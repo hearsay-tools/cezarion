@@ -21,6 +21,7 @@ import {
   automationLogRecordSchema,
   automationReceiptSchema,
   automationStateFileSchema,
+  type AutomationArchive,
   type AutomationDefinition,
   type AutomationLogRecord,
   type AutomationReceipt,
@@ -215,6 +216,28 @@ export class AutomationStore {
       }
       throw error;
     }
+  }
+
+  /**
+   * Archives a one-time schedule (hearsay-tools/cezarion#1465): pauses it, records the archive
+   * and clears its armed instant and stop reason, in one revision. `undefined` when it is gone or
+   * already archived — the first archive stands.
+   */
+  archive(id: string, archive: AutomationArchive): AutomationDefinition | undefined {
+    return this.withWriteLock(DEFINITIONS_LOCK, DEFINITIONS_RECLAIM, () => {
+      this.refreshDefinitions();
+      const current = this.definitions.get(id);
+      if (!current || current.archived) return undefined;
+      const definition = automationDefinitionSchema.parse({
+        ...current,
+        enabled: false,
+        archived: archive,
+        revision: current.revision + 1,
+        updatedAt: this.now().toISOString(),
+      });
+      this.persistArmed(definition, current, () => ({ nextRunAt: undefined, onceOutcome: undefined }), Boolean(this.state(id)));
+      return definition;
+    });
   }
 
   delete(id: string): boolean {

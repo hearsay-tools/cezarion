@@ -674,3 +674,172 @@ describe('ScheduleRunner', () => {
     expect(store.state('nightly')?.nextRunAt).toBe(iso(FIRST_RUN + DAY));
   });
 });
+
+describe('ScheduleRunner once (#1465)', () => {
+  // 00:00 in New York on 2026-09-14 (EDT, UTC-4) is FIRST_RUN; the runner's own zone is UTC, so
+  // every assertion below also proves the schedule is read in its own zone.
+  const ONCE = { type: 'once', at: '2026-09-14T00:00', timeZone: 'America/New_York' } as const;
+  const KEY = 'nightly:once:2026-09-14T00:00|America/New_York';
+  const MINUTE = 60_000;
+
+  it('fires on time, archives with runId and trigger schedule, launches once', async () => {
+    const { store, definition, runner, launch, clock } = await setup({ schedule: ONCE });
+    expect(runner.dueAt(definition)).toBe(FIRST_RUN);
+    clock.set(FIRST_RUN + 2_000);
+    const outcome = await runner.fire(definition);
+    expect(outcome).toMatchObject({ result: 'launched', runId: 'run-1', occurrenceAt: iso(FIRST_RUN) });
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(launch).toHaveBeenCalledWith(definition, { at: iso(FIRST_RUN), trigger: 'schedule' }, expect.any(String));
+    expect(store.latestReceipts().get(KEY)).toMatchObject({ status: 'launched', runId: 'run-1' });
+    const archived = store.get('nightly')!;
+    expect(archived.enabled).toBe(false);
+    expect(archived.archived).toMatchObject({ outcome: 'launched', runId: 'run-1', trigger: 'schedule', receiptId: store.latestReceipts().get(KEY)!.receiptId });
+    expect(store.state('nightly')?.nextRunAt).toBeUndefined();
+    expect(store.logs({ automationId: 'nightly' })[0]).toMatchObject({ result: 'launched', runId: 'run-1' });
+  });
+
+  it('launches late before the cutoff with a catch-up row saying minutes late, archives with trigger late', async () => {
+    const { store, definition, runner, launch, clock } = await setup({ schedule: { ...ONCE, latestStartMinutes: 360 } });
+    runner.dueAt(definition);
+    clock.set(FIRST_RUN + 2 * HOUR);
+    const outcome = await runner.fire(definition);
+    expect(outcome).toMatchObject({ result: 'catch-up', runId: 'run-1' });
+    expect(launch).toHaveBeenCalledWith(definition, { at: iso(FIRST_RUN), trigger: 'late' }, expect.any(String));
+    expect(store.logs({ automationId: 'nightly' })[0]).toMatchObject({ result: 'catch-up', reason: expect.stringContaining('120 minutes late') });
+    expect(store.get('nightly')?.archived).toMatchObject({ outcome: 'launched', trigger: 'late' });
+  });
+
+  it('launches late with no cutoff after 40 days', async () => {
+    const { store, definition, runner, launch, clock } = await setup({ schedule: ONCE });
+    runner.dueAt(definition);
+    clock.set(FIRST_RUN + 40 * DAY);
+    expect((await runner.fire(definition)).result).toBe('catch-up');
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(store.get('nightly')?.archived?.outcome).toBe('launched');
+  });
+
+  it('marks missed after the cutoff: no launch, missed row, enabled false, onceOutcome missed', async () => {
+    const { store, definition, runner, launch, clock } = await setup({ schedule: { ...ONCE, latestStartMinutes: 60 } });
+    runner.dueAt(definition);
+    clock.set(FIRST_RUN + 61 * MINUTE);
+    const outcome = await runner.fire(definition);
+    expect(outcome.result).toBe('skipped');
+    expect(launch).not.toHaveBeenCalled();
+    expect(store.logs({ automationId: 'nightly' })[0]).toMatchObject({ result: 'missed', reason: expect.stringContaining('America/New_York') });
+    expect(store.get('nightly')).toMatchObject({ enabled: false });
+    expect(store.get('nightly')?.archived).toBeUndefined();
+    expect(store.state('nightly')).toMatchObject({ onceOutcome: 'missed' });
+    expect(store.state('nightly')?.nextRunAt).toBeUndefined();
+  });
+
+  it('a cutoff shorter than the grace window never misses inside it', async () => {
+    const { runner, definition, clock, launch } = await setup({ schedule: { ...ONCE, latestStartMinutes: 10 } });
+    runner.dueAt(definition);
+    clock.set(FIRST_RUN + 9 * MINUTE);
+    expect((await runner.fire(definition)).result).toBe('launched');
+    expect(launch).toHaveBeenCalledTimes(1);
+  });
+
+  it('a failed launch sets onceOutcome failed and enabled false, and never auto-pauses or counts', async () => {
+    const { store, definition, runner, launch, clock } = await setup({ schedule: ONCE });
+    launch.mockRejectedValueOnce(new Error('model gone'));
+    runner.dueAt(definition);
+    clock.set(FIRST_RUN + 1_000);
+    expect((await runner.fire(definition)).result).toBe('failed');
+    expect(store.latestReceipts().get(KEY)).toMatchObject({ status: 'launch-error', error: 'model gone' });
+    expect(store.logs({ automationId: 'nightly' })[0]).toMatchObject({ result: 'failed', reason: 'model gone' });
+    expect(store.get('nightly')).toMatchObject({ enabled: false });
+    expect(store.get('nightly')?.archived).toBeUndefined();
+    expect(store.state('nightly')).toMatchObject({ onceOutcome: 'failed' });
+    expect(store.state('nightly')?.consecutiveFailures ?? 0).toBe(0);
+  });
+
+  it('runNow archives with trigger manual and a later fire is a duplicate that launches nothing', async () => {
+    const { store, definition, runner, launch, clock } = await setup({ schedule: ONCE });
+    runner.dueAt(definition);
+    clock.set(FIRST_RUN - HOUR);
+    expect(await runner.runNow(definition)).toMatchObject({ result: 'manual', runId: 'run-1' });
+    expect(launch).toHaveBeenCalledWith(expect.anything(), { at: iso(FIRST_RUN), trigger: 'manual' }, expect.any(String));
+    expect(store.get('nightly')?.archived).toMatchObject({ outcome: 'launched', trigger: 'manual', runId: 'run-1' });
+    clock.set(FIRST_RUN + 1_000);
+    const outcome = await runner.fire(definition);
+    expect(outcome.result).not.toBe('launched');
+    expect(launch).toHaveBeenCalledTimes(1);
+  });
+
+  it('retry of the failed receipt archives with trigger retry', async () => {
+    const { store, definition, runner, launch, clock } = await setup({ schedule: ONCE });
+    launch.mockRejectedValueOnce(new Error('boom'));
+    runner.dueAt(definition);
+    clock.set(FIRST_RUN + 1_000);
+    await runner.fire(definition);
+    const failed = store.latestReceipts().get(KEY)!;
+    const outcome = await runner.retry(store.get('nightly') as ScheduleAutomationDefinition, failed);
+    expect(outcome).toMatchObject({ result: 'manual', runId: 'run-2' });
+    expect(launch).toHaveBeenLastCalledWith(expect.anything(), { at: iso(FIRST_RUN), trigger: 'retry' }, failed.receiptId);
+    expect(store.get('nightly')?.archived).toMatchObject({ outcome: 'launched', trigger: 'retry', runId: 'run-2', receiptId: failed.receiptId });
+    expect(store.state('nightly')?.onceOutcome).toBeUndefined();
+  });
+
+  it('a fire meeting a launch-error receipt relaunches that receipt, never a new one', async () => {
+    const { store, definition, runner, launch, clock } = await setup({ schedule: ONCE });
+    launch.mockRejectedValueOnce(new Error('boom'));
+    clock.set(FIRST_RUN - HOUR);
+    await runner.runNow(definition);
+    const failed = store.latestReceipts().get(KEY)!;
+    expect(failed.status).toBe('launch-error');
+    // Re-enabled by a person: the timer then meets the failed receipt on the same key.
+    const current = store.get('nightly')!;
+    const { id: _id, revision, createdAt: _c, updatedAt: _u, ...editable } = current;
+    const enabled = store.update('nightly', revision, { ...editable, enabled: true }, () => ({ nextRunAt: iso(FIRST_RUN), onceOutcome: undefined })) as ScheduleAutomationDefinition;
+    clock.set(FIRST_RUN + 1_000);
+    expect(await runner.fire(enabled)).toMatchObject({ result: 'launched', runId: 'run-2' });
+    expect(launch).toHaveBeenLastCalledWith(expect.anything(), expect.objectContaining({ at: iso(FIRST_RUN) }), failed.receiptId);
+    expect(store.receipts().filter((row) => row.receiptKey === KEY && row.status === 'reserved').map((row) => row.receiptId)).toEqual([failed.receiptId, failed.receiptId]);
+    expect(store.get('nightly')?.archived).toMatchObject({ receiptId: failed.receiptId, runId: 'run-2' });
+  });
+
+  it('a crash after the launched receipt heals: the next fire archives from the receipt and launches nothing', async () => {
+    const { store, definition, runner, launch, clock } = await setup({ schedule: ONCE });
+    runner.dueAt(definition);
+    const reserved = store.reserveReceipt({ automationId: 'nightly', revision: definition.revision, eventId: 'once:2026-09-14T00:00|America/New_York', occurrenceAt: iso(FIRST_RUN) })!;
+    store.appendReceipt({ ...reserved, status: 'launched', runId: 'run-crashed' });
+    clock.set(FIRST_RUN + 1_000);
+    const outcome = await runner.fire(definition);
+    expect(outcome.result).toBe('duplicate');
+    expect(launch).not.toHaveBeenCalled();
+    expect(store.get('nightly')).toMatchObject({ enabled: false, archived: { outcome: 'launched', runId: 'run-crashed', receiptId: reserved.receiptId } });
+  });
+
+  it('healArchive archives from any launched receipt of the automation and is a no-op without one', async () => {
+    const { store, definition, runner } = await setup({ schedule: ONCE });
+    expect(runner.healArchive(definition as never)).toBeUndefined();
+    const reserved = store.reserveReceipt({ automationId: 'nightly', revision: 1, eventId: 'once:2026-09-01T00:00|UTC', occurrenceAt: iso(FIRST_RUN) })!;
+    store.appendReceipt({ ...reserved, status: 'launched', runId: 'run-old' });
+    expect(runner.healArchive(store.get('nightly') as never)).toMatchObject({ archived: { runId: 'run-old' } });
+  });
+
+  it('two runners on one store race: exactly one launch, one archive', async () => {
+    const { dir, definition, runner, launch, clock } = await setup({ schedule: ONCE });
+    const other = AutomationStore.open(dir, { now: () => new Date(clock.now()) });
+    const otherLaunch = vi.fn(async () => ({ runId: 'other-run' }));
+    const otherRunner = new ScheduleRunner({ projectId: 'p', store: other, timeZone: 'UTC', launch: otherLaunch, now: clock.now });
+    runner.dueAt(definition);
+    clock.set(FIRST_RUN + 1_000);
+    const results = await Promise.allSettled([runner.fire(definition), otherRunner.fire(definition)]);
+    expect(launch.mock.calls.length + otherLaunch.mock.calls.length).toBe(1);
+    expect(results.filter((r) => r.status === 'fulfilled' && r.value.result === 'launched')).toHaveLength(1);
+    other.reload();
+    expect(other.get('nightly')?.archived?.outcome).toBe('launched');
+  });
+
+  it('an edit landing before the lease re-read launches nothing', async () => {
+    const { store, definition, runner, launch, clock } = await setup({ schedule: ONCE });
+    runner.dueAt(definition);
+    const { id: _id, revision, createdAt: _c, updatedAt: _u, ...editable } = definition;
+    store.update('nightly', revision, { ...editable, task: { prompt: 'Changed' } });
+    clock.set(FIRST_RUN + 1_000);
+    expect((await runner.fire(definition)).result).toBe('skipped');
+    expect(launch).not.toHaveBeenCalled();
+  });
+});

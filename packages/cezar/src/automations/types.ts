@@ -257,6 +257,7 @@ export const automationLogRecordSchema = z
 
 export type AutomationEvent = z.infer<typeof automationEventSchema>;
 export type AutomationDefinition = z.infer<typeof automationDefinitionSchema>;
+export type AutomationArchive = NonNullable<AutomationDefinition['archived']>;
 export type AutomationRuntimeState = z.infer<typeof automationRuntimeStateSchema>;
 export type AutomationReceipt = z.infer<typeof automationReceiptSchema>;
 export type AutomationLogRecord = z.infer<typeof automationLogRecordSchema>;

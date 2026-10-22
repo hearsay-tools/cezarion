@@ -257,6 +257,26 @@ describe('automation task templates', () => {
       .toContain('scheduled for: 2026-10-02 04:00 UTC');
   });
 
+  it('renders a once schedule in its own zone and names late and retry starts (#1465)', () => {
+    const once = { ...scheduled, schedule: { type: 'once', at: '2026-10-02T00:00', timeZone: 'America/New_York' } } as ScheduleAutomationDefinition;
+    const at = { at: '2026-10-02T04:00:00.000Z', trigger: 'late' as const };
+    const task = renderScheduleTask(once, at, { projectName: 'demo', timeZone: 'UTC' });
+    expect(task).toContain('scheduled for: 2026-10-02 00:00 America/New_York');
+    expect(task).toContain('trigger: a one-time schedule, started late after a gap');
+    expect(renderScheduleTask(once, { ...at, trigger: 'retry' }, { projectName: 'demo', timeZone: 'UTC' })).toContain('trigger: a retry of a failed launch');
+  });
+
+  it('stores late and retry starts under the existing provenance triggers (#1465)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cezar-template-'));
+    try {
+      const store = RunStore.open(join(root, '.ai/cezar'));
+      const late = await launchScheduledRun({ root, manager: fakeManager(store), store, definition: scheduled, occurrence: { ...occurrence, trigger: 'late' }, receiptId: 'r1', projectName: 'demo', timeZone: 'UTC' });
+      const retry = await launchScheduledRun({ root, manager: fakeManager(store), store, definition: scheduled, occurrence: { ...occurrence, trigger: 'retry' }, receiptId: 'r2', projectName: 'demo', timeZone: 'UTC' });
+      expect(store.getRun(late.runId)?.automationTrigger?.trigger).toBe('catch-up');
+      expect(store.getRun(retry.runId)?.automationTrigger?.trigger).toBe('manual');
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it('launches a scheduled run with automationTrigger provenance', async () => {
     const root = await mkdtemp(join(tmpdir(), 'cezar-template-'));
     try {
