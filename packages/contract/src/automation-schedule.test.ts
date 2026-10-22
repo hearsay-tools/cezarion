@@ -7,6 +7,7 @@ import {
   occurrencesBetween,
   onceCutoff,
   onceInstant,
+  onceWallParts,
   parseCron,
   scheduleLabel,
   type AutomationSchedule,
@@ -120,6 +121,19 @@ describe('once', () => {
     expect(occurrencesBetween(once, at + 1, at + 86_400_000, 'UTC')).toEqual([]);
     expect(nextOccurrence(once, at - 60_000, 'UTC')).toBe(at);
     expect(nextOccurrence(once, at, 'UTC')).toBeNull();
+  });
+
+  // Review of #1465: the text format alone admitted dates that do not exist.
+  it.each(['2027-02-30T09:00', '2026-13-01T09:00', '2026-10-29T24:00', '2026-10-29T25:99', '2026-00-10T09:00', '2026-10-00T09:00'])('refuses the impossible wall time %s', (at) => {
+    const parsed = automationScheduleSchema.safeParse({ ...once, at });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]).toMatchObject({ path: ['at'], message: 'at is not a real date and time' });
+    expect(onceWallParts(at)).toBeNull();
+  });
+
+  it('admits 29 February only in a leap year', () => {
+    expect(automationScheduleSchema.safeParse({ ...once, at: '2028-02-29T09:00' }).success).toBe(true);
+    expect(automationScheduleSchema.safeParse({ ...once, at: '2027-02-29T09:00' }).success).toBe(false);
   });
 
   it('labels', () => {

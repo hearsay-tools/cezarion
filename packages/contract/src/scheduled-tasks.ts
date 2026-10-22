@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { onceStatusSchema } from './automations.ts';
 import { zonedParts } from './zoned-time.ts';
+import { isRealOnceAt } from './automation-schedule.ts';
 
 /**
  * The two session tools for one-time scheduled tasks (hearsay-tools/cezarion#1465):
@@ -40,7 +41,7 @@ export function resolveDelay(delay: string, nowMs: number, timeZone: string): st
 
 /** The fields a create and an update share. */
 const scheduleFields = {
-  at: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, 'a local wall time YYYY-MM-DDTHH:MM').optional(),
+  at: z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, 'a local wall time YYYY-MM-DDTHH:MM').refine(isRealOnceAt, 'not a real date and time').optional(),
   delay: durationField.optional(),
   time_zone: z.string().min(1).max(100).optional(),
   latest_start: durationField.optional(),

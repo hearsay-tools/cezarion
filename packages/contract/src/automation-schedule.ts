@@ -67,6 +67,7 @@ export const automationScheduleSchema = z.object({
   }
   for (const key of REPEATING_KEYS) if (present(key)) refuse(key, `${key} does not apply to a once schedule`);
   if (schedule.at === undefined) refuse('at', 'a once schedule needs at (YYYY-MM-DDTHH:MM)');
+  else if (ONCE_AT_PATTERN.test(schedule.at) && !isRealOnceAt(schedule.at)) refuse('at', 'at is not a real date and time');
   if (schedule.timeZone === undefined) refuse('timeZone', 'a once schedule needs a timeZone');
   else if (!isValidTimeZone(schedule.timeZone)) refuse('timeZone', unknownTimeZoneMessage(schedule.timeZone));
 });
@@ -109,8 +110,15 @@ export function onceWallParts(at: string): { year: number; month: number; day: n
   const match = ONCE_AT_PATTERN.exec(at);
   if (!match) return null;
   const [year, month, day, hour, minute] = match.slice(1).map(Number) as [number, number, number, number, number];
+  // A real calendar day and clock time (#1465 review): `2027-02-30` or `25:99` would otherwise
+  // roll over into another day. A DST gap is a different case: the day and time exist, the zone skips them.
+  const daysInMonth = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  if (month < 1 || month > 12 || day < 1 || day > daysInMonth || hour > 23 || minute > 59) return null;
   return { year, month, day, hour, minute };
 }
+
+/** `at` names a real calendar day and clock time. Shared by the schedule, the CLI and the agent tools. */
+export const isRealOnceAt = (at: string): boolean => onceWallParts(at) !== null;
 
 /**
  * The last instant a `once` may still start: `latestStartMinutes` after it, never less than the

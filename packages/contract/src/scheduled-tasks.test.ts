@@ -38,6 +38,13 @@ describe('scheduleTaskRequestSchema', () => {
     expect(scheduleTaskRequestSchema.safeParse(base).success).toBe(false);
   });
 
+  it('refuses an at that is no real date and time', () => {
+    const parsed = scheduleTaskRequestSchema.safeParse({ name: 'n', prompt: 'p', at: '2027-02-30T09:00' });
+    expect(parsed.success).toBe(false);
+    expect(parsed.error?.issues[0]?.path).toEqual(['at']);
+    expect(scheduledTasksRequestSchema.safeParse({ action: 'update', id: 'a1', at: '2026-13-01T25:99' }).success).toBe(false);
+  });
+
   it('refuses unknown fields such as a run or project id', () => {
     expect(scheduleTaskRequestSchema.safeParse({ ...base, delay: '1h', project_id: 'other' }).success).toBe(false);
   });
