@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { onceInstant } from './automation-schedule.ts';
 import {
   parseDurationMinutes,
   resolveDelay,
@@ -10,6 +11,26 @@ describe('resolveDelay', () => {
   it('adds elapsed days across a DST change and reports the local wall time', () => {
     // 2026-10-22T13:00Z is 15:00 in Warsaw (CEST); seven days later the clocks have gone back.
     expect(resolveDelay('7d', Date.parse('2026-10-22T13:00:00Z'), 'Europe/Warsaw')).toBe('2026-10-29T14:00');
+  });
+
+  // Review of #1465: a wall time cannot name both instants of a clock overlap. A delay must still
+  // never resolve earlier than asked, or the schedule is refused as past.
+  it('a delay into the second pass of a New York overlap resolves after the overlap, not before now', () => {
+    const now = Date.parse('2026-11-01T05:45:00Z'); // 01:45 EDT; at 06:00Z the clock goes back to 01:00 EST
+    const at = resolveDelay('30m', now, 'America/New_York');
+    expect(at).toBe('2026-11-01T02:00');
+    expect(new Date(onceInstant({ type: 'once', at, timeZone: 'America/New_York' })!).toISOString()).toBe('2026-11-01T07:00:00.000Z');
+  });
+
+  it.each([
+    ['America/New_York', '2026-11-01T04:30:00Z'],
+    ['Europe/Warsaw', '2026-10-24T23:30:00Z'],
+  ])('across the %s overlap no delay resolves earlier than now plus the delay', (timeZone, start) => {
+    for (let minute = 0; minute <= 180; minute += 5) {
+      const now = Date.parse(start) + minute * 60_000;
+      const at = resolveDelay('30m', now, timeZone);
+      expect(onceInstant({ type: 'once', at, timeZone })!, `${timeZone} ${new Date(now).toISOString()} → ${at}`).toBeGreaterThanOrEqual(now + 30 * 60_000);
+    }
   });
 
   it('rounds up to the next minute', () => {

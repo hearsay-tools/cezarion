@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { onceStatusSchema } from './automations.ts';
 import { zonedParts } from './zoned-time.ts';
-import { isRealOnceAt } from './automation-schedule.ts';
+import { isRealOnceAt, onceInstant } from './automation-schedule.ts';
 
 /**
  * The two session tools for one-time scheduled tasks (hearsay-tools/cezarion#1465):
@@ -37,10 +37,17 @@ export function parseDurationMinutes(value: string): number {
  */
 export function resolveDelay(delay: string, nowMs: number, timeZone: string): string {
   const target = Math.ceil((nowMs + parseDurationMinutes(delay) * 60_000) / 60_000) * 60_000;
-  const parts = zonedParts(target, timeZone);
-  if (!parts) throw new Error(`unknown time zone "${timeZone}"; use an IANA name such as Europe/Warsaw`);
   const pad = (n: number) => String(n).padStart(2, '0');
-  return `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
+  // A wall time names one instant of a clock overlap (the one `onceInstant` picks). When the
+  // target is the other one, the first later minute whose wall time reads back at or after the
+  // target is used: never earlier than asked, at most the overlap's length later (#1465 review).
+  for (let minute = 0; minute <= 1_440; minute += 1) {
+    const parts = zonedParts(target + minute * 60_000, timeZone);
+    if (!parts) throw new Error(`unknown time zone "${timeZone}"; use an IANA name such as Europe/Warsaw`);
+    const at = `${parts.year}-${pad(parts.month)}-${pad(parts.day)}T${pad(parts.hour)}:${pad(parts.minute)}`;
+    if ((onceInstant({ type: 'once', at, timeZone }) ?? target) >= target) return at;
+  }
+  throw new Error(`no wall time in ${timeZone} reads back at or after the delay`);
 }
 
 /** The fields a create and an update share. */
