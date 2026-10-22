@@ -982,6 +982,21 @@ test('the server exits when its test-env state is deleted, and the checkout is n
   assert.equal(existsSync(join(root, '.ai/qa')), false);
 });
 
+test('a watcher that cannot open its log never loses the started server', () => {
+  const fixture = makeFixture(false);
+  // A directory where the log belongs makes the watcher's log open fail.
+  mkdirSync(join(fixture.root, '.ai/qa/test-env-watch.log'), { recursive: true });
+  const env = { ...fixtureEnv, PATH: fixture.path, ...WATCH };
+  const cold = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-up.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(cold.status, 0, cold.stderr);
+  const pid = descriptor(fixture.root).app.pid;
+  launchedPids.add(pid);
+  assert.ok(alive(pid));
+  const stopped = spawnSync('/bin/sh', [join(fixture.root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(stopped.status, 0, stopped.stderr);
+  assert.ok(!alive(pid));
+});
+
 test('an idle server with no lease holder exits and its descriptor reads stopped', async () => {
   const { root, pid } = bootWatched({ TEST_ENV_IDLE_EXIT_MINUTES: '0.01' });
   const watcher = await watcherPid(root);

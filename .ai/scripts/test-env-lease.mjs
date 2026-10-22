@@ -183,14 +183,16 @@ async function detachApp(args, root, effectiveEnv = process.env) {
     const served = repo >= 0 && args[repo + 1] ? resolve(root, args[repo + 1]) : root;
     // Its own log, next to the app's, so the app log holds only the app's output.
     if (start) {
-      const watchFd = openSync(resolve(dirname(resolve(root, args[0])), 'test-env-watch.log'), 'a');
+      let watchFd;
       try {
+        watchFd = openSync(resolve(dirname(resolve(root, args[0])), 'test-env-watch.log'), 'a');
         const watcher = spawn(process.execPath, [import.meta.filename, 'watch-app', String(child.pid), start, root, served], {
           cwd: tmpdir(), detached: true, stdio: ['ignore', watchFd, watchFd], env, windowsHide: true,
         });
         await new Promise(done => { watcher.once('spawn', done); watcher.once('error', done); });
         watcher.unref();
-      } finally { closeSync(watchFd); }
+      } catch { /* best effort: the caller must still record the app it started */ }
+      finally { if (watchFd !== undefined) closeSync(watchFd); }
     }
     return child.pid;
   } finally { closeSync(fd); }
