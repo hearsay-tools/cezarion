@@ -1025,6 +1025,12 @@ server.listen(0, hostname, () => {
   // The runner reads the bound URL back from stdout, like the real server.
   console.log(`opencode server listening on http://${hostname}:${server.address().port}`);
 });
+// hearsay-tools/cezarion#1449: the server leads its own session, so a test process that dies
+// before its cleanup leaves it running. The runner never writes to or closes this stdin pipe,
+// so end of input means the parent died (SIGKILL included). Exit directly, past any SIGTERM
+// handler a shutdown scenario replaced.
+process.stdin.on('end', () => process.exit(0));
+process.stdin.resume();
 process.on('SIGTERM', () => {
   // Expose the end-request/process-exit interval to the root idle regression.
   if (autonomousReadinessIdle) setTimeout(() => process.exit(0), 250);
