@@ -23,8 +23,10 @@ const two = (n: number) => String(n).padStart(2, '0')
 
 /** Tomorrow at 09:00 in `timeZone`: where a fresh Once starts, always in the future. */
 export function defaultOnceAt(timeZone: string, now = Date.now()): string {
-  const parts = zonedParts(now + 86_400_000, timeZone) ?? zonedParts(now + 86_400_000, 'UTC')!
-  return `${parts.year}-${two(parts.month)}-${two(parts.day)}T09:00`
+  const today = zonedParts(now, timeZone) ?? zonedParts(now, 'UTC')!
+  // The next calendar date, not 24 hours later: a 25-hour fall-back day would stay on today.
+  const next = new Date(Date.UTC(today.year, today.month - 1, today.day + 1))
+  return `${next.getUTCFullYear()}-${two(next.getUTCMonth() + 1)}-${two(next.getUTCDate())}T09:00`
 }
 
 /** Every IANA zone this browser knows, for the zone field's suggestions. */
