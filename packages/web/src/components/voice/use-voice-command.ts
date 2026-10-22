@@ -201,7 +201,9 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
   )
 
   const [settled, setSettled] = React.useState<{ key: DecisionKey; result: Settled }>()
-  const [notice, setNotice] = React.useState<{ text: string; forText: string }>()
+  /** `forKey` scopes a decision's notice to the context it was decided in: once the card or page
+   *  syncs, a fresh preview replaces it, so Return never commits a decision nobody saw. */
+  const [notice, setNotice] = React.useState<{ text: string; forText: string; forKey?: DecisionKey }>()
   const [choosing, setChoosing] = React.useState<Choosing>()
 
   // Choices resolved for another project, page, open task or sidebar tab are gone.
@@ -234,6 +236,8 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
   }, [])
 
   const say = React.useCallback((text: string) => setNotice({ text, forText: latest.current.key.text }), [])
+  /** A notice about a committed decision: it ends with the context the decision was made in. */
+  const sayForDecision = React.useCallback((text: string) => setNotice({ text, forText: latest.current.key.text, forKey: latest.current.key }), [])
 
   /** The request for `requestKey`: the one already made for it, or a new one started now. */
   const requestFor = React.useCallback((requestKey: DecisionKey): DecisionRequest => {
@@ -324,7 +328,7 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
           }
           const only = choices[0]
           if (only) return openTarget(decision.decisionId, only.target)
-          return say(primary.kind === 'empty' ? noTasksNotice(decision.status) : pastEndNotice(decision.status, decision.position))
+          return sayForDecision(primary.kind === 'empty' ? noTasksNotice(decision.status) : pastEndNotice(decision.status, decision.position))
         }
         case 'answer':
         case 'tell': {
@@ -341,13 +345,13 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
             clearText()
             return
           }
-          return say(result.reason === 'no-card' ? NOTICES.noCard : result.reason === 'draft-not-empty' ? NOTICES.draftNotEmpty : NOTICES.busy)
+          return sayForDecision(result.reason === 'no-card' ? NOTICES.noCard : result.reason === 'draft-not-empty' ? NOTICES.draftNotEmpty : NOTICES.busy)
         }
         case 'confirm':
         case 'cancel': {
           // Only a proposal that was on screen when this sentence was committed.
           const shown = voiceStore.getProposal()
-          if (made.key.proposalId === null || shown?.decisionId !== made.key.proposalId) return say(NOTICES.unclear)
+          if (made.key.proposalId === null || shown?.decisionId !== made.key.proposalId) return sayForDecision(NOTICES.unclear)
           if (decision.action === 'confirm') return confirmProposal()
           voiceStore.cancel()
           report(shown.decisionId, 'cancelled')
@@ -356,10 +360,10 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
         }
         case 'none':
           if (decision.reason === 'not-a-command') return clickSelectedItem()
-          return say(NONE_NOTICES[decision.reason])
+          return sayForDecision(NONE_NOTICES[decision.reason])
       }
     },
-    [confirmProposal, openTarget, report, say],
+    [confirmProposal, openTarget, report, sayForDecision],
   )
 
   const commit = React.useCallback(async () => {
@@ -380,16 +384,16 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
       // The late decision, if it ever comes, is aborted and so never acts.
       made.controller.abort()
       if (request.current === made) request.current = undefined
-      say(NOTICES.timedOut)
+      sayForDecision(NOTICES.timedOut)
       return clickSelectedItem()
     }
     if (result.kind === 'aborted') return
     if (result.kind === 'failed') {
-      say(NOTICES.unavailable)
+      sayForDecision(NOTICES.unavailable)
       return clickSelectedItem()
     }
     act(result.decision, made)
-  }, [act, requestFor, say])
+  }, [act, requestFor, sayForDecision])
 
   /** Opens candidate `index`: from the choice a committed sentence made, or from the preview's
    *  own candidates when one of them is clicked before Return. The preview counts only while it
@@ -526,7 +530,7 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
   if (!enabled) return OFF
 
   let row: VoiceRow | undefined
-  if (notice && notice.forText === trimmed) {
+  if (notice && notice.forText === trimmed && (notice.forKey === undefined || sameKey(notice.forKey, key))) {
     row = { kind: 'notice', text: notice.text }
   } else if (choosingLive) {
     row = { kind: 'will-do', text: 'Which one?', choices: choosingLive.choices.map((choice) => choice.text) }

@@ -810,6 +810,22 @@ describe('useVoiceCommand', () => {
     expect(harness.result.current.voice.row).toEqual({ kind: 'notice', text })
   })
 
+  it('ends a decision notice when the card syncs, so Return never commits an unseen preview', async () => {
+    mocks.openRunId = 'r1'
+    voiceStore.registerAskCard(card(['Library']))
+    const harness = setup()
+    type(harness, 'answer vitest to question one')
+    enter(harness)
+    await answer(calls[0], { action: 'none', decisionId: DECISION_ID(1), reason: 'stale-context' })
+    expect(harness.result.current.voice.row).toEqual({ kind: 'notice', text: 'The screen changed. Try again.' })
+
+    act(() => voiceStore.syncPendingAsk('r1', 'ask_1'))
+    expect(harness.result.current.voice.row).toBeUndefined()
+    await advance(300)
+    await answer(calls[1], answerDecision(2, [option(0, 'Vitest')]))
+    expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Answer Library: Vitest' })
+  })
+
   it('names the task in the answer and tell rows', async () => {
     mocks.openRunId = 'r1'
     mocks.runs = [voiceRun({ id: 'r1', title: 'Fix flaky shard', status: 'waiting' })]
