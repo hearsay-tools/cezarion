@@ -268,8 +268,17 @@ const ROUTED_QUESTION_REFUSAL = 'This question was sent to the parent task; answ
  *  it as an ask card, #473). Returns the minted request id. */
 function emitAskRequested(sink: UiEventSink, ask: AskRequest): string {
   const requestId = randomUUID();
-  sink.handle({ type: 'ask.requested', requestId, questions: ask.questions });
+  sink.handle({ type: 'ask.requested', requestId, ...askCardFields(ask) });
   return requestId;
+}
+/** A card's stored fields: its questions and, when it has one, its context (hearsay-tools/cezarion#1458).
+ *  A card always replaces both, so a card without context never keeps an older card's. */
+function askCardFields(card: AskRequest): AskRequest {
+  return { questions: card.questions, ...(card.context !== undefined ? { context: card.context } : {}) };
+}
+/** The card a human wait holds, or none for a wait without questions. */
+function humanWaitCard(wait: Pick<HumanWaitEntry, 'questions' | 'context'> | undefined): AskRequest | undefined {
+  return wait?.questions ? askCardFields({ questions: wait.questions, context: wait.context }) : undefined;
 }
 /** A persisted, non-fatal explanation for protocol-shaped text that could not
  * become an ask card. Never include the raw payload in this diagnostic. */
@@ -351,7 +360,7 @@ function orderedTurnText(v1: string, v2: string): string | undefined {
 function classifyTurnEnd(turnText: string, completedAssistantText: string, options: {
   sessionOpen: boolean; interactive: boolean; pendingHumanAsk: boolean;
   scheduledWake: boolean; liveWorkers: boolean;
-  humanWait?: { questions?: AskRequest['questions'] }; doneRequested?: boolean;
+  humanWait?: Pick<HumanWaitEntry, 'questions' | 'context'>; doneRequested?: boolean;
 }): AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean; waitCard: boolean } {
   const complete = orderedTurnText(turnText, completedAssistantText);
   const v1 = turnParkSignals(complete ?? turnText);
@@ -361,7 +370,7 @@ function classifyTurnEnd(turnText: string, completedAssistantText: string, optio
   const askTurn = resolveAskTurn(v1.askResult, v2.askResult, options.sessionOpen && !done);
   const surfaced = options.humanWait && options.sessionOpen && !done && !askTurn.ask ? options.humanWait : undefined;
   const waitCard = !!surfaced?.questions;
-  const ask = askTurn.ask ?? (surfaced?.questions ? { questions: surfaced.questions } : null);
+  const ask = askTurn.ask ?? humanWaitCard(surfaced) ?? null;
   const humanGate = !!surfaced && !waitCard;
   const monitoring = options.interactive && options.sessionOpen && !done && !ask &&
     !options.pendingHumanAsk && !humanGate &&
@@ -2229,7 +2238,7 @@ export class RunManager {
    * its automatic wakes are spent.
    */
   async registerAsk(runId: string, request: CezarAskRequest, generation: string, capabilitySignal?: AbortSignal): Promise<HumanWaitEntry> {
-    const { questions } = cezarAskRequestSchema.parse(request);
+    const card = askCardFields(cezarAskRequestSchema.parse(request));
     const { refuse, assertCanRegister } = this.registrationGate(runId, generation, capabilitySignal);
     const { state: active, run } = assertCanRegister();
     const turnId = active.ciTurnId ??= randomUUID();
@@ -2238,7 +2247,8 @@ export class RunManager {
     if (open?.askSeq !== undefined) return open;
     if (!open && openWaits(run).length >= WAIT_LIMIT) refuse('capacity');
     const base: HumanWaitEntry = open ?? { id: randomUUID(), kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: new Date().toISOString(), phase: 'open', turnId };
-    return this.openWait(runId, active, { ...base, questions });
+    const { context: _replaced, ...kept } = base;
+    return this.openWait(runId, active, { ...kept, ...card });
   }
 
   /**
@@ -8494,7 +8504,7 @@ export class RunManager {
   }
 
   /** An alias's human wait, or the one already open: a run holds one. A full list opens none. */
-  private openHumanAlias(runId: string, state: ActiveRun | undefined, via: WaitVia, questions?: AskRequest['questions']): HumanWaitEntry | undefined {
+  private openHumanAlias(runId: string, state: ActiveRun | undefined, via: WaitVia, card?: AskRequest): HumanWaitEntry | undefined {
     const run = this.store.getRun(runId);
     if (!run) return undefined;
     const source = via === 'budget' || via === 'no-wait' || via === 'completion' ? 'cezar' : 'agent';
@@ -8502,7 +8512,7 @@ export class RunManager {
     const open = openWaits(this.store.getRun(runId) ?? run).find((wait): wait is HumanWaitEntry => wait.kind === 'human');
     if (open || openWaits(this.store.getRun(runId) ?? run).length >= WAIT_LIMIT) return open;
     const wait: HumanWaitEntry = { id: randomUUID(), kind: 'human', source, via,
-      registeredAt: new Date().toISOString(), phase: 'open', turnId: state?.ciTurnId ?? via, ...(questions ? { questions } : {}) };
+      registeredAt: new Date().toISOString(), phase: 'open', turnId: state?.ciTurnId ?? via, ...(card ? askCardFields(card) : {}) };
     try { this.store.commitWait(runId, wait); }
     catch (error) { console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return undefined; }
     return wait;
@@ -8510,13 +8520,13 @@ export class RunManager {
 
   /** Record which question a human wait is shown as: the pending card or gate, whose answer settles
    *  it. A card shown in place of the wait's own replaces it. A wait already shown is left alone. */
-  private markHumanWaitSurfaced(runId: string, wait: HumanWaitEntry, questions?: AskRequest['questions']): void {
+  private markHumanWaitSurfaced(runId: string, wait: HumanWaitEntry, shownCard?: AskRequest): void {
     const askSeq = this.pendingHumanAskSeq(runId);
     const latest = this.store.getRun(runId)?.waits?.find((entry): entry is HumanWaitEntry => entry.id === wait.id && entry.kind === 'human');
     if (askSeq === undefined || !latest || latest.phase !== 'open' || latest.askSeq !== undefined) return;
-    const { questions: own, ...kept } = latest;
-    const card = questions ?? own;
-    try { this.store.commitWait(runId, { ...kept, ...(card ? { questions: card } : {}), askSeq }); }
+    const { questions: _questions, context: _context, ...kept } = latest;
+    const card = shownCard ?? humanWaitCard(latest);
+    try { this.store.commitWait(runId, { ...kept, ...(card ? askCardFields(card) : {}), askSeq }); }
     catch (error) { console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
@@ -8534,7 +8544,7 @@ export class RunManager {
       const run = this.store.getRun(runId);
       const stepId = state?.currentStepId ?? run?.currentStepId ?? run?.steps.at(-1)?.id;
       if (wait.questions) {
-        this.store.appendEvent(runId, { type: 'ask.requested', requestId: randomUUID(), questions: wait.questions, ...(stepId ? { stepId } : {}) });
+        this.store.appendEvent(runId, { type: 'ask.requested', requestId: randomUUID(), ...askCardFields({ questions: wait.questions, context: wait.context }), ...(stepId ? { stepId } : {}) });
         if (state) this.prepareHumanAsk(state);
       } else if (state) this.raiseHumanGate(runId, state);
       else {
@@ -8593,7 +8603,8 @@ export class RunManager {
     if (!wait || !turn.ask || turn.waitCard) return;
     const latest = this.store.getRun(runId)?.waits?.find((entry): entry is HumanWaitEntry => entry.id === wait.id && entry.kind === 'human');
     if (!latest || latest.phase !== 'open' || latest.askSeq !== undefined) return;
-    try { this.store.commitWait(runId, { ...latest, questions: turn.ask.questions }); }
+    const { context: _replaced, ...kept } = latest;
+    try { this.store.commitWait(runId, { ...kept, ...askCardFields(turn.ask) }); }
     catch (error) { console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
@@ -8606,8 +8617,8 @@ export class RunManager {
   /** The turn end raised a card or the gate: record the human wait it shows. A turn that registered
    *  none opens the ask line's. */
   private recordTurnEndQuestion(runId: string, state: ActiveRun, wait: HumanWaitEntry | undefined, ask: AskRequest | null): void {
-    const shown = wait ?? (ask ? this.openHumanAlias(runId, state, 'ask-line', ask.questions) : undefined);
-    if (shown) this.markHumanWaitSurfaced(runId, shown, ask?.questions);
+    const shown = wait ?? (ask ? this.openHumanAlias(runId, state, 'ask-line', ask) : undefined);
+    if (shown) this.markHumanWaitSurfaced(runId, shown, ask ?? undefined);
   }
 
   /** Native backend asks arrive before turn-end. Persist and park immediately
@@ -8654,8 +8665,8 @@ export class RunManager {
       // A native ask is a human wait the user already sees (hearsay-tools/cezarion#1234).
       const card = askRequestSchema.safeParse({ questions: event.questions });
       const questions = card.success ? card.data.questions : undefined;
-      const wait = this.openHumanAlias(runId, state, 'native-ask', questions);
-      if (wait) this.markHumanWaitSurfaced(runId, wait, questions);
+      const wait = this.openHumanAlias(runId, state, 'native-ask', questions ? { questions } : undefined);
+      if (wait) this.markHumanWaitSurfaced(runId, wait, questions ? { questions } : undefined);
       this.clearIdleTimer(state);
       this.monitoring.delete(runId); // released below; its waits stay open
       this.waiting.add(runId);
@@ -9338,11 +9349,11 @@ export class RunManager {
   private askParentForWorker(runId: string, state: ActiveRun, stepId: string | undefined): void {
     const questions = [{ header: WORKER_FALLBACK_HEADER, question: WORKER_FALLBACK_QUESTION(runId) }];
     this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: WORKER_FALLBACK_NOTE });
-    const wait = this.openHumanAlias(runId, state, 'no-wait', questions);
+    const wait = this.openHumanAlias(runId, state, 'no-wait', { questions });
     if (wait && wait.askSeq === undefined && this.pendingHumanAskSeq(runId) === undefined) {
       this.store.appendEvent(runId, { type: 'ask.requested', requestId: randomUUID(), questions, ...(stepId ? { stepId } : {}) });
       this.prepareHumanAsk(state);
-      this.markHumanWaitSurfaced(runId, wait, questions);
+      this.markHumanWaitSurfaced(runId, wait, { questions });
       this.routeWorkerQuestion(runId);
     }
     this.parkForUser(runId, state, stepId);

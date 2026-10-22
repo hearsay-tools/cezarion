@@ -222,6 +222,30 @@ describe('parseAskMarker', () => {
     });
   });
 
+  // hearsay-tools/cezarion#1458: the ask line takes an optional context, kept through the
+  // normalizer that drops unknown keys and repairs drift in the questions.
+  it('keeps an optional context, also when the questions need normalizing', () => {
+    const context = '## Findings\n\n- one';
+    const question = { header: 'Choice', question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] };
+    expect(parseAskMarkerResult(`CEZ:ASK ${JSON.stringify({ context, questions: [question] })}`)).toMatchObject({ kind: 'valid', normalized: false, request: { context } });
+    const drifted = { context, extra: 1, questions: [{ ...question, header: 'Much too long header' }] };
+    const result = parseAskMarkerResult(`CEZ:ASK ${JSON.stringify(drifted)}`);
+    expect(result).toMatchObject({ kind: 'valid', normalized: true, request: { context, questions: [{ header: 'Much too lon' }] } });
+    expect(parseAskMarkerResult(`CEZ:ASK ${JSON.stringify({ questions: [question] })}`)).toMatchObject({ kind: 'valid', request: { questions: [question] } });
+    expect(parseAskMarkerResult(`CEZ:ASK ${JSON.stringify({ questions: [question] })}`)).not.toHaveProperty('request.context');
+  });
+
+  it('never lets a malformed context hide a valid card: an overlong one is clipped, an empty or non-string one dropped', () => {
+    const question = { header: 'Choice', question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] };
+    const long = parseAskMarkerResult(`CEZ:ASK ${JSON.stringify({ context: 'x'.repeat(20_001), questions: [question] })}`);
+    expect(long).toMatchObject({ kind: 'valid', normalized: true, request: { context: 'x'.repeat(20_000) } });
+    for (const context of ['', 42]) {
+      const result = parseAskMarkerResult(`CEZ:ASK ${JSON.stringify({ context, questions: [question] })}`);
+      expect(result).toMatchObject({ kind: 'valid', normalized: true, request: { questions: [question] } });
+      expect(result).not.toHaveProperty('request.context');
+    }
+  });
+
   it('ignores a marker that is not at the end of the turn', () => {
     expect(parseAskMarker(`CEZ:ASK ${askJson}\nand then more text after`)).toBeNull();
   });

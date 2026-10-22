@@ -14,7 +14,7 @@
  * it is never an explicit option.
  */
 import type { z } from 'zod';
-import { askRequestSchema, type AskRequest } from '@open-mercato/cezar-contract/ask-schema';
+import { ASK_LIMITS, askRequestSchema, type AskRequest } from '@open-mercato/cezar-contract/ask-schema';
 export { askOptionSchema, askQuestionSchema, askRequestSchema, type AskOption, type AskQuestion, type AskRequest } from '@open-mercato/cezar-contract/ask-schema';
 
 export interface AskParseIssue {
@@ -81,6 +81,9 @@ function hasOwn(record: Record<string, unknown>, key: string): boolean {
 function normalizeAskRequest(value: unknown): unknown {
   if (!isRecord(value)) return value;
   const request: Record<string, unknown> = {};
+  // hearsay-tools/cezarion#1458: context is display-only, so a bad one never hides the card: an
+  // overlong one is clipped, an empty or non-string one dropped.
+  if (typeof value.context === 'string' && value.context !== '') request.context = value.context.slice(0, ASK_LIMITS.context);
   if (!hasOwn(value, 'questions')) return request;
   request.questions = Array.isArray(value.questions)
     ? value.questions.map((question) => {
