@@ -74,12 +74,14 @@ function sessionActionsFor(state: VoiceEngineState): Record<string, string> {
   return {
     respond:
       // "Pass words on" rather than "reply": Jev read an instruction ("tell it to run the tests") as
-      // no reply at all, at 0.2–0.36 (hearsay-tools/cezarion#1463 live replay).
-      'Pass words on to the agent working in the open task. This covers every reply, answer, message or instruction meant for the agent, however it is worded: "answer that …", "tell it …", "tell it to …", "reply …", "say …", "message it …", "change question two to …", or only the answer words while a question card is shown.',
+      // no reply at all, at 0.2–0.36. No verb list: a list matched its own verbs and missed "inform",
+      // "warn" or "ask it whether" on held-out sentences (hearsay-tools/cezarion#1463).
+      'Pass words on to the agent working in the open task: anything the user wants the agent to read, such as a reply, an answer to its question card, a question, a request, an instruction or a piece of news, whatever verb introduces it ("tell it …", "answer that …"), or only the answer words while a question card is shown.',
     ...(state.pendingProposal !== undefined
       ? {
-          confirm: 'Confirm the pending proposal, for example "yes, confirmed".',
-          cancel: 'Drop the pending proposal, for example "no" or "cancel".',
+          // Described by meaning: "yes, confirmed" alone left "go ahead and send it" to respond.
+          confirm: 'Approve the pending proposal so the cockpit carries it out: any agreement, approval or go-ahead, however it is worded.',
+          cancel: 'Reject the pending proposal: any refusal or change of mind, however it is worded.',
         }
       : {}),
     [NONE]: 'None of these actions.',
@@ -96,7 +98,7 @@ const POSITIONS: Record<string, string> = {
 };
 
 const COMMAND_WORDS =
-  'Words said to the cockpit, not to the agent: the words that hand the reply over ("answer that", "tell it", "tell it to", "tell the agent to", "reply with", "say that"), the words that name which card question an answer is for ("to question two", "for the runner"), and filler ("um", "okay", "so").';
+  'Words said to the cockpit, not to the agent: the words that address the agent and hand the rest over to it (any verb of telling, asking, replying or letting it know, with "it" or "the agent", and the "to" or "that" that joins them to the rest, such as "answer that" or "tell it to"), the words that name which card question an answer is for ("to question two", "for the runner"), and filler ("um", "okay", "so").';
 
 function choiceQuestion(instructions: string, options: Record<string, string | null>): EngineQuestion {
   return { type: 'choice', instructions: UNTRUSTED + instructions, options };

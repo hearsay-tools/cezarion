@@ -334,6 +334,12 @@ and live run updates, by design: it waits for the user and holds nothing.
   runs them in the unit suite against scripted engine answers. `packages/cezar/scripts/voice-replay.ts`
   runs them against live Jev on demand (`TYPESAFE_API_KEY` in the environment, not in CI) and prints
   each target's min and mean word confidence, to set and re-check thresholds and criteria wording.
+- Overfitting: the replay set holds the sentences the wording was tuned on, so a pass there proves
+  little on its own. Check a wording change against sentences written without the prompt text in
+  view and not used to tune it. Describe an action by its meaning, not by a list of verbs or of
+  reported phrasings: a verb list matched its own verbs and missed "inform", "warn" and "ask it
+  whether"; "yes, confirmed" as the only confirm example left "go ahead and send it" to respond. On
+  three such sets (146 runs), the meaning-based wording scored 129 against 101.
 
 ## Later slices
 
