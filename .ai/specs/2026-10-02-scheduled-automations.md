@@ -354,6 +354,14 @@ fact; the receipt log is the truth. Every write path checks it:
 - Every one-time write and the timer settle first (`ScheduleRunner.settleOnce`): a `reserved`
   receipt no launch here is running is reconciled before the write, the cutoff decision or a launch.
   This covers a reservation another cockpit left after this one booted, which boot never saw.
+- A failed launch writes the Failed stop before its `launch-error` receipt, so a `launch-error`
+  receipt always means a stopped schedule; a crash between the two leaves `reserved`, which the
+  rule above settles. One-time writes hold the lease, so no edit lands between them.
+- The log row is a record, not a gate: the stop (Failed, Missed) or the archive (launched) lands
+  first, and a failed log append changes neither.
+- Retry relaunches a receipt only while its key is the schedule's current key. After an edit of
+  `at` or `timeZone` the old failed row stays in the log, but its Retry answers 409 and launches
+  nothing. An archived schedule's page shows its log without Retry.
 
 Archiving the schedule never archives, approves or otherwise touches the task. The task follows the
 ordinary review gate.
