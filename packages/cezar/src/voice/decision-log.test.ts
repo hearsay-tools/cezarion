@@ -75,7 +75,7 @@ describe('RecentVoiceActions.load (seeded from the log, spec "from the decision 
       decisionId: id,
       sentence,
       engine: 'fake',
-      state: { sentence, view: { sidebarView: 'active', openTask: false }, recent: [] },
+      state: { sentence, words: [], screen: { page: 'task', sidebarView: 'active', project: 'cezar' }, recent: [] },
       answers: {},
       decision: chosen,
       latencyMs: 1,

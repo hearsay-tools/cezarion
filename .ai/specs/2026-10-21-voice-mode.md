@@ -3,6 +3,8 @@
 > Status: design · Date: 2026-10-21 · Research: `.ai/analysis/2026-10-21-voice-mode-jev-research.md`
 > Revises: the "never a hands-free voice mode" note in `packages/web/src/components/composer/dictation.ts`
 > (v1 stays push-to-talk through the user's own dictation tool; see § Non-goals)
+> Revised by hearsay-tools/cezarion#1463: tiered routing, per-word reply extraction and screen context
+> (§ Answer the question card, § Tell it, § How it decides, § Testing)
 
 ## Why
 
@@ -103,7 +105,8 @@ From AGENTS.md (research § F):
 
 ### Open by status and position
 
-`open` + **position** + **status**.
+`open` + **position** + **status**. The verb does not matter: "open", "go to", "show me", "switch to"
+and "bring up" all mean open (hearsay-tools/cezarion#1463).
 
 - **Position:** first, next, previous, last, or a number ("the third"). "Next" and "previous" are
   relative to the open task inside that status's list; when the open task is not in the list,
@@ -133,15 +136,26 @@ From AGENTS.md (research § F):
 ### Answer the question card
 
 Applies to the open task's pending question card (`AskCard`, up to four questions, each with a
-header, optional choices, multi-select or not, and an Other box). For every question the sentence
-addresses, by number ("question first", "question two") or by header:
+header, optional choices, multi-select or not, and an Other box). While a card is shown, a reply
+to the open task answers it, however it is worded: "answer that …", "tell it that …", "reply …",
+"say …", or only the answer words. A request for the agent that answers none of the card's
+questions ("tell the agent to ask me one more question", "tell it skip the question") is a message
+instead (§ Tell it): the card offers a reply below it. When a sentence holds both answer words and
+message words, it answers the card. The engine labels each word of the sentence with the question it
+answers, as message, or as routing (§ How it decides). A question can be named by number ("to question
+first", "question two") or by header ("for Library"); the naming words never become part of an
+answer. On a one-question card no naming is needed. For every question that gets words:
 
-1. If the words match a choice's text on the card, that choice is taken.
-2. If the words name a position ("the first answer", "the second one"), that choice is taken.
-3. Otherwise the words go into the question's Other box, copied exactly as dictated.
+1. If the words mean one of the card's choices, by meaning or by position ("the one built on
+   Vite", "the first answer"), that choice is taken.
+2. Otherwise the words go into the question's Other box, copied exactly as dictated, without the
+   command words around them and without a trailing comma or full stop.
 
 Questions the sentence does not address stay as they are. A multi-select question can take several
-choices.
+choices. A sentence whose answer words for one question are split around another question's words,
+with no question named, is **ambiguous**: the palette says "Which question? Name it, for example
+“to question two”." A reply on a card of several questions that gives no answer words is also
+ambiguous; on a one-question card it is unclear.
 
 The palette then shows the proposal and the card shows it too: chosen chips highlighted, Other text
 filled, and a prompt "Send these answers? Say *yes, confirmed* or press Return". Confirming sends
@@ -162,7 +176,21 @@ says so in one line and does nothing.
 
 "Tell it: …" puts the dictated text after the trigger into the open task's message box as a
 proposal. Confirming sends it through the composer's existing path. This also covers needs-you
-tasks with no question card (a parked turn).
+tasks with no question card (a parked turn). With a question card shown, the same sentence answers
+the card when its words answer a card question, and stays a message otherwise (§ Answer the
+question card). The message is the words the engine labels as
+message, copied as dictated.
+
+Every proposal row names its target task: `Answer “<task>”: <header>: <value>; …` and
+`Tell “<task>”: <text>`. When the palette does not know the task's title, it falls back to
+`Answer <header>: …` and `Tell it: <text>`.
+
+**Screen context.** The palette sends the page it is on (`view`) and the question the open thread
+shows (`askRequestId`: its request id, or `null` for none; omitted while the thread history is still
+loading). When `askRequestId` is sent and differs from the question the server has for that run, the
+decision is `none` with reason `stale-context`, and the palette says "The screen changed. Try
+again." A change of page, open task, shown question or shown proposal makes an earlier preview
+stale, so Return asks again; it never acts on a decision made for an older screen.
 
 ### Confirmation
 
@@ -182,22 +210,47 @@ to the Other box (rule 3).
 ## How it decides
 
 One engine request per sentence, using speculative fan-out (all questions in one request; code reads
-only the ones that apply):
+only the ones that apply). Code routes the answers in tiers (hearsay-tools/cezarion#1463): first the
+scope, then the action within it, then, for a reply, which words go where.
 
-| Question | Kind | Options |
-| --- | --- | --- |
-| Is this a command for the cockpit? | yes/no | — |
-| Which action? | pick one | catalog entries for v1: open, answer (also changes an answer), tell it, confirm, cancel, none |
-| Which status? | pick one | the status map, plus none |
-| Which position? | pick one | first, next, previous, last, 1…N, none |
-| For each question on the open card: which choice? | pick one (one yes/no per choice for multi-select) | that question's choices, plus "my own words", plus "not addressed" |
-| Where does the dictated text start? | pick one | split points code finds in the sentence |
+| Question | Kind | Options | Asked |
+| --- | --- | --- | --- |
+| Is this a command for the cockpit? | yes/no | — | always |
+| Which scope? | pick one | global, project, session (the open task), none | always |
+| Which project action? | pick one | open, none | always |
+| Which status? | pick one | the status map, plus none | always |
+| Which position? | pick one | first, next, previous, last, 1…N, none | always |
+| Which session action? | pick one | respond; confirm and cancel only while a proposal is shown; none | with an open task |
+| For each word `W01`, `W02`, …: which part of the reply? | pick one | routing, then `q1`…`qN` for the card's questions, then `message` | with an open task |
+| For each card question with choices: which choice does its answer mean? | pick one (one yes/no per choice for multi-select) | that question's choices, plus other | with an open task and a card |
+
+The routing:
+
+1. Scope `session` with confirm or cancel acts on the shown proposal.
+2. Scope `none`, or any scope below the action floor, is not a command (or unclear).
+3. Scope `global` is `none` with reason `unsupported` ("Voice cannot do that yet."): no global
+   action exists yet.
+4. Scope `project` with `open` opens a task by status and position.
+5. Scope `session` with `respond` is a reply to the open task: no open task gives `no-open-task`, a
+   stale `askRequestId` gives `stale-context`, and otherwise the word labels give the reply.
+
+**Per-word labels.** The engine sees the sentence and the numbered words, and labels each word where
+it stands, so in "tell it that that file is fine" the first "that" is a routing word and the second
+is content. The label is `routing`, words said to the cockpit rather than the agent, and not
+`command`: live Jev read an instruction for the agent ("ask me one more question") as a command and
+dropped it. Code forces the words of a question reference ("to question two", "for Library") to
+routing, takes each word's top label, and copies each target's words out of the sentence exactly as
+said (`copyRange` in `packages/cezar/src/voice/sentence.ts`). A target is kept only when the mean
+confidence of its words is at least `EXTRACT_MIN` (`packages/cezar/src/voice/thresholds.ts`). The
+mean, not the minimum, because live Jev gives correct edge words low confidence; the value sits just
+below the lowest mean of a correct target in the live replay.
 
 Code owns everything else: reading numbers, the catalog's risk classes, which actions the open task
 allows (`runActionFlags` in `packages/web/src/routes/task-thread/run-actions.ts`), the target task,
 the text copied into Other or the message box, and execution.
 
-**State sent to the engine:** the sentence, the current view and open task, the open card's
+**State sent to the engine:** the sentence and its numbered words, the page, the project and the
+open task's title and status, the open card's
 questions and choices (built on the server from the run's durable history through `pendingHumanAsk`
 in `packages/contract/src/ask.ts`), the status map with descriptions, and the last three voice
 actions with their outcomes (Jev has no memory between calls).
@@ -274,8 +327,19 @@ and live run updates, by design: it waits for the user and holds nothing.
 - Browser E2E under `CEZ_DRY_RUN=1`: open by status, answer a two-question card and confirm, cancel,
   tell-it. Grep `packages/web/e2e/*.e2e.ts` for the palette's and ask card's `data-slot` values and
   visible copy before changing them.
-- Replay: recorded sentences with their state and the expected decision, run against Jev on demand
-  (not in the default CI), to set and re-check thresholds.
+- Replay: `packages/cezar/src/voice/replay-set.testkit.ts` holds sentences with their screen and
+  the expected decision: both reported phrasings, an option by meaning, free text, "that" as
+  content, named, unnamed and header-named replies, multi-select, a plain message, command words
+  only, a global command, no open task, and stale or missing card context. `replay-set.test.ts`
+  runs them in the unit suite against scripted engine answers. `packages/cezar/scripts/voice-replay.ts`
+  runs them against live Jev on demand (`TYPESAFE_API_KEY` in the environment, not in CI) and prints
+  each target's min and mean word confidence, to set and re-check thresholds and criteria wording.
+- Overfitting: the replay set holds the sentences the wording was tuned on, so a pass there proves
+  little on its own. Check a wording change against sentences written without the prompt text in
+  view and not used to tune it. Describe an action by its meaning, not by a list of verbs or of
+  reported phrasings: a verb list matched its own verbs and missed "inform", "warn" and "ask it
+  whether"; "yes, confirmed" as the only confirm example left "go ahead and send it" to respond. On
+  three such sets (146 runs), the meaning-based wording scored 129 against 101.
 
 ## Later slices
 

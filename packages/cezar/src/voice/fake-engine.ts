@@ -1,12 +1,13 @@
-import { QUESTION_IDS, keyText, textKey, type DecisionEngine, type EngineAnswer, type EngineQuestion, type VoiceEngineState } from './engine.ts';
+import { COMMAND_LABEL, MESSAGE_LABEL, QUESTION_IDS, keyText, questionLabel, textKey, type DecisionEngine, type EngineAnswer, type EngineQuestion, type VoiceEngineState } from './engine.ts';
+import { copyRange, splitWords, type VoiceWord } from './sentence.ts';
 
 /**
  * The dry-run engine (`CEZ_DRY_RUN=1`): deterministic, offline, and small on purpose. It reads a
  * fixed phrase set — "open <position> <status>", "answer <choice | the Nth answer | words> to
- * question <N>", "tell it: <text>", "yes, confirmed", "no" / "cancel" — which is exactly what the
- * browser E2E says. It is not a second engine: anything else reads as "not a command".
+ * question <N>", "answer that <words>", "tell it: <text>", "reply <text>", "say <text>",
+ * "yes, confirmed", "no" / "cancel" — which is exactly what the browser E2E says. It is not a second
+ * engine: anything else reads as "not a command".
  */
-
 const ORDINALS = ['first', 'second', 'third', 'fourth', 'fifth', 'sixth', 'seventh', 'eighth', 'ninth', 'tenth'];
 const CARDINALS = ['one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine', 'ten'];
 const ORD = `(?:${[...ORDINALS, ...CARDINALS].join('|')}|\\d+(?:st|nd|rd|th)?)`;
@@ -24,7 +25,10 @@ const ORDINAL_CHOICE = [
   new RegExp(`^(?:the\\s+)?(${ORD})\\s+(?:answer|option|choice|one)$`, 'i'),
   new RegExp(`^(?:option|choice|answer)\\s+(${ORD})$`, 'i'),
 ];
-const TELL_PREFIX = /^(?:tell it|tell the agent|reply|say)\b/i;
+/** The command words a reply starts with, after any filler; what follows is the reply. */
+const REPLY_PREFIX = /^(?:(?:um+|uh+|so|okay|ok)\b[\s,]*)*(?:answer(?:\s+that)?|tell\s+(?:it|the\s+agent|them)(?:\s+that|\s+to)?|reply(?:\s+with)?|say(?:\s+that)?|message\s+it)\b[\s:,]*/i;
+/** Words that join a reply's parts: "and", "then", a dangling "to"/"for". */
+const CONNECTOR = /^(?:and|then|to|for)[,.]?$/i;
 
 export class FakeVoiceEngine implements DecisionEngine {
   readonly id = 'fake';
@@ -68,29 +72,39 @@ function read(state: VoiceEngineState): {
   const sentence = clean(state.sentence);
   const lower = sentence.toLowerCase();
   const action = actionOf(lower);
-  const segments = questionSegments(sentence);
+  const words = splitWords(state.sentence);
+  const wordLabels = labelWords(state, words, action);
   const labelsOf = (i: number) => state.card?.[i]?.options?.map((o) => o.label) ?? [];
+  /** The words labelled with question `i`, as said. */
+  const answerOf = (i: number) => {
+    const own = wordLabels.flatMap((label, k) => (label === questionLabel(i) ? [k] : []));
+    return own.length === 0 ? undefined : copyRange(state.sentence, words, own[0]!, own[own.length - 1]!);
+  };
 
   return {
     choose(id, options) {
-      if (id === QUESTION_IDS.action) return action;
+      if (id === QUESTION_IDS.scope) {
+        if (action === 'open') return 'project';
+        return action === 'none' ? 'none' : 'session';
+      }
+      if (id === QUESTION_IDS.projectAction) return action === 'open' ? 'open' : 'none';
+      if (id === QUESTION_IDS.sessionAction) return action === 'confirm' || action === 'cancel' || action === 'respond' ? action : 'none';
       if (id === QUESTION_IDS.position) return positionOf(lower, options);
       if (id === QUESTION_IDS.status) return statusOf(lower, options);
-      if (id === QUESTION_IDS.tellStart) return tellStartOf(sentence, options) ?? options[0];
-      const indexed = /^q(\d+)_(span|choice)$/.exec(id);
-      if (!indexed) return undefined;
-      const segment = segments.get(Number(indexed[1]));
-      if (segment === undefined) return undefined; // not addressed: `none`
-      if (indexed[2] === 'span') return options.find((o) => keyText(o)?.trim().toLowerCase() === segment.toLowerCase());
-      return choiceOf(segment, labelsOf(Number(indexed[1])));
+      const word = /^w(\d+)$/.exec(id);
+      if (word) return wordLabels[Number(word[1])];
+      const option = /^q(\d+)_option$/.exec(id);
+      if (!option) return undefined;
+      const answer = answerOf(Number(option[1]));
+      return answer === undefined ? 'other' : choiceOf(answer, labelsOf(Number(option[1])));
     },
     noul(id) {
       if (id === QUESTION_IDS.isCommand) return action === 'none' ? 0.05 : 0.95;
       const option = /^q(\d+)_opt(\d+)$/.exec(id);
       if (!option) return 0;
-      const segment = segments.get(Number(option[1]));
+      const answer = answerOf(Number(option[1]));
       const label = labelsOf(Number(option[1]))[Number(option[2])];
-      return segment !== undefined && label !== undefined && segment.toLowerCase().includes(label.toLowerCase()) ? 1 : 0;
+      return answer !== undefined && label !== undefined && answer.toLowerCase().includes(label.toLowerCase()) ? 1 : 0;
     },
   };
 }
@@ -107,10 +121,46 @@ function actionOf(lower: string): string {
   const bare = lower.replace(/[,.!?]/g, '').trim();
   if (/^(?:yes(?: confirmed)?|confirm(?:ed)?|send it)$/.test(bare)) return 'confirm';
   if (/^(?:no|cancel|stop|never ?mind)$/.test(bare)) return 'cancel';
-  if (TELL_PREFIX.test(lower)) return 'tell';
   if (/^open\b/.test(lower)) return 'open';
-  if (/^answer\b/.test(lower)) return 'answer';
+  if (REPLY_PREFIX.test(lower) && REPLY_PREFIX.exec(lower)![0].trim() !== '') return 'respond';
   return 'none';
+}
+
+/**
+ * One label per word: the reply's leading command words, question references and joining words are
+ * `command`; with a card, the words before the reference that names question N are `qN`, and without
+ * a reference a one-question card takes them all; without a card they are the message.
+ */
+function labelWords(state: VoiceEngineState, words: VoiceWord[], action: string): string[] {
+  const labels = words.map(() => COMMAND_LABEL);
+  if (action !== 'respond') return labels;
+  const prefixEnd = REPLY_PREFIX.exec(state.sentence.trimStart())?.[0].length ?? 0;
+  const replyStart = state.sentence.length - state.sentence.trimStart().length + prefixEnd;
+  const inReply = (word: VoiceWord) => word.start >= replyStart;
+  if (state.card === undefined) {
+    words.forEach((word, k) => {
+      if (inReply(word)) labels[k] = MESSAGE_LABEL;
+    });
+    return labels;
+  }
+  const anchors = [...state.sentence.matchAll(QUESTION_ANCHOR)];
+  if (anchors.length === 0) {
+    if (state.card.length === 1) {
+      words.forEach((word, k) => {
+        if (inReply(word)) labels[k] = questionLabel(0);
+      });
+    }
+    return labels;
+  }
+  let from = replyStart;
+  for (const anchor of anchors) {
+    const n = ordinalValue(anchor[1] ?? anchor[2] ?? '');
+    words.forEach((word, k) => {
+      if (n >= 1 && word.start >= from && word.end <= anchor.index && !CONNECTOR.test(word.text)) labels[k] = questionLabel(n - 1);
+    });
+    from = anchor.index + anchor[0].length;
+  }
+  return labels;
 }
 
 function positionOf(lower: string, options: string[]): string | undefined {
@@ -126,34 +176,6 @@ function statusOf(lower: string, options: string[]): string | undefined {
   const spaced = options.filter((o) => o !== 'none').map((id) => ({ id, words: id.replace(/-/g, ' ') }));
   spaced.sort((a, b) => b.words.length - a.words.length);
   return spaced.find(({ words }) => new RegExp(`\\b${words}\\b`).test(lower.replace(/-/g, ' ')))?.id;
-}
-
-function tellStartOf(sentence: string, options: string[]): string | undefined {
-  const colon = sentence.indexOf(':');
-  const text = (colon >= 0 ? sentence.slice(colon + 1) : sentence.replace(TELL_PREFIX, '')).trim();
-  const spoken = [text, text.replace(/[.!?]+$/, '')].map((t) => t.toLowerCase());
-  return options.find((o) => spoken.includes(keyText(o)?.trim().toLowerCase() ?? ''));
-}
-
-/** The question each stretch of the sentence belongs to: the words before the anchor that names it. */
-function questionSegments(sentence: string): Map<number, string> {
-  const segments = new Map<number, string>();
-  let from = 0;
-  for (const anchor of sentence.matchAll(QUESTION_ANCHOR)) {
-    const n = ordinalValue(anchor[1] ?? anchor[2] ?? '');
-    if (n >= 1) segments.set(n - 1, trimSegment(sentence.slice(from, anchor.index)));
-    from = anchor.index + anchor[0].length;
-  }
-  return segments;
-}
-
-function trimSegment(text: string): string {
-  let out = text.trim();
-  for (let next = out.replace(/^(?:(?:answer|and|then|to|for)\b|[:,])\s*/i, ''); next !== out; ) {
-    out = next;
-    next = out.replace(/^(?:(?:answer|and|then|to|for)\b|[:,])\s*/i, '');
-  }
-  return out.replace(/[\s.!?,]+$/, '');
 }
 
 /** The choice's own words first, then "the second answer"; anything else is the user's own words. */

@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VoiceDecision } from '@open-mercato/cezar-contract/voice';
@@ -137,6 +137,31 @@ describe('voice routes', () => {
       expect(readLog(dataDir)[0]).toMatchObject({ openRunId: runId });
     });
 
+    it('sends the project and the open task to the engine', async () => {
+      const { runId } = runWithCard();
+      await decide({ text: 'answer Vitest to question first', sidebarView: 'active', view: 'task', openRunId: runId });
+      const [line] = readLog(dataDir) as Array<{ state: Record<string, unknown> }>;
+      expect(line!.state).toMatchObject({
+        screen: { page: 'task', project: basename(repoRoot), openTask: { title: 'card', status: 'queued' } },
+        words: ['W01 answer', 'W02 Vitest', 'W03 to', 'W04 question', 'W05 first'],
+      });
+    });
+
+    it('answers stale-context when the browser shows another card', async () => {
+      const { runId } = runWithCard();
+      for (const askRequestId of ['req-0', null]) {
+        const res = await decide({ text: 'answer Vitest to question first', sidebarView: 'active', openRunId: runId, askRequestId });
+        expect(await res.json()).toMatchObject({ action: 'none', reason: 'stale-context' });
+      }
+      const same = await decide({ text: 'answer Vitest to question first', sidebarView: 'active', openRunId: runId, askRequestId: 'req-1' });
+      expect(await same.json()).toMatchObject({ action: 'answer' });
+    });
+
+    it('answers no-open-task for an unknown run even with askRequestId', async () => {
+      const res = await decide({ text: 'tell it: hello there', sidebarView: 'active', openRunId: 'no-such-run', askRequestId: 'req-1' });
+      expect(await res.json()).toMatchObject({ action: 'none', reason: 'no-open-task' });
+    });
+
     it('logs the state behind the decision: view, proposal, card headers and recent', async () => {
       const { runId } = runWithCard();
       const first = await decide({ text: 'open next finished', sidebarView: 'automations' });
@@ -149,11 +174,12 @@ describe('voice routes', () => {
       });
       expect(res.status).toBe(200);
       const [firstLine, secondLine] = readLog(dataDir) as Array<{ state: Record<string, unknown> }>;
-      expect(firstLine!.state).toMatchObject({ view: { sidebarView: 'automations', openTask: false }, recent: [] });
+      expect(firstLine!.state).toMatchObject({ screen: { sidebarView: 'automations' }, recent: [] });
+      expect(firstLine!.state.screen).not.toHaveProperty('openTask');
       expect(firstLine!.state).not.toHaveProperty('pendingProposal');
       expect(secondLine!.state).toMatchObject({
         sentence: 'yes, confirmed',
-        view: { sidebarView: 'active', openTask: true },
+        screen: { sidebarView: 'active', openTask: { title: 'card' } },
         pendingProposal: 'answer',
         card: [{ header: 'First' }],
         recent: [{ sentence: 'open next finished', action: 'open' }],
