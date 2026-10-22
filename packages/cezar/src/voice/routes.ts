@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { basename } from 'node:path';
 import { Hono, type Context, type Next } from 'hono';
 import {
   voiceDecideRequestSchema,
@@ -8,7 +9,7 @@ import {
 import { jsonZodValidator } from '../server/validators.ts';
 import type { ProjectApiEnv } from '../server/server.ts';
 import { appendVoiceLog, type RecentVoiceActions } from './decision-log.ts';
-import { decideVoice } from './decide.ts';
+import { decideVoice, type VoiceScreen } from './decide.ts';
 import { VoiceEngineError, type DecisionEngine } from './engine.ts';
 import { readPendingHumanAsk } from './pending-ask.ts';
 
@@ -40,9 +41,14 @@ export function createVoiceRoutes(deps: VoiceRouteDeps) {
       const project = c.get('project');
       const body = c.req.valid('json');
       // An id this project does not know is "no open task", not an error: the tab can outlive the run.
+      // Its card id goes with it, so "no open task" wins over a stale card.
       const openRun = body.openRunId === undefined ? undefined : project.store.getRun(body.openRunId);
-      const { openRunId: _unknown, ...rest } = body;
+      const { openRunId: _unknown, askRequestId: _card, ...rest } = body;
       const request: VoiceDecideRequest = openRun ? body : rest;
+      const screen: VoiceScreen = {
+        project: basename(project.root),
+        ...(openRun ? { openTask: { title: openRun.titleSummary ?? openRun.title, status: openRun.status } } : {}),
+      };
       const ask = openRun ? readPendingHumanAsk(project.dataDir, openRun) : undefined;
       const decisionId = deps.uuid?.() ?? randomUUID();
       deps.recent.load(project.id, project.dataDir);
@@ -52,6 +58,7 @@ export function createVoiceRoutes(deps: VoiceRouteDeps) {
         const { decision, answers, latencyMs, state } = await decideVoice({
           request,
           ...(ask ? { ask } : {}),
+          screen,
           recent,
           engine,
           decisionId,

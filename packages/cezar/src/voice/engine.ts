@@ -1,5 +1,5 @@
 import type { z } from 'zod';
-import type { voiceSidebarViewSchema } from '@open-mercato/cezar-contract/voice';
+import type { VoiceView, voiceSidebarViewSchema } from '@open-mercato/cezar-contract/voice';
 import { FakeVoiceEngine } from './fake-engine.ts';
 import { JevVoiceEngine } from './jev-engine.ts';
 
@@ -18,12 +18,28 @@ export type EngineAnswer =
   | { type: 'choice'; choice: string; confidence: number; probabilities: Record<string, number> }
   | { type: 'noul'; noul: number };
 
-/** What the engine is told besides the questions: Jev has no memory between calls. */
+/**
+ * What the engine is told besides the questions: Jev has no memory between calls. `words` numbers the
+ * sentence (`W01 answer`) so a question can ask about one word where it stands; `screen` is what the
+ * user sees (hearsay-tools/cezarion#1463).
+ */
 export interface VoiceEngineState {
   sentence: string;
-  view: { sidebarView: z.infer<typeof voiceSidebarViewSchema>; openTask: boolean };
+  words: string[];
+  screen: {
+    page: VoiceView | 'unknown';
+    sidebarView: z.infer<typeof voiceSidebarViewSchema>;
+    project: string;
+    openTask?: { title: string; status: string };
+  };
   pendingProposal?: 'answer' | 'tell';
-  card?: { header: string; question: string; options?: { label: string; description?: string }[]; multiSelect?: boolean }[];
+  card?: {
+    number: number;
+    header: string;
+    question: string;
+    options?: { label: string; description?: string }[];
+    multiSelect?: boolean;
+  }[];
   recent: { sentence: string; action: string; outcome?: string }[];
 }
 
@@ -39,17 +55,26 @@ export interface DecisionEngine {
   ): Promise<{ answers: Record<string, EngineAnswer>; inputTokens?: number }>;
 }
 
-/** The question ids code and engines agree on; a card question adds its index. */
+/**
+ * The question ids code and engines agree on. A card question adds its 0-based index; a word adds
+ * its 0-based position in the sentence.
+ */
 export const QUESTION_IDS = {
   isCommand: 'is_command',
-  action: 'action',
+  scope: 'scope',
+  projectAction: 'project_action',
+  sessionAction: 'session_action',
   status: 'status',
   position: 'position',
-  tellStart: 'tell_start',
-  span: (i: number) => `q${i}_span`,
-  choice: (i: number) => `q${i}_choice`,
-  option: (i: number, j: number) => `q${i}_opt${j}`,
+  word: (k: number) => `w${k}`,
+  option: (i: number) => `q${i}_option`,
+  optionSelected: (i: number, j: number) => `q${i}_opt${j}`,
 } as const;
+
+/** The label of a word that is no part of a reply. Targets are `q1`…`qN` with a card, else `message`. */
+export const COMMAND_LABEL = 'command';
+export const MESSAGE_LABEL = 'message';
+export const questionLabel = (i: number) => `q${i + 1}`;
 
 /**
  * Option keys that carry user or card text are wrapped in curly quotes, so they can never equal a bare

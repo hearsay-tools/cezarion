@@ -1,19 +1,20 @@
 /**
- * Candidate spans of a dictated sentence: the pieces code offers the engine as options, so the engine
- * picks words and code copies them exactly as said (spec 2026-10-21-voice-mode, "Answer the question
- * card"). Pure string work; nothing here decides anything.
+ * The dictated sentence as numbered words (hearsay-tools/cezarion#1463). The engine labels each word
+ * with the part of the reply it belongs to; code copies the words back out of the sentence exactly as
+ * said (spec 2026-10-21-voice-mode, "Answer the question card"). Pure string work; nothing here
+ * decides anything.
  */
 
-const MAX_CANDIDATES = 20;
+export interface VoiceWord {
+  /** `W01`, `W02`, … as the engine sees it in `words`. */
+  id: string;
+  text: string;
+  /** Where the word sits in the sentence: `sentence.slice(start, end) === text`. */
+  start: number;
+  end: number;
+}
 
 const ORDINAL = '(?:one|two|three|four|first|second|third|fourth|[1-4])';
-/** Where dictated text starts: "tell it", "tell the agent to", "reply with", "say", "message it". */
-const TELL_TRIGGER = /\b(?:tell\s+(?:it|the\s+agent|them)(?:\s+to)?|reply(?:\s+with)?|say|message(?:\s+it)?)\b/gi;
-
-const CONNECTOR = /^(?:answer|and|then|to|for)\b/i;
-const FILLER = /^(?:um+|uh+|so|okay|ok)\b/i;
-const LEADING = /^[\s:,]+/;
-const TRAILING = /[\s.!?,]+$/;
 
 function escapeRegExp(text: string): string {
   return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -35,65 +36,40 @@ function questionAnchors(headers: string[]): RegExp {
   return new RegExp([...named, numbered].join('|'), 'gi');
 }
 
-/** The words as said: only surrounding space, a leading colon or comma and a trailing sentence mark go. */
-function literal(text: string): string {
-  return text.replace(LEADING, '').replace(/[\s.!?]+$/, '');
+export function wordId(index: number): string {
+  return `W${String(index + 1).padStart(2, '0')}`;
 }
 
-/**
- * The words without the command syntax around them: no leading connector word ("and", "then", "answer"),
- * filler ("um", "okay"), colon or comma, no trailing sentence mark. A step that would leave nothing is
- * not taken, so a dictated "and" or "okay" is never cleaned away.
- */
-function clean(text: string): string {
-  let out = text.replace(TRAILING, '').replace(LEADING, '');
-  for (;;) {
-    const next = out.replace(CONNECTOR, '').replace(LEADING, '');
-    const step = next !== out ? next : out.replace(FILLER, '').replace(LEADING, '');
-    if (step === out || step === '') return out;
-    out = step;
-  }
+export function splitWords(sentence: string): VoiceWord[] {
+  return [...sentence.matchAll(/\S+/g)].map((match, i) => ({
+    id: wordId(i),
+    text: match[0],
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
 }
 
-/**
- * Each candidate as said, then cleaned when that differs (spec 2026-10-21-voice-mode: dictated text is
- * copied exactly; the cleaned form is the alternative for a stray leading "and").
- */
-function forms(text: string): string[] {
-  return [literal(text), clean(text)];
-}
-
-function unique(texts: string[]): string[] {
-  return [...new Set(texts.filter((text) => text !== ''))].slice(0, MAX_CANDIDATES);
-}
-
-/** The text between question references, each neighbouring pair joined with ": ", and each part after a colon. */
-export function candidateSpans(sentence: string, headers: string[] = []): string[] {
-  const segments: string[] = [];
-  let from = 0;
+/** The indices of the words inside a question reference: they point at a question, they never answer it. */
+export function questionReferenceWords(sentence: string, words: readonly VoiceWord[], headers: string[]): Set<number> {
+  const found = new Set<number>();
   for (const anchor of sentence.matchAll(questionAnchors(headers))) {
-    segments.push(sentence.slice(from, anchor.index));
-    from = anchor.index + anchor[0].length;
+    const from = anchor.index;
+    const to = anchor.index + anchor[0].length;
+    words.forEach((word, i) => {
+      if (word.start < to && word.end > from) found.add(i);
+    });
   }
-  segments.push(sentence.slice(from));
-  const named = segments.filter((segment) => literal(segment) !== '');
-  const spans: string[] = named.flatMap(forms);
-  for (let i = 0; i + 1 < named.length; i++) {
-    const [a, b] = [named[i]!, named[i + 1]!];
-    spans.push(`${literal(a)}: ${literal(b)}`, `${clean(a)}: ${clean(b)}`);
-  }
-  for (const segment of named) {
-    const colon = segment.indexOf(':');
-    if (colon >= 0) spans.push(...forms(segment.slice(colon + 1)));
-  }
-  return unique(spans);
+  return found;
 }
 
-/** The text after the first colon, and after each tell-it trigger. */
-export function tellStarts(sentence: string): string[] {
-  const starts: string[] = [];
-  const colon = sentence.indexOf(':');
-  if (colon >= 0) starts.push(...forms(sentence.slice(colon + 1)));
-  for (const trigger of sentence.matchAll(TELL_TRIGGER)) starts.push(...forms(sentence.slice(trigger.index + trigger[0].length)));
-  return unique(starts);
+export function namesQuestion(sentence: string, headers: string[]): boolean {
+  return questionAnchors(headers).test(sentence);
+}
+
+/** The words `first`..`last` exactly as said, without a trailing sentence mark or comma. */
+export function copyRange(sentence: string, words: readonly VoiceWord[], first: number, last: number): string {
+  const from = words[first];
+  const to = words[last];
+  if (from === undefined || to === undefined) return '';
+  return sentence.slice(from.start, to.end).replace(/[\s.!?,]+$/, '');
 }
