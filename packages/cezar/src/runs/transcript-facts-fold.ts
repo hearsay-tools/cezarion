@@ -13,6 +13,8 @@ export interface PendingAskFacts {
   seq: number;
   requestId: string;
   questions: unknown;
+  /** The card's context (hearsay-tools/cezarion#1458), carried to the parent with the question. */
+  context?: unknown;
   /** The worker routed this ask to its parent as this conversation message (#505). */
   routedMessageId?: string;
   /** The ask went back to the human. */
@@ -56,7 +58,7 @@ export function foldEvent(facts: TranscriptFacts, event: RunEvent): boolean {
   const pending = facts.pendingAsk && ({ type: 'ask.requested', seq: facts.pendingAsk.seq, ts: '' } as RunEvent);
   const next = advancePendingHumanAsk(pending, event);
   if (next === event) {
-    facts.pendingAsk = { seq: event.seq, requestId: event.requestId as string, questions: event.questions };
+    facts.pendingAsk = { seq: event.seq, requestId: event.requestId as string, questions: event.questions, ...(event.context !== undefined ? { context: event.context } : {}) };
     changed = true;
   } else if (next === undefined && facts.pendingAsk) {
     delete facts.pendingAsk;
@@ -106,7 +108,7 @@ export const factsFileSchema = z.object({
   lastSeq: z.number(),
   projectionIds: z.array(z.string()),
   pendingAsk: z.object({
-    seq: z.number(), requestId: z.string(), questions: z.unknown(),
+    seq: z.number(), requestId: z.string(), questions: z.unknown(), context: z.unknown().optional(),
     routedMessageId: z.string().optional(), fallback: z.boolean().optional(),
   }).optional(),
   pendingGateSeq: z.number().optional(),

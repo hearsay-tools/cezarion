@@ -5220,7 +5220,7 @@ export class RunManager {
     const ask = this.store.transcriptFacts(workerId).pendingAsk;
     if (!ask || ask.routedMessageId !== undefined || ask.fallback) return;
     const fallback = (reason: string) => { this.store.appendEvent(workerId, { type: 'worker-question-fallback', askSeq: ask.seq, reason }); };
-    const request = askRequestSchema.safeParse({ questions: ask.questions });
+    const request = askRequestSchema.safeParse({ questions: ask.questions, ...(ask.context !== undefined ? { context: ask.context } : {}) });
     if (!request.success) { fallback('the question cannot be carried to the parent'); return; }
     const parentId = worker.delegation.parentRunId;
     const root = this.store.getRun(parentId);

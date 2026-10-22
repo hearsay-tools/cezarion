@@ -166,6 +166,10 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     await until(() => store.readEvents(w.id).some(event => event.type === 'worker-question-routed') && store.getRun(w.id)?.status === 'waiting');
     const routed = store.readEvents(w.id).find(event => event.type === 'worker-question-routed')!;
     expect(routed).toMatchObject({ askSeq: asks(w.id)[0]!.seq, parentRunId: p.id });
+    // hearsay-tools/cezarion#1458: the parent reads the worker's context with the question.
+    const question = store.getRun(p.id)!.delegation!.conversation!.messages.find(message => message.id === routed.messageId)!;
+    expect(question.question).toMatchObject({ context: '## Draft\n\nThe plan.' });
+    expect(question.text).toContain('Context:\n## Draft\n\nThe plan.\n\n1. [Choice] Which module?');
     const credentials = new CredentialRegistry();
     try {
       const caller = credentials.authenticate(credentials.issue('project', p.id, randomUUID()))!;
