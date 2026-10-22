@@ -253,23 +253,16 @@ export class ScheduleRunner {
     if (await this.settleOnce(definition)) return { result: 'duplicate', occurrenceAt };
     // Settling may have found a crash-lost launch and left the schedule Failed: no automatic exit.
     if (this.handle.store.get(definition.id)?.enabled === false) return { result: 'skipped', occurrenceAt };
-    // A launch error at this very revision was never followed by its stop (a crash between the two):
-    // no person has re-enabled it since, so it is Failed, which only Retry or Run now leaves.
-    const errored = this.handle.store.latestReceipts().get(`${definition.id}:${this.onceEventId(definition)}`);
-    if (errored?.status === 'launch-error' && errored.revision === definition.revision) {
-      this.stopOnce(definition.id, 'failed');
-      return { result: 'skipped', occurrenceAt };
-    }
     const cutoff = onceCutoff(definition.schedule);
     if (cutoff !== null && now > cutoff) {
       const minutes = Math.round((now - due) / 60_000);
-      await this.handle.store.appendLog({
+      this.stopOnce(definition.id, 'missed');
+      await this.logOnce({
         automationId: definition.id,
         revision: definition.revision,
         result: 'missed',
         reason: `Missed: Cezarion was not running at ${wallTime(due, definition.schedule.timeZone)} and started ${minutes} minutes later, past its latest start. Nothing was launched; use Run now to start it.`,
       });
-      this.stopOnce(definition.id, 'missed');
       return { result: 'skipped', occurrenceAt };
     }
     await this.handle.ready?.();
@@ -313,8 +306,8 @@ export class ScheduleRunner {
   private async launchOnce(definition: OnceScheduleDefinition, occurrence: ScheduleOccurrence, receipt: AutomationReceipt): Promise<ScheduleFireOutcome> {
     const { store } = this.handle;
     if (!this.handle.launch) {
-      store.appendReceipt({ ...receipt, status: 'launch-error', error: 'This cockpit cannot launch tasks.', updatedAt: new Date(this.now()).toISOString() });
       this.stopOnce(definition.id, 'failed');
+      store.appendReceipt({ ...receipt, status: 'launch-error', error: 'This cockpit cannot launch tasks.', updatedAt: new Date(this.now()).toISOString() });
       return { result: 'detection-only', occurrenceAt: occurrence.at };
     }
     const started = Date.now();
@@ -323,24 +316,30 @@ export class ScheduleRunner {
       ({ runId } = await this.handle.launch(definition, occurrence, receipt.receiptId));
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      store.appendReceipt({ ...receipt, status: 'launch-error', error: message, updatedAt: new Date(this.now()).toISOString() });
-      // The stop before the awaited log: a failed append must not leave the timer an enabled schedule.
+      // The stop before the receipt: a launch-error receipt then always means a stopped schedule,
+      // and a crash between the two leaves `reserved`, which reconciliation settles as Failed.
       this.stopOnce(definition.id, 'failed');
-      await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'failed', reason: message, receiptId: receipt.receiptId, durationMs: Date.now() - started });
+      store.appendReceipt({ ...receipt, status: 'launch-error', error: message, updatedAt: new Date(this.now()).toISOString() });
+      await this.logOnce({ automationId: definition.id, revision: definition.revision, result: 'failed', reason: message, receiptId: receipt.receiptId, durationMs: Date.now() - started });
       return { result: 'failed', occurrenceAt: occurrence.at };
     }
     store.appendReceipt({ ...receipt, status: 'launched', runId, updatedAt: new Date(this.now()).toISOString() });
     const result = occurrence.trigger === 'schedule' ? 'launched' : occurrence.trigger === 'late' ? 'catch-up' : 'manual';
-    await store.appendLog({
-      automationId: definition.id, revision: definition.revision, result,
-      reason: onceReason(occurrence, this.now(), definition.schedule.timeZone),
-      receiptId: receipt.receiptId, runId, durationMs: Date.now() - started,
-    });
     const trigger: AutomationArchive['trigger'] = occurrence.trigger === 'catch-up' ? 'late' : occurrence.trigger;
     const archived = store.archive(definition.id, { at: new Date(this.now()).toISOString(), outcome: 'launched', runId, receiptId: receipt.receiptId, trigger });
     store.setState(definition.id, (current) => ({ ...current, lastRunAt: occurrence.at, lastSuccessAt: new Date(this.now()).toISOString() }));
     this.handle.onChange?.(definition.id, archived?.revision ?? definition.revision);
+    await this.logOnce({
+      automationId: definition.id, revision: definition.revision, result,
+      reason: onceReason(occurrence, this.now(), definition.schedule.timeZone),
+      receiptId: receipt.receiptId, runId, durationMs: Date.now() - started,
+    });
     return { result, runId, occurrenceAt: occurrence.at };
+  }
+
+  /** A one-time log row is a record, not a gate: the stop or archive it follows has already landed. */
+  private async logOnce(entry: Parameters<AutomationStore['appendLog']>[0]): Promise<void> {
+    await this.handle.store.appendLog(entry).catch(() => {});
   }
 
   private stopOnce(id: string, outcome: 'failed' | 'missed'): void {

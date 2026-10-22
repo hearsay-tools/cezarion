@@ -903,29 +903,52 @@ describe('ScheduleRunner once (#1465)', () => {
       expect(store.latestReceipts().get(KEY)).toMatchObject({ receiptId: 'lost', status: 'launch-error' });
     });
 
-    // Review of #1469: a launch-error receipt whose stop never landed (a crash right after it, or
-    // a failed log append) must not leave an enabled schedule that the timer relaunches by itself.
-    it('a launch-error receipt the failure never paused is marked Failed at the next fire, not relaunched', async () => {
+    // Review of #1469: the stop lands before the launch-error receipt, so a launch-error receipt
+    // always means a stopped schedule. A crash between them leaves `reserved`, which reconciliation
+    // settles as Failed; an edit in between cannot happen, since one-time writes take the lease.
+    it('a crash between the stop and the launch-error receipt leaves the schedule Failed and the receipt reserved', async () => {
       const { store, definition, runner, launch, clock } = await crashSetup();
-      const at = iso(FIRST_RUN);
-      appendFileSync(join(store.dataDir, 'automation-receipts.ndjson'), `${JSON.stringify({ receiptId: 'errored', receiptKey: KEY, eventId: KEY.slice('nightly:'.length), automationId: 'nightly', revision: 1, status: 'launch-error', error: 'boom', occurrenceAt: at, observedAt: at, updatedAt: at })}\n`);
-      store.reload();
+      launch.mockRejectedValueOnce(new Error('boom'));
+      const append = store.appendReceipt.bind(store);
+      vi.spyOn(store, 'appendReceipt').mockImplementation((row) => {
+        if (row.status === 'launch-error') throw new Error('crash');
+        return append(row);
+      });
       clock.set(FIRST_RUN + 1_000);
-      expect((await runner.fire(definition)).result).toBe('skipped');
-      expect(launch).not.toHaveBeenCalled();
+      await expect(runner.fire(definition)).rejects.toThrow('crash');
       expect(store.get('nightly')?.enabled).toBe(false);
       expect(store.state('nightly')).toMatchObject({ onceOutcome: 'failed' });
+      expect(store.latestReceipts().get(KEY)?.status).toBe('reserved');
     });
 
-    it('a launch failure whose log append throws still pauses the schedule as Failed', async () => {
+    // The log is a record, not a gate: a failed append never blocks the stop or the archive.
+    it('a launch failure whose log append throws still answers failed and pauses the schedule', async () => {
       const { store, definition, runner, launch, clock } = await crashSetup();
       launch.mockRejectedValueOnce(new Error('boom'));
       vi.spyOn(store, 'appendLog').mockRejectedValueOnce(new Error('disk full'));
       clock.set(FIRST_RUN + 1_000);
-      await expect(runner.fire(definition)).rejects.toThrow('disk full');
+      expect((await runner.fire(definition)).result).toBe('failed');
       expect(store.latestReceipts().get(KEY)?.status).toBe('launch-error');
       expect(store.get('nightly')?.enabled).toBe(false);
       expect(store.state('nightly')).toMatchObject({ onceOutcome: 'failed' });
+    });
+
+    it('a missed schedule whose log append throws is still stopped as Missed', async () => {
+      const { store, definition, runner, launch, clock } = await crashSetup({ ...ONCE, latestStartMinutes: 30 });
+      vi.spyOn(store, 'appendLog').mockRejectedValueOnce(new Error('disk full'));
+      clock.set(FIRST_RUN + 2 * HOUR);
+      expect((await runner.fire(definition)).result).toBe('skipped');
+      expect(launch).not.toHaveBeenCalled();
+      expect(store.get('nightly')?.enabled).toBe(false);
+      expect(store.state('nightly')).toMatchObject({ onceOutcome: 'missed' });
+    });
+
+    it('a launch whose log append throws is still archived with its task', async () => {
+      const { store, definition, runner, clock } = await crashSetup();
+      vi.spyOn(store, 'appendLog').mockRejectedValueOnce(new Error('disk full'));
+      clock.set(FIRST_RUN - HOUR);
+      expect(await runner.runNow(definition)).toMatchObject({ result: 'manual', runId: 'run-1' });
+      expect(store.get('nightly')?.archived).toMatchObject({ outcome: 'launched', runId: 'run-1', trigger: 'manual' });
     });
   });
 });
