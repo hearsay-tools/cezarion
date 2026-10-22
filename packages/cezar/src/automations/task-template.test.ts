@@ -300,12 +300,17 @@ describe('automation task templates', () => {
       const created = vi.spyOn(store, 'createRun');
       // Every later write fails: the process "crashes" right after the creating commit.
       vi.spyOn(store, 'updateRun').mockImplementation(() => { throw new Error('crash after create'); });
-      await expect(launchScheduledRun({ root, manager, store, definition: scheduled, occurrence, receiptId: 'receipt', projectName: 'demo', timeZone: 'UTC' })).rejects.toThrow('crash after create');
+      // Review of #1469: the task exists, so the launch succeeded. Answering with its run keeps the
+      // receipt from becoming a launch-error that Retry would turn into a second task.
+      const scheduledLaunch = await launchScheduledRun({ root, manager, store, definition: scheduled, occurrence, receiptId: 'receipt', projectName: 'demo', timeZone: 'UTC' });
       const runId = created.mock.results[0]?.value.id as string;
+      expect(scheduledLaunch).toEqual({ runId });
       expect(store.getRun(runId)?.automationTrigger).toMatchObject({ automationId: 'nightly', receiptId: 'receipt' });
       created.mockClear();
-      await expect(launchAutomationRun({ root, manager, store, definition: { ...definition, task: { ...definition.task, workflow: 'quick-task' } }, candidate, receiptId: 'gh-receipt' })).rejects.toThrow('crash after create');
-      expect(store.getRun(created.mock.results[0]?.value.id as string)?.automation).toMatchObject({ automationId: 'one', receiptId: 'gh-receipt' });
+      const githubLaunch = await launchAutomationRun({ root, manager, store, definition: { ...definition, task: { ...definition.task, workflow: 'quick-task' } }, candidate, receiptId: 'gh-receipt' });
+      const githubRunId = created.mock.results[0]?.value.id as string;
+      expect(githubLaunch).toMatchObject({ runId: githubRunId });
+      expect(store.getRun(githubRunId)?.automation).toMatchObject({ automationId: 'one', receiptId: 'gh-receipt' });
       vi.restoreAllMocks();
       await drainFixtureManagers(root);
     } finally { await rm(root, { recursive: true, force: true }); }

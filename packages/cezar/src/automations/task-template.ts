@@ -117,6 +117,23 @@ function startRuns(manager: RunManager, workflow: WorkflowDef, definition: Autom
     : [manager.startRun(workflow, input)];
 }
 
+/**
+ * Starts the receipt's task and answers its run. A throw after the creating commit still left a
+ * task carrying the receipt: that launch succeeded, so it answers that run rather than throwing.
+ * A `launch-error` receipt then never has a task behind it, and Retry never starts a second one.
+ */
+function startClaimedRun(store: RunStore, receiptId: string, start: () => readonly { id: string }[]): { runId: string } {
+  try {
+    const first = start()[0];
+    if (!first) throw new Error('run manager did not create a run');
+    return { runId: first.id };
+  } catch (error) {
+    const runId = store.findRunIdsByAutomationReceipt([receiptId]).get(receiptId);
+    if (runId) return { runId };
+    throw error;
+  }
+}
+
 export async function launchAutomationRun(options: {
   root: string;
   manager: RunManager;
@@ -144,10 +161,7 @@ export async function launchAutomationRun(options: {
     event: candidate.event,
     githubUrl: candidate.url,
   };
-  const runs = startRuns(options.manager, workflow, definition, renderAutomationTask(definition, candidate), { automation: provenance });
-  const first = runs[0];
-  if (!first) throw new Error('run manager did not create a run');
-  return { runId: first.id };
+  return startClaimedRun(options.store, options.receiptId, () => startRuns(options.manager, workflow, definition, renderAutomationTask(definition, candidate), { automation: provenance }));
 }
 
 /**
@@ -174,10 +188,7 @@ export async function launchScheduledRun(options: {
     trigger: PROVENANCE_TRIGGER[occurrence.trigger],
     occurrenceAt: occurrence.at,
   };
-  const runs = startRuns(options.manager, workflow, definition, task, { automationTrigger: provenance });
-  const first = runs[0];
-  if (!first) throw new Error('run manager did not create a run');
-  return { runId: first.id };
+  return startClaimedRun(options.store, options.receiptId, () => startRuns(options.manager, workflow, definition, task, { automationTrigger: provenance }));
 }
 
 /** Reserved receipts are reconciled against additive run provenance after restart. Reservations
