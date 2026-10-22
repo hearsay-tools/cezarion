@@ -3,7 +3,7 @@ import * as React from 'react'
 import { reportVoiceOutcome, voiceDecide } from '@/api/client'
 import { useRuns } from '@/api/queries'
 import { useListView } from '@/components/list-view'
-import { useNavigate, useProjectMatch, useProjectPathname } from '@/lib/project-router'
+import { useActiveProjectId, useNavigate, useProjectMatch, useProjectPathname } from '@/lib/project-router'
 import { groupTitle, runTitle, type SidebarView } from '@/lib/task-groups'
 import { parseNumberedPick } from '@/lib/voice/numbered-pick'
 import { usePendingAsk, useVoiceProposal, voiceStore, type VoiceProposal } from '@/lib/voice/proposal-store'
@@ -79,10 +79,12 @@ const voiceable = (text: string) => looksLikeSentence(text) && text.length <= VO
  *  like a numbered pick, with no engine call. Otherwise they stay ordinary searches. */
 const isCancelWord = (text: string) => /^(?:no|cancel)$/.test(text.toLowerCase().replace(/[.!?]+$/, '').trim())
 
-/** What a decision depends on: the same sentence, page, open task, shown question and shown
- *  proposal ⇒ the same answer. A change to any of them makes an older decision stale. */
+/** What a decision depends on: the same sentence, project, page, open task, shown question and
+ *  shown proposal ⇒ the same answer. A change to any of them makes an older decision stale. */
 interface DecisionKey {
   text: string
+  /** The palette sits outside the project's keyed outlet, so it outlives a project switch. */
+  projectId: string | null
   view: VoiceView
   openRunId: string | null
   /** The question the open thread shows; undefined while the thread has not synced it. */
@@ -91,6 +93,7 @@ interface DecisionKey {
 }
 const sameKey = (a: DecisionKey, b: DecisionKey) =>
   a.text === b.text &&
+  a.projectId === b.projectId &&
   a.view === b.view &&
   a.openRunId === b.openRunId &&
   a.askRequestId === b.askRequestId &&
@@ -114,6 +117,7 @@ interface Choosing {
   decisionId: string
   choices: Choice[]
   /** The context the choices were resolved for; numbers mean nothing in another one. */
+  projectId: string | null
   view: VoiceView
   openRunId: string | null
   sidebarView: SidebarView
@@ -184,6 +188,7 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
   const runs = useRuns().data
   const [sidebarView] = useListView()
   const openRunId = useProjectMatch('/tasks/:id/*')?.params.id ?? null
+  const projectId = useActiveProjectId()
   const view = voiceViewOf(useProjectPathname())
   const askRequestId = usePendingAsk(openRunId ?? undefined)
   const navigate = useNavigate()
@@ -191,17 +196,19 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
 
   const trimmed = args.text.trim()
   const key = React.useMemo<DecisionKey>(
-    () => ({ text: trimmed, view, openRunId, askRequestId, proposalId: proposal?.decisionId ?? null }),
-    [trimmed, view, openRunId, askRequestId, proposal?.decisionId],
+    () => ({ text: trimmed, projectId, view, openRunId, askRequestId, proposalId: proposal?.decisionId ?? null }),
+    [trimmed, projectId, view, openRunId, askRequestId, proposal?.decisionId],
   )
 
   const [settled, setSettled] = React.useState<{ key: DecisionKey; result: Settled }>()
   const [notice, setNotice] = React.useState<{ text: string; forText: string }>()
   const [choosing, setChoosing] = React.useState<Choosing>()
 
-  // Choices resolved for another page, open task or sidebar tab are gone.
+  // Choices resolved for another project, page, open task or sidebar tab are gone.
   const choosingHere =
-    choosing !== undefined && choosing.view === view && choosing.openRunId === openRunId && choosing.sidebarView === sidebarView
+    choosing !== undefined &&
+    choosing.projectId === projectId &&
+    choosing.view === view && choosing.openRunId === openRunId && choosing.sidebarView === sidebarView
       ? choosing
       : undefined
   const pick = choosingHere ? parseNumberedPick(trimmed, choosingHere.choices.length) : null
@@ -311,7 +318,7 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
         case 'open': {
           const { primary, choices } = planOpen(decision, { runs: currentRuns, sidebarView: view, openRunId: openId })
           if (choices.length >= 2) {
-            setChoosing({ decisionId: decision.decisionId, choices, view: made.key.view, openRunId: openId, sidebarView: view })
+            setChoosing({ decisionId: decision.decisionId, choices, projectId: made.key.projectId, view: made.key.view, openRunId: openId, sidebarView: view })
             clearText()
             return
           }
@@ -419,8 +426,8 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
     return () => clearTimeout(timer)
   }, [enabled, key, pick, requestFor])
 
-  // A notice speaks about the text it was shown for. A new sentence, or another page, open task or
-  // sidebar tab, ends a choice.
+  // A notice speaks about the text it was shown for. A new sentence, or another project, page, open
+  // task or sidebar tab, ends a choice.
   const choiceEnded = choosing !== undefined && choosingLive === undefined
   React.useEffect(() => {
     setNotice((current) => (current && current.forText !== trimmed ? undefined : current))

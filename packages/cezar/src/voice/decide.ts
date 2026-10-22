@@ -202,30 +202,32 @@ function between(a: number, b: number): number[] {
 
 /**
  * The text of each reply target the words were labelled with. A target runs from its first word to its
- * last, copied as said, so a word inside it that the engine called a command word stays. Words inside a
- * question reference are command words whatever the engine said: code knows that rule. When two targets
- * interleave, a sentence that names its questions keeps each target's own stretches; one that names none
- * is ambiguous. A target whose words are, on average, below `EXTRACT_MIN` is not found.
+ * last, copied as said, so a word inside it that the engine called a command word stays. With a card
+ * (`headers` given), words inside a question reference are command words whatever the engine said, and
+ * they split a target as another target's words do, so naming words never reach an answer. Without a
+ * card there is no question to name, and such words stay message text. When two targets interleave, a
+ * sentence that names its questions keeps each target's own stretches; one that names none is
+ * ambiguous. A target whose words are, on average, below `EXTRACT_MIN` is not found.
  */
 function replyTargets(
   sentence: string,
   words: readonly VoiceWord[],
   answers: Record<string, EngineAnswer>,
-  headers: string[],
+  headers: string[] | undefined,
 ): Map<string, string> | 'ambiguous' {
-  const forced = questionReferenceWords(sentence, words, headers);
+  const forced = headers ? questionReferenceWords(sentence, words, headers) : new Set<number>();
   const labels = words.map((_, k) => {
     if (forced.has(k)) return { label: COMMAND_LABEL, confidence: 1 };
     const pick = pickOf(answers, QUESTION_IDS.word(k));
     return { label: pick.choice, confidence: pick.confidence };
   });
-  const named = namesQuestion(sentence, headers);
+  const named = headers ? namesQuestion(sentence, headers) : false;
   const found = new Map<string, string>();
   const targets = [...new Set(labels.map((entry) => entry.label))].filter((label) => label !== COMMAND_LABEL);
   for (const target of targets) {
     const own = labels.flatMap((entry, k) => (entry.label === target ? [k] : []));
-    const foreign = (k: number) => labels[k]!.label !== target && labels[k]!.label !== COMMAND_LABEL;
-    // Split the target where another target's word sits between two of its own.
+    const foreign = (k: number) => forced.has(k) || (labels[k]!.label !== target && labels[k]!.label !== COMMAND_LABEL);
+    // Split the target where another target's word, or a question reference, sits between two of its own.
     const runs: number[][] = [[own[0]!]];
     for (let i = 1; i < own.length; i++) {
       const k = own[i]!;
@@ -353,7 +355,7 @@ export async function decideVoice(args: {
   // A reply decided against another card than the one the user sees would land on the wrong question.
   if (request.askRequestId !== undefined && request.askRequestId !== (ask?.requestId ?? null)) return done(none('stale-context'));
 
-  const found = replyTargets(request.text, words, answers, ask?.questions.map((q) => q.header) ?? []);
+  const found = replyTargets(request.text, words, answers, ask?.questions.map((q) => q.header));
   if (found === 'ambiguous') return done(none('ambiguous'));
   if (ask) {
     const entries = ask.questions.flatMap((question, i) => {

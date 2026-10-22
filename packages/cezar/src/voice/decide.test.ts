@@ -296,10 +296,26 @@ describe('decideVoice: replies to a question card', () => {
   });
 });
 
+describe('decideVoice: question references inside a reply', () => {
+  it('never copies the naming words between two stretches for the same question', async () => {
+    const { decision } = await reply(
+      'answer alpha to question one and beta to question one',
+      ['c', 'q1', 'c', 'c', 'c', 'c', 'q1', 'c', 'c', 'c'],
+      { ask: OPEN_ASK },
+    );
+    expect(decision).toMatchObject({ action: 'answer', answers: [{ question: 0, kind: 'other', text: 'alpha beta' }] });
+  });
+});
+
 describe('decideVoice: replies without a card', () => {
   it('tells the open task the message words', async () => {
     const { decision } = await reply('answer that the tests are flaky, rerun them', ['c', 'c', 'message', 'message', 'message', 'message', 'message', 'message']);
     expect(decision).toEqual({ action: 'tell', decisionId: DECISION_ID, runId: RUN_ID, text: 'the tests are flaky, rerun them', confidence: 0.85 });
+  });
+
+  it('keeps a numbered question reference in a message: with no card it names nothing', async () => {
+    const { decision } = await reply('tell it: investigate question one', ['c', 'c', 'message', 'message', 'message']);
+    expect(decision).toMatchObject({ action: 'tell', text: 'investigate question one' });
   });
 
   it('is unclear when only command words were said', async () => {

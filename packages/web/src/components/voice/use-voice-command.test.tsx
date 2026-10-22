@@ -14,6 +14,7 @@ const mocks = vi.hoisted(() => ({
   openRunId: null as string | null,
   /** The page path without its project prefix; defaults to the open task's thread, or `/`. */
   path: undefined as string | undefined,
+  projectId: 'proj-a' as string | null,
   runs: [] as unknown[],
 }))
 
@@ -23,6 +24,7 @@ vi.mock('@/components/list-view', () => ({ useListView: () => ['active', () => {
 vi.mock('@/lib/project-router', () => ({
   useNavigate: () => mocks.navigate,
   useProjectMatch: () => (mocks.openRunId === null ? null : { params: { id: mocks.openRunId } }),
+  useActiveProjectId: () => mocks.projectId,
   useProjectPathname: () => mocks.path ?? (mocks.openRunId === null ? '/' : `/tasks/${mocks.openRunId}`),
 }))
 
@@ -53,6 +55,7 @@ beforeEach(() => {
   mocks.navigate.mockReset()
   mocks.openRunId = null
   mocks.path = undefined
+  mocks.projectId = 'proj-a'
   mocks.runs = []
 })
 
@@ -821,6 +824,44 @@ describe('useVoiceCommand', () => {
     await advance(300)
     await answer(calls[1], { action: 'tell', decisionId: DECISION_ID(2), runId: 'r1', text: 'ship it', confidence: 0.9 })
     expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Tell “Fix flaky shard”: ship it' })
+  })
+
+  it('drops a preview and a choice when the project changes under an open palette', async () => {
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'c', title: 'Charlie', status: 'done' })]
+    const harness = setup({ text: 'open the next failed one' })
+    await advance(300)
+    await answer(calls[0], {
+      action: 'open',
+      decisionId: DECISION_ID(1),
+      status: 'failed',
+      position: 'next',
+      confidence: 0.4,
+      alternatives: [{ status: 'done', position: 1 }],
+    })
+    expect(harness.result.current.voice.row).toMatchObject({ text: 'Which one?' })
+
+    // Back/Forward to another project: same page kind, no open task, the palette stays mounted.
+    mocks.projectId = 'proj-b'
+    harness.rerender()
+    expect(harness.result.current.voice.row).toBeUndefined()
+    enter(harness)
+    expect(calls).toHaveLength(2)
+
+    await answer(calls[1], {
+      action: 'open',
+      decisionId: DECISION_ID(2),
+      status: 'failed',
+      position: 'next',
+      confidence: 0.4,
+      alternatives: [{ status: 'done', position: 1 }],
+    })
+    expect(harness.result.current.voice.mode).toBe('choosing')
+    mocks.projectId = 'proj-a'
+    harness.rerender()
+    expect(harness.result.current.voice.mode).toBe('idle')
+    type(harness, 'two')
+    expect(enter(harness).handled).toBe(false)
+    expect(mocks.navigate).not.toHaveBeenCalled()
   })
 
   it('a single word never calls the engine and keeps the default Return', async () => {
