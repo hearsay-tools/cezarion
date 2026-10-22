@@ -7,6 +7,7 @@ import type {
   automationCheckSchema,
   automationDetailResponseSchema,
   automationLogResponseSchema,
+  automationCreateResponseSchema,
   automationResponseSchema,
   automationRetryResponseSchema,
   automationRunResponseSchema,
@@ -91,7 +92,7 @@ describe('src/contract automation schemas match the routes exactly', () => {
 
   type _Checks = [
     Assert<Exact<z.infer<typeof automationsResponseSchema>, Automations200>>,
-    Assert<Exact<z.infer<typeof automationResponseSchema>, CreateAutomation201>>,
+    Assert<Exact<z.infer<typeof automationCreateResponseSchema>, CreateAutomation201>>,
     Assert<Exact<z.infer<typeof automationDetailResponseSchema>, Automation200>>,
     Assert<Exact<z.infer<typeof automationResponseSchema>, UpdateAutomation200>>,
     Assert<Exact<z.infer<typeof automationResponseSchema>, EnableAutomation200>>,

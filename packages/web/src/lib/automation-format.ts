@@ -1,5 +1,5 @@
-import { WEEKDAY_NAMES, onceWallParts } from '@open-mercato/cezar-api-client/contract/automation-schedule'
-import { isoWeekday } from '@open-mercato/cezar-api-client/contract/zoned-time'
+import { WEEKDAY_NAMES, onceInstant, onceWallParts } from '@open-mercato/cezar-api-client/contract/automation-schedule'
+import { isoWeekday, timeZoneOffsetMs, zonedParts } from '@open-mercato/cezar-api-client/contract/zoned-time'
 
 /**
  * Time words for the automations screens. Pure and zone-explicit: every automation instant is
@@ -98,4 +98,31 @@ export function onceWall(at: string | undefined): { date: string; time: string }
   if (!parts) return null
   const { year, month, day, hour, minute } = parts
   return { date: `${WEEKDAY_NAMES[isoWeekday(year, month, day) - 1]} ${day} ${MONTHS[month - 1]} ${year}`, time: `${two(hour)}:${two(minute)}` }
+}
+
+const HOUR_MS = 3_600_000
+
+/**
+ * The wall time a one-time schedule really runs at, in its own zone (hearsay-tools/cezarion#1465
+ * review). It differs from the typed time only around a DST change: a time the clocks skip runs at
+ * another time, and a time they repeat runs at one of the two. `note` says which, so the editor and
+ * the preview never claim a time that is not the one the task starts at.
+ */
+export function onceResolved(schedule: Parameters<typeof onceInstant>[0]): { date: string; time: string; note?: string } | null {
+  const instant = onceInstant(schedule)
+  const zone = schedule.timeZone
+  const typed = onceWall(schedule.at)
+  const parts = instant === null || !zone ? null : zonedParts(instant, zone)
+  if (instant === null || !zone || !typed || !parts) return null
+  const resolved = { date: `${WEEKDAY_NAMES[isoWeekday(parts.year, parts.month, parts.day) - 1]} ${parts.day} ${MONTHS[parts.month - 1]} ${parts.year}`, time: `${two(parts.hour)}:${two(parts.minute)}` }
+  if (resolved.date !== typed.date || resolved.time !== typed.time) return { ...resolved, note: `${typed.time} does not exist on ${typed.date} in ${zone}.` }
+  const sameWall = (ms: number) => {
+    const other = zonedParts(ms, zone)
+    return !!other && other.day === parts.day && other.hour === parts.hour && other.minute === parts.minute
+  }
+  const laterToo = sameWall(instant + HOUR_MS)
+  if (!laterToo && !sameWall(instant - HOUR_MS)) return resolved
+  const offset = (timeZoneOffsetMs(zone, instant) ?? 0) / 60_000
+  const utc = `UTC${offset < 0 ? '-' : '+'}${two(Math.floor(Math.abs(offset) / 60))}:${two(Math.abs(offset) % 60)}`
+  return { ...resolved, note: `${typed.time} happens twice that day; it runs at ${laterToo ? 'the first' : 'the second'} (${utc}).` }
 }

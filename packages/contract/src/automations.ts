@@ -283,6 +283,15 @@ export type AutomationsResponse = z.infer<typeof automationsResponseSchema>;
 export const automationResponseSchema = z.object({ automation: automationDefinitionSchema });
 export type AutomationResponse = z.infer<typeof automationResponseSchema>;
 
+/**
+ * `POST /automations`. A one-time schedule's answer adds `once`: the due wall time and zone as
+ * stored, the instant they resolve to, and the downtime note (hearsay-tools/cezarion#1465).
+ */
+export const automationCreateResponseSchema = automationResponseSchema.extend({
+  once: z.object({ dueAt: z.string(), timeZone: z.string(), resolvedInstant: z.string(), note: z.string() }).optional(),
+});
+export type AutomationCreateResponse = z.infer<typeof automationCreateResponseSchema>;
+
 /** `GET /automations/:id` — one definition with its state and the most recent log row. */
 export const automationDetailResponseSchema = z.object({
   automation: automationDefinitionSchema,

@@ -41,3 +41,11 @@ it('says when a one-time schedule\'s time has passed', () => {
   render(<NextRunsPreview schedule={once} timeZone="UTC" now={Date.parse('2026-10-22T13:00:00Z')} />)
   expect(screen.getByText('The due time has passed.')).not.toBeNull()
 })
+
+// Review of #1465: a time the clocks skip shows the time the task really starts at, and why.
+it('a once in a spring-forward gap shows the resolved time and the reason', () => {
+  const once = { type: 'once', hour: 4, minute: 0, day: 1, every: 6, at: '2027-03-28T02:30', timeZone: 'Europe/Warsaw' } as const
+  render(<NextRunsPreview schedule={once} timeZone="Europe/Warsaw" now={Date.parse('2026-10-22T13:00:00Z')} />)
+  expect(screen.getByText('Sun 28 Mar 2027 01:30')).not.toBeNull()
+  expect(screen.getByText('02:30 does not exist on Sun 28 Mar 2027 in Europe/Warsaw.')).not.toBeNull()
+})

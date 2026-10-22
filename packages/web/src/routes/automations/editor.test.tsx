@@ -281,6 +281,14 @@ describe('one-time schedules', () => {
     expect(screen.queryByText(/^Cron:/)).toBeNull()
   })
 
+  it('the summary names the time a DST gap moves the schedule to', () => {
+    stubFetch(() => json(saved, 201))
+    mount()
+    chooseOnce()
+    setWhen('2027-03-28', '02', '30')
+    expect(screen.getByText('Runs once at 01:30 on Sun 28 Mar 2027 (Europe/Warsaw). 02:30 does not exist on Sun 28 Mar 2027 in Europe/Warsaw. Cezarion must be running then.')).not.toBeNull()
+  })
+
   it('a past time blocks save and keeps the draft', async () => {
     const calls = stubFetch(() => json(saved, 201))
     const onSaved = mount()

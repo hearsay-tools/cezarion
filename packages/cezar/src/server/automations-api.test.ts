@@ -1,3 +1,4 @@
+import { SCHEDULED_TASK_NOTE } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -984,6 +985,16 @@ describe('GitHub automation API', () => {
       expect(automationStore.state(automation.id)?.nextRunAt).toBe(`${definition.schedule.at}:00.000Z`);
       const listed = await body(await apiRequest(server, '/api/v1/automations'));
       expect(listed.automations[0]).toMatchObject({ id: automation.id, onceStatus: 'waiting' });
+    });
+
+    // Review of #1465: every create answer reports the due time, zone, resolved instant and the
+    // downtime note, the HTTP body included; a repeating schedule's answer carries no once block.
+    it('create answers the resolved instant and the downtime note for a once only', async () => {
+      const definition = onceInput();
+      const created = await body(await create(app(), definition));
+      expect(created.once).toEqual({ dueAt: definition.schedule.at, timeZone: 'UTC', resolvedInstant: `${definition.schedule.at}:00.000Z`, note: SCHEDULED_TASK_NOTE });
+      const daily = await body(await create(app(), { name: 'Daily', kind: 'schedule', schedule: { type: 'daily', hour: 4 }, task: { prompt: 'p' } }));
+      expect(daily).not.toHaveProperty('once');
     });
 
     it('create refuses a past at with the verbatim message', async () => {

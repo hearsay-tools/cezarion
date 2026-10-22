@@ -21,6 +21,7 @@ import type {
   AutomationLogResponse,
   AutomationRunResponse,
   AutomationRetryResponse,
+  AutomationCreateResponse,
   AutomationResponse,
   AutomationDefinition,
   CreateAutomationInput,
@@ -1958,7 +1959,7 @@ export async function getAutomations(opts?: ReadOptions & { archived?: 'include'
 }
 
 /** Create a definition. Always created PAUSED unless `enable` asks for a current-time baseline. */
-export async function createAutomation(input: CreateAutomationInput): Promise<AutomationResponse> {
+export async function createAutomation(input: CreateAutomationInput): Promise<AutomationCreateResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].automations.$post({
       param: { projectId: queryScope() },

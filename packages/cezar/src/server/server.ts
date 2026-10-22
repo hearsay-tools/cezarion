@@ -28,7 +28,7 @@ import { workerEmptyRequestSchema, runRelationshipsSchema } from '@open-mercato/
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
-import { automationCreateSchema, automationUpdateSchema, createAutomationService } from '../automations/service.ts';
+import { automationCreateSchema, automationUpdateSchema, createAutomationService, onceCreateAnswer } from '../automations/service.ts';
 import { createAutomationToolService } from '../automations/tool-adapter.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { AutomationCandidateChangedError, GithubPoller } from '../automations/github-poller.ts';
@@ -3648,7 +3648,8 @@ export function createApp(deps: ServerDeps) {
     .post('/automations', jsonZodValidator(() => automationCreateSchema), async (c) => {
       const result = await automationService.create(c.get('project'), c.req.valid('json'));
       if (!result.ok) return c.json({ error: result.error }, result.status);
-      return c.json({ automation: result.automation }, 201);
+      const once = onceCreateAnswer(result.automation);
+      return c.json({ automation: result.automation, ...(once ? { once } : {}) }, 201);
     })
 
     .get('/automations/:id', (c) => {

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { automationKindSchema, type AutomationKind, type AutomationListQuery, type OnceStatus } from '@open-mercato/cezar-contract/automations';
 import { automationScheduleSchema, nextOccurrence, ONCE_PAST_DUE_MESSAGE, onceInstant } from '@open-mercato/cezar-contract/automation-schedule';
+import { SCHEDULED_TASK_NOTE } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { MODEL_DISCOVERY_RUNNERS, type ModelDiscoveryRunner } from '@open-mercato/cezar-contract/workspace';
 import { loadConfig } from '../config.ts';
 import { missingModelChoices, type HostDiscovery } from '../discovery/catalog.ts';
@@ -465,3 +466,12 @@ export function createAutomationService(deps: AutomationServiceDeps) {
 }
 
 export type AutomationService = ReturnType<typeof createAutomationService>;
+
+/** A one-time schedule's create answer beyond its definition (#1465): what every create surface reports. */
+export function onceCreateAnswer(automation: AutomationDefinition): { dueAt: string; timeZone: string; resolvedInstant: string; note: string } | undefined {
+  if (!isOnceSchedule(automation)) return undefined;
+  const instant = onceInstant(automation.schedule);
+  if (instant === null) return undefined;
+  return { dueAt: automation.schedule.at, timeZone: automation.schedule.timeZone, resolvedInstant: new Date(instant).toISOString(), note: SCHEDULED_TASK_NOTE };
+}
+

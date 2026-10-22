@@ -5,7 +5,7 @@ import { isValidTimeZone, zonedParts } from '@open-mercato/cezar-api-client/cont
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { onceWall } from '@/lib/automation-format'
+import { onceResolved } from '@/lib/automation-format'
 import { TimeField } from './editor-schedule-fields'
 
 /** "Latest start": how late after its time a one-time schedule may still launch. `none` = no limit. */
@@ -56,7 +56,7 @@ export function OnceFields({ value, stored, onChange }: { value: NormalizedSched
   const past = !unchanged && instant !== null && instant <= Date.now()
   useEffect(() => { dateRef.current?.setCustomValidity(past ? ONCE_PAST_DUE_MESSAGE : '') }, [past])
 
-  const summary = onceWall(value.at)
+  const summary = onceResolved(value)
   return (
     <div className="grid gap-4">
       <div className="flex flex-wrap items-end gap-x-4 gap-y-3">
@@ -85,7 +85,7 @@ export function OnceFields({ value, stored, onChange }: { value: NormalizedSched
       <ZoneField value={value.timeZone ?? ''} onCommit={(timeZone) => set({ timeZone })} />
       <LatestStartField value={value.latestStartMinutes} onChange={(latestStartMinutes) => onChange(withLatestStart(value, latestStartMinutes))} />
       {summary ? (
-        <p className="text-sm break-words">{`Runs once at ${summary.time} on ${summary.date} (${value.timeZone}). Cezarion must be running then.`}</p>
+        <p className="text-sm break-words">{`Runs once at ${summary.time} on ${summary.date} (${value.timeZone}). ${summary.note ? `${summary.note} ` : ''}Cezarion must be running then.`}</p>
       ) : null}
     </div>
   )
