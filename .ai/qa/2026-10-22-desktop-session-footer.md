@@ -82,6 +82,29 @@ into view before the real pointer click. Save and cold-reload assertions remain.
 - Logs: ignored `.ai/qa/footer-settings-proof-{before,after}.log`.
 - The scratch test and config were removed after proof.
 
+## CI mock readiness proof
+
+CI run `39846172299` passed every browser shard and failed one unit test:
+`mock-opencode-orphan.test.ts` sent SIGTERM after `watchdog.pid` appeared, while
+the mock was replacing its signal handler. The mock published that file before
+mode setup. It could receive the signal while no handler was installed.
+
+The mock now publishes readiness after setup. The existing real-process test
+widens the handler-replacement gap with a preload module. It still requires the
+mock to ignore SIGTERM, then exit within five seconds after its parent dies.
+
+- `proof_base`: `f8d4682a26bd612168cc1eeb13b297ee8ac081ac`.
+- Created a disposable detached worktree and installed its own dependencies.
+- Copied only the strengthened regression test into the old checkout.
+- Command: `npm test -- --passWithNoTests=false packages/cezar/src/core/mock-opencode-orphan.test.ts`.
+- Old fixture: one test passes; the ignore-SIGTERM test fails because the mock
+  dies before the parent is killed. The failure matches CI.
+- Copied only the fixed mock fixture. The same command passes both tests.
+- Squeal also reported the strengthened test fail at revision 25 and pass at
+  revision 26 after the fixture fix in the task worktree.
+- Logs: ignored `.ai/qa/footer-orphan-proof-{red,green}.log`.
+- The disposable worktree and preload module were removed after proof.
+
 ## Existing limitation
 
 Jump to latest resets paged history and can remount the Composer, clearing a
