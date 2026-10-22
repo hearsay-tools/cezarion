@@ -163,3 +163,11 @@ it('Archived filter requests archived=only and links the run', () => {
   expect(screen.getByText('Cancelled — no task was started.')).not.toBeNull()
   for (const name of ['Edit', 'Pause', 'Enable', 'Run now', 'Cancel']) expect(screen.queryByRole(name === 'Edit' ? 'link' : 'button', { name })).toBeNull()
 })
+
+// Review of #1465: an archived schedule stays inspectable. Its card links to a read-only detail.
+it('an archived card links to its read-only detail', () => {
+  routed(() => undefined)
+  const launched = { ...once, enabled: false, nextRunAt: undefined, onceStatus: 'archived', archived: { at: '2030-01-15T08:00:05Z', outcome: 'launched', runId: 'run-9' } }
+  mount(response([launched]), '', undefined, { value: true, onChange: vi.fn() })
+  expect(screen.getByRole('link', { name: 'Details' }).getAttribute('href')).toBe('/automations/o1')
+})

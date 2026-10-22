@@ -190,6 +190,7 @@ function AutomationCard({ automation, timeZone, note, busy, onRun, onToggle, onP
           {archive.runId ? <> · <Link className="inline-flex min-h-11 items-center underline underline-offset-4" to={`/tasks/${archive.runId}`}>Open task</Link></> : null}
         </p>
       ) : null}
+      {archive ? <div className="mt-4 flex flex-wrap gap-2"><Button variant="outline" asChild><Link to={`/automations/${automation.id}`}>Details</Link></Button></div> : null}
       {archive ? null : <p className="mt-3 text-sm">
         {!isSchedule && automation.enabled ? <span>continuous</span> : nextAt ? (
           <>

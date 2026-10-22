@@ -15,7 +15,8 @@ import { useActiveProjectId } from '@/lib/project-router'
  * would 409 on a gated server and paint an error over the disabled state. The effect depends on
  * two booleans, not `health.data`, so a health refetch does not re-request the list.
  */
-export function useAutomations(archived = false): {
+/** `archived`: `only` for the list's Archived filter; `include` where one schedule is looked up by id. */
+export function useAutomations(archived?: 'include' | 'only'): {
   data: AutomationsResponse | undefined
   error: string
   refresh: () => Promise<void>
@@ -27,7 +28,7 @@ export function useAutomations(archived = false): {
   const [data, setData] = useState<AutomationsResponse>()
   const [error, setError] = useState('')
   const refresh = useCallback(
-    (signal?: AbortSignal) => getAutomations({ signal, ...(archived ? { archived: 'only' as const } : {}) }).then((next) => { if (signal?.aborted) return; setData(next); setError('') }).catch((cause) => { if (!signal?.aborted) setError(String(cause)) }),
+    (signal?: AbortSignal) => getAutomations({ signal, ...(archived ? { archived } : {}) }).then((next) => { if (signal?.aborted) return; setData(next); setError('') }).catch((cause) => { if (!signal?.aborted) setError(String(cause)) }),
     [archived],
   )
   useEffect(() => { if (healthKnown && !off) void refresh() }, [healthKnown, off, refresh])

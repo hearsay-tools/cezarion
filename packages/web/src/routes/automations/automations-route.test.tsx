@@ -58,7 +58,7 @@ function mountAt(path: string, mode: 'list' | 'new' | 'edit' | 'log') {
 it('shows an editor load error and retries the same automation', async () => {
   vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
   let failed = true
-  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => String(input).endsWith('/automations') ? (failed ? json({ error: 'Unavailable' }, 503) : json(listBody)) : json({ error: 'not found' }, 404)))
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => /\/automations(\?archived=include)?$/.test(String(input)) ? (failed ? json({ error: 'Unavailable' }, 503) : json(listBody)) : json({ error: 'not found' }, 404)))
   mountAt('/automations/a1', 'edit')
   const retry = await screen.findByRole('button', { name: 'Retry' })
   failed = false
@@ -89,7 +89,7 @@ it('keeps the typed name when another cockpit bumps the revision, and drops it o
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const path = String(input)
     if ((init?.method ?? 'GET') === 'PUT') return json({ error: 'automation revision conflict' }, 409)
-    return path.endsWith('/automations') ? json(body) : json({ error: 'not found' }, 404)
+    return /\/automations(\?archived=include)?$/.test(path) ? json(body) : json({ error: 'not found' }, 404)
   }))
   mountAt('/automations/a1', 'edit')
   const name = await screen.findByDisplayValue('Saved trigger')
@@ -124,4 +124,33 @@ it('the Archived filter refetches the list with archived=only and back', async (
   const count = urls.length
   fireEvent.click(screen.getByRole('button', { name: 'Archived' }))
   await waitFor(() => expect(urls.slice(count).some((url) => /\/automations$/.test(url))).toBe(true))
+})
+
+// Review of #1465: the link the CLI and the agent tools print for an archived one-time schedule
+// opens a read-only record: what happened, the task, what it ran with, its log, and Delete.
+it('an archived one-time schedule opens read-only with its task, inputs, log and Delete', async () => {
+  const archived = {
+    ...stored, id: 'o1', name: 'Check the rollout', schedule: { type: 'once', at: '2030-01-15T09:00', timeZone: 'Europe/Warsaw' },
+    task: { prompt: 'Check the rollout of the parser', workflow: 'quick-task', model: 'opus' }, onceStatus: 'archived',
+    archived: { at: '2030-01-15T08:00:05Z', outcome: 'launched', runId: 'run-9', receiptId: 'r1' },
+  }
+  const calls: { url: string; method: string }[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input); const method = init?.method ?? 'GET'
+    calls.push({ url, method })
+    if (url.includes('/automation-log?')) return json({ records: [{ seq: 1, ts: '2030-01-15T08:00:05Z', automationId: 'o1', revision: 2, result: 'launched', runId: 'run-9' }] })
+    if (method === 'DELETE') return new Response(null, { status: 204 })
+    return /\/automations\?archived=include$/.test(url) ? json({ ...listBody, automations: [archived] }) : json({ error: 'not found' }, 404)
+  }))
+  mountAt('/automations/o1', 'edit')
+  expect(await screen.findByText('Started its task.')).not.toBeNull()
+  expect(screen.getAllByRole('link', { name: 'Open task' })[0]!.getAttribute('href')).toBe('/tasks/run-9')
+  expect(screen.getByText('Check the rollout of the parser')).not.toBeNull()
+  expect(screen.getByText('opus')).not.toBeNull()
+  expect(screen.queryByRole('button', { name: 'Save changes' })).toBeNull()
+  expect(screen.queryByLabelText('Name')).toBeNull()
+  await screen.findByRole('heading', { name: /Recent activity/ })
+  fireEvent.click(screen.getByRole('button', { name: 'Delete' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Delete schedule' }))
+  await waitFor(() => expect(calls.some((call) => call.method === 'DELETE' && call.url.endsWith('/automations/o1'))).toBe(true))
 })

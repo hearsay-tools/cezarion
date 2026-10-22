@@ -6,6 +6,7 @@ import { useHealth } from '@/api/queries'
 import { CenteredState } from '@/components/centered-state'
 import { Button } from '@/components/ui/button'
 import { Link, useNavigate } from '@/lib/project-router'
+import { ArchivedAutomation } from './archived-view'
 import { AutomationEditor } from './editor'
 import { AutomationsList } from './automations-list'
 import { AutomationLogScreen } from './log'
@@ -17,7 +18,8 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
   const navigate = useNavigate()
   // hearsay-tools/cezarion#1465: the list shows archived one-time schedules on request only.
   const [archived, setArchived] = useState(false)
-  const { data, error, refresh } = useAutomations(mode === 'list' && archived)
+  // A schedule looked up by id may be archived: its read-only record is still reachable by link.
+  const { data, error, refresh } = useAutomations(mode === 'list' ? (archived ? 'only' : undefined) : 'include')
   // Bumped by the editor's Reload and nothing else: a background revision change must reach the
   // user as the save-time 409, not as a form that silently resets under their typing.
   const [reloadToken, setReloadToken] = useState(0)
@@ -72,6 +74,7 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
   if (mode === 'new') return <AutomationEditor forge={forge} timeZone={data.timeZone} onSaved={saved} />
   if (mode === 'edit') {
     if (!found) return <PageFrame title="Automation not found" subtitle="This automation may have been removed."><Button asChild variant="outline"><Link to="/automations">Back to automations</Link></Button></PageFrame>
+    if (found.archived) return <ArchivedAutomation automation={found} timeZone={data.timeZone} onDeleted={saved} />
     return <AutomationEditor key={`${found.id}:${reloadToken}`} automation={found} forge={forge} timeZone={data.timeZone} onSaved={saved} onReload={() => void refresh().then(() => setReloadToken((token) => token + 1))} />
   }
   return automationId
