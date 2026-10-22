@@ -758,6 +758,9 @@ function formatWakeInstant(at: Date): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' }).format(at);
 }
 
+/** How long a schedule tool call waits for the server to attach the service after recovery (#1465). */
+const AUTOMATION_TOOLS_READY_MS = 30_000;
+
 export interface StartRunInput {
   task: string;
   model?: string;
@@ -1853,11 +1856,26 @@ export class RunManager {
    * hearsay-tools/cezarion#1465: the project's one-time schedule service behind
    * `cezar_schedule_task` and `cezar_scheduled_tasks`, set by `startServer` beside the cockpit
    * address. Headless `cez run` never sets it, so the tools answer `unavailable` there. The
-   * handlers read it at call time: the boot manager recovers runs before the server sets it.
+   * boot manager recovers runs before the server sets it, and a lazy project's manager recovers
+   * before its context is announced: a resumed session can call a tool in that window. With a
+   * cockpit address the call waits for the service, bounded like the CLI's startup retry.
    */
   private automationTools?: AutomationToolService;
+  private automationToolsWaiters = new Set<() => void>();
   setAutomationTools(tools: AutomationToolService | undefined): void {
     this.automationTools = tools;
+    if (tools) for (const wake of [...this.automationToolsWaiters]) wake();
+  }
+  private async awaitAutomationTools(signal: AbortSignal): Promise<AutomationToolService | undefined> {
+    if (this.automationTools || !this.cockpit) return this.automationTools;
+    await new Promise<void>((resolve) => {
+      const done = () => { clearTimeout(timer); signal.removeEventListener('abort', done); this.automationToolsWaiters.delete(done); resolve(); };
+      // bound: the CLI's 30 s startup retry; the server attaches the service right after recovery.
+      const timer = setTimeout(done, AUTOMATION_TOOLS_READY_MS);
+      signal.addEventListener('abort', done, { once: true });
+      this.automationToolsWaiters.add(done);
+    });
+    return this.automationTools;
   }
   /** Automations on AND a cockpit attached: the one predicate behind the prompt part and the built-in skill. */
   private automationsReachable(): boolean {
@@ -2055,8 +2073,14 @@ export class RunManager {
       registerPreview: (request, signal) => this.registerPreviewServer(runId, request, signal),
       stopPreview: (request, signal) => this.stopPreviewServer(runId, request, signal),
       // A schedule belongs to the project, not to this run: any session there may manage one.
-      scheduleTask: async request => this.automationTools ? this.automationTools.scheduleTask(request) : scheduleRefusal('unavailable'),
-      scheduledTasks: async request => this.automationTools ? this.automationTools.scheduledTasks(request) : scheduleRefusal('unavailable'),
+      scheduleTask: async (request, signal) => {
+        const tools = await this.awaitAutomationTools(signal);
+        return tools ? tools.scheduleTask(request) : scheduleRefusal('unavailable');
+      },
+      scheduledTasks: async (request, signal) => {
+        const tools = await this.awaitAutomationTools(signal);
+        return tools ? tools.scheduledTasks(request) : scheduleRefusal('unavailable');
+      },
     };
   }
 

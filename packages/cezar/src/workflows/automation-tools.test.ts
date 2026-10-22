@@ -20,7 +20,9 @@ afterEach(async () => {
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'cez-automation-tools-')); roots.push(root);
   const store = RunStore.open(root);
-  return { store, manager: createFixtureManager(store, root) };
+  const manager = createFixtureManager(store, root);
+  manager.setCockpitAddress({ origin: 'http://127.0.0.1:4100', projectId: 'p' });
+  return { store, manager };
 }
 
 describe('RunManager automation tools', () => {
@@ -38,13 +40,38 @@ describe('RunManager automation tools', () => {
     expect(scheduleTask).toHaveBeenCalledWith({ name: 'n', prompt: 'p', delay: '1h' });
   });
 
-  it('no service answers unavailable', async () => {
+  // Review of #1465: recovery resumes a session before the server attaches the service. A call in
+  // that window waits for it instead of answering unavailable, which the agent must not retry.
+  it('a call made before the service is attached waits for it', async () => {
     const { store, manager } = fixture();
     const run = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
     const handlers = manager.cezarToolHandlers(run.id, 'generation');
-    await expect(handlers.scheduleTask!({ name: 'n', prompt: 'p', delay: '1h' }, signal)).resolves.toMatchObject({ ok: false, code: 'unavailable' });
+    const answer = handlers.scheduleTask!({ name: 'n', prompt: 'p', delay: '1h' }, signal);
     manager.setAutomationTools({ scheduleTask: async () => created, scheduledTasks: async () => listed });
-    manager.setAutomationTools(undefined);
-    await expect(handlers.scheduledTasks!({ action: 'list' }, signal)).resolves.toMatchObject({ ok: false, code: 'unavailable' });
+    await expect(answer).resolves.toEqual(created);
+  });
+
+  it('no service within the startup window answers unavailable', async () => {
+    const { store, manager } = fixture();
+    const run = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
+    const handlers = manager.cezarToolHandlers(run.id, 'generation');
+    vi.useFakeTimers();
+    try {
+      const first = handlers.scheduleTask!({ name: 'n', prompt: 'p', delay: '1h' }, signal);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(first).resolves.toMatchObject({ ok: false, code: 'unavailable' });
+      manager.setAutomationTools({ scheduleTask: async () => created, scheduledTasks: async () => listed });
+      manager.setAutomationTools(undefined);
+      const second = handlers.scheduledTasks!({ action: 'list' }, signal);
+      await vi.advanceTimersByTimeAsync(30_000);
+      await expect(second).resolves.toMatchObject({ ok: false, code: 'unavailable' });
+    } finally { vi.useRealTimers(); }
+  });
+
+  it('headless, with no cockpit address, answers unavailable at once', async () => {
+    const { store, manager } = fixture();
+    manager.setCockpitAddress(undefined);
+    const run = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
+    await expect(manager.cezarToolHandlers(run.id, 'generation').scheduleTask!({ name: 'n', prompt: 'p', delay: '1h' }, signal)).resolves.toMatchObject({ ok: false, code: 'unavailable' });
   });
 });
