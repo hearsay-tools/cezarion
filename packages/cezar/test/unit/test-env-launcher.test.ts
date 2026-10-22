@@ -473,7 +473,7 @@ test('ambient CEZ_* never reaches the shared server; --server-env does and keys 
   boot();
   assert.deepEqual(appEnv(), ['CEZ_DRY_RUN=1']);
   const plain = JSON.parse(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8')) as { environment: unknown };
-  assert.deepEqual(plain.environment, { singleProject: false, serverEnv: 'none' });
+  assert.deepEqual(plain.environment, { singleProject: false, serverEnv: 'none', watch: 'idle=30 interval=30' });
 
   const opted = boot('--server-env=CEZ_FOLLOWUPS=1', '--server-env=CEZ_AUTOMATIONS=1');
   assert.match(opted.stdout, /TEST_ENV_REUSED=0/);
@@ -486,7 +486,7 @@ test('ambient CEZ_* never reaches the shared server; --server-env does and keys 
   const single = boot('--server-env=CEZ_SINGLE_PROJECT=1');
   assert.match(single.stdout, /TEST_ENV_REUSED=0/);
   assert.deepEqual(JSON.parse(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8')).environment,
-    { singleProject: true, serverEnv: 'CEZ_SINGLE_PROJECT=1' });
+    { singleProject: true, serverEnv: 'CEZ_SINGLE_PROJECT=1', watch: 'idle=30 interval=30' });
 
   for (const bad of [
     ['--server-env=CEZ_HOME=/elsewhere'], ['--server-env=PATH=/x'], ['--server-env=CEZ_X=a b'],
@@ -1053,6 +1053,22 @@ test('TEST_ENV_IDLE_EXIT_MINUTES=0 keeps an idle server', async () => {
   // bound: proves an absence across about ten polls.
   await delay(2_000);
   assert.ok(alive(pid), watchLog(root));
+  const stopped = spawnSync('/bin/sh', [join(root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(stopped.status, 0, stopped.stderr);
+});
+
+test('a changed watcher setting refuses reuse, so the new policy reaches a fresh watcher', () => {
+  const { root, env, pid } = bootWatched({ TEST_ENV_CACHE_TTL_SECONDS: '600' });
+  const up = (extra: NodeJS.ProcessEnv) => spawnSync('/bin/sh', [join(root, '.ai/scripts/test-env-up.sh')], { encoding: 'utf8', env: { ...env, ...extra }, timeout: 20_000 });
+  const same = up({});
+  assert.equal(same.status, 0, same.stderr);
+  assert.match(same.stdout, /TEST_ENV_REUSED=1/, same.stderr);
+  const changed = up({ TEST_ENV_IDLE_EXIT_MINUTES: '0' });
+  assert.equal(changed.status, 0, changed.stderr);
+  assert.match(changed.stdout, /TEST_ENV_REUSED=0/);
+  assert.match(changed.stderr, /not reusing: the watcher settings changed \(now: idle=0 interval=0\.2\)/);
+  assert.ok(!alive(pid));
+  launchedPids.add(descriptor(root).app.pid);
   const stopped = spawnSync('/bin/sh', [join(root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
   assert.equal(stopped.status, 0, stopped.stderr);
 });

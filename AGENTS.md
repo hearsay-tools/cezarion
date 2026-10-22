@@ -706,6 +706,7 @@ a watcher next to it stops it when its checkout or served clone is deleted, or a
 30 minutes with no test-env lease holder. `TEST_ENV_IDLE_EXIT_MINUTES` changes that idle
 period, and `0` turns the idle exit off, for example for a long QA session that attaches
 without a lease. `TEST_ENV_WATCH_INTERVAL_SECONDS` (default 30, from 0.1 to 3600) sets how often it checks.
+A run with other values for either variable boots a new server rather than reusing the running one.
 Local exit contract:
 
 | Exit     | Marker                    | Meaning                                                                                                           |
