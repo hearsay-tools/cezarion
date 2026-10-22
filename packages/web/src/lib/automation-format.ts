@@ -1,3 +1,6 @@
+import { WEEKDAY_NAMES, onceWallParts } from '@open-mercato/cezar-api-client/contract/automation-schedule'
+import { isoWeekday } from '@open-mercato/cezar-api-client/contract/zoned-time'
+
 /**
  * Time words for the automations screens. Pure and zone-explicit: every automation instant is
  * shown in the SERVER's zone (the one its schedules are evaluated in), never the browser's.
@@ -81,4 +84,18 @@ export function logTime(iso: string, timeZone: string, now: number): string {
   if (ago === 1) return `Yesterday ${clock}`
   if (ago > 1 && ago < 7) return `${at.weekday} ${clock}`
   return `${at.day} ${at.month} ${clock}`
+}
+
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'] as const
+const two = (n: number) => String(n).padStart(2, '0')
+
+/**
+ * A one-time schedule's stored wall time as `Thu 29 Oct 2026` and `09:00` (hearsay-tools/cezarion#1465).
+ * Read off `at` itself, so it shows the time the user typed, in the zone the user picked.
+ */
+export function onceWall(at: string | undefined): { date: string; time: string } | null {
+  const parts = at ? onceWallParts(at) : null
+  if (!parts) return null
+  const { year, month, day, hour, minute } = parts
+  return { date: `${WEEKDAY_NAMES[isoWeekday(year, month, day) - 1]} ${day} ${MONTHS[month - 1]} ${year}`, time: `${two(hour)}:${two(minute)}` }
 }

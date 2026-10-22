@@ -5,12 +5,14 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { ChipButton } from './chip-button'
+import { OnceFields, defaultOnceAt } from './once-fields'
 
 const SHAPES: readonly { type: ScheduleType; label: string }[] = [
   { type: 'daily', label: 'Every day' },
   { type: 'weekdays', label: 'Weekdays' },
   { type: 'weekly', label: 'Weekly' },
   { type: 'hours', label: 'Every N hours' },
+  { type: 'once', label: 'Once' },
 ]
 
 const pad = (n: number) => String(n).padStart(2, '0')
@@ -19,7 +21,7 @@ const pad = (n: number) => String(n).padStart(2, '0')
  *  commits to the schedule only a value in range; blur settles it back to the committed value.
  *  Text that is not the committed value ("24", "7x") is invalid until fixed or blurred: the field
  *  says so and its custom validity blocks the form, so Enter cannot save a time nobody typed. */
-function TimeField({ label, value, max, onCommit }: { label: string; value: number; max: number; onCommit: (next: number) => void }) {
+export function TimeField({ label, value, max, onCommit }: { label: string; value: number; max: number; onCommit: (next: number) => void }) {
   const [text, setText] = useState(pad(value))
   const ref = useRef<HTMLInputElement>(null)
   const invalid = !(/^\d{1,2}$/.test(text) && Number(text) === value)
@@ -50,13 +52,18 @@ function TimeField({ label, value, max, onCommit }: { label: string; value: numb
 
 export function ScheduleFields({ value, onChange, timeZone }: { value: NormalizedSchedule; onChange: (next: NormalizedSchedule) => void; timeZone: string }) {
   const set = (patch: Partial<NormalizedSchedule>) => onChange({ ...value, ...patch })
+  // Once starts tomorrow at 09:00 in the cockpit's zone; the draft keeps what it had if it had one.
+  const choose = (type: ScheduleType) => set(type === 'once'
+    ? { type, at: value.at ?? defaultOnceAt(timeZone), timeZone: value.timeZone ?? timeZone }
+    : { type })
   return (
     <div className="grid gap-4">
       <div role="group" aria-label="Repeat" className="flex flex-wrap gap-2">
         {SHAPES.map((shape) => (
-          <ChipButton key={shape.type} pressed={value.type === shape.type} onClick={() => set({ type: shape.type })}>{shape.label}</ChipButton>
+          <ChipButton key={shape.type} pressed={value.type === shape.type} onClick={() => choose(shape.type)}>{shape.label}</ChipButton>
         ))}
       </div>
+      {value.type === 'once' ? <OnceFields value={value} onChange={onChange} /> : null}
       {value.type === 'weekly' ? (
         <div role="group" aria-label="Day of the week" className="flex flex-wrap gap-2">
           {WEEKDAY_NAMES.map((name, index) => (
@@ -64,7 +71,7 @@ export function ScheduleFields({ value, onChange, timeZone }: { value: Normalize
           ))}
         </div>
       ) : null}
-      {value.type === 'hours' ? (
+      {value.type === 'once' ? null : value.type === 'hours' ? (
         <div className="grid gap-2">
           <Label htmlFor="automation-every">Run every</Label>
           <Select value={String(value.every)} onValueChange={(next) => set({ every: Number(next) as ScheduleEvery })}>
@@ -88,7 +95,7 @@ export function ScheduleFields({ value, onChange, timeZone }: { value: Normalize
           <span className="text-sm break-all text-muted-foreground">{timeZone}</span>
         </div>
       )}
-      <p className="text-xs text-muted-foreground">Cron: <code className="font-mono text-foreground">{cronOf(value)}</code></p>
+      {value.type === 'once' ? null : <p className="text-xs text-muted-foreground">Cron: <code className="font-mono text-foreground">{cronOf(value)}</code></p>}
     </div>
   )
 }

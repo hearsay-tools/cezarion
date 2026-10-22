@@ -29,9 +29,11 @@ const KIND_LABEL: Record<AutomationKind, string> = { schedule: 'On a schedule', 
 /** Which section a server message belongs under. The server answers one `{ error }` string, not a
  *  field path, so the section is read off the words it uses; anything unplaceable sits above Save. */
 function sectionOf(message: string): Section {
+  // A one-time schedule's own refusals name a zone or the due time, whatever else they say.
+  if (/time zone|due time/i.test(message)) return 'when'
   if (/placeholder|prompt|workflow|runner|model|task|autonomous/i.test(message)) return 'run'
   if (/\bname\b/i.test(message)) return 'name'
-  if (/schedule|github|event|filter|label|interval|remote|forge|lookback|records?|hour|minute|poll|kind/i.test(message)) return 'when'
+  if (/schedule|github|event|filter|label|interval|remote|forge|lookback|records?|hour|minute|poll|kind|archived/i.test(message)) return 'when'
   return 'form'
 }
 
@@ -180,7 +182,9 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
               <span>{automation ? 'Enabled' : 'Enable after saving'}</span>
             </label>
             <p className="text-xs break-words text-muted-foreground">
-              {isSchedule ? 'The first run is the next occurrence shown beside the schedule.' : historySentence(draft.filters.includeExisting)}
+              {draft.kind === 'schedule' && draft.schedule.type === 'once'
+                ? 'It runs once at the time set above, then moves to Archived with its task.'
+                : isSchedule ? 'The first run is the next occurrence shown beside the schedule.' : historySentence(draft.filters.includeExisting)}
             </p>
           </Section>
 

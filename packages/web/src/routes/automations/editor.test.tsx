@@ -1,7 +1,7 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
-import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AutomationDefinition } from '@open-mercato/cezar-api-client'
 import { createQueryClient } from '@/api/query-client'
 import { AutomationEditor } from './editor'
@@ -258,4 +258,82 @@ it('shows Copy as CLI beside both kinds, following the draft', () => {
   fireEvent.click(screen.getByRole('button', { name: 'When GitHub changes' }))
   expect(screen.getByRole('heading', { name: 'Copy as CLI' })).not.toBeNull()
   expect(screen.getByText(/^cez automation (add|create) .*Weekly digest/)).not.toBeNull()
+})
+
+// hearsay-tools/cezarion#1465: Run once.
+describe('one-time schedules', () => {
+  const chooseOnce = () => fireEvent.click(screen.getByRole('button', { name: 'Once' }))
+  const setWhen = (date: string, hour: string, minute: string) => {
+    fireEvent.change(screen.getByLabelText('Date'), { target: { value: date } })
+    fireEvent.change(screen.getByLabelText('Hour'), { target: { value: hour } })
+    fireEvent.change(screen.getByLabelText('Minute'), { target: { value: minute } })
+  }
+
+  it('choosing Once shows date, time, zone and latest start', () => {
+    stubFetch(() => json(saved, 201))
+    mount()
+    chooseOnce()
+    expect(screen.getByRole('button', { name: 'Once' }).getAttribute('aria-pressed')).toBe('true')
+    for (const label of ['Date', 'Hour', 'Minute', 'Time zone', 'Latest start']) expect(screen.getByLabelText(label)).not.toBeNull()
+    expect((screen.getByLabelText('Time zone') as HTMLInputElement).value).toBe('Europe/Warsaw')
+    setWhen('2030-01-15', '09', '30')
+    expect(screen.getByText('Runs once at 09:30 on Tue 15 Jan 2030 (Europe/Warsaw). Cezarion must be running then.')).not.toBeNull()
+    expect(screen.queryByText(/^Cron:/)).toBeNull()
+  })
+
+  it('a past time blocks save and keeps the draft', async () => {
+    const calls = stubFetch(() => json(saved, 201))
+    const onSaved = mount()
+    fill()
+    chooseOnce()
+    setWhen('2020-01-15', '09', '00')
+    expect(screen.getByText('the due time has passed; choose a later time or use Run now')).not.toBeNull()
+    expect((screen.getByLabelText('Date') as HTMLInputElement).validationMessage).toBe('the due time has passed; choose a later time or use Run now')
+    fireEvent.click(screen.getByRole('button', { name: 'Save paused' }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    expect(calls.filter((call) => call.method === 'POST')).toEqual([])
+    expect(onSaved).not.toHaveBeenCalled()
+    expect((screen.getByLabelText('Name') as HTMLInputElement).value).toBe('Weekly digest')
+    expect((screen.getByLabelText('Date') as HTMLInputElement).value).toBe('2020-01-15')
+  })
+
+  it('a server 400 on time zone renders beside the zone field and keeps the draft', async () => {
+    stubFetch(() => json({ error: 'unknown time zone "Etc/Nowhere"; use an IANA name such as Europe/Warsaw' }, 400))
+    const onSaved = mount()
+    fill()
+    chooseOnce()
+    setWhen('2030-01-15', '09', '00')
+    fireEvent.click(screen.getByRole('button', { name: 'Save paused' }))
+    const alert = await screen.findByRole('alert')
+    expect(alert.textContent).toContain('unknown time zone')
+    expect(alert.previousElementSibling?.contains(screen.getByLabelText('Time zone'))).toBe(true)
+    expect(onSaved).not.toHaveBeenCalled()
+    expect((screen.getByLabelText('Date') as HTMLInputElement).value).toBe('2030-01-15')
+  })
+
+  it('an unknown typed zone blocks save with its message', () => {
+    stubFetch(() => json(saved, 201))
+    mount()
+    chooseOnce()
+    fireEvent.change(screen.getByLabelText('Time zone'), { target: { value: 'Mars/Base' } })
+    expect((screen.getByLabelText('Time zone') as HTMLInputElement).validationMessage).toBe('unknown time zone "Mars/Base"; use an IANA name such as Europe/Warsaw')
+  })
+
+  it('keyboard only: Tab reaches every once control in order and Enter saves', async () => {
+    const calls = stubFetch(() => json(saved, 201))
+    const onSaved = mount()
+    fill()
+    chooseOnce()
+    setWhen('2030-01-15', '09', '00')
+    const when = screen.getByRole('group', { name: 'When' })
+    const tabbable = [...when.querySelectorAll<HTMLElement>('button, input, select, [role="combobox"], [tabindex]')]
+      .filter((element) => element.tabIndex >= 0 && !(element as HTMLButtonElement).disabled)
+    const order = ['Date', 'Hour', 'Minute', 'Time zone', 'Latest start'].map((label) => tabbable.indexOf(screen.getByLabelText(label)))
+    expect(order.every((index) => index >= 0)).toBe(true)
+    expect([...order].sort((a, b) => a - b)).toEqual(order)
+    // Enter in a text field submits its form.
+    fireEvent.submit(screen.getByLabelText('Date').closest('form')!)
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(calls.find((call) => call.method === 'POST')?.body).toMatchObject({ schedule: { type: 'once', at: '2030-01-15T09:00', timeZone: 'Europe/Warsaw' } })
+  })
 })

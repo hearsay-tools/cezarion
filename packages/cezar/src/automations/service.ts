@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { automationKindSchema, type AutomationKind, type AutomationListQuery, type OnceStatus } from '@open-mercato/cezar-contract/automations';
-import { automationScheduleSchema, nextOccurrence, onceInstant } from '@open-mercato/cezar-contract/automation-schedule';
+import { automationScheduleSchema, nextOccurrence, ONCE_PAST_DUE_MESSAGE, onceInstant } from '@open-mercato/cezar-contract/automation-schedule';
 import { MODEL_DISCOVERY_RUNNERS, type ModelDiscoveryRunner } from '@open-mercato/cezar-contract/workspace';
 import { loadConfig } from '../config.ts';
 import { missingModelChoices, type HostDiscovery } from '../discovery/catalog.ts';
@@ -34,7 +34,7 @@ import {
  * due time in the past is refused wherever a body sets one.
  */
 
-export const ONCE_PAST_DUE = 'the due time has passed; choose a later time or use Run now';
+export const ONCE_PAST_DUE = ONCE_PAST_DUE_MESSAGE;
 export const ONCE_ARCHIVED = 'this one-time schedule is archived';
 export const ONCE_LAUNCH_IN_PROGRESS = 'a launch of this schedule is in progress; try again in a moment';
 export const ONCE_ONLY_CANCEL = 'only a one-time schedule can be cancelled; pause or delete it instead';

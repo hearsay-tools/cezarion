@@ -41,6 +41,13 @@ describe('CopyAsCliCard', () => {
     await waitFor(() => expect(screen.getByRole('status').textContent).toMatch(/could not copy/i))
   })
 
+  // hearsay-tools/cezarion#1465.
+  it('once emits --at --tz --latest-start', () => {
+    const once = fromDefinition({ name: 'Check', kind: 'schedule', schedule: { type: 'once', at: '2030-01-15T09:00', timeZone: 'Europe/Warsaw', latestStartMinutes: 360 }, task: { prompt: 'Go', workflow: 'quick-task', worktree: true } })
+    renderInProject(<CopyAsCliCard draft={once} />)
+    expect(screen.getByText(`${address}cez automation add --name 'Check' --at '2030-01-15T09:00' --tz 'Europe/Warsaw' --latest-start '6h' --workflow 'quick-task' --prompt 'Go'`)).not.toBeNull()
+  })
+
   it('falls back to the JSON form for what flags cannot say', () => {
     renderInProject(<CopyAsCliCard draft={{ ...draft, description: 'Nightly bumps' }} />)
     expect(screen.getByText((text) => text.startsWith(`${address}cez automation create --json '`))).not.toBeNull()

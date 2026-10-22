@@ -76,13 +76,20 @@ export function fromDefinition(source: DraftSource = {}): AutomationDraft {
   }
 }
 
-/** Only the keys the shape reads: a `daily` body carries no `every`, an `hours` body no time. */
+/** Only the keys the shape reads: a `daily` body carries no `every`, an `hours` body no time, a
+ *  `once` body only its wall time, zone and latest start (hearsay-tools/cezarion#1465). */
 function scheduleBody(schedule: NormalizedSchedule): AutomationSchedule {
   switch (schedule.type) {
     case 'daily':
     case 'weekdays': return { type: schedule.type, hour: schedule.hour, minute: schedule.minute }
     case 'weekly': return { type: 'weekly', hour: schedule.hour, minute: schedule.minute, day: schedule.day }
     case 'hours': return { type: 'hours', every: schedule.every }
+    case 'once': return {
+      type: 'once',
+      at: schedule.at ?? '',
+      timeZone: schedule.timeZone ?? '',
+      ...(schedule.latestStartMinutes !== undefined ? { latestStartMinutes: schedule.latestStartMinutes } : {}),
+    }
   }
 }
 

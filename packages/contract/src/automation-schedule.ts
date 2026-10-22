@@ -33,6 +33,9 @@ const ONCE_AT_PATTERN = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/;
 const REPEATING_KEYS = ['hour', 'minute', 'day', 'every'] as const;
 const ONCE_KEYS = ['at', 'timeZone', 'latestStartMinutes'] as const;
 
+/** The refusal of a one-time schedule whose time has passed: the server's 400 and the editor's field message. */
+export const ONCE_PAST_DUE_MESSAGE = 'the due time has passed; choose a later time or use Run now';
+
 export function unknownTimeZoneMessage(zone: string): string {
   return `unknown time zone "${zone}"; use an IANA name such as Europe/Warsaw`;
 }

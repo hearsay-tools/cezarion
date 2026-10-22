@@ -112,3 +112,16 @@ it('renders the automations list at /automations', async () => {
   expect(screen.getByRole('link', { name: 'New automation' })).not.toBeNull()
   expect(screen.queryByText('Automation not found.')).toBeNull()
 })
+
+// hearsay-tools/cezarion#1465: the Archived filter refetches the list with the query.
+it('the Archived filter refetches the list with archived=only and back', async () => {
+  const urls: string[] = []
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => { urls.push(String(input)); return json(listBody) }))
+  mountAt('/automations', 'list')
+  expect(await screen.findByText('Saved trigger')).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Archived' }))
+  await waitFor(() => expect(urls.some((url) => /\/automations\?archived=only$/.test(url))).toBe(true))
+  const count = urls.length
+  fireEvent.click(screen.getByRole('button', { name: 'Archived' }))
+  await waitFor(() => expect(urls.slice(count).some((url) => /\/automations$/.test(url))).toBe(true))
+})
