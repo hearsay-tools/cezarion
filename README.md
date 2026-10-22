@@ -1417,7 +1417,7 @@ as in [Quick start](#quick-start)).
 
 ```bash
 git clone https://github.com/hearsay-tools/cezarion.git
-cd cezar
+cd cezarion
 npm install --global pnpm@12.11.2
 pnpm install --frozen-lockfile
 ```
