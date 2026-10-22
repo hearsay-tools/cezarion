@@ -42,6 +42,14 @@ describe('createAutomationToolService', () => {
     expect(answer).toEqual({ ok: true, note: SCHEDULED_TASK_NOTE, task: expect.objectContaining({ status: 'paused', due_at: '2026-10-29T14:00', time_zone: 'Europe/Warsaw', resolved_instant: '2026-10-29T13:00:00.000Z' }) });
   });
 
+  // Review of #1469: nobody waits on a scheduled task, so it runs autonomous, as from the CLI and
+  // the cockpit, and never parks on a question.
+  it('creates the task autonomous, as the CLI and the cockpit do', async () => {
+    const { project, tools } = fixture();
+    const answer = await tools.scheduleTask({ name: 'Check', prompt: 'Check it', delay: '1d' });
+    expect(project.automationStore.get(answer.ok ? answer.task.id : '')?.task).toMatchObject({ autonomous: true });
+  });
+
   it('enables only when asked and reports the cockpit link and latest start', async () => {
     const { tools } = fixture({ origin: 'http://127.0.0.1:4100', projectId: 'cezar' });
     const answer = await tools.scheduleTask({ name: 'Check', prompt: 'Check it', at: '2026-10-29T09:00', time_zone: 'America/New_York', latest_start: '6h', enable: true });

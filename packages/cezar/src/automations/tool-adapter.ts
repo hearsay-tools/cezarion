@@ -86,7 +86,8 @@ export function createAutomationToolService(
         name: request.name,
         kind: 'schedule',
         schedule,
-        task: { prompt: request.prompt, ...(workflow ? { workflow } : {}), ...(runner ? { runner } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}) },
+        // Nobody waits on a scheduled task: autonomous, as the CLI and the cockpit create it.
+        task: { prompt: request.prompt, autonomous: true, ...(workflow ? { workflow } : {}), ...(runner ? { runner } : {}), ...(model ? { model } : {}), ...(effort ? { effort } : {}) },
         enable: request.enable === true,
       });
       if (!body.success) return refuse('invalid_request', body.error.issues[0]?.message ?? 'invalid schedule');
