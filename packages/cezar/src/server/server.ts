@@ -15,7 +15,7 @@ import { worktreeSetupConfigSchema } from '@open-mercato/cezar-contract/workspac
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
 import { ARCHIVED_RUNS_PAGE_DEFAULT } from '@open-mercato/cezar-contract/run-limits';
 import { RUNS_SEARCH_PER_PROJECT_MAX, archivedRunsQuerySchema, runSummariesQuerySchema, runsSearchQuerySchema } from '@open-mercato/cezar-contract/runs';
-import { automationKindSchema, type AutomationKind } from '@open-mercato/cezar-contract/automations';
+import { automationListQuerySchema } from '@open-mercato/cezar-contract/automations';
 import { automationScheduleSchema, nextOccurrence } from '@open-mercato/cezar-contract/automation-schedule';
 import { localTimeZone } from '@open-mercato/cezar-contract/zoned-time';
 import { DelegationService } from '../delegation/service.ts';
@@ -28,6 +28,7 @@ import { workerEmptyRequestSchema, runRelationshipsSchema } from '@open-mercato/
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
+import { automationCreateSchema, automationUpdateSchema, createAutomationService } from '../automations/service.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { AutomationCandidateChangedError, GithubPoller } from '../automations/github-poller.ts';
 import { githubBaselineState } from '../automations/github-baseline.ts';
@@ -454,27 +455,6 @@ const providerRetrySchema = z.object({
   authFailureId: z.string().min(1).max(128),
 }).strict();
 
-/**
- * The editable body of both kinds. Every kind-specific key is optional here because which ones a
- * body must (or must not) carry depends on the kind, and on `PUT` the kind is the STORED one when
- * the body omits it — `resolveAutomationKind` below owns those rules.
- */
-const automationEditableSchema = z
-  .object({
-    name: z.string().trim().min(1).max(200),
-    description: z.string().max(2_000).optional(),
-    enabled: z.boolean().optional(),
-    kind: automationKindSchema.optional(),
-    events: z.array(automationEventSchema).min(1).max(4).optional(),
-    intervalSeconds: z.number().int().min(60).max(86_400).optional(),
-    filters: automationFiltersSchema.optional(),
-    schedule: automationScheduleSchema.optional(),
-    task: automationTaskSchema,
-  })
-  .strict();
-type AutomationEditable = z.infer<typeof automationEditableSchema>;
-const automationCreateSchema = automationEditableSchema.extend({ enable: z.boolean().optional() });
-const automationUpdateSchema = automationEditableSchema.extend({ expectedRevision: z.number().int().positive() });
 const automationCheckRequestSchema = z.object({ mode: z.enum(['preview', 'execute']) }).strict();
 const automationLogQuerySchema = z.object({
   automationId: z.string().optional(),
@@ -489,72 +469,6 @@ const automationLogQuerySchema = z.object({
   // never needed.
   limit: z.coerce.number().int().min(1).max(100).optional(),
 });
-
-/** enable/pause carry no client revision, so a conflict is a race inside the write: 409, never 500. */
-function toggleFailure(error: unknown): { error: string; status: 404 | 409 } {
-  const message = error instanceof Error ? error.message : String(error);
-  if (message === 'automation not found') return { error: 'not found', status: 404 };
-  if (message === 'automation revision conflict') return { error: 'the automation changed elsewhere; reload and try again', status: 409 };
-  throw error;
-}
-
-function editableAutomation(definition: AutomationDefinition) {
-  return {
-    name: definition.name,
-    description: definition.description,
-    enabled: definition.enabled,
-    kind: definition.kind,
-    ...(definition.events ? { events: definition.events } : {}),
-    ...(definition.intervalSeconds !== undefined ? { intervalSeconds: definition.intervalSeconds } : {}),
-    ...(definition.filters ? { filters: definition.filters } : {}),
-    ...(definition.schedule ? { schedule: definition.schedule } : {}),
-    task: definition.task,
-  };
-}
-
-/**
- * Which kind a create/update body is, and whether its keys fit it (spec
- * 2026-10-02-scheduled-automations § Data model). A body without `kind` is `github` on create —
- * every pre-schedule client — and the STORED kind on update, so an old client editing a schedule
- * edits a schedule. Changing the kind is refused: receipts and cursors are kind-specific.
- */
-function resolveAutomationKind(
-  body: AutomationEditable,
-  stored?: AutomationDefinition,
-): { kind: AutomationKind } | { error: string; status: 400 | 409 } {
-  const kind = body.kind ?? stored?.kind ?? 'github';
-  if (stored && kind !== stored.kind) return { error: 'change the kind by creating a new automation', status: 409 };
-  if (kind === 'schedule') {
-    if (body.events !== undefined || body.intervalSeconds !== undefined || body.filters !== undefined) {
-      return { error: 'a scheduled automation has no GitHub filter', status: 400 };
-    }
-    if (!body.schedule) return { error: 'a scheduled automation needs a schedule', status: 400 };
-  } else {
-    if (body.schedule !== undefined) return { error: 'a GitHub automation has no schedule', status: 400 };
-    if (!body.events || body.intervalSeconds === undefined || !body.filters) {
-      return { error: 'a GitHub automation needs events, intervalSeconds and filters', status: 400 };
-    }
-  }
-  return { kind };
-}
-
-function sameSchedule(a: AutomationDefinition['schedule'], b: AutomationDefinition['schedule']): boolean {
-  return JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-}
-
-/**
- * The `nextRunAt` a schedule definition arms with: its next occurrence from now when enabled,
- * cleared when paused. Passed to the store's `create`/`update` as `arm`, which writes it BEFORE
- * the definition, so another cockpit's timer never pairs the new definition with the old instant.
- */
-function armAutomationFromNow(definition: AutomationDefinition) {
-  if (isGithubAutomation(definition)) {
-    return definition.enabled ? githubBaselineState(definition) : { nextCheckAt: undefined };
-  }
-  if (!isScheduleAutomation(definition)) return undefined;
-  const next = definition.enabled ? nextOccurrence(definition.schedule, Date.now(), localTimeZone()) : null;
-  return { nextRunAt: next === null ? undefined : new Date(next).toISOString() };
-}
 
 /** One row of the mirrored project-route table. */
 export interface ProjectRouteInfo {
@@ -3685,6 +3599,23 @@ export function createApp(deps: ServerDeps) {
     };
   };
 
+  /** The automations family's behavior, shared with the session tools (#1465). */
+  const automationService = createAutomationService({
+    timeZone: localTimeZone,
+    discovery: { models: modelCatalog, providers: () => providerStatus() },
+    scheduleHandle: (project) => scheduleHandle(project as ProjectContext),
+    emitChange: (project, automationId, revision, deleted) => emitAutomationChange(project as ProjectContext, automationId, revision, deleted),
+    changed: automationsChanged,
+    // Awaits the driver's settled probe (per-repo cache + in-flight dedupe, 5 s timeout, never
+    // throws): a "still being checked" answer would leave the cockpit's GitHub option disabled
+    // because it does not refetch when the probe completes. `/health` keeps `detectCached`.
+    githubAvailability: async (root) => {
+      const forge = resolveForge(await getRepoInfo(root));
+      return forge ? forge.detect() : { available: false, reason: 'No GitHub remote is configured' };
+    },
+    hasGithubRemote: async (root) => Boolean(resolveForge(await getRepoInfo(root))),
+  });
+
   // ---- chained family: GitHub automations (project-scoped) ----
   // Every handler below reads `c.get('project')` — the definitions, their runtime state and the
   // execution log are per-project files — so the family is project-scoped and mounted with the
@@ -3695,195 +3626,60 @@ export function createApp(deps: ServerDeps) {
     .use('/automations/*', requireAutomations)
     .use('/automation-log', requireAutomations)
     .use('/automation-log/*', requireAutomations)
-    .get('/automations', async (c) => {
-      const { root, automationStore, store } = c.get('project');
-      const forge = resolveForge(await getRepoInfo(root));
-      // Awaits the driver's settled probe (per-repo cache + in-flight dedupe, 5 s timeout, never
-      // throws): a "still being checked" answer would leave the cockpit's GitHub option disabled
-      // because it does not refetch when the probe completes. `/health` keeps `detectCached`.
-      // Annotated, so both branches are ONE shape: the route type is what
-      // `contract/src/automations.ts` has to describe.
-      const availability: ForgeAvailability = forge
-        ? await forge.detect()
-        : { available: false, reason: 'No GitHub remote is configured' };
-      const automations = automationStore.list().map((automation) => {
-        const logs = automationStore.logs({ automationId: automation.id, limit: 100 });
-        const state = automationStore.state(automation.id);
-        const latestLog = logs[0];
-        // Enabled only: a paused definition's stored instant is stale, not a next run.
-        const nextRunAt = automation.enabled
-          ? (automation.kind === 'schedule' ? state?.nextRunAt : state?.nextCheckAt)
-          : undefined;
-        return {
-          ...automation,
-          // Spread conditionally, never `state: maybeUndefined`: the latter types the key as
-          // always-present while `JSON.stringify` drops it from the wire, so the contract would
-          // have to describe a key consumers never receive.
-          ...(state ? { state } : {}),
-          ...(latestLog ? { latestLog } : {}),
-          ...(nextRunAt ? { nextRunAt } : {}),
-          counts: {
-            matches: logs.filter((row) => row.result === 'launched' || row.result === 'duplicate').length,
-            launched: store.countAutomationRuns(automation.id),
-            duplicates: logs.filter((row) => row.result === 'duplicate').length,
-            errors: logs.filter((row) => row.result === 'error' || row.result === 'rate-limited' || row.result === 'failed').length,
-          },
-        };
-      });
-      const nextDue = automations.map((item) => item.nextRunAt).filter(Boolean).sort()[0];
-      return c.json({
-        ...availability,
-        timeZone: localTimeZone(),
-        scheduler: {
-          // `as const` on both arms: in an object literal a conditional of two string literals
-          // widens to `string`, which would erase the two states this key can hold.
-          state: automations.some((item) => item.enabled) ? ('scheduled' as const) : ('idle' as const),
-          ...(nextDue ? { nextDue } : {}),
-        },
-        automations,
-      });
+    .get('/automations', queryZodValidator(automationListQuerySchema), async (c) => {
+      return c.json(await automationService.list(c.get('project'), c.req.valid('query')));
     })
 
     .post('/automations', jsonZodValidator(() => automationCreateSchema), async (c) => {
-      const { root, automationStore } = c.get('project');
-      const parsed = { data: c.req.valid('json') };
-      const resolved = resolveAutomationKind(parsed.data);
-      if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
-      const promptIssue = validateAutomationPrompt(parsed.data.task.prompt, resolved.kind);
-      if (promptIssue) return c.json({ error: promptIssue }, 400);
-      // A poll needs a GitHub remote to poll; a schedule needs nothing but this project.
-      if (resolved.kind === 'github' && !resolveForge(await getRepoInfo(root))) {
-        return c.json({ error: 'No GitHub remote is configured' }, 400);
-      }
-      const { enable, ...input } = parsed.data;
-      try {
-        const automation = automationStore.create({ ...input, kind: resolved.kind, enabled: enable === true }, undefined, enable ? armAutomationFromNow : undefined);
-        emitAutomationChange(c.get('project'), automation.id, automation.revision);
-        automationsChanged();
-        return c.json({ automation }, 201);
-      } catch (error) {
-        return c.json({ error: error instanceof Error ? error.message : String(error) }, 400);
-      }
+      const result = await automationService.create(c.get('project'), c.req.valid('json'));
+      if (!result.ok) return c.json({ error: result.error }, result.status);
+      return c.json({ automation: result.automation }, 201);
     })
 
     .get('/automations/:id', (c) => {
-      const { automationStore } = c.get('project');
-      const automation = automationStore.get(c.req.param('id'));
-      if (!automation) return c.json({ error: 'not found' }, 404);
-      const state = automationStore.state(automation.id);
-      const latestLog = automationStore.logs({ automationId: automation.id, limit: 1 })[0];
-      return c.json({
-        automation,
-        ...(state ? { state } : {}),
-        ...(latestLog ? { latestLog } : {}),
-      });
+      const result = automationService.get(c.get('project'), c.req.param('id'));
+      if (!result.ok) return c.json({ error: result.error }, result.status);
+      return c.json(result.body);
     })
 
     .put('/automations/:id', jsonZodValidator(() => automationUpdateSchema), async (c) => {
-      const { automationStore } = c.get('project');
-      const parsed = { data: c.req.valid('json') };
-      const { expectedRevision, ...input } = parsed.data;
-      const stored = automationStore.get(c.req.param('id'));
-      if (!stored) return c.json({ error: 'not found' }, 404);
-      const resolved = resolveAutomationKind(input, stored);
-      if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
-      const promptIssue = validateAutomationPrompt(input.task.prompt, resolved.kind);
-      if (promptIssue) return c.json({ error: promptIssue }, 400);
-      try {
-        // The armed instant belongs to the schedule it was computed from, and to an enabled
-        // definition: a new schedule, or a resume through PUT, re-arms from now — never a catch-up
-        // of an occurrence that passed while it was paused. Pausing clears it in the same write, so
-        // another cockpit never reads the still-enabled definition beside a due instant. Armed in
-        // the request, as `enable` does, rather than left to the timer: the list refetched on the
-        // change event must already see it. Compared with the definition on disk, not the one read above.
-        const automation = automationStore.update(c.req.param('id'), expectedRevision, { ...input, kind: resolved.kind, enabled: input.enabled ?? false }, (next, previous) => {
-          if (previous && (!sameSchedule(previous.schedule, next.schedule) || previous.enabled !== next.enabled
-            || (next.enabled && Boolean(previous.filters?.includeExisting) !== Boolean(next.filters?.includeExisting)))) return armAutomationFromNow(next);
-          // A continuation belongs to its query. Ordinary edits retain the successful cursor,
-          // but a changed query must start a fresh bounded scan rather than reuse page offsets.
-          if (isGithubAutomation(next) && previous && (JSON.stringify(previous.filters) !== JSON.stringify(next.filters)
-            || JSON.stringify(previous.events) !== JSON.stringify(next.events))) return { historyScan: undefined };
-          return undefined;
-        });
-        emitAutomationChange(c.get('project'), automation.id, automation.revision);
-        automationsChanged();
-        return c.json({ automation });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return c.json({ error: message }, message.includes('conflict') ? 409 : 400);
-      }
+      const result = await automationService.update(c.get('project'), c.req.param('id'), c.req.valid('json'));
+      if (!result.ok) return c.json({ error: result.error }, result.status);
+      return c.json({ automation: result.automation });
     })
 
-    .delete('/automations/:id', (c) => {
-      const id = c.req.param('id');
-      const store = c.get('project').automationStore;
-      const current = store.get(id);
-      if (!current || !store.delete(id)) return c.json({ error: 'not found' }, 404);
-      emitAutomationChange(c.get('project'), id, current.revision, true);
-      automationsChanged();
+    .delete('/automations/:id', async (c) => {
+      const result = await automationService.remove(c.get('project'), c.req.param('id'));
+      if (!result.ok) return c.json({ error: result.error }, result.status);
       return c.body(null, 204);
     })
 
     .post('/automations/:id/enable', async (c) => {
-      const store = c.get('project').automationStore;
-      // No client revision: the toggle applies to what is on disk now, not to this store's last read.
-      store.reload();
-      const current = store.get(c.req.param('id'));
-      if (!current) return c.json({ error: 'not found' }, 404);
-      try {
-      if (isScheduleAutomation(current)) {
-        // A schedule has no backlog to baseline against: it arms its next occurrence from now.
-        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true }, armAutomationFromNow);
-        emitAutomationChange(c.get('project'), automation.id, automation.revision);
-        automationsChanged();
-        return c.json({ automation });
-      }
-      if (!isGithubAutomation(current)) return c.json({ error: 'automation definition is incomplete' }, 409);
-      const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: true }, armAutomationFromNow);
-      await store.appendLog({ automationId: automation.id, revision: automation.revision, result: 'baseline', reason: current.filters.includeExisting ? 'Enabled with existing matches within the lookback; prior receipts prevent duplicate launches.' : 'Enabled from a current-time baseline; existing records were not launched.' });
-      emitAutomationChange(c.get('project'), automation.id, automation.revision);
-      automationsChanged();
-      return c.json({ automation });
-      } catch (error) {
-        const { status, ...body } = toggleFailure(error);
-        return c.json(body, status);
-      }
+      const result = await automationService.enable(c.get('project'), c.req.param('id'));
+      if (!result.ok) return c.json({ error: result.error }, result.status);
+      return c.json({ automation: result.automation });
     })
 
-    .post('/automations/:id/pause', (c) => {
-      const store = c.get('project').automationStore;
-      store.reload();
-      const current = store.get(c.req.param('id'));
-      if (!current) return c.json({ error: 'not found' }, 404);
-      try {
-        const automation = store.update(current.id, current.revision, { ...editableAutomation(current), enabled: false }, armAutomationFromNow);
-        emitAutomationChange(c.get('project'), automation.id, automation.revision);
-        automationsChanged();
-        return c.json({ automation });
-      } catch (error) {
-        const { status, ...body } = toggleFailure(error);
-        return c.json(body, status);
-      }
+    .post('/automations/:id/pause', async (c) => {
+      const result = await automationService.pause(c.get('project'), c.req.param('id'));
+      if (!result.ok) return c.json({ error: result.error }, result.status);
+      return c.json({ automation: result.automation });
+    })
+
+    // One-time schedules only (#1465): archive without launching. 409 for any other automation.
+    .post('/automations/:id/cancel', async (c) => {
+      const result = await automationService.cancel(c.get('project'), c.req.param('id'));
+      if (!result.ok) return c.json({ error: result.error }, result.status);
+      return c.json({ automation: result.automation });
     })
 
     // Run now: a schedule fired once by hand, paused or not, outside the timer and under the same
-    // lease. `nextRunAt` and `enabled` are untouched; a GitHub automation's equivalent is `check`.
+    // lease. A repeating schedule keeps `nextRunAt` and `enabled`; a one-time schedule is consumed
+    // (archived) by it. A GitHub automation's equivalent is `check`.
     .post('/automations/:id/run', async (c) => {
-      const project = c.get('project');
-      const store = project.automationStore;
-      const automation = store.get(c.req.param('id'));
-      if (!automation) return c.json({ error: 'not found' }, 404);
-      if (!isScheduleAutomation(automation)) return c.json({ error: 'a GitHub automation runs on its events; use check with mode execute' }, 409);
-      const outcome = await new ScheduleRunner(scheduleHandle(project)).runNow(automation);
-      // Gone, or no longer a schedule, once re-read under the lease: nothing was launched.
-      if (outcome.result === 'skipped') return c.json({ error: 'not found' }, 404);
-      if (outcome.result === 'manual') {
-        emitAutomationChange(project, automation.id, store.get(automation.id)?.revision ?? automation.revision);
-        return c.json({ runId: outcome.runId }, 202);
-      }
-      if (outcome.result === 'lease-held') return c.json({ error: SCHEDULE_LEASE_HELD_REASON }, 409);
-      const reason = store.logs({ automationId: automation.id, limit: 1 })[0]?.reason;
-      return c.json({ error: reason ?? 'the run could not be launched' }, 409);
+      const result = await automationService.runNow(c.get('project'), c.req.param('id'));
+      if (!result.ok) return c.json({ error: result.error }, result.status);
+      return c.json({ runId: result.runId }, 202);
     })
 
     // The body is validated as MIDDLEWARE, which is what puts it in the route type — and moves
