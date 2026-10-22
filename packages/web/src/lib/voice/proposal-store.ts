@@ -63,6 +63,9 @@ let snapshot: AskCardValues | undefined
 let drop: DropReason | undefined
 const cards = new Map<string, AskCardTarget>()
 const composers = new Map<string, ComposerTarget>()
+/** The question each open thread shows, by run: its request id, or null for none. A run the thread
+ *  has not synced yet (its history is still loading) has no entry (hearsay-tools/cezarion#1463). */
+const pendingAsks = new Map<string, string | null>()
 const listeners = new Set<() => void>()
 
 const cardKey = (runId: string, requestId: string) => `${runId}\u0000${requestId}`
@@ -188,10 +191,21 @@ export const voiceStore = {
   syncPendingAsk(runId: string, requestId: string | undefined) {
     const current = answerFor(runId)
     if (current && current.askRequestId !== requestId) dropProposal('question-closed')
+    const shown = requestId ?? null
+    if (pendingAsks.get(runId) !== shown) {
+      pendingAsks.set(runId, shown)
+      notify()
+    }
   },
   /** The thread for `runId` closed or switched to another run: its answer proposal ends. */
   leaveTask(runId: string) {
     if (answerFor(runId)) dropProposal('task-closed')
+    if (pendingAsks.delete(runId)) notify()
+  },
+  /** The question the thread for `runId` shows: its request id, null for none, undefined while the
+   *  thread has not synced it. The palette sends it so the server can refuse a stale decision. */
+  pendingAskFor(runId: string): string | null | undefined {
+    return pendingAsks.get(runId)
   },
   registerComposer(target: ComposerTarget): () => void {
     composers.set(target.runId, target)
@@ -218,6 +232,12 @@ export function useVoiceProposal(): VoiceProposal | undefined {
   return useSyncExternalStore(voiceStore.subscribe, voiceStore.getProposal, voiceStore.getProposal)
 }
 
+/** `pendingAskFor(runId)`, re-rendering when the shown question changes. */
+export function usePendingAsk(runId: string | undefined): string | null | undefined {
+  const read = () => (runId === undefined ? undefined : voiceStore.pendingAskFor(runId))
+  return useSyncExternalStore(voiceStore.subscribe, read, read)
+}
+
 /** Test-only: the store is a module singleton, so each case starts from an empty one. */
 export function resetVoiceStoreForTests() {
   proposal = undefined
@@ -225,5 +245,6 @@ export function resetVoiceStoreForTests() {
   drop = undefined
   cards.clear()
   composers.clear()
+  pendingAsks.clear()
   listeners.clear()
 }

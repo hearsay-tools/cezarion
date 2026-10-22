@@ -6,11 +6,13 @@ import { JevVoiceEngine } from './jev-engine.ts';
 const KEY = 'test-key';
 const STATE: VoiceEngineState = {
   sentence: 'open next finished',
-  view: { sidebarView: 'active', openTask: false },
+  words: ['W01 open', 'W02 next', 'W03 finished'],
+  screen: { page: 'task', sidebarView: 'active', project: 'cezar' },
   recent: [],
 };
 const QUESTIONS: Record<string, EngineQuestion> = {
-  [QUESTION_IDS.action]: {
+  // Any id works: the engine only carries questions and checks answers against them.
+  action: {
     type: 'choice',
     instructions: 'Which action?',
     options: { open: 'Open a task', none: null },

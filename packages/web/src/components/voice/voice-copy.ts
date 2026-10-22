@@ -31,16 +31,22 @@ export const noTasksNotice = (status: VoiceStatus): string => `No ${statusWords(
 export const pastEndNotice = (status: VoiceStatus, position: VoicePosition): string =>
   `No ${positionWords(position)} ${statusWords(status)} task.`
 
-/** `Answer <header>: <labels or Other text>`, one `<header>: <value>` entry per question, joined
- *  with `; `. A card the palette cannot see (`headers` undefined) is named by its 1-based
- *  question number. */
-export function answerRowText(answers: readonly VoiceAnswer[], headers: readonly string[] | undefined): string {
+/** `Answer “<task>”: <header>: <labels or Other text>`, one `<header>: <value>` entry per question,
+ *  joined with `; `. Without a known task title it reads `Answer <header>: …`. A card the palette
+ *  cannot see (`headers` undefined) is named by its 1-based question number. */
+export function answerRowText(
+  answers: readonly VoiceAnswer[],
+  headers: readonly string[] | undefined,
+  taskTitle?: string,
+): string {
   const entries = answers.map((answer) => {
     const header = headers?.[answer.question] || `question ${answer.question + 1}`
     const value = answer.kind === 'option' ? answer.labels.join(', ') : answer.text
     return `${header}: ${value}`
   })
-  return `Answer ${entries.join('; ')}`
+  return `Answer ${taskTitle ? `“${taskTitle}”: ` : ''}${entries.join('; ')}`
 }
 
-export const tellRowText = (text: string): string => `Tell it: ${text}`
+/** `Tell “<task>”: <text>`, or `Tell it: <text>` without a known task title. */
+export const tellRowText = (text: string, taskTitle?: string): string =>
+  taskTitle ? `Tell “${taskTitle}”: ${text}` : `Tell it: ${text}`

@@ -19,3 +19,11 @@ export const OPEN_STATUS_SURE = 0.6;
 export const ANSWER_OPTION_MIN = 0.5;
 /** A multi-select option is taken when its noul is at least this. */
 export const OPTION_SELECTED_MIN = 0.5;
+/**
+ * A reply target (an answer to one card question, or the message) is taken when the mean confidence
+ * of its words is at least this. Not the minimum: live jev-1.13.0 gave correct boundary words
+ * 0.04–0.5 (spike for hearsay-tools/cezarion#1463). Set just below the lowest mean of a correct
+ * target in three live runs of the replay set (`scripts/voice-replay.ts`): 0.36, for "tell it that
+ * that file is fine".
+ */
+export const EXTRACT_MIN = 0.3;

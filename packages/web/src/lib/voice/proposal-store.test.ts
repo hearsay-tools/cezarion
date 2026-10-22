@@ -230,6 +230,25 @@ describe('voiceStore', () => {
     expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
   })
 
+  it('pendingAskFor reports the shown question once the thread has synced it', () => {
+    const listener = vi.fn()
+    voiceStore.subscribe(listener)
+    expect(voiceStore.pendingAskFor('r1')).toBeUndefined()
+    voiceStore.syncPendingAsk('r1', 'ask_1')
+    expect(voiceStore.pendingAskFor('r1')).toBe('ask_1')
+    expect(voiceStore.pendingAskFor('r2')).toBeUndefined()
+    expect(listener).toHaveBeenCalledTimes(1)
+    // The same question again changes nothing and wakes nobody.
+    voiceStore.syncPendingAsk('r1', 'ask_1')
+    expect(listener).toHaveBeenCalledTimes(1)
+    voiceStore.syncPendingAsk('r1', undefined)
+    expect(voiceStore.pendingAskFor('r1')).toBeNull()
+    expect(listener).toHaveBeenCalledTimes(2)
+    voiceStore.leaveTask('r1')
+    expect(voiceStore.pendingAskFor('r1')).toBeUndefined()
+    expect(listener).toHaveBeenCalledTimes(3)
+  })
+
   it('a new proposal resets the drop reason', () => {
     voiceStore.registerAskCard(fakeCard())
     voiceStore.propose(answer('d1', option(0, 'Vitest')))

@@ -229,7 +229,7 @@ describe('palette voice mode', () => {
     expect(overlay()?.className).toContain('bg-transparent')
     expect(input.value).toBe('')
     expect(document.activeElement).toBe(input)
-    expect(screen.getByText('Answer Library: Vitest')).toBeTruthy()
+    expect(screen.getByText('Answer “Pick a library”: Library: Vitest')).toBeTruthy()
 
     // Esc closes the palette, which drops the proposal and reports it.
     fireEvent.keyDown(input, { key: 'Escape' })

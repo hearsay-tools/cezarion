@@ -70,4 +70,22 @@ describe('voice contract', () => {
     }
     expect(voiceDecisionSchema.safeParse({ action: 'none', decisionId: id, reason: 'maybe' }).success).toBe(false);
   });
+
+  it('accepts view and askRequestId, including null', () => {
+    const base = { text: 'a b', sidebarView: 'active' as const, view: 'task' as const };
+    expect(voiceDecideRequestSchema.safeParse({ ...base, askRequestId: null }).success).toBe(true);
+    expect(voiceDecideRequestSchema.safeParse({ ...base, askRequestId: 'ask-1' }).success).toBe(true);
+    expect(voiceDecideRequestSchema.safeParse({ ...base, askRequestId: '' }).success).toBe(false);
+  });
+
+  it('rejects an unknown view', () => {
+    expect(voiceDecideRequestSchema.safeParse({ text: 'a b', sidebarView: 'active', view: 'kitchen' }).success).toBe(false);
+  });
+
+  it('accepts the ambiguous, stale-context and unsupported reasons', () => {
+    const id = '00000000-0000-4000-8000-000000000000';
+    for (const reason of ['ambiguous', 'stale-context', 'unsupported']) {
+      expect(voiceDecisionSchema.safeParse({ action: 'none', decisionId: id, reason }).success).toBe(true);
+    }
+  });
 });

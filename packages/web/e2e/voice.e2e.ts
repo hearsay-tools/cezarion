@@ -177,7 +177,9 @@ beforeAll(async () => {
   git('init', '-q', '-b', 'main')
   git('-c', 'user.name=E2E', '-c', 'user.email=e2e@example.test', 'commit', '--allow-empty', '-m', 'fixture')
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
-    env: fixtureServeEnv(root, { CEZ_VOICE: '1' }),
+    // A plain nudge reply keeps the no-wait nudge from parking a plain reply on its own "Next step"
+    // card: the tell test needs a task with no question card (hearsay-tools/cezarion#1463).
+    env: fixtureServeEnv(root, { CEZ_VOICE: '1', CEZ_MOCK_NUDGE_REPLY: 'plain' }),
     stdio: 'ignore',
   })
   base = await waitForFixtureServer(server)
@@ -235,6 +237,28 @@ describe('voice mode with the dry-run engine', () => {
     // The input is empty after the commit, so this Return is the confirmation.
     browser.press('Enter')
     browser.waitForFunction(`document.body.textContent.includes('Question 2 (Build) still needs an answer.')`)
+  }, 90_000)
+
+  it('answers "answer that …" without the command words (hearsay-tools/cezarion#1463)', async () => {
+    await openAskTask()
+
+    sayInPalette('answer that Vitest to question first')
+    browser.press('Enter')
+    browser.waitForFunction(`${sentences(FILLED)} === 1`)
+    // The filled question holds the chosen chip, and no Other text carries the command words.
+    const filled = browser.waitForValue<{ pressed: string[]; typed: string[] } | null>(
+      `(() => {
+        const group = document.querySelector('${FILLED}')
+        if (!group) return null
+        return {
+          pressed: [...group.querySelectorAll('[aria-pressed="true"]')].map((el) => el.textContent.trim()),
+          typed: [...group.querySelectorAll('input, textarea')].map((el) => el.value),
+        }
+      })()`,
+      (value) => value !== null && value.pressed.length > 0,
+    )
+    expect(filled?.pressed).toEqual(['Vitest'])
+    expect(filled?.typed.join(' ')).not.toContain('answer that')
   }, 90_000)
 
   it('cancel restores the card', async () => {
