@@ -105,7 +105,8 @@ From AGENTS.md (research § F):
 
 ### Open by status and position
 
-`open` + **position** + **status**.
+`open` + **position** + **status**. The verb does not matter: "open", "go to", "show me", "switch to"
+and "bring up" all mean open (hearsay-tools/cezarion#1463).
 
 - **Position:** first, next, previous, last, or a number ("the third"). "Next" and "previous" are
   relative to the open task inside that status's list; when the open task is not in the list,

@@ -443,6 +443,9 @@ describe('buildVoiceQuestions', () => {
     expect(options(q, 'session_action').respond).toMatch(/tell it/);
     expect(Object.keys(options(q, 'status'))).toHaveLength(18);
     expect(options(q, 'position')['1']).toBe('The first one.');
+    // Live Jev took only "open" as open, and missed a status said before "task" (hearsay-tools/cezarion#1463).
+    expect(options(q, 'project_action').open).toMatch(/the verb does not matter/);
+    expect(q.status!.instructions).toContain('"the working task"');
   });
 
   it('labels each word with routing first, then the card questions and the message', () => {

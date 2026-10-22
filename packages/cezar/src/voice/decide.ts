@@ -63,7 +63,9 @@ function scopesFor(): Record<string, string> {
 }
 
 const PROJECT_ACTIONS: Record<string, string> = {
-  open: 'Open the tasks in a status at a position, for example "open next finished" or "open the third failed".',
+  // Not only "open": live Jev scored "go to", "show me" and "switch to" below the action floor
+  // (hearsay-tools/cezarion#1463).
+  open: 'Show one task of this project\'s list, picked by its status and position. Any verb of moving to or looking at a task means this action ("open", "go to", "show me", and any other wording): the verb does not matter, the status and position do. For example "open next finished" or "go to the third failed".',
   [NONE]: 'None of these actions.',
 };
 
@@ -135,10 +137,13 @@ export function buildVoiceQuestions(state: VoiceEngineState, words: readonly Voi
       'Assume `sentence` acts on the task list of this project. Which action does it ask for?',
       PROJECT_ACTIONS,
     ),
-    [QUESTION_IDS.status]: choiceQuestion('Which task status does `sentence` name?', {
-      ...VOICE_STATUS_DESCRIPTIONS,
-      [NONE]: 'No status is named.',
-    }),
+    [QUESTION_IDS.status]: choiceQuestion(
+      'Which task status does `sentence` name? A status is usually said as a word or two before "task" or "one" ("the working task", "the third failed one", "next needs you"); each option key is that word.',
+      {
+        ...VOICE_STATUS_DESCRIPTIONS,
+        [NONE]: 'No status is named.',
+      },
+    ),
     [QUESTION_IDS.position]: choiceQuestion('Which position in the task list does `sentence` name?', POSITIONS),
   };
   if (state.screen.openTask === undefined) return questions;

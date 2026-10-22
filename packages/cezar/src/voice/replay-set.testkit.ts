@@ -208,6 +208,32 @@ export const REPLAY_CASES: ReplayCase[] = [
     expect: { action: 'tell', text: 'park it' },
   },
   {
+    name: '"go to" opens a task',
+    sentence: 'go to the first cancelled task',
+    openTask: false,
+    scripted: {
+      is_command: { noul: 0.9 },
+      scope: { choice: 'project', confidence: 1 },
+      project_action: { choice: 'open', confidence: 0.9 },
+      status: { choice: 'cancelled', confidence: 1 },
+      position: { choice: '1', confidence: 0.9 },
+    },
+    expect: { action: 'open', status: 'cancelled', position: 1 },
+  },
+  {
+    name: 'a status said before "task"',
+    sentence: 'bring up the previous working task',
+    openTask: false,
+    scripted: {
+      is_command: { noul: 0.9 },
+      scope: { choice: 'project', confidence: 0.85 },
+      project_action: { choice: 'open', confidence: 0.75 },
+      status: { choice: 'working', confidence: 0.8 },
+      position: { choice: 'previous', confidence: 0.85 },
+    },
+    expect: { action: 'open', status: 'working', position: 'previous' },
+  },
+  {
     name: 'opening another task while a card is shown',
     sentence: 'open the next needs you item',
     ask: NEXT,
