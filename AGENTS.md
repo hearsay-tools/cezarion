@@ -705,7 +705,7 @@ the checkout itself, whose `.ai/cezar` may be the live cockpit's (specs seed sta
 a watcher next to it stops it when its checkout or served clone is deleted, or after
 30 minutes with no test-env lease holder. `TEST_ENV_IDLE_EXIT_MINUTES` changes that idle
 period, and `0` turns the idle exit off, for example for a long QA session that attaches
-without a lease. `TEST_ENV_WATCH_INTERVAL_SECONDS` (default 30) sets how often it checks.
+without a lease. `TEST_ENV_WATCH_INTERVAL_SECONDS` (default 30, from 0.1 to 3600) sets how often it checks.
 Local exit contract:
 
 | Exit     | Marker                    | Meaning                                                                                                           |

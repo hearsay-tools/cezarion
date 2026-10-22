@@ -1068,8 +1068,10 @@ for (const [name, value, rule] of [
   ['TEST_ENV_IDLE_EXIT_MINUTES', '-1', 'non-negative number'],
   ['TEST_ENV_IDLE_EXIT_MINUTES', 'abc', 'non-negative number'],
   ['TEST_ENV_IDLE_EXIT_MINUTES', '1.', 'non-negative number'],
-  ['TEST_ENV_WATCH_INTERVAL_SECONDS', '0', 'positive number'],
-  ['TEST_ENV_WATCH_INTERVAL_SECONDS', '1e3', 'positive number'],
+  ['TEST_ENV_WATCH_INTERVAL_SECONDS', '0', 'number of seconds from 0.1 to 3600'],
+  ['TEST_ENV_WATCH_INTERVAL_SECONDS', '0.01', 'number of seconds from 0.1 to 3600'],
+  ['TEST_ENV_WATCH_INTERVAL_SECONDS', '3000000', 'number of seconds from 0.1 to 3600'],
+  ['TEST_ENV_WATCH_INTERVAL_SECONDS', '1e3', 'number of seconds from 0.1 to 3600'],
 ] as const) {
   test(`malformed ${name}=${JSON.stringify(value)} is refused before boot`, () => {
     const fixture = makeFixture(false);

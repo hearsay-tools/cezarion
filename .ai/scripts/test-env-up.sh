@@ -79,8 +79,8 @@ if ! node -e 'const s=process.argv[1]; process.exit(s === "" || /^\d+(\.\d+)?$/.
   echo "TEST_ENV_IDLE_EXIT_MINUTES must be a non-negative number of minutes (default 30; 0 turns the idle exit off)" >&2
   exit 2
 fi
-if ! node -e 'const s=process.argv[1]; process.exit(s === "" || (/^\d+(\.\d+)?$/.test(s) && Number(s) > 0) ? 0 : 1)' -- "${TEST_ENV_WATCH_INTERVAL_SECONDS:-}"; then
-  echo "TEST_ENV_WATCH_INTERVAL_SECONDS must be a positive number of seconds (default 30)" >&2
+if ! node -e 'const s=process.argv[1]; process.exit(s === "" || (/^\d+(\.\d+)?$/.test(s) && Number(s) >= 0.1 && Number(s) <= 3600) ? 0 : 1)' -- "${TEST_ENV_WATCH_INTERVAL_SECONDS:-}"; then
+  echo "TEST_ENV_WATCH_INTERVAL_SECONDS must be a number of seconds from 0.1 to 3600 (default 30)" >&2
   exit 2
 fi
 TEST_ENV_CACHE_TTL_SECONDS=${TEST_ENV_CACHE_TTL_SECONDS:-600}

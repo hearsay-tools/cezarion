@@ -203,11 +203,11 @@ const INTERVAL_DEFAULT_SECONDS = 30;
 const STOP_GRACE_MS = 10_000;
 
 // test-env-up.sh refuses a malformed value before boot; a bad value reaching here uses the default.
-function envNumber(env, name, fallback, allowZero) {
+function envNumber(env, name, fallback, min, max) {
   const text = env[name];
   if (text === undefined || !/^\d+(\.\d+)?$/.test(text)) return fallback;
   const value = Number(text);
-  return value > 0 || (allowZero && value === 0) ? value : fallback;
+  return value >= min && value <= max ? value : fallback;
 }
 
 async function stopApp(pid, start) {
@@ -234,8 +234,9 @@ function markStopped(root, pid) {
 /** Stop the detached app when its checkout is deleted, or when no lease holder has existed for
  * the idle period (TEST_ENV_IDLE_EXIT_MINUTES, 0 = never). Exit when the app exits on its own. */
 async function watchApp(pid, start, root, served, env = process.env) {
-  const idleMs = envNumber(env, 'TEST_ENV_IDLE_EXIT_MINUTES', IDLE_DEFAULT_MINUTES, true) * 60_000;
-  const intervalMs = envNumber(env, 'TEST_ENV_WATCH_INTERVAL_SECONDS', INTERVAL_DEFAULT_SECONDS, false) * 1000;
+  const idleMs = envNumber(env, 'TEST_ENV_IDLE_EXIT_MINUTES', IDLE_DEFAULT_MINUTES, 0, Infinity) * 60_000;
+  // Node turns a timer delay outside its range into 1 ms, a busy loop: keep it inside 0.1–3600 s.
+  const intervalMs = envNumber(env, 'TEST_ENV_WATCH_INTERVAL_SECONDS', INTERVAL_DEFAULT_SECONDS, 0.1, 3600) * 1000;
   const log = message => console.log(`[test-env] watcher ${message}`);
   log(`${process.pid} watching cezar pid ${pid}`);
   let lastBusy = performance.now();
