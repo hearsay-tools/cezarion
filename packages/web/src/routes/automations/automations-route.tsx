@@ -78,6 +78,6 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
     return <AutomationEditor key={`${found.id}:${reloadToken}`} automation={found} forge={forge} timeZone={data.timeZone} onSaved={saved} onReload={() => void refresh().then(() => setReloadToken((token) => token + 1))} />
   }
   return automationId
-    ? <AutomationLogScreen automationId={automationId} automationName={found?.name} timeZone={data.timeZone} />
+    ? <AutomationLogScreen automationId={automationId} automationName={found?.name} timeZone={data.timeZone} readOnly={Boolean(found?.archived)} />
     : <PageState text="Automation not found." />
 }

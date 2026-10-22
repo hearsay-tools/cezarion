@@ -113,7 +113,7 @@ function FilterSelect({ label, value, onChange, options }: { label: string; valu
 }
 
 /** `/automations/:id/log` — the whole log with result and event filters. */
-export function AutomationLogScreen({ automationId, automationName, timeZone }: { automationId: string; automationName?: string | undefined; timeZone: string }) {
+export function AutomationLogScreen({ automationId, automationName, timeZone, readOnly = false }: { automationId: string; automationName?: string | undefined; timeZone: string; readOnly?: boolean }) {
   const { records, error, refresh } = useAutomationLog(automationId)
   const [result, setResult] = useState(ALL)
   const [event, setEvent] = useState(ALL)
@@ -134,7 +134,7 @@ export function AutomationLogScreen({ automationId, automationName, timeZone }: 
           </div>
           {visible.length === 0
             ? <PageState text="No rows match these filters." />
-            : <LogRows records={visible} all={records} timeZone={timeZone} onRetried={() => void refresh()} />}
+            : <LogRows records={visible} all={records} timeZone={timeZone} onRetried={() => void refresh()} readOnly={readOnly} />}
         </div>
       )}
     </PageFrame>
