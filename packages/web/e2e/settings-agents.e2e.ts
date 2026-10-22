@@ -116,7 +116,13 @@ describe('settings → agents against the live dry-run server', () => {
 
   it('system prompt: explicit save persists the trimmed text', async () => {
     gotoAgents()
-    // The field starts partly below the viewport; a pointer click needs its center in view.
+    // Center the field before clicking. CI run 39844072926 failed with "outside the viewport"
+    // (cockpit-failures-shard-3 artifact 12454652459 in hearsay-tools/cezarion).
+    // Bundle: .ai/qa/failures/settings-agents/system-prompt-explicit-save-persists-the-trimmed-text-1/.
+    // probe.json: 1440x900, scrollY=0; snapshot.txt: field present, Save prompt disabled.
+    // Reproduction: `npm exec -- vitest run --config .ai/qa/settings-proof.ialck5j7/vitest.config.ts`
+    // with agent-browser 0.39.2 and proof_base 3fd324dc9: 2 of 6 tests failed before, 6 of 6 passed after.
+    // Scratch setup and results: .ai/qa/2026-10-22-desktop-session-footer.md#ci-browser-compatibility-proof.
     browser.evaluate(`document.querySelector('[data-slot="agents-system-prompt"]').scrollIntoView({ block: 'center', behavior: 'instant' })`)
     browser.click('[data-slot="agents-system-prompt"]')
     setTextarea('[data-slot="agents-system-prompt"]', 'Always add tests. (e2e)')
