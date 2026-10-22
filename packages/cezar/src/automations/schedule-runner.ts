@@ -207,6 +207,8 @@ export class ScheduleRunner {
       }
       if (isOnceSchedule(current)) {
         if (this.healArchive(current) || current.archived) return { result: 'duplicate', occurrenceAt } as const;
+        // An edit of the due time moved the key: the old receipt names a schedule that is gone.
+        if (receipt.receiptKey !== `${current.id}:${this.onceEventId(current)}`) return { result: 'duplicate', occurrenceAt } as const;
         return this.launchOnce(current, { at: occurrenceAt, trigger: 'retry' }, this.rereserve(receipt));
       }
       const reserved: AutomationReceipt = { ...receipt, status: 'reserved', error: undefined, updatedAt: new Date(now).toISOString() };

@@ -7,7 +7,7 @@ import { RunStore } from '../runs/store.ts';
 import { AutomationStore } from './store.ts';
 import { reconcileAutomationReceipts } from './task-template.ts';
 import { AutomationProjectUnavailableError, SCHEDULE_AUTO_PAUSE_AFTER, ScheduleLeaseHeldError, ScheduleRunner } from './schedule-runner.ts';
-import type { ScheduleAutomationDefinition } from './types.ts';
+import type { OnceScheduleDefinition, ScheduleAutomationDefinition } from './types.ts';
 
 const dirs: string[] = [];
 afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
@@ -779,6 +779,26 @@ describe('ScheduleRunner once (#1465)', () => {
     expect(launch).toHaveBeenLastCalledWith(expect.anything(), { at: iso(FIRST_RUN), trigger: 'retry' }, failed.receiptId);
     expect(store.get('nightly')?.archived).toMatchObject({ outcome: 'launched', trigger: 'retry', runId: 'run-2', receiptId: failed.receiptId });
     expect(store.state('nightly')?.onceOutcome).toBeUndefined();
+  });
+
+  // Review of #1469: an edit of the due time moves the receipt key, so the old failed receipt in
+  // the log names a schedule that no longer exists. Its Retry must not launch the edited one early.
+  it('retry of a failed receipt from before a due-time edit launches nothing and leaves the schedule waiting', async () => {
+    const { store, definition, runner, launch, clock } = await setup({ schedule: ONCE });
+    launch.mockRejectedValueOnce(new Error('boom'));
+    runner.dueAt(definition);
+    clock.set(FIRST_RUN + 1_000);
+    await runner.fire(definition);
+    const failed = store.latestReceipts().get(KEY)!;
+    const current = store.get('nightly') as OnceScheduleDefinition;
+    const { id: _id, revision, createdAt: _c, updatedAt: _u, ...editable } = current;
+    const later = { ...current.schedule, at: '2026-12-01T09:00' };
+    store.update('nightly', revision, { ...editable, schedule: later, enabled: true }, () => ({ onceOutcome: undefined }));
+    const outcome = await runner.retry(store.get('nightly') as ScheduleAutomationDefinition, failed);
+    expect(outcome.result).toBe('duplicate');
+    expect(launch).toHaveBeenCalledTimes(1);
+    expect(store.get('nightly')?.archived).toBeUndefined();
+    expect(store.latestReceipts().get(KEY)?.status).toBe('launch-error');
   });
 
   it('a fire meeting a launch-error receipt relaunches that receipt, never a new one', async () => {
