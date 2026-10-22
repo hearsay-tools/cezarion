@@ -8,11 +8,15 @@ scrolling on desktop. The existing footer scrolled away with the conversation.
 Use the existing footer as a CSS sticky element at viewport widths of 768px and
 above. Keep the shell main as the transcript's scroll owner. Place Jump to latest
 above the footer so it cannot cover the Composer. Bound the footer content to
-60dvh; expanded activity details scroll within their card and yield space to the
-Composer. Phone controls keep their existing document flow.
+60dvh and the space below the header; expanded activity details scroll within
+their card and yield space to the Composer. Long drafts scroll inside the input.
+Attachments stay in a horizontal scroll area. Phone controls keep document flow.
 
 A fixed footer would need a separately measured spacer to keep the last message
-readable. CSS sticky retains that space without another observer or scroll owner.
+readable. CSS sticky retains that space without another scroll owner. A resize
+observer measures the header, footer and main viewport. Their sizes set native
+scroll padding so focused transcript controls and scrollIntoView targets clear
+the sticky controls. The observer removes its properties when the route unmounts.
 No configuration, run states, API, dependencies, artwork or motion are added.
 
 ## Verification
@@ -24,9 +28,10 @@ No configuration, run states, API, dependencies, artwork or motion are added.
 | Scrolling keeps a typed draft | Same browser cells retain the draft while reading earlier messages |
 | Short sessions keep controls at the bottom | Short-session browser case |
 | Expanded activity and long drafts remain accessible | Browser case at 768×640 with 20 draft lines and a scrolling activity card |
+| Attachments and send controls fit a short desktop window | Browser case at 1024×480 with four files and 20 draft lines |
 | The final transcript row remains readable | Existing `thread-scroll.e2e.ts` checks row separation during interaction and footer separation at the live tail |
 | Phone controls scroll away | Chrome inspection at 360×640; existing phone coverage in `thread-scroll.e2e.ts` |
-| Both themes and keyboard targets remain usable | Browser cells cover both themes; existing controls retain their accessible labels, focus styles and target sizes |
+| Both themes and keyboard targets remain usable | Browser cells cover both themes; a real Tab reveals a transcript button above the footer and checks its hit target |
 
 `npm run typecheck` and `npm run build` pass. The production build includes
 `check:pack`. Focused task-thread, thread-scroller, activity-dock and browser wait
@@ -44,6 +49,19 @@ task-worktree browser verdicts and the optional slow-suite count.
 - Copied only `task-thread.tsx` and `session-layout.css` from the task checkout.
   The same six browser tests pass with the fixed source.
 - Logs are retained under ignored `.ai/qa/footer-proof-{red,green}.log`.
+
+The independent review found short-window clipping and footer-hidden keyboard
+focus. Additional proof uses `8141e01a42c4e93fd1c7dc99e742a43348c993af` as its
+`proof_base`, with its own installed dependencies and unchanged new tests:
+
+- `npm run test:e2e -- session-footer.e2e.ts -t '480px|keyboard-focused'`:
+  two failures on old source. The Composer leaves the viewport, and Tab focuses
+  a button whose hit target is covered by the footer.
+- Copying the fixed CSS, route, viewport hook and activity interaction helper
+  makes both cases pass. The helper scrolls rows within the bounded activity card
+  before a pointer click; it keeps the real click and expansion assertions.
+- `npm run test:e2e -- session-footer.e2e.ts`: all eight cases pass on final source.
+- Logs: ignored `.ai/qa/footer-review-proof-{red,green}.log`.
 
 ## Existing limitation
 

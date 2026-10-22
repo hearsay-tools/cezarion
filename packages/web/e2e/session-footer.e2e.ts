@@ -115,3 +115,60 @@ it('keeps expanded activity and a long draft accessible on a short desktop viewp
   })()`)
   expect(details).toEqual({ scrollable: true, reachedEnd: true })
 })
+
+it('keeps the Composer controls visible with attachments in a 480px-high desktop window', () => {
+  browser.setViewport(1440, 900)
+  browser.goto(`${baseUrl}/p/${project}/tasks/${runId}`)
+  openSessionActivityRow(browser, 'usage')
+  browser.setViewport(1024, 480)
+  browser.fill('textarea', Array.from({ length: 20 }, (_, index) => `Draft line ${index}`).join('\n'))
+  browser.evaluate(`(() => {
+    const files = new DataTransfer();
+    for (let index = 0; index < 4; index++) files.items.add(new File(['notes'], 'notes-' + index + '.txt', { type: 'text/plain' }));
+    document.querySelector('textarea').dispatchEvent(new ClipboardEvent('paste', { bubbles: true, clipboardData: files }));
+  })()`)
+  browser.waitForFunction(`document.querySelectorAll('[data-slot="composer-thumbs"] button').length === 4`)
+  expect(waitForSettledSample(browser, geometry)).toMatchObject({ footerVisible: true, footerAtBottom: true, overflow: false })
+  expect(waitForSettledSample(browser, `(() => {
+    const input = document.querySelector('textarea');
+    const submit = document.querySelector('[data-slot="composer-actions"] button:last-child');
+    const box = submit.getBoundingClientRect();
+    return { inputVisible: input.clientHeight >= 44, draftScrolls: input.scrollHeight > input.clientHeight,
+      submitVisible: submit.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)) };
+  })()`)).toEqual({ inputVisible: true, draftScrolls: true, submitVisible: true })
+})
+
+it('scrolls a keyboard-focused transcript control above the desktop footer', () => {
+  browser.setViewport(1440, 900)
+  browser.goto(`${baseUrl}/p/${project}/tasks/${runId}?thread=flat`)
+  const target = '[data-slot="tool-card"][data-kind="execute"] > button'
+  browser.waitForFunction(`document.querySelector('${target}') !== null`)
+  browser.evaluate(`document.querySelector('[data-slot="main"]').dispatchEvent(new WheelEvent('wheel', { deltaY: -1800, bubbles: true }))`)
+  browser.waitForFunction(`(() => {
+    const button = document.querySelector('${target}');
+    const rendered = button.checkVisibility({ contentVisibilityAuto: true });
+    button.scrollIntoView({ block: 'center' });
+    return rendered;
+  })()`)
+  browser.evaluate(`(() => {
+    const main = document.querySelector('[data-slot="main"]');
+    const button = document.querySelector('${target}');
+    button.scrollIntoView({ block: 'center' });
+    main.dispatchEvent(new WheelEvent('wheel', { deltaY: -1800, bubbles: true }));
+    main.scrollTop += button.getBoundingClientRect().top - document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect().top - 20;
+    // Set the sequential keyboard start immediately before the target, without scrolling
+    // either control into view. The actual Tab must reveal the covered transcript control.
+    const start = document.createElement('span');
+    start.id = 'footer-focus-start'; start.tabIndex = -1;
+    button.before(start); start.focus({ preventScroll: true });
+  })()`)
+  browser.press('Tab')
+  browser.evaluate(`document.getElementById('footer-focus-start').remove()`)
+  expect(waitForSettledSample(browser, `(() => {
+    const button = document.querySelector('${target}'), box = button.getBoundingClientRect();
+    const header = document.querySelector('[data-slot="run-header"]').getBoundingClientRect();
+    const footer = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect();
+    return { focused: document.activeElement === button, clear: box.top >= header.bottom && box.bottom <= footer.top,
+      hit: button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)) };
+  })()`)).toEqual({ focused: true, clear: true, hit: true })
+})

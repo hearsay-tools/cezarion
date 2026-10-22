@@ -1,4 +1,4 @@
-/* Session frames 2A–2D / 3A / 3C: controls remain in document flow at every width.
+/* Session frames 2A–2D / 3A / 3C: phones keep controls in document flow.
  * The shared --measure preference remains independent of density and theme. */
 .session-composer [data-slot='composer-editor'] { border-color: var(--ring); border-radius: 12px; }
 .session-composer [data-slot='session-controls'] { padding-block: 0 10px; padding-inline: 12px; }
@@ -20,12 +20,19 @@
 [data-route='task-thread'] [data-slot='thread-dock'] { container: thread-dock / inline-size; }
 [data-route='task-thread'] [data-slot='thread-jump'] { position: fixed; inset-inline-end: 24px; inset-block-end: calc(24px + env(safe-area-inset-bottom, 0px)); }
 @media (min-width: 768px) {
+  [data-slot='main']:has([data-route='task-thread']) { scroll-padding-block: calc(var(--thread-header-height, 0px) + 8px) calc(var(--thread-footer-height, 0px) + 8px); }
   [data-route='task-thread'] [data-slot='thread-dock'] { position: sticky; inset-block-end: 0; }
   [data-route='task-thread'] [data-slot='thread-jump'] { position: absolute; inset-block-end: 100%; margin-block-end: 8px; }
   /* Expanded details yield space to the composer on short desktop viewports. */
-  [data-route='task-thread'] [data-slot='thread-footer-content'] { max-block-size: 60dvh; }
+  [data-route='task-thread'] [data-slot='thread-footer-content'] { --thread-footer-limit: min(60dvh, calc(var(--thread-viewport-height, 100dvh) - var(--thread-header-height, 0px) - var(--spacing) * 5.5)); max-block-size: var(--thread-footer-limit); }
   [data-route='task-thread'] [data-slot='thread-footer-content'] > :not([data-slot='run-activity-dock']) { flex-shrink: 0; }
   [data-route='task-thread'] [data-slot='run-activity-dock'] { min-block-size: 46px; overflow-y: auto; overscroll-behavior-block: contain; }
+  /* Keep the action row visible when a draft or attachments use the remaining space. */
+  [data-route='task-thread'] [data-slot='thread-footer-content'] > [data-slot='composer'] { display: flex; flex-direction: column; min-block-size: 0; max-block-size: calc(var(--thread-footer-limit) - 46px - var(--spacing) * 2.5); }
+  [data-route='task-thread'] [data-slot='composer-editor'] { display: flex; flex-direction: column; min-block-size: 0; overflow-y: auto; }
+  [data-route='task-thread'] [data-slot='composer-editor'] > textarea { min-block-size: 44px; flex-shrink: 1; }
+  [data-route='task-thread'] [data-slot='composer-thumbs'] { flex-wrap: nowrap; flex-shrink: 0; max-block-size: 60px; overflow: auto; }
+  [data-route='task-thread'] [data-slot='composer-toolbar'] { flex-shrink: 0; }
   @container thread-dock (max-width: 680px) {
     [data-slot='thread-dock'] > div { padding-inline: 8px; }
     /* Keep the three controls in one row (#478), with room for the selected values. */

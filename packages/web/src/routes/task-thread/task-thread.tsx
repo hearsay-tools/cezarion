@@ -52,6 +52,7 @@ import { useActiveProviderAvailability } from './active-provider'
 import { ThreadLoading } from './thread-loading'
 import { threadRenderMode } from './thread-scroll'
 import { JumpToLatestPill, useThreadScroll } from './thread-scroller'
+import { useSessionViewport } from './session-viewport'
 import {
   SessionTranscript,
   buildTranscriptRows,
@@ -352,8 +353,9 @@ export function ThreadView({
   })
   // Re-pin a tail reader after the viewport or document-flow composer changes size.
   useKeyboardInsetVar(scroll.restickIfStuck)
+  const viewportRef = useSessionViewport()
   return (
-    <div data-route="task-thread" data-run-id={run.id} className="flex min-h-full flex-col">
+    <div ref={viewportRef} data-route="task-thread" data-run-id={run.id} className="flex min-h-full flex-col">
       <RunHeader run={run} onMarkedUnread={() => onMarkedUnread?.(run.id)} />
 
       {/* Row spacing lives on each thread row (pb-2.5, both render modes measure alike);
