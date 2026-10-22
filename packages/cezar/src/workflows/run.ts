@@ -1,6 +1,7 @@
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
-import { askErrorMessage, doneErrorMessage, waitErrorMessage } from '../ci-wait/errors.ts';
+import { askErrorMessage, doneErrorMessage, scheduleRefusal, waitErrorMessage } from '../ci-wait/errors.ts';
+import type { ScheduleTaskAnswer, ScheduleTaskRequest, ScheduledTasksAnswer, ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type DoneErrorCode, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
@@ -1007,6 +1008,12 @@ function waitNamedInputIds(run: RunRecord): Set<string> {
   return new Set([...run.waits ?? [], ...(run.lastWaits ?? []).filter(wait => wait.phase === 'delivered')].flatMap(wait => [wait.id, waitInputId(wait)]));
 }
 
+/** hearsay-tools/cezarion#1465: what `startServer` hands a manager for the schedule tools. */
+export type AutomationToolService = {
+  scheduleTask(request: ScheduleTaskRequest): Promise<ScheduleTaskAnswer>;
+  scheduledTasks(request: ScheduledTasksRequest): Promise<ScheduledTasksAnswer>;
+};
+
 /**
  * The mini workflow engine: executes a `WorkflowDef` against a repo, one step
  * at a time, persisting every event to the RunStore (which the SSE endpoints
@@ -1838,6 +1845,16 @@ export class RunManager {
   cockpitAddress(): { origin: string; projectId: string } | undefined {
     return this.cockpit ? { ...this.cockpit } : undefined;
   }
+  /**
+   * hearsay-tools/cezarion#1465: the project's one-time schedule service behind
+   * `cezar_schedule_task` and `cezar_scheduled_tasks`, set by `startServer` beside the cockpit
+   * address. Headless `cez run` never sets it, so the tools answer `unavailable` there. The
+   * handlers read it at call time: the boot manager recovers runs before the server sets it.
+   */
+  private automationTools?: AutomationToolService;
+  setAutomationTools(tools: AutomationToolService | undefined): void {
+    this.automationTools = tools;
+  }
   /** Automations on AND a cockpit attached: the one predicate behind the prompt part and the built-in skill. */
   private automationsReachable(): boolean {
     return !!this.cockpit && resolveCapabilities().automations;
@@ -2033,6 +2050,9 @@ export class RunManager {
       finishTurn: async (request, signal) => this.acceptDone(runId, generation, request, signal),
       registerPreview: (request, signal) => this.registerPreviewServer(runId, request, signal),
       stopPreview: (request, signal) => this.stopPreviewServer(runId, request, signal),
+      // A schedule belongs to the project, not to this run: any session there may manage one.
+      scheduleTask: async request => this.automationTools ? this.automationTools.scheduleTask(request) : scheduleRefusal('unavailable'),
+      scheduledTasks: async request => this.automationTools ? this.automationTools.scheduledTasks(request) : scheduleRefusal('unavailable'),
     };
   }
 

@@ -15,7 +15,7 @@ import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
 import { registerProject } from '../workspace/projects.ts';
-import { RunManager } from '../workflows/run.ts';
+import { RunManager, type AutomationToolService } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp, startServer, WorkspaceEventBus } from './server.ts';
 
@@ -1099,6 +1099,16 @@ describe('GitHub automation API', () => {
       const refused = await apiRequest(server, `/api/v1/automations/${automation.id}/cancel`, { method: 'POST' });
       expect(refused.status).toBe(409);
       expect((await body(refused)).error).toBe('only a one-time schedule can be cancelled; pause or delete it instead');
+    });
+
+    // The session tools reach the same service through the boot manager.
+    it('hands the boot manager schedule tools that create through the service', async () => {
+      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      let tools: AutomationToolService | undefined;
+      app({ automationStore, manager: { setAutomationTools: (value: AutomationToolService | undefined) => { tools = value; } } as unknown as RunManager });
+      const answer = await tools!.scheduleTask({ name: 'Check', prompt: 'Check it', delay: '1d', time_zone: 'UTC' });
+      expect(answer).toMatchObject({ ok: true, task: { status: 'paused', time_zone: 'UTC' } });
+      expect(automationStore.list().map(automation => automation.name)).toEqual(['Check']);
     });
   });
 

@@ -2,9 +2,11 @@ import { request } from 'node:http';
 import { previewStopResult } from '../preview/registration.ts';
 import { previewRefusal } from './errors.ts';
 import { cezarAskAnswerSchema, cezarCancelWaitAnswerSchema, cezarDoneAnswerSchema, cezarWaitAnswerSchema, type CezarAskAnswer, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarWaitAnswer } from '@open-mercato/cezar-contract/waits';
+import { SCHEDULED_TASK_LIMITS, scheduleTaskAnswerSchema, scheduledTasksAnswerSchema, type ScheduleTaskAnswer, type ScheduledTasksAnswer } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { previewServeResultSchema, previewStopResultSchema, type PreviewStopResult, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 
 const UNAVAILABLE = 'CI tool unavailable: the owning session is closed or the private IPC connection failed.';
+const SCHEDULE_UNAVAILABLE = 'Cezar could not reach its scheduler: the owning session is closed or the private IPC connection failed.';
 /**
  * #781: posts the arguments unparsed, so the server names the failing field in its hint. Every
  * transport failure, refusal or unreadable answer becomes the typed `unavailable` result; this
@@ -37,13 +39,25 @@ export function callCezarAsk(input: unknown, env: NodeJS.ProcessEnv = process.en
   return callTool(input, env, 'ask', cezarAskAnswerSchema, { ok: false, code: 'unavailable', message: UNAVAILABLE });
 }
 
-function callTool<T>(input: unknown, env: NodeJS.ProcessEnv, route: string, schema: { safeParse(input: unknown): { success: true; data: T } | { success: false } }, unavailable: T): Promise<T> {
+/**
+ * hearsay-tools/cezarion#1465: unparsed too. A list of 50 schedules can pass the 32 KiB the
+ * other answers fit in, so these two read up to the schedule answer cap.
+ */
+export function callScheduleTask(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<ScheduleTaskAnswer> {
+  return callTool(input, env, 'schedule-task', scheduleTaskAnswerSchema, { ok: false, code: 'unavailable', message: SCHEDULE_UNAVAILABLE }, SCHEDULED_TASK_LIMITS.wireBytes);
+}
+
+export function callScheduledTasks(input: unknown, env: NodeJS.ProcessEnv = process.env): Promise<ScheduledTasksAnswer> {
+  return callTool(input, env, 'scheduled-tasks', scheduledTasksAnswerSchema, { ok: false, code: 'unavailable', message: SCHEDULE_UNAVAILABLE }, SCHEDULED_TASK_LIMITS.wireBytes);
+}
+
+function callTool<T>(input: unknown, env: NodeJS.ProcessEnv, route: string, schema: { safeParse(input: unknown): { success: true; data: T } | { success: false } }, unavailable: T, maxAnswerBytes = 32_768): Promise<T> {
   const socketPath = env.CEZ_TOOL_SOCKET; const token = env.CEZ_TOOL_TOKEN;
   if (!socketPath || !token) return Promise.resolve(unavailable);
   return new Promise(resolve => {
     const req = request({ socketPath, path: `/api/v1/tools/${route}`, method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } }, response => {
       const chunks: Buffer[] = []; let bytes = 0;
-      response.on('data', (chunk: Buffer) => { bytes += chunk.length; if (bytes > 32768) req.destroy(); else chunks.push(chunk); });
+      response.on('data', (chunk: Buffer) => { bytes += chunk.length; if (bytes > maxAnswerBytes) req.destroy(); else chunks.push(chunk); });
       response.on('error', () => resolve(unavailable));
       response.on('end', () => {
         try {

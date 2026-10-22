@@ -29,6 +29,7 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
 import { automationCreateSchema, automationUpdateSchema, createAutomationService } from '../automations/service.ts';
+import { createAutomationToolService } from '../automations/tool-adapter.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { AutomationCandidateChangedError, GithubPoller } from '../automations/github-poller.ts';
 import { githubBaselineState } from '../automations/github-baseline.ts';
@@ -3615,6 +3616,18 @@ export function createApp(deps: ServerDeps) {
     },
     hasGithubRemote: async (root) => Boolean(resolveForge(await getRepoInfo(root))),
   });
+  // #1465: every project's manager gets the schedule tools over this service. A manager reads
+  // them at call time, so a session recovered before its project's context finished building
+  // reaches them once this runs. The tools themselves stay behind CEZ_AUTOMATIONS=1.
+  const attachAutomationTools = (project: ProjectContext) => project.manager.setAutomationTools?.(
+    createAutomationToolService(automationService, project, { timeZone: localTimeZone }),
+  );
+  attachAutomationTools(bootContext);
+  for (const id of contexts.ids()) {
+    const ctx = contexts.peek(id);
+    if (ctx) attachAutomationTools(ctx);
+  }
+  contexts.onContextBuilt(attachAutomationTools);
 
   // ---- chained family: GitHub automations (project-scoped) ----
   // Every handler below reads `c.get('project')` — the definitions, their runtime state and the
