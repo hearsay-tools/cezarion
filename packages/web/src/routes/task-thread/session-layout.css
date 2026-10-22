@@ -18,7 +18,14 @@
 /* #478/#460: desktop starts at 768px, but a resized 420px sidebar can leave the dock
  * only 348px. Query the dock itself so the pill tracks share its actual width. */
 [data-route='task-thread'] [data-slot='thread-dock'] { container: thread-dock / inline-size; }
+[data-route='task-thread'] [data-slot='thread-jump'] { position: fixed; inset-inline-end: 24px; inset-block-end: calc(24px + env(safe-area-inset-bottom, 0px)); }
 @media (min-width: 768px) {
+  [data-route='task-thread'] [data-slot='thread-dock'] { position: sticky; inset-block-end: 0; }
+  [data-route='task-thread'] [data-slot='thread-jump'] { position: absolute; inset-block-end: 100%; margin-block-end: 8px; }
+  /* Expanded details yield space to the composer on short desktop viewports. */
+  [data-route='task-thread'] [data-slot='thread-footer-content'] { max-block-size: 60dvh; }
+  [data-route='task-thread'] [data-slot='thread-footer-content'] > :not([data-slot='run-activity-dock']) { flex-shrink: 0; }
+  [data-route='task-thread'] [data-slot='run-activity-dock'] { min-block-size: 46px; overflow-y: auto; overscroll-behavior-block: contain; }
   @container thread-dock (max-width: 680px) {
     [data-slot='thread-dock'] > div { padding-inline: 8px; }
     /* Keep the three controls in one row (#478), with room for the selected values. */

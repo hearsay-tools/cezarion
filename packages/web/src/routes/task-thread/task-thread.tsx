@@ -460,18 +460,18 @@ export function ThreadView({
         onClose={() => setOpenAgentId(undefined)}
       />
 
-      {/* Workflow summary, plan, pause hint and composer follow the transcript in document flow. */}
+      {/* The footer follows the transcript; desktop keeps it visible while reading history. */}
       <div
         data-slot="thread-dock"
         className="relative z-10 bg-background pt-1 pb-2 md:pt-1.5 md:pb-4"
       >
-        {/* Keep Jump reachable while the document-flow composer is below the viewport. */}
+        {/* Desktop places Jump above the sticky footer; phones keep it in the viewport. */}
         {scroll.pillVisible ? (
-          <div className="pointer-events-none fixed right-6 bottom-[calc(24px+env(safe-area-inset-bottom))] z-30 flex justify-center">
+          <div data-slot="thread-jump" className="pointer-events-none z-30 flex justify-center">
             <JumpToLatestPill onJump={scroll.jumpToLatest} />
           </div>
         ) : null}
-        <div className="mx-auto flex w-full max-w-[var(--measure)] flex-col gap-1.5 px-[14px] md:gap-2.5 md:px-16">
+        <div data-slot="thread-footer-content" className="mx-auto flex w-full max-w-[var(--measure)] flex-col gap-1.5 px-[14px] md:gap-2.5 md:px-16">
           {/* Keyed by run id, like the docks it replaced: the route survives a task change, so
               an unkeyed dock would carry the previous run's collapse state — its own and every
               nested section's — into the next one. */}
