@@ -979,5 +979,28 @@ describe('ScheduleRunner once (#1465)', () => {
       expect(await runner.runNow(definition)).toMatchObject({ result: 'manual', runId: 'run-1' });
       expect(store.get('nightly')?.archived).toMatchObject({ outcome: 'launched', runId: 'run-1', trigger: 'manual' });
     });
+
+    it('a launch whose launched receipt fails to write is archived from its run by the next action', async () => {
+      const { store, definition, runner, launch, clock, runs } = await crashSetup();
+      let runId = '';
+      launch.mockImplementationOnce(async (...args: unknown[]) => {
+        const [, occurrence, receiptId] = args as [unknown, { at: string }, string];
+        runId = runs.createRun({ title: 't', workflow: 'quick-task', task: 'x', steps: [], automationTrigger: { automationId: 'nightly', automationRevision: 1, receiptId, trigger: 'manual', occurrenceAt: occurrence.at } }).id;
+        return { runId };
+      });
+      const writer = store as unknown as { appendNdjson(file: string, value: unknown): void };
+      const write = writer.appendNdjson.bind(store);
+      vi.spyOn(writer, 'appendNdjson').mockImplementation((file, value) => {
+        if ((value as { status?: string }).status === 'launched') throw new Error('disk full');
+        write(file, value);
+      });
+      clock.set(FIRST_RUN - HOUR);
+      await expect(runner.runNow(definition)).rejects.toThrow('disk full');
+      vi.mocked(writer.appendNdjson).mockRestore();
+      expect(store.latestReceipts().get(KEY)?.status).toBe('reserved');
+      expect((await runner.runNow(store.get('nightly') as ScheduleAutomationDefinition)).result).toBe('duplicate');
+      expect(launch).toHaveBeenCalledTimes(1);
+      expect(store.get('nightly')?.archived).toMatchObject({ outcome: 'launched', runId });
+    });
   });
 });

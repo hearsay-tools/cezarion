@@ -353,13 +353,18 @@ export class AutomationStore {
   }
 
   appendReceipt(receipt: AutomationReceipt): void {
-    this.appendNdjson(RECEIPTS, redactDeep(automationReceiptSchema.parse(receipt), this.secrets));
     const key = resolve(this.dataDir);
     const pending = inFlightReservations.get(key) ?? new Set<string>();
-    if (receipt.status === 'reserved') pending.add(receipt.receiptId);
-    else pending.delete(receipt.receiptId);
-    if (pending.size) inFlightReservations.set(key, pending);
-    else inFlightReservations.delete(key);
+    try {
+      this.appendNdjson(RECEIPTS, redactDeep(automationReceiptSchema.parse(receipt), this.secrets));
+      if (receipt.status === 'reserved') pending.add(receipt.receiptId);
+    } finally {
+      // A settling write ends the launch even when it fails: the reservation it leaves on disk
+      // is then a crash leftover, which reconciliation settles from the run store.
+      if (receipt.status !== 'reserved') pending.delete(receipt.receiptId);
+      if (pending.size) inFlightReservations.set(key, pending);
+      else inFlightReservations.delete(key);
+    }
   }
 
   /** This process reserved the receipt and its launch has not settled (see `inFlightReservations`). */
