@@ -228,6 +228,8 @@ function markStopped(root, pid) {
     // A later boot owns a descriptor naming another app; leave it alone.
     if (descriptor?.app?.pid !== pid) return;
     descriptor.status = 'stopped';
+    // The pid is free for reuse now: teardown_stale and test-env-down.sh must not signal it.
+    delete descriptor.app.pid;
     writeFileSync(file, JSON.stringify(descriptor, null, 2) + '\n');
   } catch { /* absent or corrupt: test-env-up.sh treats it as stale */ }
 }

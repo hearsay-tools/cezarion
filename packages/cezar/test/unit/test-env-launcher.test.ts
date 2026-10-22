@@ -1002,7 +1002,10 @@ test('an idle server with no lease holder exits and its descriptor reads stopped
   const watcher = await watcherPid(root);
   await waitForExit(pid, 'server', () => watchLog(root));
   await waitForExit(watcher, 'watcher', () => watchLog(root));
-  assert.equal(JSON.parse(readFileSync(join(root, '.ai/qa/test-env.json'), 'utf8')).status, 'stopped');
+  const stopped = JSON.parse(readFileSync(join(root, '.ai/qa/test-env.json'), 'utf8'));
+  assert.equal(stopped.status, 'stopped');
+  // A later teardown must never signal the freed pid.
+  assert.equal(stopped.app.pid, undefined);
   assert.match(watchLog(root), new RegExp(`stopping cezar pid ${pid}: idle`));
 });
 
