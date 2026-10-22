@@ -345,7 +345,15 @@ fact; the receipt log is the truth. Every write path checks it:
   (outcome `launched`, from the receipt), answers as for an archived schedule, and launches nothing.
 - Crash before the launched receipt: the receipt stays `reserved`. The existing
   `reconcileAutomationReceipts` settles it to `launched` (a run claims it; then the invariant above
-  archives) or `launch-error` (then the schedule is **failed**, retryable).
+  archives) or `launch-error` (then the schedule is **failed**, retryable). Reconciliation writes the
+  Failed state itself (paused, `onceOutcome: 'failed'`, no `nextRunAt`), so no timer relaunches it
+  unasked.
+- A run carries its receipt from the row that creates it: `startRun` takes the provenance and
+  `createRun` writes it in the same commit, so "a run claims it" holds even after a crash between
+  task creation and any later write.
+- Every one-time write and the timer settle first (`ScheduleRunner.settleOnce`): a `reserved`
+  receipt no launch here is running is reconciled before the write, the cutoff decision or a launch.
+  This covers a reservation another cockpit left after this one booted, which boot never saw.
 
 Archiving the schedule never archives, approves or otherwise touches the task. The task follows the
 ordinary review gate.
