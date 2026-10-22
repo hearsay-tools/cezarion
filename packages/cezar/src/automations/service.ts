@@ -447,6 +447,8 @@ export function createAutomationService(deps: AutomationServiceDeps) {
       if (!current) return fail(404, 'not found');
       if (!isOnceSchedule(current)) return fail(409, ONCE_ONLY_CANCEL);
       return underOnceLease(project, id, (fresh) => {
+        // Re-read under the lease: another cockpit may have made it recurring since the read above.
+        if (!isOnceSchedule(fresh)) return fail(409, ONCE_ONLY_CANCEL);
         const automation = store.archive(fresh.id, { at: new Date(now()).toISOString(), outcome: 'cancelled' });
         if (!automation) return fail(409, ONCE_ARCHIVED);
         changed(project, automation);

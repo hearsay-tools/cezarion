@@ -108,4 +108,12 @@ describe('one-time writes that race or keep the due time (#1465 review)', () => 
     const saved = await service.update(project, stored.id, { name: stored.name, enabled: false, kind: 'schedule', schedule: { type: 'once', at: '2026-10-20T09:00', timeZone: 'UTC', latestStartMinutes: 30 }, task: stored.task, expectedRevision: stored.revision });
     expect(saved).toMatchObject({ ok: true, automation: { schedule: { latestStartMinutes: 30 } } });
   });
+
+  it('cancel refuses a schedule another cockpit changed to recurring before the lease', async () => {
+    const { service, project, automationStore } = fixture();
+    const stored = automationStore.create({ name: 'Daily', enabled: false, kind: 'schedule', schedule: { type: 'daily', hour: 4 }, task: { prompt: 'Go' } });
+    vi.spyOn(automationStore, 'get').mockReturnValueOnce({ ...stored, schedule: { type: 'once', at: '2026-10-29T09:00', timeZone: 'UTC' } } as AutomationDefinition);
+    await expect(service.cancel(project, stored.id)).resolves.toMatchObject({ ok: false, status: 409 });
+    expect(automationStore.get(stored.id)?.archived).toBeUndefined();
+  });
 });
