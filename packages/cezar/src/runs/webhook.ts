@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { ApiRun, RunStatus, WebhookTrigger } from '@open-mercato/cezar-contract';
 import { DEFAULT_WEBHOOK_TRIGGERS, deriveWebhookState, type AttentionInput } from '@open-mercato/cezar-contract/attention';
 import { asksQuestion } from '@open-mercato/cezar-contract/waits';
-import { projectStatus } from '../task-cli/projections.ts';
+import { projectStatus, type PendingQuestion } from '../task-cli/projections.ts';
 import { loadWorkspaceConfig } from '../workspace/config.ts';
 import { deriveRunContextEvents } from './event-history.ts';
 import type { RunRecord, RunStore } from './store.ts';
@@ -239,10 +239,11 @@ export class TaskWebhook {
     };
   }
 
-  private async pendingQuestion(runId: string): Promise<unknown> {
+  private async pendingQuestion(runId: string): Promise<PendingQuestion | undefined> {
     try {
       const context = await deriveRunContextEvents(this.options.dataDir, runId);
-      return [...context.contextEvents].reverse().find((event) => event.type === 'ask.requested')?.questions;
+      const ask = [...context.contextEvents].reverse().find((event) => event.type === 'ask.requested');
+      return ask ? { questions: ask.questions, context: ask.context } : undefined;
     } catch {
       return undefined;
     }

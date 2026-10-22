@@ -23,7 +23,7 @@ import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { runnerFlag, skillFlagIssue, skillTaskSteps } from '../workflows/types.ts';
 import { discoverCockpit, type DiscoverOptions } from './discovery.ts';
 import { handoffUrl, invalidResponse, refuse, request, TaskCliError, threadUrl, type Cockpit } from './http.ts';
-import { projectListRow, projectStatus } from './projections.ts';
+import { projectListRow, projectStatus, type PendingQuestion } from './projections.ts';
 import { DEFAULT_WAIT_UNTIL, readLog, requestRunSummaries, waitForRuns, type WaitMode, type WaitUntil } from './watch.ts';
 
 /**
@@ -180,7 +180,7 @@ const ATTENTION_HELP = [
   '  `attentionLabel` (its phrase), derived by the same function as the cockpit\'s Needs You.',
   '  Read those, not the raw status:',
   '  - `waiting` is attention even when no question is pending (a finished turn parks the task);',
-  '    a pending question also shows as `question` on status.',
+  '    a pending question also shows as `question` on status, its context as `questionContext`.',
   '  - `waiting` on its own open CI or timer wait (attentionLabel "waiting for CI" or "monitoring")',
   '    is neither settled nor attention: the agent is still watching what it registered. attention: running.',
   '  - a task parked on its own workers ("waiting on 2 workers") is attention: none; keep waiting.',
@@ -430,12 +430,12 @@ async function refuseWorkerNotify(cockpit: Cockpit, id: string): Promise<void> {
 }
 
 /** The latest valid unanswered question, from the same derivation the cockpit renders. */
-async function pendingQuestion(cockpit: Cockpit, id: string): Promise<unknown> {
+async function pendingQuestion(cockpit: Cockpit, id: string): Promise<PendingQuestion | undefined> {
   const result = await request(cockpit, `/runs/${encodeURIComponent(id)}/history-context`);
   const context = runHistoryContextSchema.safeParse(result.data);
   if (result.status !== 200 || !context.success) return undefined;
   const ask = [...context.data.contextEvents].reverse().find((event) => event.type === 'ask.requested');
-  return ask?.questions;
+  return ask ? { questions: ask.questions, context: ask.context } : undefined;
 }
 
 type Values = Record<string, string | boolean | undefined>;
