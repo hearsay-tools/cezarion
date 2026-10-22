@@ -71,7 +71,9 @@ const PROJECT_ACTIONS: Record<string, string> = {
 function sessionActionsFor(state: VoiceEngineState): Record<string, string> {
   return {
     respond:
-      'Reply to the agent of the open task, in any wording: "answer that …", "tell it …", "reply …", "say …", "message it …", "change question two to …", or only the answer words while a question card is shown.',
+      // "Pass words on" rather than "reply": Jev read an instruction ("tell it to run the tests") as
+      // no reply at all, at 0.2–0.36 (hearsay-tools/cezarion#1463 live replay).
+      'Pass words on to the agent working in the open task. This covers every reply, answer, message or instruction meant for the agent, however it is worded: "answer that …", "tell it …", "tell it to …", "reply …", "say …", "message it …", "change question two to …", or only the answer words while a question card is shown.',
     ...(state.pendingProposal !== undefined
       ? {
           confirm: 'Confirm the pending proposal, for example "yes, confirmed".',
