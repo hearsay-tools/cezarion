@@ -43,6 +43,20 @@ describe('schedule-task route', () => {
     expect(scheduleTask).toHaveBeenCalledOnce();
   });
 
+  // Review of #1465: the cap is in bytes, the prompt limit in characters. A prompt of 100 000
+  // three-byte or JSON-escaped characters is valid and must reach the handler, on create and update.
+  it.each([['CJK', '漢'], ['escaped control', '\u0001']])('accepts a 100 000-character %s prompt on create and update', async (_kind, char) => {
+    vi.stubEnv('CEZ_AUTOMATIONS', '1');
+    const scheduleTask = vi.fn(async () => created);
+    const scheduledTasks = vi.fn(async () => listed);
+    const { env } = await session({ scheduleTask, scheduledTasks });
+    const prompt = char.repeat(100_000);
+    await expect(callScheduleTask({ ...valid, prompt }, env)).resolves.toEqual(created);
+    await expect(callScheduledTasks({ action: 'update', id: 'a1', prompt }, env)).resolves.toEqual(listed);
+    expect(scheduleTask).toHaveBeenCalledOnce();
+    expect(scheduledTasks).toHaveBeenCalledOnce();
+  });
+
   it('refuses at plus delay with invalid_request naming the field', async () => {
     vi.stubEnv('CEZ_AUTOMATIONS', '1');
     const scheduleTask = vi.fn(async () => created);

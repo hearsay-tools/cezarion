@@ -12,8 +12,12 @@ import { isRealOnceAt } from './automation-schedule.ts';
  * (`schedule.type: 'once'`); these shapes are the agent's view of it.
  */
 
-/** Request and answer sizes of the two tools: a 100 000-character prompt and a list of 50. */
-export const SCHEDULED_TASK_LIMITS = { prompt: 100_000, list: 50, wireBytes: 262_144 } as const;
+/**
+ * Request and answer sizes of the two tools: a 100 000-character prompt and a list of 50. The
+ * request cap is in bytes: one UTF-16 unit of the prompt can take six bytes on the wire (`\u0001`
+ * escaped, or a lone surrogate), so 600 000 for the prompt plus the short fields fits 1 MiB.
+ */
+export const SCHEDULED_TASK_LIMITS = { prompt: 100_000, list: 50, wireBytes: 1_048_576 } as const;
 
 const DURATION = /^(\d+)\s*([mhd])$/;
 const durationField = z.string().regex(DURATION, 'a duration such as 30m, 6h or 7d');

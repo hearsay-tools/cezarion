@@ -275,7 +275,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
     })
     // A prompt takes up to 100 000 characters, so these bodies get their own limit. The flag gate
     // runs before validation: off means off, whatever the body.
-    .post('/api/v1/tools/schedule-task', bodyLimit({ maxSize: SCHEDULED_TASK_LIMITS.wireBytes, onError: c => c.json(scheduleRefusal('invalid_request', 'The arguments exceed 256 KiB.')) }), async (c, next) => {
+    .post('/api/v1/tools/schedule-task', bodyLimit({ maxSize: SCHEDULED_TASK_LIMITS.wireBytes, onError: c => c.json(scheduleRefusal('invalid_request', 'The arguments exceed 1 MiB.')) }), async (c, next) => {
       if (!automationsToolEnabled()) return c.json(scheduleRefusal('automations_off'));
       await next();
     }, jsonZodValidator(scheduleTaskRequestSchema, { invalid: (c, error) => c.json(scheduleRefusal('invalid_request', scheduleInvalidInput(error))) }), async c => {
@@ -296,7 +296,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       c.set('capability', capability);
       await next();
     })
-    .post('/api/v1/tools/scheduled-tasks', bodyLimit({ maxSize: SCHEDULED_TASK_LIMITS.wireBytes, onError: c => c.json(scheduleRefusal('invalid_request', 'The arguments exceed 256 KiB.')) }), async (c, next) => {
+    .post('/api/v1/tools/scheduled-tasks', bodyLimit({ maxSize: SCHEDULED_TASK_LIMITS.wireBytes, onError: c => c.json(scheduleRefusal('invalid_request', 'The arguments exceed 1 MiB.')) }), async (c, next) => {
       if (!automationsToolEnabled()) return c.json(scheduleRefusal('automations_off'));
       await next();
     }, jsonZodValidator(scheduledTasksRequestSchema, { invalid: (c, error) => c.json(scheduleRefusal('invalid_request', scheduleInvalidInput(error))) }), async c => {
