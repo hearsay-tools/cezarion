@@ -4,7 +4,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
-import type { RunManager } from '../workflows/run.ts';
+import type { RunManager, StartRunInput } from '../workflows/run.ts';
+import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { launchAutomationRun, launchScheduledRun, rebaselineIdleAutomations, reconcileAutomationReceipts, renderAutomationTask, renderScheduleTask, validateAutomationPrompt } from './task-template.ts';
 import { AutomationStore } from './store.ts';
 import { ProjectAutomationScheduler } from './scheduler.ts';
@@ -72,8 +73,8 @@ it('does not overwrite a concurrent history-policy edit during idle rebaseline',
 
 function fakeManager(store: RunStore): RunManager {
   return {
-    startRun: (workflow: { name: string; steps: Array<{ id: string; name?: string; command?: string }> }, input: { task: string }) =>
-      store.createRun({ title: 'automation', workflow: workflow.name, task: input.task, steps: workflow.steps.map((step) => ({ id: step.id, name: step.name ?? step.id, kind: step.command ? 'check' as const : 'agent' as const })) }),
+    startRun: (workflow: { name: string; steps: Array<{ id: string; name?: string; command?: string }> }, input: Pick<StartRunInput, 'task' | 'automation' | 'automationTrigger'>) =>
+      store.createRun({ title: 'automation', workflow: workflow.name, task: input.task, automation: input.automation, automationTrigger: input.automationTrigger, steps: workflow.steps.map((step) => ({ id: step.id, name: step.name ?? step.id, kind: step.command ? 'check' as const : 'agent' as const })) }),
   } as unknown as RunManager;
 }
 
@@ -96,8 +97,8 @@ describe('automation task templates', () => {
     try {
       const store = RunStore.open(join(root, '.ai/cezar'));
       const manager = {
-        startRun: (workflow: { name: string; steps: Array<{ id: string; name?: string; command?: string }> }, input: { task: string }) =>
-          store.createRun({ title: 'automation', workflow: workflow.name, task: input.task, steps: workflow.steps.map((step) => ({ id: step.id, name: step.name ?? step.id, kind: step.command ? 'check' as const : 'agent' as const })) }),
+        startRun: (workflow: { name: string; steps: Array<{ id: string; name?: string; command?: string }> }, input: Pick<StartRunInput, 'task' | 'automation' | 'automationTrigger'>) =>
+          store.createRun({ title: 'automation', workflow: workflow.name, task: input.task, automation: input.automation, automationTrigger: input.automationTrigger, steps: workflow.steps.map((step) => ({ id: step.id, name: step.name ?? step.id, kind: step.command ? 'check' as const : 'agent' as const })) }),
       } as unknown as RunManager;
       const launched = await launchAutomationRun({ root, manager, store, definition: { ...definition, task: { ...definition.task, workflow: 'quick-task' } }, candidate, receiptId: 'receipt' });
       expect(store.getRun(launched.runId)?.automation).toEqual({ automationId: 'one', automationRevision: 1, receiptId: 'receipt', event: 'issue.opened', githubUrl: candidate.url });
@@ -286,6 +287,27 @@ describe('automation task templates', () => {
       expect(run?.automationTrigger).toEqual({ automationId: 'nightly', automationRevision: 2, receiptId: 'receipt', trigger: 'schedule', occurrenceAt: occurrence.at });
       expect(run?.automation).toBeUndefined();
       expect(run?.task).toContain('scheduled for: 2026-10-02 04:00 UTC');
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
+  // Review of #1465: a crash right after the task row commits must still leave its receipt on
+  // that row, or reconciliation reads launch-error and a retry starts a second task.
+  it('commits the receipt provenance in the task row that creates the run (#1465)', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cezar-template-'));
+    try {
+      const store = RunStore.open(join(root, '.ai/cezar'));
+      const manager = createFixtureManager(store, root);
+      const created = vi.spyOn(store, 'createRun');
+      // Every later write fails: the process "crashes" right after the creating commit.
+      vi.spyOn(store, 'updateRun').mockImplementation(() => { throw new Error('crash after create'); });
+      await expect(launchScheduledRun({ root, manager, store, definition: scheduled, occurrence, receiptId: 'receipt', projectName: 'demo', timeZone: 'UTC' })).rejects.toThrow('crash after create');
+      const runId = created.mock.results[0]?.value.id as string;
+      expect(store.getRun(runId)?.automationTrigger).toMatchObject({ automationId: 'nightly', receiptId: 'receipt' });
+      created.mockClear();
+      await expect(launchAutomationRun({ root, manager, store, definition: { ...definition, task: { ...definition.task, workflow: 'quick-task' } }, candidate, receiptId: 'gh-receipt' })).rejects.toThrow('crash after create');
+      expect(store.getRun(created.mock.results[0]?.value.id as string)?.automation).toMatchObject({ automationId: 'one', receiptId: 'gh-receipt' });
+      vi.restoreAllMocks();
+      await drainFixtureManagers(root);
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 

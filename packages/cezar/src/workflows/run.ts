@@ -797,6 +797,10 @@ export interface StartRunInput {
    *  and make the task bubble render the stack's images as its own. In-memory
    *  only: rebuilt from the record on every hydration, never persisted. */
   stackedImages?: ContentBlock[];
+  /** Automation provenance (hearsay-tools/cezarion#1465). Written by `createRun` in the row that
+   *  creates the run, so a receipt never points at nothing after a crash. */
+  automation?: RunRecord['automation'];
+  automationTrigger?: RunRecord['automationTrigger'];
 }
 
 /**
@@ -2983,6 +2987,8 @@ export class RunManager {
       variant: group?.variant,
       clientRequestId: clientRequest?.id,
       clientRequestHash: clientRequest?.hash,
+      automation: input.automation,
+      automationTrigger: input.automationTrigger,
       steps: workflow.steps.map((s) => ({ id: s.id, name: s.name ?? s.id, kind: stepKind(s) })),
     });
     // Persist the full definition so a queued run survives a restart (#367) —

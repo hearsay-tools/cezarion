@@ -99,8 +99,10 @@ async function resolveWorkflow(root: string, definition: AutomationDefinition): 
   return workflow;
 }
 
-function startRuns(manager: RunManager, workflow: WorkflowDef, definition: AutomationDefinition, task: string) {
+/** `provenance` rides on the input, so the row that creates each run already carries its receipt. */
+function startRuns(manager: RunManager, workflow: WorkflowDef, definition: AutomationDefinition, task: string, provenance: Pick<StartRunInput, 'automation' | 'automationTrigger'>) {
   const input: StartRunInput = {
+    ...provenance,
     task,
     model: definition.task.model,
     effort: definition.task.effort,
@@ -135,7 +137,6 @@ export async function launchAutomationRun(options: {
     const existing = options.store.findNonArchivedRunByIssue(candidate.repo, candidate.number);
     if (existing) return { runId: existing, existing: true };
   }
-  const runs = startRuns(options.manager, workflow, definition, renderAutomationTask(definition, candidate));
   const provenance = {
     automationId: definition.id,
     automationRevision: definition.revision,
@@ -143,7 +144,7 @@ export async function launchAutomationRun(options: {
     event: candidate.event,
     githubUrl: candidate.url,
   };
-  for (const run of runs) options.store.updateRun(run.id, { automation: provenance });
+  const runs = startRuns(options.manager, workflow, definition, renderAutomationTask(definition, candidate), { automation: provenance });
   const first = runs[0];
   if (!first) throw new Error('run manager did not create a run');
   return { runId: first.id };
@@ -166,7 +167,6 @@ export async function launchScheduledRun(options: {
   const { definition, occurrence } = options;
   const workflow = await resolveWorkflow(options.root, definition);
   const task = renderScheduleTask(definition, occurrence, { projectName: options.projectName, timeZone: options.timeZone });
-  const runs = startRuns(options.manager, workflow, definition, task);
   const provenance = {
     automationId: definition.id,
     automationRevision: definition.revision,
@@ -174,7 +174,7 @@ export async function launchScheduledRun(options: {
     trigger: PROVENANCE_TRIGGER[occurrence.trigger],
     occurrenceAt: occurrence.at,
   };
-  for (const run of runs) options.store.updateRun(run.id, { automationTrigger: provenance });
+  const runs = startRuns(options.manager, workflow, definition, task, { automationTrigger: provenance });
   const first = runs[0];
   if (!first) throw new Error('run manager did not create a run');
   return { runId: first.id };
