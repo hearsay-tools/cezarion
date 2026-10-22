@@ -27,10 +27,12 @@ describe('cezar-ci MCP server instructions', () => {
       for (const tool of tools) expect(lines.some(line => line.startsWith(`- ${tool.name}:`))).toBe(true);
       expect(lines.some(line => line.startsWith('- cezar_wait_for_ci:'))).toBe(false);
       expect(lines.find(line => line.startsWith('- cezar_wait:'))).toMatch(/waiting on CI for a PR/);
-      expect(lines.find(line => line.startsWith('- cezar_ask:'))).toMatch(/you need the user/);
-      // A trigger line names a situation, never the schema.
+      expect(lines.find(line => line.startsWith('- cezar_ask:'))).toMatch(/user decision or missing input; provide the full draft/);
+      // A trigger line names a situation, never the schema. One exception: research task 77dfb5c4
+      // tested the cezar_ask trigger that names its context field (hearsay-tools/cezarion#1458).
       for (const { definition } of cezarTools({ CEZ_PREVIEW: '1' })) {
-        for (const key of Object.keys(definition.inputSchema.properties ?? {})) expect(instructions).not.toMatch(new RegExp(`\\b${key}\\b`));
+        const keys = Object.keys(definition.inputSchema.properties ?? {}).filter(key => !(definition.name === 'cezar_ask' && key === 'context'));
+        for (const key of keys) expect(instructions).not.toMatch(new RegExp(`\\b${key}\\b`));
       }
     } finally { await close(); }
   });

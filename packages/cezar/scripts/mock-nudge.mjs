@@ -11,6 +11,8 @@ import { FINAL_MESSAGE_NUDGE_PREFIX as NUDGE, silentTailOpened } from './mock-si
 
 export const NO_WAIT_NUDGE_PREFIX = NUDGE;
 const QUESTIONS = [{ header: 'Next step', question: 'How should I continue?', options: [{ label: 'Keep going' }, { label: 'Stop here' }] }];
+// hearsay-tools/cezarion#1458: cezar_ask requires the context the user reads above the card.
+const CONTEXT = 'The task stopped without a next step.';
 
 const messages = (texts) => `mock:turn-messages:${Buffer.from(JSON.stringify(texts)).toString('base64')}`;
 const base64url = (text) => Buffer.from(text).toString('base64url');
@@ -31,7 +33,7 @@ export function answerNudge(prompt) {
   if (!prompt.includes(NUDGE) || silentTailOpened()) return prompt;
   if (process.env.CEZ_MOCK_NUDGE_REPLY === 'plain') return messages(['Nothing more to add.']);
   if (prompt.includes('CEZ:ASK')) return messages([`I need your call on the next step.\n\nCEZ:ASK ${JSON.stringify({ questions: QUESTIONS })}`]);
-  return `mock:cezar-tool cezar_ask ${base64url(JSON.stringify({ questions: QUESTIONS }))} mock:then ${base64url('I asked how to continue.')}`;
+  return `mock:cezar-tool cezar_ask ${base64url(JSON.stringify({ context: CONTEXT, questions: QUESTIONS }))} mock:then ${base64url('I asked how to continue.')}`;
 }
 
 /** OpenCode's prompt body: its text parts, joined, are the prompt. */

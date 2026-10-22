@@ -317,21 +317,22 @@ describe('human waits', () => {
 // hearsay-tools/cezarion#1234: the user is asked with its own tool, which always carries a card.
 describe('cezar_ask', () => {
   it('requires a card within the ask bounds and takes nothing else', () => {
-    expect(cezarAskRequestSchema.parse({ questions: CARD })).toEqual({ questions: CARD });
+    expect(cezarAskRequestSchema.parse({ context: 'c', questions: CARD })).toEqual({ context: 'c', questions: CARD });
     expect(cezarAskRequestSchema.safeParse({}).success).toBe(false);
-    expect(cezarAskRequestSchema.safeParse({ questions: [] }).success).toBe(false);
+    expect(cezarAskRequestSchema.safeParse({ questions: CARD }).success).toBe(false);
+    expect(cezarAskRequestSchema.safeParse({ context: 'c', questions: [] }).success).toBe(false);
     const five = Array.from({ length: 5 }, (_, n) => ({ ...CARD[0]!, question: `Question ${n}?` }));
-    expect(cezarAskRequestSchema.safeParse({ questions: five }).success).toBe(false);
-    expect(cezarAskRequestSchema.safeParse({ kind: 'human', questions: CARD }).success).toBe(false);
+    expect(cezarAskRequestSchema.safeParse({ context: 'c', questions: five }).success).toBe(false);
+    expect(cezarAskRequestSchema.safeParse({ kind: 'human', context: 'c', questions: CARD }).success).toBe(false);
   });
 
   it('takes an open question as a question without options', () => {
     const open = [{ header: 'Name', question: 'What should the command be called?' }];
-    expect(cezarAskRequestSchema.parse({ questions: open })).toEqual({ questions: open });
-    expect(cezarAskRequestSchema.parse({ questions: [...CARD, ...open] }).questions).toHaveLength(2);
+    expect(cezarAskRequestSchema.parse({ context: 'c', questions: open })).toEqual({ context: 'c', questions: open });
+    expect(cezarAskRequestSchema.parse({ context: 'c', questions: [...CARD, ...open] }).questions).toHaveLength(2);
     // A list of options keeps its bounds: an empty or one-option list is not an open question.
-    expect(cezarAskRequestSchema.safeParse({ questions: [{ ...open[0], options: [] }] }).success).toBe(false);
-    expect(cezarAskRequestSchema.safeParse({ questions: [{ ...open[0], options: [{ label: 'Only' }] }] }).success).toBe(false);
+    expect(cezarAskRequestSchema.safeParse({ context: 'c', questions: [{ ...open[0], options: [] }] }).success).toBe(false);
+    expect(cezarAskRequestSchema.safeParse({ context: 'c', questions: [{ ...open[0], options: [{ label: 'Only' }] }] }).success).toBe(false);
   });
 
   it('answers with the wait id and the open waits, or a refusal the agent can act on', () => {

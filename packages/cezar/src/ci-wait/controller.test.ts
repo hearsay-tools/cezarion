@@ -260,8 +260,8 @@ describe('private wait routes', () => {
   });
 
   // hearsay-tools/cezarion#1234: `cezar_ask` is the same shape of route; its card is required.
-  const card = { questions: [{ header: 'Area', question: 'Which area?', options: [{ label: 'Parser' }, { label: 'Lexer' }] }, { header: 'Name', question: 'What should it be called?' }] };
-  const askTail = 'The user never sees a rejected call: send longer context (a draft, findings, an explanation) as assistant text before you call cezar_ask, and keep each question short. cezar_ask takes only questions: 1–4 questions with unique texts, each with a header of 1–12 characters, a question of 1–400 characters, an optional id of 1–64 characters, and either 2–4 options with unique labels of 1–60 characters and descriptions of at most 280 characters, or no options for an open question.';
+  const card = { context: '## Findings\n\n- one', questions: [{ header: 'Area', question: 'Which area?', options: [{ label: 'Parser' }, { label: 'Lexer' }] }, { header: 'Name', question: 'What should it be called?' }] };
+  const askTail = 'The user never sees a rejected call. Put the draft, findings, evidence and option meanings in context, and keep each question short. cezar_ask takes context and questions: context of 1–20000 characters of Markdown, shown above the card, and 1–4 questions with unique texts, each with a header of 1–12 characters, a question of 1–400 characters, an optional id of 1–64 characters, and either 2–4 options with unique labels of 1–60 characters and descriptions of at most 280 characters, or no options for an open question.';
   it('POST /tools/ask routes the card to the ask handler and answers its refusal with 200', async () => {
     const ask = vi.fn(async (): Promise<CezarAskAnswer> => asked);
     const session = (await controller()).provision(handlers({ ask }));
@@ -285,11 +285,11 @@ describe('private wait routes', () => {
   it('POST /tools/ask answers a call without a card with invalid_request, and cezar_wait points the old human kind at it', async () => {
     const ask = vi.fn(async (): Promise<CezarAskAnswer> => asked); const register = vi.fn(async () => registered);
     const session = (await controller()).provision(handlers({ ask, registerWait: register }));
-    expect(await callCezarAsk({}, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions\` must be a list of 1–4 questions with unique texts. ${askTail}` });
-    expect(await callCezarAsk({ questions: [{ header: 'Area', question: 'Which?', options: [{ label: 'Only' }] }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.options\` must be 2–4 options with unique labels, or left out for an open question. ${askTail}` });
+    expect(await callCezarAsk({}, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`context\` must be 1–20000 characters of Markdown; \`questions\` must be a list of 1–4 questions with unique texts. ${askTail}` });
+    expect(await callCezarAsk({ context: 'c', questions: [{ header: 'Area', question: 'Which?', options: [{ label: 'Only' }] }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.options\` must be 2–4 options with unique labels, or left out for an open question. ${askTail}` });
     expect(await callCezarAsk({ kind: 'human', ...card }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `Unknown field "kind". ${askTail}` });
     expect(JSON.parse((await raw(session.env, '{', undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
-    expect(JSON.parse((await raw(session.env, ' '.repeat(16385), undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
+    expect(JSON.parse((await raw(session.env, ' '.repeat(131_073), undefined, 'ask')).body)).toMatchObject({ ok: false, code: 'invalid_request' });
     expect(await callCezarWait({ kind: 'human', ...card }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: '`kind` must be "ci", "worker" or "timer"; ask the user with cezar_ask.' });
     expect(ask).not.toHaveBeenCalled();
     expect(register).not.toHaveBeenCalled();
@@ -300,28 +300,44 @@ describe('private wait routes', () => {
   // context belongs. The replay is task 18e7e981: the findings sat in a 785-character question
   // under a 13-character header, the agent fixed one field per rejection, then asked about
   // findings "listed above" that it never sent as assistant text.
-  it('POST /tools/ask names every failing field with its limit, and points longer context to assistant text', async () => {
+  it('POST /tools/ask names every failing field with its limit, and points longer context to the context field', async () => {
     const ask = vi.fn(async (): Promise<CezarAskAnswer> => asked);
     const session = (await controller()).provision(handlers({ ask }));
     const findings = 'F'.repeat(785);
     const options = [{ label: 'All' }, { label: 'None' }];
-    expect(await callCezarAsk({ questions: [{ header: 'File friction', question: findings, options }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.header\` must be 1–12 characters; \`questions.0.question\` must be 1–400 characters. ${askTail}` });
-    expect(await callCezarAsk({ questions: [{ header: 'Friction', question: findings, options }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.question\` must be 1–400 characters. ${askTail}` });
-    expect(await callCezarAsk({ questions: [{ header: 'Area', question: 'Which?', options: [{ label: 'L'.repeat(61), description: 'D'.repeat(281) }, { label: 'B' }] }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.options.0.label\` must be 1–60 characters; \`questions.0.options.0.description\` must be at most 280 characters. ${askTail}` });
-    expect(await callCezarAsk({ questions: [{ header: '', question: 'Which?', id: '' }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.id\` must be 1–64 characters; \`questions.0.header\` must be 1–12 characters. ${askTail}` });
-    expect(await callCezarAsk({ questions: ['which?'] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0\` must be an object with a header and a question. ${askTail}` });
+    expect(await callCezarAsk({ context: 'c', questions: [{ header: 'File friction', question: findings, options }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.header\` must be 1–12 characters; \`questions.0.question\` must be 1–400 characters. ${askTail}` });
+    expect(await callCezarAsk({ context: 'c', questions: [{ header: 'Friction', question: findings, options }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.question\` must be 1–400 characters. ${askTail}` });
+    expect(await callCezarAsk({ context: 'c', questions: [{ header: 'Area', question: 'Which?', options: [{ label: 'L'.repeat(61), description: 'D'.repeat(281) }, { label: 'B' }] }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.options.0.label\` must be 1–60 characters; \`questions.0.options.0.description\` must be at most 280 characters. ${askTail}` });
+    expect(await callCezarAsk({ context: 'c', questions: [{ header: '', question: 'Which?', id: '' }] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0.id\` must be 1–64 characters; \`questions.0.header\` must be 1–12 characters. ${askTail}` });
+    expect(await callCezarAsk({ context: 'c', questions: ['which?'] }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`questions.0\` must be an object with a header and a question. ${askTail}` });
     // Every failing field, however many: a capped list sends the agent into another rejection.
     const overlong = [0, 1, 2, 3].map(index => ({ header: `Header ${index} too long`, question: `${index}${findings}` }));
-    expect(await callCezarAsk({ questions: overlong }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `${[0, 1, 2, 3].map(index => `\`questions.${index}.header\` must be 1–12 characters; \`questions.${index}.question\` must be 1–400 characters`).join('; ')}. ${askTail}` });
+    expect(await callCezarAsk({ context: 'c', questions: overlong }, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `${[0, 1, 2, 3].map(index => `\`questions.${index}.header\` must be 1–12 characters; \`questions.${index}.question\` must be 1–400 characters`).join('; ')}. ${askTail}` });
     expect(await callCezarAsk([], session.env)).toEqual({ ok: false, code: 'invalid_request', message: `The arguments must be a JSON object. ${askTail}` });
     // The message never echoes the value the agent sent.
-    expect(JSON.stringify(await callCezarAsk({ questions: [{ header: 'File friction', question: findings }] }, session.env))).not.toContain('FFFF');
+    expect(JSON.stringify(await callCezarAsk({ context: 'c', questions: [{ header: 'File friction', question: findings }] }, session.env))).not.toContain('FFFF');
     expect(ask).not.toHaveBeenCalled();
-    const short = { questions: [{ header: 'Friction', question: 'Which project friction findings (listed above) should I file on hearsay-tools/cezarion?', options }] };
+    const short = { context: 'c', questions: [{ header: 'Friction', question: 'Which project friction findings (listed above) should I file on hearsay-tools/cezarion?', options }] };
     await expect(callCezarAsk(short, session.env)).resolves.toEqual(asked);
     expect(ask).toHaveBeenLastCalledWith(short, expect.any(AbortSignal));
   });
 
+
+  // hearsay-tools/cezarion#1458: content in prose between tool calls may never reach the user, so
+  // the call itself carries it. A call without it is refused by name and limit.
+  it('POST /tools/ask refuses a card without context, and takes 20000 multi-byte characters of it', async () => {
+    const ask = vi.fn(async (): Promise<CezarAskAnswer> => asked);
+    const session = (await controller()).provision(handlers({ ask }));
+    const { context: _context, ...bare } = card;
+    expect(await callCezarAsk(bare, session.env)).toEqual({ ok: false, code: 'invalid_request', message: `\`context\` must be 1–20000 characters of Markdown. ${askTail}` });
+    expect(await callCezarAsk({ ...card, context: '' }, session.env)).toMatchObject({ ok: false, message: expect.stringContaining('`context` must be 1–20000 characters') });
+    expect(await callCezarAsk({ ...card, context: 'x'.repeat(20_001) }, session.env)).toMatchObject({ ok: false, message: expect.stringContaining('`context` must be 1–20000 characters') });
+    expect(ask).not.toHaveBeenCalled();
+    const long = { ...card, context: '"é\n'.repeat(6_666) + 'éé' };
+    expect(long.context).toHaveLength(20_000);
+    await expect(callCezarAsk(long, session.env)).resolves.toEqual(asked);
+    expect(ask).toHaveBeenLastCalledWith(long, expect.any(AbortSignal));
+  });
 });
 
 it.each([

@@ -836,20 +836,24 @@ message names `cezar_ask`. The tool advertises one flat object schema, because t
 tool API refuses a top-level union; the server validates the discriminated union. Every
 answer carries the wait id, its kind, its absolute deadline and `open_waits`.
 
-`cezar_ask({ questions })` waits for the user (hearsay-tools/cezarion#1234). `questions` is
-required: a card in the ask format, 1–4 questions, each with a header of at most 12
+`cezar_ask({ context, questions })` waits for the user (hearsay-tools/cezarion#1234). Both are
+required. `context` is 1–20,000 characters of Markdown that the cockpit shows above the card.
+`questions` is a card in the ask format, 1–4 questions, each with a header of at most 12
 characters, the question, and 2–4 options with unique labels. A question with its `options`
 left out is open: the cockpit shows only an answer field and sends `header: text`. An empty or
 one-option list is `invalid_request`, never an open question, and `multiSelect` applies only
 to options. The answer carries the wait id and `open_waits`, with no deadline. The ask line
-takes open questions too, since both share `askRequestSchema`.
+takes open questions too, since both share `askRequestSchema`. The ask line takes an optional
+`context`; native asks carry none.
 
-The user sees only the agent's assistant text and the card, never its reasoning or a tool
-call's arguments (hearsay-tools/cezarion#1428). So the lifecycle instructions, the tool
-description and its success hint tell the agent to send the full draft, findings or
-explanation as assistant text before it asks. An `invalid_request` names every failing field
-with its limit from `ASK_LIMITS`, and tells the agent to send the detail it cut as assistant
-text before it retries with a short question.
+On Claude, assistant text written between tool calls can reach Cezar only as a short server
+summary (hearsay-tools/cezarion#1458), and the user never sees the agent's reasoning or a
+rejected call's arguments (hearsay-tools/cezarion#1428). So the lifecycle instructions, the
+tool description and its hints tell the agent to put the full draft, findings, evidence and
+option meanings in `context`. Cezar stores `context` on the human wait and the
+`ask.requested` event, and a worker's routed question carries it to the parent. An
+`invalid_request` names every failing field with its limit from `ASK_LIMITS`, `context`
+included.
 
 At most 16 waits are open at once. A
 timer is refused with `timers_disabled` when `resources.monitoringWakeIntervalMinutes` is
