@@ -1038,6 +1038,19 @@ describe('GitHub automation API', () => {
       expect((await body(again)).error).toBe('this one-time schedule is archived');
     });
 
+    // Review of #1469: the scheduler status describes the whole project, not the filtered page.
+    it('?archived=only still reports the scheduler as scheduled with the next due time of the active schedules', async () => {
+      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const server = app({ automationStore });
+      const { automation: gone } = await body(await create(server, { ...onceInput(), enable: true }));
+      await apiRequest(server, `/api/v1/automations/${gone.id}/cancel`, { method: 'POST' });
+      await create(server, { ...onceInput(2 * 86_400_000, { name: 'Later' }), enable: true });
+      const active = await body(await apiRequest(server, '/api/v1/automations'));
+      const only = await body(await apiRequest(server, '/api/v1/automations?archived=only'));
+      expect(active.scheduler).toMatchObject({ state: 'scheduled' });
+      expect(only.scheduler).toEqual(active.scheduler);
+    });
+
     it('cancel while the lease is held answers 409 in-progress and changes nothing', async () => {
       const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
       const server = app({ automationStore });

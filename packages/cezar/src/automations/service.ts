@@ -257,14 +257,19 @@ export function createAutomationService(deps: AutomationServiceDeps) {
             },
           };
         });
-      const nextDue = automations.map((item) => item.nextRunAt).filter(Boolean).sort()[0];
+      // The scheduler describes the project, not this page: an `archived` filter must not hide
+      // the active schedules from it.
+      const active = automationStore.list().filter((automation) => automation.enabled);
+      const nextDue = active
+        .map((automation) => (automation.kind === 'schedule' ? automationStore.state(automation.id)?.nextRunAt : automationStore.state(automation.id)?.nextCheckAt))
+        .filter(Boolean).sort()[0];
       return {
         ...availability,
         timeZone: deps.timeZone(),
         scheduler: {
           // `as const` on both arms: in an object literal a conditional of two string literals
           // widens to `string`, which would erase the two states this key can hold.
-          state: automations.some((item) => item.enabled) ? ('scheduled' as const) : ('idle' as const),
+          state: active.length > 0 ? ('scheduled' as const) : ('idle' as const),
           ...(nextDue ? { nextDue } : {}),
         },
         automations,
