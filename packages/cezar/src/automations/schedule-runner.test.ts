@@ -902,5 +902,30 @@ describe('ScheduleRunner once (#1465)', () => {
       expect(launch).not.toHaveBeenCalled();
       expect(store.latestReceipts().get(KEY)).toMatchObject({ receiptId: 'lost', status: 'launch-error' });
     });
+
+    // Review of #1469: a launch-error receipt whose stop never landed (a crash right after it, or
+    // a failed log append) must not leave an enabled schedule that the timer relaunches by itself.
+    it('a launch-error receipt the failure never paused is marked Failed at the next fire, not relaunched', async () => {
+      const { store, definition, runner, launch, clock } = await crashSetup();
+      const at = iso(FIRST_RUN);
+      appendFileSync(join(store.dataDir, 'automation-receipts.ndjson'), `${JSON.stringify({ receiptId: 'errored', receiptKey: KEY, eventId: KEY.slice('nightly:'.length), automationId: 'nightly', revision: 1, status: 'launch-error', error: 'boom', occurrenceAt: at, observedAt: at, updatedAt: at })}\n`);
+      store.reload();
+      clock.set(FIRST_RUN + 1_000);
+      expect((await runner.fire(definition)).result).toBe('skipped');
+      expect(launch).not.toHaveBeenCalled();
+      expect(store.get('nightly')?.enabled).toBe(false);
+      expect(store.state('nightly')).toMatchObject({ onceOutcome: 'failed' });
+    });
+
+    it('a launch failure whose log append throws still pauses the schedule as Failed', async () => {
+      const { store, definition, runner, launch, clock } = await crashSetup();
+      launch.mockRejectedValueOnce(new Error('boom'));
+      vi.spyOn(store, 'appendLog').mockRejectedValueOnce(new Error('disk full'));
+      clock.set(FIRST_RUN + 1_000);
+      await expect(runner.fire(definition)).rejects.toThrow('disk full');
+      expect(store.latestReceipts().get(KEY)?.status).toBe('launch-error');
+      expect(store.get('nightly')?.enabled).toBe(false);
+      expect(store.state('nightly')).toMatchObject({ onceOutcome: 'failed' });
+    });
   });
 });

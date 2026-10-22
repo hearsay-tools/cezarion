@@ -253,6 +253,13 @@ export class ScheduleRunner {
     if (await this.settleOnce(definition)) return { result: 'duplicate', occurrenceAt };
     // Settling may have found a crash-lost launch and left the schedule Failed: no automatic exit.
     if (this.handle.store.get(definition.id)?.enabled === false) return { result: 'skipped', occurrenceAt };
+    // A launch error at this very revision was never followed by its stop (a crash between the two):
+    // no person has re-enabled it since, so it is Failed, which only Retry or Run now leaves.
+    const errored = this.handle.store.latestReceipts().get(`${definition.id}:${this.onceEventId(definition)}`);
+    if (errored?.status === 'launch-error' && errored.revision === definition.revision) {
+      this.stopOnce(definition.id, 'failed');
+      return { result: 'skipped', occurrenceAt };
+    }
     const cutoff = onceCutoff(definition.schedule);
     if (cutoff !== null && now > cutoff) {
       const minutes = Math.round((now - due) / 60_000);
@@ -317,8 +324,9 @@ export class ScheduleRunner {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       store.appendReceipt({ ...receipt, status: 'launch-error', error: message, updatedAt: new Date(this.now()).toISOString() });
-      await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'failed', reason: message, receiptId: receipt.receiptId, durationMs: Date.now() - started });
+      // The stop before the awaited log: a failed append must not leave the timer an enabled schedule.
       this.stopOnce(definition.id, 'failed');
+      await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'failed', reason: message, receiptId: receipt.receiptId, durationMs: Date.now() - started });
       return { result: 'failed', occurrenceAt: occurrence.at };
     }
     store.appendReceipt({ ...receipt, status: 'launched', runId, updatedAt: new Date(this.now()).toISOString() });
