@@ -221,6 +221,18 @@ describe('cez automation', () => {
       }
     });
 
+    // Review of #1465: `add --in` without --tz first reads the cockpit's zone; that read must
+    // retry the startup 503 too, or a recovered agent's schedule is refused at once.
+    it('add --in without --tz retries the startup 503 on its zone lookup', async () => {
+      let starting = 1;
+      const http: AutomationIo['http'] = async (url, init) => {
+        if (starting > 0) { starting -= 1; return { status: 503, data: 'Cockpit is starting; retry shortly.\n' }; }
+        return fetchJson(url, init);
+      };
+      expect(await run(['add', '--name', 'Later', '--in', '1h', '--prompt', 'Go'], env(), { http, now: () => Date.now(), sleep: async () => {} }), out.join('\n')).toBe(EXIT.ok);
+      expect(posted).toHaveLength(1);
+    });
+
     it('gives up on the startup 503 after a bounded wait', async () => {
       let calls = 0;
       const http: AutomationIo['http'] = async () => { calls += 1; return { status: 503, data: 'Cockpit is starting; retry shortly.\n' }; };

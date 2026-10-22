@@ -340,9 +340,28 @@ export async function runAutomationCommand(
   }
 }
 
+type SendInit = { method?: string; body?: unknown; responseLimitBytes?: number };
+
+/** Every request goes through this, so no command can miss the startup retry. */
+function startupAwareSend(io: AutomationIo): (url: string, init?: SendInit) => Promise<HttpResult> {
+  const http = io.http ?? fetchJson;
+  const sleep = io.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
+  return async (url, init) => {
+    // `serve` holds its port with a placeholder listener that answers a plain-text 503 until
+    // `startServer` takes over, and recovery resumes runs inside that window (review of #1018).
+    // That 503 never reached the API, so even a POST is safe to resend; a JSON 503 is the API's.
+    let result = await http(url, init);
+    for (let attempt = 1; attempt < STARTUP_RETRIES && result.status === 503 && typeof result.data === 'string'; attempt += 1) {
+      await sleep(STARTUP_RETRY_MS);
+      result = await http(url, init);
+    }
+    return result;
+  };
+}
+
 /** The zone the cockpit runs its schedules in, read from the list it answers. */
 async function cockpitTimeZone(cockpit: Cockpit, io: AutomationIo): Promise<string> {
-  const result = await (io.http ?? fetchJson)(`${cockpit.api}/automations`, { responseLimitBytes: Infinity });
+  const result = await startupAwareSend(io)(`${cockpit.api}/automations`, { responseLimitBytes: Infinity });
   if (result.status !== 200) refuse(result);
   const zone = (result.data as { timeZone?: unknown }).timeZone;
   return typeof zone === 'string' ? zone : 'UTC';
@@ -366,23 +385,10 @@ async function execute(
   io: AutomationIo,
   print: (value: unknown) => void,
 ): Promise<number> {
-  const http = io.http ?? fetchJson;
   const path = (suffix = '') => `${cockpit.api}/automations${id ? `/${encodeURIComponent(id)}` : ''}${suffix}`;
+  const send = startupAwareSend(io);
   const sleep = io.sleep ?? ((ms: number) => new Promise<void>((done) => setTimeout(done, ms)));
-  type Init = { method?: string; body?: unknown; responseLimitBytes?: number };
-  // Every request goes through `send`, so no command can miss the startup retry.
-  const send = async (url: string, init?: Init): Promise<HttpResult> => {
-    // `serve` holds its port with a placeholder listener that answers a plain-text 503 until
-    // `startServer` takes over, and recovery resumes runs inside that window (review of #1018).
-    // That 503 never reached the API, so even a POST is safe to resend; a JSON 503 is the API's.
-    let result = await http(url, init);
-    for (let attempt = 1; attempt < STARTUP_RETRIES && result.status === 503 && typeof result.data === 'string'; attempt += 1) {
-      await sleep(STARTUP_RETRY_MS);
-      result = await http(url, init);
-    }
-    return result;
-  };
-  const call = async (url: string, init?: Init, ok = 200): Promise<unknown> => {
+  const call = async (url: string, init?: SendInit, ok = 200): Promise<unknown> => {
     const result = await send(url, init);
     if (result.status !== ok) refuse(result);
     return result.data;
