@@ -17,7 +17,7 @@ let coordinator: ReturnType<typeof createLiveCoordinator>
 beforeEach(() => {
   vi.useFakeTimers(); Worker.all = []
   vi.stubGlobal('SharedWorker', Worker)
-  vi.stubGlobal('fetch', vi.fn(async path => new Response(JSON.stringify(String(path).endsWith('/health') ? { bootProject: 'boot', capabilities: { localHandoff: true, followups: true, singleProject: false, automations: false, preview: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true } } : { generation: 'one', results: [] }))))
+  vi.stubGlobal('fetch', vi.fn(async path => new Response(JSON.stringify(String(path).endsWith('/health') ? { bootProject: 'boot', capabilities: { localHandoff: true, followups: true, singleProject: false, automations: false, preview: false, voice: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true } } : { generation: 'one', results: [] }))))
   Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' })
   coordinator = createLiveCoordinator()
 })
@@ -204,4 +204,17 @@ it('uses the restored deployment mode and boot alias before resubscribing a task
   expect(Worker.all).toHaveLength(1)
   const batch = vi.mocked(fetch).mock.calls.find(([path]) => String(path).endsWith('/run-event-batches'))!
   expect(JSON.parse(String(batch[1]!.body)).runs).toEqual([{ projectId: 'new-boot', runId: 'a', afterSeq: 8 }])
+})
+
+it('restores live delivery from an older server whose health lacks newer capabilities', async () => {
+  coordinator.subscribe({ kind: 'workspace' }, {})
+  coordinator.configure(local)
+  window.dispatchEvent(new Event('pagehide'))
+  const healthy = vi.mocked(fetch).getMockImplementation()!
+  vi.mocked(fetch).mockImplementation(async (path, init) => String(path).endsWith('/health')
+    ? new Response(JSON.stringify({ bootProject: 'boot', capabilities: { localHandoff: true, followups: true, singleProject: false } }))
+    : healthy(path, init))
+  window.dispatchEvent(new PageTransitionEvent('pageshow', { persisted: true }))
+  await vi.advanceTimersByTimeAsync(0)
+  expect(Worker.all).toHaveLength(2)
 })

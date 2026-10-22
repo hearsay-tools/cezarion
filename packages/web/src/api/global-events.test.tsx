@@ -1202,7 +1202,7 @@ describe('useGlobalEvents — provider status', () => {
     const health = {
       version: 'test', repoRoot: 'repo', repo: null, defaultRunner: 'claude', forge: null,
       projects: [], bootProject: BOOT,
-      capabilities: { localHandoff: false, followups: false, singleProject: false, automations: false, preview: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true },
+      capabilities: { localHandoff: false, followups: false, singleProject: false, automations: false, preview: false, voice: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true },
       checks: [{ name: 'cursor', available: true }],
     }
     client.removeQueries({ queryKey: queryKeys.health })
@@ -1218,6 +1218,22 @@ describe('useGlobalEvents — provider status', () => {
     await act(async () => initial.resolve(json({ ...health, checks: [] })))
     expect(result.current.data?.checks).toEqual(health.checks)
     expect(fetch).toHaveBeenCalledOnce()
+  })
+
+  it('delivers remote health from an older server whose capabilities lack the newer flags', async () => {
+    const health = {
+      version: 'old', repoRoot: 'repo', repo: null, defaultRunner: 'claude', forge: null,
+      projects: [], bootProject: BOOT,
+      capabilities: { localHandoff: false, followups: false, singleProject: false },
+      checks: [{ name: 'cursor', available: true }],
+    }
+    client.removeQueries({ queryKey: queryKeys.health })
+    vi.mocked(fetch).mockReturnValue(deferredResponse().promise)
+    const { source } = mount()
+    const { result } = renderHook(() => useHealth(), { wrapper })
+    source.emit('health', JSON.stringify(health))
+    await waitFor(() => expect(result.current.data?.checks).toEqual(health.checks))
+    expect(result.current.data?.capabilities.voice).toBeUndefined()
   })
 
   it('replaces a pending cold Cursor HTTP response after SSE reconnect', async () => {

@@ -21,6 +21,7 @@ import {
   orderRuns,
   paletteScore,
 } from '@/components/command-palette'
+import { ListViewProvider } from '@/components/list-view'
 import { orderSkills } from '@/lib/skills'
 import { ThemeProvider } from '@/components/theme-provider'
 import { THEME_STORAGE_KEY, type Theme } from '@/lib/theme'
@@ -113,7 +114,7 @@ function health(forgeAvailable: boolean, automations = false): HealthResponse {
     checks: [],
     defaultRunner: 'claude',
     forge: forgeAvailable ? { kind: 'github', available: true } : null,
-    capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: true, singleProject: false, automations, preview: false },
+    capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: true, singleProject: false, automations, preview: false, voice: false },
   }
 }
 
@@ -177,9 +178,11 @@ function renderPalette({
     <QueryClientProvider client={createQueryClient()}>
       <ThemeProvider>
         <MemoryRouter initialEntries={[entry]}>
-          <CommandPalette />
-          <LocationProbe />
-          <input data-testid="outside-input" aria-label="outside" />
+          <ListViewProvider>
+            <CommandPalette />
+            <LocationProbe />
+            <input data-testid="outside-input" aria-label="outside" />
+          </ListViewProvider>
         </MemoryRouter>
       </ThemeProvider>
     </QueryClientProvider>,

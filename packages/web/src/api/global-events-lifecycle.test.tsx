@@ -57,7 +57,7 @@ it.each([true, false].flatMap(local => ['visibility', 'bfcache', 'freeze'].map(l
   await act(async () => {
     authenticate(new Response(JSON.stringify({ bootProject: 'boot', capabilities: {
       localHandoff: local, followups: true, singleProject: false, automations: false,
-      preview: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true,
+      preview: false, voice: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true,
     } })))
     await vi.advanceTimersByTimeAsync(0)
   })
