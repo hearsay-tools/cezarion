@@ -194,6 +194,13 @@ export function reconcileAutomationReceipts(automationStore: AutomationStore, ru
   for (const receipt of leftovers) {
     const runId = byReceipt.get(receipt.receiptId);
     const error = 'Cezar restarted before run creation completed; explicit retry is available.';
+    // A one-time schedule whose launch was lost is Failed, which has no automatic exit
+    // (hearsay-tools/cezarion#1465). The stop lands before the receipt, as in the launcher: a crash
+    // between them leaves `reserved`, which the next reconciliation settles again.
+    if (!runId) {
+      const definition = automationStore.get(receipt.automationId);
+      if (definition && isOnceSchedule(definition)) stopOnceSchedule(automationStore, definition.id, 'failed');
+    }
     automationStore.appendReceipt({
       ...receipt,
       status: runId ? 'launched' : 'launch-error',
@@ -205,10 +212,6 @@ export function reconcileAutomationReceipts(automationStore: AutomationStore, ru
     // "Retry task" keys on a `failed` row carrying the receipt. Best effort, as the brake's row:
     // a busy log lock must not undo a reconciliation that already held.
     if (!runId) {
-      // A one-time schedule whose launch was lost is Failed, which has no automatic exit
-      // (hearsay-tools/cezarion#1465): left enabled, the next timer would relaunch it unasked.
-      const definition = automationStore.get(receipt.automationId);
-      if (definition && isOnceSchedule(definition)) stopOnceSchedule(automationStore, definition.id, 'failed');
       const { candidate } = receipt;
       void automationStore.appendLog({
         automationId: receipt.automationId,

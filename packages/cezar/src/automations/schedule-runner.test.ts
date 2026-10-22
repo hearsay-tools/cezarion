@@ -903,6 +903,21 @@ describe('ScheduleRunner once (#1465)', () => {
       expect(store.latestReceipts().get(KEY)).toMatchObject({ receiptId: 'lost', status: 'launch-error' });
     });
 
+    it('reconciliation stops a one-time schedule before it writes the launch-error receipt', async () => {
+      const { store, runs } = await crashSetup();
+      crashLeftover(store, 'lost');
+      store.reload();
+      const append = store.appendReceipt.bind(store);
+      vi.spyOn(store, 'appendReceipt').mockImplementation((row) => {
+        if (row.status === 'launch-error') throw new Error('crash');
+        return append(row);
+      });
+      expect(() => reconcileAutomationReceipts(store, runs)).toThrow('crash');
+      expect(store.get('nightly')?.enabled).toBe(false);
+      expect(store.state('nightly')).toMatchObject({ onceOutcome: 'failed' });
+      expect(store.latestReceipts().get(KEY)?.status).toBe('reserved');
+    });
+
     // Review of #1469: the stop lands before the launch-error receipt, so a launch-error receipt
     // always means a stopped schedule. A crash between them leaves `reserved`, which reconciliation
     // settles as Failed; an edit in between cannot happen, since one-time writes take the lease.
