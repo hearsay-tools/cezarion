@@ -12,6 +12,8 @@ const mocks = vi.hoisted(() => ({
   reportVoiceOutcome: vi.fn(),
   navigate: vi.fn(),
   openRunId: null as string | null,
+  /** The page path without its project prefix; defaults to the open task's thread, or `/`. */
+  path: undefined as string | undefined,
   runs: [] as unknown[],
 }))
 
@@ -21,6 +23,7 @@ vi.mock('@/components/list-view', () => ({ useListView: () => ['active', () => {
 vi.mock('@/lib/project-router', () => ({
   useNavigate: () => mocks.navigate,
   useProjectMatch: () => (mocks.openRunId === null ? null : { params: { id: mocks.openRunId } }),
+  useProjectPathname: () => mocks.path ?? (mocks.openRunId === null ? '/' : `/tasks/${mocks.openRunId}`),
 }))
 
 const { looksLikeSentence, useVoiceCommand } = await import('./use-voice-command')
@@ -49,6 +52,7 @@ beforeEach(() => {
   mocks.reportVoiceOutcome.mockReset()
   mocks.navigate.mockReset()
   mocks.openRunId = null
+  mocks.path = undefined
   mocks.runs = []
 })
 
@@ -163,7 +167,7 @@ describe('useVoiceCommand', () => {
     expect(mocks.voiceDecide).not.toHaveBeenCalled()
     await advance(1)
     expect(calls).toHaveLength(1)
-    expect(calls[0]?.input).toEqual({ text: 'open the next failed task', sidebarView: 'active' })
+    expect(calls[0]?.input).toEqual({ text: 'open the next failed task', sidebarView: 'active', view: 'other' })
 
     await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
 
@@ -430,6 +434,7 @@ describe('useVoiceCommand', () => {
     expect(calls.at(-1)?.input).toEqual({
       text: 'yes, confirmed',
       sidebarView: 'active',
+      view: 'task',
       openRunId: 'r1',
       proposal: { decisionId: DECISION_ID(1), action: 'answer' },
     })
@@ -719,6 +724,103 @@ describe('useVoiceCommand', () => {
     type(harness, 'two')
     expect(enter(harness).handled).toBe(false)
     expect(mocks.navigate).not.toHaveBeenCalled()
+  })
+
+  it('sends view and the shown card', async () => {
+    mocks.openRunId = 'r1'
+    voiceStore.syncPendingAsk('r1', 'ask_1')
+    const harness = setup()
+    type(harness, 'answer vitest to question one')
+    await advance(300)
+    expect(calls[0]?.input).toEqual({
+      text: 'answer vitest to question one',
+      sidebarView: 'active',
+      view: 'task',
+      openRunId: 'r1',
+      askRequestId: 'ask_1',
+    })
+
+    // A thread that shows no question sends null, so the server can refuse a decision made for one.
+    act(() => voiceStore.syncPendingAsk('r1', undefined))
+    await advance(300)
+    expect(calls[1]?.input).toMatchObject({ openRunId: 'r1', askRequestId: null })
+  })
+
+  it('omits askRequestId before the thread syncs', async () => {
+    mocks.openRunId = 'r1'
+    const harness = setup()
+    type(harness, 'tell it to run the tests')
+    await advance(300)
+    expect(calls[0]?.input).toEqual({ text: 'tell it to run the tests', sidebarView: 'active', view: 'task', openRunId: 'r1' })
+  })
+
+  it('drops a preview when the card changes', async () => {
+    mocks.openRunId = 'r1'
+    voiceStore.registerAskCard(card(['Library']))
+    voiceStore.syncPendingAsk('r1', 'ask_1')
+    const harness = setup()
+    type(harness, 'answer vitest to question one')
+    await advance(300)
+    await answer(calls[0], answerDecision(1, [option(0, 'Vitest')]))
+    expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Answer Library: Vitest' })
+
+    act(() => voiceStore.syncPendingAsk('r1', 'ask_2'))
+    expect(harness.result.current.voice.row).toBeUndefined()
+    enter(harness)
+    // Return asks again for the question now shown, and never acts on the old decision.
+    expect(calls).toHaveLength(2)
+    expect(calls[1]?.input).toMatchObject({ askRequestId: 'ask_2' })
+    expect(voiceStore.getProposal()).toBeUndefined()
+  })
+
+  it('ends a choice when the page changes', async () => {
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' }), voiceRun({ id: 'c', title: 'Charlie', status: 'done' })]
+    const harness = setup({ text: 'open the next failed one' })
+    enter(harness)
+    await answer(calls[0], {
+      action: 'open',
+      decisionId: DECISION_ID(1),
+      status: 'failed',
+      position: 'next',
+      confidence: 0.4,
+      alternatives: [{ status: 'done', position: 1 }],
+    })
+    expect(harness.result.current.voice.mode).toBe('choosing')
+
+    mocks.path = '/settings'
+    harness.rerender()
+    expect(harness.result.current.voice.mode).toBe('idle')
+  })
+
+  it.each([
+    ['ambiguous', 'Which question? Name it, for example “to question two”.'],
+    ['stale-context', 'The screen changed. Try again.'],
+    ['unsupported', 'Voice cannot do that yet.'],
+  ] as const)('shows the %s notice', async (reason, text) => {
+    const harness = setup()
+    type(harness, 'answer it somehow')
+    await advance(300)
+    await answer(calls[0], { action: 'none', decisionId: DECISION_ID(1), reason })
+    expect(harness.result.current.voice.row).toEqual({ kind: 'notice', text })
+    enter(harness)
+    await advance(0)
+    expect(harness.result.current.voice.row).toEqual({ kind: 'notice', text })
+  })
+
+  it('names the task in the answer and tell rows', async () => {
+    mocks.openRunId = 'r1'
+    mocks.runs = [voiceRun({ id: 'r1', title: 'Fix flaky shard', status: 'waiting' })]
+    voiceStore.registerAskCard(card(['Library', 'Build']))
+    const harness = setup()
+    type(harness, 'answer vitest to question one')
+    await advance(300)
+    await answer(calls[0], answerDecision(1, [option(0, 'Vitest')]))
+    expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Answer “Fix flaky shard”: Library: Vitest' })
+
+    type(harness, 'tell it: ship it')
+    await advance(300)
+    await answer(calls[1], { action: 'tell', decisionId: DECISION_ID(2), runId: 'r1', text: 'ship it', confidence: 0.9 })
+    expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Tell “Fix flaky shard”: ship it' })
   })
 
   it('a single word never calls the engine and keeps the default Return', async () => {

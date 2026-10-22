@@ -3,12 +3,13 @@ import * as React from 'react'
 import { reportVoiceOutcome, voiceDecide } from '@/api/client'
 import { useRuns } from '@/api/queries'
 import { useListView } from '@/components/list-view'
-import { useNavigate, useProjectMatch } from '@/lib/project-router'
+import { useNavigate, useProjectMatch, useProjectPathname } from '@/lib/project-router'
 import { groupTitle, runTitle, type SidebarView } from '@/lib/task-groups'
 import { parseNumberedPick } from '@/lib/voice/numbered-pick'
-import { useVoiceProposal, voiceStore, type VoiceProposal } from '@/lib/voice/proposal-store'
+import { usePendingAsk, useVoiceProposal, voiceStore, type VoiceProposal } from '@/lib/voice/proposal-store'
 import { resolveOpenTarget, type OpenTarget } from '@/lib/voice/resolve-open'
-import { VOICE_TEXT_MAX } from '@open-mercato/cezar-api-client/contract/voice'
+import { voiceViewOf } from '@/lib/voice/view'
+import { VOICE_TEXT_MAX, type VoiceView } from '@open-mercato/cezar-api-client/contract/voice'
 import type { RunSummary, VoiceDecideRequest, VoiceDecision, VoiceOutcome } from '@open-mercato/cezar-api-client'
 import {
   answerRowText,
@@ -50,7 +51,22 @@ const NOTICES = {
   questionClosed: 'The question was answered or closed elsewhere.',
   taskClosed: 'The task is no longer open.',
   scrollToQuestion: 'Scroll to the question, then confirm.',
+  ambiguous: 'Which question? Name it, for example “to question two”.',
+  staleContext: 'The screen changed. Try again.',
+  unsupported: 'Voice cannot do that yet.',
 } as const
+
+type NoneReason = Extract<VoiceDecision, { action: 'none' }>['reason']
+
+/** What the palette says for a decision that does nothing; `not-a-command` says nothing. */
+const NONE_NOTICES: Record<Exclude<NoneReason, 'not-a-command'>, string> = {
+  'no-open-task': NOTICES.noOpenTask,
+  'no-open-question': NOTICES.noOpenQuestion,
+  unclear: NOTICES.unclear,
+  ambiguous: NOTICES.ambiguous,
+  'stale-context': NOTICES.staleContext,
+  unsupported: NOTICES.unsupported,
+}
 
 /** Two or more words after trimming: a single word stays an ordinary palette search. */
 export function looksLikeSentence(text: string): boolean {
@@ -63,14 +79,22 @@ const voiceable = (text: string) => looksLikeSentence(text) && text.length <= VO
  *  like a numbered pick, with no engine call. Otherwise they stay ordinary searches. */
 const isCancelWord = (text: string) => /^(?:no|cancel)$/.test(text.toLowerCase().replace(/[.!?]+$/, '').trim())
 
-/** What a decision depends on: the same sentence, open task and shown proposal ⇒ the same answer. */
+/** What a decision depends on: the same sentence, page, open task, shown question and shown
+ *  proposal ⇒ the same answer. A change to any of them makes an older decision stale. */
 interface DecisionKey {
   text: string
+  view: VoiceView
   openRunId: string | null
+  /** The question the open thread shows; undefined while the thread has not synced it. */
+  askRequestId: string | null | undefined
   proposalId: string | null
 }
 const sameKey = (a: DecisionKey, b: DecisionKey) =>
-  a.text === b.text && a.openRunId === b.openRunId && a.proposalId === b.proposalId
+  a.text === b.text &&
+  a.view === b.view &&
+  a.openRunId === b.openRunId &&
+  a.askRequestId === b.askRequestId &&
+  a.proposalId === b.proposalId
 
 type Settled = { kind: 'decision'; decision: VoiceDecision } | { kind: 'failed' } | { kind: 'aborted' }
 
@@ -90,6 +114,7 @@ interface Choosing {
   decisionId: string
   choices: Choice[]
   /** The context the choices were resolved for; numbers mean nothing in another one. */
+  view: VoiceView
   openRunId: string | null
   sidebarView: SidebarView
 }
@@ -125,10 +150,17 @@ function planOpen(
   return { primary, choices: decision.alternatives?.length ? choices : choices.slice(0, 1) }
 }
 
-function proposalText(proposal: VoiceProposal): string {
+/** The title the sidebar shows for `runId`, when the run list has it. */
+function taskTitle(runs: readonly RunSummary[], runId: string): string | undefined {
+  const run = runs.find((candidate) => candidate.id === runId)
+  return run ? runTitle(run) : undefined
+}
+
+function proposalText(proposal: VoiceProposal, runs: readonly RunSummary[]): string {
+  const title = taskTitle(runs, proposal.runId)
   return proposal.kind === 'answer'
-    ? answerRowText(proposal.answers, voiceStore.headersFor(proposal.runId, proposal.askRequestId))
-    : tellRowText(proposal.text)
+    ? answerRowText(proposal.answers, voiceStore.headersFor(proposal.runId, proposal.askRequestId), title)
+    : tellRowText(proposal.text, title)
 }
 
 /** Return falls back to whatever cmdk has selected, as it does without voice. Voice rows are
@@ -152,22 +184,26 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
   const runs = useRuns().data
   const [sidebarView] = useListView()
   const openRunId = useProjectMatch('/tasks/:id/*')?.params.id ?? null
+  const view = voiceViewOf(useProjectPathname())
+  const askRequestId = usePendingAsk(openRunId ?? undefined)
   const navigate = useNavigate()
   const proposal = useVoiceProposal()
 
   const trimmed = args.text.trim()
   const key = React.useMemo<DecisionKey>(
-    () => ({ text: trimmed, openRunId, proposalId: proposal?.decisionId ?? null }),
-    [trimmed, openRunId, proposal?.decisionId],
+    () => ({ text: trimmed, view, openRunId, askRequestId, proposalId: proposal?.decisionId ?? null }),
+    [trimmed, view, openRunId, askRequestId, proposal?.decisionId],
   )
 
   const [settled, setSettled] = React.useState<{ key: DecisionKey; result: Settled }>()
   const [notice, setNotice] = React.useState<{ text: string; forText: string }>()
   const [choosing, setChoosing] = React.useState<Choosing>()
 
-  // Choices resolved for another open task or sidebar tab are gone.
+  // Choices resolved for another page, open task or sidebar tab are gone.
   const choosingHere =
-    choosing !== undefined && choosing.openRunId === openRunId && choosing.sidebarView === sidebarView ? choosing : undefined
+    choosing !== undefined && choosing.view === view && choosing.openRunId === openRunId && choosing.sidebarView === sidebarView
+      ? choosing
+      : undefined
   const pick = choosingHere ? parseNumberedPick(trimmed, choosingHere.choices.length) : null
   // A new sentence that is not a pick ends the choice; an empty input or a pick keeps it.
   const choosingLive = choosingHere !== undefined && !(voiceable(trimmed) && pick === null) ? choosingHere : undefined
@@ -202,7 +238,9 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
     const input: VoiceDecideRequest = {
       text: requestKey.text,
       sidebarView: latest.current.sidebarView,
+      view: requestKey.view,
       ...(requestKey.openRunId === null ? {} : { openRunId: requestKey.openRunId }),
+      ...(requestKey.askRequestId === undefined ? {} : { askRequestId: requestKey.askRequestId }),
       ...(shown && shown.decisionId === requestKey.proposalId
         ? { proposal: { decisionId: shown.decisionId, action: shown.kind } }
         : {}),
@@ -273,7 +311,7 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
         case 'open': {
           const { primary, choices } = planOpen(decision, { runs: currentRuns, sidebarView: view, openRunId: openId })
           if (choices.length >= 2) {
-            setChoosing({ decisionId: decision.decisionId, choices, openRunId: openId, sidebarView: view })
+            setChoosing({ decisionId: decision.decisionId, choices, view: made.key.view, openRunId: openId, sidebarView: view })
             clearText()
             return
           }
@@ -311,13 +349,7 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
         }
         case 'none':
           if (decision.reason === 'not-a-command') return clickSelectedItem()
-          return say(
-            decision.reason === 'no-open-task'
-              ? NOTICES.noOpenTask
-              : decision.reason === 'no-open-question'
-                ? NOTICES.noOpenQuestion
-                : NOTICES.unclear,
-          )
+          return say(NONE_NOTICES[decision.reason])
       }
     },
     [confirmProposal, openTarget, report, say],
@@ -387,7 +419,7 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
     return () => clearTimeout(timer)
   }, [enabled, key, pick, requestFor])
 
-  // A notice speaks about the text it was shown for. A new sentence, or another open task or
+  // A notice speaks about the text it was shown for. A new sentence, or another page, open task or
   // sidebar tab, ends a choice.
   const choiceEnded = choosing !== undefined && choosingLive === undefined
   React.useEffect(() => {
@@ -494,7 +526,7 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
   } else if (settled && sameKey(settled.key, key) && voiceable(trimmed)) {
     row = previewRow(settled.result, settled.key, { runs: runs ?? [], sidebarView, openRunId })
   } else if (proposal && trimmed === '') {
-    row = { kind: 'will-do', text: proposalText(proposal) }
+    row = { kind: 'will-do', text: proposalText(proposal, runs ?? []) }
   }
 
   const mode: VoiceMode = choosingLive ? 'choosing' : proposal ? 'proposal' : voiceable(trimmed) ? 'preview' : 'idle'
@@ -523,24 +555,23 @@ function previewRow(
     }
     case 'answer':
       if (decision.runId !== context.openRunId) return undefined
-      return { kind: 'will-do', text: answerRowText(decision.answers, voiceStore.headersFor(decision.runId, decision.askRequestId)) }
+      return {
+        kind: 'will-do',
+        text: answerRowText(
+          decision.answers,
+          voiceStore.headersFor(decision.runId, decision.askRequestId),
+          taskTitle(context.runs, decision.runId),
+        ),
+      }
     case 'tell':
       if (decision.runId !== context.openRunId) return undefined
-      return { kind: 'will-do', text: tellRowText(decision.text) }
+      return { kind: 'will-do', text: tellRowText(decision.text, taskTitle(context.runs, decision.runId)) }
     case 'confirm':
     case 'cancel':
       if (requestKey.proposalId === null) return { kind: 'notice', text: NOTICES.unclear }
       return { kind: 'will-do', text: decision.action === 'confirm' ? 'Send it' : 'Drop it' }
     case 'none':
       if (decision.reason === 'not-a-command') return undefined
-      return {
-        kind: 'notice',
-        text:
-          decision.reason === 'no-open-task'
-            ? NOTICES.noOpenTask
-            : decision.reason === 'no-open-question'
-              ? NOTICES.noOpenQuestion
-              : NOTICES.unclear,
-      }
+      return { kind: 'notice', text: NONE_NOTICES[decision.reason] }
   }
 }

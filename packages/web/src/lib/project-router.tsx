@@ -92,6 +92,12 @@ export function useProjectPath(): (to: To) => To {
   return useCallback((to: To) => scopeTo(projectId, to), [projectId])
 }
 
+/** The current path without any `/p/:projectId` prefix. */
+export function useProjectPathname(): string {
+  const { pathname } = useLocation()
+  return useMemo(() => stripProjectPrefix(pathname), [pathname])
+}
+
 /** `matchPath` against the flat route map, ignoring any `/p/:projectId` prefix. */
 export function useProjectMatch(pattern: string): ReturnType<typeof matchPath> {
   const { pathname } = useLocation()
