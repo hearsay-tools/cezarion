@@ -1,6 +1,11 @@
 <div align="center">
 
-# cezar ⚡
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="packages/web/public/cezarion-mark-dark.svg">
+  <img src="packages/web/public/cezarion-mark-light.svg" alt="" width="96" height="96">
+</picture>
+
+# Cezarion
 
 **Parallel coding agents orchestrator** — a local cockpit for running and
 tracking AI coding-agent tasks in your repo.
@@ -11,13 +16,13 @@ tokens, diffs, in a browser cockpit that runs entirely on your machine.
 Your CLI logins, your `gh`, your files. No accounts, no database server, no cloud.
 
 🔥 **Fire and forget.** Queue a stack of autonomous coding and maintenance
-tasks and let them run — cezar orchestrates them across isolated worktrees,
+tasks and let them run — Cezarion orchestrates them across isolated worktrees,
 in parallel. Flip the **Autonomous** flag
 and a run never stops to ask; it just finishes. Leave it on a VPS and you get
 a dev team that's *always on* — a mobile-friendly cockpit you can check from
 your phone, working your backlog while you're away.
 
-[A look inside](#a-look-inside) · [What cezar does best](#what-cezar-does-best) · [What it solves](#what-it-solves) · [Who it's for](#who-its-for) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Core concepts](#core-concepts) · [Cockpit tour](#cockpit-tour) · [Agent backends](#coding-agent-backends) · [Remote access](#remote-access-host-cezar-on-a-server)
+[A look inside](#a-look-inside) · [What Cezarion does best](#what-cezarion-does-best-) · [What it solves](#what-it-solves) · [Who it's for](#who-its-for) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Core concepts](#core-concepts) · [Cockpit tour](#cockpit-tour) · [Agent backends](#coding-agent-backends) · [Remote access](#remote-access-host-cezarion-on-a-server)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 ![Node 24.15+](https://img.shields.io/badge/Node-24.15%2B-339933)
@@ -49,7 +54,7 @@ cache entry, so the same command uses the new version on its next launch.
 Update preparation and recovery state is generated under
 `~/.cezar/application-updates/` (or `CEZ_HOME`).
 Pinned npx invocations, source checkouts, npm links, and hosted deployments use
-their existing manual update paths. Cezar holds its own installation lock and
+their existing manual update paths. Cezarion holds its own installation lock and
 npm's npx lock during promotion; a separate manual `npm install` does not honor
 those locks, so avoid one while an update is preparing or restarting.
 
@@ -67,24 +72,24 @@ Click any thumbnail for the full-size screenshot.
 
 ---
 
-## What cezar does best 🏆
+## What Cezarion does best 🏆
 
 Plenty of tools wrap a single coding agent in a nicer window — a "Codex GUI", a
-conductor-style app, one-agent front-ends. cezar's bet is different. Three things
+conductor-style app, one-agent front-ends. Cezarion's bet is different. Three things
 it does better than any of them:
 
 - 🪶 **Genuinely zero config.** `npx cezarion` in your repo and you're running —
   no wizard, no API keys, no env vars, no schema, no database server. It rides the
   `claude` / `codex` / `opencode` / `agent` (Cursor) / `pi` / `omp` logins and the `gh` you already have, and every
   missing piece degrades gracefully instead of blocking you.
-- 🖥️ **Built for a server (VPS mode).** cezar is made to live on a **VPS, cloud,
+- 🖥️ **Built for a server (VPS mode).** Cezarion is made to live on a **VPS, cloud,
   or dedicated box** as an always-on janitor for your repo — headless-first, with
   a mobile-friendly cockpit you drive from anywhere. It's a coding server you can
   actually watch, not a desktop app bolted onto one machine.
-- 🔀 **Parallel + autonomous orchestration.** The real edge: cezar runs **many
+- 🔀 **Parallel + autonomous orchestration.** The real edge: Cezarion runs **many
   agents at once** in isolated worktrees, **queues** the overflow, and pushes each
   one **autonomously** through skill playbooks — fire-and-forget. This is exactly
-  what single-agent GUIs don't do well: they babysit one agent, while cezar
+  what single-agent GUIs don't do well: they babysit one agent, while Cezarion
   orchestrates a whole team and drains your backlog while you're away.
 
 ---
@@ -93,18 +98,18 @@ it does better than any of them:
 
 Most "AI coding agent" tooling makes you choose between a **terminal** you can't
 see into once it's running, and a **cloud product** that wants your API key, your
-code on their servers, and an account. cezar is the third option: the agents run
+code on their servers, and an account. Cezarion is the third option: the agents run
 locally under *your* subscription, a cockpit shows you exactly what they're doing,
 and an orchestrator keeps a whole queue of them moving.
 
 - 👀 **No visibility into a running agent.** A headless `claude` run is a black box
-  until it finishes. cezar streams every step — agent text, each tool call and
+  until it finishes. Cezarion streams every step — agent text, each tool call and
   its result, tokens and cost per step — live, and keeps the full replay.
 - 🧩 **One agent, one working tree, one thing at a time.** Kick off a second task and
-  it fights the first over your files. cezar runs each task in its **own git
+  it fights the first over your files. Cezarion runs each task in its **own git
   worktree**, so two (or three) agents work in parallel without stepping on
   each other — or on the branch you're editing.
-- 🗂️ **A backlog that needs babysitting.** Queue a stack of tasks and cezar
+- 🗂️ **A backlog that needs babysitting.** Queue a stack of tasks and Cezarion
   **orchestrates** them: it runs up to your parallel limit and holds the rest in
   an ordered queue. Point it at a GitHub issue and it runs straight on that, so
   working the tracker down stops being a manual chore. Turn on the opt-in
@@ -125,7 +130,7 @@ and an orchestrator keeps a whole queue of them moving.
   step failed and gives its saved error before your message. Restart recovery
   also explains the restart when replaying a saved message. Background commands
   may have stopped; the agent is told to verify their state before restarting them.
-- 🔀 **Locked into one agent vendor.** Most tools wed you to a single CLI. cezar
+- 🔀 **Locked into one agent vendor.** Most tools wed you to a single CLI. Cezarion
   drives **Claude Code, Codex, OpenCode, Cursor, pi and OMP** (OpenCode, pi and OMP
   experimental) through one runner seam — set a
   default, pick a backend per task, or mix them inside one workflow (implement
@@ -134,7 +139,7 @@ and an orchestrator keeps a whole queue of them moving.
   big vendors. See
   [Agent backends](#coding-agent-backends).
 - 🖥️ **Close the laptop and the work stops.** A local agent only runs while your
-  machine is on and awake. Put cezar on a **VPS, cloud box, or dedicated server**
+  machine is on and awake. Put Cezarion on a **VPS, cloud box, or dedicated server**
   and the cockpit becomes the GUI for an **always-on AI coding team** — kick off,
   watch and steer tasks from your laptop or **phone**, on the train or between
   meetings, while the agents keep grinding through the backlog back on the server.
@@ -192,7 +197,7 @@ npx cezarion init                                            # scaffold .ai/ceza
 ```
 
 Both the `cezarion` and `cez` commands are installed, so once it's on your PATH you
-can run either. No API key is ever used — cezar shells out to whichever agent
+can run either. No API key is ever used — Cezarion shells out to whichever agent
 CLIs you are already logged into, `claude` by default.
 
 > **Contributing?** [Local development](#local-development) shows how to get a
@@ -203,7 +208,7 @@ CLIs you are already logged into, `claude` by default.
 > instead of the real CLI — the whole cockpit works with no `claude` login, so
 > you can explore runs, diffs and variants offline.
 
-### Nightly builds — help us shape cezar 🌙
+### Nightly builds — help us shape Cezarion 🌙
 
 Every night we publish the trunk to npm, so the features landing in the next
 release are one command away:
@@ -212,7 +217,7 @@ release are one command away:
 npx cezarion@nightly       # everything merged as of last night
 ```
 
-**Come build this with us.** cezar is shaped by the people who run it on real
+**Come build this with us.** Cezarion is shaped by the people who run it on real
 repos: if you try a nightly and something feels wrong — a workflow that stalls, a
 diff that reads badly, a runner that should exist — [open an
 issue](https://github.com/hearsay-tools/cezarion/issues) and tell us. That feedback,
@@ -223,7 +228,7 @@ most of the features here got their final shape.
 packaged-CLI e2e — the same gate a release runs) but it is *not* a release: it
 can be rough, a flag or a screen may change under you, and something occasionally
 breaks in a way no test caught. Nothing is at risk beyond your patience — every
-task runs in its own git worktree and cezar never auto-merges — but if you need a
+task runs in its own git worktree and Cezarion never auto-merges — but if you need a
 boring day, stay on the stable release. Pin a nightly you liked with its exact
 version (`npx cezarion@<nightly-version>` — the cockpit prints the
 version it booted, and the date in it tells you how old the build is), and drop
@@ -249,7 +254,7 @@ resolves to the latest stable release.
 
 ## How it works
 
-You describe a task. cezar runs it as a **workflow** — an ordered list of agent
+You describe a task. Cezarion runs it as a **workflow** — an ordered list of agent
 steps and shell checks — shelling out to your locally installed agent CLI
 (Claude Code by default; Codex, OpenCode, Cursor, pi and OMP are drop-in
 alternatives, per task or per step). Each task gets its own git worktree; the
@@ -314,7 +319,7 @@ Three words, no jargon — **task**, **skill**, **chain**:
 
 The moves that make the cockpit worth the browser tab:
 
-- 🗃️ **Queue + orchestration.** Start as many tasks as you like: cezar runs up to
+- 🗃️ **Queue + orchestration.** Start as many tasks as you like: Cezarion runs up to
   `maxParallel` at once across every project (default **2**; a non-git directory
   always runs one) and
   holds the rest in a FIFO queue with visible positions (`#1`, `#2`, …). Cancel a
@@ -331,7 +336,7 @@ The moves that make the cockpit worth the browser tab:
   separate worktrees, then compare their diffs side by side and **pick** one —
   the losers are archived and their worktrees cleaned up.
 - 🧹 **Bounded worktree disk.** Each task runs in its own full checkout, so a busy
-  cockpit would otherwise grow without limit. cezar keeps only the last
+  cockpit would otherwise grow without limit. Cezarion keeps only the last
   `worktreeRetention` **finished** worktrees on disk (default **10**; `0` =
   unlimited) and reclaims the rest — directory only, the `cez/<id8>` branch is
   always kept, so the work stays recoverable. Settings → Resources shows every
@@ -350,7 +355,7 @@ The moves that make the cockpit worth the browser tab:
   collect their diffs; you still review the result. See
   [Owned workers](#owned-workers-opt-in).
 - 📱 **Runs on your coding server, drives from your pocket.** The cockpit is a
-  responsive web app streaming over SSE, so the box running cezar can be a
+  responsive web app streaming over SSE, so the box running Cezarion can be a
   **VPS, cloud, or dedicated server** you never sit in front of. Point a browser
   — laptop or **phone** — at it and run an **always-on coding team** on the move:
   start tasks, watch them live, and review their diffs from anywhere.
@@ -388,7 +393,7 @@ bypasses the server cache immediately and refreshes the selected thread too.
 ## Multiple projects, one cockpit
 
 One `cez serve` hosts **every repo you work in**, not just the one you started
-it in. Each repo cezar boots in registers itself in a per-user registry at
+it in. Each repo Cezarion boots in registers itself in a per-user registry at
 `~/.cezar/config.json` — the workspace file that also holds the global knobs
 (the parallel cap, the memory ceiling, the browse root, and the checkout root). Nothing is added to
 the repo: per-project state stays exactly where it was, in that repo's
@@ -401,7 +406,7 @@ Every view is project-scoped:
 ```
 
 `<projectId>` is a slug derived from the folder name (`my-app`, then `my-app-2`
-on a collision), and `/p/default/…` always means the project cezar was started
+on a collision), and `/p/default/…` always means the project Cezarion was started
 in. The desktop rail selects the project. Its sidebar shows the project header,
 view tabs and task list, ordered **Needs you → Finished → Working**.
 Pins stay first within their status section and do not spend the default ten-row
@@ -441,7 +446,7 @@ navigation drawer):
 
 Removing a project (**Settings → Projects**) drops the registry entry only — the
 repo and its `.ai/cezar/` are never touched, so re-adding it later finds all its
-tasks intact. The project cezar is currently serving can't be removed: it
+tasks intact. The project Cezarion is currently serving can't be removed: it
 re-registers itself at the next start.
 
 **From the terminal** — the same registry, no cockpit required (handy over ssh):
@@ -563,7 +568,7 @@ is that project's own Tasks page, which is a better version of the same answer
 (live updates, the full column set, the composer). So picking a project *leaves*
 for it rather than turning the global view into a worse local one.
 
-Nothing else in cezar reads tags, on purpose: a tag is a lens, not a permission,
+Nothing else in Cezarion reads tags, on purpose: a tag is a lens, not a permission,
 a queue or a routing rule. Removing one changes what you see and nothing else.
 
 > The page reads a workspace-wide index capped at the newest 200 tasks per
@@ -572,7 +577,7 @@ a queue or a routing rule. Removing one changes what you see and nothing else.
 > Tasks page.
 
 **Old page URLs keep working.** Every unprefixed page path — `/`, `/tasks/<id>`,
-`/settings` — still answers, bound to the project cezar was started in; the
+`/settings` — still answers, bound to the project Cezarion was started in; the
 cockpit redirects flat paths to their `/p/<boot>/…` twin, so existing bookmarks
 and bookmarklets need no change. The HTTP API is the exception: it moved to
 `/api/v1/…` (see the CHANGELOG), so a script that calls it needs the extra
@@ -588,9 +593,9 @@ segment.
 ## Waiting for PR checks and timers
 
 An agent waits on something outside its turn with `cezar_wait`. With `kind: "ci"` and
-a GitHub PR URL in `pr`, Cezar watches the PR's CI outside the model. The optional
+a GitHub PR URL in `pr`, Cezarion watches the PR's CI outside the model. The optional
 `timeout_seconds` defaults to 1,800 and accepts 1–7,200. With `kind: "timer"`,
-`seconds` (60–7,200) and an optional `note`, Cezar wakes the agent at that time and
+`seconds` (60–7,200) and an optional `note`, Cezarion wakes the agent at that time and
 hands the note back. No authored configuration or worker delegation permission is
 needed. A CI wait requires `gh`, access to the repository, and a supported GitHub
 host; GitHub Enterprise hosts must already be recognized by the forge/auth
@@ -635,7 +640,7 @@ on CI or a timer keeps its agent slot, a monitoring slot when one is free, so th
 wake usually starts at once. The older `CEZ:MONITORING` line and Claude's
 `ScheduleWakeup` open a timer in the same list.
 
-Cezar reports passed, failed, cancelled or skipped checks, no checks, changed head,
+Cezarion reports passed, failed, cancelled or skipped checks, no checks, changed head,
 timeout or an operational error. It watches the registered commit: a new PR head
 is reported separately, and the agent decides whether to wait again. The first
 observation runs immediately. Later check-status and PR-head polls run every 30
@@ -644,11 +649,11 @@ queued waits retain their original deadline. Results are bounded
 observations, not merge approval or evidence that every expected workflow appeared.
 The agent still decides its next action; CI success never completes the task or
 accepts review. A wait ends only when its own result arrives, its deadline passes,
-or someone cancels it: the agent with `cezar_cancel_wait`, or Cezar when the task
+or someone cancels it: the agent with `cezar_cancel_wait`, or Cezarion when the task
 is stopped, finished, cancelled or deleted. A human message wakes the agent without
 closing any wait, and every delivered turn ends with a list of the waits still open.
 CI never answers a pending human question. If the agent's session fails or closes while a
-result is owed, Cezar retries the delivery after 15 and then 30 seconds; a third
+result is owed, Cezarion retries the delivery after 15 and then 30 seconds; a third
 failure marks the task failed and keeps the result. Continue delivers it, and Stop
 discards it and leaves the task failed.
 Controller recovery can replay an
@@ -713,7 +718,7 @@ cez worker destroy <worker-id>
 
 Use `cez worker --help` to list operations and flags, or `cez worker <operation> --help` for one operation. Explicit help prints human-readable text and exits successfully without an active delegation session. Commands otherwise return bounded JSON and a nonzero exit on failure or incomplete cleanup. Spawn requires a committed baseline (`parent-head` or an explicit ref) and pins its SHA at acceptance; dirty parent edits are excluded. Optional `--context '<text>'` or `--context-file <UTF-8-file>` supplies selected context, not the parent's conversation. The two flags are mutually exclusive, and combined task/context text is limited to 100,000 characters. The API also accepts up to 32 pinned-baseline file or parent-attachment references, with at most 8 MiB of copied attachments. Inspect reports worker-local input locations. Reuse a request ID only with the same task, baseline, context, runner, model, effort and workflow when retrying a lost response. `--runner` and its alias `--backend` count as the same field, so a retry may switch spelling. A parent holds at most 32 outstanding workers: accepted, live, or not yet verifiably destroyed. A verified destroy (`cez worker destroy`, or **Clean up** on a finished worker in the cockpit's Workers list) frees a slot; incomplete cleanup keeps its slot until a retry completes. A parent can create at most 1,024 workers in total; past that, start a new task. These limits bound disk resources and runaway spawning, not spending: a worker can be resumed with Continue, and destroying it does not undo charges already made. Cost stays bounded by `maxParallel` and by stopping the parent. There are at most 32 undelivered steering messages per worker.
 
-An incomplete destroy reports the remaining resources and a reason. Cezar retries that recorded request after a delay, including after the project's context recovers on server restart. It removes the owned checkout only after process termination and ownership are verified. If the reason persists, inspect the worker process, Git worktree lock and ownership receipt; correct the blocker and use `cez worker destroy <worker-id>` or the cockpit Destroy action to retry immediately. Cezar leaves ambiguous or replaced resources in place for operator review.
+An incomplete destroy reports the remaining resources and a reason. Cezarion retries that recorded request after a delay, including after the project's context recovers on server restart. It removes the owned checkout only after process termination and ownership are verified. If the reason persists, inspect the worker process, Git worktree lock and ownership receipt; correct the blocker and use `cez worker destroy <worker-id>` or the cockpit Destroy action to retry immediately. Cezarion leaves ambiguous or replaced resources in place for operator review.
 
 `--workflow <name>` runs a catalog workflow inside the worker: the built-in `quick-task` or any `.ai/cezar/workflows/*.yaml` by name, with its agent and check steps, `skill:` bodies and `onFail` loops, so a repo's `review.yaml` becomes a dedicated reviewer. Omitted `--workflow` runs `quick-task` exactly as before. `--runner`, `--model` and `--effort` fill only the steps that leave those fields unset; a step's own `allowedTools`/`bashAllowlist` narrow the parent's grants and never widen them. An unknown name is refused. Agent steps may mix runners: at spawn every agent step is resolved and pinned separately, so an implement-with-codex, review-with-claude chain runs each step under its own runner, account, model, effort and grants. A step's optional `agentProfile` names the account it runs under (an id the registry does not know is refused); same-runner steps otherwise inherit the parent's account and other runners resolve their project/default one. Run-level columns show the first agent step.
 
@@ -721,7 +726,7 @@ Explicit default-account model pins are checked against a fresh, nonempty host c
 
 Omitted `--runner` inherits the parent's active runner. Same-runner workers inherit omitted model/account/effort; `--runner <claude|codex|opencode|pi|cursor|omp>` selecting another runner resolves that runner's project/default account and model without forwarding another provider's settings. `--backend` is a permanent alias of `--runner`; giving both with different values is refused as `invalid_input`. Worker `inspect` and `collect` still report the selected runner in a field named `backend`. `--model <model>` selects a supported model, subject to existing locks. `--effort <low|medium|high|xhigh|max>` pins reasoning effort on same-runner and mixed-runner spawn; omitted `--effort` still inherits the parent pin on same-runner spawn and drops it on mixed-runner spawn. Accepted identity and grants remain fixed across queuing, restart and Continue, including explicit empty grants. Changing or deleting an account registry entry does not rebind a worker. Missing accepted identity evidence or account homes, incompatible Claude state-file layouts, and conflicting later model locks refuse execution explicitly. Credentials and vendor configuration are never copied; each worker receives its own delegation credential, and unspecified native models stay unspecified.
 
-Wait registers immediately. End the parent turn to release scheduler capacity; Cezar resumes it on a selected settled outcome or the finite deadline. `any` is the default, `one` requires exactly one worker, and `all` waits for every selected worker. Review, completion, failure, cancellation with proven termination, and destruction are outcomes. Timeout defaults to 600 seconds (1–1800 accepted). `cancel-wait` is idempotent for the retained wait ID and cannot cancel a newer wait. Timeout and wait cancellation report partial outcomes and unresolved workers, never cancel workers, and never automatically re-wait. Steering is attributed agent input and cannot answer a pending human question.
+Wait registers immediately. End the parent turn to release scheduler capacity; Cezarion resumes it on a selected settled outcome or the finite deadline. `any` is the default, `one` requires exactly one worker, and `all` waits for every selected worker. Review, completion, failure, cancellation with proven termination, and destruction are outcomes. Timeout defaults to 600 seconds (1–1800 accepted). `cancel-wait` is idempotent for the retained wait ID and cannot cancel a newer wait. Timeout and wait cancellation report partial outcomes and unresolved workers, never cancel workers, and never automatically re-wait. Steering is attributed agent input and cannot answer a pending human question.
 
 Parents and owned workers can converse in both directions; a worker may address only its parent. `send --kind request` opens a reply obligation whose ID is the message ID; `send --kind progress` (or `progress`) does not. Follow-ups clarify an existing request; only an explicit correlated `reply` settles it as replied. Retry a message with the same ID and exact payload, including deadline duration; changed payloads are rejected. Acceptance, provider delivery, reply, and task completion are separate facts, visible in the task transcript and `conversation` JSON.
 
@@ -738,7 +743,7 @@ Parent completion requires collection of every worker's latest settled execution
 
 Stop requests cancellation; `stopping` does not prove termination. Destroy checkpoints obtainable results, waits up to 30 seconds for proven termination, and removes only verified owned resources. An `incomplete` response lists remaining resources; resolve the cause and retry explicitly. Cleanup order is: collect/integrate desired results, destroy owned resources, explicitly delete child histories through the cockpit/API, then delete parent history. Parent-owned summaries and bounded diff snapshots remain until parent deletion, including after child-history deletion; general artifact bytes are not archived. Branch/path strings and SHAs become historical descriptors after removal, not promises of available Git objects or files. The human cleanup endpoint `POST /api/v1/p/<projectId>/runs/<worker-id>/worker-destroy` stays available when delegation is disabled. The CLI bounds each HTTP request to 45 seconds and rejects endpoint/auth/origin overrides and redirects.
 
-Provisioned sessions prefer cezar workers and suppress verified native delegation entry points through per-run adapter controls: Claude `Agent`, legacy `Task` and `Workflow` denies, Codex multi-agent feature overrides, OpenCode session `task` denies, and pi's known `subagent` extension exclusion. Claude skills and commands with `context: fork` are not blocked: Claude starts their subagent without checking those denies, and no setting turns forking off. See [the backend capability table](AGENT_PROTOCOL.md#governed-delegation-controls-d1) for tested versions and exemptions. Native workers are not tracked by cezar. Pi has no native delegation primitive or universal identifier for arbitrary custom delegation extensions; guidance does not enforce those cases. With delegation disabled or unavailable, ordinary tools/settings stay unchanged. The listener binds to `127.0.0.1`, including hosted cockpit mode. Its credentials authorize only the parent's own workers through that listener. This is cooperative local-agent supervision; same-user unrestricted shell and custom tools are not hard isolation. Workers cannot delegate or message peers through cezar. Review remains a human gate with no automatic acceptance. Never read, echo, forward, or persist the generated token.
+Provisioned sessions prefer Cezarion workers and suppress verified native delegation entry points through per-run adapter controls: Claude `Agent`, legacy `Task` and `Workflow` denies, Codex multi-agent feature overrides, OpenCode session `task` denies, and pi's known `subagent` extension exclusion. Claude skills and commands with `context: fork` are not blocked: Claude starts their subagent without checking those denies, and no setting turns forking off. See [the backend capability table](AGENT_PROTOCOL.md#governed-delegation-controls-d1) for tested versions and exemptions. Native workers are not tracked by Cezarion. Pi has no native delegation primitive or universal identifier for arbitrary custom delegation extensions; guidance does not enforce those cases. With delegation disabled or unavailable, ordinary tools/settings stay unchanged. The listener binds to `127.0.0.1`, including hosted cockpit mode. Its credentials authorize only the parent's own workers through that listener. This is cooperative local-agent supervision; same-user unrestricted shell and custom tools are not hard isolation. Workers cannot delegate or message peers through Cezarion. Review remains a human gate with no automatic acceptance. Never read, echo, forward, or persist the generated token.
 
 
 ## From the terminal: `cez task`
@@ -853,7 +858,7 @@ parked within seconds. The default is now `attention`. A bot that polls for term
 run in the `wait` output (and the `start --wait` object) now carries `attention` +
 `attentionLabel`, and the output's top level says which `until` was in force, so a caller can tell
 "parked for follow-up" (`status: waiting`, `attention: waiting`) from "finished" (`status: done`,
-`attention: none`) without knowing cezar's status vocabulary.
+`attention: none`) without knowing Cezarion's status vocabulary.
 
 *`log --follow` (#931).* `log --follow` used to stop on a terminal status only, so tailing an
 interactive task streamed until `--timeout-seconds` and exited 3 after the agent had parked. It
@@ -985,7 +990,7 @@ skills: [reproduce, root-cause, implement, self-review]
 
 ## How it runs agents
 
-cezar shells out to your locally installed, logged-in agent CLI —
+Cezarion shells out to your locally installed, logged-in agent CLI —
 **your subscription, no API key**. With the default Claude Code backend that
 means headless `stream-json` mode, tool access via `--allowedTools`, with
 unapproved tools denied without prompting (`--permission-mode dontAsk`) inside
@@ -1009,15 +1014,15 @@ Useful environment variables:
 | `CEZ_URL` | Cockpit origin for `cez task` and operator `cez discover` (e.g. a hosted `CEZ_REMOTE` cockpit). Unset, they find the local cockpit serving this checkout on ports 4321–4370. Parent discovery uses its delegation controller instead. |
 | `CEZ_COCKPIT_URL`, `CEZ_PROJECT_ID` | Set by the cockpit in every agent's environment once it listens: the bound origin and the run's project. `cez automation` calls that address; a headless `cez run` sets neither. Do not configure them. |
 | `CEZ_DRY_RUN=1` | Use bundled mocks for all five agent backends — the cockpit works offline for demos and development. Explicit backend binary overrides still win. |
-| `CEZ_AGENT_MODELS_LOCKED=1` | Globally lock each runner to the model configured in its native Claude/Codex/OpenCode settings while keeping runner selection available. Exact `1` also delegates authentication and provider enablement to those native agents, so Cezar skips its credential probes and provider-disable preferences. Existing Cezar presets are preserved but ignored, and an environment change requires a restart. The config-file equivalent is `"modelsLocked": true` in global `~/.cezar/config.json` or one repository's `.ai/cezar/config.json`; config-file locks do not disable provider checks. |
+| `CEZ_AGENT_MODELS_LOCKED=1` | Globally lock each runner to the model configured in its native Claude/Codex/OpenCode settings while keeping runner selection available. Exact `1` also delegates authentication and provider enablement to those native agents, so Cezarion skips its credential probes and provider-disable preferences. Existing Cezarion presets are preserved but ignored, and an environment change requires a restart. The config-file equivalent is `"modelsLocked": true` in global `~/.cezar/config.json` or one repository's `.ai/cezar/config.json`; config-file locks do not disable provider checks. |
 | `CEZ_APPROVAL_GATE=1` | Opt into Claude's interactive approval UI; by default, unapproved tools are denied without interrupting the run. Ignored when `CEZ_CLAUDE_PERMISSION_MODE` is a recognized value (`dontAsk`, `acceptEdits`, or `bypass`). |
 | `CEZ_CLAUDE_PERMISSION_MODE` | Claude agent-run permission flag: `dontAsk` (default), `acceptEdits`, or `bypass`. `bypass` passes `--dangerously-skip-permissions` and omits `--permission-mode`. Unset or unknown keeps today's `dontAsk` / `CEZ_APPROVAL_GATE` path. Provider verification commands are never given this flag. |
 | `CEZ_CLAUDE_SETTING_SOURCES` | When set, Claude agent runs also pass `--setting-sources <value>` (e.g. `user,project,local`). Unset or empty omits the flag. Provider verification is never given this flag. |
 | `CEZ_FOLLOWUPS=1` | Turn on the global follow-up **Inbox**: agents are asked to leave follow-ups in `todos.json` when they finish, and the Inbox view appears. Off by default — each task's own **Notes** handoff journal runs either way. |
 | `CEZ_ARCHIVE_ON_MERGE=1` | Archive settled task families after all associated pull requests merge. Off by default; only `1` enables this environment default. Saved project settings override global Tasks settings, which override the environment. Runs in the background while the cockpit is open, including unopened projects, without starting agents. Unarchive preserves restored tasks until a later merge. |
-| `CEZ_AUTOMATIONS=1` | Turn on **automations** (GitHub polls and schedules): the Automations view appears and cezar runs each enabled automation while it is open, launching an ordinary task per match or per occurrence. A schedule (daily, weekdays, weekly, every N hours, in the server's time zone) needs no GitHub remote; a GitHub automation polls on its interval. Off by default, and only the exact value `1` enables it — without it nothing polls or fires, the automations endpoints answer `409`, and the nav item is absent. Read at boot, so restart after changing it; definitions, receipts and high-watermarks are retained, so unsetting it and restarting restores the feature without migration or data loss. |
+| `CEZ_AUTOMATIONS=1` | Turn on **automations** (GitHub polls and schedules): the Automations view appears and Cezarion runs each enabled automation while it is open, launching an ordinary task per match or per occurrence. A schedule (daily, weekdays, weekly, every N hours, in the server's time zone) needs no GitHub remote; a GitHub automation polls on its interval. Off by default, and only the exact value `1` enables it — without it nothing polls or fires, the automations endpoints answer `409`, and the nav item is absent. Read at boot, so restart after changing it; definitions, receipts and high-watermarks are retained, so unsetting it and restarting restores the feature without migration or data loss. |
 | `CEZ_VOICE=1` | Turn on **voice mode** (experimental): the ⌘K palette understands a sentence such as “open the next finished task” or “answer yes”, and the server asks Jev (TypeSafe) to turn it into one action that the cockpit shows and runs. Needs `TYPESAFE_API_KEY` (read by the server only; `CEZ_DRY_RUN=1` uses a fake engine instead). Off by default, and only the exact value `1` enables it — without it the voice endpoints answer `409` and the palette is unchanged. Read at boot, so restart after changing it. |
-| `CEZ_PREVIEW=1` | Turn on **live preview** (experimental): agents register a dev server with the `cezar_preview_serve` tool, and the cockpit opens it in a headless Chromium on the host, docked next to the task. cezar first runs a registered command after you press Run and open. Agents can then use `cezar_preview_stop({ port, restart?: boolean })` to stop or restart their own Cezar-started server with that unchanged approval; changed command, cwd or path needs Run and open again. Adopted servers cannot be stopped by this tool. Off by default, and only the exact value `1` enables it — without it the tool is not listed, its route and the preview WebSocket refuse, and `capabilities.preview` is `false`. Read at boot, so restart after changing it. |
+| `CEZ_PREVIEW=1` | Turn on **live preview** (experimental): agents register a dev server with the `cezar_preview_serve` tool, and the cockpit opens it in a headless Chromium on the host, docked next to the task. Cezarion first runs a registered command after you press Run and open. Agents can then use `cezar_preview_stop({ port, restart?: boolean })` to stop or restart their own Cezarion-started server with that unchanged approval; changed command, cwd or path needs Run and open again. Adopted servers cannot be stopped by this tool. Off by default, and only the exact value `1` enables it — without it the tool is not listed, its route and the preview WebSocket refuse, and `capabilities.preview` is `false`. Read at boot, so restart after changing it. |
 | `CEZ_PREVIEW_NO_SANDBOX=1` | Launch the preview's Chromium with `--no-sandbox`. Off by default and never added automatically, not even for root or in a container; use it only where Chromium's sandbox cannot start, and only for pages you trust. Only the exact value `1` applies. Read at boot. |
 | `CEZ_AUTOSAVE=1` | Re-enable the periodic (90 s) autosave commit in task worktrees. Off by default (open-mercato/cezar#471) — turn-end and pre-PR flushes always run, so branches still end complete. Every autosave names its trigger in the commit subject (`cezar autosave (periodic)` vs `(turn end)` / `(run finalize)` / `(pre-PR)`), so the flushes you keep are distinguishable from the timer you disabled. The turn-end / run-finalize flushes and the timer commit only while HEAD is the task's own `cez/<id8>` branch; on a branch the agent checked out they leave the work uncommitted, and the closing flush says so in the handoff's `## Autosave (cezar)` section, not its Progress log (hearsay-tools/cezarion#1004). A turn-end / run-finalize commit is reported there too, with its `git reset --soft` fold-back command, and the timer's commits share one line per run of consecutive periodic commits (count, first and latest sha), with no cockpit note. The pre-PR flush is unchanged. |
 | `CEZ_CLAUDE_BIN=/path/to/claude` | Override which `claude` binary is used. |
@@ -1026,14 +1031,14 @@ Useful environment variables:
 | `CEZ_PI_BIN=/path/to/pi` | Override which `pi` binary is used. |
 | `CEZ_OMP_BIN=/path/to/omp` | Override which `omp` (Oh My Pi) binary is used. |
 | `CEZ_CURSOR_BIN=/path/to/agent` | Override the Cursor CLI (`agent`) executable. |
-| `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`, `OMP_PROFILE` | The agents' **own** variables, honoured where the vendor documents one. Setting one moves that agent's **default account** — the config folder (for omp, the profile) cezar discovers. A *second* login of the same CLI is deliberately not an environment setting, since one process-wide value cannot differ per project: add it under **Settings → Agent accounts** and pick it per project. |
+| `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`, `OMP_PROFILE` | The agents' **own** variables, honoured where the vendor documents one. Setting one moves that agent's **default account** — the config folder (for omp, the profile) Cezarion discovers. A *second* login of the same CLI is deliberately not an environment setting, since one process-wide value cannot differ per project: add it under **Settings → Agent accounts** and pick it per project. |
 | `CEZ_BROWSE_ROOT=~/` | Default root for **Add project → Open local folder…**. The picker cannot navigate above it; a saved workspace value overrides the environment default and must name an existing folder. |
 | `CEZ_PROJECTS_DIR=~/cezar/projects` | Default destination for **Clone from GitHub** and **New project**. Saved workspace settings override it, and missing directories are created recursively. |
 | `CEZ_SKILLS_AUTO_UPDATE=0` | Disable automatic checks and updates for upstream-CLI-tracked Open Mercato skill installations. On by default; a saved global Skills setting overrides this environment default. Checks are delayed, bounded, cached, and non-blocking. |
 | `CEZ_PROJECT_WARMUP=0` | Prepare each registered project only when it is first opened. By default the cockpit prepares every other registered project in the background once it listens, one at a time, most recently opened first: the run store opens and interrupted runs resume, so the first click on a project does not wait. A project another live cockpit serves is skipped. |
 | `CEZ_AUTONOMOUS_DEFAULT=0` | Seed the New Task Autonomous default (`0` or `1`). Without a seed, skills default on and workflows off; a saved global Resources setting overrides it. |
 | `CEZ_WORKTREE_DEFAULT=1` | Seed the New Task Worktree default (`0` or `1`). Without a seed, eligible runs default on; a saved global Resources setting overrides it. |
-| `CEZ_DISABLE_REPO_LOCK=1` | **Dangerous escape hatch:** allow any run executing in the repository root — an explicit `worktree=false` run, non-Git degradation, or a continuation whose worktree cannot be restored — to proceed without Cezar’s repository-root lease. Agents can overwrite each other’s files or Git state; isolated worktree runs are unaffected. Off by default; only the exact value `1` enables it. |
+| `CEZ_DISABLE_REPO_LOCK=1` | **Dangerous escape hatch:** allow any run executing in the repository root — an explicit `worktree=false` run, non-Git degradation, or a continuation whose worktree cannot be restored — to proceed without Cezarion’s repository-root lease. Agents can overwrite each other’s files or Git state; isolated worktree runs are unaffected. Off by default; only the exact value `1` enables it. |
 | `CEZ_SINGLE_PROJECT=1` | Opt into a launch-project-only cockpit: only the exact value `1` enables it. Project add, edit, checkout, folder browsing, and removal are refused and only the launch project is shown. Off by default; stored registry rows are retained, so unsetting it and restarting restores the full multi-project workspace without migration or data loss. |
 | `CEZ_HIDE_TOKEN_USAGE=1` | Hide raw input/output token counts throughout the browser cockpit while leaving backend-reported cost visible. Only the exact value `1` enables it; telemetry and API payloads are unchanged, and a restart is required after changing it. |
 | `CEZ_HIDE_COST=1` | Hide backend-reported monetary cost throughout the browser cockpit while leaving raw input/output token counts visible. Only the exact value `1` enables it; telemetry and API payloads are unchanged, and a restart is required after changing it. |
@@ -1070,7 +1075,7 @@ df -i "${TMPDIR:-/tmp}"                # a tmpfs can exhaust inodes long before 
 Under quota the file is *created* and the write then fails, so the backend reads
 back a zero-byte capture file and hands the agent an empty result.
 
-**Fix.** Since open-mercato/cezar#785 cezar gives each task its own `TMPDIR` under
+**Fix.** Since open-mercato/cezar#785 Cezarion gives each task its own `TMPDIR` under
 `.ai/cezar/t/<task-id8>` and write-probes it before spawning, so a broken temp
 directory fails the task with `agent temp directory is not writable: …` on the
 task thread instead of corrupting its work. If you see that error, free space on
@@ -1088,7 +1093,7 @@ with `TMPDIR=/tmp` set by hand, the same commands succeed. Tools like `tsx` bind
 `<tmpdir>/tsx-<uid>/<pid>.pipe`), and the kernel caps a socket path at 104–108
 bytes — a temp directory near that length leaves no room for the name.
 
-**Fix.** Since hearsay-tools/cezarion#387 cezar keeps each task's temp directory short
+**Fix.** Since hearsay-tools/cezarion#387 Cezarion keeps each task's temp directory short
 enough for these sockets: at most 58 bytes since hearsay-tools/cezarion#1022, which
 leaves room for Chromium's `<tmpdir>/org.chromium.Chromium.XXXXXX/SingletonSocket`
 on macOS's 104-byte limit. The repo-local directory is `.ai/cezar/t/<task-id8>`
@@ -1103,16 +1108,16 @@ run ends.
 
 ## Coding agent backends
 
-cezar is not married to one vendor. Every agent step runs through a single
+Cezarion is not married to one vendor. Every agent step runs through a single
 `AgentRunner` seam with six built-in backends:
 
-| Backend | CLI | How cezar drives it | Tool access |
+| Backend | CLI | How Cezarion drives it | Tool access |
 |---|---|---|---|
 | **Claude Code** (default) | [`claude`](https://github.com/anthropics/claude-code) | Headless `stream-json` mode. | Per-tool `--allowedTools` (`bashAllowlist` scopes `Bash`); `dontAsk` denies unapproved tools without prompting (`CEZ_APPROVAL_GATE=1` → `acceptEdits` + approval UI; `CEZ_CLAUDE_PERMISSION_MODE=bypass` → `--dangerously-skip-permissions`). |
 | **Codex** | [`codex`](https://github.com/openai/codex) | `codex app-server` — JSON-RPC over stdio, the same transport the Codex IDE extensions use. | Ignores `allowedTools`; inherits managed permissions and Codex approval defaults. Confirmed unmanaged sessions use `danger-full-access`. `CEZ_CODEX_NETWORK=0` requires network restriction: unmanaged sessions use network-blocked `workspace-write`; managed filesystem rules remain intact, and an unconfirmed network restriction stops before any turn. If requirements discovery is unavailable, Codex permission defaults apply. |
-| **OpenCode** _(experimental)_ | [`opencode`](https://opencode.ai) | `opencode serve` — a local HTTP server with an SSE event stream. | Ignores `allowedTools` entirely; OpenCode's own permission config governs. cezar answers OpenCode's built-in asks (outside-worktree reads, `.env` reads, the repeated-call guard) once, unless your config has a rule for that permission. Any other ask shows a permission card in the cockpit, and the run waits for your answer. |
+| **OpenCode** _(experimental)_ | [`opencode`](https://opencode.ai) | `opencode serve` — a local HTTP server with an SSE event stream. | Ignores `allowedTools` entirely; OpenCode's own permission config governs. Cezarion answers OpenCode's built-in asks (outside-worktree reads, `.env` reads, the repeated-call guard) once, unless your config has a rule for that permission. Any other ask shows a permission card in the cockpit, and the run waits for your answer. |
 | **Cursor** | [`agent`](https://cursor.com/docs/cli/installation) | Qualified builds use resumable `--print --output-format stream-json` turns; other builds and legacy sessions use ACP. | Print mode admits marketplace plugins, including user and team plugins, and narrows known native delegation tools for governed runs. Per-run `allowedTools` and `bashAllowlist` are unsupported. |
-| **pi** _(experimental)_ | [`pi`](https://github.com/badlogic/pi-mono) | Persistent `--mode rpc` over JSONL; models are picked with the `provider/model` convention. | Maps `allowedTools` onto pi tool names. The default list, which adds the harness extras `Subagent`, `SubagentSupervisor` and `SubagentWait`, sends no allowlist: `--no-builtin-tools` plus a bundled extension that activates those built-ins, so MCP servers (`direct`, `codemode` and `deferred` exposure) and other pi extensions' tools stay callable. The six base tools alone, the list a worker inherits from a Claude parent, take the same path. A narrowed `allowedTools`, or one that names any tool outside that default set (an `mcp__` tool, `WebFetch` or a custom tool), uses pi's `--tools` allowlist, so a step that grants named tools reaches only those; a list that maps to nothing becomes `--no-tools` (or only the cezar tools). A configured `bashAllowlist` disables Bash because pi cannot express command-prefix rules. |
+| **pi** _(experimental)_ | [`pi`](https://github.com/badlogic/pi-mono) | Persistent `--mode rpc` over JSONL; models are picked with the `provider/model` convention. | Maps `allowedTools` onto pi tool names. The default list, which adds the harness extras `Subagent`, `SubagentSupervisor` and `SubagentWait`, sends no allowlist: `--no-builtin-tools` plus a bundled extension that activates those built-ins, so MCP servers (`direct`, `codemode` and `deferred` exposure) and other pi extensions' tools stay callable. The six base tools alone, the list a worker inherits from a Claude parent, take the same path. A narrowed `allowedTools`, or one that names any tool outside that default set (an `mcp__` tool, `WebFetch` or a custom tool), uses pi's `--tools` allowlist, so a step that grants named tools reaches only those; a list that maps to nothing becomes `--no-tools` (or only the Cezarion tools). A configured `bashAllowlist` disables Bash because pi cannot express command-prefix rules. |
 | **OMP** _(experimental)_ | [`omp`](https://github.com/can1357/oh-my-pi) | Persistent `--mode rpc` over JSONL (Oh My Pi, a pi fork); models use the `provider/model` convention and are discovered from `omp models --json`. | Maps `allowedTools` onto OMP's `--tools` allowlist (`[]` becomes `--no-tools`); default sessions also pass `todo`, `lsp`, `ast_edit`, `task` and `wait`. A configured `bashAllowlist` disables `bash` because OMP cannot express command-prefix rules. |
 
 > ⚠️ **OpenCode, pi and OMP support are experimental.** These runners work but are less
@@ -1120,30 +1125,30 @@ cezar is not married to one vendor. Every agent step runs through a single
 > `allowedTools` (its own permission config governs what it asks). Treat them as
 > previews and expect rough edges.
 
-On startup cezar probes which CLIs are installed and the cockpit only offers
+On startup Cezarion probes which CLIs are installed and the cockpit only offers
 the backends it found — install any one of the six and you're operational.
 
 ### Cursor CLI
 
 Install [Cursor CLI](https://cursor.com/docs/cli/installation) and run `agent login`,
-or set `CURSOR_API_KEY`. Cezar discovers `agent` on PATH; `CEZ_CURSOR_BIN` overrides
+or set `CURSOR_API_KEY`. Cezarion discovers `agent` on PATH; `CEZ_CURSOR_BIN` overrides
 its location. Select **Cursor** in the runner picker. On build
 `2026.10.01-e373342` or newer, new sessions use print mode so marketplace plugins
-are available. Cezar checks `agent --version` and the native tool catalog before
+are available. Cezarion checks `agent --version` and the native tool catalog before
 the first turn; `agent --version` is also the quick way to check your installation.
-Cezar starts the CLI with `--disable-auto-update`, so a task never updates it;
+Cezarion starts the CLI with `--disable-auto-update`, so a task never updates it;
 update it yourself with `agent update`. Older builds, and a build missing a core
 tool, use ACP, which may not see marketplace plugins. Existing ACP
 sessions continue on ACP so their conversation history is preserved.
 A missing CLI leaves the other backends available. `CEZ_DRY_RUN=1` uses the mock.
-Cursor questions from a plugin may be automatically skipped by print mode. Cezar's
+Cursor questions from a plugin may be automatically skipped by print mode. Cezarion's
 own `CEZ:ASK` questions remain answerable in the cockpit; plugins that require
 native questions may not work fully. Project-local Claude plugin settings may
 not disable a user or team marketplace copy. A previously confirmed Cursor
-session ID can also lose history inside Cursor without an error; Cezar resumes
+session ID can also lose history inside Cursor without an error; Cezarion resumes
 the recorded ID and checks that Cursor returns the same ID.
-Cursor provides no qualified token-usage telemetry; Cezar leaves usage unavailable
-instead of estimating it. Cezar discovers Cursor's canonical model IDs and advertised
+Cursor provides no qualified token-usage telemetry; Cezarion leaves usage unavailable
+instead of estimating it. Cezarion discovers Cursor's canonical model IDs and advertised
 effort levels through its read-only ACP catalog. Print mode accepts those IDs and
 applies effort using a complete native parameter selection passed with `--model`,
 retaining the account catalog's defaults for other parameters. Advertised legacy
@@ -1155,20 +1160,20 @@ Settings → Agent config exposes Cursor’s global `cli-config.json`, project
 `.cursor/cli.json` permissions, `.cursor/mcp.json`, and shared `AGENTS.md`.
 [Cursor’s configuration reference](https://cursor.com/docs/cli/reference/configuration)
 documents `CURSOR_CONFIG_DIR` and the Linux/BSD `XDG_CONFIG_HOME/cursor` override.
-These select configuration; Cezar does not offer alternate Cursor account profiles
+These select configuration; Cezarion does not offer alternate Cursor account profiles
 because a complete credential-and-session home override has not been verified.
 
 
 ### OMP (Oh My Pi)
 
 Install [OMP](https://github.com/can1357/oh-my-pi) (`curl -fsSL https://omp.sh/install | sh`
-installs a prebuilt binary; Bun is needed only for `--source`) and run `omp login`. Cezar discovers `omp` on PATH;
+installs a prebuilt binary; Bun is needed only for `--source`) and run `omp login`. Cezarion discovers `omp` on PATH;
 `CEZ_OMP_BIN` overrides its location. `omp` is a separate backend from `pi`: a host with
 both binaries keeps both, and `CEZ_PI_BIN` never selects OMP. Select **OMP** in the runner
 picker to use a persistent `--mode rpc` session. A missing CLI leaves the other backends
 available and shows OMP as unavailable. `CEZ_DRY_RUN=1` uses the mock.
 
-Agents ask questions through cezar's `CEZ:ASK` marker, and OMP's own sub-agents appear in the
+Agents ask questions through Cezarion's `CEZ:ASK` marker, and OMP's own sub-agents appear in the
 Agents drawer. Settings → Agent config exposes OMP's `config.yml`, `mcp.json` and
 `AGENTS.md` files. Named OMP profiles and accounts are not supported yet.
 
@@ -1204,11 +1209,11 @@ Parallel variants (×2/×3) of one task share that task's backend — mixing
 happens per task and per step, not inside a variant group.
 
 **Models come from your own machine.** For Claude, Codex, OpenCode, and Pi, the model picker
-is not a list cezar ships — it asks the installed CLI what it can actually run
+is not a list Cezarion ships — it asks the installed CLI what it can actually run
 (Claude stream-json `list_models`, `codex app-server`'s `model/list`,
 `opencode models`, and `pi --list-models`), caches the answer in
 memory for five minutes, and shows it. A model your provider rolled out
-yesterday is selectable without a cezar release, and one it retired stops being
+yesterday is selectable without a Cezarion release, and one it retired stops being
 offered. Claude discovery starts no model turn and uses safe mode with no session
 persistence. It has a 15-second deadline and a 200-model cap, with child cleanup
 on every outcome. Unsupported or unavailable Claude CLIs fall back to the
@@ -1224,9 +1229,9 @@ can slot in the same way.
 
 ---
 
-## Remote access (host cezar on a server)
+## Remote access (host Cezarion on a server)
 
-cezar runs on `localhost` by default. To reach the cockpit from another machine —
+Cezarion runs on `localhost` by default. To reach the cockpit from another machine —
 a shared team box, a VPS, your phone — put an **authenticated public front** in
 front of it. The built-in installer does this interactively, per **platform
 strategy**, and never escalates silently: every privileged command is printed
@@ -1246,7 +1251,7 @@ On `ubuntu-vps` a single host can run several independent cockpits — add
 new domain never resumes or clobbers the first install.
 
 **Already running a reverse proxy?** If Dokploy, Coolify, Caddy or your own
-nginx already owns `:80/:443`, cezar's would fight it for the ports. Install the
+nginx already owns `:80/:443`, Cezarion's would fight it for the ports. Install the
 service only and let your proxy front it:
 
 ```bash
@@ -1256,13 +1261,13 @@ npx cezarion server-install --platform ubuntu-vps \
 
 `--bind-host` is only needed when the proxy runs in a **container** (Traefik
 can't reach the host's loopback); a host-installed proxy uses the `127.0.0.1`
-default. In this mode **your proxy must enforce authentication** — cezar has
+default. In this mode **your proxy must enforce authentication** — Cezarion has
 none of its own. [Details →](docs/server-install/ubuntu-vps.md#the-box-already-has-a-reverse-proxy-dokploy-coolify-caddy)
 
 | Provider | `--platform` | Public front | Guide |
 |----------|--------------|--------------|-------|
 | Ubuntu / Debian VPS | `ubuntu-vps` | nginx + Let's Encrypt HTTPS, htpasswd login, systemd | [Step-by-step →](docs/server-install/ubuntu-vps.md) |
-| Ubuntu + existing proxy | `ubuntu-vps --external-proxy` | your Dokploy/Traefik/Caddy front; cezar ships the service only | [Step-by-step →](docs/server-install/ubuntu-vps.md#the-box-already-has-a-reverse-proxy-dokploy-coolify-caddy) |
+| Ubuntu + existing proxy | `ubuntu-vps --external-proxy` | your Dokploy/Traefik/Caddy front; Cezarion ships the service only | [Step-by-step →](docs/server-install/ubuntu-vps.md#the-box-already-has-a-reverse-proxy-dokploy-coolify-caddy) |
 | macOS + ngrok | `macosx-ngrok` | ngrok tunnel + `--basic-auth`, launchd | [Step-by-step →](docs/server-install/macosx-ngrok.md) |
 
 See the **[Remote access overview](docs/server-install/README.md)** for how it
@@ -1282,7 +1287,7 @@ For a deliverable outside the project, an agent must explicitly publish a snapsh
 cez artifact publish /tmp/decision.md
 ```
 
-Cezar supplies the bundled command and task context to agent sessions automatically
+Cezarion supplies the bundled command and task context to agent sessions automatically
 (`CEZ_TASK_ID` and `CEZ_ARTIFACTS_DIR`; do not configure these yourself). The command
 returns JSON with a Markdown link for the agent to share. When the owning project
 is registered, the link keeps that project when copied or opened from another
@@ -1339,12 +1344,12 @@ root — live once in `~/.cezar/config.json`, alongside the
 [project registry](#multiple-projects-one-cockpit), and are edited from
 **Settings → Resources** and **Settings → Projects**. A `maxParallel` left over
 in a repo's `.ai/cezar/config.json` is imported into the workspace file the
-first time cezar boots there, and ignored afterwards.
+first time Cezarion boots there, and ignored afterwards.
 
 ### Preparing new worktrees
 
 Every task and worker runs in a fresh worktree, and a fresh worktree has nothing installed. Give
-the project a `worktreeSetup` and cezar runs those commands in each new worktree before the
+the project a `worktreeSetup` and Cezarion runs those commands in each new worktree before the
 agent's first turn, so the agent (and anything that runs beside it, such as a test watcher)
 starts in a ready tree:
 
@@ -1357,7 +1362,7 @@ starts in a ready tree:
 ```
 
 Or edit it in **Settings → Worktrees → Prepare new worktrees**, one command per line. Only a
-cockpit on the machine running cezar can change it: a hosted cockpit (`CEZ_REMOTE=1`) shows it
+cockpit on the machine running Cezarion can change it: a hosted cockpit (`CEZ_REMOTE=1`) shows it
 read-only, because these are commands the host runs.
 
 - **When it runs.** In every new task worktree and every worker worktree, and again when Continue
@@ -1393,7 +1398,7 @@ Without the key nothing runs, exactly as before. Examples:
 
 ### Editing the agents' own config (Settings → Agent config)
 
-cezar picks *which* agent runs; **Settings → Agent config** lets you edit *how* it
+Cezarion picks *which* agent runs; **Settings → Agent config** lets you edit *how* it
 behaves — the raw config files Claude, Codex, OpenCode, Cursor, pi and OMP read
 for settings, MCP, and memory. In the multi-project cockpit the section is project-scoped:
 repo-relative files resolve from the selected project's root, while user-scope
@@ -1528,4 +1533,4 @@ Every module is meant to be read in one sitting.
 
 ## License
 
-**MIT** © Patryk Lewczuk — full text in [LICENSE](LICENSE).
+**MIT** © Patryk Lewczuk (original cezar) and Wiktor Jarka (Cezarion) — full text in [LICENSE](LICENSE).
