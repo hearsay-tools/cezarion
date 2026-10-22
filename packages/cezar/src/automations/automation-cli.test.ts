@@ -5,6 +5,7 @@ import { EXIT } from '../task-cli/cli.ts';
 import { fetchJson, TaskCliError, type Cockpit, type HttpResult } from '../task-cli/http.ts';
 import { automationPageUrl, bodyFromAddFlags, parseEvery, runAutomationCommand, type AutomationIo } from './automation-cli.ts';
 import { AUTOMATION_SCHEMA_REFERENCE } from './prompts.ts';
+import { resolveDelay } from '@open-mercato/cezar-contract/scheduled-tasks';
 
 /**
  * `cez automation` (#774, port of upstream #985) against a real cockpit app on a real loopback
@@ -360,6 +361,84 @@ describe('cez automation', () => {
       const { extra } = checkIo([]);
       expect(await run(['check', 'a1'], env(), extra)).toBe(EXIT.timeout);
       expect(last()).toMatchObject({ code: 'timeout', checkId: 'chk-1' });
+    });
+  });
+
+  // hearsay-tools/cezarion#1465: one-time schedules from flags, cancel and the archived list.
+  describe('one-time schedules', () => {
+    const NOW = Date.parse('2026-10-22T13:00:00Z');
+    const later = new Date(Date.now() + 2 * 86_400_000).toISOString().slice(0, 16);
+
+    it('add --at --tz builds a once body', async () => {
+      expect(await run(['add', '--name', 'Check', '--at', later, '--tz', 'Europe/Warsaw', '--latest-start', '6h', '--prompt', 'Check it']), out.join('\n')).toBe(EXIT.ok);
+      expect(posted.at(-1)?.body).toEqual({ name: 'Check', kind: 'schedule', schedule: { type: 'once', at: later, timeZone: 'Europe/Warsaw', latestStartMinutes: 360 }, task: { prompt: 'Check it', worktree: true, autonomous: true } });
+      expect(last()).toMatchObject({ enabled: false, onceStatus: 'paused', timeZone: 'Europe/Warsaw', note: 'Cezarion must be running at the due time, or start again before the latest start, for this task to launch.' });
+      expect(String(last().dueAt)).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:00\.000Z$/);
+    });
+
+    it('add --in 7d resolves at in the cockpit zone', async () => {
+      const { timeZone } = (await fetchJson(`${cockpit.api}/automations`)).data as { timeZone: string };
+      const at = resolveDelay('7d', Date.now(), timeZone);
+      expect(await run(['add', '--name', 'Later', '--in', '7d', '--prompt', 'Go'], env(), { now: () => Date.now() }), out.join('\n')).toBe(EXIT.ok);
+      const schedule = (posted.at(-1)?.body as { schedule: { at: string; timeZone: string } }).schedule;
+      expect(schedule.timeZone).toBe(timeZone);
+      // Within a minute of the resolution above: the CLI resolved it a moment later.
+      expect(Math.abs(Date.parse(`${schedule.at}:00Z`) - Date.parse(`${at}:00Z`))).toBeLessThanOrEqual(60_000);
+    });
+
+    it('add --in resolves from io.now in the given zone', () => {
+      expect(bodyFromAddFlags({ name: 'n', in: '7d', tz: 'Europe/Warsaw' }, 'p', { now: NOW })).toMatchObject({ schedule: { type: 'once', at: '2026-10-29T14:00', timeZone: 'Europe/Warsaw' } });
+    });
+
+    it('add --at with --cron exits 64', async () => {
+      for (const argv of [
+        ['--at', later, '--cron', '0 4 * * *'],
+        ['--in', '1h', '--on', 'pull_request.opened'],
+        ['--at', later, '--in', '1h'],
+        ['--cron', '0 4 * * *', '--tz', 'UTC'],
+        ['--cron', '0 4 * * *', '--latest-start', '1h'],
+        ['--at', later, '--tz', 'Mars/Base'],
+        ['--at', 'tomorrow'],
+        ['--in', 'soon'],
+      ]) {
+        expect(await run(['add', '--name', 'n', '--prompt', 'p', ...argv], {}), argv.join(' ')).toBe(EXIT.usage);
+      }
+      expect(posted).toEqual([]);
+    });
+
+    it('--latest-start 5m exits 64 (below 10 minutes)', async () => {
+      expect(await run(['add', '--name', 'n', '--prompt', 'p', '--in', '1h', '--tz', 'UTC', '--latest-start', '5m'], {})).toBe(EXIT.usage);
+      expect(last()).toMatchObject({ code: 'invalid_input', error: expect.stringMatching(/10 minutes/) });
+      expect(await run(['add', '--name', 'n', '--prompt', 'p', '--in', '1h', '--tz', 'UTC', '--latest-start', '31d'], {})).toBe(EXIT.usage);
+    });
+
+    it('cancel posts to /cancel', async () => {
+      expect(await run(['add', '--name', 'Cancel me', '--at', later, '--tz', 'UTC', '--prompt', 'p'])).toBe(EXIT.ok);
+      const id = String(last().id);
+      expect(await run(['cancel', id]), out.join('\n')).toBe(EXIT.ok);
+      expect(posted.at(-1)).toMatchObject({ method: 'POST', url: expect.stringMatching(new RegExp(`/automations/${id}/cancel$`)) });
+      expect(last()).toMatchObject({ id, onceStatus: 'archived', archived: { outcome: 'cancelled' } });
+    });
+
+    it('list --archived only passes the query', async () => {
+      expect(await run(['add', '--name', 'Keep', '--at', later, '--tz', 'UTC', '--prompt', 'p'])).toBe(EXIT.ok);
+      expect(await run(['add', '--name', 'Gone', '--at', later, '--tz', 'UTC', '--prompt', 'p'])).toBe(EXIT.ok);
+      expect(await run(['cancel', String(last().id)])).toBe(EXIT.ok);
+      const urls: string[] = [];
+      const http = async (url: string, init?: Parameters<typeof fetchJson>[1]): Promise<HttpResult> => { urls.push(url); return fetchJson(url, init); };
+      expect(await run(['list', '--archived', 'only'], env(), { http })).toBe(EXIT.ok);
+      expect(urls.at(-1)).toMatch(/\/automations\?archived=only$/);
+      expect((last().automations as Array<Record<string, unknown>>).map(item => item.name)).toEqual(['Gone']);
+      expect(await run(['list'])).toBe(EXIT.ok);
+      const [keep] = last().automations as Array<Record<string, unknown>>;
+      expect(keep).toMatchObject({ name: 'Keep', onceStatus: 'paused', timeZone: 'UTC', dueAt: `${later}:00.000Z`, trigger: expect.stringMatching(/^once on /) });
+      expect(await run(['list', '--archived', 'all'])).toBe(EXIT.usage);
+    });
+
+    it('show carries the due instant and zone of a once', async () => {
+      expect(await run(['add', '--name', 'Show', '--at', later, '--tz', 'UTC', '--prompt', 'p'])).toBe(EXIT.ok);
+      expect(await run(['show', String(last().id)])).toBe(EXIT.ok);
+      expect(last()).toMatchObject({ onceStatus: 'paused', dueAt: `${later}:00.000Z`, timeZone: 'UTC' });
     });
   });
 

@@ -2,11 +2,17 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
+  ONCE_MAX_LATEST_START_MINUTES,
+  ONCE_MIN_LATEST_START_MINUTES,
   SCHEDULE_TYPES,
+  onceInstant,
+  onceWallParts,
   parseCron,
   scheduleLabel,
   type AutomationSchedule,
 } from '@open-mercato/cezar-contract/automation-schedule';
+import { parseDurationMinutes, resolveDelay, SCHEDULED_TASK_NOTE } from '@open-mercato/cezar-contract/scheduled-tasks';
+import { isValidTimeZone } from '@open-mercato/cezar-contract/zoned-time';
 import type { AutomationEvent, CreateAutomationInput } from '@open-mercato/cezar-contract';
 import { EXIT } from '../task-cli/cli.ts';
 import { discoverCockpit, type DiscoverOptions } from '../task-cli/discovery.ts';
@@ -46,18 +52,24 @@ One JSON object per invocation; exit 0 ok, 1 check failed, 2 refused or no cockp
   create [--file <def.json> | --json '<json>'] [--enable]
                                            create from a JSON definition (stdin when neither flag is given);
                                            paused unless --enable
-  add --name <name> (--cron "<M H * * *>" | --on <event>[,<event>] [--every <5m|1h>])
+  add --name <name> (--cron "<M H * * *>" | --on <event>[,<event>] [--every <5m|1h>]
+                    | --at <YYYY-MM-DDTHH:MM> | --in <30m|6h|7d>) [--tz <zone>] [--latest-start <6h>]
       [--prompt <text> | --prompt-file <path>] [--workflow <w>] [--runner <id>] [--model <m>]
       [--autonomous | --no-autonomous] [--label <l>]... [--author <a>]... [--changed-label <l>]... [--include-existing] [--enable]
                                            the same from flags. --cron takes "M H * * *" (daily), "M H * * 1-5"
                                            (weekdays), "M H * * D" (0 or 7 = Sunday) or "0 */N * * *"
-                                           (N in 1,2,3,4,6,8,12); anything else needs the JSON form
+                                           (N in 1,2,3,4,6,8,12); anything else needs the JSON form.
+                                           --at or --in runs once: --at is a local wall time in --tz (an IANA
+                                           name; the cockpit's zone when left out), --in is elapsed time from
+                                           now. --latest-start (10m to 30d) bounds how late a start may still
+                                           launch after Cezarion was down
   update <id> [--file <def.json> | --json '<json>']
                                            replace the editable keys you give; the rest keep their value;
                                            "task" merges key by key, and null removes a task key
   check <id> [--execute]                   GitHub poll: preview its matches (launches nothing), or --execute
-  run <id>                                 schedule: launch it once now
-  list | show <id> | enable <id> | pause <id> | delete <id>
+  run <id>                                 schedule: launch it once now (a one-time schedule is then archived)
+  cancel <id>                              one-time schedule: archive it without a task
+  list [--archived include|only] | show <id> | enable <id> | pause <id> | delete <id>
 
 Address: CEZ_COCKPIT_URL + CEZ_PROJECT_ID (set inside a task). --url <origin>, --repo <dir> or CEZ_URL look
 for a cockpit instead.`;
@@ -83,6 +95,7 @@ const ADD_FLAGS = {
   'changed-label': { type: 'string', multiple: true },
   'include-existing': { type: 'boolean' },
   enable: { type: 'boolean' },
+  at: { type: 'string' }, in: { type: 'string' }, tz: { type: 'string' }, 'latest-start': { type: 'string' },
 } as const;
 
 /** Positional count and flags per command; `schema` is handled before any of this. */
@@ -92,11 +105,12 @@ const COMMANDS = {
   update: { positionals: 1, options: DEFINITION_FLAGS },
   check: { positionals: 1, options: { execute: { type: 'boolean' } } },
   run: { positionals: 1, options: {} },
-  list: { positionals: 0, options: {} },
+  list: { positionals: 0, options: { archived: { type: 'string' } } },
   show: { positionals: 1, options: {} },
   enable: { positionals: 1, options: {} },
   pause: { positionals: 1, options: {} },
   delete: { positionals: 1, options: {} },
+  cancel: { positionals: 1, options: {} },
 } as const;
 type Command = keyof typeof COMMANDS;
 
@@ -121,22 +135,56 @@ export interface AddFlags {
   name?: string; cron?: string; on?: string; every?: string;
   workflow?: string; runner?: string; model?: string; autonomous?: boolean; 'no-autonomous'?: boolean;
   label?: string[]; author?: string[]; 'changed-label'?: string[]; 'include-existing'?: boolean; enable?: boolean;
+  at?: string; in?: string; tz?: string; 'latest-start'?: string;
 }
 
-/** The `add` flags as the `create` body they stand for. Anything they cannot say is exit 64. */
-export function bodyFromAddFlags(values: AddFlags, prompt: string): CreateAutomationInput {
+/** A duration flag in minutes; anything else is exit 64. */
+function durationFlag(flag: string, value: string): number {
+  try { return parseDurationMinutes(value); } catch { usageError(`${flag} wants a duration like 30m, 6h or 7d, not "${value}"`); }
+}
+
+/** The one-time schedule `--at`/`--in` stand for, in `timeZone`; every rule it breaks is exit 64. */
+function onceFromFlags(values: AddFlags, timeZone: string, now: number): AutomationSchedule {
+  if (values.at !== undefined && values.in !== undefined) usageError('give --at (a wall time) OR --in (a delay), not both');
+  if (values.cron || values.on) usageError('give --at or --in (a one-time schedule) OR --cron OR --on, not two of them');
+  if (values['include-existing']) usageError('--include-existing applies only to a GitHub poll');
+  if (!isValidTimeZone(timeZone)) usageError(`unknown time zone "${timeZone}"; use an IANA name such as Europe/Warsaw`);
+  if (values.at !== undefined && !onceWallParts(values.at)) usageError(`--at wants a local wall time YYYY-MM-DDTHH:MM, not "${values.at}"`);
+  if (values.in !== undefined) durationFlag('--in', values.in);
+  const at = values.at ?? resolveDelay(values.in!, now, timeZone);
+  const schedule: AutomationSchedule = { type: 'once', at, timeZone };
+  if (values['latest-start'] !== undefined) {
+    const minutes = durationFlag('--latest-start', values['latest-start']);
+    if (minutes < ONCE_MIN_LATEST_START_MINUTES || minutes > ONCE_MAX_LATEST_START_MINUTES) {
+      usageError(`--latest-start must be between ${ONCE_MIN_LATEST_START_MINUTES} minutes and ${ONCE_MAX_LATEST_START_MINUTES / 1_440} days`);
+    }
+    schedule.latestStartMinutes = minutes;
+  }
+  return schedule;
+}
+
+/**
+ * The `add` flags as the `create` body they stand for. Anything they cannot say is exit 64.
+ * `timeZone` is the zone `--at`/`--in` resolve in when `--tz` is absent (the cockpit's own).
+ */
+export function bodyFromAddFlags(values: AddFlags, prompt: string, once: { timeZone?: string; now?: number } = {}): CreateAutomationInput {
   if (!values.name?.trim()) usageError('--name is required');
   if (!prompt.trim()) usageError('--prompt (or --prompt-file) is required');
+  const isOnce = values.at !== undefined || values.in !== undefined;
+  if (!isOnce && (values.tz !== undefined || values['latest-start'] !== undefined)) usageError('--tz and --latest-start apply only to a one-time schedule (--at or --in)');
   if (values.cron && values.on) usageError('give --cron (a schedule) OR --on (a GitHub poll), not both');
   if (values.cron && values['include-existing']) usageError('--include-existing applies only to a GitHub poll');
-  if (!values.cron && !values.on) usageError('give --cron "<M H * * *>" for a schedule or --on <event> for a GitHub poll');
+  if (!isOnce && !values.cron && !values.on) usageError('give --cron "<M H * * *>" for a schedule, --at or --in for a one-time schedule, or --on <event> for a GitHub poll');
   if (values.autonomous && values['no-autonomous']) usageError('give --autonomous OR --no-autonomous, not both');
   const task: CreateAutomationInput['task'] = { prompt, worktree: true, autonomous: !values['no-autonomous'] };
   if (values.workflow) task.workflow = values.workflow;
   if (values.runner) task.runner = values.runner as CreateAutomationInput['task']['runner'];
   if (values.model) task.model = values.model;
   let body: CreateAutomationInput;
-  if (values.cron) {
+  if (isOnce) {
+    const schedule = onceFromFlags(values, values.tz ?? once.timeZone ?? 'UTC', once.now ?? Date.now());
+    body = { name: values.name.trim(), kind: 'schedule', schedule, task };
+  } else if (values.cron) {
     const schedule: AutomationSchedule | null = parseCron(values.cron);
     if (!schedule) {
       usageError(`--cron "${values.cron}" is not one of the shapes a schedule can take (${SCHEDULE_TYPES.join(', ')}): "M H * * *", "M H * * 1-5", "M H * * D" (0 or 7 = Sunday) or "0 */N * * *" (N in 1,2,3,4,6,8,12). For anything else use the JSON form: create --json with a definition shaped as the schema command prints`);
@@ -227,7 +275,7 @@ interface Parsed { command: Command; id: string; values: Record<string, unknown>
 
 function parse(argv: string[]): Parsed {
   const [name, ...rest] = argv;
-  if (name === undefined) usageError('missing command (schema, create, add, update, check, run, list, show, enable, pause, delete)');
+  if (name === undefined) usageError('missing command (schema, create, add, update, check, run, cancel, list, show, enable, pause, delete)');
   if (!Object.hasOwn(COMMANDS, name)) usageError(`unknown command "${name}"`);
   const command = name as Command;
   const spec = COMMANDS[command];
@@ -241,6 +289,7 @@ function parse(argv: string[]): Parsed {
   if (positionals.length !== spec.positionals) {
     usageError(spec.positionals ? `${command} takes an automation id` : `${command} takes no positional arguments`);
   }
+  if (values.archived !== undefined && values.archived !== 'include' && values.archived !== 'only') usageError('--archived takes include or only');
   return { command, id: positionals[0] ?? '', values };
 }
 
@@ -267,7 +316,15 @@ export async function runAutomationCommand(
       const flags = values as AddFlags & { prompt?: string; 'prompt-file'?: string };
       if (flags.prompt !== undefined && flags['prompt-file'] !== undefined) usageError('give the prompt as --prompt OR --prompt-file, not both');
       const prompt = flags['prompt-file'] !== undefined ? await readText(io, flags['prompt-file']) : (flags.prompt ?? '');
-      body = bodyFromAddFlags(flags, prompt) as Record<string, unknown>;
+      const now = (io.now ?? Date.now)();
+      body = bodyFromAddFlags(flags, prompt, { now }) as Record<string, unknown>;
+      // A one-time schedule without --tz resolves in the cockpit's zone, which only the cockpit knows.
+      if ((flags.at !== undefined || flags.in !== undefined) && flags.tz === undefined) {
+        const cockpit = await resolveCockpit(env, values as { url?: string; repo?: string }, io);
+        const timeZone = await cockpitTimeZone(cockpit, io);
+        body = bodyFromAddFlags(flags, prompt, { timeZone, now }) as Record<string, unknown>;
+        return await execute(command, id, values, body, cockpit, io, print);
+      }
     } else if (command === 'create' || command === 'update') {
       body = await readDefinition(values as { file?: string; json?: string }, io);
     }
@@ -283,7 +340,22 @@ export async function runAutomationCommand(
   }
 }
 
+/** The zone the cockpit runs its schedules in, read from the list it answers. */
+async function cockpitTimeZone(cockpit: Cockpit, io: AutomationIo): Promise<string> {
+  const result = await (io.http ?? fetchJson)(`${cockpit.api}/automations`, { responseLimitBytes: Infinity });
+  if (result.status !== 200) refuse(result);
+  const zone = (result.data as { timeZone?: unknown }).timeZone;
+  return typeof zone === 'string' ? zone : 'UTC';
+}
+
 type Definition = { id: string; name: string; enabled: boolean; revision: number; kind?: string; schedule?: AutomationSchedule } & Record<string, unknown>;
+
+/** A one-time schedule's due moment and zone, as `show` and `list` report it; nothing for any other. */
+function onceFields(schedule: AutomationSchedule | undefined): { dueAt: string; timeZone: string } | Record<string, never> {
+  if (schedule?.type !== 'once') return {};
+  const instant = onceInstant(schedule);
+  return instant === null ? {} : { dueAt: new Date(instant).toISOString(), timeZone: schedule.timeZone ?? '' };
+}
 
 async function execute(
   command: Command,
@@ -315,15 +387,22 @@ async function execute(
     if (result.status !== ok) refuse(result);
     return result.data;
   };
-  const summary = (automation: Definition) => ({
+  const summary = (automation: Definition, onceStatus?: string) => ({
     id: automation.id,
     name: automation.name,
     kind: automation.kind,
     enabled: automation.enabled,
     revision: automation.revision,
     ...(automation.kind === 'schedule' && automation.schedule ? { schedule: scheduleLabel(automation.schedule) } : {}),
+    ...onceFields(automation.schedule),
+    ...(onceStatus ? { onceStatus } : {}),
+    ...(automation.archived ? { archived: automation.archived } : {}),
     url: automationPageUrl(cockpit, automation.id),
   });
+  /** The stored status of a one-time schedule, which only `show` answers. */
+  const statusOf = async (automation: Definition) => automation.schedule?.type === 'once'
+    ? ((await call(`${cockpit.api}/automations/${encodeURIComponent(automation.id)}`)) as { onceStatus?: string }).onceStatus
+    : undefined;
 
   switch (command) {
     case 'create':
@@ -338,7 +417,8 @@ async function execute(
       const defaults = definition.kind === 'schedule' ? {} : { intervalSeconds: 300, filters: {} };
       const sent = { ...defaults, ...definition, ...(enable ? { enable: true } : {}) };
       const { automation } = await call(path(), { method: 'POST', body: sent }, 201) as { automation: Definition };
-      print(summary(automation));
+      const once = automation.schedule?.type === 'once';
+      print({ ...summary(automation, await statusOf(automation)), ...(once ? { note: SCHEDULED_TASK_NOTE } : {}) });
       return EXIT.ok;
     }
     case 'update': {
@@ -360,7 +440,7 @@ async function execute(
       next.enabled = 'enabled' in body! ? body!.enabled : current.enabled;
       next.expectedRevision = current.revision;
       const { automation } = await call(path(), { method: 'PUT', body: next }) as { automation: Definition };
-      print(summary(automation));
+      print(summary(automation, await statusOf(automation)));
       return EXIT.ok;
     }
     case 'run': {
@@ -395,12 +475,13 @@ async function execute(
     case 'list': {
       // `GET /automations` is unpaginated and carries every full prompt, so it reads like
       // `cez task list` reads `/runs`: no success-size cap, the deadline and error caps kept.
-      const data = await call(path(), { responseLimitBytes: Infinity }) as {
+      const archived = typeof values.archived === 'string' ? `?archived=${values.archived}` : '';
+      const data = await call(`${path()}${archived}`, { responseLimitBytes: Infinity }) as {
         available: boolean;
         reason?: string;
         automations: Array<Definition & {
           events?: string[]; intervalSeconds?: number; nextRunAt?: string;
-          counts: Record<string, number>; state?: { nextCheckAt?: string };
+          counts: Record<string, number>; state?: { nextCheckAt?: string }; onceStatus?: string;
         }>;
       };
       print({
@@ -418,6 +499,8 @@ async function execute(
               : `every ${item.intervalSeconds ?? 300}s on ${(item.events ?? []).join(',')}`,
             counts: item.counts,
             ...(next ? { next } : {}),
+            ...onceFields(item.schedule),
+            ...(item.onceStatus ? { onceStatus: item.onceStatus } : {}),
             url: automationPageUrl(cockpit, item.id),
           };
         }),
@@ -425,14 +508,15 @@ async function execute(
       return EXIT.ok;
     }
     case 'show': {
-      const data = await call(path()) as Record<string, unknown>;
-      print({ ...data, url: automationPageUrl(cockpit, id) });
+      const data = await call(path()) as Record<string, unknown> & { automation?: Definition };
+      print({ ...data, ...onceFields(data.automation?.schedule), url: automationPageUrl(cockpit, id) });
       return EXIT.ok;
     }
     case 'enable':
-    case 'pause': {
+    case 'pause':
+    case 'cancel': {
       const { automation } = await call(path(`/${command}`), { method: 'POST' }) as { automation: Definition };
-      print(summary(automation));
+      print(summary(automation, await statusOf(automation)));
       return EXIT.ok;
     }
     case 'delete': {

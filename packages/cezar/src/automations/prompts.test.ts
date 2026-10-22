@@ -3,7 +3,7 @@ import { createAutomationInputSchema } from '@open-mercato/cezar-contract/automa
 import { SCHEDULE_HOURS_OPTIONS, SCHEDULE_TYPES } from '@open-mercato/cezar-contract/automation-schedule';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { GITHUB_PLACEHOLDERS, SCHEDULE_PLACEHOLDERS } from './task-template.ts';
-import { automationDefinitionObjectSchema, automationEventSchema, automationFiltersSchema, automationTaskSchema } from './types.ts';
+import { automationDefinitionObjectSchema, automationDefinitionSchema, automationEventSchema, automationFiltersSchema, automationTaskSchema } from './types.ts';
 import {
   AUTOMATION_SCHEMA_REFERENCE,
   CREATE_AUTOMATION_SKILL_NAME,
@@ -52,12 +52,21 @@ describe('AUTOMATION_SCHEMA_REFERENCE', () => {
   // definition as written, with no comments inside it.
   it('prints examples that parse as JSON and that the create route accepts', () => {
     const blocks = [...AUTOMATION_SCHEMA_REFERENCE.matchAll(/^\{\n[\s\S]*?^\}$/gm)].map((match) => match[0]);
-    expect(blocks).toHaveLength(2);
+    expect(blocks).toHaveLength(3);
     for (const block of blocks) {
       const parsed = JSON.parse(block) as unknown;
       const created = createAutomationInputSchema.safeParse(parsed);
       expect(created.success, JSON.stringify(created.error?.issues)).toBe(true);
     }
+  });
+
+  // hearsay-tools/cezarion#1465.
+  it('the schema reference\'s once example parses with the storage schema', () => {
+    const blocks = [...AUTOMATION_SCHEMA_REFERENCE.matchAll(/^\{\n[\s\S]*?^\}$/gm)].map((match) => JSON.parse(match[0]) as { schedule?: { type: string } });
+    const once = blocks.find((block) => block.schedule?.type === 'once');
+    expect(once).toMatchObject({ kind: 'schedule', schedule: { type: 'once', at: expect.any(String), timeZone: expect.any(String) } });
+    expect(automationDefinitionSchema.safeParse({ ...once, id: 'x', revision: 1, enabled: false, createdAt: '2026-10-22T00:00:00.000Z', updatedAt: '2026-10-22T00:00:00.000Z' }).success).toBe(true);
+    for (const words of ['archived', 'Run now', 'cancel']) expect(AUTOMATION_SCHEMA_REFERENCE).toContain(words);
   });
 
   it('describes no dispatch: the fork delegates through governed workers', () => {
@@ -80,6 +89,12 @@ describe('automationsPrompt and the skill body', () => {
     for (const text of [automationsPrompt(command), createAutomationSkillBody(command), AUTOMATION_SCHEMA_REFERENCE]) {
       expect(text).not.toMatch(/start (the|a) cockpit|run `?cez`?\b|\bcez serve\b/i);
     }
+  });
+
+  it('steers work that starts much later to a one-time schedule, enabled only when the user asked', () => {
+    expect(automationsPrompt(command)).toContain('When work must start much later (tomorrow, next week) as a new task, create a one-time schedule (add --at or --in) instead of keeping this session waiting on repeated timers; enable it only when the user asked for the work to run later.');
+    expect(automationsPrompt(command)).toMatch(/--at <YYYY-MM-DDTHH:MM> --tz <zone> \| --in <30m\|6h\|7d>/);
+    expect(automationsPrompt(command)).toContain(`${command} cancel <id>`);
   });
 
   it('tells the agent to stop and report when the CLI is refused, not to substitute a cron job', () => {
