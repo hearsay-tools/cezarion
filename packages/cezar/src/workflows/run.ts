@@ -3015,37 +3015,42 @@ export class RunManager {
       automationTrigger: input.automationTrigger,
       steps: workflow.steps.map((s) => ({ id: s.id, name: s.name ?? s.id, kind: stepKind(s) })),
     });
-    // Persist the full definition so a queued run survives a restart (#367) —
-    // ad-hoc "(planned)" chains exist nowhere else to re-resolve from.
-    this.store.updateRun(run.id, { workflowDef: workflow });
-    // Initial pasted attachments must be visible while the run is still queued (#612),
-    // and must survive a restart before a slot opens. Persist them before the job
-    // enters `pendingJobs`; `hydrateQueuedInput` reconstructs their content blocks
-    // from these URLs when a recovered run eventually starts — and for a file (#950)
-    // this write is the ONLY copy, since it never had a block to be rebuilt from.
-    if (input.images?.length) {
-      const persisted = this.persistPastedAttachments(run.id, input.images);
-      if (persisted.length) {
-        this.store.updateRun(run.id, { taskImages: persisted.map((saved) => saved.url) });
+    // The row exists from here on. A later write that throws still queues the job, so the caller
+    // that sees the throw finds a run that starts now, not one only a restart would start (#1465).
+    try {
+      // Persist the full definition so a queued run survives a restart (#367) —
+      // ad-hoc "(planned)" chains exist nowhere else to re-resolve from.
+      this.store.updateRun(run.id, { workflowDef: workflow });
+      // Initial pasted attachments must be visible while the run is still queued (#612),
+      // and must survive a restart before a slot opens. Persist them before the job
+      // enters `pendingJobs`; `hydrateQueuedInput` reconstructs their content blocks
+      // from these URLs when a recovered run eventually starts — and for a file (#950)
+      // this write is the ONLY copy, since it never had a block to be rebuilt from.
+      if (input.images?.length) {
+        const persisted = this.persistPastedAttachments(run.id, input.images);
+        if (persisted.length) {
+          this.store.updateRun(run.id, { taskImages: persisted.map((saved) => saved.url) });
+        }
       }
+      // Step-0 reference extraction (task auto-naming spec): the regex layer's
+      // numbers persist immediately; the namer may add the kind it verified later.
+      const skillHint = workflow.steps.find((s) => stepKind(s) === 'agent' && s.skill)?.skill?.trim();
+      const refs = refineTaskRefs(extractTaskRefs(input.task), skillHint);
+      if (refs.prNumber !== undefined || refs.issueNumber !== undefined) {
+        this.store.updateRun(run.id, {
+          ...(refs.prNumber !== undefined ? { prNumber: refs.prNumber } : {}),
+          ...(refs.issueNumber !== undefined ? { issueNumber: refs.issueNumber } : {}),
+        });
+      }
+      // Fire-and-forget LLM naming (task auto-naming spec): the heuristic title
+      // above shows instantly; the namer's short title replaces it when (and if)
+      // the model answers. Never awaited, never fails the run.
+      void this.autoNameRun(run.id, skillHint, input.task);
+    } finally {
+      this.pendingJobs.set(run.id, { workflow, input: effectiveInput });
+      this.queue.push(run.id);
+      void this.pump();
     }
-    // Step-0 reference extraction (task auto-naming spec): the regex layer's
-    // numbers persist immediately; the namer may add the kind it verified later.
-    const skillHint = workflow.steps.find((s) => stepKind(s) === 'agent' && s.skill)?.skill?.trim();
-    const refs = refineTaskRefs(extractTaskRefs(input.task), skillHint);
-    if (refs.prNumber !== undefined || refs.issueNumber !== undefined) {
-      this.store.updateRun(run.id, {
-        ...(refs.prNumber !== undefined ? { prNumber: refs.prNumber } : {}),
-        ...(refs.issueNumber !== undefined ? { issueNumber: refs.issueNumber } : {}),
-      });
-    }
-    // Fire-and-forget LLM naming (task auto-naming spec): the heuristic title
-    // above shows instantly; the namer's short title replaces it when (and if)
-    // the model answers. Never awaited, never fails the run.
-    void this.autoNameRun(run.id, skillHint, input.task);
-    this.pendingJobs.set(run.id, { workflow, input: effectiveInput });
-    this.queue.push(run.id);
-    void this.pump();
     return run;
   }
 

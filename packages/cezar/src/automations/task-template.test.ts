@@ -316,6 +316,23 @@ describe('automation task templates', () => {
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
+  // Review of #1469: a launch that answers a run must leave that run queued, not a row that only
+  // a restart would start.
+  it('a write that throws after the creating commit still leaves the answered run queued', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'cezar-template-'));
+    try {
+      const store = RunStore.open(join(root, '.ai/cezar'));
+      const manager = createFixtureManager(store, root);
+      vi.spyOn(store, 'updateRun').mockImplementationOnce(() => { throw new Error('crash after create'); });
+      const { runId } = await launchScheduledRun({ root, manager, store, definition: scheduled, occurrence, receiptId: 'receipt', projectName: 'demo', timeZone: 'UTC' });
+      const engine = manager as unknown as { queue: string[]; pendingJobs: Map<string, unknown>; starting: Set<string>; active: Map<string, unknown> };
+      expect(engine.queue.includes(runId) || engine.pendingJobs.has(runId) || engine.starting.has(runId) || engine.active.has(runId)).toBe(true);
+      vi.restoreAllMocks();
+      manager.cancel(runId);
+      await drainFixtureManagers(root);
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+
   it('reconciles a reserved schedule receipt from automationTrigger provenance', async () => {
     const root = await mkdtemp(join(tmpdir(), 'cezar-reconcile-'));
     try {
