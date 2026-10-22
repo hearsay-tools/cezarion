@@ -1532,4 +1532,4 @@ Every module is meant to be read in one sitting.
 
 ## License
 
-**MIT** © Patryk Lewczuk — full text in [LICENSE](LICENSE).
+**MIT** © Patryk Lewczuk (original cezar) and Wiktor Jarka (Cezarion) — full text in [LICENSE](LICENSE).
