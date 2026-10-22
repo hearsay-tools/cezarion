@@ -133,6 +133,9 @@ import type {
   WorkspaceUiState,
   SkillsUpdateState,
   WorkerDestroyResult,
+  VoiceDecideRequest,
+  VoiceDecision,
+  VoiceOutcome,
 } from '@open-mercato/cezar-api-client'
 import { parseProviderStatusResponse } from '@/lib/provider-status'
 import {
@@ -2380,4 +2383,33 @@ export async function removeRunWorktree(id: string): Promise<RemoveWorktreeRespo
 /** Latest clone progress for finite-HTTP recovery; the mutation response decides success. */
 export async function getCheckoutProgress(checkoutId: string, opts?: ReadOptions) {
   return unwrap(await cez.api.v1.projects.checkout[':checkoutId'].progress.$get({ param: { checkoutId } }, init(opts)), '/projects/checkout/progress')
+}
+
+// ---- Voice mode (spec 2026-10-21-voice-mode) ---------------------------------------------------
+//
+// Project-scoped like the runs family. Both routes answer 409 `{ error }` while voice is off; the
+// ⌘K palette never calls them then, because it reads the capability first.
+
+/** Ask the engine what one sentence means. Rejects like every other call here on a non-2xx (409
+ *  off, 503 engine unavailable); there is no retry, the palette falls back to what it did before.
+ *  The palette passes a signal so a newer sentence cancels the older request. */
+export async function voiceDecide(input: VoiceDecideRequest, signal?: AbortSignal): Promise<VoiceDecision> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].voice.decide.$post(
+      { param: { projectId: queryScope() }, json: input },
+      init({ signal }),
+    ),
+    '/voice/decide',
+  )
+}
+
+/** Tell the server what became of a decision. Fire and forget: the report only helps it learn
+ *  which decisions were wrong, so a failure of it is never the user's problem. Never throws. */
+export function reportVoiceOutcome(decisionId: string, outcome: VoiceOutcome): void {
+  void (async () => {
+    await cez.api.v1.p[':projectId'].voice.outcome.$post({
+      param: { projectId: queryScope() },
+      json: { decisionId, outcome },
+    })
+  })().catch(() => {})
 }

@@ -1,8 +1,10 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { ApiError } from '@/api/client'
+import { resetVoiceStoreForTests, voiceStore } from '@/lib/voice/proposal-store'
+import type { VoiceAnswer } from '@open-mercato/cezar-api-client'
 import { AskCard } from './ask-card'
 import type { ThreadAsk } from './thread-state'
 import type { ApiRun, ProviderStatusResponse, StepState } from '@open-mercato/cezar-api-client'
@@ -15,6 +17,8 @@ vi.mock('@/api/queries', () => ({
   useContinueRun: () => ({ mutateAsync: continueAsync, isPending: false }),
   useProviderStatus: () => ({ data: providerStatus, isSuccess: true }),
 }))
+
+beforeEach(() => resetVoiceStoreForTests())
 
 afterEach(() => {
   cleanup()
@@ -467,5 +471,260 @@ describe('AskCard for a worker question routed to its parent (#505)', () => {
     renderAsk({ ...singleAsk, resolved: true, closed: 'finish' })
     expect(screen.getByText('Closed when the task finished')).toBeTruthy()
     expect(screen.queryByText('Answered')).toBeNull()
+  })
+})
+
+describe('AskCard voice proposals', () => {
+  const voiceAsk: ThreadAsk = {
+    kind: 'ask',
+    id: 'ask_voice',
+    resolved: false,
+    questions: [
+      { header: 'Library', question: 'Which test library?', options: [{ label: 'Vitest' }, { label: 'Jest' }] },
+      { header: 'Build', question: 'Which build tool?', options: [{ label: 'Vite' }, { label: 'esbuild' }] },
+    ],
+  }
+  const propose = (decisionId: string, ...answers: VoiceAnswer[]) =>
+    act(() => voiceStore.propose({ kind: 'answer', decisionId, runId: 'r1', askRequestId: voiceAsk.id, answers }))
+  const card = () => document.querySelector('[data-slot="ask-card"]') as HTMLElement
+  const pressed = (name: RegExp) => screen.getByRole('button', { name }).getAttribute('aria-pressed')
+
+  it('voice fills chips and Other and shows the prompt', () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    renderAsk(voiceAsk)
+    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).toBeNull()
+    propose('d1', { question: 0, kind: 'option', labels: ['Vitest'] }, { question: 1, kind: 'other', text: 'use both' })
+
+    expect(pressed(/Vitest/)).toBe('true')
+    expect(pressed(/Jest/)).toBe('false')
+    const build = screen.getByRole('group', { name: 'Which build tool?' })
+    expect(within(build).getByRole('button', { name: 'Other' }).getAttribute('aria-pressed')).toBe('true')
+    expect((within(build).getByRole('textbox', { name: 'Your answer' }) as HTMLTextAreaElement).value).toBe('use both')
+    expect(card().getAttribute('data-voice-proposal')).toBe('true')
+    expect(screen.getByRole('group', { name: 'Which test library?' }).getAttribute('data-voice-filled')).toBe('true')
+    expect(build.getAttribute('data-voice-filled')).toBe('true')
+    expect(document.querySelector('[data-slot="ask-voice-prompt"]')?.textContent).toBe(
+      'Send these answers? Say “yes, confirmed” or press Return.',
+    )
+    expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
+    // Nothing is sent until the proposal is confirmed.
+    expect(mutateAsync).not.toHaveBeenCalled()
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+  })
+
+  it('cancel restores a manual choice made before voice', () => {
+    renderAsk(voiceAsk)
+    fireEvent.click(screen.getByRole('button', { name: /Jest/ }))
+    propose('d1', { question: 0, kind: 'option', labels: ['Vitest'] }, { question: 1, kind: 'option', labels: ['Vite'] })
+    expect(pressed(/Vitest/)).toBe('true')
+    expect(pressed(/Jest/)).toBe('false')
+    act(() => voiceStore.cancel())
+    expect(pressed(/Jest/)).toBe('true')
+    expect(pressed(/Vitest/)).toBe('false')
+    expect(pressed(/Vite$/)).toBe('false')
+    expect(card().getAttribute('data-voice-proposal')).toBeNull()
+    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).toBeNull()
+    expect(document.querySelector('[data-voice-filled]')).toBeNull()
+  })
+
+  it('a replacing proposal keeps the first snapshot', () => {
+    renderAsk(voiceAsk)
+    fireEvent.click(screen.getByRole('button', { name: /Jest/ }))
+    propose('d1', { question: 0, kind: 'option', labels: ['Vitest'] })
+    propose('d2', { question: 1, kind: 'option', labels: ['Vite'] })
+    act(() => voiceStore.cancel())
+    expect(pressed(/Jest/)).toBe('true')
+    expect(pressed(/Vite$/)).toBe('false')
+  })
+
+  it('confirm sends one combined message', async () => {
+    renderAsk(voiceAsk)
+    propose('d1', { question: 0, kind: 'option', labels: ['Vitest'] }, { question: 1, kind: 'other', text: 'use both' })
+    let result: ReturnType<typeof voiceStore.confirm> | undefined
+    act(() => {
+      result = voiceStore.confirm()
+    })
+    expect(result).toEqual({ ok: true })
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    expect(mutateAsync).toHaveBeenCalledWith({ text: 'Library: Vitest\nBuild: use both' })
+    expect(voiceStore.getProposal()).toBeUndefined()
+    expect(card().getAttribute('data-voice-proposal')).toBeNull()
+    expect(document.querySelector('[data-voice-filled]')).toBeNull()
+  })
+
+  it('confirm refuses a card with an unanswered question and keeps the proposal', () => {
+    renderAsk(voiceAsk)
+    propose('d1', { question: 0, kind: 'option', labels: ['Vitest'] })
+    let result: ReturnType<typeof voiceStore.confirm> | undefined
+    act(() => {
+      result = voiceStore.confirm()
+    })
+    expect(result).toEqual({ ok: false, unanswered: [{ index: 1, header: 'Build' }] })
+    expect(mutateAsync).not.toHaveBeenCalled()
+    expect(voiceStore.getProposal()).toBeDefined()
+    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).not.toBeNull()
+  })
+
+  it('confirm sends what the card shows after a manual change', async () => {
+    renderAsk(voiceAsk)
+    propose('d1', { question: 0, kind: 'option', labels: ['Vitest'] }, { question: 1, kind: 'option', labels: ['Vite'] })
+    fireEvent.click(screen.getByRole('button', { name: /Jest/ }))
+    act(() => {
+      voiceStore.confirm()
+    })
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    expect(mutateAsync).toHaveBeenCalledWith({ text: 'Library: Jest\nBuild: Vite' })
+  })
+
+  it('confirm after a manual fill of a missing question sends', async () => {
+    renderAsk(voiceAsk)
+    propose('d1', { question: 0, kind: 'option', labels: ['Vitest'] })
+    fireEvent.click(screen.getByRole('button', { name: /esbuild/ }))
+    let result: ReturnType<typeof voiceStore.confirm> | undefined
+    act(() => {
+      result = voiceStore.confirm()
+    })
+    expect(result).toEqual({ ok: true })
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith({ text: 'Library: Vitest\nBuild: esbuild' }))
+  })
+
+  it('a one-question card is not sent on apply', () => {
+    renderAsk(singleAsk)
+    act(() => {
+      voiceStore.propose({
+        kind: 'answer',
+        decisionId: 'd1',
+        runId: 'r1',
+        askRequestId: singleAsk.id,
+        answers: [{ question: 0, kind: 'option', labels: ['date-fns'] }],
+      })
+    })
+    expect(pressed(/date-fns/)).toBe('true')
+    expect(mutateAsync).not.toHaveBeenCalled()
+    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).not.toBeNull()
+    act(() => {
+      voiceStore.confirm()
+    })
+    expect(mutateAsync).toHaveBeenCalledWith({ text: 'Library: date-fns' })
+  })
+
+  it('a refused confirm keeps the proposal, its marks and the snapshot', () => {
+    providerStatus = {
+      providers: [{ provider: 'claude', status: 'not-installed', enabled: true }],
+    }
+    renderAsk(voiceAsk)
+    propose('d1', { question: 0, kind: 'option', labels: ['Vitest'] }, { question: 1, kind: 'option', labels: ['Vite'] })
+    let result: ReturnType<typeof voiceStore.confirm> | undefined
+    act(() => {
+      result = voiceStore.confirm()
+    })
+    expect(result).toEqual({ ok: false, reason: 'busy' })
+    expect(mutateAsync).not.toHaveBeenCalled()
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+    expect(card().getAttribute('data-voice-proposal')).toBe('true')
+    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).not.toBeNull()
+    expect(document.querySelectorAll('[data-voice-filled]')).toHaveLength(2)
+    // The snapshot survived: cancel puts the card back to empty.
+    act(() => voiceStore.cancel())
+    expect(card().getAttribute('data-voice-proposal')).toBeNull()
+    expect(document.querySelector('[aria-pressed="true"]')).toBeNull()
+  })
+
+  it('a chip tapped during a voice proposal on a one-question card is not sent until confirm', async () => {
+    renderAsk(singleAsk)
+    act(() => {
+      voiceStore.propose({
+        kind: 'answer',
+        decisionId: 'd1',
+        runId: 'r1',
+        askRequestId: singleAsk.id,
+        answers: [{ question: 0, kind: 'option', labels: ['date-fns'] }],
+      })
+    })
+    fireEvent.click(screen.getByRole('button', { name: /Luxon/ }))
+    expect(mutateAsync).not.toHaveBeenCalled()
+    expect(pressed(/Luxon/)).toBe('true')
+    expect(pressed(/date-fns/)).toBe('false')
+    act(() => {
+      expect(voiceStore.confirm()).toEqual({ ok: true })
+    })
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledTimes(1))
+    expect(mutateAsync).toHaveBeenCalledWith({ text: 'Library: Luxon' })
+  })
+
+  // A virtualized thread unmounts offscreen rows while the question stays open (final review, T6).
+  it('a remount of the same open question keeps the voice answers and merges the next sentence', async () => {
+    const scrollIntoView = vi.fn()
+    Element.prototype.scrollIntoView = scrollIntoView
+    renderAsk(voiceAsk)
+    propose('d1', { question: 0, kind: 'option', labels: ['Vitest'] })
+    cleanup()
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+    expect(voiceStore.lastDrop()).toBeUndefined()
+    let result: ReturnType<typeof voiceStore.confirm> | undefined
+    act(() => {
+      result = voiceStore.confirm()
+    })
+    expect(result).toEqual({ ok: false, reason: 'no-target' })
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+
+    scrollIntoView.mockClear()
+    renderAsk(voiceAsk)
+    expect(pressed(/Vitest/)).toBe('true')
+    expect(card().getAttribute('data-voice-proposal')).toBe('true')
+    expect(screen.getByRole('group', { name: 'Which test library?' }).getAttribute('data-voice-filled')).toBe('true')
+    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).not.toBeNull()
+    // Coming back into view is not a new proposal: the card does not pull the scroll to itself.
+    expect(scrollIntoView).not.toHaveBeenCalled()
+
+    propose('d2', { question: 1, kind: 'option', labels: ['Vite'] })
+    expect(pressed(/Vitest/)).toBe('true')
+    expect(pressed(/Vite$/)).toBe('true')
+    act(() => {
+      result = voiceStore.confirm()
+    })
+    expect(result).toEqual({ ok: true })
+    await waitFor(() => expect(mutateAsync).toHaveBeenCalledWith({ text: 'Library: Vitest\nBuild: Vite' }))
+    delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+  })
+
+  it('cancel after a remount puts back the choice made before voice', () => {
+    renderAsk(voiceAsk)
+    fireEvent.click(screen.getByRole('button', { name: /Jest/ }))
+    propose('d1', { question: 0, kind: 'option', labels: ['Vitest'] })
+    cleanup()
+    renderAsk(voiceAsk)
+    expect(pressed(/Vitest/)).toBe('true')
+    act(() => voiceStore.cancel())
+    expect(pressed(/Jest/)).toBe('true')
+    expect(pressed(/Vitest/)).toBe('false')
+    expect(card().getAttribute('data-voice-proposal')).toBeNull()
+  })
+
+  it('a routed card registers no target', () => {
+    renderAsk({ ...voiceAsk, routedToParent: true, parentRunId: '11111111-2222-4333-8444-555555555555' })
+    expect(
+      voiceStore.propose({
+        kind: 'answer',
+        decisionId: 'd1',
+        runId: 'r1',
+        askRequestId: voiceAsk.id,
+        answers: [{ question: 0, kind: 'option', labels: ['Vitest'] }],
+      }),
+    ).toEqual({ ok: false, reason: 'no-card' })
+  })
+
+  it('a resolved card registers no target', () => {
+    renderAsk({ ...voiceAsk, resolved: true })
+    expect(
+      voiceStore.propose({
+        kind: 'answer',
+        decisionId: 'd1',
+        runId: 'r1',
+        askRequestId: voiceAsk.id,
+        answers: [{ question: 0, kind: 'option', labels: ['Vitest'] }],
+      }),
+    ).toEqual({ ok: false, reason: 'no-card' })
   })
 })

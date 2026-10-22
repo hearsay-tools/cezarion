@@ -29,9 +29,11 @@ import { resetActivityDisclosureForTests } from './run-activity-dock'
 import { TaskThreadRoute, ThreadView } from './task-thread'
 import { buildTranscriptRows, mainTranscriptSections } from './session-transcript'
 import { reduceThread } from './thread-state'
+import { resetVoiceStoreForTests, voiceStore } from '@/lib/voice/proposal-store'
 
 afterEach(() => {
   cleanup()
+  resetVoiceStoreForTests()
   vi.unstubAllGlobals()
   resetActivityDisclosureForTests()
 })
@@ -325,6 +327,234 @@ describe('ThreadView', () => {
     const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
     expect(textarea.disabled).toBe(false)
     expect(textarea.placeholder).toBe('Message the agent — / for skills, @ for files…')
+  })
+
+  it('a voice tell fills the composer, shows its prompt, cancels back to empty', () => {
+    const thread = run('running')
+    renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
+    const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
+    const tell = { kind: 'tell', decisionId: 'd1', runId: thread.id, text: 'use the second plan' } as const
+    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
+
+    let result: ReturnType<typeof voiceStore.propose> | undefined
+    act(() => {
+      result = voiceStore.propose(tell)
+    })
+    expect(result).toEqual({ ok: true })
+    expect(textarea.value).toBe('use the second plan')
+    expect(document.querySelector('[data-slot="composer"]')?.getAttribute('data-voice-proposal')).toBe('true')
+    expect(document.querySelector('[data-slot="composer-voice-prompt"]')?.textContent).toBe(
+      'Send this message? Say “yes, confirmed” or press Return.',
+    )
+
+    act(() => voiceStore.cancel())
+    expect(textarea.value).toBe('')
+    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
+    expect(document.querySelector('[data-slot="composer"]')?.hasAttribute('data-voice-proposal')).toBe(false)
+  })
+
+  it('a voice tell is refused while the draft has text, and for another run', () => {
+    const thread = run('running')
+    renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
+    fireEvent.change(screen.getByLabelText('Reply to the agent'), { target: { value: 'typing' } })
+    expect(voiceStore.propose({ kind: 'tell', decisionId: 'd1', runId: thread.id, text: 'hello' })).toEqual({
+      ok: false,
+      reason: 'draft-not-empty',
+    })
+    expect(voiceStore.propose({ kind: 'tell', decisionId: 'd2', runId: 'someone-else', text: 'hello' })).toEqual({
+      ok: false,
+      reason: 'no-card',
+    })
+  })
+
+  it('a voice tell is refused as busy while Stop is pending, and records nothing', () => {
+    const thread = run('running', { stopping: true })
+    renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
+    const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
+    expect(voiceStore.propose({ kind: 'tell', decisionId: 'd1', runId: thread.id, text: 'hello' })).toEqual({
+      ok: false,
+      reason: 'busy',
+    })
+    expect(voiceStore.getProposal()).toBeUndefined()
+    expect(textarea.value).toBe('')
+    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
+  })
+
+  it('a refused confirm keeps the tell, its draft and its prompt', () => {
+    const thread = run('running')
+    const { rerender, queryClient } = renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
+    const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
+    act(() => {
+      voiceStore.propose({ kind: 'tell', decisionId: 'd1', runId: thread.id, text: 'hello' })
+    })
+    // Stop becomes pending after the tell was proposed: the send is refused, nothing is lost.
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter><ThreadView run={{ ...thread, stopping: true }} thread={reduceThread(EVENTS)} /></MemoryRouter>
+      </QueryClientProvider>,
+    )
+    let result: ReturnType<typeof voiceStore.confirm> | undefined
+    act(() => {
+      result = voiceStore.confirm()
+    })
+    expect(result).toEqual({ ok: false, reason: 'busy' })
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+    expect(textarea.value).toBe('hello')
+    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).not.toBeNull()
+  })
+
+  it('switching to another task clears the tell proposed for the first', () => {
+    const first = run('running', { id: 'run-a' })
+    const second = run('running', { id: 'run-b' })
+    const { rerender, queryClient } = renderView(<ThreadView run={first} thread={reduceThread(EVENTS)} />)
+    act(() => {
+      voiceStore.propose({ kind: 'tell', decisionId: 'd1', runId: first.id, text: 'for task A' })
+    })
+    expect((screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement).value).toBe('for task A')
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter><ThreadView run={second} thread={reduceThread(EVENTS)} /></MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect((screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement).value).toBe('')
+    expect(voiceStore.getProposal()).toBeUndefined()
+    expect(voiceStore.lastDrop()).toBe('task-closed')
+    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
+    expect(document.querySelector('[data-slot="composer"]')?.hasAttribute('data-voice-proposal')).toBe(false)
+  })
+
+  it('switching to a task whose Stop is pending still clears the tell proposed for the first', () => {
+    const first = run('running', { id: 'run-a' })
+    const second = run('running', { id: 'run-b', stopping: true })
+    const { rerender, queryClient } = renderView(<ThreadView run={first} thread={reduceThread(EVENTS)} />)
+    act(() => {
+      voiceStore.propose({ kind: 'tell', decisionId: 'd1', runId: first.id, text: 'for task A' })
+    })
+    rerender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter><ThreadView run={second} thread={reduceThread(EVENTS)} /></MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect((screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement).value).toBe('')
+    expect(voiceStore.getProposal()).toBeUndefined()
+    expect(voiceStore.lastDrop()).toBe('task-closed')
+  })
+
+  describe('voice answer proposals', () => {
+    const askEvent = line(10, 'ask.requested', {
+      requestId: 'ask-v',
+      questions: [
+        { header: 'Library', question: 'Which test library?', options: [{ label: 'Vitest' }, { label: 'Jest' }] },
+        { header: 'Build', question: 'Which build tool?', options: [{ label: 'Vite' }, { label: 'esbuild' }] },
+      ],
+    })
+    const historyOf = (currentEvents: RunEvent[], over: Partial<import('@/api/run-history').RunHistoryState> = {}) => ({
+      visibleEvents: [askEvent], currentEvents, isPending: false, contextPending: false, fallback: false, hasOlder: false,
+      isFetchingOlder: false, olderError: undefined, loadOlder: async () => {}, jumpToLatest: async () => {}, retainedPages: 1, ...over,
+    })
+    const view = (thread: ApiRun, history: ReturnType<typeof historyOf>) => (
+      <ThreadView run={thread} thread={reduceThread(history.visibleEvents)} currentThread={reduceThread(history.currentEvents)} history={history} />
+    )
+    const proposeFor = (runId: string) =>
+      act(() => voiceStore.propose({ kind: 'answer', decisionId: 'd1', runId, askRequestId: 'ask-v', answers: [{ question: 0, kind: 'option', labels: ['Vitest'] }] }))
+
+    it('the question settling drops it as question-closed; a history still loading does not', () => {
+      const thread = run('waiting')
+      const { rerender, queryClient } = renderView(view(thread, historyOf([askEvent])))
+      proposeFor(thread.id)
+      expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+      const again = (history: ReturnType<typeof historyOf>) =>
+        rerender(<QueryClientProvider client={queryClient}><MemoryRouter>{view(thread, history)}</MemoryRouter></QueryClientProvider>)
+
+      again(historyOf([], { isPending: true, contextPending: true }))
+      expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+      again(historyOf([askEvent]))
+      expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+
+      again(historyOf([askEvent, line(11, 'human-input-delivered', { askSeq: 10 })]))
+      expect(voiceStore.getProposal()).toBeUndefined()
+      expect(voiceStore.lastDrop()).toBe('question-closed')
+    })
+
+    it('switching to another task drops it as task-closed', () => {
+      const first = run('waiting', { id: 'run-a' })
+      const { rerender, queryClient } = renderView(view(first, historyOf([askEvent])))
+      proposeFor(first.id)
+      rerender(
+        <QueryClientProvider client={queryClient}>
+          <MemoryRouter>{view(run('waiting', { id: 'run-b' }), historyOf([askEvent]))}</MemoryRouter>
+        </QueryClientProvider>,
+      )
+      expect(voiceStore.getProposal()).toBeUndefined()
+      expect(voiceStore.lastDrop()).toBe('task-closed')
+    })
+
+    it('leaving the thread drops it as task-closed', () => {
+      const thread = run('waiting')
+      const { unmount } = renderView(view(thread, historyOf([askEvent])))
+      proposeFor(thread.id)
+      unmount()
+      expect(voiceStore.getProposal()).toBeUndefined()
+      expect(voiceStore.lastDrop()).toBe('task-closed')
+    })
+  })
+
+  it('cancel during a pending Stop clears the voice text, and spares an edited draft', () => {
+    const thread = run('running')
+    const { rerender, queryClient } = renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
+    const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
+    const stopPending = (stopping: boolean) => rerender(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter><ThreadView run={{ ...thread, stopping }} thread={reduceThread(EVENTS)} /></MemoryRouter>
+      </QueryClientProvider>,
+    )
+    act(() => {
+      voiceStore.propose({ kind: 'tell', decisionId: 'd1', runId: thread.id, text: 'hello' })
+    })
+    stopPending(true)
+    act(() => voiceStore.cancel())
+    expect(textarea.value).toBe('')
+    expect(voiceStore.getProposal()).toBeUndefined()
+
+    stopPending(false)
+    act(() => {
+      voiceStore.propose({ kind: 'tell', decisionId: 'd2', runId: thread.id, text: 'hello' })
+    })
+    fireEvent.change(textarea, { target: { value: 'hello, and my own words' } })
+    act(() => voiceStore.cancel())
+    expect(textarea.value).toBe('hello, and my own words')
+    expect(voiceStore.getProposal()).toBeUndefined()
+  })
+
+  it('an erased tell draft is not sent: confirm is busy and the proposal stays', async () => {
+    const thread = run('running')
+    renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
+    const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
+    const sent = vi.mocked(globalThis.fetch)
+    act(() => {
+      voiceStore.propose({ kind: 'tell', decisionId: 'd1', runId: thread.id, text: 'hello' })
+    })
+    fireEvent.change(textarea, { target: { value: '' } })
+    const before = sent.mock.calls.length
+    let result: ReturnType<typeof voiceStore.confirm> | undefined
+    act(() => {
+      result = voiceStore.confirm()
+    })
+    expect(result).toEqual({ ok: false, reason: 'busy' })
+    expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
+    await act(async () => {})
+    expect(sent.mock.calls.slice(before).filter(([url]) => String(url).endsWith('/messages'))).toHaveLength(0)
+  })
+
+  it('leaving the thread drops a pending tell', () => {
+    const thread = run('running')
+    renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
+    act(() => {
+      voiceStore.propose({ kind: 'tell', decisionId: 'd1', runId: thread.id, text: 'hello' })
+    })
+    cleanup()
+    expect(voiceStore.getProposal()).toBeUndefined()
+    expect(voiceStore.lastDrop()).toBe('task-closed')
   })
 
   it.each([
