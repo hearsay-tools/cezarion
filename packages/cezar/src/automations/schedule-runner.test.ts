@@ -801,6 +801,20 @@ describe('ScheduleRunner once (#1465)', () => {
     expect(store.latestReceipts().get(KEY)?.status).toBe('launch-error');
   });
 
+  it('a recurring schedule edited to one-time is not archived by its earlier launches', async () => {
+    const { store, definition, runner, launch, clock } = await setup();
+    runner.dueAt(definition);
+    clock.set(FIRST_RUN + 2_000);
+    expect((await runner.fire(definition)).result).toBe('launched');
+    const current = store.get('nightly')!;
+    const { id: _id, revision, createdAt: _c, updatedAt: _u, ...editable } = current;
+    store.update('nightly', revision, { ...editable, schedule: ONCE, enabled: true });
+    const edited = store.get('nightly') as OnceScheduleDefinition;
+    expect(await runner.runNow(edited)).toMatchObject({ result: 'manual', runId: 'run-2' });
+    expect(launch).toHaveBeenCalledTimes(2);
+    expect(store.get('nightly')?.archived).toMatchObject({ outcome: 'launched', runId: 'run-2' });
+  });
+
   it('a fire meeting a launch-error receipt relaunches that receipt, never a new one', async () => {
     const { store, definition, runner, launch, clock } = await setup({ schedule: ONCE });
     launch.mockRejectedValueOnce(new Error('boom'));
@@ -831,10 +845,10 @@ describe('ScheduleRunner once (#1465)', () => {
     expect(store.get('nightly')).toMatchObject({ enabled: false, archived: { outcome: 'launched', runId: 'run-crashed', receiptId: reserved.receiptId } });
   });
 
-  it('healArchive archives from any launched receipt of the automation and is a no-op without one', async () => {
+  it('healArchive archives from the launched receipt of its own key and is a no-op without one', async () => {
     const { store, definition, runner } = await setup({ schedule: ONCE });
     expect(runner.healArchive(definition as never)).toBeUndefined();
-    const reserved = store.reserveReceipt({ automationId: 'nightly', revision: 1, eventId: 'once:2026-09-01T00:00|UTC', occurrenceAt: iso(FIRST_RUN) })!;
+    const reserved = store.reserveReceipt({ automationId: 'nightly', revision: 1, eventId: KEY.slice('nightly:'.length), occurrenceAt: iso(FIRST_RUN) })!;
     store.appendReceipt({ ...reserved, status: 'launched', runId: 'run-old' });
     expect(runner.healArchive(store.get('nightly') as never)).toMatchObject({ archived: { runId: 'run-old' } });
   });

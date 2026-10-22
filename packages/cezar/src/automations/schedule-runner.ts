@@ -226,8 +226,9 @@ export class ScheduleRunner {
    */
   healArchive(definition: OnceScheduleDefinition): AutomationDefinition | undefined {
     const { store } = this.handle;
-    const launched = [...store.latestReceipts().values()].find((row) => row.automationId === definition.id && row.status === 'launched');
-    if (!launched) return undefined;
+    // Its own key only: a recurring schedule edited to `once` keeps its earlier launched receipts.
+    const launched = store.latestReceipts().get(`${definition.id}:${this.onceEventId(definition)}`);
+    if (launched?.status !== 'launched') return undefined;
     const healed = store.archive(definition.id, {
       at: new Date(this.now()).toISOString(),
       outcome: 'launched',
