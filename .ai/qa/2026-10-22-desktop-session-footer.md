@@ -63,6 +63,25 @@ focus. Additional proof uses `8141e01a42c4e93fd1c7dc99e742a43348c993af` as its
 - `npm run test:e2e -- session-footer.e2e.ts`: all eight cases pass on final source.
 - Logs: ignored `.ai/qa/footer-review-proof-{red,green}.log`.
 
+## CI browser compatibility proof
+
+Fresh CI run `39844072926` installed agent-browser 0.39.2 after its release at
+19:52 UTC. The Settings system-prompt field at 1440×900 starts at y=880.89 with
+height 44px. Its center is below the viewport. Version 0.39.2 rejects this click;
+0.36.0 reported success for the same off-screen coordinates. The test now scrolls the field
+into view before the real pointer click. Save and cold-reload assertions remain.
+
+- `proof_base`: `3fd324dc95b1e0c7c1cd48378088efb040e90755`.
+- An ignored scratch copy uses the same browser config, setup and assertions.
+  Imports and artifact paths point to their original locations. Its browser
+  descriptor selects an isolated agent-browser 0.39.2 binary and namespace.
+- Command: `npm exec -- vitest run --config .ai/qa/settings-proof.ialck5j7/vitest.config.ts`.
+- Old test: four pass; explicit-save click fails with “outside the viewport”,
+  then cold reload fails because no prompt was saved. These match CI.
+- Adding only the scroll step makes all six tests pass with the same browser.
+- Logs: ignored `.ai/qa/footer-settings-proof-{before,after}.log`.
+- The scratch test and config were removed after proof.
+
 ## Existing limitation
 
 Jump to latest resets paged history and can remount the Composer, clearing a

@@ -116,6 +116,8 @@ describe('settings → agents against the live dry-run server', () => {
 
   it('system prompt: explicit save persists the trimmed text', async () => {
     gotoAgents()
+    // The field starts partly below the viewport; a pointer click needs its center in view.
+    browser.evaluate(`document.querySelector('[data-slot="agents-system-prompt"]').scrollIntoView({ block: 'center', behavior: 'instant' })`)
     browser.click('[data-slot="agents-system-prompt"]')
     setTextarea('[data-slot="agents-system-prompt"]', 'Always add tests. (e2e)')
     browser.waitForFunction(`document.querySelector('[data-slot="agents-system-prompt"]')?.value === 'Always add tests. (e2e)'`)
