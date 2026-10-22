@@ -109,6 +109,8 @@ export interface ThreadAsk {
   kind: 'ask'
   id: string
   questions: UiAskQuestion[]
+  /** Markdown the agent sent with the question (hearsay-tools/cezarion#1458); absent on older asks. */
+  context?: string
   resolved: boolean
   answer?: string
   /** The `ask.requested` event seq a routing/fallback event names (#505). */
@@ -985,7 +987,8 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
             isRecord(q) && typeof q.header === 'string' && (q.options === undefined || Array.isArray(q.options)),
         )
         if (questions.length === 0) break
-        const ask: ThreadAsk = { kind: 'ask', id: requestId, questions, resolved: false, askSeq: event.seq }
+        const context = typeof event.context === 'string' && event.context !== '' ? event.context : undefined
+        const ask: ThreadAsk = { kind: 'ask', id: requestId, questions, ...(context ? { context } : {}), resolved: false, askSeq: event.seq }
         currentTurn().entries.push({ origin: 'meta', entry: ask })
         pendingAsk = ask
         break
