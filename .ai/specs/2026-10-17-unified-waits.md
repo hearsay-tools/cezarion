@@ -472,6 +472,32 @@ builder" unless a bullet says otherwise.
   budget spent, an alias registers nothing, adds a note, and the run parks as a plain wait
   (phase 1 has no human wait for it to open). An autonomous run whose nudge would fire skips
   the alias.
+- **The monitoring line is a fallback (hearsay-tools/cezarion#1268).** At turn end,
+  an open non-human wait already supplies the wake: the line registers no new timer,
+  including when re-checks are off or the automatic-wake budget is spent. It adds no
+  human fallback in those cases. A human wait alone does not suppress the alias.
+  With no open non-human wait, the line keeps its interval, off-setting and budget
+  behavior. New monitoring-line timers carry the note `Opened by CEZ:MONITORING.`
+  `ScheduleWakeup` remains an explicit request and keeps its own registration rule.
+  Existing timers retain their deadlines and survive other wait registrations and
+  recovery; there is no migration or automatic cancellation. Resolved waits do not
+  suppress a new fallback timer.
+
+  **Transitions out** for the states retained by this change:
+
+  | State | Trigger | Who or what fires it | Behavior at shipped defaults |
+  | --- | --- | --- | --- |
+  | Worker park | Worker/request outcome or registered deadline | Family reconciliation or deadline timer | Resume with the result; deadline-less completion waits rely on worker settlement |
+  | CI park | Observation or deadline | CI watcher | Resume with the observation |
+  | Timer park | Stored deadline | Timer callback | Resume; a marker-only fallback uses the configured interval (five minutes by default) |
+  | Non-human park | Human input | Message delivery or Continue | Resume without cancelling open waits |
+  | Non-human park | Explicit cancellation | Agent or human | Remove the selected wait; keep the existing next-boundary rule |
+  | Human park | Answer or Continue | Human | No automatic answer; remain parked until human action |
+  | Recoverable provider failure | Retry or Continue | Existing delivery retry or human | Keep waits and undelivered results under the existing delivery bound |
+  | Restart without a session | Recovery and later result | Recovery re-arms stored deadlines and reconciles workers | Queue a scheduler continuation for ready results; keep unanswered human questions |
+  | Any live park | Stop or Finish | Existing lifecycle cleanup | Cancel waits and settle execution |
+  | Terminal | Explicit supported Continue | Human | No automatic restart |
+
 - **A worker park cancels no wait.** Every open timer, whatever its `via`, and every CI wait
   keeps its deadline when the run parks on workers. Attention and slots follow
   `computeWaitingOn`: workers outrank CI and timers, so the park holds no slot and reads as

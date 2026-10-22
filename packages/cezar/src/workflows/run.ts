@@ -9525,7 +9525,9 @@ export class RunManager {
    * The monitoring line and Claude's `ScheduleWakeup` open a timer in the wait list
    * (hearsay-tools/cezarion#1233): the line for the configured interval, `ScheduleWakeup` for its
    * `delaySeconds` clamped to 60–3,600 (the interval without one). Idempotent per `via`: while one
-   * is open the alias registers nothing and the timer keeps its deadline. With timers off it opens
+   * is open the alias registers nothing and the timer keeps its deadline. The line is only a
+   * fallback: any open non-human wait suppresses its registration (hearsay-tools/cezarion#1268),
+   * including the off/budget human fallback. With timers off and no such wait it opens
    * a `monitoring-line` human wait instead, and with the automatic-wake budget spent a `budget` one
    * (hearsay-tools/cezarion#1234); the park shows it. An autonomous run's nudge keeps precedence
    * over the line.
@@ -9535,7 +9537,11 @@ export class RunManager {
     if (!run || run.stopping || this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
     if (state.autonomous && this.automaticWakes(runId) < MAX_AUTO_CONTINUES && this.canAutoContinue(runId, state)) return;
     const via: WaitVia = scheduleWakeup === undefined ? 'monitoring-line' : 'schedule-wakeup';
-    if (openWaits(run).some(wait => wait.kind === 'timer' && wait.via === via)) return;
+    const open = openWaits(run);
+    // The line is a fallback, not another poll beside a wait that already supplies its wake
+    // (hearsay-tools/cezarion#1268). Keep explicit ScheduleWakeup requests and existing timers.
+    if (via === 'monitoring-line' && open.some(wait => wait.kind !== 'human')) return;
+    if (open.some(wait => wait.kind === 'timer' && wait.via === via)) return;
     const minutes = this.semaphore.monitoringWakeIntervalMinutes();
     if (minutes === null) {
       this.store.appendEvent(runId, { type: 'note', message: 'automatic re-checks are off; waiting for you' });
@@ -9559,7 +9565,8 @@ export class RunManager {
     // `seconds` is the record's bound; the line's deadline is the interval itself (tests run it sub-minute).
     const wait: TimerWaitEntry = { id: randomUUID(), kind: 'timer', source: 'agent', via, registeredAt: new Date(now).toISOString(),
       deadline: new Date(now + (delay === undefined ? minutes * 60_000 : delay * 1000)).toISOString(), phase: 'open', turnId: state.ciTurnId ?? 'monitoring',
-      seconds: delay ?? Math.min(TIMER_MAX_SECONDS, Math.max(TIMER_MIN_SECONDS, Math.round(minutes * 60))) };
+      seconds: delay ?? Math.min(TIMER_MAX_SECONDS, Math.max(TIMER_MIN_SECONDS, Math.round(minutes * 60))),
+      ...(via === 'monitoring-line' ? { note: 'Opened by CEZ:MONITORING.' } : {}) };
     this.withdrawCezarHumanWaits(runId);
     try { this.store.commitWait(runId, wait); }
     catch (error) { console.warn(`[cez] monitoring timer checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return; }

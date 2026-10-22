@@ -14,6 +14,8 @@ export const WAIT_CRITERIA = [
   { id: 'U2', scenario: 'baseline', name: 'ci and timer open: the timer wakes, ci stays open and is in the footer, the turn end re-parks without re-registering, the later ci result is delivered' },
   { id: 'U3', scenario: 'hold', name: 'a human message during a ci wait is delivered, the wait stays open, and its result arrives in a later turn' },
   { id: 'U7', scenario: 'turn-messages', name: 'cezar_wait, the monitoring line and ScheduleWakeup land in the same wait list' },
+  { id: 'U7m', scenario: 'turn-messages', name: 'the monitoring line adds no timer beside an open ci, timer or worker wait' },
+  { id: 'U7f', scenario: 'turn-messages', name: 'the monitoring line alone opens an identifiable timer and keeps its deadline' },
   { id: 'U8', scenario: 'baseline', name: 'a ci or timer park keeps its slot and wakes without queueing at maxParallel 1' },
   { id: 'U8l', scenario: 'hold-gated', name: 'a wake of a started run takes the slot before an unstarted task that queued earlier, at maxParallel 1' },
   { id: 'U8h', scenario: 'baseline', name: 'a ci result for a park on a held account waits in the line and is delivered once the hold lifts' },
