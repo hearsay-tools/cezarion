@@ -154,7 +154,7 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
               </div>
             )}
             {isSchedule
-              ? <ScheduleFields value={draft.schedule} onChange={(schedule) => patch({ schedule })} timeZone={timeZone} />
+              ? <ScheduleFields value={draft.schedule} stored={automation?.schedule} onChange={(schedule) => patch({ schedule })} timeZone={timeZone} />
               : <GithubFields draft={draft} onChange={patch} {...(forge.available ? {} : { disabledReason: forge.reason ?? 'no GitHub access' })} />}
           </Section>
 

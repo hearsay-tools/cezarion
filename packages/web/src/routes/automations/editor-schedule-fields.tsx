@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { SCHEDULE_HOURS_OPTIONS, WEEKDAY_NAMES, cronOf, type NormalizedSchedule, type ScheduleEvery, type ScheduleType } from '@open-mercato/cezar-api-client/contract/automation-schedule'
+import { SCHEDULE_HOURS_OPTIONS, WEEKDAY_NAMES, cronOf, type AutomationSchedule, type NormalizedSchedule, type ScheduleEvery, type ScheduleType } from '@open-mercato/cezar-api-client/contract/automation-schedule'
 
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -50,7 +50,8 @@ export function TimeField({ label, value, max, onCommit }: { label: string; valu
   )
 }
 
-export function ScheduleFields({ value, onChange, timeZone }: { value: NormalizedSchedule; onChange: (next: NormalizedSchedule) => void; timeZone: string }) {
+/** `stored` is the saved schedule when editing: a one-time due time left as saved is not re-judged as past. */
+export function ScheduleFields({ value, stored, onChange, timeZone }: { value: NormalizedSchedule; stored?: AutomationSchedule; onChange: (next: NormalizedSchedule) => void; timeZone: string }) {
   const set = (patch: Partial<NormalizedSchedule>) => onChange({ ...value, ...patch })
   // Once starts tomorrow at 09:00 in the cockpit's zone; the draft keeps what it had if it had one.
   const choose = (type: ScheduleType) => set(type === 'once'
@@ -63,7 +64,7 @@ export function ScheduleFields({ value, onChange, timeZone }: { value: Normalize
           <ChipButton key={shape.type} pressed={value.type === shape.type} onClick={() => choose(shape.type)}>{shape.label}</ChipButton>
         ))}
       </div>
-      {value.type === 'once' ? <OnceFields value={value} onChange={onChange} /> : null}
+      {value.type === 'once' ? <OnceFields value={value} stored={stored} onChange={onChange} /> : null}
       {value.type === 'weekly' ? (
         <div role="group" aria-label="Day of the week" className="flex flex-wrap gap-2">
           {WEEKDAY_NAMES.map((name, index) => (

@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react'
-import { ONCE_PAST_DUE_MESSAGE, onceInstant, onceWallParts, unknownTimeZoneMessage, type NormalizedSchedule } from '@open-mercato/cezar-api-client/contract/automation-schedule'
+import { ONCE_PAST_DUE_MESSAGE, onceInstant, onceWallParts, unknownTimeZoneMessage, type AutomationSchedule, type NormalizedSchedule } from '@open-mercato/cezar-api-client/contract/automation-schedule'
 import { isValidTimeZone, zonedParts } from '@open-mercato/cezar-api-client/contract/zoned-time'
 
 import { Input } from '@/components/ui/input'
@@ -39,7 +39,7 @@ function knownZones(): string[] {
  * `latestStartMinutes`; a past time or an unknown zone sets the field's custom validity, so Save
  * is blocked and the draft stays as typed.
  */
-export function OnceFields({ value, onChange }: { value: NormalizedSchedule; onChange: (next: NormalizedSchedule) => void }) {
+export function OnceFields({ value, stored, onChange }: { value: NormalizedSchedule; stored?: AutomationSchedule; onChange: (next: NormalizedSchedule) => void }) {
   const set = (patch: Partial<NormalizedSchedule>) => onChange({ ...value, ...patch })
   const wall = value.at ? onceWallParts(value.at) : null
   const date = value.at?.slice(0, 10) ?? ''
@@ -50,7 +50,10 @@ export function OnceFields({ value, onChange }: { value: NormalizedSchedule; onC
   const dateRef = useRef<HTMLInputElement>(null)
   const pastId = useId()
   const instant = onceInstant(value)
-  const past = instant !== null && instant <= Date.now()
+  // A Failed or Missed schedule keeps its past due time; only a changed one must be in the future,
+  // as the server judges it (#1465 review).
+  const unchanged = stored?.type === 'once' && stored.at === value.at && stored.timeZone === value.timeZone
+  const past = !unchanged && instant !== null && instant <= Date.now()
   useEffect(() => { dateRef.current?.setCustomValidity(past ? ONCE_PAST_DUE_MESSAGE : '') }, [past])
 
   const summary = onceWall(value.at)

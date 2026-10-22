@@ -297,6 +297,21 @@ describe('one-time schedules', () => {
     expect((screen.getByLabelText('Date') as HTMLInputElement).value).toBe('2020-01-15')
   })
 
+  // Review of #1465: a Failed or Missed schedule keeps its past due time. Editing its prompt
+  // before Run now or Retry must save; only a changed due time has to be in the future.
+  it('an existing schedule past its due time saves a prompt-only edit, but not a new past time', async () => {
+    const pastOnce = { ...stored, schedule: { type: 'once', at: '2020-01-15T09:00', timeZone: 'UTC' } } as AutomationDefinition
+    const calls = stubFetch(() => json({ automation: pastOnce }))
+    const onSaved = mount({ automation: pastOnce })
+    expect(screen.queryByText('the due time has passed; choose a later time or use Run now')).toBeNull()
+    fireEvent.change(screen.getByLabelText('Prompt'), { target: { value: 'Go, with more care' } })
+    fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+    await waitFor(() => expect(onSaved).toHaveBeenCalled())
+    expect(calls.find((call) => call.method === 'PUT')?.body).toMatchObject({ schedule: { type: 'once', at: '2020-01-15T09:00', timeZone: 'UTC' }, task: { prompt: 'Go, with more care' } })
+    setWhen('2020-02-15', '09', '00')
+    expect((screen.getByLabelText('Date') as HTMLInputElement).validationMessage).toBe('the due time has passed; choose a later time or use Run now')
+  })
+
   it('a server 400 on time zone renders beside the zone field and keeps the draft', async () => {
     stubFetch(() => json({ error: 'unknown time zone "Etc/Nowhere"; use an IANA name such as Europe/Warsaw' }, 400))
     const onSaved = mount()
