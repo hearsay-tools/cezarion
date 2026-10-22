@@ -1,5 +1,5 @@
 import { spawn, type ChildProcess } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { createInterface } from 'node:readline';
@@ -15,8 +15,8 @@ const MOCK = fileURLToPath(new URL('../../scripts/mock-opencode-serve.mjs', impo
 // a session, sends one prompt, and prints the mock's pid once the prompt is accepted.
 const PARENT = `
 const { spawn } = require('node:child_process');
-const [mock, cwd, prompt] = process.argv.slice(1);
-const child = spawn(process.execPath, [mock, 'serve', '--hostname', '127.0.0.1', '--port', '0'], { cwd, detached: true });
+const [mock, cwd, prompt, preload] = process.argv.slice(1);
+const child = spawn(process.execPath, [...(preload ? ['--import', preload] : []), mock, 'serve', '--hostname', '127.0.0.1', '--port', '0'], { cwd, detached: true });
 child.stderr.resume();
 let out = '';
 child.stdout.on('data', async chunk => {
@@ -43,9 +43,23 @@ function alive(pid: number): boolean {
 const cleanups: (() => void)[] = [];
 afterEach(() => { for (const cleanup of cleanups.splice(0)) cleanup(); });
 
-async function startMock(prompt: string): Promise<{ parent: ChildProcess; mock: number; cwd: string }> {
+async function startMock(prompt: string, { pauseSignalReplacement = false } = {}): Promise<{ parent: ChildProcess; mock: number; cwd: string }> {
   const cwd = mkdtempSync(join(tmpdir(), 'cez-mock-opencode-orphan-'));
-  const parent = spawn(process.execPath, ['-e', PARENT, MOCK, cwd, prompt], { stdio: ['ignore', 'pipe', 'inherit'] });
+  const preload = pauseSignalReplacement ? join(cwd, 'pause-signal-replacement.mjs') : '';
+  if (preload) {
+    // Model preemption after the old handler is removed. Readiness must not let the test
+    // signal the process in this gap. The real mock still handles every signal and stdin.
+    writeFileSync(preload, `
+const remove = process.removeAllListeners;
+process.removeAllListeners = function(event) {
+  const result = remove.call(this, event);
+  // bound: widen the signal-handler replacement gap enough for the 20 ms readiness poll.
+  if (event === 'SIGTERM') Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+  return result;
+};
+`);
+  }
+  const parent = spawn(process.execPath, ['-e', PARENT, MOCK, cwd, prompt, preload], { stdio: ['ignore', 'pipe', 'inherit'] });
   let mock: number | undefined;
   cleanups.push(() => {
     if (mock !== undefined && alive(mock)) process.kill(mock, 'SIGKILL');
@@ -76,8 +90,8 @@ describe.skipIf(process.platform === 'win32')('mock OpenCode server outlives no 
   });
 
   it('exits after its parent gets SIGKILL in the mode that ignores SIGTERM', async () => {
-    const { parent, mock, cwd } = await startMock('mock:no-progress-ignore-term');
-    // The mock writes watchdog.pid in the same tick that it replaces its SIGTERM handler.
+    const { parent, mock, cwd } = await startMock('mock:no-progress-ignore-term', { pauseSignalReplacement: true });
+    // The mock publishes watchdog.pid only after its SIGTERM handler is installed.
     // bound: the prompt is already accepted, so only the turn's start remains.
     await vi.waitFor(() => expect(existsSync(join(cwd, 'watchdog.pid'))).toBe(true), { timeout: 10_000, interval: 20 });
     process.kill(mock, 'SIGTERM');

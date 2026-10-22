@@ -15,6 +15,10 @@ export function openSessionActivityRow(browser: AgentBrowser, row: 'status-row' 
     browser.click(SESSION_ACTIVITY_SUMMARY)
   }
   browser.waitForFunction(`document.querySelector('${head}') !== null`)
-  if (browser.evaluate(`document.querySelector('${head}').getAttribute('aria-expanded')`) === 'false') browser.click(head)
+  if (browser.evaluate(`document.querySelector('${head}').getAttribute('aria-expanded')`) === 'false') {
+    // Desktop bounds the activity card. Reveal a row inside its scroll area before clicking.
+    browser.evaluate(`document.querySelector('${head}').scrollIntoView({ block: 'nearest' })`)
+    browser.click(head)
+  }
   browser.waitForFunction(`document.querySelector('${head}')?.getAttribute('aria-expanded') === 'true'`)
 }
