@@ -53,7 +53,7 @@ const TaskThreadRoute = lazy(() =>
 )
 
 /** Old comparison URLs load a small read-only view of retained task history. */
-const CompareVariantsRoute = lazy(() =>
+const RetainedVariantsRoute = lazy(() =>
   import('./routes/compare-variants').then((m) => ({ default: m.RetainedVariantsRoute })),
 )
 
@@ -321,7 +321,7 @@ const PAGE_TITLE_ROUTES = [
   { pattern: '/tasks', pageLabel: 'All tasks' },
   { pattern: '/tools', pageLabel: 'Workspace tools' },
   { pattern: '/new', pageLabel: 'New task' },
-  { pattern: '/compare/:groupId', pageLabel: 'Compare' },
+  { pattern: '/compare/:groupId', pageLabel: 'Retained results' },
   { pattern: '/git/*', pageLabel: 'Git' },
   { pattern: '/github/*', pageLabel: 'GitHub' },
   { pattern: '/automations/*', pageLabel: 'Automations' },
@@ -415,7 +415,7 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
         path="compare/:groupId"
         element={
           <Suspense fallback={<CompareLoading />}>
-            <CompareVariantsRoute />
+            <RetainedVariantsRoute />
           </Suspense>
         }
       />

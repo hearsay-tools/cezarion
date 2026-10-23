@@ -168,7 +168,7 @@ describe('pageTitleContext', () => {
   it.each([
     ['/p/cezar/', 'Tasks'],
     ['/new', 'New task'],
-    ['/p/cezar/compare/group-1', 'Compare'],
+    ['/p/cezar/compare/group-1', 'Retained results'],
     ['/p/cezar/git', 'Git'],
     ['/p/cezar/git/commits/abc123', 'Git'],
     ['/p/cezar/github/issues/543', 'GitHub'],
