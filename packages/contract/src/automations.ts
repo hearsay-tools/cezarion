@@ -92,6 +92,24 @@ export const automationTaskSchema = createRunInputBaseSchema
   });
 export type AutomationTask = z.infer<typeof automationTaskSchema>;
 
+/**
+ * A one-time schedule's archive record (hearsay-tools/cezarion#1465): written after its task
+ * exists (`launched`, with the run and receipt) or when it was cancelled. An archived definition
+ * is always paused and never fires again; only `once` schedules are archived.
+ */
+export const automationArchiveSchema = z.object({
+  at: z.string(),
+  outcome: z.enum(['launched', 'cancelled']),
+  runId: z.string().optional(),
+  receiptId: z.string().optional(),
+  trigger: z.enum(['schedule', 'late', 'manual', 'retry']).optional(),
+});
+export type AutomationArchive = z.infer<typeof automationArchiveSchema>;
+
+/** Where a one-time schedule stands, derived by the server so clients never re-derive it. */
+export const onceStatusSchema = z.enum(['paused', 'waiting', 'failed', 'missed', 'archived']);
+export type OnceStatus = z.infer<typeof onceStatusSchema>;
+
 /** One stored automation, as every route that answers a single definition serves it. */
 export const automationDefinitionSchema = z.object({
   id: z.string(),
@@ -110,6 +128,8 @@ export const automationDefinitionSchema = z.object({
   /** `schedule` kind: always present. `github` kind: absent. */
   schedule: automationScheduleSchema.optional(),
   task: automationTaskSchema,
+  /** `once` schedules only: present once its task exists or it was cancelled. */
+  archived: automationArchiveSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -159,6 +179,8 @@ export const automationRuntimeStateSchema = z.object({
   etags: z.record(z.string(), z.string()).optional(),
   backoffUntil: z.string().optional(),
   consecutiveFailures: z.number().optional(),
+  /** `once` schedules: why it stopped without a task — its launch failed, or it started past its cutoff. */
+  onceOutcome: z.enum(['failed', 'missed']).optional(),
 });
 export type AutomationRuntimeState = z.infer<typeof automationRuntimeStateSchema>;
 
@@ -177,6 +199,8 @@ export const automationLogResultSchema = z.enum([
   'manual',
   'catch-up',
   'failed',
+  // once schedule: Cezarion started after its latest start, so nothing launched.
+  'missed',
 ]);
 export type AutomationLogResult = z.infer<typeof automationLogResultSchema>;
 
@@ -229,6 +253,8 @@ export const automationListEntrySchema = automationDefinitionSchema.extend({
   /** Enabled only: a schedule's armed `state.nextRunAt`, a poll's `state.nextCheckAt`. Absent
    *  while paused, and for a schedule the timer has not armed yet. */
   nextRunAt: z.string().optional(),
+  /** `once` schedules only. */
+  onceStatus: onceStatusSchema.optional(),
 });
 export type AutomationListEntry = z.infer<typeof automationListEntrySchema>;
 
@@ -257,11 +283,22 @@ export type AutomationsResponse = z.infer<typeof automationsResponseSchema>;
 export const automationResponseSchema = z.object({ automation: automationDefinitionSchema });
 export type AutomationResponse = z.infer<typeof automationResponseSchema>;
 
+/**
+ * `POST /automations`. A one-time schedule's answer adds `once`: the due wall time and zone as
+ * stored, the instant they resolve to, and the downtime note (hearsay-tools/cezarion#1465).
+ */
+export const automationCreateResponseSchema = automationResponseSchema.extend({
+  once: z.object({ dueAt: z.string(), timeZone: z.string(), resolvedInstant: z.string(), note: z.string() }).optional(),
+});
+export type AutomationCreateResponse = z.infer<typeof automationCreateResponseSchema>;
+
 /** `GET /automations/:id` — one definition with its state and the most recent log row. */
 export const automationDetailResponseSchema = z.object({
   automation: automationDefinitionSchema,
   state: automationRuntimeStateSchema.optional(),
   latestLog: automationLogRecordSchema.optional(),
+  /** `once` schedules only. */
+  onceStatus: onceStatusSchema.optional(),
 });
 export type AutomationDetailResponse = z.infer<typeof automationDetailResponseSchema>;
 
@@ -319,7 +356,7 @@ export type AutomationRunResponse = z.infer<typeof automationRunResponseSchema>;
  * `enable: true` asks the route to enable it AND establish a current-time baseline in one step.
  */
 export const createAutomationInputSchema = automationDefinitionSchema
-  .omit({ id: true, revision: true, createdAt: true, updatedAt: true, enabled: true, kind: true })
+  .omit({ id: true, revision: true, createdAt: true, updatedAt: true, enabled: true, kind: true, archived: true })
   .extend({
     /** Omitted = `github` on create, the shape every pre-schedule client sends; omitted on
      *  update = the stored kind. */
@@ -340,6 +377,12 @@ export const updateAutomationInputSchema = createAutomationInputSchema
     expectedRevision: z.number(),
   });
 export type UpdateAutomationInput = z.input<typeof updateAutomationInputSchema>;
+
+/** `GET /automations` — archived one-time schedules are left out unless asked for. */
+export const automationListQuerySchema = z.object({
+  archived: z.enum(['include', 'only']).optional(),
+});
+export type AutomationListQuery = z.input<typeof automationListQuerySchema>;
 
 /** `POST /automations/:id/check` — which of the two manual checks to run. */
 export const automationCheckInputSchema = z.object({

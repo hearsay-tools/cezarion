@@ -21,6 +21,7 @@ import type {
   AutomationLogResponse,
   AutomationRunResponse,
   AutomationRetryResponse,
+  AutomationCreateResponse,
   AutomationResponse,
   AutomationDefinition,
   CreateAutomationInput,
@@ -1946,10 +1947,11 @@ export async function postPlan(task: string): Promise<PlanResponse> {
 
 /** Every automation with its runtime state, latest log row and tallies, plus the forge's
  *  availability and the scheduler summary — one read, the whole page. */
-export async function getAutomations(opts?: ReadOptions): Promise<AutomationsResponse> {
+export async function getAutomations(opts?: ReadOptions & { archived?: 'include' | 'only' }): Promise<AutomationsResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].automations.$get(
-      { param: { projectId: opts?.projectId ?? queryScope() } },
+      // hearsay-tools/cezarion#1465: archived one-time schedules are left out unless asked for.
+      { param: { projectId: opts?.projectId ?? queryScope() }, query: opts?.archived ? { archived: opts.archived } : {} },
       init(opts),
     ),
     '/automations',
@@ -1957,7 +1959,7 @@ export async function getAutomations(opts?: ReadOptions): Promise<AutomationsRes
 }
 
 /** Create a definition. Always created PAUSED unless `enable` asks for a current-time baseline. */
-export async function createAutomation(input: CreateAutomationInput): Promise<AutomationResponse> {
+export async function createAutomation(input: CreateAutomationInput): Promise<AutomationCreateResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].automations.$post({
       param: { projectId: queryScope() },
@@ -2008,6 +2010,16 @@ export async function checkAutomation(
       json: { mode },
     }),
     `/automations/${encodeURIComponent(id)}/check`,
+  )
+}
+
+/** Archive a one-time schedule without a task (hearsay-tools/cezarion#1465). Anything else is a 409. */
+export async function cancelAutomation(id: string): Promise<AutomationResponse> {
+  return unwrap(
+    await cez.api.v1.p[':projectId'].automations[':id'].cancel.$post({
+      param: { projectId: queryScope(), id: encodeURIComponent(id) },
+    }),
+    `/automations/${encodeURIComponent(id)}/cancel`,
   )
 }
 

@@ -916,6 +916,14 @@ describe('pi tool selection (hearsay-tools/cezarion#1305)', () => {
     ]);
   });
 
+  // hearsay-tools/cezarion#1465: a narrowed list admits the schedule tools only under the opt-in.
+  it('admits the schedule tools in a narrowed list only with CEZ_AUTOMATIONS=1', () => {
+    const on = buildPiArgs({ ...base, allowedTools: ['Read'], cezarTools: ci, env: { CEZ_AUTOMATIONS: '1' } });
+    expect(on[on.indexOf('--tools') + 1]!.split(',')).toEqual(expect.arrayContaining(['cezar_schedule_task', 'cezar_scheduled_tasks']));
+    const off = buildPiArgs({ ...base, allowedTools: ['Read'], cezarTools: ci });
+    expect(off[off.indexOf('--tools') + 1]!.split(',')).not.toContain('cezar_schedule_task');
+  });
+
   it('treats a bashAllowlist on the default list as narrowed: --tools without bash', () => {
     expect(buildPiArgs({ ...base, allowedTools: stepDefault, bashAllowlist: ['npm test'] })).toEqual([
       '--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read,edit,write,grep,find,subagent,subagent_supervisor,subagent_wait',

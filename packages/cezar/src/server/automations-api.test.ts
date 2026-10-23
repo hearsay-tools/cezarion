@@ -1,3 +1,4 @@
+import { SCHEDULED_TASK_NOTE } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { execFileSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,8 +14,9 @@ import { AutomationStore } from '../automations/store.ts';
 import { isScheduleAutomation } from '../automations/types.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RunStore } from '../runs/store.ts';
+import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
 import { registerProject } from '../workspace/projects.ts';
-import { RunManager } from '../workflows/run.ts';
+import { RunManager, type AutomationToolService, type StartRunInput } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp, startServer, WorkspaceEventBus } from './server.ts';
 
@@ -66,8 +68,8 @@ describe('GitHub automation API', () => {
   };
   /** A manager that creates the run record and nothing else — enough for a launch to land. */
   const recordingManager = () => ({
-    startRun: vi.fn((workflow: { name: string }, start: { task: string }) =>
-      store.createRun({ title: 'automation', workflow: workflow.name, task: start.task, steps: [] })),
+    startRun: vi.fn((workflow: { name: string }, start: Pick<StartRunInput, 'task' | 'automation' | 'automationTrigger'>) =>
+      store.createRun({ title: 'automation', workflow: workflow.name, task: start.task, automation: start.automation, automationTrigger: start.automationTrigger, steps: [] })),
   }) as unknown as RunManager & { startRun: ReturnType<typeof vi.fn> };
   const app = (over: Partial<Parameters<typeof createApp>[0]> = {}) =>
     createApp({ repoRoot: root, store, manager: {} as RunManager, version: 'test', ...over });
@@ -956,6 +958,184 @@ describe('GitHub automation API', () => {
       deleted: true,
     });
   });
+
+  describe('one-time schedules (#1465)', () => {
+    /** A wall time `ms` from now in UTC, as `at` takes it. */
+    const wall = (ms: number) => new Date(Date.now() + ms).toISOString().slice(0, 16);
+    const onceInput = (ms = 2 * 86_400_000, extra: Record<string, unknown> = {}) => ({
+      name: 'Check the rollout',
+      kind: 'schedule',
+      schedule: { type: 'once', at: wall(ms), timeZone: 'UTC', ...extra },
+      task: { prompt: 'Check the rollout of {{project}}' },
+    });
+    const create = async (server: ReturnType<typeof app>, body: unknown) => apiRequest(server, '/api/v1/automations', json(body));
+    const body = async (response: Response) => (await response.json()) as any;
+    const editable = (automation: any) => {
+      const { id: _id, revision, createdAt: _c, updatedAt: _u, archived: _a, enabled, ...rest } = automation;
+      return { ...rest, enabled, expectedRevision: revision };
+    };
+
+    it('create enabled once in the future arms nextRunAt to the instant', async () => {
+      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const server = app({ automationStore });
+      const definition = onceInput();
+      const created = await create(server, { ...definition, enable: true });
+      expect(created.status).toBe(201);
+      const { automation } = await body(created);
+      expect(automationStore.state(automation.id)?.nextRunAt).toBe(`${definition.schedule.at}:00.000Z`);
+      const listed = await body(await apiRequest(server, '/api/v1/automations'));
+      expect(listed.automations[0]).toMatchObject({ id: automation.id, onceStatus: 'waiting' });
+    });
+
+    // Review of #1465: every create answer reports the due time, zone, resolved instant and the
+    // downtime note, the HTTP body included; a repeating schedule's answer carries no once block.
+    it('create answers the resolved instant and the downtime note for a once only', async () => {
+      const definition = onceInput();
+      const created = await body(await create(app(), definition));
+      expect(created.once).toEqual({ dueAt: definition.schedule.at, timeZone: 'UTC', resolvedInstant: `${definition.schedule.at}:00.000Z`, note: SCHEDULED_TASK_NOTE });
+      const daily = await body(await create(app(), { name: 'Daily', kind: 'schedule', schedule: { type: 'daily', hour: 4 }, task: { prompt: 'p' } }));
+      expect(daily).not.toHaveProperty('once');
+    });
+
+    it('create refuses a past at with the verbatim message', async () => {
+      const refused = await create(app(), { ...onceInput(-3_600_000), enable: true });
+      expect(refused.status).toBe(400);
+      expect((await body(refused)).error).toBe('the due time has passed; choose a later time or use Run now');
+      const paused = await create(app(), onceInput(-3_600_000));
+      expect(paused.status).toBe(400);
+    });
+
+    it('create refuses an unknown zone with the verbatim message', async () => {
+      const refused = await create(app(), onceInput(86_400_000, { timeZone: 'Mars/Base' }));
+      expect(refused.status).toBe(400);
+      expect((await body(refused)).error).toContain('unknown time zone "Mars/Base"; use an IANA name such as Europe/Warsaw');
+    });
+
+    it('create refuses a model the fresh catalog lacks and lists available models', async () => {
+      const modelCatalog = new RunnerModelCatalog({ adapters: { claude: { discover: async () => [{ id: 'opus', label: 'Opus', description: 'Opus' }] } } });
+      const refused = await create(app({ modelCatalog }), { ...onceInput(), task: { prompt: 'Go', runner: 'claude', model: 'gpt-nonexistent' } });
+      expect(refused.status).toBe(400);
+      expect((await body(refused)).error).toMatch(/Model "gpt-nonexistent" is not in the claude catalog\. Available models: opus/);
+      const accepted = await create(app({ modelCatalog }), { ...onceInput(), task: { prompt: 'Go', runner: 'claude', model: 'opus' } });
+      expect(accepted.status).toBe(201);
+    });
+
+    it('cancel archives with outcome cancelled, enabled false, and list hides it; ?archived=only shows it', async () => {
+      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const server = app({ automationStore });
+      const { automation } = await body(await create(server, { ...onceInput(), enable: true }));
+      const cancelled = await apiRequest(server, `/api/v1/automations/${automation.id}/cancel`, { method: 'POST' });
+      expect(cancelled.status).toBe(200);
+      expect((await body(cancelled)).automation).toMatchObject({ enabled: false, archived: { outcome: 'cancelled' } });
+      expect(automationStore.state(automation.id)?.nextRunAt).toBeUndefined();
+      expect((await body(await apiRequest(server, '/api/v1/automations'))).automations).toEqual([]);
+      const only = await body(await apiRequest(server, '/api/v1/automations?archived=only'));
+      expect(only.automations).toEqual([expect.objectContaining({ id: automation.id, onceStatus: 'archived' })]);
+      const all = await body(await apiRequest(server, '/api/v1/automations?archived=include'));
+      expect(all.automations).toHaveLength(1);
+      const again = await apiRequest(server, `/api/v1/automations/${automation.id}/cancel`, { method: 'POST' });
+      expect(again.status).toBe(409);
+      expect((await body(again)).error).toBe('this one-time schedule is archived');
+    });
+
+    // Review of #1469: the scheduler status describes the whole project, not the filtered page.
+    it('?archived=only still reports the scheduler as scheduled with the next due time of the active schedules', async () => {
+      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const server = app({ automationStore });
+      const { automation: gone } = await body(await create(server, { ...onceInput(), enable: true }));
+      await apiRequest(server, `/api/v1/automations/${gone.id}/cancel`, { method: 'POST' });
+      await create(server, { ...onceInput(2 * 86_400_000, { name: 'Later' }), enable: true });
+      const active = await body(await apiRequest(server, '/api/v1/automations'));
+      const only = await body(await apiRequest(server, '/api/v1/automations?archived=only'));
+      expect(active.scheduler).toMatchObject({ state: 'scheduled' });
+      expect(only.scheduler).toEqual(active.scheduler);
+    });
+
+    it('cancel while the lease is held answers 409 in-progress and changes nothing', async () => {
+      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const server = app({ automationStore });
+      const { automation } = await body(await create(server, { ...onceInput(), enable: true }));
+      const held = automationStore.acquireLease();
+      try {
+        const busy = await apiRequest(server, `/api/v1/automations/${automation.id}/cancel`, { method: 'POST' });
+        expect(busy.status).toBe(409);
+        expect((await body(busy)).error).toBe('a launch of this schedule is in progress; try again in a moment');
+        const paused = await apiRequest(server, `/api/v1/automations/${automation.id}/pause`, { method: 'POST' });
+        expect(paused.status).toBe(409);
+      } finally { held?.release(); }
+      expect(automationStore.get(automation.id)).toMatchObject({ enabled: true, revision: automation.revision });
+      expect(automationStore.get(automation.id)?.archived).toBeUndefined();
+    });
+
+    it('edit after a launched receipt with no archive heals and answers 409 archived', async () => {
+      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const server = app({ automationStore });
+      const { automation } = await body(await create(server, onceInput()));
+      const reserved = automationStore.reserveReceipt({ automationId: automation.id, revision: 1, eventId: `once:${automation.schedule.at}|UTC`, occurrenceAt: new Date().toISOString() })!;
+      automationStore.appendReceipt({ ...reserved, status: 'launched', runId: 'run-crashed' });
+      const edited = await apiRequest(server, `/api/v1/automations/${automation.id}`, json({ ...editable(automation), schedule: { ...automation.schedule, at: wall(5 * 86_400_000) } }, 'PUT'));
+      expect(edited.status).toBe(409);
+      expect((await body(edited)).error).toBe('this one-time schedule is archived');
+      expect(automationStore.get(automation.id)?.archived).toMatchObject({ outcome: 'launched', runId: 'run-crashed' });
+    });
+
+    it('run now on a waiting once answers 202, archives with trigger manual', async () => {
+      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const manager = recordingManager();
+      const server = app({ automationStore, manager });
+      const { automation } = await body(await create(server, { ...onceInput(), enable: true }));
+      const ran = await apiRequest(server, `/api/v1/automations/${automation.id}/run`, { method: 'POST' });
+      expect(ran.status).toBe(202);
+      const { runId } = await body(ran);
+      expect(automationStore.get(automation.id)?.archived).toMatchObject({ outcome: 'launched', trigger: 'manual', runId });
+      const again = await apiRequest(server, `/api/v1/automations/${automation.id}/run`, { method: 'POST' });
+      expect(again.status).toBe(409);
+      expect((await body(again)).error).toBe('this one-time schedule is archived');
+      expect(manager.startRun).toHaveBeenCalledTimes(1);
+    });
+
+    it('enable from missed answers 400 due-time-passed', async () => {
+      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const server = app({ automationStore });
+      const definition = automationStore.create({ ...onceInput(-86_400_000), enabled: false } as never);
+      automationStore.setState(definition.id, (current) => ({ ...current, onceOutcome: 'missed' }));
+      expect((await body(await apiRequest(server, `/api/v1/automations/${definition.id}`))).onceStatus).toBe('missed');
+      const enabled = await apiRequest(server, `/api/v1/automations/${definition.id}/enable`, { method: 'POST' });
+      expect(enabled.status).toBe(400);
+      expect((await body(enabled)).error).toBe('the due time has passed; choose a later time or use Run now');
+    });
+
+    it('edit from failed clears onceOutcome and reports onceStatus paused', async () => {
+      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      const server = app({ automationStore });
+      const { automation } = await body(await create(server, onceInput()));
+      automationStore.setState(automation.id, (current) => ({ ...current, onceOutcome: 'failed' }));
+      expect((await body(await apiRequest(server, `/api/v1/automations/${automation.id}`))).onceStatus).toBe('failed');
+      const edited = await apiRequest(server, `/api/v1/automations/${automation.id}`, json({ ...editable(automation), task: { prompt: 'Try again' } }, 'PUT'));
+      expect(edited.status).toBe(200);
+      expect(automationStore.state(automation.id)?.onceOutcome).toBeUndefined();
+      expect((await body(await apiRequest(server, `/api/v1/automations/${automation.id}`))).onceStatus).toBe('paused');
+    });
+
+    it('cancel on a recurring schedule answers 409', async () => {
+      const server = app();
+      const { automation } = await body(await create(server, scheduleInput));
+      const refused = await apiRequest(server, `/api/v1/automations/${automation.id}/cancel`, { method: 'POST' });
+      expect(refused.status).toBe(409);
+      expect((await body(refused)).error).toBe('only a one-time schedule can be cancelled; pause or delete it instead');
+    });
+
+    // The session tools reach the same service through the boot manager.
+    it('hands the boot manager schedule tools that create through the service', async () => {
+      const automationStore = AutomationStore.open(join(root, '.ai/cezar'));
+      let tools: AutomationToolService | undefined;
+      app({ automationStore, manager: { setAutomationTools: (value: AutomationToolService | undefined) => { tools = value; } } as unknown as RunManager });
+      const answer = await tools!.scheduleTask({ name: 'Check', prompt: 'Check it', delay: '1d', time_zone: 'UTC' });
+      expect(answer).toMatchObject({ ok: true, task: { status: 'paused', time_zone: 'UTC' } });
+      expect(automationStore.list().map(automation => automation.name)).toEqual(['Check']);
+    });
+  });
+
 });
 
 function readFileOrEmpty(path: string): string {

@@ -9,8 +9,9 @@ import { getRequestListener } from '@hono/node-server';
 import { Hono } from 'hono';
 import { bodyLimit } from 'hono/body-limit';
 import { previewStopResult } from '../preview/registration.ts';
-import { askErrorMessage, askInvalidInput, ciErrorMessage, doneErrorMessage, doneInvalidInput, previewInvalidInput, previewOversized, previewRefusal, waitInvalidInput } from './errors.ts';
-import { previewToolEnabled } from './tools.ts';
+import { askErrorMessage, askInvalidInput, ciErrorMessage, doneErrorMessage, doneInvalidInput, previewInvalidInput, previewOversized, previewRefusal, scheduleInvalidInput, scheduleRefusal, waitInvalidInput } from './errors.ts';
+import { automationsToolEnabled, previewToolEnabled } from './tools.ts';
+import { SCHEDULED_TASK_LIMITS, scheduleTaskAnswerSchema, scheduleTaskRequestSchema, scheduledTasksAnswerSchema, scheduledTasksRequestSchema, type ScheduleTaskAnswer, type ScheduleTaskRequest, type ScheduledTasksAnswer, type ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { cezarAskAnswerSchema, cezarAskRequestSchema, cezarCancelWaitAnswerSchema, cezarCancelWaitRequestSchema, cezarDoneAnswerSchema, cezarDoneRequestSchema, cezarWaitAnswerSchema, cezarWaitRequestSchema, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarCancelWaitRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitAnswer, type CezarWaitRequest, type Wait, type WaitVia } from '@open-mercato/cezar-contract/waits';
 import { ciWaitErrorCodeSchema } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, previewStopResultSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
@@ -39,6 +40,9 @@ export type CezarToolHandlers = {
   /** #781: absent where no cockpit owns the run, which the route answers as `headless`. */
   registerPreview?: PreviewRegistration;
   stopPreview?: PreviewStop;
+  /** hearsay-tools/cezarion#1465: absent where no cockpit serves the project, answered as `unavailable`. */
+  scheduleTask?: (request: ScheduleTaskRequest, signal: AbortSignal) => Promise<ScheduleTaskAnswer>;
+  scheduledTasks?: (request: ScheduledTasksRequest, signal: AbortSignal) => Promise<ScheduledTasksAnswer>;
 };
 type Capability = CezarToolHandlers & { lifetime: AbortController };
 export type CiToolSession = { descriptor: NonNullable<AgentRunSpec['cezarTools']>; env: Record<string, string>; revoke(): void };
@@ -97,7 +101,7 @@ export class CiToolController {
       descriptor: { name: `cezar_ci_${randomUUID().replaceAll('-', '')}`, command: process.execPath, args: source ? ['--import', fileURLToPath(import.meta.resolve('tsx')), entry.replace(/\.js$/, '.ts')] : [entry] },
       // #781: the session carries the preview opt-in, so its runner admits and forwards exactly
       // the tools this session's adapter lists.
-      env: { CEZ_TOOL_TOKEN: token, CEZ_TOOL_SOCKET: this.address, ...(previewToolEnabled() ? { CEZ_PREVIEW: '1' } : {}) },
+      env: { CEZ_TOOL_TOKEN: token, CEZ_TOOL_SOCKET: this.address, ...(previewToolEnabled() ? { CEZ_PREVIEW: '1' } : {}), ...(automationsToolEnabled() ? { CEZ_AUTOMATIONS: '1' } : {}) },
       revoke: () => { this.capabilities.delete(token); capability.lifetime.abort(); },
     };
   }
@@ -126,7 +130,8 @@ const thrownCode = (error: unknown) => error && typeof error === 'object' && 'co
  * went with `cezar_wait_for_ci` in hearsay-tools/cezarion#1236); POST wait opens a CI, worker or
  * timer wait and POST cancel-wait closes one (hearsay-tools/cezarion#1233); POST ask opens the human
  * wait and POST done finishes the task at the turn's end (hearsay-tools/cezarion#1234); POST
- * preview-serve registers a dev server (#781); preview-stop controls its approved process (#803).
+ * preview-serve registers a dev server (#781); preview-stop controls its approved process (#803);
+ * POST schedule-task and scheduled-tasks create and manage one-time schedules (hearsay-tools/cezarion#1465).
  */
 export function ciToolRoutes(capabilities: Map<string, Capability>) {
   const authorized = (authorization: string | undefined) => {
@@ -264,6 +269,50 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       } catch {
         if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
         return c.json(previewRefusal('unavailable'));
+      }
+    })
+    .use('/api/v1/tools/schedule-task', async (c, next) => {
+      const capability = authorized(c.req.header('authorization'));
+      if (!capability) return c.json(unauthorized, 401);
+      c.set('capability', capability);
+      await next();
+    })
+    // A prompt takes up to 100 000 characters, so these bodies get their own limit. The flag gate
+    // runs before validation: off means off, whatever the body.
+    .post('/api/v1/tools/schedule-task', bodyLimit({ maxSize: SCHEDULED_TASK_LIMITS.wireBytes, onError: c => c.json(scheduleRefusal('invalid_request', 'The arguments exceed 1 MiB.')) }), async (c, next) => {
+      if (!automationsToolEnabled()) return c.json(scheduleRefusal('automations_off'));
+      await next();
+    }, jsonZodValidator(scheduleTaskRequestSchema, { invalid: (c, error) => c.json(scheduleRefusal('invalid_request', scheduleInvalidInput(error))) }), async c => {
+      const capability = c.get('capability');
+      if (!capability.scheduleTask) return c.json(scheduleRefusal('unavailable'));
+      try {
+        const answer = scheduleTaskAnswerSchema.parse(await capability.scheduleTask(c.req.valid('json'), capability.lifetime.signal));
+        capability.lifetime.signal.throwIfAborted();
+        return c.json(answer);
+      } catch {
+        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+        return c.json(scheduleRefusal('unavailable'));
+      }
+    })
+    .use('/api/v1/tools/scheduled-tasks', async (c, next) => {
+      const capability = authorized(c.req.header('authorization'));
+      if (!capability) return c.json(unauthorized, 401);
+      c.set('capability', capability);
+      await next();
+    })
+    .post('/api/v1/tools/scheduled-tasks', bodyLimit({ maxSize: SCHEDULED_TASK_LIMITS.wireBytes, onError: c => c.json(scheduleRefusal('invalid_request', 'The arguments exceed 1 MiB.')) }), async (c, next) => {
+      if (!automationsToolEnabled()) return c.json(scheduleRefusal('automations_off'));
+      await next();
+    }, jsonZodValidator(scheduledTasksRequestSchema, { invalid: (c, error) => c.json(scheduleRefusal('invalid_request', scheduleInvalidInput(error))) }), async c => {
+      const capability = c.get('capability');
+      if (!capability.scheduledTasks) return c.json(scheduleRefusal('unavailable'));
+      try {
+        const answer = scheduledTasksAnswerSchema.parse(await capability.scheduledTasks(c.req.valid('json'), capability.lifetime.signal));
+        capability.lifetime.signal.throwIfAborted();
+        return c.json(answer);
+      } catch {
+        if (capability.lifetime.signal.aborted) return c.json({ code: 'capability_revoked' as const, message: ciErrorMessage('capability_revoked') }, 401);
+        return c.json(scheduleRefusal('unavailable'));
       }
     });
 }

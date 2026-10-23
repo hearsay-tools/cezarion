@@ -123,6 +123,12 @@ describe('ompTools', () => {
     expect(ompTools(['Read'], { env: { CEZ_PREVIEW: '1' } }).tools).toEqual(['read']);
   });
 
+  // hearsay-tools/cezarion#1465: the schedule tools ride the automations opt-in the same way.
+  it('cezarTools admits the schedule tools exactly when the extension registers them (CEZ_AUTOMATIONS=1)', () => {
+    expect(ompTools(['Read'], { cezarTools: true, env: { CEZ_AUTOMATIONS: '1' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
+    expect(ompTools(['Read'], { cezarTools: true, env: { CEZ_AUTOMATIONS: '0' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+  });
+
   it('bashAllowlist drops bash; D1 drops task, wait and eval; cezarTools appends the cezar tools', () => {
     expect(ompTools(['Read', 'Bash'], { bashAllowlist: ['npm test'] }).tools).toEqual(['read']);
     expect(ompTools(['Read', 'Bash'], { bashAllowlist: [] }).tools).toEqual(['read', 'bash']);

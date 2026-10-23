@@ -31,7 +31,7 @@ export function automationCliCommand(): string {
  * The definition reference, as `cez automation schema` prints it and as the skill body embeds it.
  * One string so the two never disagree; `prompts.test.ts` pins it to the storage schema.
  */
-export const AUTOMATION_SCHEMA_REFERENCE = `An automation definition is one JSON object. Two kinds: a GitHub poll ("kind": "github") or a schedule ("kind": "schedule"). Both examples below are valid definitions as written; the keys they use are explained after them.
+export const AUTOMATION_SCHEMA_REFERENCE = `An automation definition is one JSON object. Two kinds: a GitHub poll ("kind": "github") or a schedule ("kind": "schedule"). The three examples below are valid definitions as written; the keys they use are explained after them.
 
 A GitHub poll:
 
@@ -61,6 +61,15 @@ A schedule:
   "task": { "prompt": "Run npm outdated, bump patch and minor versions, run the tests, open a draft PR if anything changed. Today is {{date}}." }
 }
 
+A one-time schedule (replace "at" with a future time):
+
+{
+  "name": "Check the rollout next week",
+  "kind": "schedule",
+  "schedule": { "type": "once", "at": "2030-01-15T09:00", "timeZone": "Europe/Warsaw", "latestStartMinutes": 360 },
+  "task": { "prompt": "Check the error rate of the release deployed last week, compare it with the week before, and report what changed." }
+}
+
 Top-level keys:
 - "name": required, 1-200 characters.
 - "description": optional, up to 2000 characters.
@@ -68,7 +77,7 @@ Top-level keys:
 - "events" (GitHub poll, required): 1-4 of pull_request.opened, issue.opened, issue.labeled, issue.unlabeled.
 - "intervalSeconds" (GitHub poll): how often GitHub is polled, 60-86400 seconds; default 300.
 - "filters" (GitHub poll): may be {}; every key is optional, and a candidate must pass ALL the given filters.
-- "schedule" (schedule, required): "type" is "daily" or "weekdays" (Mon-Fri) at "hour" and "minute"; "weekly" adds "day" (1 = Monday ... 7 = Sunday); "hours" uses "every" (1 | 2 | 3 | 4 | 6 | 8 | 12) from 00:00. Schedules run in the cockpit's own time zone.
+- "schedule" (schedule, required): "type" is "daily" or "weekdays" (Mon-Fri) at "hour" and "minute"; "weekly" adds "day" (1 = Monday ... 7 = Sunday); "hours" uses "every" (1 | 2 | 3 | 4 | 6 | 8 | 12) from 00:00. These repeating shapes run in the cockpit's own time zone. "once" runs a single time: "at" is the local wall time "YYYY-MM-DDTHH:MM" in "timeZone" (an IANA name such as Europe/Warsaw, required), and the optional "latestStartMinutes" (10-43200) is how late after "at" a start may still launch when Cezarion was not running; without it a late start always launches. Once its task exists, a one-time schedule is archived with the task's id ("archived": { "outcome": "launched", "runId": ... }) and never fires again. "run <id>" (Run now) consumes it the same way. "cancel <id>" archives it without a task ("outcome": "cancelled"). An archived schedule cannot change; "list --archived only" shows them. "at" must be in the future when it is created, moved or enabled.
 - "task": the ordinary task each match or occurrence launches.
 
 "filters" keys:
@@ -105,9 +114,14 @@ The CLI is ${command}. Every command prints one JSON object:
   ${command} create --file <def.json> [--enable]      create one from JSON (paused unless --enable); --json '<json>' or stdin work too
   ${command} add --name <n> (--cron "0 4 * * *" | --on <event> --every 5m) --prompt <p> [--workflow w] [--runner r] [--model m] [--no-autonomous] [--label l] [--author a] [--changed-label l] [--include-existing] [--enable]
   ${command} check <id> [--execute]                   GitHub poll: preview what the filter matches right now (launches nothing without --execute)
+  ${command} add --name <n> (--at <YYYY-MM-DDTHH:MM> --tz <zone> | --in <30m|6h|7d>) [--latest-start 6h] --prompt <p> [--enable]
+                                                      a one-time schedule: one task at that time, then archived
   ${command} run <id>                                 schedule: launch it once, now
+  ${command} cancel <id>                              one-time schedule: archive it without a task
   ${command} list | show <id> | update <id> --file <def.json> | enable <id> | pause <id> | delete <id>
                                                       (update replaces each key given; "task" merges key by key, null removes one)
+
+When work must start much later (tomorrow, next week) as a new task, create a one-time schedule (add --at or --in) instead of keeping this session waiting on repeated timers; enable it only when the user asked for the work to run later.
 
 Read the schema first. Create the automation PAUSED. A paused automation is the finished state of this task, not a step awaiting confirmation: enable it only when the user's own request explicitly asks for it to be switched on. An instruction to continue autonomously, not to ask for confirmation, or to make reasonable assumptions is not that request. For a GitHub poll, run a preview check so the user sees what it would match; for a schedule, report its next occurrence. Put the "url" the command prints in your final message. If the command exits non-zero or is refused, stop and report that automations are unavailable on this cockpit, quoting its error: do not write a cron job, a GitHub Action or a polling script as a substitute.`;
 }

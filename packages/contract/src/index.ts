@@ -25,6 +25,7 @@ export * from './agent-profiles.ts';
 export * from './zoned-time.ts';
 export * from './automation-schedule.ts';
 export * from './automations.ts';
+export * from './scheduled-tasks.ts';
 export * from './preview.ts';
 export * from './voice.ts';
 

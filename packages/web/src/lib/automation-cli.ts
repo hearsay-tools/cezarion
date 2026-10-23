@@ -48,6 +48,13 @@ function everyFlag(seconds: number): string {
   return `${seconds}s`
 }
 
+/** `7d` / `6h` / `30m` for `--latest-start`, from minutes. */
+function durationFlag(minutes: number): string {
+  if (minutes % 1_440 === 0) return `${minutes / 1_440}d`
+  if (minutes % 60 === 0) return `${minutes / 60}h`
+  return `${minutes}m`
+}
+
 /** `--flag 'value'`, or `--flag='value'` when the value starts with a dash: the CLI's strict
  *  parser refuses `--prompt -x` as ambiguous. */
 function flag(name: string, value: string): string {
@@ -56,7 +63,10 @@ function flag(name: string, value: string): string {
 
 function flagsOf(body: CreateAutomationInput): string {
   const parts = ['cez automation add', flag('name', body.name)]
-  if (body.kind === 'schedule') {
+  if (body.schedule?.type === 'once') {
+    parts.push(flag('at', body.schedule.at!), flag('tz', body.schedule.timeZone!))
+    if (body.schedule.latestStartMinutes !== undefined) parts.push(flag('latest-start', durationFlag(body.schedule.latestStartMinutes)))
+  } else if (body.kind === 'schedule') {
     parts.push(flag('cron', cronOf(body.schedule!)))
   } else {
     parts.push(flag('on', body.events!.join(',')), `--every ${everyFlag(body.intervalSeconds ?? 300)}`)
