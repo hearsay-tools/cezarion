@@ -182,6 +182,50 @@ describe('cez task', () => {
       expect(printed).toMatchObject({ status: 'queued', created: true });
       expect(printed.url).toBe(`${cockpit.origin}/p/default/tasks/${printed.id as string}`);
       expect(store.getRun(printed.id as string)?.task).toBe('do the thing');
+      expect(store.getRun(printed.id as string)?.archiveWhenDone).not.toBe(true);
+      expect(store.getRun(printed.id as string)?.autoMergePr).not.toBe(true);
+    });
+
+    it.each([
+      ['--archive-when-done', { archiveWhenDone: true }],
+      ['--auto-merge-pr', { autoMergePr: true }],
+    ] as const)('saves %s without enabling the other completion control', async (flag, expected) => {
+      expect(await run(['start', 'complete this task', flag])).toBe(0);
+      const record = store.getRun(last().id as string)!;
+      expect(record).toMatchObject(expected);
+      expect(record[flag === '--archive-when-done' ? 'autoMergePr' : 'archiveWhenDone']).not.toBe(true);
+    });
+
+    it.each(['positional', 'file', 'stdin', 'workflow', 'skill'] as const)('preserves %s task input with both completion controls', async (source) => {
+      const text = 'multi\nline "quoted" `code` $HOME';
+      const taskPath = join(harness.repoRoot, 'task.md');
+      writeFileSync(taskPath, text);
+      const input = source === 'file' ? ['--task-file', taskPath]
+        : source === 'stdin' ? ['--task-file', '-'] : [text];
+      const execution = source === 'workflow' ? ['--workflow', 'quick-task']
+        : source === 'skill' ? ['--skill', 'completion-skill'] : [];
+      expect(await run(['start', ...input, ...execution, '--archive-when-done', '--auto-merge-pr'], text)).toBe(0);
+      const record = store.getRun(last().id as string)!;
+      expect(record).toMatchObject({ task: text, archiveWhenDone: true, autoMergePr: true });
+      if (source === 'skill') expect(record.workflowDef?.steps).toEqual([
+        { id: 'task', name: 'completion-skill', skill: 'completion-skill', prompt: '{{task}}' },
+      ]);
+      else expect(record.workflow).toBe('quick-task');
+    });
+
+    it('retries starts with completion controls and rejects changed controls', async () => {
+      const id = randomUUID();
+      const args = ['start', 'x', '--request-id', id, '--archive-when-done', '--auto-merge-pr'];
+      expect(await run(args)).toBe(0);
+      const first = last();
+      expect(await run(args)).toBe(0);
+      expect(last()).toMatchObject({ id: first.id, created: false });
+      for (const flag of ['--archive-when-done', '--auto-merge-pr']) {
+        expect(await run(args.filter((arg) => arg !== flag))).toBe(2);
+        expect(last()).toMatchObject({ error: 'request id payload conflict' });
+      }
+      expect(store.listRuns()).toHaveLength(1);
+      expect(store.getRun(first.id as string)).toMatchObject({ archiveWhenDone: true, autoMergePr: true });
     });
 
     it('starts a run with the selected discovered skill as its agent step', async () => {
@@ -770,6 +814,8 @@ describe('cez task', () => {
       expect(out.at(-1)).toContain('cez task archive-finished');
       expect(await run(['start', '--help'])).toBe(0);
       expect(out.at(-1)).toContain('--request-id');
+      expect(out.at(-1)).toMatch(/--archive-when-done[^\n]*default off/);
+      expect(out.at(-1)).toMatch(/--auto-merge-pr[^\n]*default off/);
       expect(out.at(-1)).toMatch(/--workflow[^\n]*\n  --skill /);
       expect(discoveries).toBe(0);
     });

@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager, StartRunInput } from '../workflows/run.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import { launchAutomationRun, launchScheduledRun, rebaselineIdleAutomations, reconcileAutomationReceipts, renderAutomationTask, renderScheduleTask, validateAutomationPrompt } from './task-template.ts';
 import { AutomationStore } from './store.ts';
 import { ProjectAutomationScheduler } from './scheduler.ts';
@@ -79,6 +80,40 @@ function fakeManager(store: RunStore): RunManager {
 }
 
 describe('automation task templates', () => {
+  it.each(['github', 'schedule', 'once'].flatMap((kind) =>
+    ([1, 2, 3] as const).map((variants) => ({ kind, variants })),
+  ))('copies completion controls to every $kind variant (count $variants)', async ({ kind, variants }) => {
+    const root = await mkdtemp(join(tmpdir(), 'cezar-completion-template-'));
+    const store = RunStore.open(join(root, '.ai/cezar'));
+    const manager = createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+    try {
+      const choices = [{}, { archiveWhenDone: true }, { autoMergePr: true }, { archiveWhenDone: true, autoMergePr: true }, { archiveWhenDone: false, autoMergePr: false }];
+      for (const [index, completion] of choices.entries()) {
+        const receiptId = `completion-${index}`;
+        const task = { variants, ...completion };
+        const launched = kind === 'github'
+          ? await launchAutomationRun({ root, manager, store, definition: { ...definition, task: { ...definition.task, ...task } },
+            candidate: { ...candidate, number: candidate.number + index, url: `https://github.com/acme/demo/issues/${candidate.number + index}` }, receiptId,
+          })
+          : await launchScheduledRun({ root, manager, store,
+            definition: { ...scheduled, ...(kind === 'once' ? { schedule: { type: 'once' as const, at: '2030-01-15T09:00', timeZone: 'UTC' } } : {}), task: { ...scheduled.task, ...task } },
+            occurrence, receiptId, projectName: 'demo', timeZone: 'UTC',
+          });
+        const runs = store.listRuns().filter((run) => (run.automation ?? run.automationTrigger)?.receiptId === receiptId);
+        expect(runs).toHaveLength(variants);
+        expect(runs.some((run) => run.id === launched.runId)).toBe(true);
+        for (const run of runs) {
+          expect(run.archiveWhenDone).toBe(completion.archiveWhenDone);
+          expect(run.autoMergePr).toBe(completion.autoMergePr);
+        }
+      }
+    } finally {
+      await drainFixtureManagers(root);
+      store.close();
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('rejects every placeholder outside the fixed vocabulary', () => {
     expect(validateAutomationPrompt('read {{env.HOME}}')).toContain('unknown automation placeholder');
     expect(validateAutomationPrompt('open {{github.url}}')).toBeNull();
