@@ -252,7 +252,7 @@ describe('RunWaitDetails', () => {
     for (const [outcome, label] of [
       ['merged', 'PR merged'],
       ['closed', 'PR closed without merge — inspect the PR'],
-      ['deadline', 'Merge wait timed out — the PR has not merged'],
+      ['deadline', 'Merge wait timed out — merge not confirmed'],
       ['conflicting', 'PR has merge conflicts — inspect the PR; not merged'],
     ] as const) {
       renderWaits(run('done', { lastWaits: [ciEntry({ until: 'merge', phase: 'delivered', result: observed(outcome) })] }))

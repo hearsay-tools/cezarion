@@ -98,7 +98,7 @@ function CiWaitStatus({ run, wait, settled = false }: { run: ApiRun; wait: CiWai
     cancelled: merge ? 'Merge wait cancelled' : 'CI wait cancelled',
     skipped: 'CI checks skipped — inspect the PR checks',
     no_checks: 'No CI checks found — inspect the PR workflows',
-    deadline: merge ? 'Merge wait timed out — the PR has not merged' : 'CI wait timed out — inspect the PR checks',
+    deadline: merge ? 'Merge wait timed out — merge not confirmed' : 'CI wait timed out — inspect the PR checks',
     error: merge ? 'Merge wait unavailable — inspect access and the PR' : 'CI wait unavailable — inspect access and the PR checks',
     head_changed: `CI head changed — ${result?.headSha.slice(0, 7)} → ${result?.observedHeadSha?.slice(0, 7) ?? 'unknown'}`,
     merged: 'PR merged',

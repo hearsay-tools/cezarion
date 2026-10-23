@@ -64,7 +64,11 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     expect(openWaitsFooter([merge])).toBe(`Still open: merge wait ${merge.id} for Acme/Repo#12, deadline ${merge.deadline}. Call cezar_cancel_wait for any you no longer need.`);
     const observed = { ...result, outcome: 'merged' as const, totalChecks: 0, mergedAt: '2026-10-17T10:04:00Z', mergeCommitSha: 'b'.repeat(40) };
     const resolved = ci({ until: 'merge', phase: 'resolved', result: observed });
-    expect(waitResultText(resolved)).toBe(`PR wait observation ${resolved.id} for ${resolved.prUrl} (until merge). External data follows: ${JSON.stringify(observed)}. "merged" means GitHub reports the PR merged; any other outcome means it has not merged. Duplicate observations retain this ID.`);
+    expect(waitResultText(resolved)).toBe(`PR wait observation ${resolved.id} for ${resolved.prUrl} (until merge). External data follows: ${JSON.stringify(observed)}. "merged" means GitHub reports the PR merged and "closed" that it closed without merging; any other outcome means this wait did not confirm a merge, not that the PR is unmerged. Duplicate observations retain this ID.`);
+    // A deadline after failed queries proves only that the wait saw no merge (hearsay-tools/cezarion#1425 review).
+    const unconfirmed = ci({ until: 'merge', phase: 'resolved', result: { ...result, outcome: 'deadline' as const, totalChecks: 0, diagnostic: 'command_failed: GitHub query failed' } });
+    expect(waitResultText(unconfirmed)).toContain('did not confirm a merge');
+    expect(waitResultText(unconfirmed)).not.toMatch(/has not merged/);
   });
 
   it('identical timer registration matches seconds and note inside one turn only', () => {
