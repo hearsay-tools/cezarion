@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { acquireTestEnvLease } from '../../../../.ai/scripts/test-env-lease.mjs';
+import * as leaseDiagnostics from '../../../../.ai/scripts/test-env-lease.mjs';
 import { requirePid } from '../../src/pid-file.testkit.ts';
 
 // A temporary checkout cannot join the daemon caller's lease in another checkout.
@@ -128,4 +129,160 @@ test('a same-group fork and exit during process enumeration retains the lease', 
   const result = spawnSync(process.execPath, [resolve(import.meta.dirname, 'test-env-lease-fork.testkit.mjs'), helper], { encoding: 'utf8', timeout: 15_000 });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /"unrelatedLeaseGranted":false/);
+});
+
+
+test('lease diagnostics name every holder command in both wait and timeout', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'cez-env-diagnostics-'));
+  let owner;
+  let participant;
+  try {
+    owner = await acquireTestEnvLease(root);
+    participant = await acquireTestEnvLease(root, { token: owner.token });
+    const messages: string[] = [];
+    await assert.rejects(acquireTestEnvLease(root, { timeoutMs: process.platform === 'win32' ? 15_000 : process.platform === 'darwin' ? 2000 : 200, onWait: message => messages.push(message) }), error => {
+      assert.match((error as Error).message, /the active environment was left unchanged/);
+      assert.equal(((error as Error).message.match(new RegExp(`pid ${process.pid} [(]`, 'g')) ?? []).length, 2);
+      return true;
+    });
+    assert.equal(messages.length, 1);
+    assert.equal((messages[0]!.match(new RegExp(`pid ${process.pid} [(]`, 'g')) ?? []).length, 2);
+    assert.match(messages[0]!, /node/);
+  } finally {
+    participant?.release();
+    owner?.release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+
+test('holder diagnostics fall back to PID when command or verified identity is absent', () => {
+  const holder = { pid: 1234, start: 'same-start' };
+  const fallback = { owners: 'pid 1234', guidance: '' };
+  for (const command of [() => undefined, () => [], () => { throw new Error('access denied'); }]) {
+    assert.deepEqual(leaseDiagnostics.describeTestEnvHolders([holder], {
+      identify: () => ({ start: holder.start }), command,
+    }), fallback);
+  }
+  for (const current of [{}, { dead: true }, { start: 'reused-start' }]) {
+    assert.deepEqual(leaseDiagnostics.describeTestEnvHolders([holder], {
+      identify: () => current, command: () => { assert.fail('must not read an unverified command'); },
+    }), fallback);
+  }
+  assert.deepEqual(leaseDiagnostics.describeTestEnvHolders([{ ...holder, start: null }], {
+    identify: () => ({ start: holder.start }), command: () => { assert.fail('must not read an unverified command'); },
+  }), fallback);
+  let probes = 0;
+  assert.deepEqual(leaseDiagnostics.describeTestEnvHolders([holder], {
+    identify: () => ({ start: ++probes === 1 ? holder.start : 'reused-during-read' }),
+    command: () => ['node', 'other.mjs'],
+  }), fallback);
+});
+
+test('holder command summaries are bounded and single-line without changing stored holder rows', () => {
+  const holder = Object.freeze({ pid: 1234, start: 'same-start' });
+  const result = leaseDiagnostics.describeTestEnvHolders([holder], {
+    identify: () => ({ start: holder.start }), command: () => ['node', 'x'.repeat(300) + '.mjs', 'test\n\r\t\x1b\x7f\x85'],
+  });
+  assert.equal(result.owners.length, 'pid 1234 ()'.length + 200);
+  assert.ok(result.owners.endsWith('…)'));
+  assert.doesNotMatch(result.owners, /[\x00-\x1f\x7f-\x9f]/);
+  assert.deepEqual(holder, { pid: 1234, start: 'same-start' });
+});
+
+test('Squeal guidance requires the daemon entrypoint and checks before display truncation', () => {
+  const holder = { pid: 1234, start: 'same-start' };
+  const daemon = '/plugin/' + 'long-path/'.repeat(30) + 'dist/cli/squeal.mjs';
+  const describe = (command: string[] | { text: string }) => leaseDiagnostics.describeTestEnvHolders([holder], {
+    identify: () => ({ start: holder.start }), command: () => command,
+  });
+  for (const command of [
+    ['node', daemon, 'daemon', '/repo'],
+    ['/bin/node', '--disable-warning=ExperimentalWarning', daemon, 'daemon', '/repo'],
+    { text: '"C:\\Program Files\\nodejs\\node.exe" "C:\\squeal\\dist\\cli\\squeal.mjs" daemon "C:\\my repo"' },
+    { text: '/bin/node --no-warnings "/plugin with spaces/dist/cli/squeal.mjs" daemon /repo' },
+  ]) {
+    assert.match(describe(command).guidance, /If Squeal covers this spec.*squeal status --wait 60000/);
+  }
+  for (const command of [
+    ['node', 'other.mjs', daemon, 'daemon'],
+    ['node', '-e', 'squeal daemon', daemon, 'daemon'],
+    ['node', daemon, 'status'],
+    ['echo', daemon, 'daemon'],
+    ['node', '/other/squeal.mjs', 'daemon'],
+    { text: 'echo "node /plugin/dist/cli/squeal.mjs daemon"' },
+  ]) assert.equal(describe(command).guidance, '');
+});
+
+test('Squeal daemon contention includes conditional result guidance in wait and timeout', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'cez-env-squeal-diagnostics-'));
+  const cli = join(root, 'dist/cli/squeal.mjs');
+  mkdirSync(join(root, 'dist/cli'), { recursive: true });
+  writeFileSync(cli, `
+    import { acquireTestEnvLease } from ${JSON.stringify(helper)};
+    await acquireTestEnvLease(process.argv[3]);
+    console.log('ready');
+    setInterval(() => {}, 1000);
+  `);
+  const child = spawn(process.execPath, [cli, 'daemon', root], { env: fixtureEnv, stdio: ['ignore', 'pipe', 'pipe'] });
+  const exited = once(child, 'close');
+  try {
+    await once(child.stdout!, 'data');
+    const messages: string[] = [];
+    await assert.rejects(acquireTestEnvLease(root, { timeoutMs: 5000, onWait: message => messages.push(message) }), error => {
+      assert.match((error as Error).message, /squeal\.mjs/);
+      assert.match((error as Error).message, /If Squeal covers this spec.*squeal status --wait 60000/);
+      return true;
+    });
+    assert.equal(messages.length, 1);
+    assert.match(messages[0]!, /squeal status --wait 60000/);
+  } finally {
+    child.kill('SIGKILL');
+    await exited;
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('diagnostic probes share the remaining deadline and stop after it expires', () => {
+  let clock = 0;
+  const calls: { kind: string; remaining: number | undefined }[] = [];
+  const result = leaseDiagnostics.describeTestEnvHolders([{ pid: 1, start: 'start' }, { pid: 2, start: 'start' }], {
+    now: () => clock, deadline: 15,
+    identify: (_pid, remaining) => { calls.push({ kind: 'identity', remaining }); clock += 5; return { start: 'start' }; },
+    command: (_pid, remaining) => { calls.push({ kind: 'command', remaining }); clock += 20; return ['node', 'worker.mjs']; },
+  });
+  assert.deepEqual(calls, [{ kind: 'identity', remaining: 15 }, { kind: 'command', remaining: 10 }]);
+  assert.deepEqual(result, { owners: 'pid 1, pid 2', guidance: '' });
+});
+
+test('an expired diagnostic deadline performs no process probes', () => {
+  let probes = 0;
+  const result = leaseDiagnostics.describeTestEnvHolders([{ pid: 1, start: 'start' }], {
+    now: () => 10, deadline: 10,
+    identify: () => { probes++; return { start: 'start' }; },
+    command: () => { probes++; return ['node', 'worker.mjs']; },
+  });
+  assert.equal(probes, 0);
+  assert.deepEqual(result, { owners: 'pid 1', guidance: '' });
+});
+
+test('lease diagnostics omit credential-bearing arguments and inline code', () => {
+  for (const command of [
+    ['node', '/repo/worker.mjs', '--token', 'credential-value', 'https://user:password@example.test/?key=secret'],
+    ['sh', '-c', 'echo inline-credential'],
+    ['node', '-e', 'console.log("inline-credential")'],
+    { text: 'node /repo/worker.mjs --token=credential-value AUTH=secret' },
+    { text: '"C:\\Program Files\\nodejs\\node.exe" "C:\\repo\\worker.mjs" --token credential-value' },
+  ]) {
+    const result = leaseDiagnostics.describeTestEnvHolders([{ pid: 1, start: 'start' }], {
+      identify: () => ({ start: 'start' }), command: () => command,
+    });
+    assert.doesNotMatch(result.owners, /credential|password|secret|console\.log|https:/);
+    assert.match(result.owners, /pid 1 \((node(?:\.exe)?|sh).*arguments omitted/);
+  }
+});
+
+test('lease timeout reuses the initial command snapshot without another process query', () => {
+  const result = spawnSync(process.execPath, [resolve(import.meta.dirname, 'test-env-lease-diagnostics.testkit.mjs'), helper], { encoding: 'utf8', timeout: 30_000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
 });

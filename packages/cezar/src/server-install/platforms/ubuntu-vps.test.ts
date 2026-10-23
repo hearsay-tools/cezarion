@@ -285,7 +285,9 @@ describe('ubuntu-vps HTTP/2 install wiring', () => {
 
   it('can collect this suite when GNU sed is unavailable', () => {
     expect(hasGnuSed(() => { throw new Error('BSD sed has no --version'); })).toBe(false);
-    if (process.env.CEZ_TEST_NO_GNU_SED === '1') {
+    // This is test orchestration, not an application flag: vitest.setup.ts
+    // deliberately removes every inherited CEZ_* value.
+    if (process.env.TEST_NO_GNU_SED === '1') {
       expect(gnuSed).toBe(false);
       return;
     }
@@ -300,8 +302,9 @@ describe('ubuntu-vps HTTP/2 install wiring', () => {
         '-t', 'can collect this suite when GNU sed is unavailable',
       ], {
         cwd: repoRoot,
-        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, CEZ_TEST_NO_GNU_SED: '1' },
+        env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, TEST_NO_GNU_SED: '1' },
         encoding: 'utf8',
+        timeout: 20_000,
       });
       expect(result.status, result.stdout + result.stderr).toBe(0);
     } finally { rmSync(dir, { recursive: true, force: true }); }

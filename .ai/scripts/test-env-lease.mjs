@@ -3,7 +3,7 @@
 // Short SQLite transactions make join/release/reclamation atomic, including after SIGKILL.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { connect, createServer } from 'node:net';
@@ -12,9 +12,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
 const windowsScript = resolve(import.meta.dirname, 'test-env-windows.ps1');
-function windowsProbe(mode, payload) {
+function windowsProbe(mode, payload, timeout = 15_000) {
   const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', windowsScript, mode, payload], {
-    encoding: 'utf8', windowsHide: true, timeout: 15_000,
+    encoding: 'utf8', windowsHide: true, timeout, maxBuffer: 64 * 1024,
   });
   if (result.status !== 0) return undefined;
   return result.stdout.trim();
@@ -25,11 +25,11 @@ function windowsCommand(args) {
 }
 const windowsPayload = value => Buffer.from(JSON.stringify(value)).toString('base64');
 
-function identity(pid) {
+function identity(pid, timeout = 15_000) {
   try { process.kill(pid, 0); }
   catch (error) { return error.code === 'ESRCH' ? { dead: true } : {}; }
   if (process.platform === 'win32') {
-    const start = windowsProbe('identity', String(pid));
+    const start = windowsProbe('identity', String(pid), timeout);
     if (start === 'gone') return { dead: true };
     return /^\d+$/.test(start ?? '') ? { start } : {};
   }
@@ -43,11 +43,113 @@ function identity(pid) {
     } catch { /* Unreadable identity is not proof of death. */ }
   } else if (process.platform === 'darwin') {
     const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
-      encoding: 'utf8', timeout: 2000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
+      encoding: 'utf8', timeout: Math.min(2000, timeout), env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
     });
     if (ps.status === 0 && ps.stdout.trim()) return { start: ps.stdout.trim() };
   }
   return {};
+}
+
+// Diagnostics are transient and never participate in ownership or reclamation.
+// Limit reads as well as display size; command lines can contain arbitrary arguments.
+function commandLine(pid, timeout = 2000) {
+  try {
+    if (process.platform === 'linux') {
+      const fd = openSync(`/proc/${pid}/cmdline`, 'r');
+      try {
+        const buffer = Buffer.alloc(16 * 1024);
+        const length = readSync(fd, buffer, 0, buffer.length, 0);
+        return buffer.subarray(0, length).toString('utf8').split('\0').filter(Boolean);
+      } finally { closeSync(fd); }
+    }
+    const raw = process.platform === 'win32' ? windowsProbe('command', String(pid), timeout)
+      : process.platform === 'darwin' ? spawnSync('ps', ['-ww', '-o', 'command=', '-p', String(pid)], {
+        encoding: 'utf8', timeout, maxBuffer: 16 * 1024,
+      }) : undefined;
+    const text = typeof raw === 'string' ? raw : raw?.status === 0 ? raw.stdout.trim() : undefined;
+    // ps and Windows expose a rendered command, not argv. Parse it conservatively
+    // for safe process names and the unambiguous Node invocation used by Squeal.
+    return text ? { text } : undefined;
+  } catch { return undefined; }
+}
+
+function squealDaemon(argv) {
+  const name = value => value?.split(/[\\/]/).at(-1);
+  if (!['node', 'node.exe'].includes(name(argv[0]))) return false;
+  let index = 1;
+  while (['--no-warnings', '--disable-warning=ExperimentalWarning'].includes(argv[index])) index++;
+  return /(?:^|[\\/])dist[\\/]cli[\\/]squeal\.mjs$/.test(argv[index] ?? '') && argv[index + 1] === 'daemon';
+}
+
+const SQUEAL_GUIDANCE = 'If Squeal covers this spec, read its result with squeal status --wait 60000; do not start a duplicate run.';
+
+// Rendered process commands have no reliable argv boundary information. Recognize
+// only individually quoted/simple tokens; ambiguous commands retain their PID.
+function commandArgs(result) {
+  if (Array.isArray(result)) return result;
+  const text = result.text.trim();
+  if (!/^(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s"']+)(?:\s+(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s"']+))*$/.test(text)) return [];
+  return text.match(/"[^"\r\n]*"|'[^'\r\n]*'|[^\s"']+/g).map(arg => arg.replace(/^(?:"(.*)"|'(.*)')$/, '$1$2'));
+}
+
+// Argument values may be credentials or inline programs. Display only executable
+// and recognized interpreter script basenames; never retain the remaining argv.
+function safeCommand(argv, squeal) {
+  const name = value => value?.split(/[\\/]/).at(-1);
+  const executable = name(argv[0]);
+  if (!/^[\w.+-]+$/.test(executable ?? '')) return undefined;
+  let index = 1;
+  while (['--no-warnings', '--disable-warning=ExperimentalWarning'].includes(argv[index])) index++;
+  const script = name(argv[index]);
+  const interpreter = /^(?:node(?:\.exe)?|python[\d.]*(?:\.exe)?|(?:ba|da|z)?sh(?:\.exe)?)$/.test(executable);
+  const scriptName = interpreter && /^[\w.+-]+\.(?:[cm]?js|ts|py|sh)$/.test(script ?? '') ? ` ${script}` : '';
+  const text = executable + scriptName + (squeal ? ' daemon' : '') + (argv.length > 1 ? ' [arguments omitted]' : '');
+  return text.length > 200 ? text.slice(0, 199) + '…' : text;
+}
+
+function holderDescription(holders, snapshots) {
+  let squeal = false;
+  const owners = holders.map(holder => {
+    const saved = snapshots.get(holder.id);
+    // The latest lease transaction verified the row's PID/start. A retained group
+    // whose leader exited, or whose identity became unreadable, gets PID-only text.
+    if (!holder.diagnosticVerified || saved?.pid !== holder.pid || saved?.start !== holder.start) return `pid ${holder.pid}`;
+    squeal ||= saved.squeal;
+    return saved.owner;
+  }).join(', ');
+  return { owners, guidance: squeal ? `\n${SQUEAL_GUIDANCE}` : '' };
+}
+
+/** Best-effort snapshot outside the lease transaction, with one shared budget.
+ * Probe overrides test unreadable/changing identities and an exhausted deadline.
+ * Only safe rendered names enter snapshots; raw arguments never leave this call.
+ */
+export function describeTestEnvHolders(holders, {
+  identify = identity, command = commandLine, now = () => performance.now(), deadline = now() + 2000, snapshots,
+} = {}) {
+  const remaining = () => Math.max(0, Math.min(2000, Math.floor(deadline - now())));
+  let squeal = false;
+  const owners = holders.map(holder => {
+    const fallback = `pid ${holder.pid}`;
+    try {
+      let budget = remaining();
+      if (!holder.start || !budget || identify(holder.pid, budget).start !== holder.start) return fallback;
+      budget = remaining();
+      if (!budget) return fallback;
+      const result = command(holder.pid, budget);
+      budget = remaining();
+      if (!result || !budget || identify(holder.pid, budget).start !== holder.start || !remaining()) return fallback;
+      const argv = commandArgs(result);
+      const daemon = squealDaemon(argv);
+      const summary = safeCommand(argv, daemon);
+      if (!summary) return fallback;
+      const owner = `${fallback} (${summary})`;
+      snapshots?.set(holder.id, { pid: holder.pid, start: holder.start, owner, squeal: daemon });
+      squeal ||= daemon;
+      return owner;
+    } catch { return fallback; }
+  }).join(', ');
+  return { owners, guidance: squeal ? `\n${SQUEAL_GUIDANCE}` : '' };
 }
 
 // A shell can die before its build/clone child. Retain its group claim until the
@@ -96,6 +198,7 @@ function groupLive(pgid) {
 function liveHolders(db) {
   return db.prepare('SELECT * FROM holders').all().filter(holder => {
     const current = identity(holder.pid);
+    holder.diagnosticVerified = Boolean(holder.start && !current.dead && current.start === holder.start);
     const reused = holder.start && current.start && holder.start !== current.start;
     const dead = (reused || current.dead) && (!holder.pgid || groupLive(holder.pgid) === false);
     if (dead) db.prepare('DELETE FROM holders WHERE id = ?').run(holder.id);
@@ -128,6 +231,7 @@ export async function acquireTestEnvLease(root, { token, pid = process.pid, grou
   const id = randomUUID();
   const deadline = performance.now() + timeoutMs;
   let logged = false;
+  const snapshots = new Map();
   try {
     while (true) {
       db.exec('BEGIN IMMEDIATE');
@@ -158,9 +262,15 @@ export async function acquireTestEnvLease(root, { token, pid = process.pid, grou
         db.exec('ROLLBACK');
         throw error;
       }
-      const owners = holders.map(holder => `pid ${holder.pid}`).join(', ');
-      if (performance.now() >= deadline) throw new Error(`timed out waiting for test environment held by ${owners}; the active environment was left unchanged`);
-      if (!logged) { onWait?.(`waiting for test environment held by ${owners}`); logged = true; }
+      if (performance.now() >= deadline) {
+        const { owners, guidance } = holderDescription(holders, snapshots);
+        throw new Error(`timed out waiting for test environment held by ${owners}; the active environment was left unchanged${guidance}`);
+      }
+      if (!logged) {
+        const { owners, guidance } = describeTestEnvHolders(holders, { deadline: Math.min(deadline, performance.now() + 2000), snapshots });
+        onWait?.(`waiting for test environment held by ${owners}${guidance}`);
+        logged = true;
+      }
       await delay(Math.min(100, Math.max(1, deadline - performance.now())));
     }
   } catch (error) { db.close(); throw error; }

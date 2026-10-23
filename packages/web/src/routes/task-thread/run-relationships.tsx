@@ -7,7 +7,7 @@ import { completionWaitView, workerWaitView } from '@open-mercato/cezar-api-clie
 import { runTitle } from '@/lib/task-groups'
 import type { ApiRun, RunRelationships, WorkerCompletionWait, WorkerDestroyView, WorkerInspection } from '@open-mercato/cezar-api-client'
 
-import { useDestroyWorker, useRun, useRunRelationships, useRuns } from '@/api/queries'
+import { useDestroyWorker, useRunRelationships, useRuns } from '@/api/queries'
 import { Button } from '@/components/ui/button'
 import { Link } from '@/lib/project-router'
 import { cn } from '@/lib/utils'
@@ -20,8 +20,6 @@ import { ActivityRow } from './run-activity-row'
  *  Workers section and dock header never drift from whichever schema the record actually carries. */
 type Delegation = NonNullable<ApiRun['delegation']>
 type DelegationWait = NonNullable<Exclude<Delegation, { role: 'invalid' }>['wait']> | WorkerCompletionWait
-
-const linkClass = 'flex min-h-11 min-w-0 items-center rounded-md px-2 text-sm text-foreground hover:bg-muted break-words focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring'
 
 /** The worker ids this run is known to link, newest receipts first — the durable list that survives a
  *  failed or offline relationships lookup (a fetched-only list would blink the links away). */
@@ -55,7 +53,7 @@ export type WorkersVerdict = 'complete' | 'pending' | 'unknown' | 'issue'
 
 export function useWorkersVerdict(run: ApiRun): WorkersVerdict {
   const metadata = run.delegation
-  const delegated = metadata !== undefined && metadata.role !== 'invalid'
+  const delegated = metadata?.role === 'root'
   const query = useRunRelationships(run.id, { enabled: delegated })
   if (!delegated || !metadata) return 'complete'
   if (!query.isSuccess) return query.isError || query.fetchStatus === 'paused' ? 'unknown' : 'pending'
@@ -85,7 +83,6 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
   const runs = useRuns()
   const desktop = useIsDesktop()
   const metadata = run.delegation
-  const parentId = metadata?.role === 'worker' ? metadata.parentRunId : query.data?.parentRunId
   const workers = new Map(query.data?.workers.map(worker => [worker.workerId, worker]))
   const ids = workerIdsOf(metadata, query.data)
   // A worker wait is a wait-list entry (hearsay-tools/cezarion#1235). Cezar's completion wait, which
@@ -97,7 +94,7 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
       slot="workers"
       icon={<GitBranchIcon className="size-4" />}
       title="Workers"
-      meta={workerMeta({ ids, workers, parentId, desktop, query })}
+      meta={workerMeta({ ids, workers, desktop, query })}
       aside={query.data?.capacity ? <CapacityNote capacity={query.data.capacity} /> : undefined}
       open={open}
       onToggle={onToggle}
@@ -105,9 +102,7 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
       <div aria-label="Task relationships" className="min-w-0 text-[13px] text-muted-foreground" role="group">
         {query.data?.capacity && query.data.capacity.outstanding >= query.data.capacity.limit
           ? <p role="status" className="px-1 py-1">All worker slots are in use. Clean up finished workers to free a slot.</p> : null}
-        {metadata?.role === 'worker' && metadata.destroy ? <Cleanup state={metadata.destroy} /> : null}
         {wait ? <WaitNote wait={wait} dependencyLabel={dependencyLabel} /> : null}
-        {parentId ? <ParentLink id={parentId} /> : null}
         {ids.length > 0 ? (
           <ul className="grid max-h-64 min-w-0 gap-0.5 overflow-y-auto">
             {ids.map(id => {
@@ -151,20 +146,18 @@ export function WorkerActivitySection({ run, open, onToggle }: { run: ApiRun; op
 function workerMeta({
   ids,
   workers,
-  parentId,
   desktop,
   query,
 }: {
   ids: string[]
   workers: Map<string, WorkerInspection>
-  parentId: string | undefined
   desktop: boolean
   query: { isSuccess: boolean; isError: boolean; isPending: boolean }
 }): string {
   if (ids.length === 0) {
     if (query.isError) return 'Unavailable'
     if (query.isPending) return 'Linking…'
-    return parentId ? 'Parent linked' : 'No workers'
+    return 'No workers'
   }
   const linked = `${ids.length} linked`
   if (!desktop) return linked
@@ -219,15 +212,15 @@ function WaitNote({ wait, dependencyLabel }: { wait: DelegationWait; dependencyL
   </p>
 }
 
-function ParentLink({ id }: { id: string }) {
-  const parent = useRun(id)
-  return <div className="flex min-w-0 flex-wrap items-center gap-x-2">
-    <Link to={`/tasks/${id}`} aria-label={`Parent task ${id}`} className={linkClass}>{parent.data ? `Parent · ${runTitle(parent.data)}` : `Parent task ${id}`}</Link>
-    {parent.isError ? <>
-      <span className="px-2 text-xs">Parent record unavailable or deleted</span>
-      <Button variant="outline" className="min-h-11" onClick={() => void parent.refetch()}>Retry parent task</Button>
-    </> : null}
-  </div>
+/** General wait details show open worker waits. A resolved worker wait still owes its update. */
+export function hasWorkerWaitDetails(run: ApiRun): boolean {
+  return run.delegation?.role === 'worker' && workerWaitView(run)?.phase === 'wake-pending'
+}
+
+export function WorkerWaitDetails({ run }: { run: ApiRun }) {
+  const wait = workerWaitView(run)
+  return run.delegation?.role === 'worker' && wait?.phase === 'wake-pending'
+    ? <WaitNote wait={wait} dependencyLabel={workerWaitLabel('worker', wait)} /> : null
 }
 
 /**
@@ -296,9 +289,12 @@ function CleanUpWorker({ parentRunId, worker }: { parentRunId: string; worker: W
  * change it needs attention (hearsay-tools/cezarion#879). The line says which, when the next check is, and that
  * Retry clean up tries at once.
  */
-function Cleanup({ state }: { state: WorkerDestroyView }) {
-  const tidy = state.phase === 'complete' && state.remaining.length === 0 && state.error === undefined
-  if (tidy) return null
+export function hasCleanupDetails(state: WorkerDestroyView | undefined): state is WorkerDestroyView {
+  return state !== undefined && (state.phase !== 'complete' || state.remaining.length > 0 || state.error !== undefined)
+}
+
+export function Cleanup({ state }: { state: WorkerDestroyView }) {
+  if (!hasCleanupDetails(state)) return null
   const retry = state.phase === 'complete' ? undefined : state.retry
   const next = retry && <NextCheck at={retry.nextAt} />
   return <p className="px-2 pb-2 break-words">

@@ -229,14 +229,52 @@ describe('RunActivityDock — the workers section', () => {
     )
   })
 
-  it('keeps the parent link for a worker-role run', async () => {
+  it('omits the Workers section and its verdict lookup for a finished worker', async () => {
     renderDock(
       run({
         id: doneWorkerId,
+        status: 'done',
+        steps: [],
         delegation: { role: 'worker', permissions: [], parentRunId: parentId, workspace },
       } as Partial<ApiRun>),
+      [],
     )
-    expect(await screen.findByRole('link', { name: `Parent task ${parentId}` })).toBeTruthy()
+    expect(section('workers')).toBeNull()
+    await waitFor(() => expect(document.querySelector('[data-slot="run-activity-status"]')?.textContent).toBe('All complete'))
+    expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).endsWith('/relationships'))).toEqual([])
+  })
+
+  it('keeps a worker cleanup notice in Workspace after removing its Workers section', async () => {
+    renderDock(run({
+      id: doneWorkerId,
+      delegation: { role: 'worker', permissions: [], parentRunId: parentId, workspace,
+        destroy: { requestedAt: at, phase: 'incomplete', remaining: ['branch'], error: 'Branch is checked out' } },
+    }), [])
+    expect(section('workers')).toBeNull()
+    fireEvent.click(sectionHead('workspace'))
+    expect(await screen.findByText(/Cleanup incomplete/)).toBeTruthy()
+    expect(section('workspace')?.textContent).toContain('Branch is checked out')
+  })
+
+  it('keeps a worker request wait under status without a Workers section', async () => {
+    renderDock(run({ id: doneWorkerId, status: 'waiting',
+      delegation: { role: 'worker', permissions: [], parentRunId: parentId, workspace },
+      waits: [{ kind: 'worker', id: 'request-wait', source: 'agent', via: 'cez-worker-wait', registeredAt: at,
+        deadline: at, phase: 'open', turnId: 'turn-1', timeoutSeconds: 600, requestIds: [parentId], revisions: [], outcomes: [] }],
+    }), [])
+    expect(section('workers')).toBeNull()
+    expect(document.querySelector('[data-slot="run-activity-status"]')?.textContent).toBe('Waiting on parent reply')
+    fireEvent.click(sectionHead('status-row'))
+    expect(await screen.findByText(/Waiting on 1 request reply/)).toBeTruthy()
+  })
+
+  it('omits empty worker sections after cleanup completes', () => {
+    renderDock(run({ id: doneWorkerId, status: 'done', steps: [],
+      delegation: { role: 'worker', permissions: [], parentRunId: parentId, workspace,
+        destroy: { requestedAt: at, phase: 'complete', remaining: [] } },
+    }), [])
+    expect(section('workers')).toBeNull()
+    expect(section('workspace')).toBeNull()
   })
 
   it('closes on a click, like every other section', async () => {
