@@ -296,18 +296,13 @@ describe('task quick-list', () => {
   })
 
   it('paints one dot per row, in the tone deriveAttention picked', () => {
-    // This test can run alone: the setup bucket does not settle these three dots.
-    const sample = browser.waitForValue<{ tones: Record<string, { tone: string; pulses: boolean }>; width: string }>(`(() => {
-      const dots = ['fix-review-pr', 'fix-done', 'fix-failed'].map(id =>
-        document.querySelector('${ROW}[data-run-id="' + id + '"] [data-slot="status-dot"]'))
-      if (dots.some(dot => !dot)) return null
-      const of = dot => ({ tone: dot.dataset.tone, pulses: getComputedStyle(dot).animationName !== 'none' })
-      return {
-        tones: { review: of(dots[0]), done: of(dots[1]), failed: of(dots[2]) },
-        width: getComputedStyle(dots[1]).width,
+    const tones = browser.evaluate(`(() => {
+      const of = (id) => {
+        const dot = document.querySelector('[data-run-id="' + id + '"] [data-slot="status-dot"]')
+        return dot && { tone: dot.dataset.tone, pulses: getComputedStyle(dot).animationName !== 'none' }
       }
-    })()`)
-    const { tones } = sample
+      return { review: of('fix-review-pr'), done: of('fix-done'), failed: of('fix-failed') }
+    })()`) as Record<string, { tone: string; pulses: boolean }>
 
     // Review is info blue since the #617 status key (it used to be brand teal, which read as done).
     expect(tones.review).toEqual({ tone: 'info', pulses: true })
@@ -316,45 +311,36 @@ describe('task quick-list', () => {
     expect(tones.failed).toEqual({ tone: 'danger', pulses: false })
 
     // The design system's size rule, resolved by the real CSS rather than asserted from a class.
-    expect(sample.width).toBe('7px')
+    expect(
+      browser.evaluate(
+        `getComputedStyle(document.querySelector('[data-run-id="fix-done"] [data-slot="status-dot"]')).width`
+      )
+    ).toBe('7px')
   })
 
   it('links a row to its task, and the PR chip to the PR', () => {
-    // Read both rows together; an absent chip on a missing row proves nothing.
-    const sample = browser.waitForValue<{
-      href: string; chip: { noHover: boolean; tag: string; inert: string | null; text: string }; doneChips: number
-    }>(`(() => {
-      const done = document.querySelector('${ROW}[data-run-id="fix-done"]')
-      const link = done?.querySelector('a')
-      const el = document.querySelector('${ROW}[data-run-id="fix-review-pr"] [data-slot="pr-chip"]')
-      if (!link || !el) return null
-      return {
-        href: link.getAttribute('href'),
-        chip: { noHover: matchMedia('(hover: none)').matches, tag: el.tagName, inert: el.dataset.inert ?? null, text: el.textContent },
-        doneChips: done.querySelectorAll('[data-slot="pr-chip"]').length,
-      }
-    })()`)
-    expect(sample.href).toBe(scoped('/tasks/fix-done'))
+    expect(browser.evaluate(`document.querySelector('[data-run-id="fix-done"] a').getAttribute('href')`)).toBe(
+      scoped('/tasks/fix-done')
+    )
 
     // This spec's headless Chrome reports `hover: none`, which is the touch path (#617 01b): the
     // sidebar reference is plain text there, and the whole row is the tap target. The pointer
     // path (a real link with the status panel) is pinned in selection-states, which forces a
     // hover-capable pointer, and in the unit suite.
-    expect(sample.chip).toEqual({ noHover: true, tag: 'SPAN', inert: 'true', text: '#396' })
+    const chip = browser.evaluate(`(() => {
+      const el = document.querySelector('[data-run-id="fix-review-pr"] [data-slot="pr-chip"]')
+      return { noHover: matchMedia('(hover: none)').matches, tag: el.tagName, inert: el.dataset.inert ?? null, text: el.textContent }
+    })()`) as { noHover: boolean; tag: string; inert: string | null; text: string }
+    expect(chip).toEqual({ noHover: true, tag: 'SPAN', inert: 'true', text: '#396' })
 
     // Only the run that has one.
-    expect(sample.doneChips).toBe(0)
+    expect(browser.count('[data-run-id="fix-done"] [data-slot="pr-chip"]')).toBe(0)
   })
 
   it('expands the variant group into per-variant rows, and collapses it again', () => {
     // Scoped to the quick-list's rows: the Tasks table (Step 3.4) legitimately lists each
     // variant as its own row, so a bare data-run-id would match the table too.
-    const collapsedMembers = browser.waitForValue<number>(`(() => {
-      const group = document.querySelector('${TILE}')
-      return group?.getAttribute('aria-expanded') === 'false'
-        ? document.querySelectorAll('${ROW}[data-run-id="fix-var-a"]').length : null
-    })()`)
-    expect(collapsedMembers).toBe(0)
+    expect(browser.count(`${ROW}[data-run-id="fix-var-a"]`)).toBe(0)
 
     browser.click(TILE)
     browser.waitForFunction(`document.querySelector('${ROW}[data-run-id="fix-var-a"]') !== null`)
