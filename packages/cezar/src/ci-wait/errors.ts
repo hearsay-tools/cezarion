@@ -47,6 +47,10 @@ const waitMessages: Partial<Record<WaitErrorCode, string>> = {
   wake_budget_spent: 'This run spent its automatic wakes. Do not register another timer; call cezar_ask if you need the user, or end your turn.',
   capacity: 'Cezar cannot open another wait now: this run has the maximum open waits, or the CI watcher is full. Cancel a wait you no longer need with cezar_cancel_wait, or retry later.',
   denied_scope: 'This run cannot wait on those workers or requests: wait only on workers you own (a parent with the wait permission), or on requests you sent that are still accepted.',
+  // hearsay-tools/cezarion#1446: process waits.
+  exit_file_outside: 'exit_file must be inside the task worktree or the Cezar temp directory that $TMPDIR names, with no symlink leading out. If $TMPDIR is not under .ai/cezar or a cez-agent directory, use a git-ignored path in the worktree.',
+  process_not_allowed: 'Cezar cannot wait on that PID: it is Cezar itself or an agent session, which ends only with the session. Pass the PID that `echo $!` printed for the background command.',
+  process_not_owned: 'That PID belongs to another user, so Cezar cannot tell whether it is the process you started. Pass the PID of a command you started yourself.',
 };
 
 export function waitErrorMessage(code: WaitErrorCode): string {
