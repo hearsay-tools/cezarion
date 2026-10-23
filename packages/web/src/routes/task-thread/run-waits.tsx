@@ -4,25 +4,27 @@ import { isHttpUrl } from '@/lib/utils'
 import type { TaskReference } from '@/lib/tasks-table'
 
 /**
- * The run's wait details (spec 2026-10-17-unified-waits): every open CI, timer and worker wait,
- * then the last settled CI observation or the retained recovery error. Snapshot-only status: none
+ * The run's wait details (spec 2026-10-17-unified-waits): every open CI, timer, worker and process
+ * wait, then the last settled CI observation or the retained recovery error, and the last settled
+ * process wait's outcome. Snapshot-only status: none
  * of it starts a browser watcher. Lived in the run header until hearsay-tools/cezarion#1333 moved
  * it into the Session activity card's first row.
  */
 type CiWait = Extract<Wait, { kind: 'ci' }>
 type TimerWait = Extract<Wait, { kind: 'timer' }>
 type WorkerWait = Extract<Wait, { kind: 'worker' }>
-type ListedWait = CiWait | TimerWait | WorkerWait
+type ProcessWait = Extract<Wait, { kind: 'process' }>
+type ListedWait = CiWait | TimerWait | WorkerWait | ProcessWait
 
 /** Only these statuses can have a wait in flight; a finished run's leftovers are history. */
 const IN_FLIGHT_STATUSES: readonly ApiRun['status'][] = ['running', 'queued', 'waiting']
 
-/** The kinds listed here: CI, timer and worker waits. Streamed records were only checked
+/** The kinds listed here: CI, timer, worker and process waits. Streamed records were only checked
  *  for `id`. A human wait shows as Needs you and its question card, through the pill, never in
  *  this list. A worker wait shows only while open: its result is not owed in a line of its own. */
 function renderableWaits(value: unknown): ListedWait[] {
   return Array.isArray(value)
-    ? value.filter((wait): wait is ListedWait => wait?.kind === 'ci' || wait?.kind === 'timer' || wait?.kind === 'worker')
+    ? value.filter((wait): wait is ListedWait => wait?.kind === 'ci' || wait?.kind === 'timer' || wait?.kind === 'worker' || wait?.kind === 'process')
     : []
 }
 
@@ -52,7 +54,10 @@ function waitView(run: ApiRun) {
   const settled = [...renderableWaits(run.lastWaits), ...listed.filter(wait => !open.includes(wait) && wait.phase !== 'open')]
   const lastCi = ciOpen ? undefined : settled.filter((wait): wait is CiWait => wait.kind === 'ci').at(-1)
   const error = ciOpen ? undefined : run.lastWaitsError
-  return open.length || lastCi || error ? { open, lastCi, error } : undefined
+  // The last process outcome is the agent's to act on; an open process wait takes its place.
+  const lastProcess = open.some(wait => wait.kind === 'process') ? undefined
+    : settled.filter((wait): wait is ProcessWait => wait.kind === 'process').at(-1)
+  return open.length || lastCi || error || lastProcess ? { open, lastCi, error, lastProcess } : undefined
 }
 
 /** True when `RunWaitDetails` renders anything for this run. */
@@ -69,20 +74,23 @@ export function ciWaitReferences(run: ApiRun): TaskReference[] {
 export function RunWaitDetails({ run }: { run: ApiRun }) {
   const view = waitView(run)
   if (!view) return null
-  const { open, lastCi, error } = view
+  const { open, lastCi, error, lastProcess } = view
   return (
     <div data-slot="open-waits" className="flex min-w-0 flex-col gap-1">
       {open.map(wait => wait.kind === 'ci'
         ? <CiWaitStatus key={wait.id} run={run} wait={wait} />
         : wait.kind === 'worker'
           ? <WorkerWaitStatus key={wait.id} wait={wait} />
-          : <TimerWaitStatus key={wait.id} run={run} wait={wait} />)}
+          : wait.kind === 'process'
+            ? <ProcessWaitStatus key={wait.id} run={run} wait={wait} />
+            : <TimerWaitStatus key={wait.id} run={run} wait={wait} />)}
       {error ? (
         <div data-slot="ci-wait-status" role="status" aria-live="polite" aria-atomic="true"
           className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
           {error}
         </div>
       ) : lastCi ? <CiWaitStatus run={run} wait={lastCi} settled /> : null}
+      {lastProcess ? <ProcessWaitStatus run={run} wait={lastProcess} settled /> : null}
     </div>
   )
 }
@@ -159,6 +167,36 @@ function TimerWaitStatus({ run, wait }: { run: ApiRun; wait: TimerWait }) {
         </p>
       ) : <p>Automatic check time unavailable</p>}
       {wait.note ? <p>{wait.note}</p> : null}
+    </div>
+  )
+}
+
+/** What the process wait found, in the words of the agent's wake text (hearsay-tools/cezarion#1446). */
+function processOutcome(wait: ProcessWait) {
+  const result = wait.result
+  if (!result) return `PID ${wait.pid} still running at the deadline`
+  if (result.outcome === 'exit_file') {
+    return result.exitCode !== undefined
+      ? `PID ${wait.pid} exited with code ${result.exitCode}`
+      : `PID ${wait.pid} wrote an exit file that is not an exit code`
+  }
+  if (result.outcome === 'exited') return `PID ${wait.pid} exited, code unknown`
+  if (result.outcome === 'deadline') return `PID ${wait.pid} still running at the deadline`
+  return `PID ${wait.pid} could not be checked`
+}
+
+function ProcessWaitStatus({ run, wait, settled = false }: { run: ApiRun; wait: ProcessWait; settled?: boolean }) {
+  const cancelled = settled && wait.phase === 'cancelled'
+  const label = cancelled ? `Process wait on PID ${wait.pid} cancelled`
+    : settled ? processOutcome(wait)
+    : wait.phase === 'resolved' ? owedLabel(processOutcome(wait), run)
+    : `Waiting for PID ${wait.pid}${wait.note ? ` — ${wait.note}` : ''}`
+  const dateLabel = !settled && wait.phase === 'open' ? formatInstant(wait.deadline) : undefined
+  return (
+    <div data-slot="process-wait-status" role="status" aria-live="polite" aria-atomic="true"
+      className="min-w-0 text-xs text-muted-foreground [overflow-wrap:anywhere]">
+      <p>{label}</p>
+      {dateLabel ? <p>Until{' '}<time dateTime={wait.deadline}>{dateLabel}</time></p> : null}
     </div>
   )
 }

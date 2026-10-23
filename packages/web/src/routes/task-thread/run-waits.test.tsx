@@ -244,6 +244,56 @@ describe('RunWaitDetails', () => {
     expect(timerItems()).toHaveLength(1)
   })
 
+  // hearsay-tools/cezarion#1446: a process wait names its PID, its note and deadline, then its outcome.
+  describe('process waits', () => {
+    type ProcessEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'process' }>
+    const processEntry = (extra: Partial<ProcessEntry> = {}): ProcessEntry => ({
+      id: '00000000-0000-4000-8000-000000001446', kind: 'process', source: 'agent', via: 'cezar_wait',
+      turnId: 'turn-1', timeoutSeconds: 1800, pid: 4242, registeredAt: '2026-09-22T12:00:00.000Z',
+      deadline: '2026-09-22T12:30:00.000Z', phase: 'open', ...extra,
+    })
+    const result = (outcome: NonNullable<ProcessEntry['result']>['outcome'], extra: Partial<NonNullable<ProcessEntry['result']>> = {}) =>
+      ({ outcome, observedAt: '2026-09-22T12:10:00.000Z', ...extra })
+    const processItems = () => [...document.querySelectorAll<HTMLElement>('[data-slot="process-wait-status"]')]
+
+    it('lists an open process wait with its PID, note and deadline', () => {
+      renderWaits(run('waiting', { waits: [processEntry({ note: 'npm run build' })] }))
+      expect(processItems()).toHaveLength(1)
+      expect(processItems()[0]?.getAttribute('role')).toBe('status')
+      expect(processItems()[0]?.querySelector('p')?.textContent).toBe('Waiting for PID 4242 — npm run build')
+      expect(processItems()[0]?.querySelector('time')?.getAttribute('datetime')).toBe('2026-09-22T12:30:00.000Z')
+      expect(hasWaitDetails(run('waiting', { waits: [processEntry()] }))).toBe(true)
+    })
+
+    it('says a resolved process wait is owed to the agent', () => {
+      renderWaits(run('waiting', { waits: [processEntry({ phase: 'resolved', result: result('exit_file', { exitCode: 0 }) })] }))
+      expect(processItems()[0]?.querySelector('p')?.textContent).toBe('PID 4242 exited with code 0 — waiting for capacity')
+    })
+
+    it.each([
+      [result('exit_file', { exitCode: 0 }), 'PID 4242 exited with code 0'],
+      [result('exit_file', { exitCode: 3 }), 'PID 4242 exited with code 3'],
+      [result('exit_file', { exitFileNote: 'not-an-exit-code' }), 'PID 4242 wrote an exit file that is not an exit code'],
+      [result('exited'), 'PID 4242 exited, code unknown'],
+      [result('deadline'), 'PID 4242 still running at the deadline'],
+      [result('error', { diagnostic: 'EACCES' }), 'PID 4242 could not be checked'],
+    ])('shows the last settled process wait: %j', (outcome, label) => {
+      renderWaits(run('waiting', { lastWaits: [processEntry({ phase: 'delivered', result: outcome })] }))
+      expect(processItems().map(item => item.querySelector('p')?.textContent)).toEqual([label])
+    })
+
+    it('shows a cancelled process wait as cancelled, and an open one in place of the last result', () => {
+      const { unmount } = renderWaits(run('waiting', { lastWaits: [processEntry({ phase: 'cancelled', cancelledAt: '2026-09-22T12:01:00.000Z' })] }))
+      expect(processItems().map(item => item.querySelector('p')?.textContent)).toEqual(['Process wait on PID 4242 cancelled'])
+      unmount()
+      renderWaits(run('waiting', {
+        lastWaits: [processEntry({ phase: 'delivered', result: result('exited') })],
+        waits: [processEntry({ id: '00000000-0000-4000-8000-000000001447', pid: 4343 })],
+      }))
+      expect(processItems().map(item => item.querySelector('p')?.textContent)).toEqual(['Waiting for PID 4343'])
+    })
+  })
+
   it('renders nothing for a run with no waits at all', () => {
     renderWaits(run('running'))
     expect(document.querySelector('[data-slot="open-waits"]')).toBeNull()

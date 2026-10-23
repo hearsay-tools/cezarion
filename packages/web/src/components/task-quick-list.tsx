@@ -873,6 +873,12 @@ function metaStateWord(attention: Attention, queuePosition: number | null, run: 
     const at = new Date(waitingOn.at)
     if (Number.isFinite(at.getTime())) return `${label}, next check ${checkTimeText(at, new Date(now))}`
   }
+  // And for a process wait: `waiting for a command, until 15:40` (hearsay-tools/cezarion#1446).
+  const command = label === 'waiting for a command' ? resolveWaitingOn(run) : undefined
+  if (command?.kind === 'process') {
+    const until = new Date(command.deadline)
+    if (Number.isFinite(until.getTime())) return `${label}, until ${checkTimeText(until, new Date(now))}`
+  }
   return label
 }
 
