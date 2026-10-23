@@ -72,6 +72,24 @@ Click any thumbnail for the full-size screenshot.
 
 ---
 
+## Generated inbox removed
+
+The generated follow-up Inbox is removed in the next breaking minor release, **0.17.0**
+(hearsay-tools/cezarion#1543). There is no deprecation window for this removal.
+Remove `CEZ_FOLLOWUPS` from your launch environment; it no longer enables anything.
+Agents receive no suggestion-generation instructions or usable `CEZ_TODOS_FILE`.
+The todo API routes, `todos` SSE events, `capabilities.followups`, and task-creation
+fields `generateFollowups` and `todoId` are removed. Remove those fields from scripts
+and automation templates. Historical run records remain readable and resumable.
+Upgrades leave `.ai/cezar/todos.json` untouched. If that file exists, export its original
+contents from the project directory with:
+```bash
+cp .ai/cezar/todos.json ./cezar-followups-export.json
+```
+Old Inbox URLs show this guidance. Create an ordinary task with **New task**, or use
+an issue-authoring skill to record work in your tracker. Task **Notes**, the rolling
+handoff journal, **Continue**, live follow-up messages, and `cez worker inbox` remain
+available.
 ## What Cezarion does best 🏆
 
 Plenty of tools wrap a single coding agent in a nicer window — a "Codex GUI", a
@@ -112,9 +130,8 @@ and an orchestrator keeps a whole queue of them moving.
 - 🗂️ **A backlog that needs babysitting.** Queue a stack of tasks and Cezarion
   **orchestrates** them: it runs up to your parallel limit and holds the rest in
   an ordered queue. Point it at a GitHub issue and it runs straight on that, so
-  working the tracker down stops being a manual chore. Turn on the opt-in
-  **Inbox** (`CEZ_FOLLOWUPS=1`) and an agent's leftover follow-ups become the
-  next tasks too — one click each.
+  working the tracker down stops being a manual chore. Create ordinary tasks for
+  the work you choose to run next.
 - 🤖 **"Autonomous" means you still have to sit there.** Flip the **Autonomous**
   flag and a run never parks to ask — it keeps going until the task is done. Pair
   it with a **skill** (a Markdown playbook) and you've got fire-and-forget
@@ -179,6 +196,7 @@ the [`codex` CLI](https://github.com/openai/codex),
 cd your-repo
 npx cezarion               # start the cockpit for the current repo
 #   or: npx @wjarka/cezarion
+
 ```
 
 The cockpit opens at `http://localhost:4321`. If the requested port is occupied,
@@ -364,13 +382,12 @@ The moves that make the cockpit worth the browser tab:
 
 ## Cockpit tour
 
-Eight views, one browser window, all live over Server-Sent Events (seven until you opt into the Inbox):
+Task and project views share one browser window and live updates over Server-Sent Events:
 
 | View | What's in it |
 |---|---|
 | **Tasks** | Every task with its status, live event stream (agent text · tool calls · tool results · pasted/generated screenshots and file attachments), tokens and cost. Continue, cancel, open in terminal (`claude --resume`), review the diff, or push a draft PR. |
 | **All tasks** | Every *registered project's* tasks in one table, filtered and grouped by tag, project, status or workflow — see [Grouping connected repositories](#grouping-connected-repositories-tags-and-the-all-tasks-page). Appears once a second project is registered. |
-| **Inbox** | **Opt-in** (`CEZ_FOLLOWUPS=1`; hidden by default). Follow-ups an agent left behind (`todos.json`) — one click turns a suggestion into the next task, pre-wired to its suggested skill. Off, agents are never asked to leave follow-ups; each task's own **Notes** handoff journal is unaffected. |
 | **Git** | Branch, working-tree status, diff vs HEAD, recent commits (click one for its inline patch + GitHub link), and the configurable base branch that worktrees fork from and PRs target. |
 | **GitHub** | Open issues and PRs of the repo's origin, read through your logged-in `gh`. Hand an issue straight to the agent — pick a workflow and skills, one click runs it. |
 | **Skills** | Local skills plus any team skills repos you configured, each team skill with a per-project switch, and a rendered body + prompt preview. Refresh pulls the latest from the remote. |
@@ -777,7 +794,6 @@ Messages reach a live recipient as soon as they are accepted, including mid-turn
 
 Sending to a review or terminal participant without `--resume` reports `not-delivered` and `continuation-required`, with the reason and next command; the CLI exits 1. An active parent can use `worker send --resume` (request or progress) to continue its settled done/review/failed worker with that message as the new instruction. No human Continue is needed for this parent-controlled action. A retry with the same payload and ID never creates another continuation; changing a rejected send to use `--resume` requires a new ID. Stopped or destroyed workers need a new worker. Workers cannot resume parents, and conversation never answers a pending human question. Durable IDs deduplicate accepted queue entries and event replay, but a crash between provider acceptance and its durable delivery checkpoint can leave transport delivery ambiguous; this is not an exactly-once execution guarantee.
 
-
 Collect returns the worker's execution revision, status/outcome, `settled` and `partial` flags, and typed availability for assistant summary, HEAD, bounded diff and artifact descriptors. Missing evidence is explicit; running output is partial. An available `diff.path` points to a **JSON result file** containing `{ result, diffSnapshot }`; its `diffSnapshot` field holds the patch. Read and review that field before applying any changes. The latest collected result is stored under the parent and survives restart. Collection acknowledges observation, not Git integration or successful work. Review desired worker commits and deliberately integrate them into the parent before destroying their worktrees/branches; there is no automatic merge.
 
 Parent completion requires collection of every worker's latest settled execution revision. A worker Continue invalidates older readiness. An early completion attempt waits for outstanding workers and wakes the parent to inspect/collect; it does not silently finish on wake. While workers remain live, markerless replies, completion timeouts, and repeated premature completion park the parent as monitoring with the existing capped wakeups. Once workers settle, repeated completion without collecting their results retains attention. Human Finish also refuses unresolved/uncollected workers. If the parent is already under review, Continue the parent first, then Continue its worker. Human questions remain authoritative.
@@ -785,7 +801,6 @@ Parent completion requires collection of every worker's latest settled execution
 Stop requests cancellation; `stopping` does not prove termination. Destroy checkpoints obtainable results, waits up to 30 seconds for proven termination, and removes only verified owned resources. An `incomplete` response lists remaining resources; resolve the cause and retry explicitly. Cleanup order is: collect/integrate desired results, destroy owned resources, explicitly delete child histories through the cockpit/API, then delete parent history. Parent-owned summaries and bounded diff snapshots remain until parent deletion, including after child-history deletion; general artifact bytes are not archived. Branch/path strings and SHAs become historical descriptors after removal, not promises of available Git objects or files. The human cleanup endpoint `POST /api/v1/p/<projectId>/runs/<worker-id>/worker-destroy` stays available when delegation is disabled. The CLI bounds each HTTP request to 45 seconds and rejects endpoint/auth/origin overrides and redirects.
 
 Provisioned sessions prefer Cezarion workers and suppress verified native delegation entry points through per-run adapter controls: Claude `Agent`, legacy `Task` and `Workflow` denies, Codex multi-agent feature overrides, OpenCode session `task` denies, and pi's known `subagent` extension exclusion. Claude skills and commands with `context: fork` are not blocked: Claude starts their subagent without checking those denies, and no setting turns forking off. See [the backend capability table](AGENT_PROTOCOL.md#governed-delegation-controls-d1) for tested versions and exemptions. Native workers are not tracked by Cezarion. Pi has no native delegation primitive or universal identifier for arbitrary custom delegation extensions; guidance does not enforce those cases. With delegation disabled or unavailable, ordinary tools/settings stay unchanged. The listener binds to `127.0.0.1`, including hosted cockpit mode. Its credentials authorize only the parent's own workers through that listener. This is cooperative local-agent supervision; same-user unrestricted shell and custom tools are not hard isolation. Workers cannot delegate or message peers through Cezarion. Review remains a human gate with no automatic acceptance. Never read, echo, forward, or persist the generated token.
-
 
 ## From the terminal: `cez task`
 
@@ -1093,7 +1108,6 @@ Useful environment variables:
 | `CEZ_APPROVAL_GATE=1` | Opt into Claude's interactive approval UI; by default, unapproved tools are denied without interrupting the run. Ignored when `CEZ_CLAUDE_PERMISSION_MODE` is a recognized value (`dontAsk`, `acceptEdits`, or `bypass`). |
 | `CEZ_CLAUDE_PERMISSION_MODE` | Claude agent-run permission flag: `dontAsk` (default), `acceptEdits`, or `bypass`. `bypass` passes `--dangerously-skip-permissions` and omits `--permission-mode`. Unset or unknown keeps today's `dontAsk` / `CEZ_APPROVAL_GATE` path. Provider verification commands are never given this flag. |
 | `CEZ_CLAUDE_SETTING_SOURCES` | When set, Claude agent runs also pass `--setting-sources <value>` (e.g. `user,project,local`). Unset or empty omits the flag. Provider verification is never given this flag. |
-| `CEZ_FOLLOWUPS=1` | Turn on the global follow-up **Inbox**: agents are asked to leave follow-ups in `todos.json` when they finish, and the Inbox view appears. Off by default — each task's own **Notes** handoff journal runs either way. |
 | `CEZ_ARCHIVE_ON_MERGE=1` | Archive settled task families after all associated pull requests merge. Off by default; only `1` enables this environment default. Saved project settings override global Tasks settings, which override the environment. Runs in the background while the cockpit is open, including unopened projects, without starting agents. Unarchive preserves restored tasks until a later merge. |
 | `CEZ_AUTOMATIONS=1` | Turn on **automations** (GitHub polls and schedules): the Automations view appears and Cezarion runs each enabled automation while it is open, launching an ordinary task per match or per occurrence. A schedule (daily, weekdays, weekly, every N hours, in the server's time zone, or once at a set time in a named zone) needs no GitHub remote; a GitHub automation polls on its interval. Off by default, and only the exact value `1` enables it — without it nothing polls or fires, the automations endpoints answer `409`, and the nav item is absent. Read at boot, so restart after changing it; definitions, receipts and high-watermarks are retained, so unsetting it and restarting restores the feature without migration or data loss. |
 | `CEZ_VOICE=1` | Turn on **voice mode** (experimental): the ⌘K palette understands a sentence such as “open the next finished task” or “answer yes”, and the server asks Jev (TypeSafe) to turn it into one action that the cockpit shows and runs. Needs `TYPESAFE_API_KEY` (read by the server only; `CEZ_DRY_RUN=1` uses a fake engine instead). Off by default, and only the exact value `1` enables it — without it the voice endpoints answer `409` and the palette is unchanged. Read at boot, so restart after changing it. |
@@ -1236,7 +1250,6 @@ documents `CURSOR_CONFIG_DIR` and the Linux/BSD `XDG_CONFIG_HOME/cursor` overrid
 These select configuration; Cezarion does not offer alternate Cursor account profiles
 because a complete credential-and-session home override has not been verified.
 
-
 ### OMP (Oh My Pi)
 
 Install [OMP](https://github.com/can1357/oh-my-pi) (`curl -fsSL https://omp.sh/install | sh`
@@ -1316,6 +1329,7 @@ npx cezarion server-deploy    --platform ubuntu-vps   # roll out a new version (
 npx cezarion server-uninstall --platform ubuntu-vps   # reverse it
 
 # host a SECOND cockpit for another domain on the same box (ubuntu-vps):
+
 npx cezarion server-install   --platform ubuntu-vps --domain shop.example.com
 ```
 
@@ -1522,6 +1536,7 @@ your PATH pointing at *this checkout*:
 ```bash
 npm run install-as-command            # live link (default) — see the change loop below
 #   or: npm run install-as-command:global   # self-contained snapshot copy
+
 ```
 
 Now `cd` into any other repo and run it:

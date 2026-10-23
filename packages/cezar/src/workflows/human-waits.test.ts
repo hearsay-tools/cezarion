@@ -309,7 +309,7 @@ describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 4
     expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
     await until(() => prompts().length === 2 && store.getRun(run.id)?.status === 'waiting');
     for (const prompt of prompts()) {
-      expect(prompt).toContain(handoffInstructions({ tools: true, followups: false }));
+      expect(prompt).toContain(handoffInstructions({ tools: true, }));
       expect(prompt).not.toContain('CEZ:DONE');
     }
   });

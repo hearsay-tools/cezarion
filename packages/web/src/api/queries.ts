@@ -67,7 +67,6 @@ import {
   getImportableSkillsWhenReady,
   getSkills,
   getSkillsWhenReady,
-  getTodos,
   getUiState,
   getWorkflows,
   getWorkspaceConfig,
@@ -164,9 +163,6 @@ export const queryKeys = {
   },
   groups: {
     detail: (groupId: string) => [queryScope(), 'groups', groupId] as const,
-  },
-  get todos() {
-    return [queryScope(), 'todos'] as const
   },
   get workflows() {
     return [queryScope(), 'workflows'] as const
@@ -1161,19 +1157,6 @@ export function useRunHandoff(id: string | undefined, enabled = true) {
     queryKey: queryKeys.runs.handoff(id ?? ''),
     queryFn: ({ signal }) => getRunHandoff(id as string, { signal }),
     enabled: Boolean(id) && enabled,
-  })
-}
-
-/** The follow-up inbox. Drives the nav badge. */
-/** The follow-up inbox. `enabled: false` (the caller passing `false` while
- *  `capabilities.followups` is off, #471) parks the query instead of polling an
- *  endpoint that can only answer `[]` — `data` stays undefined, which the inbox
- *  badge already reads as "no badge". */
-export function useTodos(enabled = true) {
-  return useQuery({
-    queryKey: queryKeys.todos,
-    queryFn: ({ signal }) => getTodos({ signal }),
-    enabled,
   })
 }
 

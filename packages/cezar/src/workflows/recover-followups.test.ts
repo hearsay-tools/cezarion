@@ -8,25 +8,11 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 
-
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 
-/**
- * Restart recovery vs the inbox ceiling (#471).
- *
- * `recover()` re-queues runs that were `queued` when the process died, rebuilding their
- * StartRunInput straight from the persisted record — the one path into the engine that does NOT
- * go through `startRun`. A run queued while `CEZ_FOLLOWUPS=1` and recovered after the flag was
- * dropped must not come back claiming it generates follow-ups: `execute()` gates the agent at
- * spawn time regardless, so the behavior was always safe, but the record would have kept
- * echoing `generateFollowups: true` for a run that produces none.
- *
- * These tests only exercise `recover()`'s bookkeeping — a workspace semaphore capped at 0
- * (the cap is workspace-level since spec 2026-07-20, step 2.5) keeps the queue from actually
- * dispatching, so nothing spawns.
- */
-describe('recover() and the follow-up ceiling (#471)', () => {
+/** Legacy true/false/absent fields never prevent queue recovery, even without a live session. */
+describe('recover() reads legacy generated-inbox records — hearsay-tools/cezarion#1543', () => {
   let repoRoot: string;
   let store: RunStore;
   const savedFollowups = process.env.CEZ_FOLLOWUPS;
@@ -64,40 +50,40 @@ describe('recover() and the follow-up ceiling (#471)', () => {
 
   /** A run left `queued` by a crash. `workflowDef` is persisted by a follow-up updateRun, the
    *  way startRun does it (run.ts:254) — recover() revives the workflow from it. */
-  const queuedRun = (generateFollowups: boolean): string => {
+  const queuedRun = (generateFollowups: boolean | undefined): string => {
     const { id } = store.createRun({
       title: 't',
       workflow: 'quick-task',
       task: 'do it',
-      generateFollowups,
       steps: [{ id: 'work', name: 'Work', kind: 'agent' }],
     });
-    store.updateRun(id, { workflowDef: WORKFLOW_DEF });
+    store.updateRun(id, { workflowDef: WORKFLOW_DEF, generateFollowups });
     return id;
   };
 
-  it('normalizes a recovered record to false when the inbox is off', async () => {
+  it('reads and recovers an old true record without a live session', async () => {
     delete process.env.CEZ_FOLLOWUPS;
     const id = queuedRun(true);
     expect(store.getRun(id)?.generateFollowups).toBe(true); // the pre-restart truth
 
     await createFixtureManager(store, repoRoot, { semaphore: frozen() }).recover();
 
-    // The record must not keep claiming follow-ups it will never produce.
-    expect(store.getRun(id)?.generateFollowups).toBe(false);
-    expect(store.getRun(id)?.status).toBe('queued'); // still recovered, just honest
+    // Preserve historical data without using it to control generation.
+    expect(store.getRun(id)?.generateFollowups).toBe(true);
+    expect(store.getRun(id)?.status).toBe('queued');
   });
 
-  it('leaves the record alone when the inbox is on', async () => {
+  it.each([true, false, undefined])('recovers the legacy %s preference even with the retired env flag set', async (preference) => {
     process.env.CEZ_FOLLOWUPS = '1';
-    const id = queuedRun(true);
+    const id = queuedRun(preference);
 
     await createFixtureManager(store, repoRoot, { semaphore: frozen() }).recover();
 
-    expect(store.getRun(id)?.generateFollowups).toBe(true);
+    expect(store.getRun(id)?.generateFollowups).toBe(preference);
+    expect(store.getRun(id)?.status).toBe('queued');
   });
 
-  it('does not resurrect an explicit per-run opt-out', async () => {
+  it('recovers a legacy false record', async () => {
     process.env.CEZ_FOLLOWUPS = '1';
     const id = queuedRun(false);
 

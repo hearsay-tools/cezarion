@@ -41,10 +41,6 @@ export function bookmarkletRunBody(
     runner,
     defaultRunner,
     images: [],
-    // Absent for every saved bookmarklet (legacy links have no `todo`), so this stays off the
-    // wire exactly as before — but if an in-app link ever arms auto, the inbox bookkeeping
-    // (#374) rides along here too rather than being silently lost on this path.
-    todoId: params.todo,
   })
 }
 

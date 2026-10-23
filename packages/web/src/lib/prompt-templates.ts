@@ -1,7 +1,7 @@
 /**
  * Follow-up prompt templates (#413): a small set of reusable snippets a user can insert into a
- * follow-up instructions box — the GitHub hand-over's custom prompt (`routes/github/hand-to-agent.tsx`)
- * and the Inbox's "Add instructions" composer (`routes/inbox.tsx`). Both surfaces read the SAME
+ * task instructions box — the GitHub hand-over (`routes/github/hand-to-agent.tsx`)
+ * and New task (`routes/new-task.tsx`). Both surfaces read the SAME
  * list through `normalizePromptTemplates`, so editing it in one place (Settings → Prompt
  * templates) reshapes what shows up in both.
  *

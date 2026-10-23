@@ -124,11 +124,9 @@ let droppedOnce = false;
 const MOCK_SCREENSHOT_B64 =
   'iVBORw0KGgoAAAANSUhEUgAAAUAAAADICAIAAAAWZq/8AAACMklEQVR42u3csQnAIBRFUQdJY+b4tfvP4AhCLKyyghAMMRw4Ezz/bU0RBdhUMgEIGBAwIGAQMCBgQMCAgEHAgIABAYOAAQEDAgYEDAIGBAwsCLhfDdiUgEHAgIABAYOAAQEDAgYEDAIGBAwIGAT8vlEr/ImAQcACBgELGAQsYAQsYBCwgEHAAgYBe3IELGAQsIBBwAJGwAIGAQsYBCxgELCAEbCAQcACBgELGAQMAhYwCFjAIGABI2D/QgMCBgEDAgYEDAgYBAwIGBAwCBgQMCBgQMAgYEDAgIBBwCYAAQMCBgQMAgYEDAgYEDAIGBAwIGAQMCBgQMCAgEHAgIABAQMCBgEDAgYEDAIGBAwIGBAwCBgQMCBgQMAgYEDAgIBBwICAAQEDAgYBAwIGBAwCtgIIGBAwIGAQMCBgQMCAgEHAgIABAYOAeejMB/McjIAFLGABW0HAAhYwmhSwgAUsYAQsYAELGAELWMACRsACFrCAEbCABSxgBCxgAQtYwAhYwAIWMAIWsIAFjIAFLGABI2ABC1jACFjAAhYwAhawgAWMgAUsYAEjYAELWMACRsACFrCAEbCABSxgBCxgAQsYAQtYwAJGwAIWMCBgQMAgYEDAgIBBwICAAQEDAgYBAwIGBAwCBgQMCBgQMAgYEDAgYEDAIGBAwICAQcCAgAEBAwIGAQMCBgQMCBgEDAgYEDAIGBAwIGBAwCBgQMCAgAEBg4ABAQMCBgEDAgYEDAgYBAx8xQ1bxBr9kelHqgAAAABJRU5ErkJggg==';
 
-
-// Spec 007: behave like an agent that read the handoff/todos instructions —
-// append a progress line to CEZ_HANDOFF_FILE and a follow-up entry to
-// CEZ_TODOS_FILE, so the inbox loop is testable without tokens.
-function writeHandoffAndTodo() {
+// Spec 007: behave like an agent that read the handoff instructions —
+// append a progress line to CEZ_HANDOFF_FILE so handoff continuity is testable without tokens.
+function writeHandoff() {
   try {
     const handoff = process.env.CEZ_HANDOFF_FILE;
     if (handoff) {
@@ -144,27 +142,6 @@ function writeHandoffAndTodo() {
     }
   } catch {
     // best effort — the mock still answers without a handoff file
-  }
-  try {
-    const todosFile = process.env.CEZ_TODOS_FILE;
-    if (todosFile) {
-      let items = [];
-      try {
-        items = JSON.parse(readFileSync(todosFile, 'utf8'));
-      } catch {
-        items = []; // missing or broken file — start fresh, append-only
-      }
-      if (!Array.isArray(items)) items = [];
-      items.push({
-        ts: new Date().toISOString(),
-        taskId: process.env.CEZ_TASK_ID,
-        summary: 'Follow up: verify the mock change',
-        suggestedPrompt: 'Verify the change from the previous task',
-      });
-      writeFileSync(todosFile, JSON.stringify(items, null, 2), 'utf8');
-    }
-  } catch {
-    // best effort
   }
 }
 
@@ -801,7 +778,7 @@ async function respond(userText, imageCount, uuid) {
     } catch {
       // read-only cwd — the mock still works, just without a diff
     }
-    writeHandoffAndTodo();
+    writeHandoff();
     emit({
       type: 'assistant',
       message: {

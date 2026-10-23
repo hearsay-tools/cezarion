@@ -1,7 +1,7 @@
 import { useRef, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
 
-import { useHealth, useProjectRuns, useProjects, useTodos } from '@/api/queries'
+import { useHealth, useProjectRuns, useProjects } from '@/api/queries'
 import type { HealthResponse } from '@open-mercato/cezar-api-client'
 import { AppShell, type RepoChip } from '@/components/app-shell'
 import { useApplicationUpdate } from '@/components/use-application-update'
@@ -45,7 +45,7 @@ export function repoChipOf(health: HealthResponse | undefined): RepoChip | null 
  * The app shell, wired to live data.
  *
  * AppShell stays presentational. This container reads health for repo/version/update state,
- * owns the mutation hook, and reads todos for the inbox badge.
+ * and owns the mutation hook.
  *
  * The last good health payload protects the shell through a failed reconciliation; the root
  * health subscription remains the live source, with reconnect/visibility HTTP reconciliation.
@@ -58,15 +58,9 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
   if (health.data) lastKnownHealth.current = health.data
   const shellHealth = health.data ?? lastKnownHealth.current
   const applicationUpdate = useApplicationUpdate(shellHealth)
-  // The global inbox is opt-in (#471). With the capability off there is no Inbox nav item to
-  // badge and the endpoint can only answer [], so the query parks rather than polls.
-  // Capabilities describe the workspace even when navigation selects an empty health cache.
-  // Keep the last confirmed views until the new response supplies authoritative capabilities.
-  const inboxAvailable = shellHealth?.capabilities.followups === true
   // GitHub automations are opt-in too (#801) — same honesty rule: without the server's word for
   // it the nav must not offer a tab whose every request would 409.
   const automationsAvailable = shellHealth?.capabilities.automations === true
-  const todos = useTodos(inboxAvailable)
   // Unread done items (#unread-done-items) for the Tasks badge. Reads the same active-scope run
   // list the sidebar quick-list and Tasks table already hold — one cache entry, no extra fetch.
   const projectsQuery = useProjects()
@@ -137,16 +131,10 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         applicationUpdateError={applicationUpdate.error}
         applicationUpdateBusy={applicationUpdate.busy}
         applicationUpdateOffline={applicationUpdate.offline || health.isError}
-        // `?? null` rather than `?? 0`: no badge while the inbox is unknown, and no badge when it
-        // is known to be empty — AppShell renders neither for a falsy count.
-        inboxCount={todos.data?.length ?? null}
         // Hidden until health confirms the forge driver (R6 Step 1.1) — same honesty rule as
         // the chips: the nav must not claim a GitHub tab it cannot back. The Tools menu's
         // forge note says why it is absent.
         forgeAvailable={forgeAvailable}
-        // Hidden unless health reports the opt-in inbox (#471) — same honesty rule as above:
-        // the nav must not offer an Inbox this server will never fill.
-        inboxAvailable={inboxAvailable}
         // Hidden unless health reports the opt-in automations capability (#801).
         automationsAvailable={automationsAvailable}
         banner={<ProviderBannerContainer />}

@@ -10,7 +10,7 @@ import { EFFORT_OPTIONS } from '@/routes/new-task-form'
 import { EnginePills, engineBody, engineRunBody, type EnginePick, type ResolvedEngine, useResolvedEngine } from './engine-pills'
 
 /**
- * `engineBody` (#401) is the one place the create-run body rules live for the Inbox and the
+ * `engineBody` (#401) is the one place the create-run body rules live for the
  * GitHub tab. The rules are small; the reason they are worth pinning is the third case below —
  * the composer's `runnerCount > 1` rule gets it wrong, and this is the difference.
  */

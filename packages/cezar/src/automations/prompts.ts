@@ -36,8 +36,7 @@ A GitHub poll:
     "prompt": "Review pull request #{{github.number}} ({{github.title}}) at {{github.url}}: read the diff, run the tests, and post your findings as a review.",
     "workflow": "quick-task",
     "worktree": true,
-    "autonomous": true,
-    "generateFollowups": false
+    "autonomous": true
   }
 }
 
@@ -86,7 +85,7 @@ Top-level keys:
 - "autonomous": never park to ask; an automation has no one watching (recommended: true).
 - "archiveWhenDone": boolean (default false). Archive each launched task after Done. Without a PR, archive on Done even when autoMergePr is true.
 - "autoMergePr": boolean (default false). After Done, merge the task's PR only when current-head CI and GitHub rules pass. This may mark a draft ready. With archiveWhenDone, merge before archive. Pending or blocked actions show a reason on the task. These settings apply to future tasks; editing the automation does not change tasks it already launched.
-- "generateFollowups": true or false. "systemPrompt": extra guidance for every launched run.
+- "systemPrompt": extra guidance for every launched run.
 
 For a GitHub poll, name, events and task are required; for a schedule, name, kind, schedule and task.
 

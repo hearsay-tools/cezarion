@@ -86,7 +86,6 @@ describe('the new-task draft store', () => {
       planFirst: false,
       worktree: null,
       autonomous: null,
-      generateFollowups: null,
       archiveWhenDone: false,
       autoMergePr: false,
     })
@@ -104,14 +103,12 @@ describe('the new-task draft store', () => {
       planFirst: false,
       worktree: false,
       autonomous: null,
-      generateFollowups: false,
       archiveWhenDone: false,
       autoMergePr: false,
     })
     const first = readDraft()
     expect(first.text).toBe('fix it')
     expect(first.worktree).toBe(false)
-    expect(first.generateFollowups).toBe(false)
     first.text = 'mutated'
     expect(readDraft().text).toBe('fix it')
   })
@@ -128,7 +125,6 @@ describe('the new-task draft store', () => {
       planFirst: true,
       worktree: null,
       autonomous: null,
-      generateFollowups: true,
       archiveWhenDone: false,
       autoMergePr: false,
     })
@@ -146,7 +142,6 @@ describe('the new-task draft store', () => {
       planFirst: true,
       worktree: null,
       autonomous: null,
-      generateFollowups: true,
       archiveWhenDone: false,
       autoMergePr: false,
     })
@@ -164,7 +159,6 @@ describe('the new-task draft store', () => {
       planFirst: true,
       worktree: false,
       autonomous: null,
-      generateFollowups: false,
       archiveWhenDone: false,
       autoMergePr: false,
     })
@@ -176,7 +170,6 @@ describe('the new-task draft store', () => {
       retiredVariants: false,
       worktree: false,
       autonomous: null,
-      generateFollowups: false,
       archiveWhenDone: false,
       autoMergePr: false,
       planFirst: true,
@@ -198,7 +191,6 @@ describe('the new-task draft store', () => {
       planFirst: false,
       worktree: null,
       autonomous: null,
-      generateFollowups: null,
       archiveWhenDone: false,
       autoMergePr: false,
     })
@@ -216,7 +208,6 @@ describe('the new-task draft store', () => {
       planFirst: false,
       worktree: null,
       autonomous: null,
-      generateFollowups: null,
       archiveWhenDone: false,
       autoMergePr: false,
     })

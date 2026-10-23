@@ -2,6 +2,7 @@
 
 ## ⚠️ Breaking
 
+- **The generated follow-up Inbox is removed in 0.17.0 without a deprecation window**, as requested by the owner (hearsay-tools/cezarion#1543). Inbox navigation, suggestion actions, generation controls and agent prompts, todo routes/watchers, `todos` SSE events, and `capabilities.followups` are gone. `CEZ_FOLLOWUPS` no longer enables anything; inherited `CEZ_TODOS_FILE` values are shadowed empty. Remove `generateFollowups` and `todoId` from launch scripts and automation templates. Existing `.ai/cezar/todos.json` files are untouched: copy the original file to export it, then create ordinary tasks for work you choose. Old Inbox links show export guidance. Old run records still load and resume. Notes, handoff journals, Continue, live follow-up messages, worker messaging and issue-authoring skills remain available.
 - **Parallel task variants are removed for the next minor (0.17).** The ×2/×3 composer controls, special launch engine, comparison UI and winner cleanup are gone. Run and automation requests for multiple candidates fail explicitly; the old pick route returns `410` without changing history. Existing comparison links open read-only retained results, and saved drafts and automation templates require an explicit choice to use one task. Use owned workers to compare diffs, choose commits and clean up explicitly. Stored group fields, runs, commits and worktrees are retained. The owner waived the deprecation window for this removal. (hearsay-tools/cezarion#1542)
 
 - **The deprecated `cezar_wait_for_ci` tool is removed.** No runner lists or admits it, and its private `POST /api/v1/tools/ci-wait` route is gone. Agent prompts and skills call `cezar_wait` with `kind: "ci"` and the same `pr` and `timeout_seconds`; its answer is the wait list answer (`wait_id`, `open_waits`), not the old CI receipt. Stored waits it opened still load. (hearsay-tools/cezarion#1236)
@@ -20,6 +21,7 @@
 - Recover structured questions missing only closing brackets, with a persistent warning to check options and selection count; preserve fork monitoring and Claude wakeups (#88).
 
 ## ✨ Features
+
 - Agents finish a task with `cezar_done` and ask you with `cezar_ask` on every runner. `cezar_ask` takes the question card (1–4 questions) and the task waits for your answer; a question without options is open, and the card shows a text box for it instead of choices. `cezar_wait` keeps to CI and timers and points an agent that asks it for a human wait to `cezar_ask`. `cezar_done` finishes the task at the end of the turn, cancels its open waits and writes its optional summary as a note; it refuses, and names what to do, while owned workers are live or uncollected, a worker question is unanswered, a question to you is still pending, or the workflow step is not the last. The `CEZ:DONE` line, the ask-marker card and native asks keep working and land in the same list, and your reply answers every human wait. Sessions with cezar tools are taught the tools instead of the lifecycle markers. The automatic-wake budget now survives a restart and a scheduler continuation; your message or Continue resets it, and when it runs out the task waits for you through the same list. (hearsay-tools/cezarion#1234)
 - Agents wait on CI and on timers through one list. `cezar_wait` (`kind: "ci"` or `"timer"`) and `cezar_cancel_wait` reach every runner, several waits can be open at once, and each ends only on its own result, its deadline or a cancel. A human message or a question no longer withdraws a CI wait: the message reaches the agent and the CI result arrives in a later turn. Every delivered turn ends with the list of waits still open. A CI or timer park keeps its agent slot, a monitoring slot first, so its wake runs without queueing. `CEZ:MONITORING` and Claude's `ScheduleWakeup` open timers. `cezar_wait_for_ci` keeps working but is deprecated and is removed in a later phase (hearsay-tools/cezarion#1236). (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1197, hearsay-tools/cezarion#1226)
 - The GitHub tab pages its lists. The first 50 issues and pull requests paint with GitHub's exact open totals, and the next page loads as you scroll toward the end of the list, on desktop and on a phone. One GraphQL query per side and page replaces the old 1,000-row fetch, and each side keeps its own cursor, so an exhausted side is never fetched again. Comment counts, an item's body and a pull request's line counts load after the rows paint. A failed page shows Retry. Preset counts show `+` while pages remain; searching or filtering by label, assignee or board narrows the loaded rows, and the next page then waits for Load more. `GET /api/v1/github` gains additive cursor and total fields, the new `GET /api/v1/github/comment-counts` reads counts in batches of up to 100, and the comments route gains an additive `detail`. The list rows' `body` is deprecated: it is still sent and a later minor removes it. (hearsay-tools/cezarion#1183; port of open-mercato/cezar#1362, #1366 and #1374)
@@ -51,6 +53,7 @@
   is a 400, matching `POST /api/v1/runs`. Spec: `.ai/specs/2026-07-29-agent-profiles.md`.
 
 ## 🐛 Fixes
+
 - 🐛 **Finish closes the task's open question.** A task that ended its turn on a question kept the
   question open after you finished it, so the card still asked for an answer and the one-click
   Continue was hidden. Finish now closes the question, the card reads "Closed when the task
@@ -145,6 +148,7 @@
   All tasks uses — and falls back to health only for the boot project. (#901)
 
 ## 🚀 CI/CD & Infrastructure
+
 - 🚀 **This clone publishes as `cezarion`, not as upstream's `cezar`.** The install line is
   `npx cezarion`; the implementation ships as `@wjarka/cezarion`. Installed bins are `cezarion`
   and `cez` — upstream's `cezar` and `cezar-cli` bins are deliberately gone, so a global install
@@ -158,6 +162,7 @@
 # 0.10.0 (2026-08-14)
 
 ## Highlights
+
 The cockpit stops being one-project-at-a-time: **All tasks** shows every registered repo's work
 in a single filterable table, grouped by tags you give your repositories, and every PR or issue
 chip in cezar now says where that PR or issue stands. Alongside that, **agent accounts** let one
@@ -166,6 +171,7 @@ opencode as a runner, and a task killed by a provider usage limit resumes itself
 reopens.
 
 ## ⚠️ Breaking
+
 - **GitHub Automations are now opt-in via `CEZ_AUTOMATIONS=1`.** They previously ran for any
   project with a GitHub remote, with no way to switch them off. Off — the default — every
   automations route answers `409` naming the flag and the scheduler never starts, so nothing
@@ -173,6 +179,7 @@ reopens.
   required `capabilities.automations`. (#801, #802)
 
 ## ✨ Features
+
 - ✨ **All tasks: one table for every project, grouped by the repos that belong together.** Tag
   your repositories in **Settings → Projects** (`storefront`, `infra`, `client-acme`; the field
   autocompletes from tags already in use), then open **All tasks** — the new top sidebar item,
@@ -257,6 +264,7 @@ reopens.
   state — so cezar shows a visible unsafe-mode note whenever it is active. (#762)
 
 ## 🐛 Fixes
+
 - 🐛 **`npx cezar-cli` starts again.** The alias imported a subpath the scoped package's exports
   map does not expose, so Node rejected it with `ERR_PACKAGE_PATH_NOT_EXPORTED` and every launch
   died on startup. It imports the bare specifier now. (#851, #852)
@@ -327,9 +335,11 @@ reopens.
   injectable seam. (#824, #825)
 
 ## 🔧 Changed
+
 - Dropped the unused `KNOWN_PROVIDERS` export. (#548, #831)
 
 ## 🚀 CI/CD & Infrastructure
+
 - 🚀 **`npx cezar-cli@nightly` is always the trunk.** A nightly workflow verifies main (typecheck,
   unit suites, build, packaged-CLI e2e) at 03:17 UTC and publishes it under the `nightly`
   dist-tag; a scheduled run skips itself when main has not moved in 24h. The channel is reachable
@@ -340,6 +350,7 @@ reopens.
 - 🚀 Give the health-topic probe waits a realistic budget. (#701, #733)
 
 ## 📝 Specs & Documentation
+
 - 📝 Design spec for publishable Cezar React components. (#710)
 - 📝 Spec for linked-PR chips on the GitHub Issues list. (#816)
 - 📝 Disambiguate cezar (OSS) from the hosted team SaaS. (#883)
@@ -359,6 +370,7 @@ reopens.
 # 0.9.2 (2026-08-04)
 
 ## ⚠️ Breaking
+
 - **The HTTP API moved to `/api/v1`.** Every route answers under `/api/v1/…` (project-scoped:
   `/api/v1/p/<projectId>/…`) and the WebSocket bus is `/api/v1/ws`; the unversioned `/api/*`
   spelling is gone. The bundled cockpit ships in lockstep, so a normal upgrade needs nothing from
@@ -369,6 +381,7 @@ reopens.
   additive mount rather than an edit to every route.
 
 ## ✨ Features
+
 - ✨ **The two mixed-format routes do real HTTP content negotiation.** `GET /api/v1/repo/commit/:sha`
   (legacy text blob or structured commit payload) and `GET /api/v1/runs/:id/files` (JSON listing or
   an image's raw bytes) now honour the request's `Accept` header, answer `Vary: Accept`, and set a
@@ -403,6 +416,7 @@ reopens.
   taller ones, and anchored near the top so it no longer jumps as results come and go.
 
 ## 🔧 Changed
+
 - Every mutating route is now visible to the typed client, `POST /api/v1/todos/:id/start` included.
   Its body used to be parsed inside the handler to keep "unknown id 404s before the body is
   validated"; a small existence guard registered *before* the body validator keeps that status
@@ -424,6 +438,7 @@ reopens.
   compile time.
 
 ## 🐛 Fixes
+
 - 🐛 **Running the test suite no longer wipes your project registry.** A merge-write resolved
   `~/.cezar/config.json` twice — once to read, once to write, after the `await` — and
   `cezarHomeDir()` re-reads `CEZ_HOME` on every call, so a test that lost its sandbox pin
@@ -459,12 +474,15 @@ reopens.
 # 0.9.1 (2026-07-24)
 
 ## Highlights
+
 A stabilization release that hardens single-project mode and sharpens the cockpit. Project edits and the registry are now correctly gated and isolated when `CEZ_SINGLE_PROJECT` is set (#625, #626), the diff and task commit list are virtualized for snappier scrolling on large runs (#599), and browser tabs finally carry project-aware titles (#543). Codex sessions read more clearly with labeled image-view tool calls and context compaction (#593, #596), while streamed deltas coalesce into whole text events (#633). A batch of run-fidelity fixes keeps task titles, issue-number provenance, and tool issue links accurate (#623, #539, #538).
 
 ## ✨ Features
+
 - ✨ Project-aware browser page titles (fixes #543). (#592) *(@pkarw)*
 
 ## 🐛 Fixes
+
 - ⚡ **Settings → Agent accounts opens instantly.** The account listing used to probe every agent's
   login while you waited — one CLI shell-out per agent plus one per account, 2.5s on a machine with
   four accounts. Which login an agent uses is operating knowledge that changes only when you run
@@ -527,9 +545,11 @@ A stabilization release that hardens single-project mode and sharpens the cockpi
 - 🐛 Auto-refresh the team-repo cache so codex reviews use current skills. (#644) *(@pkarw)*
 
 ## 📝 Specs & Documentation
+
 - 📝 Document `CEZ_SINGLE_PROJECT` mode. (#597) *(@pkarw)*
 
 ## 🚀 CI/CD & Infrastructure
+
 - 🚀 Pin `CEZ_HOME` in specs that boot their own server. (#619) *(@pat-lewczuk)*
 - 🚀 Cover detached launcher lifecycle (fixes #574). (#640) *(@pkarw)*
 
@@ -542,9 +562,11 @@ A stabilization release that hardens single-project mode and sharpens the cockpi
 # 0.9.0 (2026-07-21)
 
 ## Highlights
+
 <!-- TODO: Highlights — auto-update-changelog leaves this blank for the human author to fill in. -->
 
 ## ✨ Features
+
 - ✨ Edit the coding agents' own config files (global vs local, raw + highlighted). (#418) *(@pkarw)*
 - ✨ Canonical provider/model identity shared across runners (fixes #405). (#466) *(@pat-lewczuk)*
 - ✨ Runner + model selection for the Continue flow (fixes #401). (#468) *(@pat-lewczuk)*
@@ -558,9 +580,11 @@ A stabilization release that hardens single-project mode and sharpens the cockpi
 - ✨ Separate browse and checkout roots. (#572) *(@pkarw)*
 
 ## 🔒 Security
+
 - 🔒 Guard the localhost API against CSRF and DNS rebinding (fixes #426). (#467) *(@pat-lewczuk)*
 
 ## 🐛 Fixes
+
 - 📦 Never push a release commit to protected main. (#514) *(@pat-lewczuk)*
 - 🔄 Stop GitHub nav item flickering — stale-while-revalidate forge probe. (#516) *(@pat-lewczuk)*
 - 🔄 Resolve a stale local base ref to `origin/<base>` to stop phantom diffs. (#518) *(@pat-lewczuk)*
@@ -580,6 +604,7 @@ A stabilization release that hardens single-project mode and sharpens the cockpi
 - 🐛 Scope subtasks by session id (fixes #551). (#587) *(@pkarw)*
 
 ## 📝 Specs & Documentation
+
 - 📝 Multi-project workspace — per-user `~/.cezar` registry, project-scoped cockpit, config migrations. (#517) *(@pkarw)*
 - 📝 Grouped sub-agent display within a single session. (#522) *(@pkarw)*
 - 📝 GitHub tab timeline events (commits, labels, merges) + per-commit CI markers. (#527) *(@pkarw)*
@@ -589,6 +614,7 @@ A stabilization release that hardens single-project mode and sharpens the cockpi
 - 📝 Discover latest Codex models. (#585) *(@pkarw)*
 
 ## 🚀 CI/CD & Infrastructure
+
 - 🚀 Migrate to TypeScript 7 (native compiler). (#559) *(@patzick)*
 
 ## 👥 Contributors

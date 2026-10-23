@@ -138,37 +138,6 @@ describe('resolveCapabilities — localHandoff', () => {
   });
 });
 
-describe('resolveCapabilities — followups (#471)', () => {
-  it('is OFF by default — the global inbox is opt-in', () => {
-    expect(resolveCapabilities({}, undefined).followups).toBe(false);
-  });
-
-  it('is on with CEZ_FOLLOWUPS=1', () => {
-    expect(resolveCapabilities({ CEZ_FOLLOWUPS: '1' }, undefined).followups).toBe(true);
-  });
-
-  it.each(['0', 'true', 'yes', '', 'on'])(
-    'stays off for CEZ_FOLLOWUPS=%j — only an exact "1" opts in',
-    (value) => {
-      expect(resolveCapabilities({ CEZ_FOLLOWUPS: value }, undefined).followups).toBe(false);
-    },
-  );
-
-  it('is independent of the deployment mode', () => {
-    expect(resolveCapabilities({ CEZ_FOLLOWUPS: '1', CEZ_REMOTE: '1' }, '0.0.0.0')).toEqual({
-      localHandoff: false,
-      followups: true,
-      singleProject: false,
-      automations: false,
-      preview: false,
-      voice: false,
-      tokenMetrics: true,
-      tokenUsageMetrics: true,
-      costMetrics: true,
-    });
-  });
-});
-
 describe('resolveCapabilities — singleProject', () => {
   it('is off by default', () => {
     expect(resolveCapabilities({}).singleProject).toBe(false);
@@ -209,7 +178,6 @@ describe('resolveCapabilities — automations (#801)', () => {
       automations: true,
       preview: false,
       voice: false,
-      followups: false,
       singleProject: false,
     });
   });

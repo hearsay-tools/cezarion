@@ -39,7 +39,6 @@ export type ForgeInfo = z.infer<typeof forgeInfoSchema>;
 /** Server-side feature switches the cockpit reads once at boot. */
 export const capabilitiesSchema = z.object({
   localHandoff: z.boolean(),
-  followups: z.boolean(),
   singleProject: z.boolean(),
   /**
    * `true` means `CEZ_AUTOMATIONS=1` opted this server into GitHub automations (#801). Off — the

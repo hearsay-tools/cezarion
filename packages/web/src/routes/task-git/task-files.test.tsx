@@ -42,7 +42,7 @@ const HEALTH: HealthResponse = {
   checks: [],
   defaultRunner: 'claude',
   forge: { kind: 'github', available: true },
-  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: false, singleProject: false, automations: false, preview: false, voice: false },
+  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
 }
 
 /** The worktree the stub serves: a root with one lazy directory and every preview kind. */
@@ -293,7 +293,6 @@ describe('the Files tab route', () => {
   })
 })
 
-
 it('opens a known worktree path without fetching unopened directories', async () => {
   const sent = stubFetch()
   renderFilesRoute()
@@ -303,7 +302,6 @@ it('opens a known worktree path without fetching unopened directories', async ()
   await waitFor(() => expect(sent).toContain('GET /api/v1/runs/r1/file-link?path=src%2Fnested.md'))
   expect(sent).not.toContain('GET /api/v1/runs/r1/files?path=src')
 })
-
 
 it('explains a directory entered in the file-path control instead of blanking the preview', async () => {
   stubFetch()

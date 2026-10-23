@@ -190,8 +190,6 @@ export const uiStateSchema = z.looseObject({
   lastWorktree: z.boolean().optional(),
   /** The last autonomous choice — remembered like `lastWorktree`. Absent → off. */
   lastAutonomous: z.boolean().optional(),
-  /** Whether new runs should ask agents to append follow-up work. Absent → on. */
-  lastGenerateFollowups: z.boolean().optional(),
   /** Team skills this project switched off, by source repo and name. Absent or `[]`: every team
    *  skill shows. Legacy `importedSkills` keys still round-trip through
    *  the loose object but nothing reads them. */
