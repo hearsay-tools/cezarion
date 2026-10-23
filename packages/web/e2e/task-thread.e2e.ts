@@ -1017,6 +1017,25 @@ describe('task thread', () => {
     browser.setViewport(1440, 900)
   })
 
+  // hearsay-tools/cezarion#1478 review: once the step shows its whole name, the summary takes all
+  // the room left, so a desktop header still shows agent details beside the step.
+  it('folded Activity keeps agent details beside the step on desktop', () => {
+    browser.setViewport(1280, 900)
+    browser.goto(`${baseUrl}${scoped(`/tasks/${TYPO_RUNS[1]!.id}`)}`)
+    browser.waitForFunction(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}') !== null`)
+    browser.evaluate(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}[aria-expanded="true"]')?.click()`)
+    const folded = waitForSettledSample<{ step: boolean; visible: string[] } | null>(browser, `(() => {
+      const summary = document.querySelector('${SESSION_ACTIVITY_SUMMARY}')
+      const name = summary.querySelector('[data-slot="run-activity-step-name"]')
+      if (summary.getAttribute('aria-expanded') !== 'false' || !name) return null
+      return { step: name.scrollWidth <= name.clientWidth + 1,
+        visible: [...summary.querySelectorAll('[data-slot="activity-summary"] > [data-hidden="false"]')].map(item => item.dataset.summaryItem) }
+    })()`)
+    expect(folded?.step).toBe(true)
+    expect(folded?.visible).toEqual(expect.arrayContaining(['runner', 'model', 'effort']))
+    browser.setViewport(1440, 900)
+  })
+
   // hearsay-tools/cezarion#1478: the folded header names the step in flight. A long name ends in an
   // ellipsis on a phone while its spinner stays whole; the disclosure keeps working from the
   // keyboard and names the step; reduced motion stops the spin but keeps the loader glyph.

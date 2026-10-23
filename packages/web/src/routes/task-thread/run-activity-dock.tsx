@@ -236,14 +236,16 @@ function SessionActivityCard({
           <>
             <span data-slot="run-activity-status" title={statusText} className={cn('inline-flex min-w-[calc(0.875rem+3ch)] flex-[0_1_auto] items-center gap-1.5 text-[13px] whitespace-nowrap text-muted-foreground', allComplete ? 'text-success' : failed && 'text-danger')}>{glyph}<span data-slot="run-activity-status-label" className="min-w-0 truncate">{statusText}</span></span>
             {activeStep ? (
-              <span data-slot="run-activity-step" className="flex max-w-max min-w-[calc(1.375rem+2ch)] flex-[1_1_0] items-center gap-1.5 text-[13px] text-muted-foreground">
+              <span data-slot="run-activity-step" className="flex max-w-max min-w-[calc(1.375rem+2ch)] flex-[1000_1_0] items-center gap-1.5 text-[13px] text-muted-foreground">
                 <WorkflowGlyph steps={workflow} decorative />
                 <span data-slot="run-activity-step-name" title={activeStep.name} className="min-w-0 truncate">{activeStep.name}</span>
               </span>
             ) : null}
-            {/* A token grow factor: the step takes the free space first, up to its whole name. While
-                the summary shows nothing, a negative margin returns its gap to the status and step. */}
-            <span className="-ms-2 flex min-w-0 flex-[0.001_1_0] has-[[data-hidden=false]]:ms-0"><ActivitySummary items={foldedSummary} /></span>
+            {/* Grow 1 against the step's 1000: the step takes the free space first, up to its whole
+                name, and the summary then takes all that is left. Factors summing below 1 would
+                hand out only that fraction of it. While the summary shows nothing, a negative
+                margin returns its gap to the status and step. */}
+            <span className="-ms-2 flex min-w-0 flex-[1_1_0] has-[[data-hidden=false]]:ms-0"><ActivitySummary items={foldedSummary} /></span>
           </>
         )}
         {open && cost ? <span data-slot="run-activity-cost" className="ms-auto shrink-0 text-[13px] text-muted-foreground tabular-nums">{cost}</span> : null}
