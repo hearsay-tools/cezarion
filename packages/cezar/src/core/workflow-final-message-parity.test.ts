@@ -2,12 +2,23 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { setTimeout as realDelay } from 'node:timers/promises';
+import { describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 import { FINAL_MESSAGE_CRITERIA, HARNESS_ADAPTERS, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { handoffPath } from '../handoff.ts';
 import { NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE } from '../workflows/run.ts';
+
+// Poll native process/store signals while the product's reply clock is frozen.
+async function waitForNativeContent(ready: () => boolean): Promise<void> {
+  const deadline = Date.now() + 10_000;
+  while (!ready()) {
+    if (Date.now() > deadline) throw new Error(`Native reply signal missing: ${ready.toString()}`);
+    // bound: real I/O poll; fake time must not advance until native content arrives.
+    await realDelay(10);
+  }
+}
 
 // The no-wait nudge absorbed the final-message nudge (hearsay-tools/cezarion#1234): these rows pin
 // its reply bound, #544's liveness. A worker's fallback stays the plain park.
@@ -181,17 +192,52 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
       }
       if (row.id === 'F10') {
         it(`${backend} ${row.id} ${row.name}`, async () => {
-          await withOwnedInputRun(backend, 'silent-tail-slow-done', async ({ store, manager, runId, repoRoot }) => {
+          const gateRoot = backend === 'cursor' ? mkdtempSync(join(tmpdir(), 'cez-nudge-content-')) : undefined;
+          try { await withOwnedInputRun(backend, 'silent-tail-slow-done', async ({ store, manager, runId, repoRoot }) => {
             shortenNudgeBound(manager as unknown as { noWaitNudgeReplyMs?: number });
             const handoff = handoffPath(join(repoRoot, '.ai/cezar'), runId);
             const startSeq = store.readEvents(runId).length;
-            manager.enqueueOwnedRun(runId);
+            if (gateRoot) {
+              // Cursor starts a new print process for the nudge. Its startup must not
+              // consume F10's 300 ms content budget (hearsay-tools/cezarion#1511).
+              // Freeze only that budget: process-drain and other timers keep real time.
+              const realSetTimeout = globalThis.setTimeout;
+              vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'], shouldClearNativeTimers: true });
+              const fakeSetTimeout = globalThis.setTimeout;
+              let armingReply = false;
+              let replyTimers = 0;
+              const timerOwner = manager as unknown as { armNoWaitNudgeReplyTimer: typeof manager['armNoWaitNudgeReplyTimer'] };
+              const armReply = timerOwner.armNoWaitNudgeReplyTimer.bind(manager);
+              const armClock = vi.spyOn(timerOwner, 'armNoWaitNudgeReplyTimer').mockImplementation((...args) => {
+                armingReply = true;
+                try { armReply(...args); } finally { armingReply = false; }
+              });
+              const replyClock = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((...args: Parameters<typeof setTimeout>) => {
+                if (!armingReply) return realSetTimeout(...args);
+                replyTimers++;
+                return fakeSetTimeout(...args);
+              }) as typeof setTimeout);
+              try {
+                manager.enqueueOwnedRun(runId);
+                await waitForNativeContent(() => store.readEvents(runId).slice(startSeq).some(e =>
+                  e.type === 'text' && String(e.text).includes('Working on the wrap-up.')));
+                expect(replyTimers).toBe(1);
+                expect(manager['active'].get(runId)?.noWaitNudgeReplyTimer).toBeUndefined();
+                // The native mock holds DONE until this test crosses the reply bound.
+                await vi.advanceTimersByTimeAsync(300);
+                expect(store.getRun(runId)?.status).toBe('running');
+                expect(manager['busySlots']()).toBe(1);
+                expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
+              } finally { armClock.mockRestore(); replyClock.mockRestore(); vi.useRealTimers(); }
+              writeFileSync(join(gateRoot, 'done'), 'go');
+            } else manager.enqueueOwnedRun(runId);
             await waitFor(() => store.getRun(runId)?.status === 'done' || store.getRun(runId)?.status === 'waiting');
             expect(store.getRun(runId)?.status).toBe('done');
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
             expect(readFileSync(handoff, 'utf8')).toContain('status=running (no-wait nudge)');
-          });
+          }, gateRoot ? { env: { CEZ_MOCK_RELEASE_FILE: join(gateRoot, 'done') } } : {});
+          } finally { if (gateRoot) rmSync(gateRoot, { recursive: true, force: true }); }
         }, 30_000);
         continue;
       }
