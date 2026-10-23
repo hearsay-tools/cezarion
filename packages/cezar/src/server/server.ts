@@ -354,8 +354,6 @@ export interface ServerDeps {
    *  reaches `openInTerminal`. Injected for the same reason as the two above: a test that reaches
    *  this for real opens a window on the developer's machine (#820). */
   openApp?: typeof openInApp;
-  /** Process-wide Open Mercato skills update detector. Injected in tests and
-   * shared by every workspace route/project; createApp owns the default. */
   /** WebSocket subscription hub (`/api/v1/ws`, src/server/ws.ts). `createApp`
    *  only registers topics on it — `startServer` builds one and attaches it
    *  to the HTTP server it binds. Optional so legacy callers/tests change

@@ -231,6 +231,9 @@ describe('the workspace settings API (step 2.7)', () => {
     expect(body).not.toHaveProperty('effectiveSkillsAutoUpdate');
     const route = await apiRequest(app, '/api/v1/workspace/skills-update?projectId=default');
     expect(route.status).toBe(404);
+    // `startServer` reaches `npx` only through the updater's `execFile`, which an ESM spy cannot
+    // observe; the built route table is the permitted proxy: no skills-update route remains.
+    expect(app.routes.map((r) => r.path).filter((path) => path.includes('skills-update'))).toEqual([]);
   });
 
   it('PUT ignores a retired skillsAutoUpdate key and an old stored key survives unrelated writes', async () => {
