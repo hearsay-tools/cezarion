@@ -11,6 +11,7 @@ import {
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
 
 import { isCockpitE2e } from '@/lib/e2e-mode'
+import { jumpLabel } from './pending-ask-navigation'
 import {
   NEAR_BOTTOM_SLACK_PX,
   isNearHistoryStart,
@@ -756,18 +757,20 @@ function VirtualRowsSession({
   )
 }
 
-/** The floating "Jump to latest" pill, absolutely positioned above the dock by its caller. */
-export function JumpToLatestPill({ onJump }: { onJump: () => void }) {
+/** The floating "Jump to latest" pill, absolutely positioned above the dock by its caller. With a
+ *  question pending, it names how many questions wait at the tail (hearsay-tools/cezarion#1495). */
+export function JumpToLatestPill({ onJump, pendingQuestions = 0 }: { onJump: () => void; pendingQuestions?: number }) {
   return (
     <button
       type="button"
       data-slot="jump-to-latest"
+      data-pending-questions={pendingQuestions > 0 ? pendingQuestions : undefined}
       // Never forward the click event: the jump's optional argument is a focus target.
       onClick={() => onJump()}
       className="pointer-events-auto inline-flex min-h-11 min-w-11 items-center gap-1.5 rounded-full border border-border bg-background px-3.5 text-xs font-medium text-muted-foreground shadow-modal hover:text-foreground"
     >
       <ArrowDownIcon aria-hidden className="size-3.5" />
-      Jump to latest
+      {jumpLabel(pendingQuestions)}
     </button>
   )
 }
