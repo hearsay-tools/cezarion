@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { EyeIcon } from 'lucide-react'
 import { CheckIcon, CircleSlashIcon, CpuIcon, GitBranchIcon, GaugeIcon, TerminalIcon, SlidersHorizontalIcon, FolderOpenIcon, SparklesIcon, WorkflowIcon, XIcon } from '@/components/design-icons'
@@ -280,28 +281,16 @@ export function NewTaskRoute() {
     }
   }, [providersReady])
 
-  // Parallel variants need a worktree per variant, hence git (the server 409s without it).
-  // Read it from the PROJECT-scoped `/repo` above, never from `/api/health.repo`: health is bound
-  // to the boot folder, so booting outside a git repo hid the worktree controls for every
-  // registered project (#791) — the same per-project sweep as #700 (forge) and #699 (runner
-  // defaults). Loading still assumes git so the controls do not flicker.
   const hasGit = repo.data === undefined || repo.data.info !== null
-  const variants = hasGit ? draft.variants : 1
 
   // Worktree opt-out (#worktree-toggle): any ordinary run in a git repo may use the current
-  // checkout. Parallel variants are the one hard constraint because each competing run needs
-  // its own tree; a non-git repo already runs in place.
+  // checkout. Workflows may run in place when the user opts out.
   const worktreeToggleShown = hasGit
-  const worktreeForced = variants > 1
 
-  // Autonomous (#autonomous): the run never pauses for the user. An explicit toggle this session
-  // wins; then an interactive skill recommends handing the ball back; otherwise the configured
-  // workspace default applies ('source-dependent' → skills default ON, everything else OFF).
   // Plan-first forces it OFF (and disables the toggle): planning is inherently interactive, so
   // the run must be able to hand the ball back.
   const runMode = resolveComposerRunMode({
     hasGit,
-    variants,
     planFirst: draft.planFirst,
     explicitAutonomous: draft.autonomous,
     explicitWorktree: draft.worktree,
@@ -449,6 +438,7 @@ export function NewTaskRoute() {
 
   const submit = async (text: string, images: AttachmentInput[]) => {
     const submittedRevision = draftRevision(draftProjectId)
+    if (draft.retiredVariants) throw new Error('Parallel variants are removed. Choose Use one task before starting this saved draft.')
     if (!providersReady || runner === null) {
       throw new Error(
         providers.isPending
@@ -484,7 +474,6 @@ export function NewTaskRoute() {
         runnerExplicit: draft.runner !== null,
         agentProfile,
         defaultRunner,
-        variants,
         images,
         worktree: worktreeOn,
         autonomous: autonomousOn,
@@ -542,7 +531,6 @@ export function NewTaskRoute() {
           runner,
           runnerExplicit: draft.runner !== null,
           defaultRunner,
-          variants,
           images: plan.images,
           generateFollowups: generateFollowupsOn,
           todoId: deepLink.todo, // #374: planning first must not lose the inbox entry
@@ -683,6 +671,13 @@ export function NewTaskRoute() {
           </p>
         </header>
 
+        {draft.retiredVariants ? (
+          <section role="alert" className="flex flex-col items-start gap-3 rounded-xl border border-border bg-card p-4">
+            <p>Parallel variants are removed. This saved draft requested multiple candidates. Use owned workers to compare approaches, or start one task.</p>
+            <Button variant="outline" className="min-h-11" onClick={() => update({ retiredVariants: false })}>Use one task</Button>
+          </section>
+        ) : null}
+
         <Composer
           ref={composerRef}
           onSubmit={submit}
@@ -767,26 +762,9 @@ export function NewTaskRoute() {
               <div className="space-y-3 border-t border-border px-5 pt-3 pb-5">
                 <p className="hidden text-[11px] text-muted-foreground xl:block">Control where and how this task runs.</p>
                 <div role="group" aria-label="Run settings" className="new-task-run-settings">
-                  <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>Parallel variants</span><PickerPill
-                    slot="variants-pill"
-                    ariaLabel="Parallel variants"
-                    label={variants > 1 ? `×${variants} variants` : '×1'}
-                    value={String(variants)}
-                    onPick={(next) => update({ variants: Number(next) })}
-                    disabled={!hasGit}
-                    hint="How many times to run this task in parallel — each variant gets its own worktree, and you pick the diff you keep. ×1 runs it once."
-                    disabledHint="Parallel variants need a git repository — each variant runs in its own worktree."
-                    options={[
-                      { value: '1', label: '×1', desc: 'One run' },
-                      { value: '2', label: '×2 variants', desc: 'Two competing runs — pick the diff you keep' },
-                      { value: '3', label: '×3 variants', desc: 'Three competing runs — pick the diff you keep' },
-                    ]}
-                  /></div>
                   {worktreeToggleShown ? (
                     <WorktreeToggle
                       on={worktreeOn}
-                      disabled={worktreeForced}
-                      disabledReason="Parallel variants always use isolated worktrees"
                       onChange={(on) => update({ worktree: on })}
                     />
                   ) : null}

@@ -1,13 +1,12 @@
-import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { RunRecord } from '../runs/store.ts';
 import { RunStore } from '../runs/store.ts';
 import type { TodoItem } from '../todos.ts';
 import type { RunManager, StartRunInput } from '../workflows/run.ts';
-import type { RunRecord } from '../runs/store.ts';
 import type { WorkflowDef } from '../workflows/types.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -48,17 +47,6 @@ describe('POST /api/v1/runs todoId', () => {
         started += 1;
         return store.createRun({ title: 't', workflow: '(planned)', task: input.task, steps: [] });
       },
-      startVariants: (_workflow: WorkflowDef, input: StartRunInput, variants: number): RunRecord[] =>
-        Array.from({ length: variants }, (_, i) => {
-          started += 1;
-          return store.createRun({
-            title: 't',
-            workflow: '(planned)',
-            task: input.task,
-            steps: [],
-            variant: String.fromCharCode(65 + i),
-          });
-        }),
     } as unknown as RunManager;
     app = createApp({
       repoRoot,
@@ -123,20 +111,13 @@ describe('POST /api/v1/runs todoId', () => {
     expect(readTodosFile()[0]?.startedTaskId).toBe('run-first');
   });
 
-  it('records the FIRST variant for a ×2 launch — the thread the composer lands on', async () => {
-    // Variants need a git repo (each one runs in its own worktree) or the route 400s — and a
-    // real one: `getRepoInfo` reads HEAD, which is unborn until the first commit.
-    const git = (...args: string[]) => execFileSync('git', args, { cwd: repoRoot });
-    git('init', '-q', '-b', 'main');
-    git('-c', 'user.email=t@example.com', '-c', 'user.name=t', 'commit', '-q', '--allow-empty', '-m', 'init');
+  it('refuses retired variant launches without changing the inbox', async () => {
     writeTodos([{ id: 't1', summary: 'Follow up' }]);
-
     const res = await post({ ...base, todoId: 't1', variants: 2 });
-    expect(res.status).toBe(201);
-    const { runs } = (await res.json()) as { runs: RunRecord[] };
-
-    expect(runs).toHaveLength(2);
-    expect(readTodosFile()[0]?.startedTaskId).toBe(runs[0]?.id);
+    expect(res.status).toBe(400);
+    expect(await res.json()).toMatchObject({ error: expect.stringContaining('Parallel variants are removed') });
+    expect(readTodosFile()[0]?.startedTaskId).toBeUndefined();
+    expect(started).toBe(0);
   });
 
   it('leaves the inbox alone when no todoId is sent (every other launch)', async () => {

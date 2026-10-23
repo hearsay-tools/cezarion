@@ -1148,26 +1148,6 @@ describe('TasksOverview — mobile cards and FAB', () => {
   })
 })
 
-describe('TasksOverview — compare-variants strip', () => {
-  const pair = (status: RunRecord['status']) => [
-    run({ id: 'va', groupId: 'g1', variant: 'A', title: 'Add autocomplete (A)', status }),
-    run({ id: 'vb', groupId: 'g1', variant: 'B', title: 'Add autocomplete (B)', status }),
-  ]
-
-  it('offers Compare once every variant is terminal', () => {
-    renderOverview({ runs: pair('review') })
-    const strip = document.querySelector('[data-slot="compare-strip"]') as HTMLElement
-    expect(strip.textContent).toContain('Add autocomplete')
-    expect(strip.textContent).toContain('2 variants finished')
-    expect(within(strip).getByRole('link', { name: 'Compare' }).getAttribute('href')).toBe('/compare/g1')
-  })
-
-  it('offers nothing while a variant is still working', () => {
-    renderOverview({ runs: pair('running') })
-    expect(document.querySelector('[data-slot="compare-strip"]')).toBeNull()
-  })
-})
-
 describe('TasksOverviewRoute — wired to the app', () => {
   const fetchMock = vi.fn<typeof fetch>()
 
