@@ -593,6 +593,26 @@ Verification, and let CI's Vitest shards decide. Squeal reports and
 `squeal why <check>` output are the same evidence. The rerun is not a full pass;
 green CI shards are. A failure in a file the branch touches never qualifies: fix it.
 
+Count a test file's observed CI failure annotations across rerun attempts with:
+
+```bash
+node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/cezarion --runs 20
+# Or select runs by creation time (inclusive UTC timestamps):
+node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/cezarion --since 2026-10-22T00:00:00Z --until 2026-10-23T00:00:00Z
+```
+
+The command uses authenticated `gh` reads and defaults to the current repository's
+latest 20 `ci.yml` runs. It scans every attempt, including runs whose latest
+conclusion is success. Use a literal file name or path; matching uses annotation
+paths and titles, not stack references in messages. It prints each matching
+failure and separate totals for failing runs, failing attempts and runs scanned.
+These are observed annotated failures: no matching annotation does not prove a
+test ran or passed, and the count is not a pass rate. Missing data, unfinished
+attempts, changed run metadata, GitHub's date-query cap, or the 1,500-request /
+12-minute limits produce an incomplete report and exit 1. Narrow the range and
+repeat an incomplete scan. This evidence does not replace the reproduction or
+before/after verification required for a changed wait.
+
 **When filing a load-dependent test failure, preserve the diagnostic evidence.**
 Quote the full error line verbatim, with nothing cut, including any list after
 its `;`. Name the stack frame that throws the error, rather than an operation
