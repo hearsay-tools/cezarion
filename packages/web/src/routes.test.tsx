@@ -40,8 +40,8 @@ function rememberLocation(lastLocation: unknown): void {
 const BOOT = 'boot'
 
 /** A full-enough `/api/v1/health` answer: the redirect gate reads `bootProject`, and the routes
- *  behind it (inbox, /new) read `capabilities` — a partial seed would crash what a real health
- *  payload never crashes. `followups: true` keeps the Inbox route's real heading. */
+ *  behind it (/new) read `capabilities` — a partial seed would crash what a real health
+ *  payload never crashes. */
 const HEALTH = {
   version: '0.0.0-test',
   repoRoot: '/home/u/cezar',
@@ -49,7 +49,7 @@ const HEALTH = {
   checks: [],
   defaultRunner: 'claude',
   forge: null,
-  capabilities: { localHandoff: true, followups: true, singleProject: false, automations: false },
+  capabilities: { localHandoff: true, singleProject: false, automations: false },
   projects: [{ id: BOOT, name: 'cezar' }],
   bootProject: BOOT,
 }
@@ -168,7 +168,7 @@ describe('pageTitleContext', () => {
   it.each([
     ['/p/cezar/', 'Tasks'],
     ['/new', 'New task'],
-    ['/p/cezar/compare/group-1', 'Compare'],
+    ['/p/cezar/compare/group-1', 'Retained results'],
     ['/p/cezar/git', 'Git'],
     ['/p/cezar/git/commits/abc123', 'Git'],
     ['/p/cezar/github/issues/543', 'GitHub'],
@@ -213,7 +213,7 @@ const ROUTE_CASES: Array<[url: string, route: string, title: string]> = [
   ['/tasks/abc123/pr/5', 'task-github-item', 'Loading pull request…'],
   ['/tasks/abc123/issue/7', 'task-github-item', 'Loading issue…'],
   // The real compare view (Step R3 2.3): with fetch never answering it is honestly loading.
-  ['/compare/grp-1', 'compare', 'Loading variants…'],
+  ['/compare/grp-1', 'compare', 'Loading retained results…'],
   // The real repo view (R5 Step 1.7): with fetch never answering it is honestly loading —
   // and every segment is its own URL, commit deep links included.
   ['/git', 'repo-git', 'Loading repository…'],
@@ -226,7 +226,7 @@ const ROUTE_CASES: Array<[url: string, route: string, title: string]> = [
   ['/github/prs', 'github', 'Loading GitHub…'],
   ['/github/issues/42', 'github', 'Loading GitHub…'],
   ['/github/prs/7', 'github', 'Loading GitHub…'],
-  ['/inbox', 'inbox', 'Inbox'],
+  ['/inbox', 'inbox', 'Inbox has been removed'],
   // The real workflow builder (R6 Step 1.6): with fetch never answering both the list URL
   // and a named deep link are honestly loading.
   ['/workflows', 'workflows', 'Workflows'],
@@ -367,7 +367,6 @@ describe('the global settings area (/settings/global)', () => {
     ['/settings/global/appearance', 'settings-global-appearance', 'Appearance'],
     ['/settings/global/notifications', 'settings-global-notifications', 'Notifications'],
     ['/settings/global/resources', 'settings-global-resources', 'Resources'],
-    ['/settings/global/skills', 'settings-global-skills', 'Skills'],
     ['/settings/global/projects', 'settings-global-projects', 'Projects'],
   ]
   for (const [url, route, title] of GLOBAL_CASES) {
@@ -380,6 +379,12 @@ describe('the global settings area (/settings/global)', () => {
       expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
     })
   }
+
+  it('/settings/global/skills (removed, hearsay-tools/cezarion#1494) lands on the Skills page', () => {
+    renderAt('/settings/global/skills')
+    expect(currentPathname()).toBe(`/p/${BOOT}/skills`)
+    expect(routeName()).toBe('skills')
+  })
 
   it('/settings/global has no index page: it lands on Appearance', () => {
     renderAt('/settings/global')

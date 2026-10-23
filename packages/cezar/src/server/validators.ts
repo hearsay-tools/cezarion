@@ -3,29 +3,8 @@ import { validator } from 'hono/validator';
 import type { z } from 'zod';
 
 /**
- * Request validation as ROUTE MIDDLEWARE — the `json` / `param` / `query` trio every mutating
- * route reaches for.
- *
- * The point is not that handlers stop restating six lines of `safeParse`, though they do. It is
- * that Hono only records a validated shape in the ROUTE TYPE when validation happens as
- * middleware. Parsing inside a handler is invisible to it, which is why `POST /runs` used to
- * accept `{ totalNonsense: 12345 }` from `hc` without a murmur. Everything typed-client-side
- * flows from validating here instead of there.
- *
- * ## Why not `@hono/zod-validator`
- *
- * It is a thin wrapper over the same `hono/validator` used below, so it inherits Hono's two
- * behaviours at the JSON boundary — and both are wrong for this server:
- *
- *   - a malformed body answers Hono's PLAIN-TEXT `400 Malformed JSON in request body`, and the
- *     error hook never runs, so the `{error}` shape BACKWARD_COMPATIBILITY.md §2 protects (and
- *     the cockpit renders verbatim in a toast) is bypassed entirely;
- *   - a body sent WITHOUT a JSON content-type is silently discarded and the handler runs against
- *     `{}` — a 200 that applied an empty update, which is worse than a rejection.
- *
- * Both were verified against `@hono/zod-validator@0.9.0`, not inferred. `jsonZodValidator` settles
- * those cases itself and only delegates to Hono on the well-formed path, so the wire matches what
- * these handlers did when they parsed inline (`await c.req.json().catch(() => absent)`).
+ * Route-middleware validators for JSON, params and queries. Preserve typed input/output and the
+ * API’s JSON error boundary, including absent and malformed body policy.
  */
 
 type ErrorOptions = {
@@ -46,12 +25,7 @@ type JsonOptions = ErrorOptions & {
    * What a body that is PRESENT but not parseable as JSON becomes. Defaults to `absent`, which is
    * what every route wants when both cases are rejected anyway.
    *
-   * `POST /todos/:id/start` is the one route that must tell them apart: no body at all is the
-   * pre-#401 bodyless POST and has to succeed (`absent: undefined`, which its optional schema
-   * accepts), while a truncated payload must 400 rather than pass as "no body" and silently 201
-   * (`malformed: null`, which it does not). That distinction lived in the handler's own
-   * `JSON.parse` before the route moved its body onto a validator; it is expressed here so the
-   * behaviour moved with it rather than being lost in the move.
+   * Use distinct values when an optional body accepts absence but must reject malformed JSON.
    */
   malformed?: unknown;
   /**
@@ -106,8 +80,7 @@ export function jsonZodValidator<
   options: JsonOptions = {},
 ): JsonValidator<S, E, P> {
   // Key presence, not a destructuring default: `undefined` IS a meaningful value for both of
-  // these (it is what `POST /todos/:id/start` wants a bodyless request to parse as), and a
-  // `= null` default would silently overwrite exactly that case.
+  // these; a `= null` default would silently overwrite an explicitly absent value.
   const absent = 'absent' in options ? options.absent : null;
   const malformed = 'malformed' in options ? options.malformed : absent;
   const { message, code, invalid } = options;

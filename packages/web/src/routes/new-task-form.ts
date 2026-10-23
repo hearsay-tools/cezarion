@@ -313,7 +313,7 @@ export function resolveSource(
  *  - an explicit/sticky `runner` always rides the request; an untouched runner is omitted only
  *    when it equals the active project's known default (unknown defaults and connected fallbacks
  *    stay explicit);
- *  - `model`/`variants`/`images` only when they say something (`''`/1/empty mean "default").
+ *  - `model`/`images` only when they say something (`''`/empty mean "default").
  */
 export function buildCreateRunBody(opts: {
   task: string
@@ -331,20 +331,14 @@ export function buildCreateRunBody(opts: {
   /** Per-task agent account (spec 2026-07-29-agent-profiles) — the composer's override of the
    *  project's own selection, applying to `runner`. Absent/empty follows the project. */
   agentProfile?: string | null
-  variants: number
   images: readonly AttachmentInput[]
   /** false → run in the repo working tree, no worktree (single runs only). Sent only when
    *  explicitly off; the default (isolated worktree) stays implicit. */
   worktree?: boolean
   /** true → autonomous run (never pauses for the user). Sent only when on. */
   autonomous?: boolean
-  /** false → do not ask the agent for follow-up todos. Sent only when off. */
-  generateFollowups?: boolean
-  /** The inbox entry this composer was prefilled from (`/new?…&todo=`, #374) — sent back so
-   *  the server records the started run on it. Empty/absent for every other launch.
-   *  Independent of `generateFollowups`: starting a task FROM a follow-up still marks that
-   *  entry started, even when the new task itself won't generate follow-ups of its own. */
-  todoId?: string
+  archiveWhenDone?: boolean
+  autoMergePr?: boolean
 }): CreateRunInput {
   const {
     task,
@@ -356,12 +350,11 @@ export function buildCreateRunBody(opts: {
     runnerExplicit,
     defaultRunner,
     agentProfile,
-    variants,
     images,
     worktree,
     autonomous,
-    generateFollowups,
-    todoId,
+    archiveWhenDone,
+    autoMergePr,
   } = opts
   return {
     task,
@@ -374,13 +367,11 @@ export function buildCreateRunBody(opts: {
     // Sent only when the user picked one — an absent key is "follow the project", which is what
     // every launch that never touched the control means.
     agentProfile: agentProfile || undefined,
-    variants: variants > 1 ? variants : undefined,
     images: images.length > 0 ? [...images] : undefined,
-    // Off only matters for a single run — variants always isolate.
-    worktree: worktree === false && variants <= 1 ? false : undefined,
+    worktree: worktree === false ? false : undefined,
     autonomous: autonomous === true ? true : undefined,
-    generateFollowups: generateFollowups === false ? false : undefined,
-    todoId: todoId || undefined,
+    ...(archiveWhenDone ? { archiveWhenDone: true } : {}),
+    ...(autoMergePr ? { autoMergePr: true } : {}),
   }
 }
 
@@ -396,14 +387,12 @@ export function withNotify(body: CreateRunInput, notify: boolean): CreateRunInpu
  * an automation is a reusable template, not one browser submission. */
 export function buildAutomationTask(
   opts: Parameters<typeof buildCreateRunBody>[0],
-): Omit<CreateRunInput, 'task' | 'images' | 'todoId'> & { prompt: string } {
-  const { task, images: _images, todoId: _todoId, ...body } = buildCreateRunBody(opts)
+): Omit<CreateRunInput, 'task' | 'images'> & { prompt: string } {
+  const { task, images: _images, ...body } = buildCreateRunBody(opts)
   return { prompt: task, ...body }
 }
 
-/** Where a successful POST navigates: the run's thread — for ×2/×3 the FIRST variant's thread,
- *  exactly what legacy `handleStarted` selects. */
+/** Open the newly created task. */
 export function startedRunPath(response: CreateRunResponse): string {
-  const first = 'runs' in response ? response.runs[0] : response
-  return first ? `/tasks/${first.id}` : '/'
+  return `/tasks/${response.id}`
 }

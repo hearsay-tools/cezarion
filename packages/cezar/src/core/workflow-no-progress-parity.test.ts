@@ -1,8 +1,9 @@
 import { randomUUID } from 'node:crypto';
-import { requirePid } from '../pid-file.testkit.ts';
+import { readPid, requirePid } from '../pid-file.testkit.ts';
 import { join } from 'node:path';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
+import * as sessionProcess from './session-process.ts';
 import { NO_PROGRESS_CRITERIA, driveSeam, exemptionFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
 
@@ -12,7 +13,36 @@ vi.mock('./runner-runtime.ts', async importOriginal => ({
   KILL_GRACE_MS: 150,
 }));
 
-const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+// Keep native startup, IPC, polling and process exit on real time. Only the
+// inactivity deadline (and N5's kill escalation) uses the controlled clock.
+// Advancing it after watchdog.pid exists cannot spend the fixture's startup
+// budget before the mock has reached the stalled turn (hearsay-tools/cezarion#1319).
+function controlDeadlines(killEscalation: boolean) {
+  const realSetTimeout = globalThis.setTimeout;
+  const realClearTimeout = globalThis.clearTimeout;
+  vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  const fakeSetTimeout = globalThis.setTimeout;
+  const fakeClearTimeout = globalThis.clearTimeout;
+  const controlled = new Set<ReturnType<typeof setTimeout>>();
+  vi.spyOn(globalThis, 'setTimeout').mockImplementation(((...params: Parameters<typeof setTimeout>) => {
+    const [callback, ms, ...args] = params;
+    // Cursor and OpenCode keep their own 4 s kill grace; the other runners
+    // use runner-runtime's shortened 150 ms grace below.
+    if (ms !== 800 && !(killEscalation && (ms === 150 || ms === 4_000))) {
+      return realSetTimeout(callback, ms, ...args);
+    }
+    const timer = fakeSetTimeout(callback, ms, ...args);
+    controlled.add(timer);
+    return timer;
+  }) as typeof setTimeout);
+  vi.spyOn(globalThis, 'clearTimeout').mockImplementation(timer => {
+    if (controlled.delete(timer as ReturnType<typeof setTimeout>)) fakeClearTimeout(timer);
+    else realClearTimeout(timer);
+  });
+}
+
+afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+
 describe('managed open-turn inactivity — #470', () => {
   for (const backend of RUNNER_IDS) {
     for (const row of NO_PROGRESS_CRITERIA) {
@@ -26,6 +56,16 @@ describe('managed open-turn inactivity — #470', () => {
         continue;
       }
       it(`${backend} ${row.id} ${row.name}`, async () => {
+        const exits = new Map<number, NodeJS.Signals | null>();
+        const spawn = sessionProcess.spawnSessionLeader;
+        vi.spyOn(sessionProcess, 'spawnSessionLeader').mockImplementation((...args) => {
+          const child = spawn(...args);
+          child.once('exit', (_code, signal) => { if (child.pid) exits.set(child.pid, signal); });
+          return child;
+        });
+        // N2 measures repeated native progress over a real 2.4 s turn. The
+        // other rows exercise expiry only after their native readiness signal.
+        if (row.id !== 'N2') controlDeadlines(row.id === 'N5');
         const workflowDef = row.id === 'N1' || row.id === 'N2' || row.id === 'N5' || row.id === 'N7'
           ? workflowDefSchema.parse({ name: 'inactivity', source: 'file', steps: [
             { id: 'work', prompt: '{{task}}' }, { id: 'check', command: 'true' },
@@ -34,7 +74,7 @@ describe('managed open-turn inactivity — #470', () => {
           manager.enqueueOwnedRun(runId);
           if (row.id === 'N3' || row.id === 'N4' || row.id === 'N6' || row.id === 'N8') {
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
-            await sleep(1_600);
+            await vi.advanceTimersByTimeAsync(1_600);
             expect(store.getRun(runId)?.status).toBe('waiting');
             expect(manager.isActive(runId)).toBe(true);
             if (row.id === 'N6') {
@@ -58,6 +98,15 @@ describe('managed open-turn inactivity — #470', () => {
               expect(manager.sendMessage(runId, [{ type: 'text', text: 'mock:no-progress' }])).toBe(true);
             }
           }
+          if (row.id !== 'N2') {
+            // bound: native mock startup includes Node imports and runner IPC;
+            // give PID publication its own guard, independent of inactivity.
+            await waitFor(() => {
+              const cwd = store.getRun(runId)?.worktreePath;
+              return cwd !== undefined && readPid(join(cwd, 'watchdog.pid')) !== undefined;
+            }, 15_000);
+            await vi.advanceTimersByTimeAsync(800);
+          }
           // Let the real native wire and process exit settle; no synthetic turn events.
           if (row.id === 'N5' || row.id === 'N7') {
             await waitFor(() => store.readEvents(runId).some(e => e.type === 'error' && typeof e.message === 'string' && e.message.includes('no progress')));
@@ -66,9 +115,21 @@ describe('managed open-turn inactivity — #470', () => {
               expect(() => process.kill(pid, 0)).not.toThrow();
               expect(manager.isActive(runId)).toBe(true);
             }
-            await waitFor(() => !manager.isActive(runId), row.id === 'N7' ? 2_500 : 8_000);
+            if (row.id === 'N5') await vi.advanceTimersByTimeAsync(4_000);
+            // bound: native exit follows TERM/KILL delivery, independent of
+            // output drain and store settlement. N5 must exit from SIGKILL;
+            // its mock's 12 s natural-exit backstop cannot make this pass.
+            await waitFor(() => exits.has(pid), 15_000);
+            if (row.id === 'N5') expect(exits.get(pid)).toBe('SIGKILL');
+            // bound: after confirmed process exit, allow the bounded output
+            // drain (up to 2 s) and the manager's durable capacity release.
+            await waitFor(() => !manager.isActive(runId), 15_000);
             expect(() => process.kill(pid, 0)).toThrow();
-          } else await waitFor(() => !manager.isActive(runId));
+          } else {
+            // bound: N4 starts a new native session and N8 admits another input;
+            // expiry above starts this separate exit/drain/settlement phase.
+            await waitFor(() => !manager.isActive(runId), 15_000);
+          }
           expect(manager.isActive(runId)).toBe(false);
           const run = store.getRun(runId)!;
           if (row.id === 'N2') {

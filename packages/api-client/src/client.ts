@@ -4,24 +4,8 @@ import type { ClientRequestOptions, ClientResponse } from 'hono/client'
 import type { SuccessStatusCode } from 'hono/utils/http-status'
 
 /**
- * The typed HTTP client for a cezar service.
- *
- * `hc` reuses the SERVER's own route types, so the contract is the code: a wrong path, a wrong
- * request body or a misread response shape is a compile error, and nothing has to be mirrored
- * by hand. The app type comes from the service package
- * (`import type { AppType } from '@wjarka/cezarion/app-type'`) and is supplied by the
- * caller rather than imported here on purpose — this package must stay installable, and
- * usable at runtime, without the server package present:
- *
- * ```ts
- * import type { AppType } from '@wjarka/cezarion/app-type'
- * const cez = createCezarClient<AppType>({ baseUrl: 'http://127.0.0.1:4321' })
- * const res = await cez.api.v1['agent-config'].$get()
- * ```
- *
- * Only the versioned surface (`/api/v1/*`) is typed. The legacy `/api/*` paths stay frozen for
- * the bookmarklets and scripts that already call them (BACKWARD_COMPATIBILITY.md §2) and are
- * deliberately not part of what a new consumer is invited to build on.
+ * Typed HTTP client for /api/v1. Supply the service AppType as a type argument; this package has
+ * no runtime service dependency. Example: createCezarClient<AppType>({ baseUrl }).
  */
 export interface CezarClientOptions {
   /**
@@ -69,21 +53,8 @@ export function createCezarClient<
 }
 
 /**
- * The 200 member of a typed response union — the shape a caller actually receives.
- *
- * `hc` types a call as the union of everything the handler can answer, error branches included:
- * a route that answers `{runner, models}` or `{error}` infers both. That is honest about the
- * wire, but a caller that treats a non-2xx as a thrown error (as cezar's client does) only ever
- * holds the success shape, and forcing it to narrow a union it can never see would be noise.
- *
- * Selecting the success branch is what makes an inferred type a drop-in replacement for the
- * hand-written DTO it retires.
- *
- * EVERY 2xx, not just 200: a handler answering `c.json(x, 201)` — `POST /runs`, `/workflows`,
- * `/runs/:id/pr`, `/todos/:id/start` — has no 200 branch at all, so keying on 200 inferred
- * `never`. That stayed invisible while a hand-written DTO still annotated the call site (`never`
- * is assignable to anything) and would have surfaced as a broken caller at the exact moment
- * those DTOs were deleted.
+ * Select every successful 2xx JSON response branch, including 201, while excluding error and
+ * non-JSON branches.
  */
 export type Ok<R> = R extends ClientResponse<infer T, infer S, 'json'>
   ? S extends SuccessStatusCode
@@ -92,16 +63,8 @@ export type Ok<R> = R extends ClientResponse<infer T, infer S, 'json'>
   : never
 
 /**
- * `Ok<R>`, but loud when there is no JSON branch at all.
- *
- * A route can answer more than one format on one path — `/repo/commit/:sha` serves a structured
- * payload or a raw blob, `/runs/:id/files` a listing or image bytes — so `hc` infers a union of
- * `'json'` and `'text'`/`'body'` members and `Ok` correctly picks the JSON one. But for a route
- * that is text-only, `Ok` is `never`, and `never` is assignable to EVERY declared return type: a
- * caller would compile and then fail at runtime, with the type system having said nothing.
- *
- * Substituting a branded object makes that case a readable compile error instead. It is why
- * `unwrap` can accept mixed-format routes without becoming a hole for single-format ones.
+ * Like Ok<R>, with a branded error type when no successful JSON branch exists. Mixed-format
+ * routes keep their successful JSON branch.
  */
 export type OkJson<R> = [Ok<R>] extends [never]
   ? { readonly __error: 'this route has no JSON response; read it as text instead' }

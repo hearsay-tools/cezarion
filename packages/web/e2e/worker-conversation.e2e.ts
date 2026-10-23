@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedTranscript } from './seed-transcript'
 
-import { waitForSettledSample } from './visual-ready'
+import { settleVisual, waitForSettledSample } from './visual-ready'
 import { messageClockExpression } from './transcript-measurements'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
@@ -25,8 +25,12 @@ const reqB = { ...reqA, id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', recipientRun
 const reply = { ...reqA, id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', senderRunId: alpha, recipientRunId: parent, kind: 'reply', requestId: reqA.id, text: 'Alpha found one parser edge case.', createdAt: '2026-09-20T12:05:00Z' }
 const follow = { ...reqA, id: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', kind: 'follow-up', requestId: reqA.id, text: 'Also check empty input.' }
 const projection = (message: object) => ({ type: 'conversation-message', message, delivery: 'delivered' })
+const longRequestText = ['# Full review request', ...Array.from({ length: 45 }, (_, n) =>
+  `Paragraph ${n}: inspect the parser and preserve each finding in the complete response.`),
+  '[Reference](https://example.com)', '```text\nfinal line of the request\n```'].join('\n\n')
 const events = (padding = 0) => [
-  projection(reqA), projection(reqB),
+  projection(padding ? { ...reqA, text: longRequestText } : reqA),
+  projection(padding ? { ...reqB, text: longRequestText } : reqB),
   { type: 'item.completed', item: { kind: 'reasoning', id: 'thinking', text: 'Requests are non-blocking; continue independent work.' } },
   { type: 'item.completed', item: { kind: 'tool', id: 'check', name: 'Bash', title: 'Ran npm test', toolKind: 'execute', status: 'completed', output: 'Tests passed', exitCode: 0 } },
   { type: 'item.completed', item: { kind: 'message', id: 'independent', role: 'assistant', text: 'Independent work completed before the reply arrived.' } },
@@ -59,6 +63,8 @@ beforeAll(async () => {
     // The long transcript has its own sender identity, keeping direction truthful.
     seedTranscript(join(root, '.ai/cezar/runs', `${id}.ndjson`), lines.map(line => JSON.stringify(line).replaceAll(parent, id)).join('\n') + '\n')
   }
+  seedTranscript(join(root, '.ai/cezar/runs', `${alpha}.ndjson`), [projection(reqA), projection(reply)]
+    .map((event, n) => JSON.stringify({ seq: n + 1, ts: reply.createdAt, ...event })).join('\n') + '\n')
   const diagnosticEvents = [
     { ...projection(reqA), deliveredAt: '2026-09-20T12:04:00Z' },
     { type: 'conversation-message', delivery: 'queued', message: { ...reqB, kind: 'progress', text: 'Latest worker update' } },
@@ -89,6 +95,26 @@ function waitForFocusedCard(selector: string) {
       ? header.getBoundingClientRect().bottom : main.getBoundingClientRect().top;
     return card.getBoundingClientRect().top >= top - 1 && card.getBoundingClientRect().top < innerHeight;
   })()`)
+}
+
+/** The heights of a virtual row's virtua item and of virtua's list, which is the sum of the
+ *  item sizes virtua has applied. */
+type VirtualRowHeights = { row: number; list: number }
+const virtualRowHeightsExpression = (selector: string) => `(() => {
+  const item = document.querySelector(${JSON.stringify(selector)})?.closest('[data-slot="thread-row"]')?.parentElement;
+  const list = item?.parentElement;
+  return item && list ? { row: item.getBoundingClientRect().height, list: list.getBoundingClientRect().height } : null;
+})()`
+
+function virtualRowHeights(selector: string): VirtualRowHeights {
+  return waitForSettledSample<VirtualRowHeights>(browser, virtualRowHeightsExpression(selector))
+}
+
+/** Waits until virtua has applied a virtual row's new height: its list changed by the same amount.
+ *  A scroll before that windows the rows with the old size and can unmount the row. */
+function waitForVirtualRowMeasured(selector: string, before: VirtualRowHeights) {
+  waitForSettledSample<VirtualRowHeights>(browser, virtualRowHeightsExpression(selector),
+    now => Math.abs(now.row - before.row) > 1 && Math.abs(now.list - before.list - (now.row - before.row)) <= 1)
 }
 
 describe('chronological worker conversation', () => {
@@ -222,6 +248,33 @@ describe('chronological worker conversation', () => {
       }))()`)
       expect(bounds.overflow).toBe(false)
       expect(bounds.targets.every(height => height >= 44)).toBe(true)
+      const closed = browser.waitForValue<string[]>(`[...document.querySelectorAll('[data-slot="conversation-body-toggle"]')].map(el => el.getAttribute('aria-expanded'))`, value => value.length === 2)
+      expect(closed).toEqual(['false', 'false'])
+      focusWithKeyboard(browser, `${request} [data-slot="conversation-body-toggle"]`)
+      browser.press('Enter')
+      const expanded = browser.waitForValue<string>(`document.querySelector('${request} [data-slot="conversation-body"]').textContent`, value => value.includes(reqA.text))
+      expect(expanded).toContain(reqA.text)
+      expect(browser.waitForValue<string>(`document.querySelector('${replyCard} [data-slot="conversation-body-toggle"]').getAttribute('aria-expanded')`)).toBe('false')
+      focusWithKeyboard(browser, `${request} [data-slot="conversation-body-toggle"]`)
+      browser.press('Space')
+      browser.waitForFunction(`document.querySelector('${request} [data-slot="conversation-body-toggle"]').getAttribute('aria-expanded') === 'false'`)
+      // After collapsing the request, render and settle the reply row before pointer clicks.
+      // Evidence: worker-conversation failed with last value "Show message" (bundle
+      // .ai/qa/failures/worker-conversation/keeps-direction-and-interleaved-work-visible-mobile-light-comfortable-1/:
+      // probe.json lastValue="Show message"; snapshot.txt reply toggle expanded=false).
+      // CI run 39991752744, cockpit-failures-shard-1 artifact 12517699947:
+      // https://github.com/hearsay-tools/cezarion/actions/runs/39991752744/artifacts/12517699947
+      // Reproduce: npm run test:e2e -- worker-conversation.e2e.ts -t 'keeps direction and interleaved work visible: mobile-light-comfortable'
+      // CI command: npm run test:e2e -- --shard=1/4; 1 of 1 runs failed before (0db0c8d16),
+      // 1 of 1 passed after (28cab79d9, run 39995644693). Local agent-browser 0.39.2
+      // scratch full-spec runs passed 1 of 1 before and 1 of 1 after; no local red reproduced.
+      hoverVisiblePoint(browser, `${replyCard} [data-slot="conversation-body-toggle"]`)
+      settleVisual(browser, replyCard)
+      browser.click(`${replyCard} [data-slot="conversation-body-toggle"]`)
+      expect(browser.waitForValue<string>(`document.querySelector('${replyCard} [data-slot="conversation-body"]').textContent`, value => value.includes(reply.text))).toContain(reply.text)
+      settleVisual(browser, replyCard)
+      browser.click(`${replyCard} [data-slot="conversation-body-toggle"]`)
+      browser.waitForFunction(`document.querySelector('${replyCard} [data-slot="conversation-body-toggle"]').getAttribute('aria-expanded') === 'false'`)
       focusWithKeyboard(browser, `${replyCard} ${connector}`)
       browser.press('Enter')
       waitForFocusedCard(request)
@@ -235,7 +288,20 @@ describe('chronological worker conversation', () => {
     })
   }
 
-  it('navigates to an unmounted request and back through the virtualizer', () => {
+  it('collapses both incoming requests and outgoing replies in a replayed worker transcript', () => {
+    browser.goto(`${base}/p/${project}/tasks/${alpha}?thread=flat`)
+    const state = browser.waitForValue<{ direction: string; expanded: string; bodyVisible: boolean }[]>(`[...document.querySelectorAll('${card}')].map(el => ({
+      direction: el.dataset.direction,
+      expanded: el.querySelector('[data-slot="conversation-body-toggle"]').getAttribute('aria-expanded'),
+      bodyVisible: !!el.querySelector('.thread-markdown')
+    }))`, value => value.length === 2)
+    expect(state).toEqual([
+      { direction: 'inbound', expanded: 'false', bodyVisible: false },
+      { direction: 'outbound', expanded: 'false', bodyVisible: false },
+    ])
+  })
+
+  it('expands a long body and preserves it across virtual row navigation', () => {
     browser.setViewport(1440, 900)
     browser.goto(`${base}/p/${project}/tasks/${large}?thread=virtual`)
     browser.waitForFunction(`document.querySelector('${replyCard}') !== null && document.querySelector('[data-virtualized="true"]') !== null`)
@@ -246,6 +312,43 @@ describe('chronological worker conversation', () => {
     const top = waitForSettledSample<number>(browser, `document.querySelector('${request}').getBoundingClientRect().top`)
     expect(top).toBeGreaterThanOrEqual(0)
     expect(top).toBeLessThan(500)
+    focusWithKeyboard(browser, `${request} [data-slot="conversation-body-toggle"]`)
+    const collapsed = virtualRowHeights(request)
+    browser.press('Enter')
+    const body = browser.waitForValue<{ height: number; text: string; reference: string | null }>(`(() => {
+      const body = document.querySelector('${request} [data-slot="conversation-body"]');
+      return { height: body.getBoundingClientRect().height, text: body.textContent,
+        reference: body.querySelector('a')?.getAttribute('href') ?? null };
+    })()`, value => value.text.includes('final line of the request'))
+    expect(body.height).toBeGreaterThan(900)
+    expect(body.text).toContain('Paragraph 44')
+    expect(body.reference).toBe('https://example.com/')
+    // Let virtua apply the expanded height before the Tab start scrolls: a scroll first
+    // windows the rows with the collapsed height and unmounts this card. Evidence:
+    // worker-conversation failed with "focus never reached … it is on
+    // button.pointer-events-auto.inline-flex.min-h-11" (bundle
+    // .ai/qa/failures/worker-conversation/expands-a-long-body-and-preserves-it-across-virtual-row-navigation-1/:
+    // probe.json active element data-slot="jump-to-latest"; snapshot.txt has no conversation card;
+    // CI run 40017980734, cockpit-failures-shard-1 artifact 12530555246,
+    // hearsay-tools/cezarion#1573). Reproduce with an AGENT_BROWSER_INIT_SCRIPTS script that holds
+    // ResizeObserver callbacks for 1.5 s from the expanding Enter, on
+    // `npm run test:e2e -- worker-conversation.e2e.ts -t 'expands a long body'`:
+    // 5 of 5 runs failed before, 5 of 5 passed after.
+    waitForVirtualRowMeasured(request, collapsed)
+    focusWithKeyboard(browser, `${request} ${connector}`)
+    browser.press('Enter')
+    waitForFocusedCard(replyCard)
+    browser.waitForFunction(`document.querySelector('${request}') === null`)
+    focusWithKeyboard(browser, `${replyCard} ${connector}`)
+    browser.press('Enter')
+    waitForFocusedCard(request)
+    expect(browser.waitForValue<string>(`document.querySelector('${request} [data-slot="conversation-body-toggle"]').getAttribute('aria-expanded')`)).toBe('true')
+    focusWithKeyboard(browser, `${request} [data-slot="conversation-body-toggle"]`)
+    const expanded = virtualRowHeights(request)
+    browser.press('Space')
+    browser.waitForFunction(`document.querySelector('${request} [data-slot="conversation-body-toggle"]').getAttribute('aria-expanded') === 'false'`)
+    // The collapse changes the row height too.
+    waitForVirtualRowMeasured(request, expanded)
     focusWithKeyboard(browser, `${request} ${connector}`)
     browser.press('Enter')
     waitForFocusedCard(replyCard)

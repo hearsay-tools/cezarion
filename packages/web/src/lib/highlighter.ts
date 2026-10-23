@@ -1,26 +1,9 @@
 import type { HighlighterCore } from 'shiki/core'
 
 /**
- * The ONE Shiki highlighter for the whole cockpit (spec, "Task thread" tech picks;
- * `.ai/analysis/cockpit-ui-redesign/diff-highlight-tech.md` §1). The thread's markdown code
- * blocks consume it now; R5's diff views share it — a second `createHighlighterCore` call
- * anywhere is a bug (it would instantiate the engine and re-fetch grammars twice).
- *
- * Bundle rules this module exists to enforce:
- *  - fine-grained core only (`shiki/core`), never the full `shiki` bundle — the full bundle
- *    lands every grammar in `dist/`;
- *  - the JavaScript regex engine, never the Oniguruma WASM blob (~600 KB it doesn't need);
- *  - core, engine and every grammar load through dynamic `import()`, so all of Shiki lives in
- *    lazy chunks off the main bundle — a thread with no code block downloads none of it;
- *  - grammars load on demand per fence language, from the explicit allowlist below (a fully
- *    dynamic `import(\`@shikijs/langs/${lang}\`)` would chunk-split all ~200 grammars);
- *  - every unknown language falls back to plaintext — LLMs invent fence infos (```console,
- *    ```jsonc-with-comments), and an unknown tag must cost highlighting, not a crash.
- *
- * Theming: ONE theme whose token colors are the `--syn-*` CSS variables from
- * `styles/index.css`. The variables flip with the `.light` class (Option B dual theme — not
- * `light-dark()`, which follows `color-scheme` rather than our class), so code highlighted once
- * re-themes instantly with zero JS — the opencode pattern the research singled out.
+ * One lazy Shiki core with the JavaScript regex engine and an explicit grammar allowlist.
+ * Unknown languages use plaintext. Share the CSS-variable theme and instance across Markdown and
+ * diff surfaces.
  */
 
 /** A highlighted line: what both the markdown code blocks and R5's diffs render. */

@@ -62,16 +62,34 @@ those locks, so avoid one while an update is preparing or restarting.
 
 Click any thumbnail for the full-size screenshot.
 
-| Orchestrate parallel agents | Watch a run live | Parallel variants |
-|:--:|:--:|:--:|
-| [![The Tasks view — two projects on the rail, running and queued tasks with queue positions, per-run tokens, cost and peak memory, pull requests, and a ×2 variant group](docs/screenshots/task-view.png)](docs/screenshots/task-view.png) | [![A running task streaming agent text, tool calls and test output live](docs/screenshots/live-run.png)](docs/screenshots/live-run.png) | [![Two competing variants of the same task compared side by side — pick the winner](docs/screenshots/variants-compare.png)](docs/screenshots/variants-compare.png) |
-| *Run and queue many tasks at once — each in its own worktree — with live status, cost and peak memory per run.* | *Every step, tool call, token and screenshot — streamed as it happens.* | *Run a task ×2/×3 in isolated worktrees, compare the diffs, keep one.* |
-| **Workflow builder** | **GitHub, one click away** | **Skills + fire-and-forget** |
-| [![The workflow builder — drag skills into an ordered chain of agent steps and shell checks](docs/screenshots/workflow-builder.png)](docs/screenshots/workflow-builder.png) | [![The GitHub tab — hand an open issue to the agent with a workflow and skills](docs/screenshots/github-issues.png)](docs/screenshots/github-issues.png) | [![The task composer — pick a skill playbook, a runner and a model, and flip the Autonomous flag to run unattended](docs/screenshots/skills-autonomous.png)](docs/screenshots/skills-autonomous.png) |
-| *Stitch skills and shell checks into a reusable YAML chain, no code.* | *Open issues and PRs via your `gh` — run the agent straight on an issue.* | *Pick a Markdown skill and flip **Autonomous** — the run never stops to ask, so you can walk away.* |
+| Orchestrate parallel agents | Watch a run live |
+|:--:|:--:|
+| [![The Tasks view with running and queued tasks](docs/screenshots/task-view.png)](docs/screenshots/task-view.png) | [![A running task streaming agent text, tool calls and test output](docs/screenshots/live-run.png)](docs/screenshots/live-run.png) |
+| *Run and queue tasks in isolated worktrees, with live status and resource use.* | *Every step, tool call, token and screenshot streams as it happens.* |
+| **Workflow builder** | **GitHub, one click away** |
+| [![The workflow builder](docs/screenshots/workflow-builder.png)](docs/screenshots/workflow-builder.png) | [![The GitHub tab](docs/screenshots/github-issues.png)](docs/screenshots/github-issues.png) |
+| *Stitch skills and shell checks into a reusable YAML chain.* | *Hand an issue to an agent through your own `gh` login.* |
 
 ---
 
+## Generated inbox removed
+
+The generated follow-up Inbox is removed in the next breaking minor release, **0.17.0**
+(hearsay-tools/cezarion#1543). There is no deprecation window for this removal.
+Remove `CEZ_FOLLOWUPS` from your launch environment; it no longer enables anything.
+Agents receive no suggestion-generation instructions or usable `CEZ_TODOS_FILE`.
+The todo API routes, `todos` SSE events, `capabilities.followups`, and task-creation
+fields `generateFollowups` and `todoId` are removed. Remove those fields from scripts
+and automation templates. Historical run records remain readable and resumable.
+Upgrades leave `.ai/cezar/todos.json` untouched. If that file exists, export its original
+contents from the project directory with:
+```bash
+cp .ai/cezar/todos.json ./cezar-followups-export.json
+```
+Old Inbox URLs show this guidance. Create an ordinary task with **New task**, or use
+an issue-authoring skill to record work in your tracker. Task **Notes**, the rolling
+handoff journal, **Continue**, live follow-up messages, and `cez worker inbox` remain
+available.
 ## What Cezarion does best 🏆
 
 Plenty of tools wrap a single coding agent in a nicer window — a "Codex GUI", a
@@ -112,16 +130,16 @@ and an orchestrator keeps a whole queue of them moving.
 - 🗂️ **A backlog that needs babysitting.** Queue a stack of tasks and Cezarion
   **orchestrates** them: it runs up to your parallel limit and holds the rest in
   an ordered queue. Point it at a GitHub issue and it runs straight on that, so
-  working the tracker down stops being a manual chore. Turn on the opt-in
-  **Inbox** (`CEZ_FOLLOWUPS=1`) and an agent's leftover follow-ups become the
-  next tasks too — one click each.
+  working the tracker down stops being a manual chore. Create ordinary tasks for
+  the work you choose to run next.
 - 🤖 **"Autonomous" means you still have to sit there.** Flip the **Autonomous**
   flag and a run never parks to ask — it keeps going until the task is done. Pair
   it with a **skill** (a Markdown playbook) and you've got fire-and-forget
   automation: hand off "fix this", "upgrade that", "triage these" and walk away.
 - ✅ **The agent finishes and you have to trust it.** Every task's diff stays on
   its own branch: inspect it, send notes back into the same session, or push a
-  **draft PR** — never an auto-merge. Turn on the optional **review gate**
+  **draft PR**. Auto merge is off by default; each task can opt in to merge after Done.
+  Turn on the optional **review gate**
   (`CEZ_REVIEW_GATE=1` or Settings → Agents) and a finished run with changes
   waits in `review` for you.
 - ♻️ **Losing a session when it fails.** Every run records its `claude` session id.
@@ -178,6 +196,7 @@ the [`codex` CLI](https://github.com/openai/codex),
 cd your-repo
 npx cezarion               # start the cockpit for the current repo
 #   or: npx @wjarka/cezarion
+
 ```
 
 The cockpit opens at `http://localhost:4321`. If the requested port is occupied,
@@ -206,7 +225,7 @@ CLIs you are already logged into, `claude` by default.
 
 > **Just kicking the tires?** Set `CEZ_DRY_RUN=1` to run against a bundled mock
 > instead of the real CLI — the whole cockpit works with no `claude` login, so
-> you can explore runs, diffs and variants offline.
+> you can explore runs and diffs offline.
 
 ### Nightly builds — help us shape Cezarion 🌙
 
@@ -228,7 +247,7 @@ most of the features here got their final shape.
 packaged-CLI e2e — the same gate a release runs) but it is *not* a release: it
 can be rough, a flag or a screen may change under you, and something occasionally
 breaks in a way no test caught. Nothing is at risk beyond your patience — every
-task runs in its own git worktree and Cezarion never auto-merges — but if you need a
+task runs in its own git worktree and auto merge is off by default — but if you need a
 boring day, stay on the stable release. Pin a nightly you liked with its exact
 version (`npx cezarion@<nightly-version>` — the cockpit prints the
 version it booted, and the date in it tells you how old the build is), and drop
@@ -289,8 +308,9 @@ you to inspect.
 ```
 
 When a check fails, the workflow can loop back to an earlier step (bounded by
-`max`) with the failing output appended to the retried agent's prompt. Nothing
-auto-merges: a finished run's changes stay on its branch until you act on them.
+`max`) with the failing output appended to the retried agent's prompt. By default,
+a finished run's changes stay on its branch until you act on them. A task can opt
+into merging its PR after Done, subject to current-head CI and GitHub rules.
 With the optional review gate on, a run with changes rests in `review` instead
 of `done`.
 
@@ -307,8 +327,9 @@ Three words, no jargon — **task**, **skill**, **chain**:
   the agent gets each one as a real file on disk), or send follow-up messages into
   the live session while it works.
 - 📖 **Skills** are Markdown playbooks. Drop them in `.ai/skills/` or
-  `.ai/cezar/skills/`, or pull them from a shared **team skills repo** (a bare
-  git clone cached globally in `~/.cache/cez/`). A workflow step references one by
+  `.ai/cezar/skills/`, or pull them from a shared **team skills repo** you name
+  in `skillsRepos` (a bare git clone cached globally in `~/.cache/cez/`). There is no
+  default team repo, and each team skill has its own on/off switch per project. A workflow step references one by
   `skill: <name>` and its body becomes the agent's extra system prompt — so you
   shape *how* the agent reasons without touching code.
 - 🔗 **Chains (workflows)** stitch steps into a pipeline: agent steps plus shell
@@ -332,18 +353,15 @@ The moves that make the cockpit worth the browser tab:
   is *paused* — freeing its tree so the queue keeps advancing — and resumes on
   demand. Event logs are append-only NDJSON and streamed rather than re-serialized,
   and live UI deltas are coalesced so they never hit disk.
-- 🪞 **Parallel variants (×2 / ×3).** Run the same task as competing agents in
-  separate worktrees, then compare their diffs side by side and **pick** one —
-  the losers are archived and their worktrees cleaned up.
 - 🧹 **Bounded worktree disk.** Each task runs in its own full checkout, so a busy
   cockpit would otherwise grow without limit. Cezarion keeps only the last
   `worktreeRetention` **finished** worktrees on disk (default **10**; `0` =
   unlimited) and reclaims the rest — directory only, the `cez/<id8>` branch is
   always kept, so the work stays recoverable. Settings → Resources shows every
   worktree's disk use with per-row delete and a **Reclaim now** button.
-- 🛡️ **You stay the merge button.** Read a finished run's diff, type notes that go
+- 🛡️ **You control merging.** Read a finished run's diff, type notes that go
   straight back into the agent's session, or push a `gh pr create --draft`.
-  Nothing auto-merges. The **review gate** is optional (`CEZ_REVIEW_GATE=1`, or
+  Auto merge is off by default and requires a task to opt in. The **review gate** is optional (`CEZ_REVIEW_GATE=1`, or
   Settings → Agents): with it on, a successful run with changes parks in `review`
   until you accept it. Autonomous runs always skip it.
 - 🗂️ **Every project in one cockpit.** One `cez serve` hosts every repo you
@@ -364,16 +382,15 @@ The moves that make the cockpit worth the browser tab:
 
 ## Cockpit tour
 
-Eight views, one browser window, all live over Server-Sent Events (seven until you opt into the Inbox):
+Task and project views share one browser window and live updates over Server-Sent Events:
 
 | View | What's in it |
 |---|---|
 | **Tasks** | Every task with its status, live event stream (agent text · tool calls · tool results · pasted/generated screenshots and file attachments), tokens and cost. Continue, cancel, open in terminal (`claude --resume`), review the diff, or push a draft PR. |
 | **All tasks** | Every *registered project's* tasks in one table, filtered and grouped by tag, project, status or workflow — see [Grouping connected repositories](#grouping-connected-repositories-tags-and-the-all-tasks-page). Appears once a second project is registered. |
-| **Inbox** | **Opt-in** (`CEZ_FOLLOWUPS=1`; hidden by default). Follow-ups an agent left behind (`todos.json`) — one click turns a suggestion into the next task, pre-wired to its suggested skill. Off, agents are never asked to leave follow-ups; each task's own **Notes** handoff journal is unaffected. |
 | **Git** | Branch, working-tree status, diff vs HEAD, recent commits (click one for its inline patch + GitHub link), and the configurable base branch that worktrees fork from and PRs target. |
 | **GitHub** | Open issues and PRs of the repo's origin, read through your logged-in `gh`. Hand an issue straight to the agent — pick a workflow and skills, one click runs it. |
-| **Skills** | Local skills plus the team skills repo, with a rendered body + prompt preview. Refresh pulls the latest from the remote. |
+| **Skills** | Local skills plus any team skills repos you configured, each team skill with a per-project switch, and a rendered body + prompt preview. Refresh pulls the latest from the remote. |
 | **Workflows** | Build a chain by drag-ordering skills, save it as portable YAML, import/export, or delete. Built-ins always come back. |
 | **Settings** | Appearance (dark/light theme, accent, density), agent backends, notifications, and the skills catalog. |
 
@@ -699,6 +716,32 @@ For operators, the command finds the running cockpit for the current checkout; `
 
 The catalog describes host default accounts, not every named account or the selections permitted by a task's model locks and workflow pins.
 
+## Parallel variant removal
+
+Parallel variants (×2/×3) are removed in the next breaking minor release (0.17).
+The owner chose immediate removal without a deprecation window
+(hearsay-tools/cezarion#1542). The composer starts one task. `POST /api/v1/runs`
+refuses `variants: 2` or `3` with `400`; it never turns them into one candidate.
+The old `variants: 1` spelling still means an ordinary run. Winner selection
+returns `410` and cannot cancel, archive or remove any result.
+
+Historical `groupId` and `variant` fields remain readable. Old `/compare/:groupId`
+links, including project-scoped links, open retained results with links to each task's
+transcript, diff and commits. No retirement migration deletes runs, branches or worktrees;
+normal retention and explicit cleanup still apply. Saved multi-candidate drafts and
+automations offer **Use one task** before saving or launching. A saved automation with
+`task.variants > 1` reports an error on launch; edit it to remove that field or set it to `1`.
+
+For explicit comparison, ask a task: “Spawn two owned workers from the same committed
+baseline. Try a minimal change and a structural approach. Collect both results and
+compare their diffs. Show me the commits to choose from before integration and cleanup.”
+The parent uses `cez worker spawn`, `collect` and `diff`, reviews the chosen commits,
+integrates them with Git, then uses `cez worker destroy` for verified cleanup. Read
+`diffSnapshot` from an available collection's JSON file rather than applying that file
+as a patch. Collect each worker's latest settled revision before finishing. Owned workers
+keep their ownership, isolation, resource limits and Git cleanup safeguards. There is
+no one-click comparison page, automatic winner selection or automatic loser cleanup.
+
 ## Owned workers (opt-in)
 
 Start the cockpit or a headless task with `CEZ_DELEGATION=1`. Each eligible parent session receives the absolute bundled Node/CLI invocation and its own environment credentials; no `cez` installation on the agent's PATH, config file, separate daemon, or remembered port is needed. If the private listener cannot start, ordinary tasks keep working without delegation tools. `.env` is never loaded automatically.
@@ -751,7 +794,6 @@ Messages reach a live recipient as soon as they are accepted, including mid-turn
 
 Sending to a review or terminal participant without `--resume` reports `not-delivered` and `continuation-required`, with the reason and next command; the CLI exits 1. An active parent can use `worker send --resume` (request or progress) to continue its settled done/review/failed worker with that message as the new instruction. No human Continue is needed for this parent-controlled action. A retry with the same payload and ID never creates another continuation; changing a rejected send to use `--resume` requires a new ID. Stopped or destroyed workers need a new worker. Workers cannot resume parents, and conversation never answers a pending human question. Durable IDs deduplicate accepted queue entries and event replay, but a crash between provider acceptance and its durable delivery checkpoint can leave transport delivery ambiguous; this is not an exactly-once execution guarantee.
 
-
 Collect returns the worker's execution revision, status/outcome, `settled` and `partial` flags, and typed availability for assistant summary, HEAD, bounded diff and artifact descriptors. Missing evidence is explicit; running output is partial. An available `diff.path` points to a **JSON result file** containing `{ result, diffSnapshot }`; its `diffSnapshot` field holds the patch. Read and review that field before applying any changes. The latest collected result is stored under the parent and survives restart. Collection acknowledges observation, not Git integration or successful work. Review desired worker commits and deliberately integrate them into the parent before destroying their worktrees/branches; there is no automatic merge.
 
 Parent completion requires collection of every worker's latest settled execution revision. A worker Continue invalidates older readiness. An early completion attempt waits for outstanding workers and wakes the parent to inspect/collect; it does not silently finish on wake. While workers remain live, markerless replies, completion timeouts, and repeated premature completion park the parent as monitoring with the existing capped wakeups. Once workers settle, repeated completion without collecting their results retains attention. Human Finish also refuses unresolved/uncollected workers. If the parent is already under review, Continue the parent first, then Continue its worker. Human questions remain authoritative.
@@ -759,7 +801,6 @@ Parent completion requires collection of every worker's latest settled execution
 Stop requests cancellation; `stopping` does not prove termination. Destroy checkpoints obtainable results, waits up to 30 seconds for proven termination, and removes only verified owned resources. An `incomplete` response lists remaining resources; resolve the cause and retry explicitly. Cleanup order is: collect/integrate desired results, destroy owned resources, explicitly delete child histories through the cockpit/API, then delete parent history. Parent-owned summaries and bounded diff snapshots remain until parent deletion, including after child-history deletion; general artifact bytes are not archived. Branch/path strings and SHAs become historical descriptors after removal, not promises of available Git objects or files. The human cleanup endpoint `POST /api/v1/p/<projectId>/runs/<worker-id>/worker-destroy` stays available when delegation is disabled. The CLI bounds each HTTP request to 45 seconds and rejects endpoint/auth/origin overrides and redirects.
 
 Provisioned sessions prefer Cezarion workers and suppress verified native delegation entry points through per-run adapter controls: Claude `Agent`, legacy `Task` and `Workflow` denies, Codex multi-agent feature overrides, OpenCode session `task` denies, and pi's known `subagent` extension exclusion. Claude skills and commands with `context: fork` are not blocked: Claude starts their subagent without checking those denies, and no setting turns forking off. See [the backend capability table](AGENT_PROTOCOL.md#governed-delegation-controls-d1) for tested versions and exemptions. Native workers are not tracked by Cezarion. Pi has no native delegation primitive or universal identifier for arbitrary custom delegation extensions; guidance does not enforce those cases. With delegation disabled or unavailable, ordinary tools/settings stay unchanged. The listener binds to `127.0.0.1`, including hosted cockpit mode. Its credentials authorize only the parent's own workers through that listener. This is cooperative local-agent supervision; same-user unrestricted shell and custom tools are not hard isolation. Workers cannot delegate or message peers through Cezarion. Review remains a human gate with no automatic acceptance. Never read, echo, forward, or persist the generated token.
-
 
 ## From the terminal: `cez task`
 
@@ -825,9 +866,19 @@ Without either flag, `start` still runs `quick-task`.
 `cez discover --runner`; `--model` and `--effort` pin the rest. `--backend` is a permanent
 alias of `--runner` with no warning. Giving both with different values exits 64.
 
+`--archive-when-done` archives the task after **Done**. `--auto-merge-pr` merges its
+PR after **Done** only when current-head CI and GitHub rules pass. It can mark a
+draft PR ready. Both controls are off by default. They also appear as switches in
+the task composer and task details. With both on, Cezarion merges before it archives;
+without a PR, it archives on Done. Pending or blocked completion actions show their
+reason in task details. Use `status <id> --full` to read the saved `archiveWhenDone`,
+`autoMergePr` and `completionAction` fields. Existing task choices can be changed
+through `PATCH /api/v1/p/:projectId/runs/:id` with the matching boolean fields.
+
 `start` is retry-safe: it sends a request id (`--request-id <UUID>` to pick your own), and a
-retry with the same id and task answers with the run the first one created (`created: false`)
-instead of starting a second. Also: `list`, `stop`, `finish`, `diff [--stat]`, `open`.
+retry with the same id and start options answers with the run the first one created
+(`created: false`) instead of starting a second. Changing a completion control on that
+retry is a payload conflict. Also: `list`, `stop`, `finish`, `diff [--stat]`, `open`.
 Use `archive <id>` to hide a task from `list`, `unarchive <id>` to restore it, and
 `list --all` to include archived tasks. `list` never shows owned workers, with or without
 `--all`: they are steer targets of their parent task. Id-addressed commands (`status`, `wait`,
@@ -926,6 +977,13 @@ it is given, except `task`, which merges key by key (`null` removes one); it res
 and echoes the revision it read, so a concurrent edit in the cockpit is refused (exit 2), never
 overwritten. Mutating commands print the automation's cockpit page as `url`.
 
+`add` accepts `--archive-when-done` and `--auto-merge-pr` with the same behavior as
+`cez task start`. The JSON keys are `task.archiveWhenDone` and `task.autoMergePr`.
+Both are optional booleans and default to off. The automation editor has the same
+switches. Editing these choices affects future tasks only; it does not change tasks
+the automation already launched. Enabling an automation or making its tasks autonomous
+does not enable either completion control.
+
 GitHub automations exclude events before enablement by default. Turn on **Include existing items**
 in the editor, pass `--include-existing` to `add`, or set `"filters": {"includeExisting": true,
 "lookbackDays": 7, "maxRecords": 25}` in a JSON definition to include older matches within the
@@ -955,7 +1013,7 @@ one-time schedules with the `cezar_schedule_task` and `cezar_scheduled_tasks` to
 only with `CEZ_AUTOMATIONS=1` and also create schedules paused unless the user asked for them to run.
 
 Automation list counters use two windows. **Launched** counts every stored task with that
-automation's provenance, across definition revisions, including each variant, completed and
+automation's provenance, across definition revisions, including historical variants, completed and
 archived tasks. Restarting or compacting automation logs and receipts does not change it;
 deleting a task removes it from the count. **Matches**, **Duplicates** and **Errors** describe
 only that automation's latest 100 activity-log rows. Recent activity remains a separate log view.
@@ -1050,7 +1108,6 @@ Useful environment variables:
 | `CEZ_APPROVAL_GATE=1` | Opt into Claude's interactive approval UI; by default, unapproved tools are denied without interrupting the run. Ignored when `CEZ_CLAUDE_PERMISSION_MODE` is a recognized value (`dontAsk`, `acceptEdits`, or `bypass`). |
 | `CEZ_CLAUDE_PERMISSION_MODE` | Claude agent-run permission flag: `dontAsk` (default), `acceptEdits`, or `bypass`. `bypass` passes `--dangerously-skip-permissions` and omits `--permission-mode`. Unset or unknown keeps today's `dontAsk` / `CEZ_APPROVAL_GATE` path. Provider verification commands are never given this flag. |
 | `CEZ_CLAUDE_SETTING_SOURCES` | When set, Claude agent runs also pass `--setting-sources <value>` (e.g. `user,project,local`). Unset or empty omits the flag. Provider verification is never given this flag. |
-| `CEZ_FOLLOWUPS=1` | Turn on the global follow-up **Inbox**: agents are asked to leave follow-ups in `todos.json` when they finish, and the Inbox view appears. Off by default — each task's own **Notes** handoff journal runs either way. |
 | `CEZ_ARCHIVE_ON_MERGE=1` | Archive settled task families after all associated pull requests merge. Off by default; only `1` enables this environment default. Saved project settings override global Tasks settings, which override the environment. Runs in the background while the cockpit is open, including unopened projects, without starting agents. Unarchive preserves restored tasks until a later merge. |
 | `CEZ_AUTOMATIONS=1` | Turn on **automations** (GitHub polls and schedules): the Automations view appears and Cezarion runs each enabled automation while it is open, launching an ordinary task per match or per occurrence. A schedule (daily, weekdays, weekly, every N hours, in the server's time zone, or once at a set time in a named zone) needs no GitHub remote; a GitHub automation polls on its interval. Off by default, and only the exact value `1` enables it — without it nothing polls or fires, the automations endpoints answer `409`, and the nav item is absent. Read at boot, so restart after changing it; definitions, receipts and high-watermarks are retained, so unsetting it and restarting restores the feature without migration or data loss. |
 | `CEZ_VOICE=1` | Turn on **voice mode** (experimental): the ⌘K palette understands a sentence such as “open the next finished task” or “answer yes”, and the server asks Jev (TypeSafe) to turn it into one action that the cockpit shows and runs. Needs `TYPESAFE_API_KEY` (read by the server only; `CEZ_DRY_RUN=1` uses a fake engine instead). Off by default, and only the exact value `1` enables it — without it the voice endpoints answer `409` and the palette is unchanged. Read at boot, so restart after changing it. |
@@ -1066,7 +1123,6 @@ Useful environment variables:
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`, `OMP_PROFILE` | The agents' **own** variables, honoured where the vendor documents one. Setting one moves that agent's **default account** — the config folder (for omp, the profile) Cezarion discovers. A *second* login of the same CLI is deliberately not an environment setting, since one process-wide value cannot differ per project: add it under **Settings → Agent accounts** and pick it per project. |
 | `CEZ_BROWSE_ROOT=~/` | Default root for **Add project → Open local folder…**. The picker cannot navigate above it; a saved workspace value overrides the environment default and must name an existing folder. |
 | `CEZ_PROJECTS_DIR=~/cezar/projects` | Default destination for **Clone from GitHub** and **New project**. Saved workspace settings override it, and missing directories are created recursively. |
-| `CEZ_SKILLS_AUTO_UPDATE=0` | Disable automatic checks and updates for upstream-CLI-tracked Open Mercato skill installations. On by default; a saved global Skills setting overrides this environment default. Checks are delayed, bounded, cached, and non-blocking. |
 | `CEZ_PROJECT_WARMUP=0` | Prepare each registered project only when it is first opened. By default the cockpit prepares every other registered project in the background once it listens, one at a time, most recently opened first: the run store opens and interrupted runs resume, so the first click on a project does not wait. A project another live cockpit serves is skipped. |
 | `CEZ_AUTONOMOUS_DEFAULT=0` | Seed the New Task Autonomous default (`0` or `1`). Without a seed, skills default on and workflows off; a saved global Resources setting overrides it. |
 | `CEZ_WORKTREE_DEFAULT=1` | Seed the New Task Worktree default (`0` or `1`). Without a seed, eligible runs default on; a saved global Resources setting overrides it. |
@@ -1083,7 +1139,6 @@ Useful environment variables:
 | `CEZ_TITLE_UPDATES=0` | Turn off the live task-title refresh (namer re-runs on each turn end). The Settings → Agents toggle overrides this default. |
 | `CEZ_AUTONAME=0` | Disable ALL LLM task naming (creation + live) — titles stay heuristic (`437: /om-auto-review-pr`). Under `CEZ_DRY_RUN=1` naming is already off unless forced with `CEZ_AUTONAME=1`. |
 | `CEZ_REVIEW_GATE=1` | Turn ON the optional diff-first review gate (open-mercato/cezar#489): a successful, non-autonomous run with changes parks at `review` (Accept / Send back / Draft PR) instead of finishing. Off by default — changed runs settle to `done` with the diff left in the worktree. Only `1` enables. The Settings → Agents toggle overrides this; autonomous runs always skip it. |
-| `CEZ_NO_BANNER=1` | Skip the `open-mercato/skills` banner on `cez serve` startup. (The cockpit no longer shows a banner — its skills now live on the Skills page's Manage panel — so this env var is the terminal banner's only switch.) |
 | `VITE_CEZ_API_BASE=http://localhost:4321` | **Build time only**, and only when the cockpit bundle is deployed apart from the service it talks to. Empty (the default) means "the origin that served this page", which is right for both normal cases: the CLI serves the bundle itself, and `npm run dev` proxies `/api` to the local service. A deployment that must be configured without a rebuild can put `<meta name="cez-api-base" content="…">` in the served HTML instead, which wins over this. |
 | `VITE_CEZ_E2E=1` | **Build time only.** The cockpit e2e suite sets this when it builds the bundle it drives. It pins `useNow` and every `refetchInterval` so a wait cannot span a 30s tick or a 4s poll. Leave unset for production. |
 
@@ -1195,7 +1250,6 @@ documents `CURSOR_CONFIG_DIR` and the Linux/BSD `XDG_CONFIG_HOME/cursor` overrid
 These select configuration; Cezarion does not offer alternate Cursor account profiles
 because a complete credential-and-session home override has not been verified.
 
-
 ### OMP (Oh My Pi)
 
 Install [OMP](https://github.com/can1357/oh-my-pi) (`curl -fsSL https://omp.sh/install | sh`
@@ -1237,8 +1291,8 @@ steps:
     onFail: { retry: implement, max: 2 }
 ```
 
-Parallel variants (×2/×3) of one task share that task's backend — mixing
-happens per task and per step, not inside a variant group.
+Owned workers can compare approaches in separate worktrees. Each worker has its own
+runner and model selection; see [Owned workers](#owned-workers-opt-in).
 
 **Models come from your own machine.** For Claude, Codex, OpenCode, and Pi, the model picker
 is not a list Cezarion ships — it asks the installed CLI what it can actually run
@@ -1275,6 +1329,7 @@ npx cezarion server-deploy    --platform ubuntu-vps   # roll out a new version (
 npx cezarion server-uninstall --platform ubuntu-vps   # reverse it
 
 # host a SECOND cockpit for another domain on the same box (ubuntu-vps):
+
 npx cezarion server-install   --platform ubuntu-vps --domain shop.example.com
 ```
 
@@ -1343,7 +1398,7 @@ never blocks startup):
 
 ```jsonc
 {
-  "skillsRepos": [{ "repo": "open-mercato/skills", "ref": "main" }], // team skills; [] disables
+  "skillsRepos": [], // team skills; none by default. Example: [{ "repo": "open-mercato/skills", "ref": "main" }]
   // Team-skill repos are code-trusted: a skill body becomes an agent system prompt.
   // Only owner/name, https/ssh URLs, or local paths (`/abs`, `./rel`, `~/dir`,
   // `C:\dir`) are accepted — no ext::/fd:: transport helpers. Write a relative
@@ -1481,6 +1536,7 @@ your PATH pointing at *this checkout*:
 ```bash
 npm run install-as-command            # live link (default) — see the change loop below
 #   or: npm run install-as-command:global   # self-contained snapshot copy
+
 ```
 
 Now `cd` into any other repo and run it:

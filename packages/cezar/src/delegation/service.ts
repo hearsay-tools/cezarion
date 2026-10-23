@@ -70,10 +70,8 @@ import { DESTROY_ATTENTION_ATTEMPTS, DESTROY_BACKOFF, retryDelayMs, type Backoff
 export type DelegationProject = { id: string; root: string; store: RunStore; manager: RunManager };
 
 /**
- * The catalog definition a spawn runs (#451): the built-in quick-task constant when the request
- * names neither workflow nor skill — never the catalog's `quick-task` entry, so a repo file cannot change the default
- * path — else the named workflow or a one-step discovered skill task. Every agent step resolves its own runner and account (#452), so a
- * chain may mix providers; a chain with no agent step has nothing for a worker to run.
+ * Resolve an explicit workflow or skill. With neither, use the built-in quick-task constant, not
+ * a repo override. Require at least one agent step and resolve its runner/account independently.
  */
 async function resolveSpawnWorkflow(project: Pick<DelegationProject, 'root' | 'manager'>, request: WorkerSpawnRequest): Promise<WorkflowDef> {
   const root = project.root;
@@ -91,11 +89,9 @@ async function resolveSpawnWorkflow(project: Pick<DelegationProject, 'root' | 'm
 
 type WorkerGrants = { allowedTools?: string[]; bashAllowlist?: string[] };
 /**
- * A step's authored tools narrow the parent's grants and never widen them: the parent's
- * permissions bound every worker session (#430). A step that authors nothing inherits the
- * parent's grants exactly; an authored list keeps only what the parent may use, where an absent
- * parent `allowedTools` means the backend's default set and an absent `bashAllowlist` means
- * unrestricted Bash, which any authored allowlist is narrower than.
+ * Intersect authored step grants with parent grants. Unset step grants inherit; unset parent
+ * tools use the runner default and unset Bash rules mean unrestricted Bash. Native enforcement
+ * remains runner-specific.
  */
 function narrowGrants(parent: WorkerGrants, step: WorkflowStepDef, runner: RunnerId): WorkerGrants {
   const parentTools = step.allowedTools === undefined ? parent.allowedTools : parent.allowedTools ?? allowedToolsForStep(undefined, runner);
@@ -109,9 +105,8 @@ function narrowGrants(parent: WorkerGrants, step: WorkflowStepDef, runner: Runne
 type ResolvedSpawnStep = { step: WorkflowStepDef; settings: DelegationExecutionSettings; grants: WorkerGrants };
 
 /**
- * Resolve every agent step of the chain once, before acceptance (#452). The spawn selection fills
- * only what a step leaves unset; a step's own runner, model, effort and account win. Equal
- * selections share one resolution so a ten-step single-runner chain reads the registry once.
+ * Resolve each agent step before acceptance. Step choices override spawn defaults; equal
+ * selections share resolution. Bind account, runner, model, effort and narrowed grants together.
  */
 async function resolveSpawnSteps(manager: RunManager, parentId: string, request: WorkerSpawnRequest, workflow: WorkflowDef, validateModel: (step: WorkflowStepDef, settings: DelegationExecutionSettings) => Promise<void>): Promise<ResolvedSpawnStep[]> {
   const cache = new Map<string, Promise<DelegationExecutionSettings>>();
@@ -579,7 +574,7 @@ export class DelegationService {
           title: request.task.slice(0, 200), task: context ? workerContextTask(request.task, context) : request.task, workflow: workflowDef.name,
           runner: settings.runner, model: settings.model, effort: settings.effort, agentProfile: identity.account.profileId,
           systemPrompt: settings.systemPrompt, workflowDef,
-          autonomous: parent.autonomous, generateFollowups: parent.generateFollowups,
+          autonomous: parent.autonomous,
           steps: workflowDef.steps.map(step => ({ id: step.id, name: step.name ?? step.id, kind: stepKind(step) })),
         }, parent.id, request.requestId, { role: 'worker', permissions: [], parentRunId: parent.id, workspace, ...(context ? { context } : {}) }, requestHash, {
           ...identity, ...(context ? { contextHash: workerContextHash(context) } : {}),

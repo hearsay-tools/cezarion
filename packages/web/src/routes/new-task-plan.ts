@@ -79,11 +79,8 @@ export function planTaskLine(task: string, max = 120): string {
 /**
  * The exact `POST /api/runs` body for an approved plan: the edited steps INLINE (never a
  * workflow name — the chain may be unsaved), plus the composer's current picker choices under
- * the same rules as `buildCreateRunBody`: `model`/`variants`/`images` only when they say
+ * the same rules as `buildCreateRunBody`: `model`/`images` only when they say
  * something, explicit/sticky `runner` choices always sent (untouched defaults may be omitted),
- * `generateFollowups`
- * only when off (#444), and `todoId` only when the composer was prefilled from an inbox entry (#374 —
- * planning the follow-up first still starts it, so the entry must still be marked started).
  */
 export function buildPlannedRunBody(opts: {
   task: string
@@ -96,12 +93,11 @@ export function buildPlannedRunBody(opts: {
   /** True when the draft contains a sticky/user runner choice rather than an untouched default. */
   runnerExplicit?: boolean
   defaultRunner?: Runner
-  variants: number
   images: readonly AttachmentInput[]
-  generateFollowups?: boolean
-  todoId?: string
+  archiveWhenDone?: boolean
+  autoMergePr?: boolean
 }): CreateRunInput {
-  const { task, steps, model, modelsLocked, effort, runner, runnerExplicit, defaultRunner, variants, images, generateFollowups, todoId } =
+  const { task, steps, model, modelsLocked, effort, runner, runnerExplicit, defaultRunner, images, archiveWhenDone, autoMergePr } =
     opts
   return {
     task,
@@ -109,9 +105,8 @@ export function buildPlannedRunBody(opts: {
     model: modelsLocked ? undefined : model || undefined,
     effort: modelsLocked ? undefined : effort || undefined,
     runner: runnerOverride(runner, defaultRunner, runnerExplicit),
-    variants: variants > 1 ? variants : undefined,
     images: images.length > 0 ? [...images] : undefined,
-    generateFollowups: generateFollowups === false ? false : undefined,
-    todoId: todoId || undefined,
+    ...(archiveWhenDone ? { archiveWhenDone: true } : {}),
+    ...(autoMergePr ? { autoMergePr: true } : {}),
   }
 }

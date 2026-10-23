@@ -25,8 +25,8 @@ import { NewTaskRoute } from './new-task'
 
 /**
  * The /new screen against a mocked API: picker data flows (runner hidden on single-backend
- * hosts, model presets switching per runner, variants gated on git), the EXACT submit bodies
- * (workflow vs skill vs variants — the wire contract with POST /api/v1/runs), lastTask
+ * hosts, model presets switching per runner, worktrees gated on git), the EXACT submit bodies
+ * (workflow vs skill — the wire contract with POST /api/v1/runs), lastTask
  * persistence, draft survival across unmounts, ?skill/?ref prefill, and the suggested chips.
  */
 
@@ -67,7 +67,7 @@ const HEALTH: HealthResponse = {
     { name: 'git', available: true, version: '2.43.0' },
   ],
   forge: null,
-  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: true, singleProject: false, automations: false, preview: false, voice: false },
+  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
 }
 
 const HEALTH_MULTI: HealthResponse = {
@@ -165,8 +165,6 @@ const WORKSPACE_CONFIG: WorkspaceConfigResponse = {
   agentDefaults: {},
   browseRoot: '~/',
   projectsDir: '~/cezar/projects',
-  skillsAutoUpdate: null,
-  effectiveSkillsAutoUpdate: true,
   archiveOnMerge: null,
   effectiveArchiveOnMerge: false,
   archiveOnMergeSource: 'default',
@@ -380,6 +378,25 @@ const postedBody = () => requests.find((r) => r.method === 'POST' && r.url === '
 // ---- the hero surface -------------------------------------------------------------------------
 
 describe('the hero surface', () => {
+  it('keeps default-off completion switches in the draft and sends them on create', async () => {
+    serve()
+    const view = renderNewTask()
+    await pillReady()
+    for (const name of ['Archive when Done', 'Auto-merge PR']) {
+      const control = screen.getByRole('switch', { name })
+      expect(control.getAttribute('aria-checked')).toBe('false')
+      fireEvent.click(control)
+    }
+    view.unmount()
+    renderNewTask()
+    await pillReady()
+    expect(screen.getByRole('switch', { name: 'Auto-merge PR' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('switch', { name: 'Archive when Done' }).getAttribute('aria-checked')).toBe('true')
+    fireEvent.change(textarea(), { target: { value: 'Ship it' } })
+    await startTask()
+    expect(postedBody()).toMatchObject({ archiveWhenDone: true, autoMergePr: true })
+  })
+
   it('keeps run options in a disclosure separate from prompt, agent selection, and submission', async () => {
     serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
     renderNewTask()
@@ -398,14 +415,12 @@ describe('the hero surface', () => {
     fireEvent.click(await screen.findByRole('menuitemradio', { name: /sonnet/ }))
     expect(summary.parentElement?.textContent).toContain('sonnet')
     fireEvent.change(textarea(), { target: { value: 'Keep this draft' } })
-    fireEvent.pointerDown(screen.getByRole('button', { name: 'Parallel variants' }))
-    fireEvent.click(await screen.findByRole('menuitemradio', { name: /×2 variants/ }))
     const originalTextarea = textarea()
     fireEvent.click(summary)
     fireEvent.click(summary)
     expect(textarea()).toBe(originalTextarea)
     expect(textarea().value).toBe('Keep this draft')
-    expect(screen.getByRole('button', { name: 'Parallel variants' }).textContent).toContain('×2')
+    expect(screen.queryByRole('button', { name: 'Parallel variants' })).toBeNull()
     expect(screen.getByRole('button', { name: /^Model · / })).toBe(model)
   })
 
@@ -453,7 +468,7 @@ describe('picker data flows', () => {
     expect(editor.contains(model)).toBe(false)
     expect(document.querySelector('[data-slot="composer-agent-options"]')?.contains(model)).toBe(true)
     expect(execution.contains(model)).toBe(false)
-    expect(execution.contains(variants)).toBe(true)
+    expect(variants).toBeNull()
   })
 
   it('uses one in-pill Field · value grammar for Model, Runner, and Effort (#272)', async () => {
@@ -597,8 +612,8 @@ describe('picker data flows', () => {
 
   it('drops a persisted model preset that belongs to another runner', async () => {
     writeDraft({
-      text: '', source: null, runner: 'codex', agentProfile: null, model: 'claude-opus-4-8', effort: null, variants: 1,
-      planFirst: false, worktree: null, autonomous: null, generateFollowups: null,
+      text: '', source: null, runner: 'codex', agentProfile: null, model: 'claude-opus-4-8', effort: null, retiredVariants: false,
+      planFirst: false, worktree: null, autonomous: null, archiveWhenDone: false, autoMergePr: false,
     })
     serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
     renderNewTask()
@@ -654,25 +669,21 @@ describe('picker data flows', () => {
     })
   })
 
-  it('gates variants on git: no repo → pill disabled with the honest reason, base pill gone', async () => {
+  it('has no parallel variant control, including without git', async () => {
     serve({ health: HEALTH_NO_GIT, repo: REPO_NO_GIT })
     renderNewTask()
     await pillReady()
-    const pill = document.querySelector('[data-slot="variants-pill"]') as HTMLButtonElement
-    expect(pill.disabled).toBe(true)
-    expect(pill.title).toContain('need a git repository')
+    expect(document.querySelector('[data-slot="variants-pill"]')).toBeNull()
     expect(document.querySelector('[data-slot="base-pill"]')).toBeNull()
   })
 
   // #791: health is bound to the boot folder, so a cezar booted outside a git repo answered
   // `repo: null` for EVERY project. Reading git state from the project-scoped `/repo` instead is
   // what keeps the worktree controls alive for a git project under a non-git boot root.
-  it('gates variants on the project repo, not the boot folder: boot without git still offers worktrees', async () => {
+  it('offers worktrees for the project repo even when the boot folder has no git', async () => {
     serve({ health: HEALTH_NO_GIT, repo: REPO })
     renderNewTask()
     await pillReady()
-    const pill = document.querySelector('[data-slot="variants-pill"]') as HTMLButtonElement
-    expect(pill.disabled).toBe(false)
     expect(document.querySelector('[data-slot="worktree-toggle"]')).not.toBeNull()
     fireEvent.change(textarea(), { target: { value: 'Fix the composer git detection' } })
     await startTask()
@@ -1242,7 +1253,6 @@ describe('submit', () => {
         lastTask: { source: 'skill', ref: 'om-fix' },
         // The run also lands at the head of the recency list (picker sort)...
         recentSources: [{ source: 'skill', ref: 'om-fix' }],
-        lastGenerateFollowups: true,
         // ...and bumps its usage count for the #408 frequency sort (a workflow source would
         // NOT carry a skillUsage key at all — see the WORKFLOW test below).
         skillUsage: { 'om-fix': 1 },
@@ -1258,7 +1268,7 @@ describe('submit', () => {
     // lands in its errored state immediately and the test stays deterministic.
     writeDraft({
       text: '', source: { source: 'skill', ref: 'om-fix' }, runner: null, agentProfile: null, model: null, effort: null,
-      variants: 1, planFirst: false, worktree: null, autonomous: null, generateFollowups: null,
+      retiredVariants: false, planFirst: false, worktree: null, autonomous: null, archiveWhenDone: false, autoMergePr: false,
     })
     serve({ createRun: { id: 'run-9' }, uiStateStatus: 404 })
     renderNewTask()
@@ -1319,7 +1329,6 @@ describe('submit', () => {
         // cockpit restoring a stale skill from this same file.
         lastTask: null,
         // Nothing was picked, so nothing joins the recency list or the frequency map.
-        lastGenerateFollowups: true,
       }),
     )
   })
@@ -1396,33 +1405,19 @@ describe('submit', () => {
     expect(postedBody()).toMatchObject({ workflow: 'quick-task', worktree: false })
   })
 
-  it('picking a model and ×2 variants rides along; {runs} answer navigates to the FIRST variant', async () => {
-    serve({ createRun: { runs: [{ id: 'v-a' }, { id: 'v-b' }] } })
+  it('preserves old draft text and requires a choice before launching one task', async () => {
+    localStorage.setItem('cez-new-task-draft', JSON.stringify({ text: 'Race two attempts', variants: 2 }))
+    serve()
     renderNewTask()
     await pillReady()
-
-    fireEvent.pointerDown(document.querySelector('[data-slot="model-pill"]') as HTMLElement)
-    let options = await screen.findAllByRole('menuitemradio')
-    fireEvent.click(options.find((o) => o.textContent?.includes('sonnet')) as HTMLElement)
-    await waitFor(() => expect(screen.queryAllByRole('menuitemradio')).toHaveLength(0))
-
-    fireEvent.pointerDown(document.querySelector('[data-slot="variants-pill"]') as HTMLElement)
-    options = await screen.findAllByRole('menuitemradio')
-    fireEvent.click(options.find((o) => o.textContent?.includes('×2')) as HTMLElement)
-    await waitFor(() =>
-      expect((document.querySelector('[data-slot="variants-pill"]') as HTMLElement).textContent).toContain('×2'),
-    )
-
-    fireEvent.change(textarea(), { target: { value: 'Race two attempts' } })
+    expect(screen.getByRole('alert').textContent).toContain('Parallel variants are removed')
+    fireEvent.click(screen.getByRole('button', { name: 'Start task' }))
+    await waitFor(() => expect(screen.getByText(/Choose Use one task/)).toBeTruthy())
+    expect(requests.filter(request => request.method === 'POST' && request.url === '/api/v1/runs')).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Use one task' }))
     await startTask()
-
-    expect(postedBody()).toEqual({
-      task: 'Race two attempts',
-      workflow: 'quick-task',
-      model: 'sonnet',
-      variants: 2,
-    })
-    await waitFor(() => expect(location()).toBe('/tasks/v-a'))
+    expect(postedBody()).toMatchObject({ task: 'Race two attempts' })
+    expect(postedBody()).not.toHaveProperty('variants')
   })
 
   it('shows a locked native default but omits it from the direct run request', async () => {
@@ -1494,39 +1489,6 @@ describe('submit', () => {
     expect(postedBody()).toMatchObject({ runner: 'codex' })
   })
 
-  it('defaults follow-up generation on, but posts and remembers an explicit opt-out', async () => {
-    serve()
-    renderNewTask()
-    await pillReady()
-    const toggle = document.querySelector(
-      '[data-slot="generate-followups-toggle"]',
-    ) as HTMLButtonElement
-    expect(toggle.getAttribute('aria-checked')).toBe('true')
-
-    fireEvent.click(toggle)
-    expect(toggle.getAttribute('aria-checked')).toBe('false')
-    fireEvent.change(textarea(), { target: { value: 'No follow-up inbox items' } })
-    await startTask()
-
-    expect((postedBody() as Record<string, unknown>).generateFollowups).toBe(false)
-    await waitFor(() =>
-      expect(requests.find((r) => r.method === 'PUT' && r.url === '/api/v1/ui-state')?.body).toMatchObject({
-        lastGenerateFollowups: false,
-      }),
-    )
-  })
-
-  it('uses the remembered follow-up preference when the draft has no choice', async () => {
-    serve({ uiState: { lastGenerateFollowups: false } })
-    renderNewTask()
-    await pillReady()
-    expect(
-      document
-        .querySelector('[data-slot="generate-followups-toggle"]')
-        ?.getAttribute('aria-checked'),
-    ).toBe('false')
-  })
-
   it('applies an interactive skill hint to untouched controls while keeping both overridable', async () => {
     // The composer opens on no source, so an interactive skill only drives the recommendation
     // once it is the selected one — here from the draft.
@@ -1580,52 +1542,20 @@ describe('submit', () => {
   })
 
   // #471 — the composer must not offer a switch the server overrides anyway.
-  const inboxOffHealth: HealthResponse = {
+  const retiredInboxHealth: HealthResponse = {
     ...HEALTH,
-    capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: false, singleProject: false, automations: false, preview: false, voice: false },
+    capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
   }
   const followupsToggle = () =>
     document.querySelector('[data-slot="generate-followups-toggle"]')
 
-  it('hides the follow-up toggle when the server has the inbox off', async () => {
-    serve({ health: inboxOffHealth })
+  it('omits the retired follow-up toggle', async () => {
+    serve({ health: retiredInboxHealth })
     renderNewTask()
     await pillReady()
     await waitFor(() => expect(followupsToggle()).toBeNull())
     // The neighbouring toggles are untouched — the gate owns exactly one control.
     expect(document.querySelector('[data-slot="autonomous-toggle"]')).not.toBeNull()
-  })
-
-  it('posts generateFollowups:false from an inbox-less server', async () => {
-    serve({ health: inboxOffHealth })
-    renderNewTask()
-    await pillReady()
-    await waitFor(() => expect(followupsToggle()).toBeNull())
-
-    fireEvent.change(textarea(), { target: { value: 'No inbox on this server' } })
-    await startTask()
-
-    expect((postedBody() as Record<string, unknown>).generateFollowups).toBe(false)
-  })
-
-  it('does not overwrite the remembered preference it never offered', async () => {
-    // The user last chose "on". With the inbox off there is no toggle, so persisting the
-    // forced `false` would silently flip their choice for when CEZ_FOLLOWUPS comes back.
-    serve({ health: inboxOffHealth, uiState: { lastGenerateFollowups: true } })
-    renderNewTask()
-    await pillReady()
-    await waitFor(() => expect(followupsToggle()).toBeNull())
-
-    fireEvent.change(textarea(), { target: { value: 'Leave my preference alone' } })
-    await startTask()
-
-    await waitFor(() =>
-      expect(requests.some((r) => r.method === 'PUT' && r.url === '/api/v1/ui-state')).toBe(true),
-    )
-    const persisted = requests
-      .filter((r) => r.method === 'PUT' && r.url === '/api/v1/ui-state')
-      .map((r) => r.body as Record<string, unknown>)
-    for (const body of persisted) expect(body).not.toHaveProperty('lastGenerateFollowups')
   })
 
 })
@@ -1663,18 +1593,7 @@ describe('drafts and prefill', () => {
     expect(requests.some((r) => r.method === 'POST' && r.url === '/api/v1/runs')).toBe(false)
   })
 
-  // #374: the composer is the middle of the inbox round trip — the Run link carries `todo=`,
-  // and the started run must carry it back so the entry is marked started and leaves the inbox.
-  it('?todo= prefill: the entry id rides along to POST /api/v1/runs so the inbox entry is marked', async () => {
-    serve()
-    renderNewTask('/new?skill=deploy&ref=ship%20it&todo=t1')
-    await pillReady('deploy')
-    await startTask()
-
-    expect((postedBody() as Record<string, unknown>).todoId).toBe('t1')
-  })
-
-  it('a plain launch (no ?todo=) sends no todoId — the inbox is left alone', async () => {
+  it('launches omit retired Inbox fields', async () => {
     serve()
     renderNewTask()
     await pillReady()
@@ -1682,22 +1601,7 @@ describe('drafts and prefill', () => {
     await startTask()
 
     expect((postedBody() as Record<string, unknown>).todoId).toBeUndefined()
-  })
-
-  // The two are orthogonal concerns (#374 vs #444): turning follow-up generation OFF for the
-  // NEW task must never stop the entry it was launched FROM being marked started.
-  it('carries todoId even when follow-up generation is switched off', async () => {
-    serve()
-    renderNewTask('/new?skill=deploy&ref=ship%20it&todo=t1')
-    await pillReady('deploy')
-    fireEvent.click(
-      document.querySelector('[data-slot="generate-followups-toggle"]') as HTMLElement,
-    )
-    await startTask()
-
-    const body = postedBody() as Record<string, unknown>
-    expect(body.todoId).toBe('t1')
-    expect(body.generateFollowups).toBe(false)
+    expect((postedBody() as Record<string, unknown>).generateFollowups).toBeUndefined()
   })
 
   it('submit spends the draft text', async () => {
@@ -2175,6 +2079,7 @@ describe('the plan flow', () => {
 
   it('▶ Start posts the EDITED steps inline — the exact wire payload — and navigates', async () => {
     serve({ createRun: { id: 'planned-1' } })
+    writeDraft({ ...readDraft(), archiveWhenDone: true, autoMergePr: true })
     renderNewTask()
     await planTask('Tighten the flaky suite')
 
@@ -2187,6 +2092,8 @@ describe('the plan flow', () => {
     )
     expect(postedBody()).toEqual({
       task: 'Tighten the flaky suite',
+      archiveWhenDone: true,
+      autoMergePr: true,
       steps: [
         { id: 'review', name: 'Review', skill: 'om-fix', prompt: 'Review the changes for {{task}}' },
         { id: 'implement', name: 'Implement', prompt: '{{task}}' },
@@ -2254,24 +2161,6 @@ describe('the plan flow', () => {
     fireEvent.click(start)
 
     expect(requests.some((request) => request.url === '/api/v1/runs')).toBe(false)
-  })
-
-  it('▶ Start carries the follow-up opt-out from the composer and remembers it', async () => {
-    serve({ createRun: { id: 'planned-no-followups' } })
-    renderNewTask()
-    await pillReady()
-    fireEvent.click(
-      document.querySelector('[data-slot="generate-followups-toggle"]') as HTMLElement,
-    )
-    await planTask('Plan without follow-ups')
-    fireEvent.click(document.querySelector('[data-slot="plan-start"]') as HTMLElement)
-
-    await waitFor(() => expect((postedBody() as Record<string, unknown>).generateFollowups).toBe(false))
-    await waitFor(() =>
-      expect(requests.find((r) => r.method === 'PUT' && r.url === '/api/v1/ui-state')?.body).toEqual({
-        lastGenerateFollowups: false,
-      }),
-    )
   })
 
   it('embeds plan review in the page and Escape restores focus to the untouched draft', async () => {
@@ -2394,7 +2283,7 @@ describe('prompt templates on the new-task composer', () => {
     renderNewTask()
     await pillReady()
 
-    // No "templates" word next to the icon, unlike the roomier GitHub/Inbox composers.
+    // No "templates" word next to the icon, unlike the roomier GitHub composer.
     expect(templateTrigger().textContent).toContain('Template')
     expect(templateTrigger().querySelector('svg')).not.toBeNull()
   })
@@ -2658,7 +2547,6 @@ describe('the composer runner pill carries the account', () => {
     expect(postedBody()).not.toHaveProperty('agentProfile')
   })
 })
-
 
 describe('retained task submission (#164)', () => {
   it('keeps prompt and attachments read-only during delayed success and blocks repeat submits', async () => {

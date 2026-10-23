@@ -3,22 +3,8 @@ import type { RunIndexEntry, RunRecord, RunSummary } from './runs.ts';
 import { hasResolvedWait, resolveWaitingOn } from './waits.ts';
 
 /**
- * The one canonical attention function (cockpit spec, "Design system" → status grammar).
- *
- * Every surface that says "this run wants you" derives it from here: the cockpit's quick-list
- * dot, the table's dot, the thread header, the browser notification — and, since #553/#609, the
- * `cez task` CLI (`status`/`list` rows, and the `wait --until attention` decision). One function
- * means those can never disagree, which is the whole point of naming it in the spec. Before it
- * moved here the CLI kept its own two-line "is this settled" and the two drifted: a root parked
- * on its own workers stopped a CLI attention wait that the cockpit showed as "waiting on
- * 2 workers" (#553), and an operator cleared a run on a pending-question flag while the
- * cockpit showed Needs You (#609).
- *
- * Deliberately UI-free and Node-free: no React, no class names, no tokens, no `node:*` (the
- * contract tsconfig makes that structural). It maps a run to a bucket, a tone name and whether
- * the dot pulses; the components decide what those look like, the CLI prints the bucket and
- * the label. That is also what lets the cockpit's notification path call it from outside a
- * component tree.
+ * Canonical Node-free attention classification for browser and CLI. Map run facts to bucket,
+ * tone and pulse without UI state or backend-specific inference.
  */
 
 /**
@@ -70,17 +56,8 @@ function hasPendingPermission(run: AttentionInput): boolean {
 }
 
 /**
- * Whether a run finished while the user was not looking.
- *
- * Still always false here, but now by DESIGN rather than for want of data. The "finished while
- * you weren't looking" question is answered by the cockpit's read/unread channel
- * (#unread-done-items): `RunRecord.seenAt` + `isUnread()` in the cockpit's `lib/read-state.ts`.
- * That signal is deliberately kept OFF the status dot — the dot keeps saying done/failed, and
- * unread rides its own trailing violet marker (the approved "Option B") so status and "have I
- * seen it" never collapse into one dot. Routing unread through this `unseen` bucket would recolor
- * the status dot violet, which is exactly the conflation that design avoids, so the bucket stays
- * reserved and unused. Like `hasPendingPermission`, it reads no cockpit-only state, so nothing
- * here needs injecting for the CLI to reproduce the cockpit's answer.
+ * Reserved unseen attention bucket remains unused. Finished-item read receipts use a separate
+ * channel; do not recolor status from unread state.
  */
 function isUnseen(_run: AttentionInput): boolean {
   return false;

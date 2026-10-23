@@ -6,6 +6,14 @@ import type { AutomationDefinition } from '@open-mercato/cezar-api-client'
 import { fromDefinition, toCreateBody, toUpdateBody, type AutomationDraft } from './editor-draft'
 
 describe('fromDefinition', () => {
+  it('starts completion choices off and restores saved opt-ins outside taskExtra', () => {
+    expect(fromDefinition()).toMatchObject({ archiveWhenDone: false, autoMergePr: false })
+    const draft = fromDefinition({ task: { prompt: 'Ship', archiveWhenDone: true, autoMergePr: true, effort: 'high' } })
+    expect(draft).toMatchObject({ archiveWhenDone: true, autoMergePr: true, taskExtra: { effort: 'high' } })
+    expect(draft.taskExtra).not.toHaveProperty('autoMergePr')
+    expect(toCreateBody(draft).task).toMatchObject({ archiveWhenDone: true, autoMergePr: true })
+    expect(toUpdateBody({ ...draft, archiveWhenDone: false, autoMergePr: false }, 2).task).toMatchObject({ archiveWhenDone: false, autoMergePr: false, effort: 'high' })
+  })
   it('starts a new draft as a paused daily 04:00 schedule that runs autonomously', () => {
     expect(fromDefinition()).toMatchObject({
       name: '',
@@ -29,7 +37,10 @@ describe('fromDefinition', () => {
     const draft = fromDefinition(stored)
     expect(draft.schedule).toEqual({ type: 'weekly', hour: 4, minute: 0, day: 3, every: 6 })
     expect(draft.enabled).toBe(true)
-    expect(toUpdateBody(draft, 3).task).toMatchObject({ prompt: 'Go', effort: 'high', variants: 2 })
+    expect(draft.retiredVariants).toBe(true)
+    expect(() => toUpdateBody(draft, 3)).toThrow('Parallel variants are removed')
+    expect(toUpdateBody({ ...draft, retiredVariants: false }, 3).task).toMatchObject({ prompt: 'Go', effort: 'high' })
+    expect(toUpdateBody({ ...draft, retiredVariants: false }, 3).task).not.toHaveProperty('variants')
   })
 })
 

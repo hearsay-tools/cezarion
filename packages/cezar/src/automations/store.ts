@@ -52,11 +52,8 @@ const WRITE_LOCK_TIMEOUT_MS = 10_000;
 const RETENTION_MS = 90 * 24 * 60 * 60 * 1_000;
 
 /**
- * Reservations THIS process wrote and has not settled yet, per data directory. A `reserved`
- * receipt on disk is ambiguous: a crash leftover, or a launch still running here. Only this
- * process can tell, and reconciliation must leave the second kind alone — a lazily built
- * project context reconciles while the timer's launch that triggered the build is in flight.
- * Process-wide rather than per store, so a second store opened on the same directory agrees.
+ * Process-wide reservations still launching, keyed by data directory. Reconciliation must leave
+ * these alone even when another store opens the same project.
  */
 const inFlightReservations = new Map<string, Set<string>>();
 const LEASE_RECLAIM_ATTEMPTS = 1;

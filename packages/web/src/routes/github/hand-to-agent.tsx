@@ -184,8 +184,7 @@ export function HandToAgent({
     },
     onSuccess: (created) => {
       if (created === null) return
-      // The GitHub tab never starts variants, so the answer is a single record.
-      const run = 'runs' in created ? created.runs[0] : created
+      const run = created
       if (run) onQueued(item.url, run.id)
       // The "✓ queued / View task →" affordance sits BELOW the button, which on a phone is
       // typically off-screen or behind the keyboard right after the tap — so the hand-off also
@@ -300,7 +299,7 @@ export function HandToAgent({
 
         {/* `accounts`: this hand-off posts to `/api/v1/runs`, which takes `agentProfile` — so
             the runner pill may offer the agent's logins as rows (spec 2026-07-29-agent-profiles).
-            The Inbox card deliberately does not; its endpoint has no such field yet. */}
+             */}
         <EnginePills
           layout="row"
           pick={engine}

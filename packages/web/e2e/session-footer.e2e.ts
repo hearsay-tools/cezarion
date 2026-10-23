@@ -143,7 +143,18 @@ it('scrolls a keyboard-focused transcript control above the desktop footer', () 
   browser.goto(`${baseUrl}/p/${project}/tasks/${runId}?thread=flat`)
   const target = '[data-slot="tool-card"][data-kind="execute"] > button'
   browser.waitForFunction(`document.querySelector('${target}') !== null`)
-  browser.evaluate(`document.querySelector('[data-slot="main"]').dispatchEvent(new WheelEvent('wheel', { deltaY: -1800, bubbles: true }))`)
+  // Finish paging before selecting and covering the keyboard target. Evidence for
+  // hearsay-tools/cezarion#1510: CPU15/two-loop old-test diagnosis failed 1/1 with
+  // focused:true/clear:false/hit:false: page 2 arrived after Tab and moved the focused
+  // button to y=8419.14. Bundle:
+  // .ai/qa/failures/before.test.ts/scrolls-a-keyboard-focused-transcript-control-above-the-desktop-footer-1.
+  // Repro: LOOPS=2 RUNS=1 LABEL=old-1 timeout --kill-after=5s 120s taskset -c 15
+  // bash .ai/qa/1510-proof/run-loaded.sh. Matched scratch proof: old failed 1/1,
+  // fixed passed 1/1; final targeted acceptance passed 10/10 with the same CPU/load.
+  // This proves the paging/layout variant; the historical focused:false cause is unproved.
+  browser.evaluate(`document.querySelector('[data-slot="history-boundary"] button').click()`)
+  browser.waitForFunction(`document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '2' &&
+    document.querySelector('[data-slot="history-boundary"]')?.getAttribute('aria-busy') === 'false' && window.__cezIdle === true`)
   browser.waitForValue(`(() => {
     const button = document.querySelector('${target}');
     const rendered = button.checkVisibility({ contentVisibilityAuto: true });
@@ -154,22 +165,18 @@ it('scrolls a keyboard-focused transcript control above the desktop footer', () 
     const main = document.querySelector('[data-slot="main"]');
     const button = document.querySelector('${target}');
     button.scrollIntoView({ block: 'center' });
-    main.dispatchEvent(new WheelEvent('wheel', { deltaY: -1800, bubbles: true }));
     main.scrollTop += button.getBoundingClientRect().top - document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect().top - 20;
     // Set the sequential keyboard start immediately before the target, without scrolling
     // either control into view. The actual Tab must reveal the covered transcript control.
     const start = document.createElement('span');
     start.id = 'footer-focus-start'; start.tabIndex = -1;
     button.before(start); start.focus({ preventScroll: true });
-    // The upward wheel above can load an older page after the Tab. That page prepends earlier
-    // execute cards, so a fresh query would name another card. Keep this one. Evidence
-    // (hearsay-tools/cezarion#1495): the test failed with focused: false, clear: false (local bundle
-    // session-footer/scrolls-a-keyboard-focused-transcript-control-above-the-desktop-footer-1,
-    // recorded in the PR body, where a probe read retainedPages 1 → 2). Reproduce with
-    // 'npm run test:e2e -- session-footer.e2e.ts -t keyboard-focused': 4 of 4 runs failed
-    // without this change on the #1495 branch, 2 of 2 passed with it.
+    // Retain the node rather than re-querying after a prepend. The earlier repair in
+    // hearsay-tools/cezarion#1495 fixed that separate selector race: 4/4 keyboard-focused
+    // runs failed before retention and 2/2 passed after it (PR's session-footer bundle).
     window.__footerFocusTarget = button;
   })()`)
+  browser.waitForFunction(`document.activeElement === document.getElementById('footer-focus-start') && window.__footerFocusTarget.isConnected`)
   browser.press('Tab')
   browser.evaluate(`document.getElementById('footer-focus-start').remove()`)
   expect(waitForSettledSample(browser, `(() => {

@@ -2,26 +2,13 @@ import { z } from 'zod';
 // An automation launches an ORDINARY cezar task, so the task it carries is the composer's own
 // run-creation input minus the keys an automation supplies itself. Consumed rather than
 // redeclared — the same one-way direction `./runs.ts` takes towards `./workflows.ts`.
-import { createRunInputBaseSchema } from './runs.ts';
+import { createRunInputBaseSchema, singleRunVariantsSchema } from './runs.ts';
 import { automationScheduleSchema } from './automation-schedule.ts';
 
 /**
- * The AUTOMATIONS family of `/api/v1` (#694) — the per-project GitHub triggers, their runtime
- * state, the manual "test filter" checks and the execution log.
- *
- * These shapes exist twice on purpose and only once as a DEFINITION of what the wire carries.
- * `packages/cezar/src/automations/types.ts` owns the STORAGE schemas: they are `.passthrough()`,
- * because a definitions/state/log file written by a newer cezar must survive a round trip through
- * an older one rather than lose keys it has never heard of. The schemas here are the CLOSED wire
- * half of those files — every key the routes actually answer with, and no index signature, so a
- * consumer compiles against a shape rather than against `unknown`. `src/server/
- * contract-parity.automations.test.ts` checks each response schema against the route that serves
- * it, in both directions.
- *
- * What that guard can and cannot see is worth knowing: a named key whose type drifts fails, and a
- * key this file makes required that the route does not send fails — but an EXTRA key arriving
- * through the storage schemas' catchall cannot, since the route's own type admits any key. That is
- * the same limit `contract-parity.workspace.test.ts` documents for the open GUI-pref bags.
+ * Closed automation wire schemas. Storage schemas preserve unknown keys separately. Parity
+ * checks compare named response fields in both directions; open storage catchalls limit
+ * extra-key detection.
  */
 
 // ---- the definition ------------------------------------------------------------------------
@@ -67,21 +54,20 @@ export const automationKindSchema = z.enum(['github', 'schedule']);
 export type AutomationKind = z.infer<typeof automationKindSchema>;
 
 /**
- * The task a match launches: `POST /runs`' own body minus the three keys an automation owns
- * itself — `task` (the rendered prompt), `images` and `todoId` — plus the prompt TEMPLATE.
+ * The task a match launches: `POST /runs`' own body minus the two keys an automation owns
+ * itself — `task` (the rendered prompt) and `images` — plus the prompt TEMPLATE.
  *
  * Two keys are re-spelled rather than inherited, because the automation schema really does differ
  * from the composer's and the contract has to describe the automation route:
  *
- *  - `variants` is the literal union the server's own automation schema accepts (`1 | 2 | 3`),
- *    not the composer's `z.number().int().min(1).max(3)`. Identical values, but only the literal
- *    spelling is assignable to the route's parameter;
+ *  - `variants` retains `1 | 2 | 3` in stored definitions and read responses. New writes use
+ *    `singleRunVariantsSchema`; a saved count above one is readable but cannot launch;
  *  - `systemPrompt` carries no `.transform()` here. The composer's trims-to-absent on the way in,
  *    which makes the key REQUIRED (`string | undefined`) on the output side; the automation route
  *    stores and answers it plainly, so it stays optional.
  */
 export const automationTaskSchema = createRunInputBaseSchema
-  .omit({ task: true, images: true, todoId: true, systemPrompt: true })
+  .omit({ task: true, images: true, systemPrompt: true })
   .extend({
     /** The prompt template. `{{github.number}}`, `{{github.title}}`, `{{github.url}}` and
      *  `{{github.labels}}` are substituted per match; GitHub content is appended as untrusted
@@ -361,6 +347,7 @@ export const createAutomationInputSchema = automationDefinitionSchema
     /** Omitted = `github` on create, the shape every pre-schedule client sends; omitted on
      *  update = the stored kind. */
     kind: automationKindSchema.optional(),
+    task: automationTaskSchema.extend({ variants: singleRunVariantsSchema }),
     enable: z.boolean().optional(),
   });
 export type CreateAutomationInput = z.input<typeof createAutomationInputSchema>;

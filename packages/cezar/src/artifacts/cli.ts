@@ -11,14 +11,10 @@ function canonicalDirectory(path: string): string {
   try { return realpathSync(path); } catch { return resolve(path); }
 }
 
-/** The registry project that owns a run's artifact storage (#925).
- *
- * The comparison is realpath-SYMMETRIC: both the per-project candidate (`<root>/.ai/cezar`,
- * canonicalized by `artifactDirectory` and again here with the run suffix) and the task's
- * artifacts directory are canonicalized before comparing, so a directory spelled through an OS
- * alias (`/var` vs `/private/var`, a symlinked checkout) still names its owner instead of
- * silently degrading to an unscoped, boot-bound link. Exact canonical equality is what keeps a
- * NON-owner project out: a registry entry only matches when its own storage IS this directory. */
+/**
+ * Resolve the artifact storage owner by exact canonical equality of both candidate and task
+ * directories. A path alias may match; a non-owner project must not.
+ */
 export function owningProjectId(
   projects: ReadonlyArray<{ id: string; root: string }>,
   artifactsDir: string,

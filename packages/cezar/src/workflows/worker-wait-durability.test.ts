@@ -206,19 +206,31 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     await until(() => store.getRun(w.id)?.status === 'running');
     expect(semaphore.busy()).toBe(1); // only child, not parked parent
-    const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:slow', runner: 'claude' });
-    await until(() => store.getRun(w.id)?.status === 'waiting');
-    await until(() => store.getRun(blocker.id)?.status === 'running');
-    manager.finish(w.id);
-    await until(() => terminal.includes(store.getRun(w.id)?.status ?? ''));
-    const wake = waitOf(store.getRun(p.id)); expect(wake?.phase).toBe('wake-pending');
-    expect(store.getRun(p.id)?.agentInputs?.some(i => i.deliveredAt)).not.toBe(true);
-    manager.reconcileWorkerWaits(); manager.reconcileWorkerWaits();
-    manager.cancel(blocker.id);
-    await until(() => !waitOf(store.getRun(p.id)));
-    expect(store.getRun(p.id)?.agentInputs).toHaveLength(1);
-    expect(store.getRun(p.id)?.agentInputs?.[0]).toMatchObject({ id: wake?.wakeId, source: 'lifecycle', parentRunId: p.id, deliveredAt: expect.any(String) });
-    expect(store.readEvents(p.id).filter(e => e.type === 'user-message')).toEqual([]);
+    const release = join(root, 'release-live-wake-blocker');
+    process.env.CEZ_MOCK_RELEASE_FILE = release;
+    const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold-gated', runner: 'claude' });
+    const explain = () => `worker execution: ${JSON.stringify(store.readWorkerExecution(w.id))}\n${timeline(w.id)}\n${timeline(p.id)}\n${timeline(blocker.id)}`;
+    try {
+      await until(() => store.getRun(w.id)?.status === 'waiting', explain);
+      await until(() => store.getRun(blocker.id)?.status === 'running' &&
+        store.readEvents(blocker.id).some(event => event.type === 'turn.started'), explain);
+      manager.finish(w.id);
+      await until(() => terminal.includes(store.getRun(w.id)?.status ?? ''), explain);
+      // Terminal status precedes execution cleanup; only the resolved wait proves the wake is owed.
+      // bound: until's 15 s guards execution cleanup and durable wait resolution, not blocker lifetime.
+      await until(() => waitOf(store.getRun(p.id))?.phase === 'wake-pending', explain);
+      const wake = waitOf(store.getRun(p.id)); expect(wake?.phase).toBe('wake-pending');
+      expect(store.getRun(blocker.id)?.status).toBe('running');
+      expect(semaphore.busy()).toBe(1);
+      expect(store.getRun(p.id)?.agentInputs?.some(i => i.deliveredAt)).not.toBe(true);
+      manager.reconcileWorkerWaits(); manager.reconcileWorkerWaits();
+      expect(store.getRun(p.id)?.agentInputs?.some(i => i.deliveredAt)).not.toBe(true);
+      manager.cancel(blocker.id);
+      await until(() => !waitOf(store.getRun(p.id)), explain);
+      expect(store.getRun(p.id)?.agentInputs).toHaveLength(1);
+      expect(store.getRun(p.id)?.agentInputs?.[0]).toMatchObject({ id: wake?.wakeId, source: 'lifecycle', parentRunId: p.id, deliveredAt: expect.any(String) });
+      expect(store.readEvents(p.id).filter(e => e.type === 'user-message')).toEqual([]);
+    } finally { writeFileSync(release, ''); }
   });
 
   for (const status of ['review', 'done', 'failed', 'cancelled'] as const) {

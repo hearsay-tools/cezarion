@@ -72,6 +72,15 @@ export async function getRepoInfo(dir: string): Promise<RepoInfo | null> {
   }
 }
 
+/** Resolve an owned branch without depending on a retained worktree. */
+export async function getBranchHead(root: string, branch: string): Promise<string | undefined> {
+  if (!isSafeGitRef(branch)) return undefined;
+  try {
+    const sha = (await git(root, ['rev-parse', '--verify', `refs/heads/${branch}^{commit}`])).trim();
+    return /^[a-f0-9]{40,64}$/i.test(sha) ? sha : undefined;
+  } catch { return undefined; }
+}
+
 /** The current commit, pinned as a full SHA. Null outside a repository or before its first commit. */
 export async function getHeadCommit(root: string): Promise<string | null> {
   try {

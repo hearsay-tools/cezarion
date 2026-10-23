@@ -353,7 +353,7 @@ Notable fields (full doc-comments in the source):
 - `userPrompt` (required), `systemPrompt?`, `images?` (first-message content
   blocks — pasted screenshots), `cwd` (the run dir and the only writable root),
   `model?`, `timeoutMs?`, `env?` (merged over `process.env` — carries
-  `CEZ_HANDOFF_FILE` / `CEZ_TODOS_FILE` / `CEZ_TASK_ID`).
+  `CEZ_HANDOFF_FILE` / `CEZ_ARTIFACTS_DIR` / `CEZ_TASK_ID`).
 - `allowedTools?` / `bashAllowlist?` / `additionalDirectories?` — tool access.
   **Caveat (open-mercato/cezar#430):** the zero-config default (`DEFAULT_ALLOWED_TOOLS`) includes
   unrestricted `Bash`, and Codex/OpenCode do not honor `allowedTools` at all.
@@ -1850,7 +1850,7 @@ stdin write callback, as for Claude: the mock accepts `session/prompt` and sends
 reply; items, text and tools count at any time, and nested `item.*` events with `parentItemId` do not.
 F9 lets a late reply after expiry unpark the run (`running`, slot held) and then complete normally;
 the nudged-last-turn latch still prevents a second nudge. F11 lets the bound expire, then starts the
-late reply turn on the wire and holds before any content longer than the test poll window: `turn.started`
+late reply turn on the wire and gates content until the test observes the resumed slot: `turn.started`
 alone unparks (`running`, slot held) before content arrives, then the run completes normally. Only Codex
 emits a native `turn/started` after the nudge is sent; the other adapters have named executable exemptions
 because `turn.started` is synthetic inside `sendAgentMessage` and fires at nudge send, before the bound.

@@ -34,7 +34,6 @@ import {
   useRuns,
   useArchivedRuns,
   useSkills,
-  useSkillsUpdate,
   workspaceQueryKeys,
 } from './queries'
 
@@ -93,7 +92,7 @@ const HEALTH = {
   repo: { root: '/home/me/cezar', branch: 'main' },
   checks: [],
   defaultRunner: 'claude',
-  capabilities: { localHandoff: true, followups: false, singleProject: false, automations: false },
+  capabilities: { localHandoff: true, singleProject: false, automations: false },
 }
 
 /** Just enough WebSocket for useHealth's topic subscription (api/ws.ts): records the frames the
@@ -621,7 +620,6 @@ describe('queryKeys', () => {
     try {
       expect(queryKeys.runs.list()).toEqual(['proj-a', 'runs', 'list'])
       expect(queryKeys.health).toEqual(['proj-a', 'health'])
-      expect(queryKeys.todos).toEqual(['proj-a', 'todos'])
       expect(queryKeys.skills).toEqual(['proj-a', 'skills'])
       expect(queryKeys.skillsReady).toEqual(['proj-a', 'skills', 'ready'])
       expect(queryKeys.agentConfig).toEqual(['proj-a', 'agent-config'])
@@ -672,35 +670,6 @@ describe('useSkills', () => {
       expect(result.current.data?.map((skill) => skill.name)).toEqual(['local', 'om-fix']),
     )
     expect(fetchMock.mock.calls.map(([path]) => path)).toEqual(['/api/v1/skills', '/api/v1/skills?wait=1'])
-  })
-})
-
-describe('useSkillsUpdate', () => {
-  it('retries a transient snapshot conservatively until the background server check converges', async () => {
-    fetchMock.mockResolvedValue(json({
-      status: 'idle',
-      available: false,
-      autoUpdateEnabled: false,
-      inherited: false,
-      checkedAt: null,
-      updatedAt: null,
-      scopes: [],
-      needsUpgradeNotes: false,
-    }))
-    const client = createQueryClient()
-    const key = workspaceQueryKeys.skillsUpdate('boot')
-    const { result } = renderHook(() => useSkillsUpdate('boot'), {
-      wrapper: ({ children }: { children: ReactNode }) => (
-        <QueryClientProvider client={client}>{children}</QueryClientProvider>
-      ),
-    })
-    await waitFor(() => expect(result.current.data?.status).toBe('idle'))
-
-    // The interval now belongs to the coordinator; this query must not open its own poll.
-    expect(client.getQueryCache().find({ queryKey: key })?.observers[0]?.options.refetchInterval).toBe(false)
-    act(() => client.setQueryData(key, { ...result.current.data!, status: 'current' }))
-    await waitFor(() => expect(result.current.data?.status).toBe('current'))
-
   })
 })
 
@@ -1322,7 +1291,6 @@ describe('refStatusRecheckAfter', () => {
     expect(refStatusRecheckAfter(undefined)).toBeGreaterThan(0)
   })
 })
-
 
 describe('usePinRun scope ownership', () => {
   it('invalidates the originating cache after navigation while preserving newer SSE fields', async () => {

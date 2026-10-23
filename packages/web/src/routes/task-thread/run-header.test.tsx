@@ -70,7 +70,7 @@ function stubFetch(overrides: Record<string, () => Response> = {}): SentRequest[
       })
       const override = overrides[path]
       if (override) return override()
-      if (method === 'GET' && path === '/api/v1/run-summaries') return jsonResponse([])
+      if (method === 'GET' && path.endsWith('/run-summaries')) return jsonResponse([])
       if (method === 'GET' && path === '/api/v1/providers/status') {
         return jsonResponse({
           providers: [
@@ -343,7 +343,9 @@ describe('action bar visibility per status (the legacy rules, rendered)', () => 
     renderHeader(run(status))
     actionBar()
     const names = [...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map(el => el.textContent?.trim())
-    expect(names).toEqual(visible)
+    const settings = ['Archive when Done', 'Auto-merge PR']
+    const deleteIndex = visible.indexOf('Delete task…')
+    expect(names).toEqual(deleteIndex < 0 ? [...visible, ...settings] : [...visible.slice(0, deleteIndex), ...settings, ...visible.slice(deleteIndex)])
   })
 
   it('the menu offers neither Archive nor Unarchive — both moved to a control (#281)', () => {
@@ -378,7 +380,7 @@ describe('Mark unread (#775)', () => {
     renderHeader(readDone())
     actionBar()
     const names = [...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map(el => el.textContent?.trim())
-    expect(names).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Delete task…'])
+    expect(names).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Archive when Done', 'Auto-merge PR', 'Delete task…'])
   })
 
   it.each([
@@ -875,7 +877,6 @@ describe('header layout, tabs, pill and resume hint', () => {
   })
 })
 
-
 it('uses one actions menu and omits the legacy action and resume rows', () => {
   stubFetch()
   renderHeader(run('done'))
@@ -883,7 +884,6 @@ it('uses one actions menu and omits the legacy action and resume rows', () => {
   expect(document.querySelector('[data-slot="resume-hint"]')).toBeNull()
   expect(screen.getByRole('button', { name: 'Run actions' }).className).not.toContain('md:hidden')
 })
-
 
 it('confirms archive before retiring an active-list task', async () => {
   const sent = stubFetch()
@@ -893,7 +893,6 @@ it('confirms archive before retiring an active-list task', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Archive task' }))
   await waitFor(() => expect(sent.find(r => r.path.endsWith('/archive'))?.body).toEqual({ archived: true }))
 })
-
 
 it('copies the resumable command directly from the task actions menu', async () => {
   stubFetch()
@@ -1110,7 +1109,7 @@ describe('Preview header toggle (#781)', () => {
   })
   const health = (preview: boolean) => () =>
     jsonResponse({
-      capabilities: { localHandoff: true, followups: false, singleProject: false, tokenMetrics: true, preview },
+      capabilities: { localHandoff: true, singleProject: false, tokenMetrics: true, preview },
     })
   const withWorktree = (servers: number[] = []) =>
     run('done', { worktreePath: '/tmp/wt', previewServers: servers.map(server) })
@@ -1196,5 +1195,44 @@ describe('Preview header toggle (#781)', () => {
     renderHeader(withWorktree([5173]))
     await act(async () => {})
     expect(toggle()).toBeNull()
+  })
+})
+
+describe('completion settings', () => {
+  it.each(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled'] as const)('lets a %s task opt in with a scoped PATCH', async status => {
+    const sent = stubFetch()
+    renderHeader(run(status), undefined, 'session', 'sample')
+    const archive = actionBar().getByRole('menuitemcheckbox', { name: 'Archive when Done' })
+    expect(archive.getAttribute('aria-checked')).toBe('false')
+    fireEvent.click(archive)
+    await waitFor(() => expect(sent.find(request => request.method === 'PATCH')).toMatchObject({
+      path: '/api/v1/p/sample/runs/r1', body: { archiveWhenDone: true },
+    }))
+  })
+
+  it('sends an explicit false to disable saved auto-merge', async () => {
+    const sent = stubFetch()
+    renderHeader(run('done', { autoMergePr: true, archiveWhenDone: true }))
+    const merge = actionBar().getByRole('menuitemcheckbox', { name: 'Auto-merge PR' })
+    expect(merge.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(merge)
+    await waitFor(() => expect(sent.find(request => request.method === 'PATCH')?.body).toEqual({ autoMergePr: false }))
+  })
+
+  it('surfaces PATCH errors and keeps the saved setting', async () => {
+    stubFetch({ '/api/v1/runs/r1': () => jsonResponse({ error: 'Cannot save completion settings' }, 409) })
+    renderHeader(run('done', { autoMergePr: true }))
+    fireEvent.click(actionBar().getByRole('menuitemcheckbox', { name: 'Auto-merge PR' }))
+    expect(await screen.findByText('Cannot save completion settings')).toBeTruthy()
+    expect(actionBar().getByRole('menuitemcheckbox', { name: 'Auto-merge PR' }).getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('renders completion work beside the task title without changing its Done status', () => {
+    stubFetch()
+    renderHeader(run('done', { autoMergePr: true, completionAction: {
+      id: '00000000-0000-4000-8000-000000000001', phase: 'blocked', message: 'Required checks have not passed.',
+    } }))
+    expect(within(screen.getByRole('region', { name: 'Completion action' })).getByRole('status').textContent).toContain('Required checks have not passed.')
+    expect(screen.getByRole('button', { name: 'Disable auto-merge' })).toBeTruthy()
   })
 })

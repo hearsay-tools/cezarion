@@ -4,7 +4,6 @@ import { workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } fro
 import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, removeAgentTmpDir } from './agent-tmpdir.ts';
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID, createHash } from 'node:crypto';
-import { hasRegisteredRunProcess } from '../core/process-usage.ts';
 import { isDeepStrictEqual } from 'node:util';
 import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -46,7 +45,7 @@ import { emptyFacts, stampOf, TranscriptFactsIndex, type TranscriptFacts } from 
 import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
-import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, sharedCwdScan, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { archivePullRequests, pullRequestKey, mergePullRequests } from './pull-requests.ts';
@@ -240,8 +239,7 @@ export const runRecordSchema = z.object({
    *  contract are derivable from the persisted workflow and would bloat the
    *  index. Resolved at execute time (a queued run picks up config edits). */
   systemPrompt: z.string().optional(),
-  /** Per-task follow-up inbox contract (spec 007, #444). Missing on old runs
-   *  means enabled — the historical behavior. */
+  /** Legacy generated-inbox preference. Read for old records only; never enables generation. */
   generateFollowups: z.boolean().optional(),
   /** Effective autonomous mode (#489), set at creation from StartRunInput.autonomous.
    *  This records the resolved launch mode, not whether a user clicked a checkbox:
@@ -249,6 +247,10 @@ export const runRecordSchema = z.object({
    *  Used by the autonomous nudge and terminal review policy. Continue/recovery
    *  preserve it; absent on legacy records means non-autonomous. */
   autonomous: z.boolean().optional(),
+  archiveWhenDone: contractRunRecordSchema.shape.archiveWhenDone,
+  autoMergePr: contractRunRecordSchema.shape.autoMergePr,
+  completionAction: contractRunRecordSchema.shape.completionAction,
+  archiveBlocker: contractRunRecordSchema.shape.archiveBlocker,
   /** Task webhook opt-in (#589). Absent = off; `POST /runs/:id/notify` flips it at any time. */
   notify: z.boolean().optional().catch(undefined),
   /** The last task-webhook delivery's outcome (#589), written by `runs/webhook.ts`. */
@@ -357,7 +359,7 @@ export const runRecordSchema = z.object({
   worktreeReclaimedAt: z.string().optional(),
   /** Worktree setup (#917). An unreadable value drops the field, never the run. */
   worktreeSetup: contractRunRecordSchema.shape.worktreeSetup.catch(undefined),
-  /** Parallel variants (spec 010): tasks sharing a groupId are one group. */
+  /** Historical parallel variants (retired): tasks sharing a groupId are one group. */
   groupId: z.string().optional(),
   /** Variant letter within the group — 'A' | 'B' | 'C' (kept as a string). */
   variant: z.string().optional(),
@@ -849,25 +851,9 @@ function refUrlRepo(url: string): string | undefined {
 }
 
 /**
- * May the referenced tier ADOPT this URL as the task's subject? (#945)
- *
- * The tier was text-scoped but never repo-scoped: `PR_URL_RE` matches any
- * `github.com/<owner>/<repo>/pull/N`, so a research task that cites one upstream PR handed the
- * resolver exactly one candidate and it became the task's identity — an `oko` task wearing
- * `supabase/cli#6056`. Nothing compared the URL's repository with the project's own.
- *
- * A foreign URL is adoptable only when the TASK PROMPT corroborates it: the prompt names that
- * `owner/repo`, which a pasted URL does inherently. That is the trust boundary this module already
- * uses elsewhere — the prompt and the agent's own turn text are trusted, scraped tool output is
- * not — and it is what keeps the legitimate cross-repo case working (#819:
- * `om-auto-fix-pr https://github.com/open-mercato/open-mercato/pull/1977` started from cezar).
- *
- * Unknown handle → today's behavior exactly (`AGENTS.md` zero config: degrade, never fail). An
- * unparseable URL is left alone for the same reason — the guard only ever removes an association
- * it can PROVE is foreign.
- *
- * Note what this does not touch: `referenced*Candidates` keep recording every URL as evidence.
- * The fix changes what is *promoted*, never what is *collected* (the #526 rule).
+ * A foreign referenced URL needs task-prompt corroboration of its repository. Unknown project
+ * handles preserve the degraded rule. This check vets the resolved winner, not the candidate
+ * list.
  */
 function isRepoScopedRef(url: string, task: string, handle?: RepoHandle | null): boolean {
   if (!handle) return true;
@@ -956,19 +942,8 @@ function eventTextFragments(event: Record<string, unknown>): string[] {
 }
 
 /**
- * Where a CREATION CLAIM may come from — the trust boundary the created tier was missing.
- *
- * `CREATED_PR_RE` used to be matched against everything an event carried, tool OUTPUT included,
- * so a transcript that merely QUOTES a `gh pr create` line handed the run a PR it never opened.
- * Not hypothetical: the task that fixed the reference chips printed another run's stored events
- * while investigating them, and cezar read `"title": "Ran gh pr create --repo …"` out of that
- * dump and adopted a PR from a DIFFERENT repository as its own — permanently, because the first
- * created URL wins and the real `gh pr create` that followed was never looked at.
- *
- * So the claim must come from the agent's own words, or from the tool title cezar itself renders
- * from the command it saw run. Tool output and tool input are the transcript of the world, not a
- * statement about this run. The URL is still read from the whole event — `gh` prints it in the
- * output — because it is the CLAIM that needs a trustworthy source, not the link.
+ * Creation claims come from agent prose or cezar-rendered tool titles, never arbitrary tool
+ * output/input. The claimed URL may still come from the event’s command result.
  */
 function eventCreationClaimFragments(event: Record<string, unknown>): string[] {
   const fragments: string[] = [];
@@ -1014,21 +989,9 @@ function eventAgentTextFragments(event: Record<string, unknown>): string[] {
 }
 
 /**
- * The referenced tier's resolution rule, shared by the PR and issue janitors:
- * a marker-declared number (spec 2026-07-18-task-ref-markers) owns the answer
- * outright — only a candidate URL ending in that number resolves, and a
- * contradiction clears the chip. Without a declaration: one distinct URL is
- * the subject; among several, prefer the exact URL pasted in the prompt, then
- * the one whose number the task prompt names (and
- * only when exactly one matches); otherwise ambiguous — no chip beats a wrong
- * chip.
- *
- * Whatever that produces is then repo-scoped (#945): a winner from another repository that the
- * prompt does not corroborate is vetoed — see `isRepoScopedRef`. The veto is applied to the
- * RESULT rather than to the candidate list on purpose, so the guard stays strictly subtractive:
- * filtering first would let a project-local candidate win a two-candidate race today's rule calls
- * ambiguous, which is a wider behavior change than the defect warrants. As written this function
- * can only ever lose a value, never gain one.
+ * Resolve declarations and prompt-supported candidates without guessing through ambiguity. Apply
+ * repository scope to the winner only; filtering candidates first could promote an otherwise
+ * ambiguous reference.
  */
 function resolveReferencedRef(
   candidates: string[],
@@ -1070,20 +1033,8 @@ function refUrlNumber(url: string | undefined): number | undefined {
 }
 
 /**
- * The PR declaration the REFERENCED tier is allowed to act on.
- *
- * `CEZ:PR=N` means one of two things depending on when the agent writes it: on the way in it
- * names the PR the task is ABOUT, and once the task has opened a PR of its own the marker
- * contract asks it to re-declare with the new number ("Re-emit with the new number if the subject
- * changes (e.g. you open a PR later in the task)"). A declaration naming the PR this run CREATED
- * is therefore a statement about the CREATED tier, which `pullRequestUrl` already carries — and
- * feeding it to the referenced tier ERASES the about-PR, because `resolveReferencedRef` clears
- * the chip when no candidate matches the declared number (a task on #4326 that opened
- * #5366 dropped from two chips to one the moment it declared #5366).
- *
- * Both tiers stay true instead: the created PR is the created PR, and the reference resolves as
- * if that declaration had not been made — which is exactly what it was before the task opened
- * anything.
+ * Ignore a created-PR declaration when resolving the referenced subject, so a task can retain
+ * both its original subject and its new PR.
  */
 function referencedPrDeclaration(run: RunRecord): number | undefined {
   const declared = run.markerRefs?.pr;
@@ -1260,13 +1211,8 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
 }
 
 /**
- * Settle a live run whose owning process died, when a control adopts it (#779, plan step 3), so
- * that adopting never starts agent work: only Continue may, with the user's own input. A run that
- * never started is cancelled before it began, which Continue restarts as it would after a Stop (the
- * same "untouched" test as `isUntouchedCancelledRun`); any other live run is interrupted, exactly as
- * an open that does not recover settles it, and Continue resumes its last session. With `stop`
- * (the control is Stop, and this is its run) a live run is cancelled instead, as an accepted Stop
- * always reads. Mutates `run`.
+ * Settle an adopted dead owner’s live run without starting work. Untouched runs cancel; started
+ * runs become interrupted. Stop explicitly cancels its target. Mutates run.
  */
 export function settleOrphanedRun(run: RunRecord, opts: { stop?: boolean } = {}): RunRecord {
   if (opts.stop && (run.status === 'queued' || run.status === 'running' || run.status === 'waiting')) run.stopping = true;
@@ -1375,28 +1321,9 @@ function legacyIndexRows(bytes: Buffer): { rows: RunRowInput[]; skipped: number;
 }
 
 /**
- * Import `runs.json` into a database that has never completed an import (#779, plan step 4).
- *
- * Nothing is read while a live cockpit other than this process owns the project
- * (`assertNoLegacyCockpit`): an older cezar still writes `runs.json` then, and the import could
- * not commit. Otherwise the file is read once, through one descriptor, and parsed; it is checked
- * again before anything is written, so a file that moved while it was parsed costs no write. Then
- * ONE transaction writes every record and the completion marker, or nothing:
- * - the marker is checked again once the transaction holds the write lock, so of two processes
- *   importing at once exactly one writes; the other finds the marker and writes nothing;
- * - right before COMMIT it refuses (`LegacyWriterError`) when an older cezar may still be writing
- *   `runs.json` (`assertNoLegacyWriter`) — the check that decides;
- * - only then are the exact bytes kept beside it (`backUpLegacyIndex`: synced, never half-written,
- *   an existing backup trusted only when it holds the same bytes), and the marker records what
- *   the import read: size, sha256 and the backup's name. A refused attempt leaves no backup;
- * - a crash or refusal leaves no marker, so the next open imports again from the start.
- * `runs.json` itself is left as it was, and nothing writes it again: an older cezar keeps reading
- * the history as it stood at the upgrade, and what it writes afterwards is never imported.
- *
- * A record that does not parse is skipped and the rest are imported; an index that does not parse
- * at all imports as an empty history. Either way the import that commits says so once, naming the
- * backup: the bytes survive there and in `runs.json`, which used to be overwritten by the next save
- * instead.
+ * Import legacy rows and the completion marker atomically, once. Recheck live-writer evidence
+ * before commit and preserve exact input bytes in a synced backup. Leave runs.json untouched;
+ * invalid entries are skipped and reported.
  */
 function importLegacyIndex(db: RunDatabase, dataDir: string): void {
   assertNoLegacyCockpit(dataDir);
@@ -1681,33 +1608,9 @@ export function isSweepable(
 }
 
 /**
- * File-backed run store: one row per run in `runs.db` (#779, `./run-database.ts`) plus one
- * append-only NDJSON event file per run. Also the in-process event bus the SSE endpoints
- * subscribe to: emits `('run', RunRecord)` and `('event', { runId, event: RunEvent })`.
- *
- * Only the held set lives in memory (#779, Amendment 2): live runs, the runs a RunManager pins,
- * their delegation families, and runs whose latest write has not settled yet (see `isHeld`).
- * `getRun` answers a held run with the held object, so `commitIndex` still installs into the
- * record a caller holds; any other run is read from `runs.db` as a fresh copy every time (frozen
- * under vitest, so an in-place write throws instead of being lost). Writes to a finished run go
- * through the methods here, which load it, change it and persist the row like any other.
- *
- * Two write paths, both through `writeIndex`:
- * - optimistic: a method changes the held record, marks it dirty and schedules the debounced
- *   save, which writes the dirty rows and deletions only;
- * - durable (`commitIndex`): one transaction with the changed rows AND everything a debounced
- *   save still owes. Only once it commits do the records change in memory, and only then do
- *   subscribers hear about it.
- *
- * Several processes may open one project (`serve` and a headless `cez run`), so a store writes
- * only the delegation families it claims in `run_claims` (#779, plan step 3; `run-claims.ts`).
- * Everything it holds is claimed: open claims the live rows nobody alive owns and leaves the rest
- * alone, and a write to a run not in memory claims its family first, or refuses it while another
- * live process owns it. Claims are released once a family leaves memory, and all of them on
- * `close()`; a crashed owner's are taken over only once it is proven dead. Every write is fenced
- * in its transaction: if a row is not as this store last saw it, or its claim is gone, nothing is
- * written, the evidence goes to `run_conflicts` and this store stops writing that row
- * (`handleConflicts`).
+ * Run rows in runs.db plus append-only NDJSON events and an in-process event bus. Hold live,
+ * pinned, related and unsettled records only. Optimistic writes debounce; durable commits
+ * publish after persistence. Family claims fence every write.
  */
 export class RunStore extends EventEmitter {
   /** The held set: every record this store keeps in memory, by id. */
@@ -2060,12 +1963,9 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * Take over the delegation family of an `orphaned` run for a control: claim it from its dead
-   * owner (or from nobody), then load it and settle its live rows (`settleOrphanedRun`) — never
-   * keep them for recovery to resume, since only Continue may start agent work. With `stop` the
-   * control is Stop: `id` itself is settled as cancelled rather than interrupted. Returns the
-   * family's root id, or undefined when a live owner holds it after all or it is gone. The caller
-   * runs recovery for that family next (`RunManager.adoptOrphanedRun`), which then repairs it.
+   * Claim an orphaned family and settle its live rows before a control acts. Stop cancels its
+   * target. Return the root id, or undefined for a live owner or missing run; adoption never
+   * resumes work.
    */
   adoptFamily(id: string, opts: { stop?: boolean } = {}): string | undefined {
     const family = this.db?.familyOf(id);
@@ -2251,20 +2151,8 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * Tell the store which repository this project IS (#945), so the referenced tier stops adopting
-   * another repo's PR/issue as the task's subject. See `isRepoScopedRef` for the rule.
-   *
-   * A setter rather than an `open()` option because `open()` is synchronous and the handle costs a
-   * `gh` spawn: callers arm this in the background so boot never waits on the network. `null` is a
-   * first-class answer meaning "cannot be known" (no `gh`, no remote, a non-git root) and leaves
-   * the store in exactly its pre-#945 behavior.
-   *
-   * Arming also HEALS records already poisoned by the un-scoped rule, on the `reconcileLoadedRun`
-   * precedent: the evidence is all still on the record (`referenced*Candidates`), only the
-   * conclusion drawn from it was wrong, so re-deciding beats asking for a migration. It rewrites
-   * values, never the format, and is one-directional by construction — see `rescopeRun`. Held
-   * runs are re-checked in memory; of the rest, only rows whose stored summary references another
-   * repository are decoded, and the healed ones are written, so their summaries heal too.
+   * Set discovered repository identity without blocking boot. Recompute conclusions from retained
+   * evidence, including cold records; null retains unknown-handle behavior.
    */
   setRepoHandle(handle: RepoHandle | null): void {
     this.repoHandle = handle;
@@ -2710,8 +2598,9 @@ export class RunStore extends EventEmitter {
     runner?: RunnerId;
     /** Composer's per-task agent account (spec 2026-07-29-agent-profiles). */
     agentProfile?: string;
-    generateFollowups?: boolean;
     autonomous?: boolean;
+    archiveWhenDone?: boolean;
+    autoMergePr?: boolean;
     /** Task webhook opt-in (#589), set at creation so the first transition is already covered. */
     notify?: boolean;
     worktree?: false;
@@ -2754,8 +2643,9 @@ export class RunStore extends EventEmitter {
       effort: input.effort,
       runner: input.runner,
       agentProfile: input.agentProfile,
-      generateFollowups: input.generateFollowups,
       autonomous: input.autonomous,
+      archiveWhenDone: input.archiveWhenDone,
+      autoMergePr: input.autoMergePr,
       ...(input.notify ? { notify: true } : {}),
       worktree: input.worktree,
       groupId: input.groupId,
@@ -3303,16 +3193,12 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * The durable write: `staged` holds the records this operation replaces (`null` deletes one),
-   * in the order subscribers hear about them. The transaction is the durability boundary;
-   * flush() is deliberately best-effort.
-   *
-   * One transaction carries the staged rows and every row a debounced save still owes, so the
-   * database never holds a commit without the optimistic writes made before it. If it fails,
-   * nothing changed anywhere: the held records, the database, the pending dirty rows and the
-   * subscribers all see the store as it was.
+   * Durably replace or delete staged rows together with pending dirty rows. Persist before
+   * changing held objects or notifying subscribers. On failure retain all pending state; flush()
+   * remains best-effort.
    */
-  private commitIndex(staged: ReadonlyMap<string, RunRecord | null>, source?: CommitSource): void {
+  private commitIndex(input: ReadonlyMap<string, RunRecord | null>, source?: CommitSource): void {
+    const staged = this.prepareCompletionActions(input);
     if (!this.db) throw this.openFailure ?? new Error('runs database unavailable: nothing can be saved');
     this.assertWritable(staged);
     this.persist(staged);
@@ -3322,7 +3208,12 @@ export class RunStore extends EventEmitter {
       if (!next) { this.held.delete(id); continue; }
       this.committing.add(id);
       const current = this.held.get(id);
-      if (current) Object.assign(current, next);
+      if (current) {
+        for (const key of Object.keys(current) as Array<keyof RunRecord>) {
+          if (!(key in next)) delete current[key];
+        }
+        Object.assign(current, next);
+      }
       else this.held.set(id, next);
     }
     try {
@@ -3334,6 +3225,100 @@ export class RunStore extends EventEmitter {
       for (const id of staged.keys()) this.committing.delete(id);
       this.sweepIfSettled(staged.keys());
     }
+    for (const [id, next] of staged) if (next?.archived) this.compressor.enqueue(id);
+  }
+
+  /** Completion and its intent/archive share the same committed rows, including root Finish. */
+  private prepareCompletionActions(input: ReadonlyMap<string, RunRecord | null>): Map<string, RunRecord | null> {
+    const staged = new Map(input);
+    for (const [id, candidate] of input) {
+      if (!candidate) continue;
+      const previous = this.peek(id);
+      let next = candidate;
+      const changed = candidate.status === 'done' && !candidate.archived && (
+        previous?.status !== 'done' ||
+        Boolean(previous.archiveWhenDone) !== Boolean(candidate.archiveWhenDone) ||
+        Boolean(previous.autoMergePr) !== Boolean(candidate.autoMergePr));
+      if (changed && (candidate.archiveWhenDone || candidate.autoMergePr)) {
+        next = { ...candidate, completionAction: { id: randomUUID(), phase: 'pending' } };
+        staged.set(id, next);
+        if (next.archiveWhenDone && !next.autoMergePr) {
+          const blocker = this.completionArchiveBlocker(next);
+          next.completionAction = { ...next.completionAction!, phase: blocker ? 'blocked' : 'complete', ...(blocker ? { message: blocker } : {}) };
+          if (!blocker) this.stageArchive(staged, next, true);
+        }
+      } else if (candidate.status !== 'done' || (!candidate.archiveWhenDone && !candidate.autoMergePr)) {
+        if (candidate.completionAction) staged.set(id, { ...candidate, completionAction: undefined });
+      }
+    }
+    return staged;
+  }
+
+  private completionArchiveBlocker(root: RunRecord): string | undefined {
+    const family = [root, ...this.listWorkersOf(root.id)];
+    for (const run of family) {
+      const facts = this.facts.peek(run.id);
+      if (!facts || !['done', 'review', 'failed', 'cancelled'].includes(run.status) || run.waits?.some(wait => wait.phase === 'open') ||
+        run.hasPendingPermission || facts.pendingAsk !== undefined)
+        return 'Task or worker work still needs attention. Open the task or archive manually.';
+      if (run.delegation?.role === 'invalid' || (run.delegation?.role === 'worker' && this.readWorkerExecution(run.id)?.phase !== 'complete'))
+        return 'Worker execution has not settled. Open the worker or archive manually.';
+    }
+    return undefined;
+  }
+
+  /** One archive write for manual actions, merge observations, completion, and sweeps.
+   * Archiving files history away; it never stops a process or removes a worktree. */
+  private stageArchive(staged: Map<string, RunRecord | null>, root: RunRecord, archived: boolean): void {
+    const ids = root.delegation?.role === 'worker' ? [root.id] :
+      [root.id, ...new Set([...(this.db?.listIdsByParent(root.id) ?? []), ...this.listWorkersOf(root.id).map(run => run.id)])];
+    const now = new Date().toISOString();
+    for (const id of ids) {
+      const member = staged.get(id) ?? this.peek(id);
+      if (!member) continue;
+      if (!archived) { this.compressor.cancel(id); restoreHistory(this.dataDir, id); }
+      const next = { ...member, archiveBlocker: undefined };
+      archiveFields(next, archived, now);
+      staged.set(id, next);
+    }
+  }
+
+  /** A bounded persisted queue also covers projects without a live RunManager. */
+  listCompletionCandidates(afterSeq = 0, limit = 32): Array<{ id: string; seq: number }> {
+    return this.db?.listCompletionCandidates(afterSeq, limit) ?? [];
+  }
+
+  canCompleteAction(id: string, token: string): boolean {
+    const run = this.record(id);
+    return Boolean(run && run.status === 'done' && !run.archived && (run.autoMergePr || run.archiveWhenDone) &&
+      run.completionAction?.id === token && run.completionAction.phase !== 'complete' && !this.writeRefusal(id));
+  }
+
+  claimCompletionAction(id: string, token: string): boolean {
+    if (!this.canCompleteAction(id, token)) return false;
+    const run = this.record(id)!;
+    this.assertWritable(new Map([[id, run]]));
+    // A normal write may defer its claim until the transaction. A remote mutation
+    // needs the committed claim now, and must not act on a stale row read before it.
+    const claim = this.db?.getClaim(familyKey(run));
+    return Boolean(claim && claim.session === this.owner?.session &&
+      claim.generation === this.claimed.get(familyKey(run)) &&
+      this.db?.get(id)?.revision === this.base.get(id)?.revision);
+  }
+
+  completeAction(id: string, token: string, phase: 'blocked' | 'complete', message?: string): boolean {
+    const run = this.record(id);
+    if (!run || !this.canCompleteAction(id, token)) return false;
+    if (run.completionAction?.phase === phase && run.completionAction.message === message) return true;
+    const next: RunRecord = { ...run, completionAction: { id: token, phase, ...(message ? { message } : {}) } };
+    const staged = new Map<string, RunRecord | null>([[id, next]]);
+    if (phase === 'complete' && next.archiveWhenDone) {
+      const blocker = this.completionArchiveBlocker(next);
+      if (blocker) next.completionAction = { id: token, phase: 'blocked', message: blocker };
+      else this.stageArchive(staged, next, true);
+    }
+    this.commitIndex(staged);
+    return true;
   }
 
   /**
@@ -3404,6 +3389,15 @@ export class RunStore extends EventEmitter {
     }
     // Restore before mutating so a throw leaves status and archived unchanged (#818 S3).
     if (archived === false) restoreHistory(this.dataDir, id);
+    // Only opted-in completion needs this transaction. Default-off Finish must
+    // retain its best-effort write path so a locked database cannot stop cleanup.
+    if ((normalized.status === 'done' && (run.archiveWhenDone || run.autoMergePr)) ||
+      normalized.archiveWhenDone !== undefined || normalized.autoMergePr !== undefined) {
+      const next = { ...run, ...this.redactPatch(normalized) };
+      if (archived !== undefined) archiveFields(next, archived, new Date().toISOString());
+      this.commitIndex(new Map([[id, next]]));
+      return this.record(id);
+    }
     Object.assign(run, this.redactPatch(normalized));
     if (run.status !== 'waiting') run.autoResumeAt = undefined;
     if (normalized.task !== undefined) this.resolveEditedTaskRefs(run);
@@ -3532,32 +3526,51 @@ export class RunStore extends EventEmitter {
     const ids = [id, ...new Set([...(this.db?.listIdsByParent(id) ?? []), ...this.listWorkersOf(id).map(run => run.id)])];
     if (ids.length > 1025) return undefined;
     const family: RunRecord[] = [];
-    const cwds = sharedCwdScan();
+    const block = (message: string, runId = id) => { this.setArchiveBlocker(id, { message, runId }); return undefined; };
     for (const memberId of ids) {
       const row = this.db?.get(memberId);
       const raw: unknown = row ? JSON.parse(row.data) : this.held.get(memberId);
       const decoded = decodeRunRow(JSON.stringify(raw));
-      if (!decoded) return undefined;
+      if (!decoded) return block('Task history is unavailable. Open the task or archive it manually.', memberId);
       // Do not let the runtime schema's per-entry salvage hide malformed PR authority.
       if (raw && typeof raw === 'object' && 'pullRequests' in raw &&
-        (!Array.isArray(raw.pullRequests) || raw.pullRequests.some(entry => !runPullRequestSchema.safeParse(entry).success))) return undefined;
+        (!Array.isArray(raw.pullRequests) || raw.pullRequests.some(entry => !runPullRequestSchema.safeParse(entry).success))) return block('PR associations are invalid. Check the task PRs or archive manually.', memberId);
       const run = this.held.get(memberId) ?? decoded.run;
       if (row && !this.held.has(memberId)) this.decodeCold(row); // records the synchronous write fence
-      if (this.deleted.has(memberId) || this.quarantined.has(memberId) || this.pins.has(memberId) || isActive(memberId) ||
-        hasRegisteredRunProcess(memberId) || isLiveRecord(run) || row?.live ||
-        run.waits?.some((wait) => wait.kind === 'human' && wait.phase === 'open') || run.hasPendingPermission || run.delegation?.role === 'invalid' ||
-        !['review', 'done', 'failed', 'cancelled'].includes(run.status) || autosaveCleanupBlocker(this.dataDir, memberId)) return undefined;
+      if (this.deleted.has(memberId) || this.quarantined.has(memberId) || this.writeRefusal(memberId))
+        return block('Task history is owned elsewhere or cannot be changed. Retry after its owner stops.', memberId);
+      if (this.pins.has(memberId) || isActive(memberId) || isLiveRecord(run) || row?.live ||
+        !['review', 'done', 'failed', 'cancelled'].includes(run.status))
+        return block('Task work is still active. Wait for it to finish or archive manually.', memberId);
+      if (run.waits?.some(wait => wait.kind === 'human' && wait.phase === 'open') || run.hasPendingPermission)
+        return block('Task needs an answer or permission. Open it to respond, or archive manually.', memberId);
+      if (run.delegation?.role === 'invalid') return block('Worker ownership is invalid. Inspect the task or archive manually.', memberId);
       const facts = this.facts.peek(memberId);
-      if (!facts || facts.pendingAsk !== undefined) return undefined;
-      if (run.delegation?.role === 'worker') {
-        const proof = this.readWorkerExecution(memberId);
-        if (!proof || this.workerResourceHolders(memberId, proof.generation, run.delegation.workspace.resourceId, { cwds }) !== 'safe') return undefined;
-      } else if (run.worktreePath && inspectGeneration({ paths: [run.worktreePath], cwds }).liveness !== 'gone') return undefined;
-      if (this.writeRefusal(memberId)) return undefined;
+      if (!facts || facts.pendingAsk !== undefined) return block('Task has an unanswered question or unread history. Open it to respond, or archive manually.', memberId);
+      if (run.delegation?.role === 'worker' && this.readWorkerExecution(memberId)?.phase !== 'complete')
+        return block('Worker execution has not settled. Open the worker or archive manually.', memberId);
+      // Process and scratch cleanup evidence protects deletion, not reversible filing.
       family.push(run);
     }
     if (family[0]?.delegation?.role === 'worker' || family[0]?.archived) return undefined;
     return family;
+  }
+
+  /** Blockers are feedback, never archive authority or cleanup permission. */
+  setArchiveBlocker(id: string, blocker: RunRecord['archiveBlocker']): void {
+    const run = this.record(id);
+    if (!run || run.archived || isDeepStrictEqual(run.archiveBlocker, blocker)) return;
+    this.commitIndex(new Map([[id, { ...run, archiveBlocker: blocker }]]));
+  }
+
+  archiveMergeBlocker(snapshot: ArchiveOnMergeSnapshot, missing: ArchivePullRequestIdentity, repoBase?: string): void {
+    const url = `https://github.com/${missing.owner}/${missing.repo}/pull/${missing.number}`;
+    const family = [snapshot.rootId, ...(this.db?.listIdsByParent(snapshot.rootId) ?? [])].flatMap(id => {
+      const run = this.peek(id); return run ? [run] : [];
+    });
+    const member = family.find(run => archivePullRequests([run], repoBase)?.some(pr => pullRequestKey(pr) === pullRequestKey(missing)));
+    this.setArchiveBlocker(snapshot.rootId, { message: `PR ${missing.owner}/${missing.repo}#${missing.number} is not confirmed merged. Check the PR association or archive manually.`,
+      runId: member?.id ?? snapshot.rootId, pullRequestUrl: url });
   }
 
   hasArchiveOnMergeAssociations(id: string): boolean {
@@ -3578,10 +3591,13 @@ export class RunStore extends EventEmitter {
 
   private archiveSnapshot(family: RunRecord[], repoBase?: string): ArchiveOnMergeSnapshot | undefined {
     const pullRequests = archivePullRequests(family, repoBase);
-    if (!pullRequests) return undefined;
+    if (!pullRequests) {
+      this.setArchiveBlocker(family[0]!.id, { message: 'PR associations cannot be resolved. Check task and worker PRs, or archive manually.' });
+      return undefined;
+    }
     const fingerprint = archiveDigest(pullRequests);
     if (family[0]!.autoArchive?.fingerprint === fingerprint) return undefined;
-    return { rootId: family[0]!.id, fingerprint, pullRequests, token: archiveDigest(family) };
+    return { rootId: family[0]!.id, fingerprint, pullRequests, token: archiveDigest(family.map(({ archiveBlocker: _blocker, ...run }) => run)) };
   }
 
   /** No await between final revalidation and the fenced, all-or-nothing cascade. */
@@ -3600,12 +3616,8 @@ export class RunStore extends EventEmitter {
     if (restoredAt && merged.every(pr => Date.parse(pr.mergedAt) <= restoredAt)) return false;
     const now = new Date().toISOString();
     if (merged.some(pr => Date.parse(pr.mergedAt) > Date.parse(now))) return false;
-    const staged = new Map(family.map(run => {
-      const next = structuredClone(run);
-      archiveFields(next, true, now);
-      next.pinned = undefined; next.pinnedAt = undefined;
-      return [next.id, next] as const;
-    }));
+    const staged = new Map<string, RunRecord | null>();
+    this.stageArchive(staged, family[0]!, true);
     staged.get(snapshot.rootId)!.autoArchive = { reason: 'pull-requests-merged', archivedAt: now, fingerprint: current.fingerprint, pullRequests: merged };
     this.commitIndex(staged);
     for (const id of staged.keys()) this.compressor.enqueue(id);
@@ -3621,16 +3633,14 @@ export class RunStore extends EventEmitter {
 
   /** Parent + owned workers; returns how many records flipped `archived`. */
   private applyArchivedCascade(run: RunRecord, archived: boolean): number {
+    const staged = new Map<string, RunRecord | null>();
+    this.stageArchive(staged, run, archived);
     let changed = 0;
-    if (this.applyArchived(run, archived)) changed++;
-    // Owned workers nest under their parent only while both share Active/Archived (#250).
-    // Cascade from the parent only — archiving one worker stays independent.
-    if (run.delegation?.role !== 'worker') {
-      for (const { id } of this.listWorkersOf(run.id)) {
-        const child = this.record(id);
-        if (child && this.applyArchived(child, archived)) changed++;
-      }
+    for (const [id, next] of staged) {
+      if (next && this.peek(id)?.archived !== archived) changed++;
+      if (next) next.completionAction = undefined; // an explicit filing/restoration retires pending work
     }
+    this.commitIndex(staged);
     return changed;
   }
 
@@ -3789,29 +3799,11 @@ export class RunStore extends EventEmitter {
     return run;
   }
 
-  /** Bulk mark-read: stamp every currently-unread finished run; returns the count.
-   *  "Unread" here is the same rule the cockpit paints (`isUnread` in read-state.ts),
-   *  clause for clause:
-   *   - a `done` or `failed` run that finished and has not been seen since;
-   *   - cancelled runs are never unread — you stopped them yourself;
-   *   - archived ones never are either, since archiving is a stronger "done with this"
-   *     than reading;
-   *   - and a run waiting out a usage limit is not a done item AT ALL: it is `waiting` with
-   *     its appointment (hearsay-tools/cezarion#1236), so there is no outcome to have missed.
-   *
-   *  Keeping the two rules identical is what makes the returned count the number the
-   *  cockpit's unread badge was showing. The `autoResumeAt` clause is the one that drifted
-   *  (#803): `isUnread` gained it with auto-resume and this sweep did not, so a task waiting
-   *  out a usage limit was uncounted by the badge but stamped read by the sweep — and this
-   *  comment asserted an invariant the code no longer held.
-   *
-   *  This rule lives in two languages of the same repo, which is why it has now drifted
-   *  once. The cockpit cannot import it (`packages/web` does not depend on the service, and
-   *  should not), so a single definition would have to move to `packages/contract` — the one
-   *  package both sides already import. Worth doing; deliberately not done here, because
-   *  widening the contract package's remit from "shapes" to "behavior" is a design change
-   *  that deserves its own review rather than riding along in a bug fix. Until then: EDIT
-   *  BOTH, and the case-table tests on either side are what catch you if you don't. */
+  /**
+   * Stamp unread finished runs in bulk and return the count. Keep the rule aligned with cockpit
+   * isUnread: done/failed, finished since seen, not archived; cancelled and usage-limit waiting
+   * runs are excluded.
+   */
   markAllRead(): number {
     const now = new Date().toISOString();
     let count = 0;
@@ -4197,7 +4189,6 @@ export class RunStore extends EventEmitter {
       return [];
     }
   }
-
 
   readEvents(runId: string): RunEvent[] {
     try {
@@ -4785,23 +4776,9 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * A fenced write found rows that changed under this store (#779, plan step 3); the write itself
-   * has already failed with nothing changed, and its caller sees that error.
-   *
-   * A conflict is UNEXPECTED when this store owned the row's family when it last read or wrote it:
-   * a held or pending row, or one read inside a family it claimed. Another writer then broke the
-   * claim. For each such row the original (what this store last saw), local (what it meant to
-   * write, or that it meant to delete it) and current versions go to `run_conflicts` first. Only
-   * once that evidence is stored does the row leave the pending set, so no retry rewrites it; this
-   * store then refuses to write it again, and its held copy is replaced by the current row (or
-   * dropped when deleted) and announced. That refusal lasts as long as this store: the explicit
-   * recovery is a restart, which reads the row as it now stands, and the evidence row stays for a
-   * person to compare. Other pending rows stay pending and the next save writes them.
-   *
-   * If the evidence cannot be stored, nothing changes: the rows stay pending, and the next write
-   * meets the same conflict and tries again. A row read before its family was claimed may simply
-   * have been finished by its previous owner in between: a stale read, not a conflict, so only the
-   * write fails.
+   * Handle a fenced-write conflict. Save unexpected conflict evidence before clearing pending
+   * state or quarantining the row. If evidence persistence fails, retain pending writes. Other
+   * rows remain writable; stale unclaimed reads only fail their write.
    */
   private handleConflicts(error: RunConflictError, staged: ReadonlyMap<string, RunRecord | null>): void {
     const unexpected = error.conflicts.filter((conflict) =>

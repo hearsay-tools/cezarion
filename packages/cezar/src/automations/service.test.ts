@@ -73,7 +73,7 @@ describe('one-time writes after a crash-left reservation', () => {
   it('an edit of the due time is refused, and Run now starts no second task', async () => {
     const { service, project, id, launch, automationStore } = await fixture();
     const stored = automationStore.get(id)!;
-    const moved = await service.update(project, id, { name: stored.name, enabled: stored.enabled, kind: 'schedule', schedule: { type: 'once', at: '2026-10-30T09:00', timeZone: 'UTC' }, task: stored.task, expectedRevision: stored.revision });
+    const moved = await service.update(project, id, { name: stored.name, enabled: stored.enabled, kind: 'schedule', schedule: { type: 'once', at: '2026-10-30T09:00', timeZone: 'UTC' }, task: { ...stored.task, variants: 1 }, expectedRevision: stored.revision });
     expect(moved).toMatchObject({ ok: false, status: 409, error: ONCE_ARCHIVED });
     await expect(service.runNow(project, id)).resolves.toMatchObject({ ok: false, status: 409 });
     expect(launch).not.toHaveBeenCalled();
@@ -105,7 +105,7 @@ describe('one-time writes that race or keep the due time (#1465 review)', () => 
     const { service, project, automationStore } = fixture();
     const stored = automationStore.create({ name: 'Once', enabled: false, kind: 'schedule', schedule: { type: 'once', at: '2026-10-20T09:00', timeZone: 'UTC' }, task: { prompt: 'Go' } });
     automationStore.setState(stored.id, (state) => ({ ...state, onceOutcome: 'missed' }));
-    const saved = await service.update(project, stored.id, { name: stored.name, enabled: false, kind: 'schedule', schedule: { type: 'once', at: '2026-10-20T09:00', timeZone: 'UTC', latestStartMinutes: 30 }, task: stored.task, expectedRevision: stored.revision });
+    const saved = await service.update(project, stored.id, { name: stored.name, enabled: false, kind: 'schedule', schedule: { type: 'once', at: '2026-10-20T09:00', timeZone: 'UTC', latestStartMinutes: 30 }, task: { ...stored.task, variants: 1 }, expectedRevision: stored.revision });
     expect(saved).toMatchObject({ ok: true, automation: { schedule: { latestStartMinutes: 30 } } });
   });
 

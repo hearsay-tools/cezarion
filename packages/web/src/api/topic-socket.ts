@@ -1,23 +1,7 @@
 /**
- * The cockpit's one WebSocket to `/api/v1/ws` — the subscription bus that replaced polling.
- * Design + the subscribe/unsubscribe discipline: spec
- * `.ai/specs/2026-07-23-websocket-subscriptions.md`.
- *
- * The server hub (src/server/ws.ts) does work per TOPIC only while someone holds it, so the
- * client's whole job is honest bookkeeping: `subscribeTopic(topic, listener)` ref-counts
- * listeners per topic, opens the socket lazily on the first subscription anywhere, sends one
- * `subscribe` frame per topic (not per listener), sends `unsubscribe` when a topic's last
- * listener leaves, and closes the socket once NO topic is held — so an idle cockpit costs the
- * server nothing, which is the point of moving off `refetchInterval` (#369).
- *
- * One socket per app, same argument as the SSE stream in global-events.tsx: the per-origin
- * connection budget is shared with every fetch, and duplicate sockets would carry duplicate
- * copies of the same frames.
- *
- * Wire protocol (both directions JSON, one frame per message):
- *   → {type: 'subscribe' | 'unsubscribe', topic}
- *   ← {type: 'event', topic, data}          — a payload for a held topic
- *   ← {type: 'error', topic?, error}        — ignored here beyond being non-events
+ * Ref-counted topic socket used by the shared local live owner. Subscribe once per topic,
+ * unsubscribe on last listener and close with no demand. JSON frames carry subscriptions, events
+ * or errors.
  */
 
 import { setIdleSource } from '@/lib/cez-idle'

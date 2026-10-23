@@ -294,18 +294,6 @@ describe('provider action gating', () => {
     expect(sendMessage).toHaveBeenCalledOnce();
   });
 
-  it('blocks starting an inbox todo with a disabled provider', async () => {
-    mkdirSync(dataDir, { recursive: true });
-    writeFileSync(join(dataDir, 'todos.json'), JSON.stringify([{ id: 'todo-1', summary: 'Follow up' }]), 'utf8');
-    const response = await apiRequest(app, '/api/v1/todos/todo-1/start', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ runner: 'codex' }),
-    });
-
-    await expectDisabled(response);
-    expect(startRun).not.toHaveBeenCalled();
-  });
 });
 
 /**

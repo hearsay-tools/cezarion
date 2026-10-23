@@ -185,7 +185,7 @@ export function refPrefixMatches(title: string, reference: number | undefined): 
 /**
  * A variant's shared title: `"Add autocomplete (A)"` → `"Add autocomplete"`.
  *
- * The suffix is the server's own convention (`startVariants` appends ` (A)`…` (C)`), so this
+ * The suffix is the server's own convention (the retired launch engine appended ` (A)`…` (C)`), so this
  * strips exactly that shape — a title that merely ends in "(D)" or "(draft)" is left alone.
  */
 export function groupTitle(run: Pick<RunSummary, 'title'>): string {

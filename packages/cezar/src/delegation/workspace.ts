@@ -17,10 +17,8 @@ import type { RunRecord } from '../runs/store.ts';
 import { DelegationPolicyError } from './policy.ts';
 
 const RECEIPT_CAP = 16_384;
-// The reflog's content identifies a worker branch: its creation entry from provisioning on,
-// and its full bytes plus the tip from prepare to delete. `git gc` rewrites every reflog as
-// a new file with the same entries (hearsay-tools/cezarion#904), so `file` and `logFile` are
-// never compared. They are still written because an older cezar's strict schemas require them.
+// Identify owned branches by tip and reflog contents, not inode identity.
+// Keep file/logFile fields for older strict checkpoint readers.
 const fileIdentitySchema = z.object({ dev: z.number(), ino: z.number(), birthtimeMs: z.number() }).strict();
 const branchIdentitySchema = z.object({ file: fileIdentitySchema, prefixBytes: z.number().int().min(1).max(4096), prefixHash: z.string().length(64) }).strict();
 const receiptSchema = z.object({ workspace: workerWorkspaceSchema, gitDir: z.string().min(1), branchIdentity: branchIdentitySchema.optional() }).strict();
@@ -270,16 +268,11 @@ export class WorkspaceHeldError extends Error {
   constructor(readonly pids: readonly number[]) { super(`Processes ${pids.join(', ')} may still hold the worker's resources`); }
 }
 
-/** Checked cleanup only. Caller must first persist destruction intent and prove termination.
- * The private checkpoint survives removal of the linked Git directory and records
- * the exact ref/log identity whose compare-and-swap deletion may be retried.
- * `beforeRemove` runs once every check has passed, right before git removes the checkout: call
- * this through `releaseThenRemoveOwnedWorkspace` so the worker's preview goes first (#781).
- * `report` tells a retrying caller why an incomplete removal stopped (hearsay-tools/cezarion#879):
- * `held` with the processes either holder check named, so it can tell when they exit, or
- * `unexplained` when a holder check named none, a destructive Git step failed or something threw:
- * causes no observation of the inputs can see change (scratch ownership evidence, a holder Windows
- * names to no scan, a transient lock). */
+/**
+ * Checked cleanup after persisted destroy intent and termination proof. Keep the private
+ * checkpoint beyond Git-directory removal; compare exact ref/reflog identity before retrying
+ * deletion.
+ */
 export type RemovalReport = { held?: (pids: readonly number[]) => void; unexplained?: () => void };
 export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, assertCurrent?: () => void,
   beforeRemove?: () => Promise<void>, assertUnheld?: () => void, report?: RemovalReport): Promise<WorkerDestroyResult> {

@@ -177,8 +177,8 @@ beforeAll(async () => {
     run('task-pr-only', { pullRequestUrl: `https://github.com/${REPO}/pull/201` }),
   ]))
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
-    // CEZ_FOLLOWUPS=1 adds Inbox, so the view tabs carry their most crowded set: a More menu beside six views.
-    env: { ...fixtureServeEnv(root), CEZ_FOLLOWUPS: '1' }, stdio: 'ignore',
+    // CEZ_AUTOMATIONS=1 adds Automations, so the view tabs carry their most crowded set: a More menu beside six views.
+    env: { ...fixtureServeEnv(root), CEZ_AUTOMATIONS: '1' }, stdio: 'ignore',
   })
   base = await waitForFixtureServer(server)
   project = await bootProjectId(base)
@@ -407,7 +407,7 @@ describe('GitHub desktop sidebar (#622)', () => {
         overflow: tabs.map((tab) => Math.round(tab.getBoundingClientRect().right - inner)).filter((over) => over > 0),
       };
     })()`) as { tabs: number; sidebar: number; overflow: number[] }
-    // Tasks, Git, GitHub, Skills, Settings and More: Workflows joins Inbox in the menu.
+    // Tasks, Git, GitHub, Skills, Settings and More: Workflows joins Automations in the menu.
     expect(fit.tabs).toBe(6)
     const label = waitForSettledSample(browser, `(() => { const span = document.querySelector('[data-slot="view-tabs"] a[aria-current="page"] span.truncate'); return span.scrollWidth - span.clientWidth })()`)
     expect(label).toBe(0)

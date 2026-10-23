@@ -163,7 +163,7 @@ function FieldLabel({ field, children }: { field: string; children: ReactNode })
   )
 }
 
-/** A generic single-choice pill (runner / model / variants): DropdownMenu radio semantics,
+/** A generic single-choice pill (runner / model): DropdownMenu radio semantics,
  *  two-line items (label + quiet description), disabled state carries its reason as `title`. */
 export function PickerPill({
   slot,
@@ -193,7 +193,7 @@ export function PickerPill({
   disabled?: boolean
   /** Display the resolved value without presenting a selector. */
   readOnly?: boolean
-  /** Hover explanation for the enabled pill — what the setting does (e.g. the ×1 variants pill). */
+  /** Hover explanation for the enabled pill — what the setting does (e.g. the model pill). */
   hint?: string
   disabledHint?: string
   /** Quiet non-selectable catalog state, kept inside the menu's accessible reading order. */

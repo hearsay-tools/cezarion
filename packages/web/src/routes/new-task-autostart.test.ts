@@ -12,7 +12,6 @@ const params = (over: Partial<NewTaskParams>): NewTaskParams => ({
   ref: '',
   auto: true,
   key: 'k',
-  todo: '', // saved bookmarklets never carry one (#374) — the default here says so
   ...over,
 })
 
@@ -29,7 +28,7 @@ describe('bookmarkletRunBody', () => {
         steps: [{ id: 'task', name: 'om-fix', skill: 'om-fix', prompt: '{{task}}' }],
         model: undefined,
         runner: undefined,
-        variants: undefined,
+
         images: undefined,
       },
     ],
@@ -41,7 +40,7 @@ describe('bookmarkletRunBody', () => {
         workflow: 'quick-task',
         model: undefined,
         runner: undefined,
-        variants: undefined,
+
         images: undefined,
       },
     ],

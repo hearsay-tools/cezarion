@@ -121,8 +121,9 @@ async function mcpToolGate(tool) {
 let steerTurn = null;
 let steerSerial = 0;
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-async function waitForMockRelease(fallbackMs) {
-  const file = process.env.CEZ_MOCK_RELEASE_FILE;
+async function waitForMockRelease(fallbackMs, suffix = '') {
+  const release = process.env.CEZ_MOCK_RELEASE_FILE;
+  const file = release && `${release}${suffix}`;
   if (!file) { if (fallbackMs) await sleep(fallbackMs); return; }
   const deadline = Date.now() + 15_000;
   while (!parityGateFs.existsSync(file)) {
@@ -294,7 +295,7 @@ rl.on('line', async (line) => {
       silent.noteSilentTailPrompt(turnText);
       if (silent.isAckOnlyNudge(turnText)) return;
       if (silent.isLateTurnStartNudge(turnText)) await waitForMockRelease(silent.LATE_REPLY_MS);
-      else if (silent.isLateNudge(turnText)) await silent.sleep(silent.LATE_REPLY_MS);
+      else if (silent.isLateNudge(turnText)) await waitForMockRelease(silent.LATE_REPLY_MS);
     }
     // hearsay-tools/cezarion#1112: the acknowledged turn/start reports turn/started late.
     if (turnText.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
@@ -302,7 +303,7 @@ rl.on('line', async (line) => {
     emit({ method: 'turn/started', params: { turn: { id: 'turn_mock_1', status: 'inProgress', items: [] } } });
     }
     if (delivery) await delivery.holdResponse(turnText);
-    if (silent?.isLateTurnStartNudge(turnText)) await silent.sleep(silent.LATE_TURN_START_HOLD_MS);
+    if (silent?.isLateTurnStartNudge(turnText)) await waitForMockRelease(silent.LATE_TURN_START_HOLD_MS, '.content');
     // The real app-server records the turn's own input as a userMessage item,
     // echoing clientUserMessageId as clientId (probe 0.155.1, #505).
     const opening = { type: 'userMessage', id: `item_user_open_${++steerEchoSerial}`, clientId: msg.params?.clientUserMessageId ?? null, content: [{ type: 'text', text: turnText }] };

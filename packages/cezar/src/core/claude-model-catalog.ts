@@ -90,16 +90,8 @@ function spawnClaudeProbe(bin: string, cwd: string): ChildProcessWithoutNullStre
 }
 
 /**
- * Discover the model catalog the host's authenticated Claude Code CLI actually offers.
- *
- * The CLI answers a `list_models` control request over the same stream-json channel the runner
- * already speaks, which makes it the Claude counterpart of the Codex app-server's `model/list`
- * (spec `.ai/specs/2026-07-21-codex-latest-model-discovery.md`). The probe never starts a turn,
- * so it costs no tokens; it is bounded by a deadline and always terminates its child.
- *
- * Every failure — no CLI, a CLI too old to know `list_models`, not logged in, a malformed answer,
- * a timeout — throws, so `RunnerModelCatalog` degrades to `unavailable` and the picker falls back
- * to the static tier aliases rather than showing an empty list.
+ * Discover Claude models with a bounded list_models control request, without starting a turn.
+ * Always terminate the child; throw on failure so the catalog can fall back to presets.
  */
 export async function discoverClaudeModels(
   options: ClaudeModelDiscoveryOptions,

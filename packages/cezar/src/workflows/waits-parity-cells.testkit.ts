@@ -12,7 +12,7 @@ import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { checkpoint, collect, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { checkpoint, collect, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
@@ -172,12 +172,36 @@ const delivered = (id: string, inputId: string) => !!store.getRun(id)?.agentInpu
 
 /** A root parent on `runner`'s native wire, parked after its opening turn, and one worker it owns
  *  that never starts: `fixtureUpdateRun` settles it. Workers run on the Claude wire. */
-async function parentWithWorker(runner: RunnerId) {
+async function parentWithWorker(runner: RunnerId, step?: string) {
   nativeWire(runner);
   process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
   const p = await parent(HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
-  await until(() => store.getRun(p.id)?.status === 'waiting');
+  await until(() => store.getRun(p.id)?.status === 'waiting', step ? () => `${step}: opening park\n${timeline(p.id)}` : undefined);
   return { p, w: await worker(p.id) };
+}
+
+/** Claude U22c/k/x cross several real process launches. Keep the shared 15 s guard per
+ *  signal, rather than charging every delivery attempt to one window (hearsay-tools/cezarion#1450). */
+const refusalStep = (runner: RunnerId, id: string, step: string, predicate: () => boolean) =>
+  until(predicate, runner === 'claude' ? () => `${runner} ${step}\n${timeline(id)}` : undefined);
+
+async function refusalDeliveryBound(runner: RunnerId, id: string, cell: string, closed: () => number) {
+  const failed = () => store.getRun(id)?.status === 'failed' && !manager.isActive(id);
+  if (runner !== 'claude') { await until(failed); return; }
+  // bound: each existing 15 s guard covers one durable queue write, native admission, close,
+  // or retry checkpoint. Three fresh mock processes no longer share one launch budget.
+  await refusalStep(runner, id, `${cell}: refusal queued`, () =>
+    store.getRun(id)?.agentInputs?.some(input => input.purpose === 'completion-refusal') === true);
+  for (let attempt = 1; attempt <= MAX_WAKE_DELIVERY_ATTEMPTS; attempt++) {
+    await refusalStep(runner, id, `${cell}: retry ${attempt} native admission`, () => prompted(runner, MESSAGE_WAKE_OPENING).length >= attempt);
+    await refusalStep(runner, id, `${cell}: retry ${attempt} session close`, () => closed() >= attempt);
+    if (attempt < MAX_WAKE_DELIVERY_ATTEMPTS) {
+      // The counter clears at the cap. A later native admission also proves this retry was admitted.
+      await refusalStep(runner, id, `${cell}: retry ${attempt} delivery checkpoint`, () =>
+        (store.getRun(id)?.waitDeliveryFailures ?? 0) >= attempt || prompted(runner, MESSAGE_WAKE_OPENING).length > attempt || failed());
+    }
+  }
+  await refusalStep(runner, id, `${cell}: delivery cap and inactive`, failed);
 }
 
 /** One parent turn through the native wire: `text`'s tool calls run, and the turn ends parked. */
@@ -1999,7 +2023,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       for (const legacy of [false, true]) {
         it(`${runner} U22c a refusal whose reopened sessions keep closing cleanly is queued once, stops at the delivery bound, and Continue delivers it once${legacy ? ' (legacy Finish)' : ''}`, async () => {
           retryAtOnce();
-          const { p, w } = await parentWithWorker(runner);
+          const { p, w } = await parentWithWorker(runner, runner === 'claude' ? 'U22c' : undefined);
           const refusal = `Workers are still live: ${w.id}.`;
           const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
           const wakes = store.getRun(p.id)?.automaticWakes ?? 0;
@@ -2009,13 +2033,17 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
             store.commitDelegation([{ id: p.id, delegation: { ...delegation, finishRequestedAt: new Date().toISOString() } }]);
           }
           let closing = true;
+          let closed = 0;
           const closeAtTurnEnd = ({ runId, event }: { runId: string; event: { type: string } }) => {
-            if (runId === p.id && event.type === 'turn-end' && closing && refusals().some(input => !input.deliveredAt)) engine().active.get(p.id)?.session.end();
+            if (runId === p.id && event.type === 'turn-end' && closing && refusals().some(input => !input.deliveredAt)) {
+              closed++;
+              engine().active.get(p.id)?.session.end();
+            }
           };
           store.on('event', closeAtTurnEnd);
           try {
             engine().active.get(p.id)!.session.end();
-            await until(() => store.getRun(p.id)?.status === 'failed' && !manager.isActive(p.id));
+            await refusalDeliveryBound(runner, p.id, 'U22c', () => closed);
             // Each attempt is a scheduler continuation that closed before the refusal reached it.
             expect(prompted(runner, MESSAGE_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
             expect(prompted(runner, refusal)).toEqual([]);
@@ -2029,10 +2057,13 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
             expect(store.getRun(p.id)?.delegation).not.toHaveProperty('finishRequestedAt');
             closing = false;
             expect(manager.continueRun(p.id, { text: 'go on' })).toEqual({ ok: true });
-            await until(() => refusals()[0]?.deliveredAt !== undefined && prompted(runner, refusal).length > 0);
+            if (runner === 'claude') {
+              await refusalStep(runner, p.id, 'U22c: Continue native refusal receipt', () => prompted(runner, refusal).length > 0);
+              await refusalStep(runner, p.id, 'U22c: Continue delivery checkpoint', () => refusals()[0]?.deliveredAt !== undefined);
+            } else await until(() => refusals()[0]?.deliveredAt !== undefined && prompted(runner, refusal).length > 0);
             expect(prompted(runner, refusal)).toHaveLength(1);
             expect(refusals()).toHaveLength(1);
-            await until(() => store.getRun(p.id)?.status === 'waiting');
+            await refusalStep(runner, p.id, 'U22c: Continue final park', () => store.getRun(p.id)?.status === 'waiting');
           } finally {
             store.off('event', closeAtTurnEnd);
           }
@@ -2085,7 +2116,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           retryAtOnce();
           if (variant === 'silent') silenceRefusals();
           else process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
-          const { p, w } = await parentWithWorker(runner);
+          const { p, w } = await parentWithWorker(runner, runner === 'claude' ? 'U22k' : undefined);
           const refusal = `Workers are still live: ${w.id}.`;
           const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
           let closes = MAX_WAKE_DELIVERY_ATTEMPTS;
@@ -2097,20 +2128,28 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           store.on('event', closeAtTurnEnd);
           onTestFinished(() => { store.off('event', closeAtTurnEnd); });
           engine().active.get(p.id)!.session.end();
-          await until(() => store.getRun(p.id)?.status === 'failed' && !manager.isActive(p.id));
+          await refusalDeliveryBound(runner, p.id, 'U22k', () => MAX_WAKE_DELIVERY_ATTEMPTS - closes);
           expect(prompted(runner, MESSAGE_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
           expect(refusals()).toHaveLength(1);
           expect(refusals()[0]!.deliveredAt).toBeUndefined();
           if (variant === 'closing') closes = 1;
           expect(manager.continueRun(p.id, { text: 'go on' })).toEqual({ ok: true });
+          if (runner === 'claude') {
+            if (variant === 'closing') {
+              await refusalStep(runner, p.id, 'U22k: Continue session close', () => closes === 0);
+              await refusalStep(runner, p.id, 'U22k: Continue retry native admission', () => prompted(runner, MESSAGE_WAKE_OPENING).length > MAX_WAKE_DELIVERY_ATTEMPTS);
+            }
+            await refusalStep(runner, p.id, 'U22k: Continue native refusal receipt', () => prompted(runner, refusal).length > 0);
+            await refusalStep(runner, p.id, 'U22k: Continue delivery checkpoint', () => refusals()[0]?.deliveredAt !== undefined);
+          }
           if (variant === 'silent') {
-            await until(() => noReplyNotes(p.id).length === 1 && gated(p.id));
+            await refusalStep(runner, p.id, 'U22k: Continue no-reply final park', () => noReplyNotes(p.id).length === 1 && gated(p.id));
             expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
             expect(semaphore.busy()).toBe(0);
           } else {
             // The reply ends on done again, and the second step parks on the workers or, once they
             // settled, on Cezar's completion human wait.
-            await until(() => prompted(runner, refusal).length > 0 && store.getRun(p.id)?.status === 'waiting' &&
+            await refusalStep(runner, p.id, 'U22k: Continue final park', () => prompted(runner, refusal).length > 0 && store.getRun(p.id)?.status === 'waiting' &&
               (workerWaits(p.id)[0]?.phase === 'open' || humanOpen(p.id).some(wait => wait.via === 'completion')));
             expect(closes).toBe(0);
             // The Continue's session closed first: one more scheduler continuation delivered it.
@@ -2191,7 +2230,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       // discards the run's waits, so a Continue after it never delivers a stale refusal.
       it(`${runner} U22x Stop retires a refusal a closed session still owes, and Continue does not deliver it`, async () => {
         retryAtOnce();
-        const { p, w } = await parentWithWorker(runner);
+        const { p, w } = await parentWithWorker(runner, runner === 'claude' ? 'U22x' : undefined);
         const refusal = `Workers are still live: ${w.id}.`;
         const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
         let closes = MAX_WAKE_DELIVERY_ATTEMPTS;
@@ -2203,7 +2242,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         store.on('event', closeAtTurnEnd);
         onTestFinished(() => { store.off('event', closeAtTurnEnd); });
         engine().active.get(p.id)!.session.end();
-        await until(() => store.getRun(p.id)?.status === 'failed' && !manager.isActive(p.id));
+        await refusalDeliveryBound(runner, p.id, 'U22x', () => MAX_WAKE_DELIVERY_ATTEMPTS - closes);
         expect(refusals()).toEqual([expect.objectContaining({ purpose: 'completion-refusal' })]);
         expect(refusals()[0]!.deliveredAt).toBeUndefined();
         expect(manager.cancel(p.id)).toBe(true);
@@ -2211,7 +2250,8 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(store.getRun(p.id)?.status).toBe('failed');
         expect(store.readEvents(p.id).filter(event => event.type === 'note' && event.message === REFUSAL_DISCARDED_NOTE)).toHaveLength(1);
         expect(manager.continueRun(p.id, { text: 'go on' })).toEqual({ ok: true });
-        await until(() => prompted(runner, 'go on').length > 0 && store.getRun(p.id)?.status === 'waiting');
+        if (runner === 'claude') await refusalStep(runner, p.id, 'U22x: Continue native receipt', () => prompted(runner, 'go on').length > 0);
+        await refusalStep(runner, p.id, 'U22x: Continue final park', () => prompted(runner, 'go on').length > 0 && store.getRun(p.id)?.status === 'waiting');
         expect(prompted(runner, refusal)).toHaveLength(0);
         expect(nudgeNotes(p.id)).toHaveLength(1);
       });

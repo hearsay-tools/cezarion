@@ -785,7 +785,6 @@ describe('workspace projects API', () => {
       expect(body.forge).toBeNull();
       expect(body.capabilities).toEqual({
         localHandoff: true,
-        followups: false,
         singleProject: false,
         automations: false,
         preview: false,

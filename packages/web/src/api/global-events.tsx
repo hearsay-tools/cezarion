@@ -32,26 +32,9 @@ import type {
 } from '@open-mercato/cezar-api-client'
 
 /**
- * The app's one connection to `GET /api/workspace/events`, and the two halves of the sync
- * doctrine (spec, "Architecture"): the stream is for immediacy, the REST endpoints are
- * authoritative, and on reconnect or a tab-visibility flip we refetch and reconcile.
- *
- * Immediacy is cache patching, not refetching: a live run emits a `run` event per step transition
- * and per token update, and invalidating the list on each would turn one agent into a request
- * flood against a server sharing this laptop's CPU with it. So events are folded into the cache
- * in place (events.ts), and the authoritative refetch happens exactly when we know we may have
- * missed something: at reconnect, and when a tab (or a phone that slept through an hour of the
- * run) comes back.
- *
- * Multi-project (spec, step 3.1): the one stream carries EVERY project's events, each stamped
- * with its owner. Run lists are patched by stamp (boot → `'default'`, else the registry id) so
- * a sidebar group never receives another project's row (#129). Todos, usage and detail stay
- * active-scope-only — the mounted scope's, or the boot project's when unscoped. One
- * connection for the whole workspace, not one per project: same per-origin socket-budget
- * argument as ever, and a project switch changes the filter, not the socket.
- *
- * Provider authentication is host-wide rather than project-owned. Its dedicated unstamped event
- * bypasses that project filter and patches only an already-fetched workspace cache.
+ * Workspace event integration over the shared live coordinator. Patch caches by project stamp;
+ * reconcile authoritative queries after reconnect or visibility restoration. Scope detail, todos
+ * and usage to their owner.
  */
 
 // Route-relative: `apiPath` adds the version (and would add the project scope, though this
@@ -70,7 +53,7 @@ const REOPEN_DELAY_MS = 3_000
 
 /** Everything the stream is allowed to say. An unknown name never reaches `parseGlobalEvent`,
  *  because SSE only delivers named events to a matching listener in the first place. */
-const EVENT_NAMES = ['run', 'run-deleted', 'todos', 'usage', 'ping'] as const
+const EVENT_NAMES = ['run', 'run-deleted', 'usage', 'ping'] as const
 
 /**
  * The workspace-only names (server: `WorkspaceEventName`). Unlike the list above these are not
@@ -153,7 +136,6 @@ function createRunsIndexRefresher(queryClient: QueryClient): {
  * These are the endpoints the stream can leave stale:
  * - runs: the summaries the stream patches (`invalidate(['runs'])` covers the list and every
  *   single-run query under it — that is what the hierarchical keys in queries.ts are for);
- * - todos: the inbox the `todos` event replaces;
  * - health: probe completion pushes a refreshed snapshot over SSE; reconciliation catches
  *   snapshots missed while disconnected and refreshes repository state on return;
  * - worktrees: run terminal transitions and reclaim operations change the resources panel;
@@ -190,7 +172,7 @@ function reconcile(queryClient: QueryClient, signal?: AbortSignal, periodic = fa
   // Cancel just this reconciliation's demanded families when the document hides or its
   // finite recovery deadline expires. Query functions receive TanStack's own AbortSignal.
   const keys = [queryKeys.runs.all, workspaceQueryKeys.runsIndex, workspaceQueryKeys.projects,
-    queryKeys.todos, queryKeys.health, queryKeys.worktrees, queryKeys.repoBranches,
+    queryKeys.health, queryKeys.worktrees, queryKeys.repoBranches,
     workspaceQueryKeys.providerStatus, workspaceQueryKeys.models('cursor')]
   const cancel = () => { for (const key of keys) void queryClient.cancelQueries({ queryKey: key }) }
   signal?.addEventListener('abort', cancel, { once: true })
@@ -213,7 +195,6 @@ function reconcile(queryClient: QueryClient, signal?: AbortSignal, periodic = fa
       // here covers it.
       queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex }),
       queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.projects }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.todos }),
       reconcileBackgroundQuery(queryClient, queryKeys.health),
       // The worktree panel's list/total (#483) — a run finishing or a reclaim changes it.
       queryClient.invalidateQueries({ queryKey: queryKeys.worktrees }),
@@ -648,11 +629,6 @@ function applyGlobalEvent(
       void queryClient.invalidateQueries({ queryKey: queryKeys.repoBranches })
       return
     }
-    case 'todos':
-      // A complete array every time (the server re-reads the file), so it replaces outright and
-      // may seed a cache no one fetched yet — unlike `run`, this payload *is* the whole answer.
-      queryClient.setQueryData(queryKeys.todos, event.items)
-      return
     case 'usage':
       usage.set(event.usage)
       return

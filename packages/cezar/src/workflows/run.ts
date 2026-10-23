@@ -49,14 +49,12 @@ import {
 import {
   appendHandoffAutosaveReport,
   appendHandoffHeartbeat,
-  followupsEnabled,
   handoffInstructions,
   handoffPath,
   recordHandoffPeriodicAutosave,
   seedHandoffFile,
 } from '../handoff.ts';
 import { attachmentDirectory, resolveAttachmentPath } from './attachment-path.ts';
-import { todosPath } from '../todos.ts';
 // Contract VALUES, like `workspaceUiStateSchema` in workspace/migrations.ts: the attachment
 // vocabulary the routes validate with is the same one the engine stores and re-reads by, so the
 // wire and the disk can never disagree about what counts as an image (#950).
@@ -83,7 +81,8 @@ import {
 import { askRequestSchema } from '@open-mercato/cezar-contract/ask-schema';
 import type { AgentEvent, ContentBlock, InputDelivery } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
-import { discoverSkills, type Skill } from '../skills.ts';
+import { readProjectUiState, readProjectUiStateSync } from '../ui-state.ts';
+import { discoverSkills, filterDisabledTeamSkills, readDisabledTeamSkills, type Skill } from '../skills.ts';
 import { resolveCapabilities } from '../server/capabilities.ts';
 import { automationCliCommand, automationsPrompt } from '../automations/prompts.ts';
 import { createAutomationSkill } from '../automations/builtin-skill.ts';
@@ -155,7 +154,7 @@ async function configuredModelProvider(
 /** An interactive session that hears nothing from the user closes itself. */
 export const IDLE_TIMEOUT_MS = 15 * 60_000;
 /**
- * Task-completion marker from the agent contract (HANDOFF_INSTRUCTIONS):
+ * Task-completion marker from the agent contract (HANDOFF_ONLY_INSTRUCTIONS):
  * an active `CEZ:DONE` declaration means "goal achieved, nothing to ask" —
  * the session is closed right away instead of parking at `waiting` (#347).
  * Detection runs on the accumulated turn text so delta-streaming backends
@@ -401,14 +400,10 @@ export const AUTOSAVE_INTERVAL_MS = 90_000;
 
 export { CHECK_KILL_GRACE_MS, CHECK_TERMINATION_CONFIRM_MS } from './grouped-command.ts';
 
-/** The periodic autosave timer is opt-in (#471): off, a task branch carries only the
- *  agent's own commits plus the turn-end/pre-PR flushes — no mid-run "cezar autosave"
- *  noise interleaving PR history. The flushes (`autosaveCommit` at turn end and before
- *  a draft PR) are NOT gated: the task branch must still end holding the finished state.
- *  The turn-end and run-finalize flushes and the timer commit only while HEAD is that
- *  branch, though (hearsay-tools/cezarion#1004): on a branch the agent checked out they
- *  commit nothing. The timer's commits are reported as one coalesced handoff line per run
- *  of periodic commits (`recordHandoffPeriodicAutosave`), never as a cockpit note. */
+/**
+ * Periodic saves are opt-in. Turn-end, finalization and pre-PR flushes remain enabled; only
+ * pre-PR follows a repointed HEAD. Coalesce timer-save evidence in the handoff.
+ */
 export function periodicAutosaveEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CEZ_AUTOSAVE === '1';
 }
@@ -706,16 +701,8 @@ export const QUEUE_WATCHDOG_MS = 60_000;
 const NO_HOLDS: AccountHolds = { deadline: new Set(), inFlight: new Set() };
 
 /**
- * May this run start, given what its account is holding?
- *
- * The two kinds of hold bind different work, and getting that wrong has produced a bug in each
- * direction (spec 2026-08-03-auto-resume-after-usage-limit):
- *
- *  - a `deadline` hold means the window is KNOWN shut until an instant, so it blocks everything
- *    on that account — resumes included. Exempting them let four resumes fire at once and
- *    re-limit one after another, which is the stampede wearing a different hat.
- *  - an `inFlight` hold means a resume is testing the window right now and nothing is proven, so
- *    it blocks fresh work but not other resumes. Blocking those deadlocked a live workspace.
+ * A deadline hold blocks all work on its account. An in-flight resume holds fresh work only;
+ * other resumes must remain eligible.
  */
 function accountHeldFor(
   run: Pick<RunRecord, 'runner' | 'agentProfile' | 'status' | 'autoResumeAttempts'>,
@@ -728,14 +715,8 @@ function accountHeldFor(
 }
 
 /**
- * Which agent ACCOUNT a run's work runs on — the thing a provider usage limit actually closes
- * (spec 2026-08-03-auto-resume-after-usage-limit).
- *
- * Backend plus agent account, because those are the two axes a limit is scoped to: a Claude
- * limit must never stall a Codex task, and a second Claude login is a second budget. A record
- * that names no runner has not started yet and will take the configured default, which is what
- * `fallbackRunner` carries; a run that HAS started always carries its resolved runner (execute
- * persists it), and only started runs can be holding.
+ * Key usage-limit holds by resolved runner and account. fallbackRunner applies before a run
+ * records its runner.
  */
 export function runAccountKey(
   run: Pick<RunRecord, 'runner' | 'agentProfile'>,
@@ -745,15 +726,8 @@ export function runAccountKey(
 }
 
 /**
- * Is this run an automatic resume that has not completed a turn yet?
- *
- * Such a run is the work the reopened window is FOR, so the hold must never apply to it — not
- * its own, and not another resume's. Two resumes that hold each other is a deadlock the queue
- * cannot recover from: both sit `queued` with a counter and no deadline, each waiting for the
- * other to prove a window neither will ever get to test. That is the shape a live run produced
- * — two scheduled tasks fired, both went `queued`, and nothing in the workspace moved again.
- *
- * The hold exists to stop NEW work walking into a closed window. A resume is not new work.
+ * Whether an automatic resume has not completed its first turn. Such resumes bypass in-flight
+ * holds, but not a future deadline hold.
  */
 function resumeInFlight(run: Pick<RunRecord, 'status' | 'autoResumeAttempts'>): boolean {
   return (
@@ -810,16 +784,15 @@ export interface StartRunInput {
   systemPrompt?: string;
   /** Composer opt-out (#worktree-toggle): `false` runs the task in the repo
    *  working tree instead of an isolated worktree. Undefined/`true` keeps the
-   *  default per-task worktree. Ignored for variants (they always isolate). */
+   *  default per-task worktree. */
   worktree?: boolean;
   /** Autonomous mode (#autonomous): eligible turn ends auto-continue until done
    *  or the safety cap. Native asks, input delivery and lifecycle waits still apply. */
   autonomous?: boolean;
+  archiveWhenDone?: boolean;
+  autoMergePr?: boolean;
   /** Task webhook opt-in (#589). Persisted on the record at creation; read from there after. */
   notify?: boolean;
-  /** Follow-up inbox generation (spec 007, #444). Omitted means enabled for
-   *  compatibility; the handoff journal runs either way. */
-  generateFollowups?: boolean;
   /** Attachments from the queued prompt stack (#472), re-encoded from disk by
    *  `hydrateQueuedInput` at dequeue. Kept separate from `images` because those
    *  are persisted into `taskImages` by `startRun()` — folding
@@ -968,15 +941,6 @@ export function pastedAttachmentsText(attachments: PersistedAttachment[]): strin
 export function pastedAttachmentsNote(attachments: PersistedAttachment[]): ContentBlock {
   return { type: 'text', text: pastedAttachmentsText(attachments) };
 }
-
-/** Variant letters + the fixed diversification hints (spec 010). A runs the
- *  task verbatim; B/C get one constant sentence each — zero configuration. */
-export const VARIANT_LETTERS = ['A', 'B', 'C'] as const;
-const VARIANT_HINTS: Record<string, string | undefined> = {
-  A: undefined,
-  B: 'Approach hint: prefer the minimal, surgical change.',
-  C: 'Approach hint: prefer a thorough, structural approach.',
-};
 
 const RESTART_CONTINUATION_PROMPT =
   'The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
@@ -1556,7 +1520,7 @@ export class RunManager {
    */
   private repoRootTail: Promise<void> = Promise.resolve();
 
-  /** `.ai/cezar` — where the per-task handoff files and todos.json live. */
+  /** `.ai/cezar` — where the per-task handoff files live. */
   private readonly dataDir: string;
 
   /** Runs currently being paused by the memory guard — dedupes the ~2 s samples so one breach
@@ -1724,49 +1688,29 @@ export class RunManager {
     }
   }
 
-  /** Env the spawned claude gets so the agent can find its handoff file and
-   *  the global inbox (spec 007; the inbox only when the run opted in).
-   *
-   *  `CEZ_TODOS_FILE` is set to `''` rather than omitted when follow-ups are
-   *  off: runners spawn with `{ ...process.env, ...spec.env }`, so omitting the
-   *  key would let a value inherited from *this* process through — a nested
-   *  cezar (an agent running `cez serve`/`cez run`/the test suite) would then
-   *  write follow-ups into the parent's inbox despite the opt-out. Empty is the
-   *  established "absent" spelling — consumers guard with `if (todosFile)`.
+  /** Env for the rolling handoff and artifacts.
    *
    *  `TMPDIR`/`TEMP`/`TMP` (#785) point at this run's own scratch directory
    *  instead of the machine-wide one every agent used to share. Created and
    *  write-probed here, on the last common path before a spawn, so an unusable
    *  temp directory throws `AgentTempDirError` at the caller rather than
    *  turning into empty command output inside a running agent. */
-  private agentEnv(runId: string, generateFollowups = true): Record<string, string> {
+  private agentEnv(runId: string): Record<string, string> {
     return {
       CEZ_ARTIFACTS_DIR: provisionArtifactDirectory(this.dataDir, runId),
       CEZ_HANDOFF_FILE: handoffPath(this.dataDir, runId),
       CEZ_TASK_ID: runId,
-      CEZ_TODOS_FILE: generateFollowups ? todosPath(this.dataDir) : '',
+      // Shadow a path inherited from an older parent process.
+      CEZ_TODOS_FILE: '',
       ...agentTmpEnv(this.dataDir, runId),
       ...(this.cockpit ? { CEZ_COCKPIT_URL: this.cockpit.origin, CEZ_PROJECT_ID: this.cockpit.projectId } : {}),
     };
   }
 
   /**
-   * `agentEnv` plus the agent-account variable for the profile this STEP runs under (spec
-   * 2026-07-29-agent-profiles), and the id it resolved to so the caller can record it.
-   *
-   * Resolved per step, not per run, because a workflow can mix backends: an override naming a
-   * Claude account says nothing about which Codex account a codex step should use. Resolution
-   * order, most specific first:
-   *
-   *   1. the step's ALREADY-RECORDED `profileId` — a resume or Continue must reattach to the
-   *      account that created the session, whatever the project has since been switched to;
-   *   2. the run's composer override, but only for steps on the run's own runner;
-   *   3. the project's stored selection, and failing that the discovered default.
-   *
-   * Read fresh every time. `~/.cezar/config.json` is shared by every cezar process on this
-   * machine, so a cached snapshot is a staleness bug, and one small JSON read is free next to
-   * spawning a CLI. Never throws: an unreadable home degrades to the default profile, which is
-   * exactly the behaviour that predates profiles.
+   * Resolve this step’s account environment from agent-accounts.json and record its id. Ordinary
+   * steps prefer the recorded account, then a matching run override, then project selection and
+   * default. Keep account and session ids paired; owned workers use pinned identity.
    */
   /**
    * Ordinary runs retain mutable discovery; owned runs require explicit durable evidence. With a
@@ -1847,14 +1791,14 @@ export class RunManager {
   private async agentEnvForStep(
     runId: string,
     backend: RunnerId,
-    options: { generateFollowups?: boolean; recordedProfileId?: string; stepId?: string } = {},
+    options: { recordedProfileId?: string; stepId?: string } = {},
   ): Promise<{ env: Record<string, string>; profileId: string; accountBinding?: WorkerAccountBinding }> {
     // An owned worker binds the account its identity pinned for THIS step (#452); a legacy identity
     // answers every step with its single run-level account, so the one-provider rule still holds there.
     const step = this.workerStep(runId, options.stepId);
     if (step) {
       if (backend !== step.account.provider) throw new WorkerIdentityError('Accepted worker provider identity cannot change');
-      const env = this.agentEnv(runId, options.generateFollowups);
+      const env = this.agentEnv(runId);
       return { env: { ...env, ...boundWorkerAccountEnv(step.account, buildChildEnv({ backend, extraEnv: env })) },
         profileId: step.account.profileId, accountBinding: step.account };
     }
@@ -1862,7 +1806,7 @@ export class RunManager {
     const profileId = options.recordedProfileId
       ?? (backend === (run?.runner ?? 'claude') ? run?.agentProfile : undefined);
     const resolved = await resolveProfileEnvForRoot(this.repoRoot, backend, profileId);
-    const env = { ...this.agentEnv(runId, options.generateFollowups), ...resolved.env };
+    const env = { ...this.agentEnv(runId), ...resolved.env };
     return {
       env,
       profileId: resolved.profile.id,
@@ -1925,6 +1869,14 @@ export class RunManager {
     return discoverSkills(this.repoRoot, { builtin: this.builtinSkills() });
   }
   /**
+   * The run's skill registry minus the project's off-list as it is now (#1494). The registry is
+   * discovered when the run starts or continues, so a team skill switched off since then is still
+   * in `state.skills`; every prompt a step, a Continue or a live `/name` builds reads this instead.
+   */
+  private enabledSkills(state: ActiveRun): Skill[] {
+    return filterDisabledTeamSkills(state.skills ?? [], readDisabledTeamSkills(readProjectUiStateSync(this.repoRoot)));
+  }
+  /**
    * A live `/name` message already carries the skill's body, and `sendMessage` answers
    * synchronously, so its files and companions install after the message went out (#1408).
    * When anything new landed, or a team skill's files went to a cache copy the message could not
@@ -1956,17 +1908,18 @@ export class RunManager {
   }
 
   /**
-   * Install the run's skills where its agent's own skill lookup finds them, for the step start,
-   * Continue, restart recovery and a live `/name` alike (#286, #413, #1024, hearsay-tools/cezarion#1408).
-   * The roots are the selected step skill and a leading `/name`, looked up in the registry the
-   * run expands from (`state.skills`); a name that is no skill (`/compact`) installs nothing.
+   * Provision the step skill and leading registry slash skill for start, Continue, recovery and
+   * live input. Native slashes that are not registry skills install nothing.
    *
    * The run's OWN task worktree gets every root and the companions their bodies name
    * (`provisionSkills`): links to local and global skills, generated `SKILL.md` files, and marked
    * team copies, in `.claude/skills`, `.agents/skills` and `.cursor/skills`, recorded in the
-   * worktree's git dir and kept out of git by a worktree-local `.gitignore`. Companions resolve
-   * against the ungated team list too, so a default team skill switched off in the picker still
-   * serves a skill that runs it: the selection curates the picker, it is no loading boundary.
+   * worktree's git dir and kept out of git by a worktree-local `.gitignore`. The project's
+   * off-list (`disabledTeamSkills`) is read fresh on every pass and applied to the saved
+   * registry, the roots and the team list alike: a team skill switched off for the project is
+   * never installed, not even for a skill that runs it, and a switch-off made after the run
+   * started holds for the next step, a live `/name` and Continue. Copies a pass installed before
+   * the switch stay in the worktree until the task ends: cezar removes nothing mid-task.
    *
    * Any other cwd — worktree off, a non-git project, a Continue whose worktree is gone — is the
    * main checkout or unknown, where those directories are LOCAL skills to `discoverSkills` that
@@ -1983,12 +1936,16 @@ export class RunManager {
   ): Promise<{ notes: string[]; filesDir: Map<string, string>; installed: string[] }> {
     const notes: string[] = [];
     const filesDir = new Map<string, string>();
-    const registry = state.skills ?? [];
-    const roots = [...new Set([wanted.stepSkill, wanted.slash].filter((name): name is string => Boolean(name)))]
-      .flatMap((name) => registry.filter((skill) => skill.name === name).slice(0, 1));
+    const wantedNames = [...new Set([wanted.stepSkill, wanted.slash].filter((name): name is string => Boolean(name)))];
     // Stop can land during an earlier await (Continue's team-cache wait): a stopped run writes
     // nothing, here or between the pass's own steps.
     const stopped = () => Boolean(state.cancelled) || this.workerExecutionStopped(runId);
+    if (wantedNames.length === 0 || stopped()) return { notes, filesDir, installed: [] };
+    // The off-list as it is now, applied to every input: the saved registry predates a switch
+    // made during the run, so it is filtered as well as the fresh team list.
+    const disabled = readDisabledTeamSkills(await readProjectUiState(this.repoRoot));
+    const registry = filterDisabledTeamSkills(state.skills ?? [], disabled);
+    const roots = wantedNames.flatMap((name) => registry.filter((skill) => skill.name === name).slice(0, 1));
     if (roots.length === 0 || stopped()) return { notes, filesDir, installed: [] };
     const teamRoots = roots.filter((skill) => skill.source === 'team' && skill.team?.dir);
     const cacheCopy = async (skill: Skill): Promise<void> => {
@@ -2001,7 +1958,8 @@ export class RunManager {
       for (const skill of teamRoots) await cacheCopy(skill);
       return { notes, filesDir, installed: [] };
     }
-    const result = await provisionSkills(state.cwd, roots, [...registry, ...getTeamSkillsCached(this.repoRoot)], { cancelled: stopped });
+    const catalog = [...registry, ...filterDisabledTeamSkills(getTeamSkillsCached(this.repoRoot), disabled)];
+    const result = await provisionSkills(state.cwd, roots, catalog, { cancelled: stopped });
     if (stopped()) return { notes, filesDir, installed: [] };
     for (const skill of teamRoots) {
       const written = result.teamCopies[skill.name] ?? [];
@@ -3076,22 +3034,21 @@ export class RunManager {
     if (existing) {
       return existing.clientRequestHash === request.hash ? { run: existing, created: false } : { conflict: true };
     }
-    return { run: this.startRun(workflow, input, undefined, request), created: true };
+    return { run: this.startRun(workflow, input, request), created: true };
   }
 
   startRun(
     workflow: WorkflowDef,
     input: StartRunInput,
-    group?: { groupId: string; variant: string },
     clientRequest?: { id: string; hash: string },
   ): RunRecord {
-    // Sanitize at the manager boundary so CLI runs, workflows, variants, and
+    // Sanitize at the manager boundary so CLI runs, workflows, and
     // direct callers cannot bypass the HTTP policy.
     const effectiveInput = agentModelsLocked(this.repoRoot)
       ? { ...input, model: undefined, effort: undefined }
       : input;
     const run = this.store.createRun({
-      title: makeRunTitle(input.task, workflow) + (group ? ` (${group.variant})` : ''),
+      title: makeRunTitle(input.task, workflow),
       workflow: workflow.name,
       task: input.task,
       systemPrompt: input.systemPrompt,
@@ -3101,21 +3058,17 @@ export class RunManager {
       // The composer's per-task account (spec 2026-07-29-agent-profiles). Persisted at creation
       // so a queued run picks it up at dequeue and every later resume reads the same answer.
       agentProfile: input.agentProfile,
-      // The global inbox is the ceiling on the per-run flag (#471). Enforced here rather than
-      // at the HTTP route because `cezar run`, the inbox's own "▶ Run" and variants all reach
-      // startRun directly — a route-level gate would leave those writing todos.json.
-      generateFollowups: followupsEnabled() ? input.generateFollowups : false,
       // Persist autonomy on the record (#489) so the terminal review gate
-      // (`settleSuccess`) and the group-pick winner-park can honor it — mid-run
+      // (`settleSuccess`) can honor it — mid-run
       // auto-nudge reads `input.autonomous` (`execute`), but the record is the
       // only source those after-the-fact consumers have.
       autonomous: input.autonomous === true,
+      archiveWhenDone: input.archiveWhenDone,
+      autoMergePr: input.autoMergePr,
       notify: input.notify === true,
       // Persist the explicit opt-out so queued-run restart recovery and the
       // session Git routes can distinguish it from a removed isolated worktree.
-      worktree: !group && input.worktree === false ? false : undefined,
-      groupId: group?.groupId,
-      variant: group?.variant,
+      worktree: input.worktree === false ? false : undefined,
       clientRequestId: clientRequest?.id,
       clientRequestHash: clientRequest?.hash,
       automation: input.automation,
@@ -3190,7 +3143,7 @@ export class RunManager {
       input: {
         task: run.task, runner: run.runner, model: run.model, effort: run.effort,
         agentProfile: run.agentProfile, systemPrompt: run.systemPrompt,
-        autonomous: run.autonomous, generateFollowups: run.generateFollowups, worktree: true,
+        autonomous: run.autonomous, worktree: true,
       },
     };
   }
@@ -3207,24 +3160,6 @@ export class RunManager {
       throw new WorkerIdentityError('Accepted worker workflow definition is unavailable or changed');
     }
     return run.workflowDef;
-  }
-
-  /**
-   * Parallel variants (spec 010): N runs of the same workflow on the same
-   * task, sharing a groupId. Variant A gets the task verbatim; B and C get a
-   * fixed one-line approach hint appended to the *task input* (not the step
-   * template), so diversification works with any workflow. The normal queue
-   * applies — with maxParallel=2 a third variant simply waits.
-   */
-  startVariants(workflow: WorkflowDef, input: StartRunInput, count: number): RunRecord[] {
-    const groupId = randomUUID();
-    return VARIANT_LETTERS.slice(0, Math.min(Math.max(count, 1), VARIANT_LETTERS.length)).map(
-      (variant) => {
-        const hint = VARIANT_HINTS[variant];
-        const task = hint ? `${input.task}\n\n${hint}` : input.task;
-        return this.startRun(workflow, { ...input, task, worktree: undefined }, { groupId, variant });
-      },
-    );
   }
 
   /**
@@ -3506,19 +3441,8 @@ export class RunManager {
   }
 
   /**
-   * Make one `queued` RECORD executable again — the engine half a queued run needs but does not
-   * persist (`pendingJobs` / `pendingContinuations` are process-local, the record is not).
-   *
-   * Two callers, one path: boot recovery re-adopts everything the previous process was holding,
-   * and the queue watchdog re-adopts anything the running process has somehow lost. A queued
-   * record with no work item behind it is invisible to `pump()` and would sit there for good,
-   * which is the worst failure this engine has — the task is neither running nor failed, just
-   * silently never going to happen.
-   *
-   * A continuation is reconstructed first: its executable details are gone, but the pending
-   * `continue-N` step and the session before it are durable, which is enough. Otherwise the
-   * workflow is revived from the record. A run that can be neither is failed loudly rather than
-   * left in the queue as a ghost.
+   * Rebuild executable state for a durable queued record. Shared by recovery and the watchdog;
+   * reconstruct jobs or continuations before pumping.
    */
   private async reviveQueuedRun(run: RunRecord, reason: string): Promise<void> {
     if (this.isActive(run.id) || this.workerExecutionStopped(run.id)) return;
@@ -3593,14 +3517,6 @@ export class RunManager {
       });
       return;
     }
-    // Re-apply the inbox ceiling (#471). `execute()` gates again at spawn time, so the agent is
-    // safe either way — but a run queued while the inbox was on and recovered after it was
-    // switched off would otherwise keep echoing `generateFollowups: true` on a run that
-    // demonstrably produced none. Normalize the record, the way startRun does.
-    const generateFollowups = followupsEnabled() ? run.generateFollowups : false;
-    if (generateFollowups !== run.generateFollowups) {
-      this.store.updateRun(run.id, { generateFollowups });
-    }
     this.pendingJobs.set(run.id, {
       workflow,
       // A continuation can durably queue the untouched remainder before the
@@ -3618,7 +3534,6 @@ export class RunManager {
         model: run.model,
         effort: run.effort,
         runner: run.runner,
-        generateFollowups,
         // Re-thread autonomy (#489): the rebuilt input feeds `execute`, whose mid-run auto-nudge
         // reads `input.autonomous`. Without this a recovered autonomous run would run
         // non-autonomously and later wrongly park at `review`.
@@ -3845,7 +3760,7 @@ export class RunManager {
       const interruptedDef = interruptedIndex >= 0 ? run.workflowDef?.steps[interruptedIndex] : undefined;
       const requeueInput = () => ({ task: run.task, runner: run.runner, model: run.model, effort: run.effort,
         agentProfile: run.agentProfile, systemPrompt: run.systemPrompt, autonomous: run.autonomous,
-        generateFollowups: run.generateFollowups, worktree: run.worktree });
+        worktree: run.worktree });
       // Worktree setup (#917) interrupted before any agent session: there is no session to
       // continue, so start the workflow over. `execute` sees setup still `running` and reruns it.
       if (run.workflowDef && run.worktreeSetup?.status === 'running' && !run.steps.some(step => step.sessionId)) {
@@ -3917,16 +3832,9 @@ export class RunManager {
   }
 
   /**
-   * Take over a run whose owning process is gone (#779, plan step 3): a control (Stop, Continue,
-   * archive…) reached a run `runOwnership` calls `orphaned`. Its family is claimed, its live runs
-   * are settled rather than resumed (`settleOrphanedRun`: interrupted, or cancelled before they
-   * began), and the family is recovered as a restart would, which repairs it but finds nothing live
-   * to resume. The control that follows then acts on a run this process now owns — rather than on
-   * a record nobody owns, a dead end until a restart — and only Continue starts agent work, with
-   * the user's own input. With `stop` the control is Stop, which the adoption carries out itself:
-   * `runId` ends cancelled, as an accepted Stop reads, rather than interrupted. False when a live
-   * process holds it after all (or it is gone): the control is refused as another process's.
-   * Adoptions run one at a time, after any recovery already in progress.
+   * Adopt a dead owner’s family for a control, then recover the settled family without resuming
+   * work. Stop cancels its target; only Continue starts work. Serialize adoptions after recovery.
+   * False means missing or live-owned.
    */
   adoptOrphanedRun(runId: string, opts: { stop?: boolean } = {}): Promise<boolean> {
     const adoption = this.adoptionTail.then(async () => {
@@ -4158,17 +4066,8 @@ export class RunManager {
   }
 
   /**
-   * Make the armed timers agree with the records and the current setting. Runs on every `pump()`
-   * — which is where a settings change lands (a config PUT refreshes the shared semaphore, which
-   * pumps every manager) — and once from `recover()`.
-   *
-   * It is a RECONCILE rather than a one-shot restore because the deadline is durable state and
-   * the timer is not: a restart, a rebuilt project context, a manager disposed mid-wait, or a
-   * refusal all leave a record promising a resume that no timer is holding. Rebuilding from the
-   * record covers every one of those at once — the alternative is a hint counting down to a time
-   * that has already passed, which is exactly the failure this method exists to make impossible.
-   *
-   * Cheap: an in-memory scan, and arming is skipped for every run already held.
+   * Reconcile process-local resume timers from durable records on pump and recovery. Retire
+   * appointments when disabled or invalid; do not leave a deadline with no wake source.
    */
   private reconcileAutoResumes(): void {
     if (!this.semaphore.autoResumeOnUsageLimit()) {
@@ -4263,24 +4162,8 @@ export class RunManager {
   }
 
   /**
-   * The failsafe: a queue must never be able to wedge.
-   *
-   * Everything else in this file makes an idle queue CORRECT under some condition — a slot cap, a
-   * repo-root lease, and now a usage-limit hold. That is also what makes a wedged queue look
-   * correct, and the hold has already produced one in the field: two resumes fired together, each
-   * holding the account the other was waiting on, and the whole workspace stopped with every task
-   * `queued`. That specific bug is fixed and tested, but "the queue stopped and nothing will ever
-   * restart it" is too expensive a failure mode to leave resting on any single fix being right.
-   *
-   * The test is deliberately about JUSTIFICATION rather than about any particular bug: idling is
-   * legitimate while work is running (here or in another project), or while a real appointment is
-   * still ahead — a scheduled resume that will fire and pump on its own. Anything else is a
-   * queue with work in it, nothing running anywhere, and no event coming to wake it. That gets one
-   * forced sweep, which starts work under the ordinary caps and lets the account's real state
-   * re-assert itself: if the window truly is shut, that task meets the limit and re-establishes an
-   * honest hold, with a real deadline behind it this time.
-   *
-   * Public so a test can drive the wedge directly instead of waiting out the interval.
+   * Repair queued records missing executable state. Rescue an idle queue only when no running work
+   * or future appointment explains it; start through ordinary caps. Public for direct tests.
    */
   async rescueStalledQueue(now = Date.now()): Promise<void> {
     if (this.disposed) return;
@@ -4320,16 +4203,8 @@ export class RunManager {
   }
 
   /**
-   * The accounts this project is currently holding: one key per run parked on a usage-limit
-   * resume that has not come due yet (spec 2026-08-03-auto-resume-after-usage-limit).
-   *
-   * Published to the shared semaphore so the hold spans PROJECTS — one Claude account can be
-   * driving tasks in three repos, and a limit closes it for all of them. Derived from the
-   * records on every ask rather than tracked as state: a deadline that passes, a resume that
-   * fires, a cancel, an archive and a delete all lift the hold with no bookkeeping.
-   *
-   * Deliberately excludes a deadline that has already passed — that run is about to resume, and
-   * holding the queue for it would only stall the very work the window reopened for.
+   * Derive this project’s future-deadline and in-flight account holds from records for the shared
+   * semaphore. Past deadlines do not block the queue.
    */
   accountHolds(now = Date.now()): AccountHolds {
     const deadline = new Set<string>();
@@ -4347,7 +4222,6 @@ export class RunManager {
     }
     return { deadline, inFlight };
   }
-
 
   /**
    * The PER-TASK off switch (`DELETE /api/v1/runs/:id/auto-resume`, and the archive route):
@@ -4423,22 +4297,9 @@ export class RunManager {
   private lastNamerKey = new Map<string, string>();
 
   /**
-   * Acquire the one-at-a-time lease for runs executing in `repoRoot`.
-   *
-   * A lease waiter is idle, so it parks in `waiting` and gives its
-   * `maxParallel` slot back (the #347 rule): isolated worktrees keep using
-   * every configured slot while root runs line up. The store status stays
-   * `running` — only the queue's busy count changes, so the GUI never shows a
-   * lease-blocked run as awaiting user input.
-   *
-   * The lease is held for the run's whole lifetime, including the idle
-   * `waiting` parks between agent turns. A parked session is still live and
-   * writes to the working tree the moment it resumes, so handing the tree to
-   * another run there would reintroduce the concurrent-edit bug (#438) this
-   * lease exists to prevent.
-   *
-   * Returns false when the run was cancelled while waiting: the lease was
-   * never granted and the caller must not touch the working tree.
+   * Acquire the exclusive repository-root lease. A waiter releases scheduling capacity but stays
+   * running in the store. Hold the lease across idle turns; false means cancellation before
+   * acquisition and forbids tree access.
    */
   private async acquireRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
     // `cancel()` can land between the run going `running` and reaching here,
@@ -4601,20 +4462,9 @@ export class RunManager {
   }
 
   /**
-   * Fold a queued run's persisted prompt — `run.task` plus everything stacked
-   * onto it (#472) — into the job input that is about to execute.
-   *
-   * Called from `pump()` immediately before `execute()`, which makes the RECORD
-   * the single source of truth for a queued run's prompt. Before this, the
-   * executing copy lived in `pendingJobs` (memory) while the record held a
-   * second one, so an edit that PATCHed the record silently did nothing until a
-   * restart. `recover()` rebuilds through the same helper, so both paths agree.
-   *
-   * **Read-only, and that is load-bearing.** It composes into the in-memory
-   * `input` and never writes the folded string back to `RunRecord.task`; the
-   * task and its stack stay separate on disk for the life of the run. Writing
-   * back would re-append the whole stack on every recovery and compound without
-   * bound — asserted directly by a test.
+   * Fold the persisted task and queued message stack immediately before execution. Keep durable
+   * record state authoritative over pendingJobs. Read-only: never write the composite back to
+   * RunRecord.task; task and stack stay separate.
    */
   private hydrateQueuedInput(runId: string, input: StartRunInput): StartRunInput {
     const run = this.store.getRun(runId);
@@ -6436,7 +6286,7 @@ export class RunManager {
     // (save, `cp`, attach to a GitHub issue/PR) — and it's the only usable reference on backends
     // (codex, opencode) that drop image blocks entirely before reaching the model.
     const blocks = contentBlocksOf(content);
-    const expanded = userAuthored ? expandRegistrySlashSkill(blocks, state.skills ?? []) : blocks;
+    const expanded = userAuthored ? expandRegistrySlashSkill(blocks, this.enabledSkills(state)) : blocks;
     const deliverable: ContentBlock[] = persisted.length
       ? [...expanded, pastedAttachmentsNote(persisted)]
       : expanded.length ? expanded : [{ type: 'text', text: 'The user attached a document, but it could not be saved. Ask them to attach it again before discussing its contents.' }];
@@ -6809,7 +6659,7 @@ export class RunManager {
           : { workflow: current.workflowDef!, input: {
             task: current.task, runner: current.runner, model: current.model, effort: current.effort,
             agentProfile: current.agentProfile, systemPrompt: current.systemPrompt,
-            autonomous: current.autonomous, generateFollowups: current.generateFollowups, worktree: current.worktree,
+            autonomous: current.autonomous, worktree: current.worktree,
           } };
         this.beginWorkerExecution(runId, false);
       } catch (error) { return { ok: false, error: admissionError(error, 'original execution checkpoint unavailable') }; }
@@ -7004,9 +6854,6 @@ export class RunManager {
       this.dropActive(runId);
       return;
     }
-    // The env is a live ceiling: a run created while the inbox was on must not keep writing
-    // follow-ups after it is switched off.
-    const generateFollowups = followupsEnabled() && record?.generateFollowups !== false;
     // Continue/recovery constructs a second ActiveRun: hydrate the durable mode here too.
     const state: ActiveRun = {
       delegationSettings: undefined, revokeDelegation: undefined,
@@ -7308,7 +7155,6 @@ export class RunManager {
     let continueProfile: Awaited<ReturnType<RunManager['agentEnvForStep']>>;
     try {
       continueProfile = await this.agentEnvForStep(runId, continueBackend, {
-        generateFollowups,
         recordedProfileId: resumedProfileId,
         stepId: toolsStep?.id,
       });
@@ -7351,7 +7197,7 @@ export class RunManager {
     const continuationSlash = leadingSlashSkillName(prompt);
     let continuationFiles = new Map<string, string>();
     if (continuedSkillName) {
-      let skill = (state.skills ?? []).find((candidate) => candidate.name === continuedSkillName);
+      let skill = this.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
       if (!skill) {
         // Boot recovery can outrun the async team-skills cache (`getTeamSkillsCached`
         // returns [] until `initialTeamSkillsLoad` resolves). Wait briefly, then
@@ -7369,7 +7215,7 @@ export class RunManager {
             }, () => undefined);
           });
           state.skills = await this.discoverSkills().catch(() => state.skills ?? []);
-          skill = (state.skills ?? []).find((candidate) => candidate.name === continuedSkillName);
+          skill = this.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
         } catch {
           // Best-effort — a slow or failing team-skills load must not fail Continue.
         }
@@ -7389,7 +7235,7 @@ export class RunManager {
         });
       }
     }
-    if (!continuedSkillName || !(state.skills ?? []).some((candidate) => candidate.name === continuedSkillName)) {
+    if (!continuedSkillName || !this.enabledSkills(state).some((candidate) => candidate.name === continuedSkillName)) {
       if (continuationSlash) continuationFiles = (await this.provisionRunSkills(runId, state, { slash: continuationSlash })).filesDir;
     }
     state.currentStepId = stepId;
@@ -7424,14 +7270,14 @@ export class RunManager {
     try {
     // Provisioning determines the actual capability, including a fresh session after recovery.
     const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !!ciTools });
-    const openingPrompt = withResumeContext(expandRegistrySlashSkillText(prompt, state.skills ?? [], continuationFiles) +
+    const openingPrompt = withResumeContext(expandRegistrySlashSkillText(prompt, this.enabledSkills(state), continuationFiles) +
       (setupNote ? `\n\n${setupNote}` : '') + (footer ? `\n\n${footer}` : ''), checkpoint);
     const continuationTail = composeSystemPrompt(
       record?.systemPrompt,
       delegation?.instructions,
       this.automationsPart(),
       artifactInstructions(continueProfile.env.CEZ_ARTIFACTS_DIR),
-      handoffInstructions({ tools: !!ciTools, followups: generateFollowups }),
+      handoffInstructions({ tools: !!ciTools }),
     );
     session = startManagedSession(runner,
       {
@@ -7547,7 +7393,6 @@ export class RunManager {
                 agentProfile: completed.agentProfile,
                 systemPrompt: completed.systemPrompt,
                 autonomous: completed.autonomous,
-                generateFollowups: completed.generateFollowups,
                 worktree: completed.worktree,
               },
             };
@@ -7903,7 +7748,6 @@ export class RunManager {
           state,
           step,
           input,
-          skills,
           checkFailure,
           interactive,
           emit,
@@ -8055,7 +7899,6 @@ export class RunManager {
     state: ActiveRun,
     step: WorkflowStepDef,
     input: StartRunInput,
-    skills: Skill[],
     checkFailure: string | null,
     interactive: boolean,
     emit: (event: { type: string; stepId?: string; [k: string]: unknown }) => void,
@@ -8078,7 +7921,7 @@ export class RunManager {
     const provisioned = await this.provisionRunSkills(runId, state, { stepSkill: step.skill, slash: leadingSlashSkillName(rawPrompt) });
     for (const message of provisioned.notes) emit({ type: 'note', stepId: step.id, message });
     if (step.skill) {
-      const skill = skills.find((s) => s.name === step.skill);
+      const skill = this.enabledSkills(state).find((s) => s.name === step.skill);
       if (skill) {
         // The body alone often does not identify the selected skill. Keep its
         // name and catalog description in the normalized runner payload so a
@@ -8097,7 +7940,7 @@ export class RunManager {
 
     // Opening prompts bypass deliverMessage. Expand before workflow and attachment
     // context so a leading registry skill matches, without changing the stored task.
-    let userPrompt = expandRegistrySlashSkillText(rawPrompt, state.skills ?? [], provisioned.filesDir);
+    let userPrompt = expandRegistrySlashSkillText(rawPrompt, this.enabledSkills(state), provisioned.filesDir);
     if (chainNote) userPrompt = `${chainNote}\n\n---\n\n${userPrompt}`;
     if (checkFailure) {
       userPrompt += `\n\nA verification command failed after the previous attempt. Fix the cause. Failing output:\n\n${checkFailure}`;
@@ -8241,7 +8084,6 @@ export class RunManager {
     let stepProfile: Awaited<ReturnType<RunManager['agentEnvForStep']>>;
     try {
       stepProfile = await this.agentEnvForStep(runId, stepBackend, {
-        generateFollowups: followupsEnabled() && input.generateFollowups !== false,
         stepId: step.id,
       });
     } catch (err) {
@@ -8292,14 +8134,14 @@ export class RunManager {
       session = startManagedSession(runner,
         {
           // Skill body, then the run's extra prompt (POST override or config
-          // default), then the handoff/todos contract — every agent step.
+          // default), then the handoff contract — every agent step.
           systemPrompt: composeSystemPrompt(
             systemPrompt,
             extraSystemPrompt,
             delegation?.instructions,
             this.automationsPart(),
             artifactInstructions(stepProfile.env.CEZ_ARTIFACTS_DIR),
-            handoffInstructions({ tools: !!ciTools, followups: followupsEnabled() && input.generateFollowups !== false }),
+            handoffInstructions({ tools: !!ciTools }),
           ),
           userPrompt,
           images,

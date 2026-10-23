@@ -4,6 +4,7 @@ import type { AutomationDefinition, AutomationKind, Runner } from '@open-mercato
 import { ApiError, createAutomation, deleteAutomation, setAutomationEnabled, updateAutomation } from '@/api/client'
 import { useConfig, useProviderStatus, useRunnerModels, useWorkflows } from '@/api/queries'
 import { CpuIcon, TerminalIcon, WorkflowIcon } from '@/components/design-icons'
+import { CompletionControls } from '@/components/completion-controls'
 import { SegmentedControl } from '@/components/facet-filter'
 import { PickerPill, PickerPillGroup } from '@/components/picker-pill'
 import { Button } from '@/components/ui/button'
@@ -127,6 +128,10 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
     >
       <form className="automation-editor grid min-w-0 gap-5 md:grid-cols-[minmax(0,1fr)_320px] md:items-start" onSubmit={submit}>
         <div className="grid min-w-0 gap-5">
+          {draft.retiredVariants ? <section role="alert" className="flex flex-col items-start gap-3 rounded-xl border border-border bg-card p-4">
+            <p>Parallel variants are removed. This automation requests multiple candidates and cannot launch. Use one task, or ask that task to compare approaches with owned workers.</p>
+            <Button type="button" variant="outline" className="min-h-11" onClick={() => patch({ retiredVariants: false })}>Use one task</Button>
+          </section> : null}
           <Section title="Name" section="name" failure={failure}>
             <div className="grid gap-2">
               <Label htmlFor="automation-name">Name</Label>
@@ -173,7 +178,9 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
               <Switch aria-label="Autonomous" checked={draft.autonomous} onCheckedChange={(autonomous) => patch({ autonomous })} />
               <span>Autonomous <span className="text-muted-foreground">· runs without waiting for answers</span></span>
             </label>
-            <p className="text-xs break-words text-muted-foreground">Each run is an ordinary task in its own worktree, queued behind the parallel cap, never auto-merged.</p>
+            <p className="text-xs break-words text-muted-foreground">Each run is an ordinary task in its own worktree, queued behind the parallel cap.</p>
+            <CompletionControls archiveWhenDone={draft.archiveWhenDone} autoMergePr={draft.autoMergePr} onChange={patch} disabled={saving} />
+            {automation ? <p className="text-xs text-muted-foreground">These settings apply to future tasks. Existing tasks keep their settings.</p> : null}
           </Section>
 
           <Section title="Enable" section="enable" failure={failure}>
@@ -225,7 +232,7 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
                 <p className="text-sm break-words text-muted-foreground">{pollSentence(draft)}</p>
               </section>
             )}
-          <CopyAsCliCard draft={draft} />
+          {!draft.retiredVariants ? <CopyAsCliCard draft={draft} /> : null}
         </aside>
       </form>
     </PageFrame>

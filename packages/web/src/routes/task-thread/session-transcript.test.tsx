@@ -21,6 +21,7 @@ import {
 import { createQueryClient } from '@/api/query-client'
 import { PreviewPaneContext, type PreviewPane } from './preview/preview-state'
 import { clearThreadScrollCaches } from './thread-scroll'
+import { clearOpenCardCache } from './thread-open-cards'
 import { collectSubagents, subagentChildren } from './subagent-dock'
 import { reduceThread, type ThreadAsk, type ThreadEntry, type ThreadState } from './thread-state'
 
@@ -39,6 +40,7 @@ afterEach(() => {
   cleanup()
   vi.unstubAllGlobals()
   clearThreadScrollCaches()
+  clearOpenCardCache()
 })
 
 const tool = (id: string, overrides: Partial<UiToolItem> = {}): UiToolItem => ({
@@ -80,6 +82,62 @@ const ask = (id: string, overrides: Partial<ThreadAsk> = {}): ThreadAsk => ({
 })
 
 const note = (id: string): ThreadEntry => ({ kind: 'message', id, role: 'assistant', text: `Later ${id}` })
+
+describe('worker message body replay and live updates', () => {
+  const parent = '11111111-1111-4111-8111-111111111111', worker = '22222222-2222-4222-8222-222222222222'
+  const request = { id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', senderRunId: parent, recipientRunId: worker, kind: 'request',
+    text: 'Inspect the complete parser', createdAt: '2026-10-23T12:00:00Z', state: 'accepted', requestHash: 'a'.repeat(64) }
+  const reply = { ...request, id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', senderRunId: worker, recipientRunId: parent, kind: 'reply',
+    requestId: request.id, text: 'Parser inspected' }
+  const queued = { type: 'conversation-message', message: request, delivery: 'queued' }
+  const delivered = { ...queued, delivery: 'delivered' }
+  const answered = { type: 'request-outcome', outcome: { requestId: request.id, status: 'replied', replyId: reply.id, observedAt: reply.createdAt } }
+  const response = { type: 'conversation-message', message: reply, delivery: 'delivered' }
+  const transcript = (events: object[], runId = parent) => <MemoryRouter><SessionTranscript runId={runId} viewId="main"
+    sections={[{ id: 'turn', entries: reduceThread(asRunEvents(events)).turns.flatMap(turn => turn.items) }]}
+    mode="document" taskTitles={{ [parent]: 'Parent', [worker]: 'Worker' }} /></MemoryRouter>
+
+  it.each([parent, worker])('collapses replayed request and reply bodies in the %s transcript', runId => {
+    render(transcript([queued, delivered, answered, response, queued, response], runId))
+    expect(document.querySelectorAll('[data-slot="worker-conversation-card"]')).toHaveLength(2)
+    expect(screen.getAllByRole('button', { name: 'Show message' })).toHaveLength(2)
+    expect(screen.queryByText(request.text)).toBeNull()
+    expect(screen.queryByText(reply.text)).toBeNull()
+    expect(screen.getByText('Replied')).toBeTruthy()
+    expect(screen.getByRole('button', { name: runId === parent ? 'View reply from Worker' : 'View reply to Parent' })).toBeTruthy()
+  })
+
+  it('preserves the open body through delivery, outcome, and batch updates', () => {
+    const view = render(transcript([queued]))
+    expect(screen.getByText('Pending')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Show message' }))
+    const second = { type: 'conversation-message', message: { ...request, id: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', recipientRunId: '33333333-3333-4333-8333-333333333333' }, delivery: 'queued' }
+    view.rerender(transcript([queued, delivered, second, answered, response]))
+    expect(screen.getByText(request.text)).toBeTruthy()
+    expect(screen.getByText('Replied')).toBeTruthy()
+    expect(screen.getByText('Pending')).toBeTruthy()
+    expect(screen.getByText('Queued', { exact: true })).toBeTruthy()
+    expect(screen.queryByText(reply.text)).toBeNull()
+    expect(screen.getByRole('button', { name: 'Hide message' }).getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('restores an opened or closed body after row unmount, without opening the worker copy', () => {
+    const view = render(transcript([delivered]))
+    fireEvent.click(screen.getByRole('button', { name: 'Show message' }))
+    view.rerender(transcript([]))
+    view.rerender(transcript([delivered]))
+    expect(screen.getByText(request.text)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Hide message' }))
+    view.rerender(transcript([]))
+    view.rerender(transcript([delivered]))
+    expect(screen.queryByText(request.text)).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show message' }))
+    view.rerender(transcript([delivered], worker))
+    expect(screen.queryByText(request.text)).toBeNull()
+    view.rerender(transcript([delivered]))
+    expect(screen.getByText(request.text)).toBeTruthy()
+  })
+})
 
 describe('pending ask placement (#1495)', () => {
   const visible = (...items: ThreadEntry[]): ThreadState => ({ turns: [{ id: 't1', items }] })
@@ -580,7 +638,7 @@ describe('SessionTranscript', () => {
       )
     function renderPreview(capable: boolean, pane: PreviewPane | null) {
       vi.stubGlobal('fetch', vi.fn(async () =>
-        new Response(JSON.stringify({ capabilities: { localHandoff: true, followups: false, singleProject: false, tokenMetrics: true, preview: capable } }), {
+        new Response(JSON.stringify({ capabilities: { localHandoff: true, singleProject: false, tokenMetrics: true, preview: capable } }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         })))
@@ -605,7 +663,7 @@ describe('SessionTranscript', () => {
       const openPane = vi.fn()
       const stopped: ThreadEntry = { ...preview, state: 'stopped' } as ThreadEntry
       vi.stubGlobal('fetch', vi.fn(async () =>
-        new Response(JSON.stringify({ capabilities: { localHandoff: true, followups: false, singleProject: false, tokenMetrics: true, preview: true } }), {
+        new Response(JSON.stringify({ capabilities: { localHandoff: true, singleProject: false, tokenMetrics: true, preview: true } }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
         })))

@@ -1,9 +1,7 @@
 /**
- * The turn-end rule (spec 2026-10-17-unified-waits, hearsay-tools/cezarion#1234,
- * hearsay-tools/cezarion#1525): one decision for every turn end, whichever entry settles it — a
- * fresh step, a Continue, an acknowledgement that lands late, or input readiness. Input already on
- * its way defers; done finishes; any open wait parks; a non-final workflow step completes; any other
- * turn end gets a nudge, then a wait. There is no prose classification.
+ * Shared turn-end decision for initial sessions, Continue and late input ACKs. Owed input
+ * defers; done, waits and step completion take precedence. Final no-wait turns use bounded
+ * nudges then a human wait; never classify prose.
  *
  * A nudge has a cause. No wait: the turn named neither a wait nor a done. Completion: the agent's
  * done was refused by the completion gate (hearsay-tools/cezarion#1301). Each cause keeps its own

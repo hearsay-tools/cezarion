@@ -7,7 +7,7 @@ import { promisify } from 'node:util';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { ContentBlock } from '../core/agent-runner.ts';
 import { shellQuote } from '../core/shell-env.ts';
-import { HANDOFF_INSTRUCTIONS } from '../handoff.ts';
+import { HANDOFF_ONLY_INSTRUCTIONS as HANDOFF_INSTRUCTIONS } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
 import { crashStore } from '../runs/run-store.testkit.ts';
 import type { WorkflowDef } from './types.ts';

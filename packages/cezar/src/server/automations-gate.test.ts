@@ -5,9 +5,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutomationStore } from '../automations/store.ts';
 import { WorkspaceAutomationScheduler } from '../automations/scheduler.ts';
 import { RunStore } from '../runs/store.ts';
-import { SkillsUpdateCoordinator } from '../skills-update.ts';
 import type { RunManager } from '../workflows/run.ts';
+import { sweepRegisteredPreviewLeftovers } from './project-context.ts';
 import { createApp, startServer, type ServerDeps } from './server.ts';
+
+// The post-listen chain reads the registry, then sweeps preview leftovers, then decides on the
+// warm-up: the sweep call is the test's signal that the chain reached that decision.
+vi.mock('./project-context.ts', async (original) => {
+  const actual = await original<typeof import('./project-context.ts')>();
+  return { ...actual, sweepRegisteredPreviewLeftovers: vi.fn(actual.sweepRegisteredPreviewLeftovers) };
+});
 import { apiRequest } from './loopback-request.testkit.ts';
 
 /**
@@ -16,10 +23,8 @@ import { apiRequest } from './loopback-request.testkit.ts';
  * cockpit's nav gate, so a bookmarked deep link or a script cannot drive a feature the operator
  * switched off.
  *
- * The twin of `inbox-gate.test.ts`, with one deliberate difference. The inbox READER degrades to
- * `200 []` because an inbox that is off is honestly empty; an automations reader cannot say the
- * same — `{automations: []}` would read as "you have configured none", and the cockpit would then
- * offer to create one against a `409`ing POST. Off means refused, uniformly, for reads too.
+ * Disabled readers refuse uniformly, so the UI cannot offer to create an automation
+ * against a refused POST.
  *
  * The definitions on disk are never touched: the gate hides the feature, it does not delete it.
  */
@@ -39,7 +44,6 @@ describe('automations gate (#801)', () => {
   let store: RunStore;
   let automationId: string;
   const savedAutomations = process.env.CEZ_AUTOMATIONS;
-  const savedFollowups = process.env.CEZ_FOLLOWUPS;
   const savedRemote = process.env.CEZ_REMOTE;
 
   beforeEach(() => {
@@ -52,7 +56,6 @@ describe('automations gate (#801)', () => {
     const seed = AutomationStore.open(dataDir);
     automationId = seed.create(DEFINITION).id;
     delete process.env.CEZ_AUTOMATIONS;
-    delete process.env.CEZ_FOLLOWUPS;
     delete process.env.CEZ_REMOTE;
   });
 
@@ -61,8 +64,6 @@ describe('automations gate (#801)', () => {
     rmSync(repoRoot, { recursive: true, force: true });
     if (savedAutomations === undefined) delete process.env.CEZ_AUTOMATIONS;
     else process.env.CEZ_AUTOMATIONS = savedAutomations;
-    if (savedFollowups === undefined) delete process.env.CEZ_FOLLOWUPS;
-    else process.env.CEZ_FOLLOWUPS = savedFollowups;
     if (savedRemote === undefined) delete process.env.CEZ_REMOTE;
     else process.env.CEZ_REMOTE = savedRemote;
   });
@@ -111,7 +112,7 @@ describe('automations gate (#801)', () => {
       const built = app();
       expect((await apiRequest(built, '/api/v1/health')).status).toBe(200);
       expect((await apiRequest(built, '/api/v1/runs')).status).toBe(200);
-      expect((await apiRequest(built, '/api/v1/todos')).status).toBe(200);
+      expect((await apiRequest(built, '/api/v1/run-summaries')).status).toBe(200);
       expect((await apiRequest(built, '/api/v1/workflows')).status).toBe(200);
     });
 
@@ -202,15 +203,14 @@ describe('automations gate (#801)', () => {
     /** Boot on an ephemeral port, wait until warmup has started or skipped the scheduler, then close. */
     const boot = async (warmupHoldMs = 0): Promise<void> => {
       const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start');
-      const originalWarmup = SkillsUpdateCoordinator.prototype.start;
-      vi.spyOn(SkillsUpdateCoordinator.prototype, 'start').mockImplementation(function (
-        this: SkillsUpdateCoordinator,
-        projects,
-      ) {
+      const sweep = vi.mocked(sweepRegisteredPreviewLeftovers);
+      const { sweepRegisteredPreviewLeftovers: originalSweep } = await vi.importActual<typeof import('./project-context.ts')>('./project-context.ts');
+      sweep.mockClear();
+      sweep.mockImplementation((...args) => {
         if (warmupHoldMs > 0) {
           Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, warmupHoldMs);
         }
-        originalWarmup.call(this, projects);
+        return originalSweep(...args);
       });
       const server = startServer(
         { repoRoot, store, manager: { isActive: () => false } as unknown as RunManager, version: '0.0.0-test' },
@@ -224,7 +224,7 @@ describe('automations gate (#801)', () => {
             interval: 10,
           });
         } else {
-          await vi.waitFor(() => expect(SkillsUpdateCoordinator.prototype.start).toHaveBeenCalled(), {
+          await vi.waitFor(() => expect(sweep).toHaveBeenCalled(), {
             timeout: WARMUP_MS,
             interval: 10,
           });
