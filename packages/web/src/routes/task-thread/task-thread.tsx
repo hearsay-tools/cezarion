@@ -52,7 +52,7 @@ import { useActiveProviderAvailability } from './active-provider'
 import { ThreadLoading } from './thread-loading'
 import { threadRenderMode } from './thread-scroll'
 import { JumpToLatestPill, useThreadScroll } from './thread-scroller'
-import { AskOriginMarker, pinnedAnswerControl } from './pending-ask-navigation'
+import { AskOriginMarker, pinnedAnswerControl, pinnedAskFocus } from './pending-ask-navigation'
 import { useRevealAskOrigin } from './use-reveal-ask-origin'
 import { useSessionViewport } from './session-viewport'
 import {
@@ -369,6 +369,10 @@ export function ThreadView({
     history,
     jumpToRow: scroll.jumpToRow,
   })
+  // The pill's late focus reads this to give up once its question was answered. A history
+  // reload has no answer yet, so it keeps the last settled id.
+  const settledAskIdRef = useRef(pendingAskId)
+  if (!historyLoading) settledAskIdRef.current = pendingAskId
   const navigationRef = useRef({ rows, jumpToRow: scroll.jumpToRow, reveal: revealOrigin.reveal })
   navigationRef.current = { rows, jumpToRow: scroll.jumpToRow, reveal: revealOrigin.reveal }
   const renderAsk = useCallback((ask: ThreadAsk) => {
@@ -503,7 +507,10 @@ export function ThreadView({
           <div data-slot="thread-jump" className="pointer-events-none z-30 flex justify-center">
             <JumpToLatestPill
               pendingQuestions={pendingQuestions}
-              onJump={() => scroll.jumpToLatest(pendingQuestions > 0 ? pinnedAnswerControl : undefined)}
+              onJump={() => {
+                const askId = pendingQuestions > 0 ? pinnedAsk?.id : undefined
+                scroll.jumpToLatest(askId === undefined ? undefined : pinnedAskFocus(askId, () => settledAskIdRef.current === askId))
+              }}
             />
           </div>
         ) : null}

@@ -65,7 +65,9 @@ export interface ThreadScrollControls {
   pillVisible: boolean
   /** The pill's action: pin to the live tail and stick again. A focus target, when given,
    *  receives focus once it exists under the scroller (the pending question, #1495). */
-  jumpToLatest: (focusTarget?: (root: HTMLElement) => HTMLElement | null) => void
+  /** `focusTarget` returns the element to focus, null while it is not mounted yet, or false to
+   *  give the late focus up (its question was answered). */
+  jumpToLatest: (focusTarget?: (root: HTMLElement) => HTMLElement | null | false) => void
   /** Navigate within loaded history, through virtua when the target is unmounted. Focus goes to
    *  `focusTarget(row)` when it returns an element, otherwise to the row itself. */
   jumpToRow: (key: string, index: number, focusTarget?: (row: HTMLElement) => HTMLElement | null) => void
@@ -334,7 +336,7 @@ export function useThreadScroll(
     saveThreadScroll(viewKey, { top: scroller.scrollTop, atBottom: false })
   }, [contentEl, setOffset, viewKey, bumpFocus])
 
-  const jumpToLatest = useCallback((focusTarget?: (root: HTMLElement) => HTMLElement | null) => {
+  const jumpToLatest = useCallback((focusTarget?: (root: HTMLElement) => HTMLElement | null | false) => {
     const generation = bumpFocus()
     const owner = viewKeyRef.current
     pendingFocusRef.current?.disconnect()
@@ -354,8 +356,10 @@ export function useThreadScroll(
     // The refreshed tail can remount the transcript, so the target is looked up under the
     // shell scroller, not the rows container, and focused when it exists.
     const owns = () => ownsFocus(owner, generation)
+    // True when the wait is over: the target took focus, or the caller gave it up.
     const focus = () => {
       const target = focusTarget?.(scroller)
+      if (target === false) return true
       if (!target) return false
       target.focus({ preventScroll: true })
       return document.activeElement === target

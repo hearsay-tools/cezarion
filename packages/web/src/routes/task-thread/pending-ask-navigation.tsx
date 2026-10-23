@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { PENDING_ASK_SECTION_ID } from './session-transcript'
 
 /**
  * Navigation between the pending question's two places (hearsay-tools/cezarion#1495): the
@@ -20,6 +21,20 @@ export function firstAnswerControl(card: HTMLElement): HTMLElement {
 export function pinnedAnswerControl(root: HTMLElement): HTMLElement | null {
   const card = root.querySelector<HTMLElement>('[data-slot="ask-card"][data-pinned="true"]')
   return card ? firstAnswerControl(card) : null
+}
+
+/**
+ * The pill's focus target for one pending ask: its pinned card's first answer control. Null
+ * while that card is not mounted; false once the ask is no longer pending, which gives up the
+ * late focus, so a later question in the same task never takes focus from an old click.
+ */
+export function pinnedAskFocus(askId: string, stillPending: () => boolean) {
+  const key = `${PENDING_ASK_SECTION_ID}:${askId}`
+  return (root: HTMLElement): HTMLElement | null | false => {
+    if (!stillPending()) return false
+    const row = [...root.querySelectorAll<HTMLElement>('[data-row-key]')].find((el) => el.dataset.rowKey === key)
+    return row ? pinnedAnswerControl(row) : null
+  }
 }
 
 /** The jump pill's label: with a question pending, it names how many questions wait. */

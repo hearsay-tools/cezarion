@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { AskCard } from './ask-card'
-import { AskOriginMarker, firstAnswerControl, jumpLabel, pinnedAnswerControl } from './pending-ask-navigation'
+import { AskOriginMarker, firstAnswerControl, jumpLabel, pinnedAnswerControl, pinnedAskFocus } from './pending-ask-navigation'
 import type { ThreadAsk } from './thread-state'
 import { JumpToLatestPill } from './thread-scroller'
 
@@ -82,6 +82,27 @@ describe('firstAnswerControl (#1495)', () => {
     cleanup()
     renderCard(ask())
     expect(pinnedAnswerControl(document.body)).toBe(screen.getByRole('button', { name: 'First' }))
+  })
+})
+
+describe('pinnedAskFocus (#1495)', () => {
+  /** A pinned card inside the row the transcript renders for it, keyed by its ask id. */
+  const renderPinned = (askId: string) => {
+    const row = document.createElement('div')
+    row.dataset.rowKey = `pending-ask:${askId}`
+    document.body.append(row)
+    render(<MemoryRouter><AskCard ask={ask({ id: askId })} run={run} /></MemoryRouter>, { container: row })
+  }
+
+  it('focuses only the pinned card of the ask it was made for', () => {
+    renderPinned('q2')
+    expect(pinnedAskFocus('q1', () => true)(document.body)).toBeNull()
+    expect(pinnedAskFocus('q2', () => true)(document.body)).toBe(screen.getByRole('button', { name: 'First' }))
+  })
+
+  it('cancels once its ask is no longer pending', () => {
+    renderPinned('q1')
+    expect(pinnedAskFocus('q1', () => false)(document.body)).toBe(false)
   })
 })
 

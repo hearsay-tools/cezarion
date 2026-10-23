@@ -798,6 +798,28 @@ describe('useThreadScroll — jump to latest', () => {
     scroller.remove()
   })
 
+  it('a focus target that returns false cancels the late focus (#1495)', async () => {
+    const { scroller, hook } = attachScroller()
+    document.body.append(scroller)
+    let cancelled = false
+    const target = vi.fn((root: HTMLElement) => cancelled ? false : root.querySelector<HTMLElement>('[data-testid="late"]'))
+    await act(async () => {
+      hook.result.current.jumpToLatest(target)
+      await Promise.resolve()
+    })
+    cancelled = true
+    await act(async () => { scroller.append(document.createElement('span')) })
+    const calls = target.mock.calls.length
+    cancelled = false
+    const late = document.createElement('button')
+    late.dataset.testid = 'late'
+    await act(async () => { scroller.append(late) })
+    expect(document.activeElement).not.toBe(late)
+    expect(target).toHaveBeenCalledTimes(calls)
+    hook.unmount()
+    scroller.remove()
+  })
+
   it('a wheel-up gesture drops a pending focus target (#1495)', async () => {
     const { scroller, hook } = attachScroller()
     document.body.append(scroller)
