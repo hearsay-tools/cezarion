@@ -12,7 +12,7 @@ import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { checkpoint, collect, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { checkpoint, collect, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
@@ -176,7 +176,8 @@ async function parentWithWorker(runner: RunnerId) {
   nativeWire(runner);
   process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
   const p = await parent(HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
-  await until(() => store.getRun(p.id)?.status === 'waiting');
+  checkpoint('parent-opening-repark');
+  await until(() => store.getRun(p.id)?.status === 'waiting', () => timeline(p.id));
   return { p, w: await worker(p.id) };
 }
 
@@ -192,7 +193,10 @@ async function parentTurn(id: string, text: string, parked: () => boolean) {
  *  prompt, then `parked`. Returns the parent's open worker entry, if any. */
 async function ignoreRefusal(runner: RunnerId, id: string, refusal: string, parked: () => boolean) {
   expect(manager.sendMessage(id, [{ type: 'text', text: messagesPrompt(runner, ['All done.\nCEZ:DONE']) }])).toBe(true);
-  await until(() => prompted(runner, refusal).length > 0 && store.getRun(id)?.status === 'waiting' && parked());
+  checkpoint('completion-refusal-native-prompt');
+  await until(() => prompted(runner, refusal).length > 0, () => timeline(id));
+  checkpoint('completion-refusal-repark');
+  await until(() => store.getRun(id)?.status === 'waiting' && parked(), () => timeline(id));
   expect(prompted(runner, refusal)).toHaveLength(1);
   expect(store.readEvents(id).filter(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE))).toHaveLength(1);
   return workerWaits(id)[0]!;
@@ -222,7 +226,8 @@ async function conversingParent(runner: RunnerId) {
   // An idle worker that only talks: it plain-parks rather than ask its parent (hearsay-tools/cezarion#1301).
   spendWorkerBudget(w.id);
   manager.enqueueOwnedRun(w.id);
-  await until(() => store.getRun(w.id)?.status === 'waiting');
+  checkpoint('conversing-worker-repark');
+  await until(() => store.getRun(w.id)?.status === 'waiting', () => timeline(w.id));
   const credentials = new CredentialRegistry();
   onTestFinished(() => credentials.close());
   const workerCaller = credentials.authenticate(credentials.issue('project', w.id, randomUUID()))!;
@@ -508,9 +513,15 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           // These live mock servers must not overwrite each other's session JSON. U8 never
           // restarts either server; keep their shared args file for native prompt assertions.
           if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8-parked-sessions.json');
-          const parked = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', request), runner });
+          const task = toolCall('cezar_wait', request);
+          const parked = manager.startRun(QUICK_TASK_WORKFLOW, { task, runner });
+          // bound: Keep the fixture's 15s native-wire hang guard per stage. The six-burner
+          // Node floor reproduction exceeded it across server and tool startup combined
+          // (hearsay-tools/cezarion#1298); native prompt receipt separates those stages.
+          checkpoint(`u8-parked-native-prompt:${parked.id}`);
+          await until(() => prompted(runner, task).length > 0, () => timeline(parked.id));
           checkpoint(`u8-parked-waiting:${parked.id}`);
-          await until(() => parkedOn(parked.id, waitOfKind(parked.id, kind)));
+          await until(() => parkedOn(parked.id, waitOfKind(parked.id, kind)), () => timeline(parked.id));
           const wait = waitOfKind(parked.id, kind)!;
           // The only regular slot goes to a turn held open until this test releases it.
           const release = join(root, 'u8-release');
@@ -1871,15 +1882,31 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       // (hearsay-tools/cezarion#1268), but an explicit cezar_wait still opens the agent's timer.
       it(`${runner} U21t an agent timer registered beside a completion-wait park keeps its deadline and wakes beside it`, async () => {
         process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+        checkpoint('u21t-conversing-parent');
         const f = await conversingParent(runner);
+        const waitAt = async (phase: string, predicate: () => boolean) => {
+          checkpoint(`u21t-${phase}`);
+          await until(predicate, () => timeline(f.p.id));
+        };
+        checkpoint('u21t-completion-refusal');
         const entry = await ignoreRefusal(runner, f.p.id, `Workers are still live: ${f.w.id}.`, () => workerWaits(f.p.id)[0]?.phase === 'open');
         let turns = turnEnds(f.p.id);
-        const markerId = await f.progress(messagesPrompt(runner, ['Still checking.\nCEZ:MONITORING']));
-        await until(() => delivered(f.p.id, markerId) && turnEnds(f.p.id) > turns && parkedOn(f.p.id, workerWaits(f.p.id)[0]));
+        const marker = messagesPrompt(runner, ['Still checking.\nCEZ:MONITORING']);
+        checkpoint('u21t-marker-admission');
+        const markerId = await f.progress(marker);
+        await waitAt('marker-native-prompt', () => prompted(runner, marker).length > 0);
+        await waitAt('marker-delivery', () => delivered(f.p.id, markerId));
+        await waitAt('marker-turn-end', () => turnEnds(f.p.id) > turns);
+        await waitAt('marker-repark', () => parkedOn(f.p.id, workerWaits(f.p.id)[0]));
         expect(store.getRun(f.p.id)?.waits).toEqual([expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' })]);
         turns = turnEnds(f.p.id);
-        const id = await f.progress(toolCall('cezar_wait', { kind: 'timer', seconds: 600, note: 'u21t explicit timer' }));
-        await until(() => delivered(f.p.id, id) && turnEnds(f.p.id) > turns && parkedOn(f.p.id, waitOfKind(f.p.id, 'timer')));
+        const timerPrompt = toolCall('cezar_wait', { kind: 'timer', seconds: 600, note: 'u21t explicit timer' });
+        checkpoint('u21t-timer-admission');
+        const id = await f.progress(timerPrompt);
+        await waitAt('timer-native-prompt', () => prompted(runner, timerPrompt).length > 0);
+        await waitAt('timer-delivery', () => delivered(f.p.id, id));
+        await waitAt('timer-turn-end', () => turnEnds(f.p.id) > turns);
+        await waitAt('timer-repark', () => parkedOn(f.p.id, waitOfKind(f.p.id, 'timer')));
         const timer = timed(waitOfKind(f.p.id, 'timer')!);
         expect(timer).toMatchObject({ via: 'cezar_wait', note: 'u21t explicit timer' });
         expect(store.getRun(f.p.id)?.waits).toEqual([
@@ -1890,8 +1917,10 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         // The timer wakes the parent once; the completion wait stays open, with no deadline.
         turns = turnEnds(f.p.id);
         fireTimer(timer.id);
-        await until(() => settled(f.p.id, timer.id)?.phase === 'delivered' && turnEnds(f.p.id) > turns &&
-          parkedOn(f.p.id, workerWaits(f.p.id)[0]));
+        await waitAt('timer-wake-delivery', () => settled(f.p.id, timer.id)?.phase === 'delivered');
+        await waitAt('timer-wake-native-prompt', () => prompted(runner, inputsFor(f.p.id, timer.id)[0]!.text).length > 0);
+        await waitAt('timer-wake-turn-end', () => turnEnds(f.p.id) > turns);
+        await waitAt('timer-wake-repark', () => parkedOn(f.p.id, workerWaits(f.p.id)[0]));
         expect(inputsFor(f.p.id, timer.id)).toHaveLength(1);
         expect(prompted(runner, inputsFor(f.p.id, timer.id)[0]!.text)).toEqual([expect.stringContaining(`Still open: worker wait ${entry.id} on 1 worker, no deadline.`)]);
         expect(store.getRun(f.p.id)?.waits).toEqual([expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' })]);
@@ -1899,10 +1928,11 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(inputsFor(f.p.id, entry.id)).toEqual([]);
         // The worker's settlement still resolves the completion wait, and it wakes the parent once.
         expect(manager.finish(f.w.id)).toBe(true);
-        await until(() => settled(f.p.id, entry.id)?.phase === 'delivered' && prompted(runner, workerWake(entry)).length > 0);
+        await waitAt('completion-wake-delivery', () => settled(f.p.id, entry.id)?.phase === 'delivered');
+        await waitAt('completion-wake-native-prompt', () => prompted(runner, workerWake(entry)).length > 0);
         expect(inputsFor(f.p.id, entry.id)).toHaveLength(1);
         expect(prompted(runner, workerWake(entry))).toHaveLength(1);
-        await until(() => store.getRun(f.p.id)?.status === 'waiting');
+        await waitAt('completion-wake-repark', () => store.getRun(f.p.id)?.status === 'waiting');
       });
 
       it(`${runner} U21h an ignored refusal with only uncollected results parks on Cezar's human wait`, async () => {
