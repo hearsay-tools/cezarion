@@ -307,8 +307,34 @@ async function provisionPass(
 
     const installed = new Set<string>();
     const wanted = new Set<string>();
-    const ownedNames = (agentDir: string) => ownedNamesIn(records, agentDir);
-    const syncIgnore = (agentDir: string, names: readonly string[]) => syncIgnoreFile(worktree, root, records, save, agentDir, names);
+    const ownedNames = (agentDir: string): string[] => [...records.values()]
+      .filter((entry) => entry.kind !== 'ignore-file' && entry.path.startsWith(`${agentDir}/skills/`))
+      .map((entry) => entry.skill ?? '').filter(Boolean);
+
+    /** Keep `names` out of git in `<agentDir>/skills`, through cezar's own `.gitignore` when it may. */
+    const syncIgnore = async (agentDir: string, names: readonly string[]): Promise<void> => {
+      const rel = `${agentDir}/skills/.gitignore`;
+      const file = join(worktree, rel);
+      if (!(await landsInside(root, file))) return;
+      const record = records.get(rel);
+      const current = await identityOf(file, 'ignore-file');
+      if (current !== null && current !== record?.identity) {
+        if (record) records.delete(rel);
+        for (const name of names) await excludeFromGit(worktree, `${agentDir}/skills/${name}`);
+        return;
+      }
+      const sorted = [...new Set(names)].sort();
+      if (sorted.length === 0) {
+        if (current !== null) await unlink(file);
+        records.delete(rel);
+        return save();
+      }
+      const text = [PROVISION_IGNORE_MARK, '/.gitignore', ...sorted.map((name) => `/${name}`)].join('\n') + '\n';
+      await mkdir(dirname(file), { recursive: true });
+      await writeFile(file, text, 'utf8');
+      records.set(rel, { path: rel, kind: 'ignore-file', identity: (await identityOf(file, 'ignore-file'))! });
+      await save();
+    };
 
     for (const agentDir of TEAM_SKILL_AGENT_DIRS) {
       checkpoint();
@@ -446,81 +472,6 @@ async function provisionPass(
     // Best effort: the skill body still rides the system prompt.
   }
   return result;
-}
-
-/** The skill names of the entries recorded under `<agentDir>/skills`. */
-function ownedNamesIn(records: ReadonlyMap<string, ProvisionedEntry>, agentDir: string): string[] {
-  return [...records.values()]
-    .filter((entry) => entry.kind !== 'ignore-file' && entry.path.startsWith(`${agentDir}/skills/`))
-    .map((entry) => entry.skill ?? '').filter(Boolean);
-}
-
-/** Keep `names` out of git in `<agentDir>/skills`, through cezar's own `.gitignore` when it may. */
-async function syncIgnoreFile(
-  worktree: string,
-  root: string,
-  records: Map<string, ProvisionedEntry>,
-  save: () => Promise<void>,
-  agentDir: string,
-  names: readonly string[],
-): Promise<void> {
-  const rel = `${agentDir}/skills/.gitignore`;
-  const file = join(worktree, rel);
-  if (!(await landsInside(root, file))) return;
-  const record = records.get(rel);
-  const current = await identityOf(file, 'ignore-file');
-  if (current !== null && current !== record?.identity) {
-    if (record) records.delete(rel);
-    for (const name of names) await excludeFromGit(worktree, `${agentDir}/skills/${name}`);
-    return;
-  }
-  const sorted = [...new Set(names)].sort();
-  if (sorted.length === 0) {
-    if (current !== null) await unlink(file);
-    records.delete(rel);
-    return save();
-  }
-  const text = [PROVISION_IGNORE_MARK, '/.gitignore', ...sorted.map((name) => `/${name}`)].join('\n') + '\n';
-  await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, text, 'utf8');
-  records.set(rel, { path: rel, kind: 'ignore-file', identity: (await identityOf(file, 'ignore-file'))! });
-  await save();
-}
-
-/**
- * Take `names` back out of `worktree` (#1494): drop them from the recorded roots and remove each
- * entry recorded for them that still is what cezar left. A path the user replaced, and every skill
- * cezar has no record of, stays. Other recorded skills are not touched, so a pass that cannot see
- * the whole catalog (a cold team cache) removes nothing else. Never throws.
- */
-export function withdrawProvisionedSkills(worktree: string, names: ReadonlySet<string>): Promise<void> {
-  if (names.size === 0) return Promise.resolve();
-  return serialized(worktree, async () => {
-    try {
-      const gitDir = await gitDirOf(worktree);
-      const root = await realpath(worktree).catch(() => null);
-      if (!gitDir || root === null) return;
-      const manifestFile = join(gitDir, MANIFEST_FILE);
-      const manifest = await readManifest(manifestFile);
-      const doomed = manifest.entries.filter((entry) => entry.kind !== 'ignore-file' && entry.skill && names.has(entry.skill));
-      if (doomed.length === 0 && !manifest.roots.some((name) => names.has(name))) return;
-      const records = new Map(manifest.entries.map((entry) => [entry.path, entry]));
-      const save = () => writeManifest(manifestFile, { ...manifest, entries: [...records.values()] });
-      const contained = (rel: string) => landsInside(root, dirname(join(worktree, rel)));
-      manifest.roots = manifest.roots.filter((name) => !names.has(name));
-      for (const record of doomed) {
-        if (await ownedAt(worktree, record, contained)) await removePath(join(worktree, record.path));
-        else if (record.kind === 'pending' && (await contained(record.path)) && (await lstat(join(worktree, record.path)).catch(() => null))) {
-          continue; // changed since the interrupted pass: never deleted, still kept out of git
-        }
-        records.delete(record.path);
-      }
-      await save();
-      for (const agentDir of TEAM_SKILL_AGENT_DIRS) await syncIgnoreFile(worktree, root, records, save, agentDir, ownedNamesIn(records, agentDir));
-    } catch {
-      // Best effort: a copy left behind is still out of git.
-    }
-  });
 }
 
 /**

@@ -363,23 +363,19 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     await run.finish();
   });
 
-  it("Continue removes cezar's copies of a team skill switched off after it was installed, and nothing else (#1494)", async () => {
+  it('Continue leaves copies installed before a switch-off in place: nothing is removed mid-task (#1494)', async () => {
     const { repo } = await seedTeamSource();
     const run = await runToEnd(undefined);
     for (const agentDir of AGENT_SKILL_DIRS) {
       expect(existsSync(join(run.spec.cwd, agentDir, 'skills', TEAM_SKILL, 'SKILL.md')), agentDir).toBe(true);
     }
-    // The user's own install, beside cezar's copies.
-    mkdirSync(join(run.spec.cwd, '.agents/skills/user-own-1494'), { recursive: true });
-    writeFileSync(join(run.spec.cwd, '.agents/skills/user-own-1494/SKILL.md'), 'mine\n');
     switchOff(repo);
     const before = launches.length;
     expect(manager.continueRun(run.id, { text: 'keep going' })).toEqual({ ok: true });
     await vi.waitFor(() => expect(launches.length).toBeGreaterThan(before), { timeout: LAUNCH_WAIT_MS });
     for (const agentDir of AGENT_SKILL_DIRS) {
-      expect(existsSync(join(run.spec.cwd, agentDir, 'skills', TEAM_SKILL)), agentDir).toBe(false);
+      expect(existsSync(join(run.spec.cwd, agentDir, 'skills', TEAM_SKILL, 'SKILL.md')), agentDir).toBe(true);
     }
-    expect(readFileSync(join(run.spec.cwd, '.agents/skills/user-own-1494/SKILL.md'), 'utf8')).toBe('mine\n');
     sessions[before]!();
   });
 
