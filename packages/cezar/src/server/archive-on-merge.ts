@@ -58,8 +58,19 @@ export class ArchiveOnMergeCoordinator {
       for (const id of this.cursors.keys()) if (!ids.has(id)) { this.cursors.delete(id); this.failures.delete(id); }
       for (const [key, state] of this.pending) if (!ids.has(state.projectId)) this.pending.delete(key);
       if (!projects.length || !current()) return;
-      // One project, at most 64 indexed roots and four merge sets per tick.
-      const project = projects[this.projectCursor++ % projects.length]!;
+      // Four projects per tick avoids a minute per unopened project. Each project remains bounded.
+      for (let i = 0; i < Math.min(4, projects.length) && current(); i++) {
+        const project = projects[this.projectCursor++ % projects.length]!;
+        await this.tickProject(project, abort.signal, current);
+      }
+    } catch {
+      // A registry outage leaves tasks visible until the next bounded poll.
+    } finally {
+      clearTimeout(timeout); this.abort = undefined; this.busy = false;
+    }
+  }
+  private async tickProject(project: ArchiveProject, signal: AbortSignal, current: () => boolean): Promise<void> {
+    try {
       if ((this.failures.get(project.id)?.nextAt ?? 0) > Date.now() || !await this.deps.enabled(project) || !current()) return;
       const repoBase = await this.deps.repository(project);
       const snapshots = await this.deps.withStore(project, async (store, isActive, valid) => {
@@ -102,7 +113,7 @@ export class ArchiveOnMergeCoordinator {
         for (const pr of snapshot.pullRequests.slice(state.offset, state.offset + 64)) requests.set(pullRequestKey(pr), pr);
       }
       if (!requests.size) return;
-      const observed = await this.deps.lookup(project.root, [...requests.values()], abort.signal);
+      const observed = await this.deps.lookup(project.root, [...requests.values()], signal);
       if (!current()) return;
       const observedByKey = new Map(observed.map(pr => [pullRequestKey(pr), pr]));
       for (const snapshot of snapshots) {
@@ -115,7 +126,13 @@ export class ArchiveOnMergeCoordinator {
         state.offset += 64;
         if (state.offset < snapshot.pullRequests.length) continue;
         state.offset = 0;
-        if (state.merged.size !== snapshot.pullRequests.length) { this.pending.delete(key); continue; }
+        if (state.merged.size !== snapshot.pullRequests.length) {
+          const missing = snapshot.pullRequests.find(pr => !state.merged.has(pullRequestKey(pr)));
+          if (missing) await this.deps.withStore(project, async (store, _active, valid) => {
+            if (current() && valid()) store.archiveMergeBlocker(snapshot, missing, repoBase);
+          });
+          this.pending.delete(key); continue;
+        }
         await this.deps.withStore(project, async (store, isActive, valid) => {
           if (!await this.deps.enabled(project) || !current() || !valid()) return;
           const registered = (await this.deps.projects()).some(p => p.id === project.id && p.root === project.root && p.status !== 'missing');
@@ -129,17 +146,11 @@ export class ArchiveOnMergeCoordinator {
       }
       this.failures.delete(project.id);
     } catch {
-      // Network/store errors leave tasks visible. Repeated outages back off, capped at 15 min.
       if (current()) {
-        const projects = await this.deps.projects().catch(() => []);
-        const project = projects.length ? projects[(this.projectCursor - 1) % projects.length] : undefined;
-        if (project) {
-          const count = Math.min(5, (this.failures.get(project.id)?.count ?? 0) + 1);
-          this.failures.set(project.id, { count, nextAt: Date.now() + Math.min(900_000, this.interval * 2 ** (count - 1)) });
-        }
+        const count = Math.min(5, (this.failures.get(project.id)?.count ?? 0) + 1);
+        this.failures.set(project.id, { count, nextAt: Date.now() + Math.min(900_000, this.interval * 2 ** (count - 1)) });
       }
-    } finally {
-      clearTimeout(timeout); this.abort = undefined; this.busy = false;
     }
   }
+
 }

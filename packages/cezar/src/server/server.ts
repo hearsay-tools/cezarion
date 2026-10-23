@@ -1,4 +1,5 @@
 import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
+import { CompletionActionCoordinator } from './completion-actions.ts';
 import { discoverRepoHandle, lookupMergedPullRequests } from './forge/github.ts';
 import { resolveArchiveOnMerge, resolveGlobalArchiveOnMerge } from '../archive-on-merge-setting.ts';
 import type { WorkspaceConfigResponse, TestProjectWebhookResponse } from '@open-mercato/cezar-contract';
@@ -160,7 +161,7 @@ import { isUntouchedCancelledRun, toPastedContent, type PastedContent, type RunM
 import { worktreeDiff, worktreeDiffStat, worktreeSizeBytes } from '../git-worktree.ts';
 import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
 import { isReclaimable, reclaimWorktree, reclaimWorktrees, rematerializeReclaimedWorktree, selectReclaimableWorktrees } from '../runs/retention.ts';
-import { getBranches, getCommit, getDiff, getLogWithParents, getRepoInfo, getStatus, getTracking } from './git.ts';
+import { getBranches, getCommit, getDiff, getLogWithParents, getBranchHead, getRepoInfo, getStatus, getTracking } from './git.ts';
 import { attributeLog, deleteBranches, forgetRepoBranches, githubBranchForge, readRepoBranches, type BranchForge, type ClassifyInput } from './repo-branches.ts';
 import { claimRepoGitMutation, localPullBranches, pullRepoCheckout } from './repo-pull.ts';
 import {
@@ -245,7 +246,7 @@ import { attachUpgradeRouter } from './upgrade-router.ts';
 import { createPreviewSocket } from './preview-socket.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
-import { parseRemote, resolveForge, type ForgeAvailability } from './forge/index.ts';
+import { parseRemote, resolveForge, forgeWebRoot, type ForgeAvailability } from './forge/index.ts';
 import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubCommentCounts, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { CockpitAlreadyRunningError, type CockpitOwnership } from './cockpit-ownership.ts';
@@ -6445,7 +6446,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     },
     afterRecover: (project) => deps.delegation?.service.armDestroyRetries(project.id),
   });
-  const archiveOnMerge = new ArchiveOnMergeCoordinator({
+  const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = {
     projects: async () => {
       const boot = { id: bootProjectId, root: deps.repoRoot, status: 'ok' as const };
       if (resolveCapabilities(process.env, deps.bindHost).singleProject) return [boot];
@@ -6462,6 +6463,18 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
         work(store, id => sharedContexts.peek(project.id)?.manager.isActive(id) ?? false, valid));
     },
     lookup: lookupMergedPullRequests,
+  };
+  const archiveOnMerge = new ArchiveOnMergeCoordinator(archiveDeps);
+  const completionActions = new CompletionActionCoordinator({
+    projects: archiveDeps.projects,
+    withStore: (project, work) => archiveDeps.withStore(project, (store, _active, valid) => work(store, valid)),
+    forge: async project => {
+      const info = await getRepoInfo(project.root);
+      const driver = resolveForge(info);
+      const repository = info?.remote ? forgeWebRoot(info.remote) : null;
+      return driver && repository ? { driver, repository } : undefined;
+    },
+    head: (project, branch) => getBranchHead(project.root, branch),
   });
   // Injected contexts (tests) skip `prepareManager`.
   sharedContexts.onContextBuilt(addressManager);
@@ -6632,6 +6645,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   });
   const startBackgroundServices = () => {
     archiveOnMerge.start();
+    completionActions.start();
     void listProjects().then((projects) => {
       const all = projects.some((project) => project.root === deps.repoRoot)
         ? projects : [{ id: deps.bootProjectId ?? 'default', root: deps.repoRoot, status: 'ok' as const }, ...projects];
@@ -6676,7 +6690,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     resolveProject: async (projectId) => projectLookup.resolve?.(projectId),
   });
   server.once('close', () => {
-    unsubscribe(); archiveOnMerge.stop(); coordinator.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close();
+    unsubscribe(); archiveOnMerge.stop(); completionActions.stop(); coordinator.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close();
     socketHub.close();
     previewSocket.close();
     void deps.previewHost?.close().catch(() => undefined);
@@ -6684,7 +6698,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   // The one `upgrade` listener: the subscription bus and the preview pane's socket (#781).
   attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), previewSocket.route]);
   const shutdownForRestart = async (): Promise<void> => {
-    archiveOnMerge.stop();
+    archiveOnMerge.stop(); completionActions.stop();
     sharedContexts.disposeAll(); // close every built secondary project before old process exits
     deps.store.flush();
     socketHub.close();

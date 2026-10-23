@@ -898,6 +898,14 @@ export class RunDatabase {
       .map(row => ({ id: row.id as string, seq: row.seq as number }));
   }
 
+  listCompletionCandidates(afterSeq: number, limit: number): Array<{ id: string; seq: number }> {
+    return this.run(() => this.db.prepare(`SELECT id, seq FROM runs
+      WHERE archived = 0 AND status = 'done' AND seq > ?
+        AND json_extract(data, '$.completionAction.phase') IN ('pending', 'blocked')
+      ORDER BY seq LIMIT ?`).all(afterSeq, Math.max(1, Math.min(64, limit))))
+      .map(row => ({ id: row.id as string, seq: row.seq as number }));
+  }
+
   /** Indexed point/family lookup, after the bounded root page has been selected. */
   archiveFamilyHasPullRequests(id: string): boolean {
     return this.run(() => this.db.prepare(`SELECT 1 FROM runs WHERE (id = ? OR parent_run_id = ?)

@@ -4,7 +4,6 @@ import { workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } fro
 import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, removeAgentTmpDir } from './agent-tmpdir.ts';
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID, createHash } from 'node:crypto';
-import { hasRegisteredRunProcess } from '../core/process-usage.ts';
 import { isDeepStrictEqual } from 'node:util';
 import { appendFileSync, closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, realpathSync, readdirSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -46,7 +45,7 @@ import { emptyFacts, stampOf, TranscriptFactsIndex, type TranscriptFacts } from 
 import { hasPlainHistory, historyPaths, readHistoryText, readHistoryTextAsync, removeHistory, restoreHistory } from './history-file.ts';
 import { workerExecutionIdentitySchema, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { capacityError, workerCapacity } from '../delegation/capacity.ts';
-import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, sharedCwdScan, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartToken, type CwdSource, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { archivePullRequests, pullRequestKey, mergePullRequests } from './pull-requests.ts';
@@ -252,6 +251,7 @@ export const runRecordSchema = z.object({
   archiveWhenDone: contractRunRecordSchema.shape.archiveWhenDone,
   autoMergePr: contractRunRecordSchema.shape.autoMergePr,
   completionAction: contractRunRecordSchema.shape.completionAction,
+  archiveBlocker: contractRunRecordSchema.shape.archiveBlocker,
   /** Task webhook opt-in (#589). Absent = off; `POST /runs/:id/notify` flips it at any time. */
   notify: z.boolean().optional().catch(undefined),
   /** The last task-webhook delivery's outcome (#589), written by `runs/webhook.ts`. */
@@ -3319,7 +3319,8 @@ export class RunStore extends EventEmitter {
    * nothing changed anywhere: the held records, the database, the pending dirty rows and the
    * subscribers all see the store as it was.
    */
-  private commitIndex(staged: ReadonlyMap<string, RunRecord | null>, source?: CommitSource): void {
+  private commitIndex(input: ReadonlyMap<string, RunRecord | null>, source?: CommitSource): void {
+    const staged = this.prepareCompletionActions(input);
     if (!this.db) throw this.openFailure ?? new Error('runs database unavailable: nothing can be saved');
     this.assertWritable(staged);
     this.persist(staged);
@@ -3329,7 +3330,12 @@ export class RunStore extends EventEmitter {
       if (!next) { this.held.delete(id); continue; }
       this.committing.add(id);
       const current = this.held.get(id);
-      if (current) Object.assign(current, next);
+      if (current) {
+        for (const key of Object.keys(current) as Array<keyof RunRecord>) {
+          if (!(key in next)) delete current[key];
+        }
+        Object.assign(current, next);
+      }
       else this.held.set(id, next);
     }
     try {
@@ -3341,6 +3347,82 @@ export class RunStore extends EventEmitter {
       for (const id of staged.keys()) this.committing.delete(id);
       this.sweepIfSettled(staged.keys());
     }
+    for (const [id, next] of staged) if (next?.archived) this.compressor.enqueue(id);
+  }
+
+  /** Completion and its intent/archive share the same committed rows, including root Finish. */
+  private prepareCompletionActions(input: ReadonlyMap<string, RunRecord | null>): Map<string, RunRecord | null> {
+    const staged = new Map(input);
+    for (const [id, candidate] of input) {
+      if (!candidate) continue;
+      const previous = this.peek(id);
+      let next = candidate;
+      const changed = candidate.status === 'done' && !candidate.archived && (
+        previous?.status !== 'done' ||
+        Boolean(previous.archiveWhenDone) !== Boolean(candidate.archiveWhenDone) ||
+        Boolean(previous.autoMergePr) !== Boolean(candidate.autoMergePr));
+      if (changed && (candidate.archiveWhenDone || candidate.autoMergePr)) {
+        next = { ...candidate, completionAction: { id: randomUUID(), phase: 'pending' } };
+        staged.set(id, next);
+        if (next.archiveWhenDone && !next.autoMergePr) {
+          const blocker = this.completionArchiveBlocker(next);
+          next.completionAction = { ...next.completionAction!, phase: blocker ? 'blocked' : 'complete', ...(blocker ? { message: blocker } : {}) };
+          if (!blocker) this.stageArchive(staged, next, true);
+        }
+      } else if (candidate.status !== 'done' || (!candidate.archiveWhenDone && !candidate.autoMergePr)) {
+        if (candidate.completionAction) staged.set(id, { ...candidate, completionAction: undefined });
+      }
+    }
+    return staged;
+  }
+
+  private completionArchiveBlocker(root: RunRecord): string | undefined {
+    const family = [root, ...this.listWorkersOf(root.id)];
+    for (const run of family) {
+      if (!['done', 'review', 'failed', 'cancelled'].includes(run.status) || run.waits?.some(wait => wait.phase === 'open') ||
+        run.hasPendingPermission || this.facts.peek(run.id)?.pendingAsk !== undefined)
+        return 'Task or worker work still needs attention. Open the task or archive manually.';
+      if (run.delegation?.role === 'invalid' || (run.delegation?.role === 'worker' && this.readWorkerExecution(run.id)?.phase !== 'complete'))
+        return 'Worker execution has not settled. Open the worker or archive manually.';
+    }
+    return undefined;
+  }
+
+  /** One archive write for manual actions, merge observations, completion, and sweeps.
+   * Archiving files history away; it never stops a process or removes a worktree. */
+  private stageArchive(staged: Map<string, RunRecord | null>, root: RunRecord, archived: boolean): void {
+    const ids = root.delegation?.role === 'worker' ? [root.id] :
+      [root.id, ...new Set([...(this.db?.listIdsByParent(root.id) ?? []), ...this.listWorkersOf(root.id).map(run => run.id)])];
+    const now = new Date().toISOString();
+    for (const id of ids) {
+      const member = staged.get(id) ?? this.peek(id);
+      if (!member) continue;
+      if (!archived) { this.compressor.cancel(id); restoreHistory(this.dataDir, id); }
+      const next = { ...member, archiveBlocker: undefined };
+      archiveFields(next, archived, now);
+      staged.set(id, next);
+    }
+  }
+
+  /** A bounded persisted queue also covers projects without a live RunManager. */
+  listCompletionCandidates(afterSeq = 0, limit = 32): Array<{ id: string; seq: number }> {
+    return this.db?.listCompletionCandidates(afterSeq, limit) ?? [];
+  }
+
+  completeAction(id: string, token: string, phase: 'blocked' | 'complete', message?: string): boolean {
+    const run = this.record(id);
+    if (!run || run.status !== 'done' || run.archived || run.completionAction?.id !== token ||
+      run.completionAction.phase === 'complete') return false;
+    if (run.completionAction.phase === phase && run.completionAction.message === message) return true;
+    const next: RunRecord = { ...run, completionAction: { id: token, phase, ...(message ? { message } : {}) } };
+    const staged = new Map<string, RunRecord | null>([[id, next]]);
+    if (phase === 'complete' && next.archiveWhenDone) {
+      const blocker = this.completionArchiveBlocker(next);
+      if (blocker) next.completionAction = { id: token, phase: 'blocked', message: blocker };
+      else this.stageArchive(staged, next, true);
+    }
+    this.commitIndex(staged);
+    return true;
   }
 
   /**
@@ -3411,6 +3493,12 @@ export class RunStore extends EventEmitter {
     }
     // Restore before mutating so a throw leaves status and archived unchanged (#818 S3).
     if (archived === false) restoreHistory(this.dataDir, id);
+    if (normalized.status === 'done' || normalized.archiveWhenDone !== undefined || normalized.autoMergePr !== undefined) {
+      const next = { ...run, ...this.redactPatch(normalized) };
+      if (archived !== undefined) archiveFields(next, archived, new Date().toISOString());
+      this.commitIndex(new Map([[id, next]]));
+      return this.record(id);
+    }
     Object.assign(run, this.redactPatch(normalized));
     if (run.status !== 'waiting') run.autoResumeAt = undefined;
     if (normalized.task !== undefined) this.resolveEditedTaskRefs(run);
@@ -3539,32 +3627,51 @@ export class RunStore extends EventEmitter {
     const ids = [id, ...new Set([...(this.db?.listIdsByParent(id) ?? []), ...this.listWorkersOf(id).map(run => run.id)])];
     if (ids.length > 1025) return undefined;
     const family: RunRecord[] = [];
-    const cwds = sharedCwdScan();
+    const block = (message: string, runId = id) => { this.setArchiveBlocker(id, { message, runId }); return undefined; };
     for (const memberId of ids) {
       const row = this.db?.get(memberId);
       const raw: unknown = row ? JSON.parse(row.data) : this.held.get(memberId);
       const decoded = decodeRunRow(JSON.stringify(raw));
-      if (!decoded) return undefined;
+      if (!decoded) return block('Task history is unavailable. Open the task or archive it manually.', memberId);
       // Do not let the runtime schema's per-entry salvage hide malformed PR authority.
       if (raw && typeof raw === 'object' && 'pullRequests' in raw &&
-        (!Array.isArray(raw.pullRequests) || raw.pullRequests.some(entry => !runPullRequestSchema.safeParse(entry).success))) return undefined;
+        (!Array.isArray(raw.pullRequests) || raw.pullRequests.some(entry => !runPullRequestSchema.safeParse(entry).success))) return block('PR associations are invalid. Check the task PRs or archive manually.', memberId);
       const run = this.held.get(memberId) ?? decoded.run;
       if (row && !this.held.has(memberId)) this.decodeCold(row); // records the synchronous write fence
-      if (this.deleted.has(memberId) || this.quarantined.has(memberId) || this.pins.has(memberId) || isActive(memberId) ||
-        hasRegisteredRunProcess(memberId) || isLiveRecord(run) || row?.live ||
-        run.waits?.some((wait) => wait.kind === 'human' && wait.phase === 'open') || run.hasPendingPermission || run.delegation?.role === 'invalid' ||
-        !['review', 'done', 'failed', 'cancelled'].includes(run.status) || autosaveCleanupBlocker(this.dataDir, memberId)) return undefined;
+      if (this.deleted.has(memberId) || this.quarantined.has(memberId) || this.writeRefusal(memberId))
+        return block('Task history is owned elsewhere or cannot be changed. Retry after its owner stops.', memberId);
+      if (this.pins.has(memberId) || isActive(memberId) || isLiveRecord(run) || row?.live ||
+        !['review', 'done', 'failed', 'cancelled'].includes(run.status))
+        return block('Task work is still active. Wait for it to finish or archive manually.', memberId);
+      if (run.waits?.some(wait => wait.kind === 'human' && wait.phase === 'open') || run.hasPendingPermission)
+        return block('Task needs an answer or permission. Open it to respond, or archive manually.', memberId);
+      if (run.delegation?.role === 'invalid') return block('Worker ownership is invalid. Inspect the task or archive manually.', memberId);
       const facts = this.facts.peek(memberId);
-      if (!facts || facts.pendingAsk !== undefined) return undefined;
-      if (run.delegation?.role === 'worker') {
-        const proof = this.readWorkerExecution(memberId);
-        if (!proof || this.workerResourceHolders(memberId, proof.generation, run.delegation.workspace.resourceId, { cwds }) !== 'safe') return undefined;
-      } else if (run.worktreePath && inspectGeneration({ paths: [run.worktreePath], cwds }).liveness !== 'gone') return undefined;
-      if (this.writeRefusal(memberId)) return undefined;
+      if (!facts || facts.pendingAsk !== undefined) return block('Task has an unanswered question or unread history. Open it to respond, or archive manually.', memberId);
+      if (run.delegation?.role === 'worker' && this.readWorkerExecution(memberId)?.phase !== 'complete')
+        return block('Worker execution has not settled. Open the worker or archive manually.', memberId);
+      // Process and scratch cleanup evidence protects deletion, not reversible filing.
       family.push(run);
     }
     if (family[0]?.delegation?.role === 'worker' || family[0]?.archived) return undefined;
     return family;
+  }
+
+  /** Blockers are feedback, never archive authority or cleanup permission. */
+  setArchiveBlocker(id: string, blocker: RunRecord['archiveBlocker']): void {
+    const run = this.record(id);
+    if (!run || run.archived || isDeepStrictEqual(run.archiveBlocker, blocker)) return;
+    this.commitIndex(new Map([[id, { ...run, archiveBlocker: blocker }]]));
+  }
+
+  archiveMergeBlocker(snapshot: ArchiveOnMergeSnapshot, missing: ArchivePullRequestIdentity, repoBase?: string): void {
+    const url = `https://github.com/${missing.owner}/${missing.repo}/pull/${missing.number}`;
+    const family = [snapshot.rootId, ...(this.db?.listIdsByParent(snapshot.rootId) ?? [])].flatMap(id => {
+      const run = this.peek(id); return run ? [run] : [];
+    });
+    const member = family.find(run => archivePullRequests([run], repoBase)?.some(pr => pullRequestKey(pr) === pullRequestKey(missing)));
+    this.setArchiveBlocker(snapshot.rootId, { message: `PR ${missing.owner}/${missing.repo}#${missing.number} is not confirmed merged. Check the PR association or archive manually.`,
+      runId: member?.id ?? snapshot.rootId, pullRequestUrl: url });
   }
 
   hasArchiveOnMergeAssociations(id: string): boolean {
@@ -3585,10 +3692,13 @@ export class RunStore extends EventEmitter {
 
   private archiveSnapshot(family: RunRecord[], repoBase?: string): ArchiveOnMergeSnapshot | undefined {
     const pullRequests = archivePullRequests(family, repoBase);
-    if (!pullRequests) return undefined;
+    if (!pullRequests) {
+      this.setArchiveBlocker(family[0]!.id, { message: 'PR associations cannot be resolved. Check task and worker PRs, or archive manually.' });
+      return undefined;
+    }
     const fingerprint = archiveDigest(pullRequests);
     if (family[0]!.autoArchive?.fingerprint === fingerprint) return undefined;
-    return { rootId: family[0]!.id, fingerprint, pullRequests, token: archiveDigest(family) };
+    return { rootId: family[0]!.id, fingerprint, pullRequests, token: archiveDigest(family.map(({ archiveBlocker: _blocker, ...run }) => run)) };
   }
 
   /** No await between final revalidation and the fenced, all-or-nothing cascade. */
@@ -3607,12 +3717,8 @@ export class RunStore extends EventEmitter {
     if (restoredAt && merged.every(pr => Date.parse(pr.mergedAt) <= restoredAt)) return false;
     const now = new Date().toISOString();
     if (merged.some(pr => Date.parse(pr.mergedAt) > Date.parse(now))) return false;
-    const staged = new Map(family.map(run => {
-      const next = structuredClone(run);
-      archiveFields(next, true, now);
-      next.pinned = undefined; next.pinnedAt = undefined;
-      return [next.id, next] as const;
-    }));
+    const staged = new Map<string, RunRecord | null>();
+    this.stageArchive(staged, family[0]!, true);
     staged.get(snapshot.rootId)!.autoArchive = { reason: 'pull-requests-merged', archivedAt: now, fingerprint: current.fingerprint, pullRequests: merged };
     this.commitIndex(staged);
     for (const id of staged.keys()) this.compressor.enqueue(id);
@@ -3628,16 +3734,14 @@ export class RunStore extends EventEmitter {
 
   /** Parent + owned workers; returns how many records flipped `archived`. */
   private applyArchivedCascade(run: RunRecord, archived: boolean): number {
+    const staged = new Map<string, RunRecord | null>();
+    this.stageArchive(staged, run, archived);
     let changed = 0;
-    if (this.applyArchived(run, archived)) changed++;
-    // Owned workers nest under their parent only while both share Active/Archived (#250).
-    // Cascade from the parent only — archiving one worker stays independent.
-    if (run.delegation?.role !== 'worker') {
-      for (const { id } of this.listWorkersOf(run.id)) {
-        const child = this.record(id);
-        if (child && this.applyArchived(child, archived)) changed++;
-      }
+    for (const [id, next] of staged) {
+      if (next && this.peek(id)?.archived !== archived) changed++;
+      if (next) next.completionAction = undefined; // an explicit filing/restoration retires pending work
     }
+    this.commitIndex(staged);
     return changed;
   }
 
