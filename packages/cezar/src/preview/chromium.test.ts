@@ -665,6 +665,8 @@ setInterval(()=>{},1000);`,
 });
 
 describe('launchChromium leak-detection Chromium regression (#972)', () => {
+  const LAUNCH_BUDGET_MS = 120_000;
+  const PAGE_STEPS_BUDGET_MS = 120_000;
   const bin = resolveChromium();
   const posix = process.platform !== 'win32';
   let dir: string;
@@ -706,7 +708,9 @@ describe('launchChromium leak-detection Chromium regression (#972)', () => {
         res.end(html);
       });
       const profile = join(dir, 'profile');
-      const { proc, port } = await launchChromium(bin!, profile, { CEZ_PREVIEW_NO_SANDBOX: '1' });
+      // bound: a cold Chrome start on a loaded CI runner took over the product's 30 s
+      // (job 119853707395, hearsay-tools/cezarion#1467). The wait still ends on DevToolsActivePort.
+      const { proc, port } = await launchChromium(bin!, profile, { CEZ_PREVIEW_NO_SANDBOX: '1' }, { timeoutMs: LAUNCH_BUDGET_MS });
       procs.push(proc);
       const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as Array<{
         type: string;
@@ -729,7 +733,7 @@ describe('launchChromium leak-detection Chromium regression (#972)', () => {
         // Wait on the load the submit causes, not on a poll of location.pathname. The poll ran
         // under vi.waitFor's 1 s default and timed out in CI when the POST took longer on a
         // loaded runner (run 38774681222, hearsay-tools/cezarion#1071). Subscribe before the
-        // submit so the event cannot fire first; the test's 45 s budget bounds the wait.
+        // submit so the event cannot fire first; the test's budget bounds the wait.
         const submitted = new Promise<void>(resolve => {
           const off = cdp.on('Page.loadEventFired', () => {
             off();
@@ -780,7 +784,8 @@ describe('launchChromium leak-detection Chromium regression (#972)', () => {
         proc.kill();
       }
     },
-    // launchChromium waits up to 30 s for DevToolsActivePort (#781); CI timed this cell out at the 5 s default (#978).
-    45_000,
+    // bound: the launch budget plus PAGE_STEPS_BUDGET_MS for the three page loads. Under 48 busy
+    // loops on one CPU those took about 38 s and the old 45 s budget failed (#978, #1467).
+    LAUNCH_BUDGET_MS + PAGE_STEPS_BUDGET_MS,
   );
 });
