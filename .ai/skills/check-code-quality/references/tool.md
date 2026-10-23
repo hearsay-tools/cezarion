@@ -1,7 +1,8 @@
 # Bundled tool
 
 The skill owns the parser, CLI and change scanner in `scripts/`. Copy the whole
-skill directory to reuse them. They require Node 24.15 or newer and Git.
+skill directory to reuse them. They require Node 24.15 or newer. The changed-function
+check also requires Git; individual measurements work outside a Git repository.
 
 Dependencies resolve from the skill or an ancestor's `node_modules`.
 If a bundled dependency is absent, install the bundled manifest:

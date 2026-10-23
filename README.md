@@ -1628,7 +1628,11 @@ checkout and is available after the normal dependency installation. Use
 `pnpm --silent metrics ... --json` to also suppress pnpm's command banner.
 
 The tool is bundled in the [check-code-quality skill](.ai/skills/check-code-quality/SKILL.md).
-Its pre-PR check selects changed functions, fixes small problems, and files larger
+Ask an agent to measure a file, function or module for a scoped stats report.
+That path uses available coverage and reports missing CRAP without starting the
+PR process. Ask explicitly for fresh coverage when needed.
+
+The skill's pre-PR path selects changed functions, fixes small problems, and files larger
 inherited refactors as `code-quality-improvement` issues. The scan report defines
 the limits: CRAP 30 and complexity 20. Scores equal to a limit pass. Copy the
 whole skill directory to use the tool in another repository.
