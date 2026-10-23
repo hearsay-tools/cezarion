@@ -9345,7 +9345,9 @@ export class RunManager {
       this.writeTurnHeartbeat(runId, entry, { kind: 'nudge', cause: 'no-wait', autonomous: true });
       return true;
     }
-    if (entry !== 'turn-end') openAlias();
+    // A turn end opens it once owed input was tried; this turn's ask keeps that input back, so its
+    // monitoring line opens the timer now. A refused done decides before any alias, as before.
+    if (entry !== 'turn-end' || (turn.ask && !refused)) openAlias();
     // The turn end and the gate deliver owed input; an acknowledgement or readiness finds it already tried.
     let decision = decideTurnEnd(facts(entry === 'turn-end' || entry === 'gate' ? undefined : false));
     const keepDone = turn.done && (!refused || (decision.kind === 'defer' && !!decision.keepDone));

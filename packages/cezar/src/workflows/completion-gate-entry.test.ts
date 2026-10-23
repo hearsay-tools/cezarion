@@ -9,7 +9,8 @@ import { RunManager } from './run.ts';
 
 // The completion gate's refusal of a live session's done outside a turn end (`settleTurn`'s `gate`
 // entry, hearsay-tools/cezarion#1525). Mid-turn, the live turn end decides the refusal; at the
-// boundary, owed input runs first, as at a turn end.
+// boundary, owed input runs first, as at a turn end. Also the turn end's monitoring alias beside
+// an ask line.
 type State = Parameters<RunManager['tryAutonomousNudge']>[1];
 const workerId = randomUUID();
 const refusal = { code: 'workers_outstanding' as const, message: `Workers are still live: ${workerId}.`,
@@ -70,5 +71,16 @@ describe('the completion gate outside a turn end', () => {
     expect(manager['deferParentCompletion'](id)).toBe(true);
     expect(store.getRun(id)?.status).toBe('waiting');
     expect(sent()).toBe(0);
+  });
+
+  // A turn end with an ask line skips owed input; its monitoring line still opens the timer alias,
+  // as on main's `applyTurnEnd` (hearsay-tools/cezarion#1525 review).
+  it('a turn end with an ask line and a monitoring line opens the timer alias', () => {
+    state.atTurnBoundary = session;
+    const ask = { questions: [{ header: 'Choice', question: 'Which framework?', options: [{ label: 'Vitest' }, { label: 'Node' }] }] };
+    manager['settleTurn'](id, state, 'turn-end', { stepId: 'task', finalStep: true, monitoring: true, humanGate: false, ask,
+      askNudged: false, done: false, nudgedLastTurn: false });
+    expect(store.getRun(id)?.waits?.some(wait => wait.kind === 'timer')).toBe(true);
+    expect(store.getRun(id)?.status).toBe('waiting');
   });
 });
