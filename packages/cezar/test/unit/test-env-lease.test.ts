@@ -182,7 +182,7 @@ test('holder diagnostics fall back to PID when command or verified identity is a
 test('holder command summaries are bounded and single-line without changing stored holder rows', () => {
   const holder = Object.freeze({ pid: 1234, start: 'same-start' });
   const result = leaseDiagnostics.describeTestEnvHolders([holder], {
-    identify: () => ({ start: holder.start }), command: () => ['node', 'test\n\r\t\x1b\x7f\x85.mjs', 'x'.repeat(300)],
+    identify: () => ({ start: holder.start }), command: () => ['node', 'x'.repeat(300) + '.mjs', 'test\n\r\t\x1b\x7f\x85'],
   });
   assert.equal(result.owners.length, 'pid 1234 ()'.length + 200);
   assert.ok(result.owners.endsWith('…)'));
@@ -241,4 +241,48 @@ test('Squeal daemon contention includes conditional result guidance in wait and 
     await exited;
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test('diagnostic probes share the remaining deadline and stop after it expires', () => {
+  let clock = 0;
+  const calls: { kind: string; remaining: number | undefined }[] = [];
+  const result = leaseDiagnostics.describeTestEnvHolders([{ pid: 1, start: 'start' }, { pid: 2, start: 'start' }], {
+    now: () => clock, deadline: 15,
+    identify: (_pid, remaining) => { calls.push({ kind: 'identity', remaining }); clock += 5; return { start: 'start' }; },
+    command: (_pid, remaining) => { calls.push({ kind: 'command', remaining }); clock += 20; return ['node', 'worker.mjs']; },
+  });
+  assert.deepEqual(calls, [{ kind: 'identity', remaining: 15 }, { kind: 'command', remaining: 10 }]);
+  assert.deepEqual(result, { owners: 'pid 1, pid 2', guidance: '' });
+});
+
+test('an expired diagnostic deadline performs no process probes', () => {
+  let probes = 0;
+  const result = leaseDiagnostics.describeTestEnvHolders([{ pid: 1, start: 'start' }], {
+    now: () => 10, deadline: 10,
+    identify: () => { probes++; return { start: 'start' }; },
+    command: () => { probes++; return ['node', 'worker.mjs']; },
+  });
+  assert.equal(probes, 0);
+  assert.deepEqual(result, { owners: 'pid 1', guidance: '' });
+});
+
+test('lease diagnostics omit credential-bearing arguments and inline code', () => {
+  for (const command of [
+    ['node', '/repo/worker.mjs', '--token', 'credential-value', 'https://user:password@example.test/?key=secret'],
+    ['sh', '-c', 'echo inline-credential'],
+    ['node', '-e', 'console.log("inline-credential")'],
+    { text: 'node /repo/worker.mjs --token=credential-value AUTH=secret' },
+    { text: '"C:\\Program Files\\nodejs\\node.exe" "C:\\repo\\worker.mjs" --token credential-value' },
+  ]) {
+    const result = leaseDiagnostics.describeTestEnvHolders([{ pid: 1, start: 'start' }], {
+      identify: () => ({ start: 'start' }), command: () => command,
+    });
+    assert.doesNotMatch(result.owners, /credential|password|secret|console\.log|https:/);
+    assert.match(result.owners, /pid 1 \((node(?:\.exe)?|sh).*arguments omitted/);
+  }
+});
+
+test('lease timeout reuses the initial command snapshot without another process query', () => {
+  const result = spawnSync(process.execPath, [resolve(import.meta.dirname, 'test-env-lease-diagnostics.testkit.mjs'), helper], { encoding: 'utf8', timeout: 30_000 });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
 });
