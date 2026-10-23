@@ -2,6 +2,9 @@
 // Load only when configured: ordinary mock turns retain their event-loop ordering.
 const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
   : (await import('./mock-failure-control.mjs')).readFailureControl(['provider', 'usage-limit', 'unread']);
+// Claude acknowledges agent input with the local stdin write, so only a held response is native.
+const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
+  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['hold-response']);
 // Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
 import { spawn as watchdogSpawn } from 'node:child_process';
 import { closeSync as watchdogCloseInput, renameSync as watchdogRename, writeFileSync as watchdogWrite } from 'node:fs';
@@ -167,6 +170,7 @@ function writeHandoffAndTodo() {
 
 async function respond(userText, imageCount, uuid) {
   respondingUuid = uuid;
+  if (delivery) await delivery.holdResponse(userText);
   // hearsay-tools/cezarion#1351: native refusals before any model work.
   if (userText.startsWith('mock:model-refusal')) {
     const { modelRefusalReply } = await import('./mock-claude-model-refusal.mjs');
@@ -447,7 +451,6 @@ async function respond(userText, imageCount, uuid) {
   }
 
   // Same assistant/result envelopes as the baseline stream-json fixture.
-  // owned-input-delivery.testkit.ts patches the line below to hold the pipe response; keep it verbatim.
   if (userText.includes('mock:agent-echo')) {
     emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: userText }] } });
     emit({ type: 'result', subtype: 'success', result: userText, usage: { input_tokens: 20, output_tokens: 10 } });
