@@ -222,7 +222,7 @@ describe('the full-screen /new against a live dry-run server', () => {
       `${baseUrl}/api/v1/config`,
     )
     expect(browser.text('[data-slot="model-pill"]')).toContain(config.defaultModels?.claude || 'auto')
-    expect(browser.text('[data-slot="variants-pill"]')).toContain('×1')
+    expect(browser.count('[data-slot="variants-pill"]')).toBe(0)
     expect(browser.text('[data-slot="base-pill"]')).toContain('main')
     browser.screenshot(`${artifactsDir}/new-task-hero.png`)
   })

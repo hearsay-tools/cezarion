@@ -61,7 +61,7 @@ describe('human owned-worker cleanup', () => {
     }
     const response = await app.request(`http://127.0.0.1/api/v1${url}`, { method: operation === 'delete' ? 'DELETE' : 'POST',
       headers: { host: '127.0.0.1', 'content-type': 'application/json' }, ...(body ? { body } : {}) });
-    expect(response.status).toBe(operation === 'remove-worktree' ? 409 : 200);
+    expect(response.status).toBe(operation === 'remove-worktree' ? 409 : operation === 'variant-pick' ? 410 : 200);
     expect(existsSync(join(path, 'unrelated.txt'))).toBe(true);
     expect(execFileSync('git', ['rev-parse', `refs/heads/${branch}`], { cwd: f.root, encoding: 'utf8' }).trim()).toBe(f.sha);
     expect(f.store.getRun(workerId) === undefined).toBe(operation === 'delete');

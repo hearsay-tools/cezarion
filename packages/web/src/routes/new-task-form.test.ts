@@ -318,7 +318,6 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
       model: '',
       runner: 'claude',
       defaultRunner: 'claude',
-      variants: 1,
       images: [],
     })
     expect(body).toEqual({
@@ -326,7 +325,6 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
       workflow: 'quick-task',
       model: undefined,
       runner: undefined,
-      variants: undefined,
       images: undefined,
     })
     // What actually goes over the wire: the undefineds vanish.
@@ -337,7 +335,7 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
     const body = buildCreateRunBody({
       task: 'hard', source: { source: 'workflow', ref: 'quick-task' },
       model: 'model[effort=high]', effort: 'max', runner: 'cursor', defaultRunner: 'claude',
-      variants: 1, images: [],
+      images: [],
     })
     expect(body.model).toBe('model[effort=high]')
     expect(body.effort).toBe('max')
@@ -351,7 +349,6 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
       effort: 'xhigh',
       runner: 'claude',
       defaultRunner: 'claude',
-      variants: 1,
       images: [],
     })
     expect(JSON.parse(JSON.stringify(pinned)).effort).toBe('xhigh')
@@ -363,7 +360,6 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
       effort: '',
       runner: 'claude',
       defaultRunner: 'claude',
-      variants: 1,
       images: [],
     })
     expect(JSON.parse(JSON.stringify(auto)).effort).toBeUndefined()
@@ -376,7 +372,6 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
       modelsLocked: true,
       runner: 'claude',
       defaultRunner: 'claude',
-      variants: 1,
       images: [],
     })
     expect(locked.effort).toBeUndefined()
@@ -389,7 +384,6 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
       model: '',
       runner: 'claude',
       defaultRunner: 'claude',
-      variants: 1,
       images: [],
     })
     // Byte-identical to picking quick-task by hand — which is why the picker stopped offering
@@ -404,7 +398,6 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
       model: 'sonnet',
       runner: 'claude',
       defaultRunner: 'codex',
-      variants: 1,
       images: [],
     })
     expect(JSON.parse(JSON.stringify(body))).toEqual({
@@ -426,7 +419,6 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
       modelsLocked: true,
       runner: 'claude' as const,
       defaultRunner: 'claude' as const,
-      variants: 1,
       images: [],
     }
     expect(buildCreateRunBody(opts).model).toBeUndefined()
@@ -436,7 +428,7 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
   it('omits runner when the chosen connected runner equals the server default', () => {
     const body = buildCreateRunBody({
       task: 't', source: { source: 'workflow', ref: 'quick-task' }, model: '',
-      runner: 'codex', defaultRunner: 'codex', variants: 1, images: [],
+      runner: 'codex', defaultRunner: 'codex', images: [],
     })
     expect(body.runner).toBeUndefined()
   })
@@ -444,7 +436,7 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
   it('keeps an explicit runner pick even when it equals the default snapshot', () => {
     const body = buildCreateRunBody({
       task: 't', source: { source: 'workflow', ref: 'quick-task' }, model: '',
-      runner: 'codex', runnerExplicit: true, defaultRunner: 'codex', variants: 1, images: [],
+      runner: 'codex', runnerExplicit: true, defaultRunner: 'codex', images: [],
     })
     expect(body.runner).toBe('codex')
   })
@@ -452,61 +444,52 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
   it('sends a connected fallback that differs from the server default, even when it is the only choice', () => {
     const body = buildCreateRunBody({
       task: 't', source: { source: 'workflow', ref: 'quick-task' }, model: '',
-      runner: 'codex', defaultRunner: 'claude', variants: 1, images: [],
+      runner: 'codex', defaultRunner: 'claude', images: [],
     })
     expect(body.runner).toBe('codex')
   })
 
-  it('worktree=false is sent only for a single run; on/variants keep it implicit', () => {
+  it('worktree=false is sent while the default stays implicit', () => {
     const off = buildCreateRunBody({
       task: 't', source: { source: 'skill', ref: 'om-review' }, model: '',
-      runner: 'claude', defaultRunner: 'claude', variants: 1, images: [], worktree: false,
+      runner: 'claude', defaultRunner: 'claude', images: [], worktree: false,
     })
     expect(off.worktree).toBe(false)
     // Default (on) never sends the flag.
     const on = buildCreateRunBody({
       task: 't', source: { source: 'skill', ref: 'om-review' }, model: '',
-      runner: 'claude', defaultRunner: 'claude', variants: 1, images: [], worktree: true,
+      runner: 'claude', defaultRunner: 'claude', images: [], worktree: true,
     })
     expect(on.worktree).toBeUndefined()
-    // Variants always isolate — worktree=false is ignored.
-    const variant = buildCreateRunBody({
-      task: 't', source: { source: 'skill', ref: 'om-review' }, model: '',
-      runner: 'claude', defaultRunner: 'claude', variants: 2, images: [], worktree: false,
-    })
-    expect(variant.worktree).toBeUndefined()
+
   })
 
   it('generateFollowups=false is sent only when follow-up generation is disabled', () => {
     const base = {
       task: 't', source: { source: 'skill' as const, ref: 'om-review' }, model: '',
-      runner: 'claude' as const, defaultRunner: 'claude' as const, variants: 1, images: [],
+      runner: 'claude' as const, defaultRunner: 'claude' as const, images: [],
     }
     expect(buildCreateRunBody({ ...base, generateFollowups: false }).generateFollowups).toBe(false)
     expect(buildCreateRunBody({ ...base, generateFollowups: true }).generateFollowups).toBeUndefined()
     expect(buildCreateRunBody(base).generateFollowups).toBeUndefined()
   })
 
-  it('variants > 1 and images ride along; ×1 and no images are omitted', () => {
+  it('images ride along without a variant launch field', () => {
     const body = buildCreateRunBody({
       task: 't', source: { source: 'workflow', ref: 'quick-task' }, model: '',
-      runner: 'claude', defaultRunner: 'claude', variants: 3,
+      runner: 'claude', defaultRunner: 'claude',
       images: [{ mediaType: 'image/png', data: 'aGk=' }],
     })
-    expect(body.variants).toBe(3)
+    expect(body).not.toHaveProperty('variants')
     expect(body.images).toEqual([{ mediaType: 'image/png', data: 'aGk=' }])
   })
 })
 
-describe('startedRunPath (legacy handleStarted: select the first run)', () => {
+describe('startedRunPath', () => {
   const record = { id: 'r1' } as never
 
-  it('×1: the created run’s thread', () => {
+  it('opens the created task thread', () => {
     expect(startedRunPath(record)).toBe('/tasks/r1')
-  })
-
-  it('×2/×3: the FIRST variant’s thread', () => {
-    expect(startedRunPath({ runs: [{ id: 'v-a' }, { id: 'v-b' }] as never })).toBe('/tasks/v-a')
   })
 })
 
@@ -544,7 +527,6 @@ describe('buildAutomationTask', () => {
       model: 'opus',
       runner: 'claude',
       defaultRunner: 'claude',
-      variants: 2,
       images: [{ mediaType: 'image/png', data: 'ignored' }],
       autonomous: true,
       todoId: 'ignored',
@@ -552,7 +534,6 @@ describe('buildAutomationTask', () => {
       prompt: 'Review {{github.url}}',
       steps: [{ id: 'task', name: 'om-code-review', skill: 'om-code-review', prompt: '{{task}}' }],
       model: 'opus',
-      variants: 2,
       autonomous: true,
     })
   })
@@ -591,7 +572,7 @@ describe('Cursor advertised effort options', () => {
     expect(options.map(option => option.value)).toEqual(['', 'high', 'low'])
     for (const [selected, expected] of [['high', 'high'], ['max', undefined], ['', undefined]]) {
       const body = buildCreateRunBody({ task: 'Task', source: null, model: 'base', runner: 'cursor', defaultRunner: 'cursor',
-        effort: resolveEffort(selected, options), variants: 1, images: [] })
+        effort: resolveEffort(selected, options), images: [] })
       expect(body.effort).toBe(expected)
     }
   })

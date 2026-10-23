@@ -1,6 +1,6 @@
 import './task-lists.css'
 import { useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-query'
-import { CheckCheckIcon, ChevronsLeftIcon, ChevronsRightIcon, Clock3Icon, CoinsIcon, DollarSignIcon, ListChecksIcon, LinkIcon, MemoryStickIcon, MoreHorizontalIcon, PencilIcon, ScaleIcon, SearchXIcon } from 'lucide-react'
+import { CheckCheckIcon, ChevronsLeftIcon, ChevronsRightIcon, Clock3Icon, CoinsIcon, DollarSignIcon, ListChecksIcon, LinkIcon, MemoryStickIcon, MoreHorizontalIcon, PencilIcon, SearchXIcon } from 'lucide-react'
 import { ArchiveIcon, CpuIcon, FileDiffIcon, GitBranchIcon, PlusIcon, SearchIcon, WorkflowIcon } from '@/components/design-icons'
 import * as React from 'react'
 import { Link, useNavigate } from '@/lib/project-router'
@@ -42,7 +42,6 @@ import {
 } from '@/lib/task-columns'
 import { ARCHIVED_WINDOW, listCounts, queuePositions, runTitle, sortRuns, withArchivedPages, type ListView } from '@/lib/task-groups'
 import {
-  compareGroups,
   filterRuns,
   finishedRunCount,
   formatCost,
@@ -175,7 +174,6 @@ export function TasksOverview({
   // Positions come from the full list, never the filtered one: a search must not renumber the
   // queue the engine is actually going to drain.
   const positions = queuePositions(all)
-  const strips = compareGroups(filterRuns(all, query), view)
   const finished = finishedRunCount(all)
   const columns = taskColumnsForCapabilities({ tokens: showTokens, cost: showCost })
   const unread = unreadDoneCount(all)
@@ -390,24 +388,6 @@ export function TasksOverview({
             {archivedPages.loading ? 'Loading older archived…' : 'Show older archived'}
           </Button>
         ) : null}
-
-        {strips.map((group) => (
-          <div
-            key={group.groupId}
-            data-slot="compare-strip"
-            data-group-id={group.groupId}
-            className="mt-3.5 flex flex-wrap items-center gap-2.5 rounded-lg border border-border bg-card px-3.5 py-2.5 text-[13px] text-muted-foreground shadow-xs"
-          >
-            <ScaleIcon className="size-[15px] shrink-0 text-soft-foreground" aria-hidden="true" />
-            <span>
-              <strong className="font-semibold text-foreground">{group.title}</strong> — {group.count} variants
-              finished
-            </span>
-            <Button asChild variant="outline" size="sm" className="md:ml-auto">
-              <Link to={`/compare/${group.groupId}`}>Compare</Link>
-            </Button>
-          </div>
-        ))}
       </div>
     </div>
   )

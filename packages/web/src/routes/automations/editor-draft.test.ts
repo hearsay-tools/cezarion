@@ -37,7 +37,10 @@ describe('fromDefinition', () => {
     const draft = fromDefinition(stored)
     expect(draft.schedule).toEqual({ type: 'weekly', hour: 4, minute: 0, day: 3, every: 6 })
     expect(draft.enabled).toBe(true)
-    expect(toUpdateBody(draft, 3).task).toMatchObject({ prompt: 'Go', effort: 'high', variants: 2 })
+    expect(draft.retiredVariants).toBe(true)
+    expect(() => toUpdateBody(draft, 3)).toThrow('Parallel variants are removed')
+    expect(toUpdateBody({ ...draft, retiredVariants: false }, 3).task).toMatchObject({ prompt: 'Go', effort: 'high' })
+    expect(toUpdateBody({ ...draft, retiredVariants: false }, 3).task).not.toHaveProperty('variants')
   })
 })
 

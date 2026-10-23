@@ -24,7 +24,7 @@ import './engine-row.css'
  * (`usableRunners` → `resolveRunner` → `modelsForRunner` → `resolveModel`) and the
  * "hide the runner pill on a single-backend host" rule live here once, read from the same
  * provider/config queries new-task.tsx reads. The composer itself keeps its own inline copy —
- * it threads the pills through a persisted draft and a variants pill this pair has no notion of.
+ * it threads the pills through a persisted draft this pair has no notion of.
  *
  * The caller owns the pick (`null` = never touched, so the configured default shows through);
  * this component only resolves and renders. `useResolvedEngine` hands back what the POST body

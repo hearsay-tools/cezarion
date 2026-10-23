@@ -82,7 +82,7 @@ function fakeManager(store: RunStore): RunManager {
 describe('automation task templates', () => {
   it.each(['github', 'schedule', 'once'].flatMap((kind) =>
     ([1, 2, 3] as const).map((variants) => ({ kind, variants })),
-  ))('copies completion controls to every $kind variant (count $variants)', async ({ kind, variants }) => {
+  ))('copies completion controls to a $kind task or refuses retired variants (count $variants)', async ({ kind, variants }) => {
     const root = await mkdtemp(join(tmpdir(), 'cezar-completion-template-'));
     const store = RunStore.open(join(root, '.ai/cezar'));
     const manager = createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
@@ -91,16 +91,22 @@ describe('automation task templates', () => {
       for (const [index, completion] of choices.entries()) {
         const receiptId = `completion-${index}`;
         const task = { variants, ...completion };
-        const launched = kind === 'github'
-          ? await launchAutomationRun({ root, manager, store, definition: { ...definition, task: { ...definition.task, ...task } },
+        const launch = () => kind === 'github'
+          ? launchAutomationRun({ root, manager, store, definition: { ...definition, task: { ...definition.task, ...task } },
             candidate: { ...candidate, number: candidate.number + index, url: `https://github.com/acme/demo/issues/${candidate.number + index}` }, receiptId,
           })
-          : await launchScheduledRun({ root, manager, store,
+          : launchScheduledRun({ root, manager, store,
             definition: { ...scheduled, ...(kind === 'once' ? { schedule: { type: 'once' as const, at: '2030-01-15T09:00', timeZone: 'UTC' } } : {}), task: { ...scheduled.task, ...task } },
             occurrence, receiptId, projectName: 'demo', timeZone: 'UTC',
           });
+        if (variants > 1) {
+          await expect(launch()).rejects.toThrow('Parallel variants are removed');
+          expect(store.listRuns()).toHaveLength(0);
+          continue;
+        }
+        const launched = await launch();
         const runs = store.listRuns().filter((run) => (run.automation ?? run.automationTrigger)?.receiptId === receiptId);
-        expect(runs).toHaveLength(variants);
+        expect(runs).toHaveLength(1);
         expect(runs.some((run) => run.id === launched.runId)).toBe(true);
         for (const run of runs) {
           expect(run.archiveWhenDone).toBe(completion.archiveWhenDone);

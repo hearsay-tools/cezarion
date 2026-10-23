@@ -579,13 +579,8 @@ describe('tasks table overview', () => {
     })
   })
 
-  it('offers the compare strip for the finished variant group', () => {
-    expect(browser.text('[data-slot="compare-strip"]')).toContain('Add skills autocomplete to composer')
-    expect(
-      browser.evaluate(
-        `document.querySelector('[data-slot="compare-strip"] a[href$="/compare/fix-group-1"]').getAttribute('href')`
-      )
-    ).toBe(scoped('/compare/fix-group-1'))
+  it('does not promote retired variant comparisons', () => {
+    expect(browser.count('[data-slot="compare-strip"]')).toBe(0)
   })
 
   it('keeps the table archive filter and the sidebar tabs independent', () => {

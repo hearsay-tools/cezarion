@@ -109,8 +109,7 @@ describe('src/contract/runs.ts matches the runs routes exactly', () => {
     Assert<
       Exact<
         z.infer<typeof createRunResponseSchema>,
-        | Extract<RunCreate201, { id: string }>
-        | { runs: Extract<RunCreate201, { runs: unknown }>['runs'][number][] }
+        RunCreate201
       >
     >,
     // an idempotent retry (#504) answers 200 with the stored record the first request created

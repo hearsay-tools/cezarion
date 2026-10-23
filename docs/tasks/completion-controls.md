@@ -3,7 +3,7 @@
 Tasks and automation templates have two optional switches. Both default to off.
 `cez task start` and `cez automation add` accept `--archive-when-done` and
 `--auto-merge-pr`. JSON uses `archiveWhenDone` and `autoMergePr` on the task.
-Automation edits affect future tasks and every variant. Existing tasks keep their choices.
+Automation edits affect future tasks. Existing tasks keep their choices.
 
 Archive when Done files a task after it reaches Done. Auto-merge PR asks GitHub to
 merge only PRs created by that task on its owned branch. It verifies repository,

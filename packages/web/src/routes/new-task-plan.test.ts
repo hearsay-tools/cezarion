@@ -21,7 +21,7 @@ const STEPS: WorkflowStepDef[] = [
 const ids = (steps: WorkflowStepDef[]) => steps.map((s) => s.id)
 
 it('retains completion choices when starting an approved plan', () => {
-  const input = { task: 'Ship', steps: STEPS, model: '', runner: 'claude' as const, variants: 1, images: [] }
+  const input = { task: 'Ship', steps: STEPS, model: '', runner: 'claude' as const, images: [] }
   expect(buildPlannedRunBody(input)).not.toHaveProperty('autoMergePr')
   expect(buildPlannedRunBody({ ...input, archiveWhenDone: true, autoMergePr: true })).toMatchObject({ archiveWhenDone: true, autoMergePr: true })
 })
@@ -115,7 +115,7 @@ describe('buildPlannedRunBody — the POST /api/v1/runs wire contract for approv
     model: '',
     runner: 'claude' as const,
     defaultRunner: 'claude' as const,
-    variants: 1,
+
     images: [],
   }
 
@@ -125,7 +125,7 @@ describe('buildPlannedRunBody — the POST /api/v1/runs wire contract for approv
       steps: STEPS,
       model: undefined,
       runner: undefined,
-      variants: undefined,
+
       images: undefined,
       generateFollowups: undefined,
     })
@@ -148,7 +148,7 @@ describe('buildPlannedRunBody — the POST /api/v1/runs wire contract for approv
   it.each([
     { name: 'model rides when chosen', patch: { model: 'sonnet' }, key: 'model', expected: 'sonnet' },
     { name: 'connected fallback rides when it differs from the default', patch: { runner: 'codex' as const }, key: 'runner', expected: 'codex' },
-    { name: 'variants ride above ×1', patch: { variants: 3 }, key: 'variants', expected: 3 },
+    { name: 'removed count never rides along', patch: { variants: 3 }, key: 'variants', expected: undefined },
   ])('$name', ({ patch, key, expected }) => {
     const body = buildPlannedRunBody({ ...base, ...patch }) as unknown as Record<string, unknown>
     expect(body[key]).toEqual(expected)

@@ -197,6 +197,23 @@ const stored = {
   task: { prompt: 'Go', workflow: 'quick-task' }, createdAt: '', updatedAt: '',
 } as AutomationDefinition
 
+it('requires an explicit single-task choice before saving a retired multi-candidate template', async () => {
+  const calls = stubFetch(() => json(saved))
+  const onSaved = mount({ automation: { ...stored, task: { ...stored.task, variants: 2 } } })
+  expect(screen.getByRole('alert').textContent).toContain('cannot launch')
+  expect(screen.queryByRole('heading', { name: 'Copy as CLI' })).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await screen.findByText('Parallel variants are removed. Choose Use one task before saving this automation.')
+  expect(calls).toEqual([])
+  expect(onSaved).not.toHaveBeenCalled()
+  fireEvent.click(screen.getByRole('button', { name: 'Use one task' }))
+  expect(screen.getByRole('heading', { name: 'Copy as CLI' })).toBeTruthy()
+  fireEvent.click(screen.getByRole('button', { name: 'Save changes' }))
+  await waitFor(() => expect(onSaved).toHaveBeenCalled())
+  expect(calls.find(call => call.method === 'PUT')?.body).toMatchObject({ task: { prompt: 'Go' } })
+  expect(calls.find(call => call.method === 'PUT')?.body).not.toHaveProperty('task.variants')
+})
+
 it('a 409 shows the reload action and keeps the typed name', async () => {
   stubFetch(() => json({ error: 'automation revision conflict' }, 409))
   const onReload = vi.fn()
