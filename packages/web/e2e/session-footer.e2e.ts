@@ -161,11 +161,15 @@ it('scrolls a keyboard-focused transcript control above the desktop footer', () 
     const start = document.createElement('span');
     start.id = 'footer-focus-start'; start.tabIndex = -1;
     button.before(start); start.focus({ preventScroll: true });
+    // The upward wheel above can load an older page after the Tab. That page prepends earlier
+    // execute cards, so a fresh query would name another card. Keep this one (hearsay-tools/cezarion#1495:
+    // with a probe between Tab and the sample, main 08c436d4 also read another card, retainedPages 1 → 2).
+    window.__footerFocusTarget = button;
   })()`)
   browser.press('Tab')
   browser.evaluate(`document.getElementById('footer-focus-start').remove()`)
   expect(waitForSettledSample(browser, `(() => {
-    const button = document.querySelector('${target}'), box = button.getBoundingClientRect();
+    const button = window.__footerFocusTarget, box = button.getBoundingClientRect();
     const header = document.querySelector('[data-slot="run-header"]').getBoundingClientRect();
     const footer = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect();
     return { focused: document.activeElement === button, clear: box.top >= header.bottom && box.bottom <= footer.top,
