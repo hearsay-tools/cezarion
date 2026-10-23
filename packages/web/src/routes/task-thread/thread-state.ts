@@ -122,6 +122,9 @@ export interface ThreadAsk {
   /** Finish ended the task with the question unanswered (hearsay-tools/cezarion#1260), or new input
    *  superseded a worker's fallback question (hearsay-tools/cezarion#1301). */
   closed?: 'finish' | 'superseded'
+  /** View-only, set by `mainTranscriptSections` (hearsay-tools/cezarion#1495), never by the
+   *  reducer: the pending ask's answerable copy after the newest entry, or its original place. */
+  placement?: 'origin' | 'pinned'
 }
 
 /** Native approvals belong to the live request that offered the choices, never a later turn. */

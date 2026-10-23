@@ -52,9 +52,13 @@ import { useActiveProviderAvailability } from './active-provider'
 import { ThreadLoading } from './thread-loading'
 import { threadRenderMode } from './thread-scroll'
 import { JumpToLatestPill, useThreadScroll } from './thread-scroller'
+import { AskOriginMarker, pinnedAnswerControl, pinnedAskFocus } from './pending-ask-navigation'
+import { useRevealAskOrigin } from './use-reveal-ask-origin'
 import { useSessionViewport } from './session-viewport'
 import {
+  PENDING_ASK_SECTION_ID,
   SessionTranscript,
+  askRow,
   buildTranscriptRows,
   mainTranscriptSections,
   type TranscriptMessageActions,
@@ -217,7 +221,7 @@ export function ThreadView({
   // id comes from the transcript, the same source the ask card renders from.
   const pendingAskId = history
     ? (typeof pendingAsk?.requestId === 'string' ? pendingAsk.requestId : undefined)
-    : currentThread.turns.flatMap(turn => turn.items).find(item => item.kind === 'ask' && !item.resolved)?.id
+    : currentThread.turns.flatMap(turn => turn.items).reverse().find(item => item.kind === 'ask' && !item.resolved)?.id
   const historyLoading = history !== undefined && (history.isPending || history.contextPending)
   useEffect(() => {
     if (!historyLoading) voiceStore.syncPendingAsk(run.id, pendingAskId)
@@ -317,7 +321,10 @@ export function ThreadView({
     [queued, patchRunAsync, editQueuedAsync, removeQueuedAsync],
   )
 
-  const sections = useMemo(() => mainTranscriptSections(run, thread, currentThread), [run, thread, currentThread])
+  // Current state is authoritative once its context has loaded: `null` then says no ask is
+  // pending, so an unresolved ask left in an older page renders as answered (#1495).
+  const sectionsAskId = historyLoading ? undefined : (pendingAskId ?? null)
+  const sections = useMemo(() => mainTranscriptSections(run, thread, currentThread, sectionsAskId), [run, thread, currentThread, sectionsAskId])
   const rows = useMemo(() => buildTranscriptRows(sections, run.id), [sections, run.id])
   // A delegated run's conversation names its parent and workers; once archived they may be past
   // the run list's window (#864), so the relationships answer carries their titles too. The same
@@ -327,7 +334,6 @@ export function ThreadView({
   const taskTitles = useMemo(() => titlesFromRuns(run, runs.data, relationships.data?.titles), [run, runs.data, relationships.data])
   const recipientBackends = useMemo(() => recipientBackendsFromRuns(run, runs.data), [run, runs.data])
   const renderPermission = useCallback((permission: ThreadPermission) => <PermissionCard permission={permission} runId={run.id} sessionOpen={sessionOpen} />, [run.id, sessionOpen])
-  const renderAsk = useCallback((ask: ThreadAsk) => <AskCard ask={ask} run={run} />, [run])
   const messageActions = useMemo<Readonly<Record<string, TranscriptMessageActions>> | undefined>(() => {
     if (edit === undefined) return undefined
     const actions: Record<string, TranscriptMessageActions> = {
@@ -351,6 +357,35 @@ export function ThreadView({
     onJumpToLatest: history?.jumpToLatest,
     rowKeys: rows.map(({ key }) => key),
   })
+  // The pending question (hearsay-tools/cezarion#1495): pinned after the newest entry, with a
+  // marker where it was asked. Rows and jumps go through refs so the card renderer stays stable.
+  const pinnedSection = sections.at(-1)
+  const pinnedAsk = pinnedSection?.id === PENDING_ASK_SECTION_ID ? pinnedSection.entries[0] : undefined
+  const pendingQuestions = pinnedAsk?.kind === 'ask' ? pinnedAsk.questions.length : 0
+  const revealOrigin = useRevealAskOrigin({
+    pendingAskId,
+    askSeq: history ? pendingAsk?.seq : undefined,
+    rows,
+    history,
+    jumpToRow: scroll.jumpToRow,
+  })
+  // The pill's late focus reads this to give up once its question was answered. A history
+  // reload has no answer yet, so it keeps the last settled id.
+  const settledAskIdRef = useRef(pendingAskId)
+  if (!historyLoading) settledAskIdRef.current = pendingAskId
+  const navigationRef = useRef({ rows, jumpToRow: scroll.jumpToRow, reveal: revealOrigin.reveal })
+  navigationRef.current = { rows, jumpToRow: scroll.jumpToRow, reveal: revealOrigin.reveal }
+  const renderAsk = useCallback((ask: ThreadAsk) => {
+    if (ask.placement === 'origin') {
+      const goToQuestion = () => {
+        const { rows: current, jumpToRow } = navigationRef.current
+        const pinned = askRow(current, ask.id, 'pinned')
+        if (pinned) jumpToRow(pinned.key, pinned.index, (row) => pinnedAnswerControl(row))
+      }
+      return <AskOriginMarker onGoToQuestion={goToQuestion} />
+    }
+    return <AskCard ask={ask} run={run} onShowOrigin={() => navigationRef.current.reveal()} />
+  }, [run])
   // Re-pin a tail reader after the viewport or document-flow composer changes size.
   useKeyboardInsetVar(scroll.restickIfStuck)
   const viewportRef = useSessionViewport()
@@ -470,7 +505,13 @@ export function ThreadView({
         {/* Desktop places Jump above the sticky footer; phones keep it in the viewport. */}
         {scroll.pillVisible ? (
           <div data-slot="thread-jump" className="pointer-events-none z-30 flex justify-center">
-            <JumpToLatestPill onJump={scroll.jumpToLatest} />
+            <JumpToLatestPill
+              pendingQuestions={pendingQuestions}
+              onJump={() => {
+                const askId = pendingQuestions > 0 ? pinnedAsk?.id : undefined
+                scroll.jumpToLatest(askId === undefined ? undefined : pinnedAskFocus(askId, () => settledAskIdRef.current === askId))
+              }}
+            />
           </div>
         ) : null}
         <div data-slot="thread-footer-content" className="mx-auto flex w-full max-w-[var(--measure)] flex-col gap-1.5 px-[14px] md:gap-2.5 md:px-16">
