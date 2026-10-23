@@ -60,7 +60,6 @@ describe('every mutating route carries a typed body into AppType', () => {
     Assert<HasTypedBody<'/api/v1/providers/connect', '$post'>>,
     Assert<HasTypedBody<'/api/v1/providers/:provider/enabled', '$put'>>,
     Assert<HasTypedBody<'/api/v1/providers/:provider/retry', '$post'>>,
-    Assert<HasTypedBody<'/api/v1/groups/:groupId/pick', '$post'>>,
     Assert<HasTypedBody<'/api/v1/github/prs/:number/merge', '$post'>>,
     Assert<HasTypedBody<'/api/v1/agent-config/:id', '$put'>>,
     Assert<HasTypedBody<'/api/v1/config', '$put'>>,

@@ -1,3 +1,4 @@
+import { PARALLEL_VARIANTS_REMOVED } from '@open-mercato/cezar-contract/runs';
 import { zonedParts } from '@open-mercato/cezar-contract/zoned-time';
 import { loadWorkflows } from '../workflows/load.ts';
 import { stepsIssue, type WorkflowDef } from '../workflows/types.ts';
@@ -100,7 +101,7 @@ async function resolveWorkflow(root: string, definition: AutomationDefinition): 
 }
 
 /** `provenance` rides on the input, so the row that creates each run already carries its receipt. */
-function startRuns(manager: RunManager, workflow: WorkflowDef, definition: AutomationDefinition, task: string, provenance: Pick<StartRunInput, 'automation' | 'automationTrigger'>) {
+function startRun(manager: RunManager, workflow: WorkflowDef, definition: AutomationDefinition, task: string, provenance: Pick<StartRunInput, 'automation' | 'automationTrigger'>) {
   const input: StartRunInput = {
     ...provenance,
     task,
@@ -112,20 +113,16 @@ function startRuns(manager: RunManager, workflow: WorkflowDef, definition: Autom
     autonomous: definition.task.autonomous,
     generateFollowups: definition.task.generateFollowups,
   };
-  return (definition.task.variants ?? 1) > 1
-    ? manager.startVariants(workflow, input, definition.task.variants ?? 1)
-    : [manager.startRun(workflow, input)];
+  return manager.startRun(workflow, input);
 }
 
 /**
  * Start a receipted task. If creation committed before a throw, return the run carrying that
  * receipt so Retry cannot duplicate it.
  */
-function startClaimedRun(store: RunStore, receiptId: string, start: () => readonly { id: string }[]): { runId: string } {
+function startClaimedRun(store: RunStore, receiptId: string, start: () => { id: string }): { runId: string } {
   try {
-    const first = start()[0];
-    if (!first) throw new Error('run manager did not create a run');
-    return { runId: first.id };
+    return { runId: start().id };
   } catch (error) {
     const runId = store.findRunIdsByAutomationReceipt([receiptId]).get(receiptId);
     if (runId) return { runId };
@@ -143,6 +140,7 @@ export async function launchAutomationRun(options: {
   poller?: GithubPoller;
 }): Promise<{ runId: string; existing?: boolean }> {
   const { definition, candidate } = options;
+  if ((definition.task.variants ?? 1) !== 1) throw new Error(PARALLEL_VARIANTS_REMOVED);
   const workflow = await resolveWorkflow(options.root, definition);
   if (definition.filters.requireCurrentLabels && !await (options.poller ?? new GithubPoller()).matchesCurrentLabels(candidate, definition)) {
     throw new AutomationCandidateChangedError();
@@ -160,7 +158,7 @@ export async function launchAutomationRun(options: {
     event: candidate.event,
     githubUrl: candidate.url,
   };
-  return startClaimedRun(options.store, options.receiptId, () => startRuns(options.manager, workflow, definition, renderAutomationTask(definition, candidate), { automation: provenance }));
+  return startClaimedRun(options.store, options.receiptId, () => startRun(options.manager, workflow, definition, renderAutomationTask(definition, candidate), { automation: provenance }));
 }
 
 /**
@@ -178,6 +176,7 @@ export async function launchScheduledRun(options: {
   timeZone: string;
 }): Promise<{ runId: string }> {
   const { definition, occurrence } = options;
+  if ((definition.task.variants ?? 1) !== 1) throw new Error(PARALLEL_VARIANTS_REMOVED);
   const workflow = await resolveWorkflow(options.root, definition);
   const task = renderScheduleTask(definition, occurrence, { projectName: options.projectName, timeZone: options.timeZone });
   const provenance = {
@@ -187,7 +186,7 @@ export async function launchScheduledRun(options: {
     trigger: PROVENANCE_TRIGGER[occurrence.trigger],
     occurrenceAt: occurrence.at,
   };
-  return startClaimedRun(options.store, options.receiptId, () => startRuns(options.manager, workflow, definition, task, { automationTrigger: provenance }));
+  return startClaimedRun(options.store, options.receiptId, () => startRun(options.manager, workflow, definition, task, { automationTrigger: provenance }));
 }
 
 /** Reserved receipts are reconciled against additive run provenance after restart. Reservations

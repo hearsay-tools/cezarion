@@ -13,7 +13,7 @@ Without a usable start time or branch reflog, a repointed task uses `HEAD` and r
 uncommitted work only. That can omit committed work, but avoids an unsupported ownership claim.
 The result records when narrowing occurred.
 
-The text `/diff` endpoint and variant comparisons retain their whole-branch merge-base
+The text `/diff` endpoint retains its whole-branch merge-base
 semantics. The text endpoint is a protected API. Settlement also uses it to avoid declaring
 reviewable work empty; a review gate still depends on the run’s settings.
 

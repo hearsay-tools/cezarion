@@ -2,7 +2,7 @@ import { z } from 'zod';
 // An automation launches an ORDINARY cezar task, so the task it carries is the composer's own
 // run-creation input minus the keys an automation supplies itself. Consumed rather than
 // redeclared — the same one-way direction `./runs.ts` takes towards `./workflows.ts`.
-import { createRunInputBaseSchema } from './runs.ts';
+import { createRunInputBaseSchema, singleRunVariantsSchema } from './runs.ts';
 import { automationScheduleSchema } from './automation-schedule.ts';
 
 /**
@@ -60,9 +60,8 @@ export type AutomationKind = z.infer<typeof automationKindSchema>;
  * Two keys are re-spelled rather than inherited, because the automation schema really does differ
  * from the composer's and the contract has to describe the automation route:
  *
- *  - `variants` is the literal union the server's own automation schema accepts (`1 | 2 | 3`),
- *    not the composer's `z.number().int().min(1).max(3)`. Identical values, but only the literal
- *    spelling is assignable to the route's parameter;
+ *  - `variants` retains `1 | 2 | 3` in stored definitions and read responses. New writes use
+ *    `singleRunVariantsSchema`; a saved count above one is readable but cannot launch;
  *  - `systemPrompt` carries no `.transform()` here. The composer's trims-to-absent on the way in,
  *    which makes the key REQUIRED (`string | undefined`) on the output side; the automation route
  *    stores and answers it plainly, so it stays optional.
@@ -348,6 +347,7 @@ export const createAutomationInputSchema = automationDefinitionSchema
     /** Omitted = `github` on create, the shape every pre-schedule client sends; omitted on
      *  update = the stored kind. */
     kind: automationKindSchema.optional(),
+    task: automationTaskSchema.extend({ variants: singleRunVariantsSchema }),
     enable: z.boolean().optional(),
   });
 export type CreateAutomationInput = z.input<typeof createAutomationInputSchema>;

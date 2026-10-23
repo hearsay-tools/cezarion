@@ -86,7 +86,6 @@ import type {
   OpenTargetsResponse,
   ParsedWorkflow,
   PatchRunInput,
-  PickVariantResponse,
   PlanResponse,
   ProviderConnectResponse,
   ProviderId,
@@ -1727,19 +1726,6 @@ export async function startTodo(
       json: Object.keys(body).length > 0 ? body : undefined,
     }),
     `/todos/${encodeURIComponent(id)}/start`,
-  )
-}
-
-/** "Pick this one" (spec 010): the winner rests at `review` for the gate; the losers are
- *  cancelled if alive, archived, and their worktrees + branches removed. 409 while the picked
- *  variant is still active — the server's words come back verbatim in the ApiError. */
-export async function pickVariant(groupId: string, runId: string): Promise<PickVariantResponse> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].groups[':groupId'].pick.$post({
-      param: { projectId: queryScope(), groupId: encodeURIComponent(groupId) },
-      json: { runId },
-    }),
-    `/groups/${encodeURIComponent(groupId)}/pick`,
   )
 }
 

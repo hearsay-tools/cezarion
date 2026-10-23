@@ -14,6 +14,18 @@ acknowledgement can defer settlement until after the turn-end signal.
 Turn settlement concerns what happens after agent work. Session termination
 and proof that worker resources can be removed remain separate facts.
 
+## Nudge
+
+One automatic turn that Cezar sends when a turn ends without an accepted done
+and without a wait. It has a cause: no wait (the turn named neither a wait nor
+a done) or completion (the agent's done was refused). A nudge is charged to the
+automatic-wake budget, and a timer bounds its reply. A run that is not
+autonomous gets one nudge per cause; when the answered turn ends the same way,
+the run parks on Cezar's human wait (no wait) or on the completion wait or the
+user (completion). An autonomous run is nudged again until the budget is spent.
+
+_Avoid_: reminder, poke
+
 ## Native failure control
 
 A test fixture that selects when a native runner mock fails and how long that

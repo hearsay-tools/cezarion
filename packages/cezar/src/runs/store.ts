@@ -357,7 +357,7 @@ export const runRecordSchema = z.object({
   worktreeReclaimedAt: z.string().optional(),
   /** Worktree setup (#917). An unreadable value drops the field, never the run. */
   worktreeSetup: contractRunRecordSchema.shape.worktreeSetup.catch(undefined),
-  /** Parallel variants (spec 010): tasks sharing a groupId are one group. */
+  /** Historical parallel variants (retired): tasks sharing a groupId are one group. */
   groupId: z.string().optional(),
   /** Variant letter within the group — 'A' | 'B' | 'C' (kept as a string). */
   variant: z.string().optional(),

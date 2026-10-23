@@ -14,7 +14,6 @@ afterEach(resetDraft)
 describe('resolveComposerRunMode', () => {
   const base = {
     hasGit: true,
-    variants: 1,
     planFirst: false,
     explicitAutonomous: null,
     explicitWorktree: null,
@@ -47,9 +46,8 @@ describe('resolveComposerRunMode', () => {
     })).toEqual({ autonomous: true, worktree: false })
   })
 
-  it('keeps plan, parallel, and no-git constraints authoritative', () => {
+  it('keeps plan and no-git constraints authoritative', () => {
     expect(resolveComposerRunMode({ ...base, planFirst: true, explicitAutonomous: true }).autonomous).toBe(false)
-    expect(resolveComposerRunMode({ ...base, variants: 2, explicitWorktree: false }).worktree).toBe(true)
     expect(resolveComposerRunMode({ ...base, hasGit: false, explicitWorktree: true }).worktree).toBe(false)
   })
 
@@ -68,7 +66,7 @@ describe('the new-task draft store', () => {
       agentProfile: null,
       model: null,
       effort: null,
-      variants: 1,
+      retiredVariants: false,
       planFirst: false,
       worktree: null,
       autonomous: null,
@@ -84,7 +82,7 @@ describe('the new-task draft store', () => {
       agentProfile: null,
       model: 'gpt-5-codex',
       effort: 'high',
-      variants: 2,
+      retiredVariants: false,
       planFirst: false,
       worktree: false,
       autonomous: null,
@@ -106,7 +104,7 @@ describe('the new-task draft store', () => {
       agentProfile: null,
       model: 'opus',
       effort: 'max',
-      variants: 3,
+      retiredVariants: false,
       planFirst: true,
       worktree: null,
       autonomous: null,
@@ -119,10 +117,10 @@ describe('the new-task draft store', () => {
       source: null,
       runner: null,
       agentProfile: null,
-      // Runner/model/variants/plan-first are a way of working — they survive, as they always did.
+      // Runner/model/plan-first are a way of working — they survive, as they always did.
       model: 'opus',
       effort: 'max',
-      variants: 3,
+      retiredVariants: false,
       planFirst: true,
       worktree: null,
       autonomous: null,
@@ -138,7 +136,7 @@ describe('the new-task draft store', () => {
       agentProfile: null,
       model: 'sonnet',
       effort: 'low',
-      variants: 2,
+      retiredVariants: false,
       planFirst: true,
       worktree: false,
       autonomous: null,
@@ -149,7 +147,7 @@ describe('the new-task draft store', () => {
     const raw = localStorage.getItem('cez-new-task-draft') as string
     expect(JSON.parse(raw)).toMatchObject({
       text: 'do not lose me',
-      variants: 2,
+      retiredVariants: false,
       worktree: false,
       autonomous: null,
       generateFollowups: false,
@@ -168,7 +166,7 @@ describe('the new-task draft store', () => {
       agentProfile: null,
       model: null,
       effort: null,
-      variants: 1,
+      retiredVariants: false,
       planFirst: false,
       worktree: null,
       autonomous: null,
@@ -176,7 +174,7 @@ describe('the new-task draft store', () => {
     })
 
     resetDraft()
-    localStorage.setItem('cez-new-task-draft', '{"text":42,"variants":9,"source":"nope","worktree":"x"}')
+    localStorage.setItem('cez-new-task-draft', '{"text":42,"variants":1,"source":"nope","worktree":"x"}')
     expect(readDraft()).toEqual({
       text: '',
       source: null,
@@ -184,7 +182,7 @@ describe('the new-task draft store', () => {
       agentProfile: null,
       model: null,
       effort: null,
-      variants: 1,
+      retiredVariants: false,
       planFirst: false,
       worktree: null,
       autonomous: null,
@@ -227,4 +225,11 @@ describe('composerRunModeNote (#793)', () => {
       expect(composerRunModeNote({ worktree: false, hasGit })).not.toContain('isolated worktree')
     }
   })
+})
+
+it('requires an explicit migration choice for an old multi-candidate draft', () => {
+  localStorage.setItem('cez-new-task-draft', JSON.stringify({ text: 'Keep this task', variants: 2 }))
+  expect(readDraft()).toMatchObject({ text: 'Keep this task', retiredVariants: true })
+  writeDraft({ ...readDraft(), retiredVariants: false })
+  expect(readDraft()).toMatchObject({ text: 'Keep this task', retiredVariants: false })
 })

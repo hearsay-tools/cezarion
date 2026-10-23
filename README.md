@@ -62,13 +62,13 @@ those locks, so avoid one while an update is preparing or restarting.
 
 Click any thumbnail for the full-size screenshot.
 
-| Orchestrate parallel agents | Watch a run live | Parallel variants |
-|:--:|:--:|:--:|
-| [![The Tasks view — two projects on the rail, running and queued tasks with queue positions, per-run tokens, cost and peak memory, pull requests, and a ×2 variant group](docs/screenshots/task-view.png)](docs/screenshots/task-view.png) | [![A running task streaming agent text, tool calls and test output live](docs/screenshots/live-run.png)](docs/screenshots/live-run.png) | [![Two competing variants of the same task compared side by side — pick the winner](docs/screenshots/variants-compare.png)](docs/screenshots/variants-compare.png) |
-| *Run and queue many tasks at once — each in its own worktree — with live status, cost and peak memory per run.* | *Every step, tool call, token and screenshot — streamed as it happens.* | *Run a task ×2/×3 in isolated worktrees, compare the diffs, keep one.* |
-| **Workflow builder** | **GitHub, one click away** | **Skills + fire-and-forget** |
-| [![The workflow builder — drag skills into an ordered chain of agent steps and shell checks](docs/screenshots/workflow-builder.png)](docs/screenshots/workflow-builder.png) | [![The GitHub tab — hand an open issue to the agent with a workflow and skills](docs/screenshots/github-issues.png)](docs/screenshots/github-issues.png) | [![The task composer — pick a skill playbook, a runner and a model, and flip the Autonomous flag to run unattended](docs/screenshots/skills-autonomous.png)](docs/screenshots/skills-autonomous.png) |
-| *Stitch skills and shell checks into a reusable YAML chain, no code.* | *Open issues and PRs via your `gh` — run the agent straight on an issue.* | *Pick a Markdown skill and flip **Autonomous** — the run never stops to ask, so you can walk away.* |
+| Orchestrate parallel agents | Watch a run live |
+|:--:|:--:|
+| [![The Tasks view with running and queued tasks](docs/screenshots/task-view.png)](docs/screenshots/task-view.png) | [![A running task streaming agent text, tool calls and test output](docs/screenshots/live-run.png)](docs/screenshots/live-run.png) |
+| *Run and queue tasks in isolated worktrees, with live status and resource use.* | *Every step, tool call, token and screenshot streams as it happens.* |
+| **Workflow builder** | **GitHub, one click away** |
+| [![The workflow builder](docs/screenshots/workflow-builder.png)](docs/screenshots/workflow-builder.png) | [![The GitHub tab](docs/screenshots/github-issues.png)](docs/screenshots/github-issues.png) |
+| *Stitch skills and shell checks into a reusable YAML chain.* | *Hand an issue to an agent through your own `gh` login.* |
 
 ---
 
@@ -206,7 +206,7 @@ CLIs you are already logged into, `claude` by default.
 
 > **Just kicking the tires?** Set `CEZ_DRY_RUN=1` to run against a bundled mock
 > instead of the real CLI — the whole cockpit works with no `claude` login, so
-> you can explore runs, diffs and variants offline.
+> you can explore runs and diffs offline.
 
 ### Nightly builds — help us shape Cezarion 🌙
 
@@ -332,9 +332,6 @@ The moves that make the cockpit worth the browser tab:
   is *paused* — freeing its tree so the queue keeps advancing — and resumes on
   demand. Event logs are append-only NDJSON and streamed rather than re-serialized,
   and live UI deltas are coalesced so they never hit disk.
-- 🪞 **Parallel variants (×2 / ×3).** Run the same task as competing agents in
-  separate worktrees, then compare their diffs side by side and **pick** one —
-  the losers are archived and their worktrees cleaned up.
 - 🧹 **Bounded worktree disk.** Each task runs in its own full checkout, so a busy
   cockpit would otherwise grow without limit. Cezarion keeps only the last
   `worktreeRetention` **finished** worktrees on disk (default **10**; `0` =
@@ -699,6 +696,32 @@ For operators, the command finds the running cockpit for the current checkout; `
 
 The catalog describes host default accounts, not every named account or the selections permitted by a task's model locks and workflow pins.
 
+## Parallel variant removal
+
+Parallel variants (×2/×3) are removed in the next breaking minor release (0.17).
+The owner chose immediate removal without a deprecation window
+(hearsay-tools/cezarion#1542). The composer starts one task. `POST /api/v1/runs`
+refuses `variants: 2` or `3` with `400`; it never turns them into one candidate.
+The old `variants: 1` spelling still means an ordinary run. Winner selection
+returns `410` and cannot cancel, archive or remove any result.
+
+Historical `groupId` and `variant` fields remain readable. Old `/compare/:groupId`
+links, including project-scoped links, open retained results with links to each task's
+transcript, diff and commits. No retirement migration deletes runs, branches or worktrees;
+normal retention and explicit cleanup still apply. Saved multi-candidate drafts and
+automations offer **Use one task** before saving or launching. A saved automation with
+`task.variants > 1` reports an error on launch; edit it to remove that field or set it to `1`.
+
+For explicit comparison, ask a task: “Spawn two owned workers from the same committed
+baseline. Try a minimal change and a structural approach. Collect both results and
+compare their diffs. Show me the commits to choose from before integration and cleanup.”
+The parent uses `cez worker spawn`, `collect` and `diff`, reviews the chosen commits,
+integrates them with Git, then uses `cez worker destroy` for verified cleanup. Read
+`diffSnapshot` from an available collection's JSON file rather than applying that file
+as a patch. Collect each worker's latest settled revision before finishing. Owned workers
+keep their ownership, isolation, resource limits and Git cleanup safeguards. There is
+no one-click comparison page, automatic winner selection or automatic loser cleanup.
+
 ## Owned workers (opt-in)
 
 Start the cockpit or a headless task with `CEZ_DELEGATION=1`. Each eligible parent session receives the absolute bundled Node/CLI invocation and its own environment credentials; no `cez` installation on the agent's PATH, config file, separate daemon, or remembered port is needed. If the private listener cannot start, ordinary tasks keep working without delegation tools. `.env` is never loaded automatically.
@@ -955,7 +978,7 @@ one-time schedules with the `cezar_schedule_task` and `cezar_scheduled_tasks` to
 only with `CEZ_AUTOMATIONS=1` and also create schedules paused unless the user asked for them to run.
 
 Automation list counters use two windows. **Launched** counts every stored task with that
-automation's provenance, across definition revisions, including each variant, completed and
+automation's provenance, across definition revisions, including historical variants, completed and
 archived tasks. Restarting or compacting automation logs and receipts does not change it;
 deleting a task removes it from the count. **Matches**, **Duplicates** and **Errors** describe
 only that automation's latest 100 activity-log rows. Recent activity remains a separate log view.
@@ -1237,8 +1260,8 @@ steps:
     onFail: { retry: implement, max: 2 }
 ```
 
-Parallel variants (×2/×3) of one task share that task's backend — mixing
-happens per task and per step, not inside a variant group.
+Owned workers can compare approaches in separate worktrees. Each worker has its own
+runner and model selection; see [Owned workers](#owned-workers-opt-in).
 
 **Models come from your own machine.** For Claude, Codex, OpenCode, and Pi, the model picker
 is not a list Cezarion ships — it asks the installed CLI what it can actually run
