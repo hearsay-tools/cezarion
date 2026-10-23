@@ -28,14 +28,12 @@ vi.mock('../core/backend-detect.ts', async (importOriginal) => ({
   ...await importOriginal<typeof import('../core/backend-detect.ts')>(),
   detectEnvironment: async () => [],
 }));
-const discovery = () => {
-  return {
-    modelCatalog: new RunnerModelCatalog({ adapters: {} }),
-    providerAuth: new ProviderAuthService({
-      runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }),
-    }),
-  };
-};
+const discovery = () => ({
+  modelCatalog: new RunnerModelCatalog({ adapters: {} }),
+  providerAuth: new ProviderAuthService({
+    runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }),
+  }),
+});
 
 /** A git checkout whose `origin` is on github.com — what a GitHub automation needs at create. */
 function withGithubRemote(root: string): void {

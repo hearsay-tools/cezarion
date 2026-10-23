@@ -28,10 +28,11 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
 
 export const terminal = ['review', 'done', 'failed', 'cancelled'];
-/** `explain` builds a failure's message, such as `() => timeline(id)`, only once the wait has failed. */
+/** Every failure names its predicate; `explain` adds state, such as `() => timeline(id)`, lazily. */
 export async function until(predicate: () => boolean, explain?: () => string) {
+  // bound: fail a stuck state/termination check after 15 s; the predicate remains the signal.
   await vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 }).catch((error: unknown) => {
-    if (explain && error instanceof Error) error.message = `${explain()}: ${error.message}`;
+    if (error instanceof Error) error.message = `Waiting for ${predicate.toString()}\n${explain ? `${explain()}: ` : ''}${error.message}`;
     throw error;
   });
 }

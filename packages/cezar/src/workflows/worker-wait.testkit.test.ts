@@ -51,4 +51,13 @@ describe('the event timeline in assertion messages (hearsay-tools/cezarion#1292)
     await expect(until(() => false, explain)).rejects.toThrow(`${explain()}: expected false to be true`);
     expect(explain).toHaveBeenCalledTimes(2);
   });
+
+  it('names the predicate when a wait times out without an explanation', async () => {
+    vi.useFakeTimers();
+    onTestFinished(() => { vi.useRealTimers(); });
+    const parentWaitIsParked = () => false;
+    const failed = expect(until(parentWaitIsParked)).rejects.toThrow(`Waiting for ${parentWaitIsParked.toString()}`);
+    await vi.advanceTimersByTimeAsync(15_000);
+    await failed;
+  });
 });
