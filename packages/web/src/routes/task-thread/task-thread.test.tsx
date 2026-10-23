@@ -1649,6 +1649,39 @@ it('reads attention from the record, not from an ask the transcript still shows'
   expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain('waiting on 1 worker')
 })
 
+describe('the pending question (#1495)', () => {
+  const askEvent = (seq: number, requestId: string) =>
+    line(seq, 'ask.requested', { requestId, questions: [{ header: 'Choice', question: `Choose ${requestId}`, options: [{ label: 'First' }, { label: 'Second' }] }] })
+
+  it('pins the pending ask and shows a marker at its origin', () => {
+    const thread = reduceThread([askEvent(1, 'q1'), line(2, 'note', { message: 'later work' })])
+    renderView(<ThreadView run={run('waiting')} thread={thread} />)
+    expect(document.querySelectorAll('[data-slot="ask-card"][data-pinned="true"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-slot="ask-origin"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-slot="ask-card"][data-resolved="false"]')).toHaveLength(1)
+    const rows = [...document.querySelectorAll<HTMLElement>('[data-slot="thread-row"]')]
+    expect(rows.at(-1)?.dataset.rowKey).toBe('pending-ask:q1')
+  })
+
+  it('pins a pending ask whose turn is outside the loaded history', () => {
+    const ask = askEvent(10, 'q1')
+    const visibleEvents = [line(50, 'note', { message: 'later work' })]
+    const history: import('@/api/run-history').RunHistoryState = { visibleEvents, currentEvents: [ask, ...visibleEvents], isPending: false, contextPending: false, fallback: false, hasOlder: true, isFetchingOlder: false, olderError: undefined, loadOlder: async () => {}, jumpToLatest: async () => {}, retainedPages: 1 }
+    renderView(<ThreadView run={run('waiting')} thread={reduceThread(visibleEvents)} currentThread={reduceThread([ask, ...visibleEvents])} history={history} />)
+    expect(document.querySelector('[data-slot="ask-card"][data-pinned="true"]')).not.toBeNull()
+    expect(document.querySelector('[data-slot="ask-origin"]')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Show where it was asked' })).toBeTruthy()
+  })
+
+  it('an answered ask renders its summary and no pinned card', () => {
+    const thread = reduceThread([askEvent(1, 'q1'), line(2, 'user-message', { text: 'First' })])
+    renderView(<ThreadView run={run('running')} thread={thread} />)
+    expect(document.querySelector('[data-slot="ask-card"][data-resolved="true"]')).not.toBeNull()
+    expect(document.querySelector('[data-pinned]')).toBeNull()
+    expect(document.querySelector('[data-slot="ask-origin"]')).toBeNull()
+  })
+})
+
 describe('composer execution actions (#201)', () => {
   it.each(['queued', 'running', 'waiting'] as const)('keeps Stop reachable for %s tasks', async (status) => {
     renderView(<ThreadView run={run(status)} thread={reduceThread([])} />)
