@@ -16,9 +16,10 @@ async function session(stop?: CezarToolHandlers['stopPreview']) {
   const notWait = async (): Promise<never> => { throw new Error('Not a CI test'); };
   return controller.provision({ registerWait: notWait, ask: notWait, cancelWait: notWait, finishTurn: notWait, stopPreview: stop });
 }
+// One connection per call, as client.ts does: see raw() in controller.test.ts (hearsay-tools/cezarion#1484).
 function post(env: Record<string, string>, body: string, token = env.CEZ_TOOL_TOKEN!) {
   return new Promise<{ status: number; body: string }>((resolve, reject) => {
-    const req = request({ socketPath: env.CEZ_TOOL_SOCKET, path: '/api/v1/tools/preview-stop', method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } }, res => {
+    const req = request({ socketPath: env.CEZ_TOOL_SOCKET, agent: false, path: '/api/v1/tools/preview-stop', method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } }, res => {
       let body = ''; res.on('data', chunk => body += chunk); res.on('end', () => resolve({ status: res.statusCode!, body }));
     }); req.on('error', reject); req.end(body);
   });
