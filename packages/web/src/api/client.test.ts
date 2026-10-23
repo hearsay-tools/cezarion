@@ -343,6 +343,13 @@ describe('request shapes', () => {
       body: { title: 'New name' },
     },
     {
+      name: 'patchRun completion choices',
+      call: () => patchRun('run-1', { archiveWhenDone: true, autoMergePr: false }),
+      path: '/api/v1/runs/run-1',
+      method: 'PATCH',
+      body: { archiveWhenDone: true, autoMergePr: false },
+    },
+    {
       name: 'sendMessage',
       call: () => sendMessage('run-1', { text: 'hi' }),
       path: '/api/v1/runs/run-1/messages',

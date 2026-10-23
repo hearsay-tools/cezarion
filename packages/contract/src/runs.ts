@@ -55,6 +55,13 @@ export const runStatusSchema = z.enum([
 ]);
 export type RunStatus = z.infer<typeof runStatusSchema>;
 
+/** Durable completion work. The id fences replies from a previous completion or setting. */
+export const completionActionSchema = z.object({
+  id: z.string().uuid(),
+  phase: z.enum(['pending', 'blocked', 'complete']),
+  message: z.string().optional(),
+});
+
 export const stepStatusSchema = z.enum([
   'pending',
   'running',
@@ -254,6 +261,13 @@ export const runRecordSchema = z.object({
   /** Autonomous mode (#autonomous): the run never parks at `waiting` or the terminal `review`
    *  gate. Absent = falsy = not autonomous. */
   autonomous: z.boolean().optional(),
+  /** Opt-in completion controls. Missing values are off. */
+  archiveWhenDone: z.boolean().optional(),
+  autoMergePr: z.boolean().optional(),
+  completionAction: completionActionSchema.optional(),
+  archiveBlocker: z.object({
+    message: z.string(), runId: z.string().optional(), pullRequestUrl: z.string().optional(),
+  }).optional(),
   /**
    * Provenance for a task a project GitHub automation launched (#694). Absent on every ordinary
    * run, which is what makes it additive — the cockpit shows the "from automation" link only when
@@ -949,6 +963,8 @@ export const createRunInputBaseSchema = z
     worktree: z.boolean().optional(),
     /** true → autonomous run: never parks at "waiting"; auto-continues until done. */
     autonomous: z.boolean().optional(),
+    archiveWhenDone: z.boolean().optional(),
+    autoMergePr: z.boolean().optional(),
     /** false → keep the handoff journal but do not expose or request a follow-up todos file.
      *  Omit for the default (enabled); a server with the capability off pins it to false. */
     generateFollowups: z.boolean().optional(),
@@ -1015,6 +1031,8 @@ export type MessageInput = z.input<typeof messageInputSchema>;
 export const patchRunInputSchema = z.object({
   title: z.string().trim().min(1).max(300).optional(),
   task: z.string().trim().min(1).max(100_000).optional(),
+  archiveWhenDone: z.boolean().optional(),
+  autoMergePr: z.boolean().optional(),
 });
 export type PatchRunInput = z.input<typeof patchRunInputSchema>;
 

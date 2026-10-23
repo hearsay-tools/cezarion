@@ -98,9 +98,11 @@ export function buildPlannedRunBody(opts: {
   defaultRunner?: Runner
   images: readonly AttachmentInput[]
   generateFollowups?: boolean
+  archiveWhenDone?: boolean
+  autoMergePr?: boolean
   todoId?: string
 }): CreateRunInput {
-  const { task, steps, model, modelsLocked, effort, runner, runnerExplicit, defaultRunner, images, generateFollowups, todoId } =
+  const { task, steps, model, modelsLocked, effort, runner, runnerExplicit, defaultRunner, images, generateFollowups, archiveWhenDone, autoMergePr, todoId } =
     opts
   return {
     task,
@@ -110,6 +112,8 @@ export function buildPlannedRunBody(opts: {
     runner: runnerOverride(runner, defaultRunner, runnerExplicit),
     images: images.length > 0 ? [...images] : undefined,
     generateFollowups: generateFollowups === false ? false : undefined,
+    ...(archiveWhenDone ? { archiveWhenDone: true } : {}),
+    ...(autoMergePr ? { autoMergePr: true } : {}),
     todoId: todoId || undefined,
   }
 }
