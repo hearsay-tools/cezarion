@@ -1242,7 +1242,6 @@ describe('submit', () => {
         lastTask: { source: 'skill', ref: 'om-fix' },
         // The run also lands at the head of the recency list (picker sort)...
         recentSources: [{ source: 'skill', ref: 'om-fix' }],
-        lastGenerateFollowups: true,
         // ...and bumps its usage count for the #408 frequency sort (a workflow source would
         // NOT carry a skillUsage key at all — see the WORKFLOW test below).
         skillUsage: { 'om-fix': 1 },
@@ -1319,7 +1318,6 @@ describe('submit', () => {
         // cockpit restoring a stale skill from this same file.
         lastTask: null,
         // Nothing was picked, so nothing joins the recency list or the frequency map.
-        lastGenerateFollowups: true,
       }),
     )
   })
@@ -1547,15 +1545,15 @@ describe('submit', () => {
   })
 
   // #471 — the composer must not offer a switch the server overrides anyway.
-  const inboxOffHealth: HealthResponse = {
+  const retiredInboxHealth: HealthResponse = {
     ...HEALTH,
     capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
   }
   const followupsToggle = () =>
     document.querySelector('[data-slot="generate-followups-toggle"]')
 
-  it('hides the follow-up toggle when the server has the inbox off', async () => {
-    serve({ health: inboxOffHealth })
+  it('omits the retired follow-up toggle', async () => {
+    serve({ health: retiredInboxHealth })
     renderNewTask()
     await pillReady()
     await waitFor(() => expect(followupsToggle()).toBeNull())

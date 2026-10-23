@@ -226,7 +226,7 @@ const ROUTE_CASES: Array<[url: string, route: string, title: string]> = [
   ['/github/prs', 'github', 'Loading GitHub…'],
   ['/github/issues/42', 'github', 'Loading GitHub…'],
   ['/github/prs/7', 'github', 'Loading GitHub…'],
-  ['/inbox', 'inbox', 'Inbox'],
+  ['/inbox', 'inbox', 'Inbox has been removed'],
   // The real workflow builder (R6 Step 1.6): with fetch never answering both the list URL
   // and a named deep link are honestly loading.
   ['/workflows', 'workflows', 'Workflows'],
