@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { z } from 'zod';
+import { matchesGithubPullRequest, mergedPullRequestObservations } from '../merge-observations.ts';
 import { ciPrIdentitySchema, ciWaitRequestSchema, type CiPrIdentity, type CiWaitErrorCode } from '@open-mercato/cezar-contract/ci-wait';
 
 export const CI_QUERY_TIMEOUT_MS = 10_000;
@@ -165,7 +166,8 @@ export class GithubCiClient {
     if (!validUrl.success) throw new CiGithubError('malformed_data', 'GitHub returned an invalid canonical PR URL.');
     const url = new URL(metadata.url);
     const parts = url.pathname.split('/');
-    if (url.hostname !== supplied.hostname || Number(parts[4]) !== metadata.number || metadata.number !== Number(supplied.pathname.split('/')[4])) throw new CiGithubError('malformed_data', 'GitHub returned inconsistent PR identity.');
+    const suppliedParts = supplied.pathname.split('/');
+    if (!matchesGithubPullRequest({ owner: suppliedParts[1]!, repo: suppliedParts[2]!, number: Number(suppliedParts[4]) }, metadata)) throw new CiGithubError('malformed_data', 'GitHub returned inconsistent PR identity.');
     return { ...ciPrIdentitySchema.parse({ prUrl: metadata.url, repository: `${parts[1]}/${parts[2]}`, prNumber: metadata.number, headSha: metadata.headRefOid }),
       mergeable: metadata.mergeable, mergeStateStatus: metadata.mergeStateStatus, raw };
   }
@@ -179,10 +181,12 @@ export class GithubCiClient {
   }
   /** The PR's state for a merge wait, in one bounded query with its head and mergeability. */
   async mergeState(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubPrMergeState> {
-    const { headSha, mergeable, mergeStateStatus, raw } = await this.readMetadata(pr.prUrl, signal, true);
+    const { headSha, mergeable, mergeStateStatus, repository, prNumber, raw } = await this.readMetadata(pr.prUrl, signal, true);
     const parsed = mergeStateSchema.safeParse(raw);
     if (!parsed.success) throw new CiGithubError('malformed_data', 'GitHub returned malformed structured data; update gh and retry.');
     const { state, mergedAt, mergeCommit } = parsed.data;
+    const [owner, repo] = repository.split('/');
+    if (this.env.CEZ_DRY_RUN !== '1') mergedPullRequestObservations.observe({ owner: owner!, repo: repo!, number: prNumber }, raw);
     return { headSha, mergeable, mergeStateStatus, state, ...(mergedAt ? { mergedAt } : {}), ...(mergeCommit ? { mergeCommitSha: mergeCommit.oid.toLowerCase() } : {}) };
   }
   async head(pr: CiPrIdentity, signal: AbortSignal): Promise<string> { return (await this.metadata(pr, signal)).headSha; }

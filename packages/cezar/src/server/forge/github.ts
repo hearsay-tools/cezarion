@@ -1,5 +1,6 @@
-import { mergedPullRequestSchema, type ArchivePullRequestIdentity, type MergedPullRequest } from '@open-mercato/cezar-contract/runs';
-import { archivePullRequests, pullRequestKey } from '../../runs/pull-requests.ts';
+import type { ArchivePullRequestIdentity, MergedPullRequest } from '@open-mercato/cezar-contract/runs';
+import { pullRequestKey } from '../../runs/pull-requests.ts';
+import { matchesGithubPullRequest, mergedPullRequestObservations } from '../../merge-observations.ts';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -215,6 +216,7 @@ const ghPrViewSchema = z.object({
   number: z.number(),
   url: z.string(),
   state: z.string().default('OPEN'),
+  mergedAt: z.unknown().optional(),
   isDraft: z.boolean().default(false),
   statusCheckRollup: ghStatusCheckRollup,
 });
@@ -233,6 +235,7 @@ const mergePrSchema = z.object({
   title: z.string(),
   url: z.string(),
   state: z.string(),
+  mergedAt: z.unknown().optional(),
   isDraft: z.boolean().default(false),
   headRefName: z.string(),
   baseRefName: z.string(),
@@ -693,6 +696,8 @@ const ghSearchHitSchema = ghIssueSchema.extend({
 /** `gh {issue,pr} view <n> --json …` — the exact-number path. Shares `ghIssueSchema`'s core;
  *  `isDraft`/`additions`/`deletions` are PR-only and default harmlessly for issues. */
 const ghViewHitSchema = ghIssueSchema.extend({
+  state: z.string().optional(),
+  mergedAt: z.unknown().optional(),
   assignees: z.array(z.object({ login: z.string() })).optional(),
   isDraft: z.boolean().default(false),
   additions: z.number().default(0),
@@ -753,9 +758,14 @@ async function viewGithubHit(
       'view',
       String(number),
       '--json',
-      kind === 'pr' ? `${SEARCH_FIELDS},isDraft,additions,deletions` : `${SEARCH_FIELDS},assignees`,
+      kind === 'pr' ? `${SEARCH_FIELDS},isDraft,additions,deletions,state,mergedAt` : `${SEARCH_FIELDS},assignees`,
     ]);
-    return ghViewHitSchema.parse(JSON.parse(out));
+    const hit = ghViewHitSchema.parse(JSON.parse(out));
+    if (kind === 'pr' && hit.state === 'MERGED') {
+      const handle = await resolveRepoHandle(repoRoot);
+      if (handle) mergedPullRequestObservations.observe({ owner: handle.owner, repo: handle.name, number }, hit);
+    }
+    return hit;
   } catch (err) {
     if (MISSING_ITEM_RE.test(err instanceof Error ? err.message : String(err))) return null;
     throw err;
@@ -1913,6 +1923,8 @@ function reviewerKey(ref: z.infer<typeof reviewerRefSchema>): string | null {
 const ghRefStatusPrSchema = z
   .object({
     state: z.string(),
+    url: z.unknown().optional(),
+    mergedAt: z.unknown().optional(),
     isDraft: z.boolean().nullish(),
     reviewDecision: z.string().nullish(),
     /** `MERGEABLE` | `CONFLICTING` | `UNKNOWN` — GitHub computes it in the background, so
@@ -2030,10 +2042,10 @@ function refStatusQuery(numbers: number[]): string {
   const aliases = numbers
     .map(
       (n, i) =>
-        `    r${i}: issueOrPullRequest(number: ${n}) { __typename ... on PullRequest { state isDraft reviewDecision mergeable commits(last: 1) { nodes { commit { committedDate parents(first: 1) { totalCount nodes { committedDate } } statusCheckRollup { state } } } } reviews(last: 1, states: CHANGES_REQUESTED) { nodes { submittedAt } } reviewRequests(first: 20) { totalCount nodes { requestedReviewer { __typename ... on User { login } ... on Bot { login } ... on Team { slug } } } } timelineItems(last: 20, itemTypes: [REVIEW_REQUESTED_EVENT]) { nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { __typename ... on User { login } ... on Bot { login } ... on Team { slug } } } } } } ... on Issue { state stateReason } }`,
+        `    r${i}: issueOrPullRequest(number: ${n}) { __typename ... on PullRequest { url mergedAt state isDraft reviewDecision mergeable commits(last: 1) { nodes { commit { committedDate parents(first: 1) { totalCount nodes { committedDate } } statusCheckRollup { state } } } } reviews(last: 1, states: CHANGES_REQUESTED) { nodes { submittedAt } } reviewRequests(first: 20) { totalCount nodes { requestedReviewer { __typename ... on User { login } ... on Bot { login } ... on Team { slug } } } } timelineItems(last: 20, itemTypes: [REVIEW_REQUESTED_EVENT]) { nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { __typename ... on User { login } ... on Bot { login } ... on Team { slug } } } } } } ... on Issue { state stateReason } }`,
     )
     .join('\n');
-  return `query ($owner: String!, $name: String!) {\n  repository(owner: $owner, name: $name) {\n${aliases}\n  }\n}`;
+  return `query ($owner: String!, $name: String!) {\n  repository(owner: $owner, name: $name) {\nnameWithOwner\n${aliases}\n  }\n}`;
 }
 
 /**
@@ -2261,6 +2273,7 @@ export async function fetchRefStatuses(
     try {
       const raw = JSON.parse(await runGraphql(refStatusQuery(chunk), { owner, name })) as {
         data?: { repository?: unknown };
+        errors?: unknown;
       };
       const repository = ghRefStatusSchema.parse(raw?.data?.repository ?? {});
       chunk.forEach((number, index) => {
@@ -2271,6 +2284,10 @@ export async function fetchRefStatuses(
         if (node.__typename === 'PullRequest') {
           const pr = ghRefStatusPrSchema.parse(node);
           if (!pr) return;
+          if ((!raw.errors || (Array.isArray(raw.errors) && raw.errors.length === 0)) &&
+            typeof repository.nameWithOwner === 'string' && repository.nameWithOwner.toLowerCase() === `${owner}/${name}`.toLowerCase()) {
+            mergedPullRequestObservations.observe({ owner, repo: name, number }, { ...pr, number });
+          }
           const head = pr.commits?.nodes[0]?.commit;
           const rollup = head?.statusCheckRollup;
           const mergeability = mergeabilityOf(pr.state, pr.mergeable);
@@ -3356,9 +3373,11 @@ async function fetchPrMergeState(
   try {
     const prOut = await gh(repoRoot, [
       'pr', 'view', String(number), '--json',
-      'number,title,url,state,isDraft,headRefName,baseRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup',
+      'number,title,url,state,isDraft,headRefName,baseRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt',
     ]);
     const parsedPr = mergePrSchema.parse(JSON.parse(prOut));
+    if (!matchesGithubPullRequest({ ...repoRef, number }, parsedPr)) return { available: false, reason: 'GitHub returned a different pull request.' };
+    mergedPullRequestObservations.observe({ ...repoRef, number }, parsedPr);
     const [policyOut, requirements] = await Promise.all([
       gh(repoRoot, ['api', `repos/${repoRef.owner}/${repoRef.repo}`]),
       fetchGithubMergeRequirements((args) => gh(repoRoot, args), repoRef.owner, repoRef.repo, parsedPr.baseRefName, number),
@@ -3404,16 +3423,24 @@ async function mergePullRequest(
   if (mergeInflight.has(key)) return { merged: false, status: 409, error: 'A merge is already in progress.', code: 'concurrent' };
   mergeInflight.add(key);
   try {
+    if (input.canProceed?.() === false) return { merged: false, status: 409, error: 'Automatic merging was cancelled.', code: 'cancelled' };
     const fresh = await fetchPrMergeState(repoRoot, repoRef, number, true);
+    if (input.canProceed?.() === false) return { merged: false, status: 409, error: 'Automatic merging was cancelled.', code: 'cancelled' };
     if (!fresh.available) return { merged: false, status: 502, error: fresh.reason };
     const current = fresh.mergeState;
     if (current.headSha !== input.expectedHeadSha) {
       return { merged: false, status: 409, error: 'The pull request head changed. Review the new commits before merging.', code: 'stale-head', current };
     }
+    if (input.expectedHeadRef !== undefined && current.headRef !== input.expectedHeadRef) {
+      return { merged: false, status: 409, error: 'The pull request branch changed.', code: 'stale-branch', current };
+    }
+    if (input.requirePassingChecks && (current.checks.length === 0 || current.checks.some(check => check.state !== 'passing'))) {
+      return { merged: false, status: 409, error: 'Automatic merging requires at least one check and every current-head check passing.', code: 'checks-not-passing', current };
+    }
     if (!current.methods.includes(input.method)) {
       return { merged: false, status: 409, error: 'That merge method is no longer enabled.', code: 'disabled-method', current };
     }
-    if (!mergePreflightAllowed(current, input.overrideRules)) {
+    if (!mergePreflightAllowed(current, !input.requirePassingChecks && input.overrideRules)) {
       return { merged: false, status: 409, error: current.blockers[0]?.message ?? 'The pull request is not eligible to merge.', code: current.eligibility, current };
     }
     if (process.env.CEZ_DRY_RUN === '1') {
@@ -3421,10 +3448,13 @@ async function mergePullRequest(
       return { merged: true, number, url: current.url, method: input.method, mergeCommitSha: 'abcdef0123456789abcdef0123456789abcdef01' };
     }
     if (!repoRef) return { merged: false, status: 404, error: 'GitHub repository not found.' };
+    if (input.canProceed?.() === false) return { merged: false, status: 409, error: 'Automatic merging was cancelled.', code: 'cancelled' };
     const out = await gh(repoRoot, [
       'api', '--method', 'PUT', `repos/${repoRef.owner}/${repoRef.repo}/pulls/${number}/merge`,
       '-f', `merge_method=${input.method}`, '-f', `sha=${input.expectedHeadSha}`,
     ]);
+    // Once GitHub accepted the mutation, report its real outcome even if intent changed in flight.
+    input.canProceed?.();
     const result = ghMergeResultSchema.parse(JSON.parse(out));
     if (!result.merged) return { merged: false, status: 409, error: result.message ?? 'GitHub refused the merge.', code: 'github-blocked', current };
     evictGithubProjectCaches(repoRoot);
@@ -3440,6 +3470,52 @@ async function mergePullRequest(
 
 export function mergePreflightAllowed(current: ForgePrMergeState, overrideRules = false): boolean {
   return current.canMerge || (overrideRules && current.canOverride);
+}
+
+/** gh has no compare-and-swap ready operation. Check ownership immediately before marking ready,
+ * then refresh again; the later merge has its own head guard and GitHub's atomic SHA check. */
+async function readyPullRequest(
+  repoRoot: string,
+  repoRef: GithubRepoRef | null,
+  number: number,
+  input: { expectedHeadSha: string; expectedHeadRef: string; canProceed?: () => boolean },
+): Promise<ForgePrMergeStateResult> {
+  if (!Number.isSafeInteger(number) || number < 1 || !/^[0-9a-f]{40}$/.test(input.expectedHeadSha) || !input.expectedHeadRef) {
+    return { available: false, reason: 'A valid pull request, head SHA and task branch are required.' };
+  }
+  const key = `${repoRoot}:${number}`;
+  if (mergeInflight.has(key)) return { available: false, reason: 'A pull request mutation is already in progress.' };
+  mergeInflight.add(key);
+  try {
+    if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
+    const dryRun = process.env.CEZ_DRY_RUN === '1';
+    if (!dryRun) {
+      if (!repoRef) return { available: false, reason: 'GitHub remote could not be resolved' };
+      const pr = mergePrSchema.pick({ number: true, url: true, state: true, isDraft: true, headRefName: true, headRefOid: true }).parse(JSON.parse(await gh(repoRoot, [
+        'pr', 'view', String(number), '--json', 'number,url,state,isDraft,headRefName,headRefOid',
+      ])));
+      if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
+      if (!matchesGithubPullRequest({ ...repoRef, number }, pr)) return { available: false, reason: 'GitHub returned a different pull request.' };
+      if (pr.headRefOid !== input.expectedHeadSha) return { available: false, reason: 'The pull request head changed.' };
+      if (pr.headRefName !== input.expectedHeadRef) return { available: false, reason: 'The pull request branch changed.' };
+      if (pr.state !== 'OPEN') return { available: false, reason: 'The pull request is no longer open.' };
+      if (pr.isDraft) {
+        if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
+        await gh(repoRoot, ['pr', 'ready', String(number), '--repo', `github.com/${repoRef.owner}/${repoRef.repo}`]);
+        evictGithubProjectCaches(repoRoot);
+        if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
+      }
+    }
+    const fresh = await fetchPrMergeState(repoRoot, repoRef, number, true);
+    if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
+    if (fresh.available && fresh.mergeState.headSha !== input.expectedHeadSha) return { available: false, reason: 'The pull request head changed.' };
+    if (fresh.available && fresh.mergeState.headRef !== input.expectedHeadRef) return { available: false, reason: 'The pull request branch changed.' };
+    return fresh;
+  } catch {
+    return { available: false, reason: 'GitHub could not mark the pull request ready for review.' };
+  } finally {
+    mergeInflight.delete(key);
+  }
 }
 
 /** owner/repo parsed out of the origin remote — feeds `viewUrl`. */
@@ -3479,8 +3555,9 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
     prStatus: async (branch) => {
       if (process.env.CEZ_DRY_RUN === '1') return null;
       try {
-        const out = await gh(repoRoot, ['pr', 'view', branch, '--json', 'number,url,state,isDraft,statusCheckRollup']);
+        const out = await gh(repoRoot, ['pr', 'view', branch, '--json', 'number,url,state,isDraft,statusCheckRollup,mergedAt']);
         const pr = ghPrViewSchema.parse(JSON.parse(out));
+        if (repoRef) mergedPullRequestObservations.observe({ ...repoRef, number: pr.number }, pr);
         return {
           number: pr.number,
           url: pr.url,
@@ -3494,6 +3571,8 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
     },
 
     prMergeState: (number, opts) => fetchPrMergeState(repoRoot, repoRef, number, opts?.refresh),
+
+    readyPR: (number, input) => readyPullRequest(repoRoot, repoRef, number, input),
 
     mergePR: (number, input) => mergePullRequest(repoRoot, repoRef, number, input),
 
@@ -3569,22 +3648,26 @@ export async function fetchMergedPullRequests(runGraphql: GraphqlRunner, identit
       const parsed = z.object({ errors: z.array(z.unknown()).optional(), data: z.object({ repository: z.object({ nameWithOwner: z.string() }).passthrough().nullable() }) }).safeParse(response);
       if (!parsed.success || parsed.data.errors?.length || parsed.data.data.repository?.nameWithOwner.toLowerCase() !== repository.toLowerCase()) continue;
       for (const pr of chunk) {
-        const node = z.object({ number: z.number(), url: z.string(), state: z.literal('MERGED'), mergedAt: z.string().datetime() }).safeParse(parsed.data.data.repository[`pr${pr.number}`]);
-        if (!node.success || node.data.number !== pr.number) continue;
-        const actual = archivePullRequests([{ pullRequests: [{ number: node.data.number, url: node.data.url, source: 'created' }] }]);
-        if (actual?.length !== 1 || pullRequestKey(actual[0]!) !== pullRequestKey(pr)) continue;
-        merged.push(mergedPullRequestSchema.parse({ ...pr, mergedAt: node.data.mergedAt }));
+        const fact = mergedPullRequestObservations.observe(pr, parsed.data.data.repository[`pr${pr.number}`]);
+        if (fact) merged.push(fact);
       }
     }
   }
   return merged;
 }
 
-export function lookupMergedPullRequests(repoRoot: string, identities: ArchivePullRequestIdentity[], signal: AbortSignal): Promise<MergedPullRequest[]> {
+export async function lookupMergedPullRequests(repoRoot: string, identities: ArchivePullRequestIdentity[], signal: AbortSignal): Promise<MergedPullRequest[]> {
+  signal.throwIfAborted();
+  if (process.env.CEZ_DRY_RUN === '1') return [];
+  const unique = [...new Map(identities.map(pr => [pullRequestKey(pr), pr])).values()];
+  const known = unique.flatMap(pr => mergedPullRequestObservations.get(pr) ?? []);
+  const missing = unique.filter(pr => !mergedPullRequestObservations.get(pr));
+  if (missing.length === 0) return known;
   const context = githubContext(repoRoot);
-  return fetchMergedPullRequests(async (query, variables) => {
+  const fetched = await fetchMergedPullRequests(async (query, variables) => {
     const args = ['api', 'graphql', '--hostname', 'github.com', '-f', `query=${query}`];
     for (const [key, value] of Object.entries(variables)) args.push('-f', `${key}=${value}`);
     return gh(repoRoot, args, 15_000, signal, context);
-  }, identities);
+  }, missing);
+  return [...known, ...fetched];
 }
