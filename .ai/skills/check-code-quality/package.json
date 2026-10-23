@@ -1,0 +1,7 @@
+{
+  "name": "check-code-quality-skill",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.15.0" },
+  "dependencies": { "@babel/parser": "8.0.7" }
+}

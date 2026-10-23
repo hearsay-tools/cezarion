@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { analyzeSource, functionResults, measureCoverage, selectFunctions } from './code-metrics.mjs';
+import { analyzeSource, functionResults, measureCoverage, selectFunctions } from '../.ai/skills/check-code-quality/scripts/code-metrics.mjs';
 import { runMetrics } from './metrics.mjs';
 
 test('classic complexity counts decisions, defaults, short circuits and optional chains', () => {
@@ -221,6 +221,60 @@ test('CLI validates selection and arguments before running tests', async t => {
     assert.equal(result.code, 1, JSON.stringify(args));
     assert.ok(JSON.parse(result.output).error);
   }
+});
+
+test('project selection requires tests and supplies target cwd to the coverage runner', async t => {
+  const f = fixture(t);
+  for (const args of [['--project', 'unit'], ['--project', '', '--test', 'source.spec.ts']]) {
+    assert.equal((await invoke(['source.ts', '--json', ...args], { cwd: f.cwd })).code, 1);
+  }
+  writeFileSync(join(f.cwd, 'source.spec.ts'), '');
+  const result = await invoke(['source.ts', '--test', 'source.spec.ts', '--project', 'unit', '--project', 'client', '--json'], {
+    cwd: f.cwd,
+    runTests(file, tests, directory, stderr, context) {
+      assert.deepEqual(context, { cwd: f.cwd, projects: ['unit', 'client'] });
+      assert.deepEqual(tests, [join(f.cwd, 'source.spec.ts')]);
+      const report = join(directory, 'coverage-final.json');
+      writeFileSync(report, JSON.stringify(f.report));
+      return report;
+    },
+  });
+  assert.equal(result.code, 0, result.error);
+});
+
+test('coverage resolves Vitest from the target project and keeps its output off JSON stdout', async t => {
+  const f = fixture(t);
+  const vitest = join(f.cwd, 'node_modules/vitest');
+  mkdirSync(vitest, { recursive: true });
+  writeFileSync(join(vitest, 'package.json'), JSON.stringify({ name: 'vitest', version: '1.0.0' }));
+  writeFileSync(join(f.cwd, 'source.test.ts'), '');
+  writeFileSync(join(vitest, 'vitest.mjs'), `
+    import assert from 'node:assert/strict';
+    import { writeFileSync } from 'node:fs';
+    import { join } from 'node:path';
+    assert.equal(process.cwd(), ${JSON.stringify(f.cwd)});
+    const args = process.argv.slice(2);
+    assert.equal(args[0], 'run');
+    assert.equal(args[args.indexOf('--project') + 1], 'custom-unit');
+    assert.ok(args.includes(${JSON.stringify(join(f.cwd, 'source.test.ts'))}));
+    const directory = args[args.indexOf('--coverage.reportsDirectory') + 1];
+    writeFileSync(join(directory, 'coverage-final.json'), ${JSON.stringify(JSON.stringify(f.report))});
+    console.log('coverage fixture output');
+  `);
+  const result = await invoke(['source.ts', '--test', 'source.test.ts', '--project', 'custom-unit', '--json'], { cwd: f.cwd });
+  assert.equal(result.code, 0, result.error);
+  assert.equal(JSON.parse(result.output).functions[0].crap, 2.5);
+  assert.match(result.error, /coverage fixture output/);
+});
+
+test('copied skill needs no original checkout scripts to analyze another project', t => {
+  const f = fixture(t);
+  const skill = join(f.cwd, 'copied-skill');
+  cpSync(fileURLToPath(new URL('../.ai/skills/check-code-quality', import.meta.url)), skill, { recursive: true });
+  // Supply only the dependency tree. Every tool source must come from the copy.
+  symlinkSync(fileURLToPath(new URL('../node_modules', import.meta.url)), join(skill, 'node_modules'), 'dir');
+  const output = execFileSync(process.execPath, [join(skill, 'scripts/metrics.mjs'), f.file, '--json'], { cwd: f.cwd, encoding: 'utf8' });
+  assert.equal(JSON.parse(output).functions[0].complexity, 2);
 });
 
 test('fresh coverage selects supplied tests and removes temporary reports on success', async t => {

@@ -1594,6 +1594,12 @@ go to stderr, so `--json` stdout contains only the report. This tool belongs to 
 checkout and is available after the normal dependency installation. Use
 `pnpm --silent metrics ... --json` to also suppress pnpm's command banner.
 
+The tool is bundled in the [check-code-quality skill](.ai/skills/check-code-quality/SKILL.md).
+Its pre-PR check selects changed functions, fixes small problems, and files larger
+inherited refactors as `code-quality-improvement` issues. The scan report defines
+the limits: CRAP 30 and complexity 20. Scores equal to a limit pass. Copy the
+whole skill directory to use the tool in another repository.
+
 For iteration, run affected test files or `npm run test:changed` (inspect with
 `-- --plan`; override the local main comparison with `-- --base=<ref>`).
 The changed-test command includes staged, unstaged and untracked changes and
