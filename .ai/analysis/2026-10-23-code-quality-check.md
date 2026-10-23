@@ -14,12 +14,44 @@ The first scan found the newly added AST visitor at complexity 26. Splitting chi
 
 The two node:test suites passed all 30 tests. A separate run collected V8 coverage because Squeal validation does not provide function coverage for this measurement. The installed @vitest/coverage-v8 dependencies @bcoe/v8-coverage and ast-v8-to-istanbul merged the raw process reports and converted them to Istanbul using the Babel ESTree parser. No coverage exclusions were added.
 
+Run from the checkout root, using the already installed dependencies:
+
 ```sh
-node .ai/skills/check-code-quality/scripts/changed-functions.mjs --base origin/main
-NODE_V8_COVERAGE=<absolute-report-directory>/raw node --import ./scripts/test-git-env.mjs --test scripts/metrics.test.mjs scripts/changed-functions.test.mjs
-# Convert the raw V8 reports to Istanbul JSON with the installed V8 coverage tools.
-node .ai/skills/check-code-quality/scripts/metrics.mjs <changed-file> --coverage <report-directory>/coverage-final.json --json
+quality_dir=$(mktemp -d)
+node .ai/skills/check-code-quality/scripts/changed-functions.mjs --base origin/main > "$quality_dir/scan.json"
+NODE_V8_COVERAGE="$quality_dir/raw" node --import ./scripts/test-git-env.mjs --test scripts/metrics.test.mjs scripts/changed-functions.test.mjs
+node --input-type=module - "$quality_dir" <<'JS'
+import { createRequire } from 'node:module';
+import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { resolve, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
+const require = createRequire(resolve('package.json'));
+const provider = createRequire(require.resolve('@vitest/coverage-v8'));
+const { mergeProcessCovs } = provider('@bcoe/v8-coverage');
+const { default: convert } = await import(pathToFileURL(provider.resolve('ast-v8-to-istanbul')));
+const { parse } = await import(pathToFileURL(require.resolve('@babel/parser')));
+const directory = process.argv[2];
+const scan = JSON.parse(readFileSync(join(directory, 'scan.json'), 'utf8'));
+const selected = new Set(scan.files.map(file => pathToFileURL(resolve(file.file)).href));
+const inputs = readdirSync(join(directory, 'raw')).filter(file => file.endsWith('.json')).map(file => {
+  const raw = JSON.parse(readFileSync(join(directory, 'raw', file), 'utf8'));
+  return { result: raw.result.filter(script => selected.has(script.url)) };
+});
+const report = {};
+for (const coverage of mergeProcessCovs(inputs).result) {
+  const code = readFileSync(new URL(coverage.url), 'utf8');
+  const ast = parse(code, { sourceType: 'module', plugins: ['estree'], ranges: true }).program;
+  Object.assign(report, await convert({ code, ast, coverage }));
+}
+writeFileSync(join(directory, 'coverage-final.json'), JSON.stringify(report));
+JS
+node .ai/skills/check-code-quality/scripts/metrics.mjs <changed-file> --coverage "$quality_dir/coverage-final.json" --json
 ```
+
+The test command must succeed before converting coverage or accepting scores. Use
+the pinned baseline SHA instead of `origin/main` to repeat the recorded scope after
+the target branch advances. Select the scan's function names, lines and columns
+from each file's metric results.
 
 Squeal also reported both focused test files current and passing at revision 20. Full background validation and the 84 slow test files were still pending; this report does not claim they passed.
 
