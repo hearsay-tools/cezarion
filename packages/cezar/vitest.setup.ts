@@ -167,7 +167,9 @@ afterEach(() => {
   clearHostBinAndModeOverrides()
 })
 afterAll(() => {
-  rmSync(sandboxHome, { recursive: true, force: true })
-  rmSync(sandboxUserHome, { recursive: true, force: true })
+  // bound: keep the existing temp cleanup's three retries / 50 ms backoff for
+  // one-shot child-process writes during removal (hearsay-tools/cezarion#1432).
+  rmSync(sandboxHome, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
+  rmSync(sandboxUserHome, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
   rmSync(sandboxTemp, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
 })
