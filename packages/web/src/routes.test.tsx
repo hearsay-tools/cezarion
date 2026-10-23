@@ -40,8 +40,8 @@ function rememberLocation(lastLocation: unknown): void {
 const BOOT = 'boot'
 
 /** A full-enough `/api/v1/health` answer: the redirect gate reads `bootProject`, and the routes
- *  behind it (inbox, /new) read `capabilities` — a partial seed would crash what a real health
- *  payload never crashes. `followups: true` keeps the Inbox route's real heading. */
+ *  behind it (/new) read `capabilities` — a partial seed would crash what a real health
+ *  payload never crashes. */
 const HEALTH = {
   version: '0.0.0-test',
   repoRoot: '/home/u/cezar',
@@ -49,7 +49,7 @@ const HEALTH = {
   checks: [],
   defaultRunner: 'claude',
   forge: null,
-  capabilities: { localHandoff: true, followups: true, singleProject: false, automations: false },
+  capabilities: { localHandoff: true, singleProject: false, automations: false },
   projects: [{ id: BOOT, name: 'cezar' }],
   bootProject: BOOT,
 }
@@ -226,7 +226,7 @@ const ROUTE_CASES: Array<[url: string, route: string, title: string]> = [
   ['/github/prs', 'github', 'Loading GitHub…'],
   ['/github/issues/42', 'github', 'Loading GitHub…'],
   ['/github/prs/7', 'github', 'Loading GitHub…'],
-  ['/inbox', 'inbox', 'Inbox'],
+  ['/inbox', 'inbox', 'Inbox has been removed'],
   // The real workflow builder (R6 Step 1.6): with fetch never answering both the list URL
   // and a named deep link are honestly loading.
   ['/workflows', 'workflows', 'Workflows'],

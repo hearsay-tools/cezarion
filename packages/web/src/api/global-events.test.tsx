@@ -1153,19 +1153,6 @@ describe('useGlobalEvents — run events', () => {
   })
 })
 
-describe('useGlobalEvents — todos', () => {
-  it('replaces the inbox cache, seeding it even when nothing fetched it', () => {
-    const { source } = mount()
-
-    source.emit('todos', JSON.stringify({ project: BOOT, items: [{ id: 't1', summary: 'Review the PR' }] }))
-    expect(client.getQueryData(queryKeys.todos)).toEqual([{ id: 't1', summary: 'Review the PR' }])
-
-    // The payload is the whole inbox, so an emptied inbox really empties the badge.
-    source.emit('todos', JSON.stringify({ project: BOOT, items: [] }))
-    expect(client.getQueryData(queryKeys.todos)).toEqual([])
-  })
-})
-
 describe('useGlobalEvents — usage', () => {
   it('feeds the usage store and never touches the runs cache', () => {
     const list: ApiRun[] = [runRecord('r1')]
@@ -1202,7 +1189,7 @@ describe('useGlobalEvents — provider status', () => {
     const health = {
       version: 'test', repoRoot: 'repo', repo: null, defaultRunner: 'claude', forge: null,
       projects: [], bootProject: BOOT,
-      capabilities: { localHandoff: false, followups: false, singleProject: false, automations: false, preview: false, voice: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true },
+      capabilities: { localHandoff: false, singleProject: false, automations: false, preview: false, voice: false, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true },
       checks: [{ name: 'cursor', available: true }],
     }
     client.removeQueries({ queryKey: queryKeys.health })
@@ -1224,7 +1211,7 @@ describe('useGlobalEvents — provider status', () => {
     const health = {
       version: 'old', repoRoot: 'repo', repo: null, defaultRunner: 'claude', forge: null,
       projects: [], bootProject: BOOT,
-      capabilities: { localHandoff: false, followups: false, singleProject: false },
+      capabilities: { localHandoff: false, singleProject: false },
       checks: [{ name: 'cursor', available: true }],
     }
     client.removeQueries({ queryKey: queryKeys.health })
@@ -1491,7 +1478,6 @@ describe('useGlobalEvents — project scoping (multi-project spec, step 3.1)', (
 
     // The one stream carries every project; only the boot project's news may land here.
     expect(client.getQueryData<ApiRun[]>(queryKeys.runs.list())).toEqual([])
-    expect(client.getQueryData(queryKeys.todos)).toBeUndefined()
     expect(usage.get()).toEqual({})
   })
 
@@ -1666,7 +1652,6 @@ describe('useGlobalEvents — reconcile doctrine', () => {
       // scoped caches hold one project, and this spans the workspace.
       workspaceQueryKeys.runsIndex,
       workspaceQueryKeys.projects,
-      queryKeys.todos,
       queryKeys.worktrees, // the Resources panel's list/total (#483)
       queryKeys.repoBranches, // the Git view's branch classes (issue 08)
       workspaceQueryKeys.providerStatus,
@@ -1941,7 +1926,6 @@ describe('relationships refresh (#659)', () => {
     expect(client.getQueryState(workerKey)).toBeUndefined()
   })
 })
-
 
 it('delivers a secondary-project structured ASK waiting transition to browser notifications', () => {
   const notifications: string[] = []

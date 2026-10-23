@@ -72,7 +72,7 @@ function health(voice: boolean): HealthResponse {
     checks: [],
     defaultRunner: 'claude',
     forge: null,
-    capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: true, singleProject: false, automations: false, preview: false, voice },
+    capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: true, preview: false, voice },
   }
 }
 
@@ -109,11 +109,11 @@ function renderPalette({ voice, runs = [], entry = '/' }: { voice: boolean; runs
   )
 }
 
-/** Opens the palette and waits until health has loaded (the Inbox view row follows it). */
+/** Opens the palette and waits until health has loaded (the Automations view row follows it). */
 async function openPalette() {
   fireEvent.keyDown(window, { key: 'k', metaKey: true })
   const input = await screen.findByPlaceholderText(/Search projects, tasks/)
-  await screen.findByText('Inbox')
+  await screen.findByText('Automations')
   return input as HTMLInputElement
 }
 

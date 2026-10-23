@@ -18,13 +18,13 @@ describe('clientRequestHash', () => {
   it.each([
     ['task', 'b'], ['workflow', 'review'], ['steps', [{ id: 'x', prompt: '{{task}}' }]], ['runner', 'codex'],
     ['model', 'm'], ['effort', 'high'], ['agentProfile', 'p'], ['autonomous', true], ['worktree', false],
-    ['systemPrompt', 's'], ['images', [{ mediaType: 'image/png', data: 'x' }]], ['generateFollowups', false],
+    ['systemPrompt', 's'], ['images', [{ mediaType: 'image/png', data: 'x' }]],
   ])('changes with %s', (key, value) => {
     expect(clientRequestHash({ ...base, [key]: value })).not.toBe(clientRequestHash(base));
   });
 
   it.each([
-    ['todoId', 't1'], ['variants', 1], ['clientRequestId', '0b0f9a4e-8c1e-4b8a-9a52-4b3f1d0c9e11'],
+    ['generateFollowups', false], ['todoId', 't1'], ['variants', 1], ['clientRequestId', '0b0f9a4e-8c1e-4b8a-9a52-4b3f1d0c9e11'],
     // Mutable after start through POST /runs/:id/notify (#589), so a retry must not conflict on it.
     ['notify', true],
   ])('ignores %s', (key, value) => {

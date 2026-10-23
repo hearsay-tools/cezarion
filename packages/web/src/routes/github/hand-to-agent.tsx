@@ -299,7 +299,7 @@ export function HandToAgent({
 
         {/* `accounts`: this hand-off posts to `/api/v1/runs`, which takes `agentProfile` — so
             the runner pill may offer the agent's logins as rows (spec 2026-07-29-agent-profiles).
-            The Inbox card deliberately does not; its endpoint has no such field yet. */}
+             */}
         <EnginePills
           layout="row"
           pick={engine}

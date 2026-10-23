@@ -142,12 +142,6 @@
     {
       "file": "smoke.e2e.ts",
       "rule": "one-shot-read",
-      "site": "expect(browser.evaluate('document.getElementById(\"root\") !== null')).toBe(true)",
-      "count": 2
-    },
-    {
-      "file": "smoke.e2e.ts",
-      "rule": "one-shot-read",
       "site": "expect(browser.isVisible('[data-slot=\"mobile-top-bar\"]')).toBe(false)",
       "count": 1
     },

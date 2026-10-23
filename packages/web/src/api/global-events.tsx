@@ -53,7 +53,7 @@ const REOPEN_DELAY_MS = 3_000
 
 /** Everything the stream is allowed to say. An unknown name never reaches `parseGlobalEvent`,
  *  because SSE only delivers named events to a matching listener in the first place. */
-const EVENT_NAMES = ['run', 'run-deleted', 'todos', 'usage', 'ping'] as const
+const EVENT_NAMES = ['run', 'run-deleted', 'usage', 'ping'] as const
 
 /**
  * The workspace-only names (server: `WorkspaceEventName`). Unlike the list above these are not
@@ -136,7 +136,6 @@ function createRunsIndexRefresher(queryClient: QueryClient): {
  * These are the endpoints the stream can leave stale:
  * - runs: the summaries the stream patches (`invalidate(['runs'])` covers the list and every
  *   single-run query under it — that is what the hierarchical keys in queries.ts are for);
- * - todos: the inbox the `todos` event replaces;
  * - health: probe completion pushes a refreshed snapshot over SSE; reconciliation catches
  *   snapshots missed while disconnected and refreshes repository state on return;
  * - worktrees: run terminal transitions and reclaim operations change the resources panel;
@@ -173,7 +172,7 @@ function reconcile(queryClient: QueryClient, signal?: AbortSignal, periodic = fa
   // Cancel just this reconciliation's demanded families when the document hides or its
   // finite recovery deadline expires. Query functions receive TanStack's own AbortSignal.
   const keys = [queryKeys.runs.all, workspaceQueryKeys.runsIndex, workspaceQueryKeys.projects,
-    queryKeys.todos, queryKeys.health, queryKeys.worktrees, queryKeys.repoBranches,
+    queryKeys.health, queryKeys.worktrees, queryKeys.repoBranches,
     workspaceQueryKeys.providerStatus, workspaceQueryKeys.models('cursor')]
   const cancel = () => { for (const key of keys) void queryClient.cancelQueries({ queryKey: key }) }
   signal?.addEventListener('abort', cancel, { once: true })
@@ -196,7 +195,6 @@ function reconcile(queryClient: QueryClient, signal?: AbortSignal, periodic = fa
       // here covers it.
       queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.runsIndex }),
       queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.projects }),
-      queryClient.invalidateQueries({ queryKey: queryKeys.todos }),
       reconcileBackgroundQuery(queryClient, queryKeys.health),
       // The worktree panel's list/total (#483) — a run finishing or a reclaim changes it.
       queryClient.invalidateQueries({ queryKey: queryKeys.worktrees }),
@@ -631,11 +629,6 @@ function applyGlobalEvent(
       void queryClient.invalidateQueries({ queryKey: queryKeys.repoBranches })
       return
     }
-    case 'todos':
-      // A complete array every time (the server re-reads the file), so it replaces outright and
-      // may seed a cache no one fetched yet — unlike `run`, this payload *is* the whole answer.
-      queryClient.setQueryData(queryKeys.todos, event.items)
-      return
     case 'usage':
       usage.set(event.usage)
       return

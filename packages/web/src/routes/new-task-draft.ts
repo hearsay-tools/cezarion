@@ -36,8 +36,6 @@ export interface NewTaskDraft {
    *  null → interactive-skill hint, then workspace/env policy (skills default on).
    *  Plan-first overrides every choice. See resolveComposerRunMode. */
   autonomous: boolean | null
-  /** Follow-up generation is default-on. null → remembered value / on. */
-  generateFollowups: boolean | null
   archiveWhenDone: boolean
   autoMergePr: boolean
 }
@@ -107,7 +105,6 @@ const EMPTY: NewTaskDraft = {
   planFirst: false,
   worktree: null,
   autonomous: null,
-  generateFollowups: null,
   archiveWhenDone: false,
   autoMergePr: false,
 }
@@ -144,8 +141,6 @@ function normalize(raw: unknown): NewTaskDraft {
     planFirst: obj.planFirst === true,
     worktree: typeof obj.worktree === 'boolean' ? obj.worktree : null,
     autonomous: typeof obj.autonomous === 'boolean' ? obj.autonomous : null,
-    generateFollowups:
-      typeof obj.generateFollowups === 'boolean' ? obj.generateFollowups : null,
     archiveWhenDone: obj.archiveWhenDone === true,
     autoMergePr: obj.autoMergePr === true,
   }

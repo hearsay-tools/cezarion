@@ -25,7 +25,7 @@ beforeAll(async () => {
       createdAt: '2026-09-01T00:00:00Z', finishedAt: '2026-09-01T01:00:00Z', tokensUsed: 0, archived: false, steps: [],
     }))))
     const server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
-      env: fixtureServeEnv(root, { CEZ_REMOTE: remote ? '1' : '0', CEZ_FOLLOWUPS: '1', CEZ_AUTOMATIONS: '1' }), stdio: 'ignore',
+      env: fixtureServeEnv(root, { CEZ_REMOTE: remote ? '1' : '0', CEZ_AUTOMATIONS: '1' }), stdio: 'ignore',
     })
     fixtures.push({ root, server, url: '', project: '', remote })
     const url = await waitForFixtureServer(server)
@@ -99,8 +99,8 @@ describe('project header actions', () => {
     expect(tabs.length).toBeGreaterThanOrEqual(3)
     expect(tabs.every(size => size.width >= 44 && size.height >= 44)).toBe(true)
     browser.click('[data-slot="mobile-tab-bar"] [data-tab="more"]')
-    // Inbox and Automations arrive with health capabilities, after the permanent rows render.
-    const expectedRows = ['/skills', '/workflows', '/settings', '/inbox', '/automations']
+    // Automations arrives with health capabilities, after the permanent rows render.
+    const expectedRows = ['/skills', '/workflows', '/settings', '/automations']
     const rows = browser.waitForValue(`Array.from(document.querySelectorAll('[data-slot="more-sheet"] [data-slot="more-row"]')).map(el => el.getAttribute('data-more-row'))`, value => Array.isArray(value) && value.length === expectedRows.length) as string[]
     expect(rows).toEqual(expectedRows)
     browser.press('Escape')

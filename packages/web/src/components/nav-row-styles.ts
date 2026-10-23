@@ -31,9 +31,6 @@ export function navIconClass(isActive: boolean): string {
  * shrinks `--spacing` cannot shrink them. */
 const NAV_COUNT_SHAPE = 'ml-auto rounded-[9px] px-[6px] py-px text-[11px] leading-[16px] font-semibold tabular-nums'
 
-/** The Inbox count: soft amber, because follow-ups wait for you (tokens in `styles/index.css`). */
-export const NAV_INBOX_COUNT_CLASS = cn(NAV_COUNT_SHAPE, 'bg-inbox-count text-inbox-count-foreground')
-
 /**
  * The Tasks unread count: neutral, because unread is news rather than a to-do. On a selected
  * row the `--muted` chip would sit on a near-identical fill, so it takes `--sidebar`, the same

@@ -113,7 +113,6 @@ function startRun(manager: RunManager, workflow: WorkflowDef, definition: Automa
     autonomous: definition.task.autonomous,
     archiveWhenDone: definition.task.archiveWhenDone,
     autoMergePr: definition.task.autoMergePr,
-    generateFollowups: definition.task.generateFollowups,
   };
   return manager.startRun(workflow, input);
 }

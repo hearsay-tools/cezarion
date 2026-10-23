@@ -68,7 +68,6 @@
   .new-task-agent-options button { border-color: var(--border); }
 }
 
-
 /* New task frames 1 / 23: local geometry, without changing shared picker behavior. */
 [data-route='new'] .new-task-agent-options { gap: 10px; }
 /* Size against the composer: a wide sidebar can leave a desktop viewport narrow. */
@@ -92,7 +91,6 @@
 [data-route='new'] .new-task-agent-options [data-slot='effort-pill'] { background: var(--background); }
 [data-route='new'] [data-slot='mode-seg'] button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 [data-route='new'] [data-slot='source-pill'] { border-color: var(--border); }
-[data-route='new'] [data-slot='followups-options'] { background: transparent; padding: 16px; }
 [data-route='new'] [data-slot='execution-options'] summary { gap: 10px; }
 [data-route='new'] [data-slot='execution-options'] summary > span:first-of-type { font-weight: 600; }
 [data-route='new'] [data-slot='execution-options'] > div { border-block-start: 0; padding-block-start: 0; }

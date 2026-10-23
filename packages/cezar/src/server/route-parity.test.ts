@@ -183,7 +183,6 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
       'PUT /agent-config/:id',
       'DELETE /runs/:id',
       'PATCH /runs/:id',
-      'POST /todos/:id/start',
       'GET /repo/commit/:sha',
     ]) {
       expect(keys, expected).toContain(expected);

@@ -17,9 +17,8 @@ import { multiWordFilter } from '@/lib/skills'
 import { cn } from '@/lib/utils'
 
 /**
- * "Insert a template" — the trigger shared by all three follow-up composers: the GitHub
- * hand-over (`routes/github/hand-to-agent.tsx`), the Inbox's "Add instructions"
- * (`routes/inbox.tsx`), and the /new task composer (`routes/new-task.tsx`). Picking one calls
+ * "Insert a template" — the trigger shared by the GitHub hand-over
+ * (`routes/github/hand-to-agent.tsx`) and New task (`routes/new-task.tsx`). Picking one calls
  * `onInsert` with the snippet text; the composer decides where it lands (caret position via
  * `lib/prompt-templates.ts#insertTemplate`).
  *

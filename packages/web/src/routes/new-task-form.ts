@@ -337,15 +337,8 @@ export function buildCreateRunBody(opts: {
   worktree?: boolean
   /** true → autonomous run (never pauses for the user). Sent only when on. */
   autonomous?: boolean
-  /** false → do not ask the agent for follow-up todos. Sent only when off. */
-  generateFollowups?: boolean
   archiveWhenDone?: boolean
   autoMergePr?: boolean
-  /** The inbox entry this composer was prefilled from (`/new?…&todo=`, #374) — sent back so
-   *  the server records the started run on it. Empty/absent for every other launch.
-   *  Independent of `generateFollowups`: starting a task FROM a follow-up still marks that
-   *  entry started, even when the new task itself won't generate follow-ups of its own. */
-  todoId?: string
 }): CreateRunInput {
   const {
     task,
@@ -360,10 +353,8 @@ export function buildCreateRunBody(opts: {
     images,
     worktree,
     autonomous,
-    generateFollowups,
     archiveWhenDone,
     autoMergePr,
-    todoId,
   } = opts
   return {
     task,
@@ -379,10 +370,8 @@ export function buildCreateRunBody(opts: {
     images: images.length > 0 ? [...images] : undefined,
     worktree: worktree === false ? false : undefined,
     autonomous: autonomous === true ? true : undefined,
-    generateFollowups: generateFollowups === false ? false : undefined,
     ...(archiveWhenDone ? { archiveWhenDone: true } : {}),
     ...(autoMergePr ? { autoMergePr: true } : {}),
-    todoId: todoId || undefined,
   }
 }
 
@@ -398,8 +387,8 @@ export function withNotify(body: CreateRunInput, notify: boolean): CreateRunInpu
  * an automation is a reusable template, not one browser submission. */
 export function buildAutomationTask(
   opts: Parameters<typeof buildCreateRunBody>[0],
-): Omit<CreateRunInput, 'task' | 'images' | 'todoId'> & { prompt: string } {
-  const { task, images: _images, todoId: _todoId, ...body } = buildCreateRunBody(opts)
+): Omit<CreateRunInput, 'task' | 'images'> & { prompt: string } {
+  const { task, images: _images, ...body } = buildCreateRunBody(opts)
   return { prompt: task, ...body }
 }
 

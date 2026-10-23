@@ -102,7 +102,6 @@ function stubServer(kind: 'issue' | 'pr') {
             tokenMetrics: false,
             tokenUsageMetrics: false,
             costMetrics: false,
-            followups: false,
             singleProject: true,
             automations: false,
           },

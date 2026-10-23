@@ -97,7 +97,6 @@ import type {
   UpdateProjectResponse,
   NotifyRunInput,
   TestProjectWebhookResponse,
-  RemoveTodoResponse,
   RepoBranchResponse,
   RepoPullBranchesResponse,
   RepoPullConfirmation,
@@ -125,8 +124,6 @@ import type {
   SetWorkspaceUiStateInput,
   ImportableSkill,
   Skill,
-  StartTodoResponse,
-  TodoItem,
   UiState,
   WorkflowsResponse,
   WorkspaceConfigResponse,
@@ -709,13 +706,6 @@ export async function getImportableSkillsWhenReady(opts?: ReadOptions): Promise<
       init(opts),
     ),
     '/skills/importable',
-  )
-}
-
-export async function getTodos(opts?: ReadOptions): Promise<TodoItem[]> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].todos.$get({ param: { projectId: queryScope() } }, init(opts)),
-    '/todos',
   )
 }
 
@@ -1676,55 +1666,6 @@ export async function deleteRun(id: string): Promise<DeleteRunResponse> {
       param: { projectId: queryScope(), id: encodeURIComponent(id) },
     }),
     runPath(id),
-  )
-}
-
-/** Inbox "Dismiss" (spec 007): check the follow-up off — the server deletes the entry. */
-export async function removeTodo(id: string): Promise<RemoveTodoResponse> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].todos[':id'].$delete({
-      param: { projectId: queryScope(), id: encodeURIComponent(id) },
-    }),
-    `/todos/${encodeURIComponent(id)}`,
-  )
-}
-
-/** The Inbox card's optional backend choice + extra instructions for a Run. Unlike
- *  `ContinueOptions` these start a NEW run, so an omitted `runner`/`model` means the host's
- *  `defaultRunner`, not "keep the run's". `prompt` (#413) is extra instructions appended to the
- *  suggested/summary task text — e.g. a template inserted in the Inbox composer. */
-export interface StartTodoOptions {
-  runner?: Runner
-  model?: string
-  effort?: string
-  prompt?: string
-}
-
-/** Inbox "Run" (spec 007): the server turns the entry into a task — a one-off single-step
- *  workflow around the suggested skill when it exists, plain quick-task otherwise — and
- *  answers 201 with the new run. 409 when the entry was already started. An optional
- *  runner/model (#401) picks the engine and an optional `prompt` (#413) appends instructions;
- *  with neither, sends no body at all — the pre-#401/#413 bodyless POST, kept for compat. */
-export async function startTodo(
-  id: string,
-  opts: StartTodoOptions = {},
-): Promise<StartTodoResponse> {
-  const body = {
-    ...(opts.runner !== undefined ? { runner: opts.runner } : {}),
-    ...(opts.model !== undefined ? { model: opts.model } : {}),
-    ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
-    ...(opts.prompt !== undefined ? { prompt: opts.prompt } : {}),
-  }
-  // No override → no body at all, exactly the bodyless POST this endpoint has always sent
-  // (`continueRun` posts `{}` because it always carried one). The server tolerates either, and
-  // `hc` sends nothing for an `undefined` json — no body AND no content-type, which is the same
-  // request `mutate(…, undefined)` used to build.
-  return unwrap(
-    await cez.api.v1.p[':projectId'].todos[':id'].start.$post({
-      param: { projectId: queryScope(), id: encodeURIComponent(id) },
-      json: Object.keys(body).length > 0 ? body : undefined,
-    }),
-    `/todos/${encodeURIComponent(id)}/start`,
   )
 }
 
