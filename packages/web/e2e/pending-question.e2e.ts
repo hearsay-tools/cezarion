@@ -93,9 +93,9 @@ afterAll(async () => {
   if (dataRoot) rmSync(dataRoot, { recursive: true, force: true })
 })
 
-function openTask(width: number, height: number): void {
+function openTask(width: number, height: number, query = ''): void {
   browser.setViewport(width, height)
-  browser.goto(`${baseUrl}/p/${project}/tasks/${RUN_ID}`)
+  browser.goto(`${baseUrl}/p/${project}/tasks/${RUN_ID}${query}`)
   browser.waitForFunction(`document.querySelector(${JSON.stringify(PINNED)}) !== null`)
   browser.waitForStable(`window.__cezIdle !== false`, { holdMs: 50 })
 }
@@ -120,12 +120,15 @@ function inViewport(selector: string): string {
   })()`
 }
 
+// `?thread=virtual` forces virtua's rows: the newest page alone stays under its threshold.
 describe.each([
-  { name: 'desktop', width: 1440, height: 900 },
-  { name: '360×640', width: 360, height: 640 },
-])('the pinned pending question at $name', ({ width, height }) => {
+  { name: 'desktop', width: 1440, height: 900, query: '' },
+  { name: '360×640', width: 360, height: 640, query: '' },
+  { name: 'desktop, virtualized rows', width: 1440, height: 900, query: '?thread=virtual' },
+])('the pinned pending question at $name', ({ width, height, query }) => {
   it('pins the pending question at the tail and never answers the earlier one', () => {
-    openTask(width, height)
+    openTask(width, height, query)
+    expect(browser.evaluate(`document.querySelector('[data-slot="thread-rows"]')?.dataset.virtualized ?? null`)).toBe(query ? 'true' : 'false')
     expect(browser.count('[data-slot="ask-card"][data-resolved="false"]')).toBe(1)
     expect(browser.text(PINNED)).toContain('Which approach should I take?')
     // The origin is far above the newest page, so only the pinned copy is loaded.
@@ -134,7 +137,7 @@ describe.each([
   })
 
   it('keyboard activation of the pill focuses the first answer chip', () => {
-    openTask(width, height)
+    openTask(width, height, query)
     scrollAwayFromTail()
     browser.evaluate(`document.querySelector(${JSON.stringify(PILL)}).focus()`)
     browser.press('Enter')
@@ -146,7 +149,7 @@ describe.each([
   })
 
   it('"Show where it was asked" loads older history and focuses the marker', () => {
-    openTask(width, height)
+    openTask(width, height, query)
     browser.evaluate(`document.querySelector('[data-slot="ask-show-origin"]').focus()`)
     browser.press('Enter')
     browser.waitForValue(`(() => {
@@ -158,14 +161,24 @@ describe.each([
     expect(browser.evaluate(`document.activeElement?.closest('[data-resolved="true"]') === null`)).toBe(true)
     expect(browser.count('[data-slot="ask-card"][data-resolved="false"]')).toBe(1)
 
-    browser.evaluate(`document.querySelector('[data-slot="ask-go-to-question"]').focus()`)
+    const marker = '[data-slot="ask-go-to-question"]'
+    const box = browser.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(marker)}).getBoundingClientRect(); return { w: r.width, h: r.height } })()`) as { w: number; h: number }
+    expect(box.w).toBeGreaterThanOrEqual(44)
+    expect(box.h).toBeGreaterThanOrEqual(44)
+    for (const theme of ['dark', 'light'] as const) {
+      browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
+      const sample = browser.waitForValue<ContrastSample>(contrastSampleExpression(marker), (value) => value !== null)
+      expect(sample.ratio, `marker link in ${theme}`).toBeGreaterThanOrEqual(4.5)
+    }
+    browser.evaluate(`document.documentElement.classList.remove('light')`)
+    browser.evaluate(`document.querySelector(${JSON.stringify(marker)}).focus()`)
     browser.press('Enter')
     browser.waitForValue(`document.activeElement === document.querySelector(${JSON.stringify(FIRST_CHIP)})`,
       (value): value is true => value === true, { failure: 'Go to the question did not focus the first chip' })
   })
 
   it('keeps 44×44 targets and readable contrast in light and dark themes', () => {
-    openTask(width, height)
+    openTask(width, height, query)
     scrollAwayFromTail()
     for (const selector of [PILL, '[data-slot="ask-show-origin"]']) {
       const box = browser.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { w: r.width, h: r.height } })()`) as { w: number; h: number }

@@ -121,9 +121,9 @@ export const PENDING_ASK_SECTION_ID = 'pending-ask'
  *  entry, from the compact context, so it exists even when its turn is not loaded. Its original
  *  entry becomes a marker. Only one ask is pending, so any other unresolved ask on screen was
  *  answered in a page the view no longer holds, and renders as answered. */
-function placeAsk(entry: ThreadEntry, pendingAskId: string): ThreadEntry {
+function placeAsk(entry: ThreadEntry, pendingAskId: string | null, pinnedAsk: ThreadAsk | undefined): ThreadEntry {
   if (entry.kind !== 'ask') return entry
-  if (entry.id === pendingAskId) return { ...entry, placement: 'origin' }
+  if (entry.id === pendingAskId) return pinnedAsk !== undefined ? { ...entry, placement: 'origin' } : entry
   return entry.resolved ? entry : { ...entry, resolved: true }
 }
 
@@ -132,9 +132,11 @@ export function mainTranscriptSections(
   run: ApiRun,
   thread: ThreadState,
   currentThread: ThreadState = thread,
-  pendingAskId?: string,
+  /** The pending ask from current state: an id, `null` when current state says none is pending,
+   *  or omitted when the caller does not know (no placement and no reconciliation then). */
+  pendingAskId?: string | null,
 ): TranscriptSection[] {
-  const pinnedAsk = pendingAskId === undefined ? undefined : currentThread.turns
+  const pinnedAsk = pendingAskId === undefined || pendingAskId === null ? undefined : currentThread.turns
     .flatMap(turn => turn.items)
     .find((entry): entry is ThreadAsk => entry.kind === 'ask' && entry.id === pendingAskId && !entry.resolved)
   const currentPermissions = new Map(currentThread.turns.flatMap(turn => turn.items).filter((entry): entry is ThreadPermission => entry.kind === 'permission').map(entry => [entry.requestId, entry]))
@@ -180,7 +182,7 @@ export function mainTranscriptSections(
       ...(turn.startedAt !== undefined ? { startedAt: turn.startedAt } : {}),
       ...(turn.completed?.ts !== undefined ? { completedAt: turn.completed.ts } : {}),
       entries: overlayAgentInputNotes(run, turn.items.map(entry => {
-        if (pinnedAsk !== undefined && entry.kind === 'ask') return placeAsk(entry, pinnedAsk.id)
+        if (pendingAskId !== undefined && entry.kind === 'ask') return placeAsk(entry, pendingAskId, pinnedAsk)
         if (entry.kind !== 'permission') return entry
         visiblePermissions.add(entry.requestId)
         return currentPermissions.get(entry.requestId) ?? (entry.status === 'pending' ? { ...entry, status: 'expired' as const } : entry)

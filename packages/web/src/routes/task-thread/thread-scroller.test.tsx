@@ -737,6 +737,29 @@ describe('useThreadScroll — jump to latest', () => {
     scroller.remove()
   })
 
+  it('a jump settling after a task change never focuses the new task (#1495)', async () => {
+    let settle: () => void = () => {}
+    const scroller = document.createElement('main')
+    scroller.dataset.slot = 'main'
+    Object.defineProperties(scroller, { clientHeight: { value: 400 }, scrollHeight: { value: 1_000 } })
+    const content = document.createElement('div')
+    scroller.append(content)
+    document.body.append(scroller)
+    const hook = renderHook(({ viewKey }) => useThreadScroll(viewKey, {
+      onJumpToLatest: () => new Promise<void>((resolve) => { settle = resolve }),
+    }), { initialProps: { viewKey: 'task-a:main' } })
+    act(() => hook.result.current.attachContent(content))
+    act(() => { hook.result.current.jumpToLatest((root) => root.querySelector<HTMLElement>('[data-testid="answer"]')) })
+    hook.rerender({ viewKey: 'task-b:main' })
+    const answer = document.createElement('button')
+    answer.dataset.testid = 'answer'
+    content.append(answer)
+    await act(async () => { settle(); await Promise.resolve() })
+    expect(document.activeElement).not.toBe(answer)
+    hook.unmount()
+    scroller.remove()
+  })
+
   it('a wheel-up gesture drops a pending focus target (#1495)', async () => {
     const { scroller, hook } = attachScroller()
     document.body.append(scroller)

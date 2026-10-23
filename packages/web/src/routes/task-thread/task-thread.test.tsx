@@ -1673,6 +1673,13 @@ describe('the pending question (#1495)', () => {
     expect(screen.getByRole('button', { name: 'Show where it was asked' })).toBeTruthy()
   })
 
+  it('pins the newest of two unanswered asks without progressive history', () => {
+    const thread = reduceThread([askEvent(1, 'q0'), askEvent(2, 'q1')])
+    renderView(<ThreadView run={run('waiting')} thread={thread} />)
+    expect(document.querySelector('[data-pinned="true"]')?.textContent).toContain('Choose q1')
+    expect(document.querySelectorAll('[data-slot="ask-card"][data-resolved="false"]')).toHaveLength(1)
+  })
+
   it('an answered ask renders its summary and no pinned card', () => {
     const thread = reduceThread([askEvent(1, 'q1'), line(2, 'user-message', { text: 'First' })])
     renderView(<ThreadView run={run('running')} thread={thread} />)

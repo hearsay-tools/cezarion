@@ -273,6 +273,8 @@ export function useThreadScroll(
   useEffect(() => () => clearTimeout(wheelGestureTimerRef.current), [])
 
   const pendingFocusRef = useRef<MutationObserver | null>(null)
+  /** Each jump owns its late focus: a later jump, reader intent or a view change bumps it (#1495). */
+  const focusGenerationRef = useRef(0)
   useEffect(() => () => pendingFocusRef.current?.disconnect(), [viewKey, contentEl])
 
   const jumpToRow = useCallback((key: string, index: number, focusTarget?: (row: HTMLElement) => HTMLElement | null) => {
@@ -285,6 +287,7 @@ export function useThreadScroll(
     stuckRef.current = false
     downIntentAtRef.current = 0
     setPillVisible(true)
+    focusGenerationRef.current += 1
     pendingFocusRef.current?.disconnect()
     const findRow = () => [...contentEl.querySelectorAll<HTMLElement>('[data-row-key]')]
       .find(row => row.dataset.rowKey === key)
@@ -316,6 +319,8 @@ export function useThreadScroll(
   }, [contentEl, setOffset, viewKey])
 
   const jumpToLatest = useCallback((focusTarget?: (root: HTMLElement) => HTMLElement | null) => {
+    const generation = ++focusGenerationRef.current
+    const owner = viewKeyRef.current
     pendingFocusRef.current?.disconnect()
     const scroller = scrollElRef.current
     if (!scroller) return
@@ -332,6 +337,7 @@ export function useThreadScroll(
     }
     // The refreshed tail can remount the transcript, so the target is looked up under the
     // shell scroller, not the rows container, and focused when it exists.
+    const owns = () => focusGenerationRef.current === generation && viewKeyRef.current === owner && stuckRef.current
     const focus = () => {
       const target = focusTarget?.(scroller)
       if (!target) return false
@@ -345,13 +351,15 @@ export function useThreadScroll(
         pin()
         requestAnimationFrame(() => {
           pin()
-          // A wheel or key gesture since the click is the reader's intent: no late focus.
-          if (!focusTarget || !stuckRef.current || focus()) return
+          // A later jump, a reader gesture or another task since the click: no late focus.
+          if (!focusTarget || !owns() || focus()) return
           pendingFocusRef.current?.disconnect()
-          pendingFocusRef.current = new MutationObserver(() => {
-            if (stuckRef.current && focus()) pendingFocusRef.current?.disconnect()
+          const observer = new MutationObserver(() => {
+            if (!owns()) observer.disconnect()
+            else if (focus()) observer.disconnect()
           })
-          pendingFocusRef.current.observe(scroller, { childList: true, subtree: true })
+          pendingFocusRef.current = observer
+          observer.observe(scroller, { childList: true, subtree: true })
         })
       })
     })
@@ -361,6 +369,7 @@ export function useThreadScroll(
   const rowCount = rowKeys.length
   useLayoutEffect(() => {
     historyRestoreGenerationRef.current += 1
+    focusGenerationRef.current += 1
     pendingHistoryRestoreRef.current = null
     loadingOlderRef.current = false
   }, [viewKey])
@@ -407,6 +416,7 @@ export function useThreadScroll(
     let pointerScrolling = false
     let previousScrollTop = scroller.scrollTop
     const unstick = () => {
+      focusGenerationRef.current += 1
       pendingFocusRef.current?.disconnect()
       pendingRestoreRef.current = null
       measurementRestoreRef.current = null

@@ -221,7 +221,7 @@ export function ThreadView({
   // id comes from the transcript, the same source the ask card renders from.
   const pendingAskId = history
     ? (typeof pendingAsk?.requestId === 'string' ? pendingAsk.requestId : undefined)
-    : currentThread.turns.flatMap(turn => turn.items).find(item => item.kind === 'ask' && !item.resolved)?.id
+    : currentThread.turns.flatMap(turn => turn.items).findLast(item => item.kind === 'ask' && !item.resolved)?.id
   const historyLoading = history !== undefined && (history.isPending || history.contextPending)
   useEffect(() => {
     if (!historyLoading) voiceStore.syncPendingAsk(run.id, pendingAskId)
@@ -321,7 +321,10 @@ export function ThreadView({
     [queued, patchRunAsync, editQueuedAsync, removeQueuedAsync],
   )
 
-  const sections = useMemo(() => mainTranscriptSections(run, thread, currentThread, pendingAskId), [run, thread, currentThread, pendingAskId])
+  // Current state is authoritative once its context has loaded: `null` then says no ask is
+  // pending, so an unresolved ask left in an older page renders as answered (#1495).
+  const sectionsAskId = historyLoading ? undefined : (pendingAskId ?? null)
+  const sections = useMemo(() => mainTranscriptSections(run, thread, currentThread, sectionsAskId), [run, thread, currentThread, sectionsAskId])
   const rows = useMemo(() => buildTranscriptRows(sections, run.id), [sections, run.id])
   // A delegated run's conversation names its parent and workers; once archived they may be past
   // the run list's window (#864), so the relationships answer carries their titles too. The same

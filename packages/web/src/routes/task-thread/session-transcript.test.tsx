@@ -117,6 +117,20 @@ describe('pending ask placement (#1495)', () => {
     expect(stale).not.toHaveProperty('placement')
   })
 
+  it('keeps a stale visible ask resolved after the pending one is answered', () => {
+    // q0's answer is in a dropped page; q1 was answered from the current context.
+    const thread = visible(ask('q0'))
+    const sections = mainTranscriptSections(run({ task: '' }), thread, { turns: [{ id: 'ctx', items: [ask('q1', { resolved: true })] }] }, null)
+    expect(sections.find(section => section.id === 't1')?.entries[0]).toMatchObject({ id: 'q0', resolved: true })
+    expect(sections.map(section => section.id)).not.toContain(PENDING_ASK_SECTION_ID)
+  })
+
+  it('keeps stale asks resolved when the pending ask has no unresolved copy', () => {
+    const thread = visible(ask('q0'))
+    const sections = mainTranscriptSections(run({ task: '' }), thread, { turns: [{ id: 'ctx', items: [ask('q1', { resolved: true })] }] }, 'q1')
+    expect(sections.find(section => section.id === 't1')?.entries[0]).toMatchObject({ id: 'q0', resolved: true })
+  })
+
   it('adds nothing when no ask is pending', () => {
     const pending = ask('q1')
     const thread = visible(pending)
