@@ -7,10 +7,14 @@ catalog reads.
 
 ## Consequences
 
-Picker curation controls default-source visibility, not whether a selected skill can use its
-companions. Provision selected roots and the catalog skills their bodies name into the run’s
-own worktree. The companion scan is a bounded heuristic, not a guarantee that every dependency
-was discovered. Runs without an owned worktree retain a cache fallback.
+Team sources are optional; an absent `skillsRepos` setting supplies no team catalog. The
+project’s `disabledTeamSkills` list matches source repo and name. Read it for each catalog and
+provisioning pass, and apply it to roots and companions. Skills disabled during a run are not
+installed on later passes; existing copies stay until the task ends.
+
+Provision selected roots and the catalog skills their bodies name into the run’s own worktree.
+The companion scan is a bounded heuristic, not a guarantee that every dependency was discovered.
+Runs without an owned worktree retain a cache fallback.
 
 Never overwrite unowned content or copy managed skills into the main checkout. Record owned
 entries in the worktree Git directory and install ignore rules before files, so a crash cannot

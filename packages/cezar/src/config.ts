@@ -7,8 +7,8 @@ import { RUNNER_IDS } from './core/agent-runner.ts';
 /**
  * Optional advanced config at `.ai/cezar/config.json`. Zero-config rule:
  * a missing file behaves exactly like the default below, an unreadable or
- * invalid file degrades to the default too (never blocks startup). The key
- * can be overridden or emptied (`"skillsRepos": []` disables team skills).
+ * invalid file degrades to the default too (never blocks startup). `skillsRepos`
+ * defaults to `[]`: no team skills until a repo lists its own sources.
  */
 const skillsRepoSchema = z.object({
   /** `owner/name` (GitHub shorthand), a full git URL, or a local/file:// path. */
@@ -17,26 +17,6 @@ const skillsRepoSchema = z.object({
 });
 
 export type SkillsRepoSource = z.infer<typeof skillsRepoSchema>;
-
-export const DEFAULT_SKILLS_REPOS: SkillsRepoSource[] = [
-  { repo: 'open-mercato/skills', ref: 'main' },
-];
-
-/**
- * #359: the schema default for `skillsRepos`, suppressed under vitest. The unit suite
- * boots an app per test FILE, and every configless fixture repoRoot would otherwise
- * activate the vendor source: the first catalog read per process clones/fetches the
- * global `~/.cache/cez` bare cache and lists it with one `git show` per skill — ~50
- * real spawns plus a network fetch per file (18,798 shows / 61 fetches measured over
- * one default-worker `npm test`). That ambient load is what timed delegation-cleanup
- * and query-parity tests out at the 5s limit, and it made results depend on the
- * developer's machine state (CI has no cache and no network, so it never saw it).
- * The same env gate `open-in-terminal.ts` uses to refuse spawning from tests; a repo
- * that sets its OWN `skillsRepos` — in production or in a test — is unaffected.
- */
-function defaultSkillsRepos(): SkillsRepoSource[] {
-  return process.env.VITEST ? [] : DEFAULT_SKILLS_REPOS;
-}
 
 /** Last-resort retention when neither the repo nor the workspace says anything. */
 export const DEFAULT_WORKTREE_RETENTION = 10;
@@ -47,7 +27,7 @@ export const DEFAULT_WORKTREE_RETENTION = 10;
 const worktreeRetentionSchema = z.number().int().min(0).max(1000);
 
 const configSchema = z.object({
-  skillsRepos: z.array(skillsRepoSchema).default(defaultSkillsRepos),
+  skillsRepos: z.array(skillsRepoSchema).default([]),
   /** How many tasks may run at once (spec 006). Non-git dirs always run 1. */
   maxParallel: z.number().int().min(1).max(16).default(2),
   /**
@@ -211,43 +191,6 @@ async function ownWorktreeRetention(repoRoot: string): Promise<number | undefine
     return field.success ? field.data : undefined;
   } catch {
     return undefined; // malformed JSON — same as unset
-  }
-}
-
-/**
- * The default skills repos that are *opt-in per skill* (the "import OM skills"
- * flow): the set of repo identifiers a user must explicitly import from before
- * their skills join the catalog. This is exactly `DEFAULT_SKILLS_REPOS` when the
- * repo has NOT configured its own `skillsRepos` — the zero-config majority — and
- * empty once a repo takes control by setting `skillsRepos` (then everything it
- * lists auto-loads, unchanged).
- *
- * `loadConfig` cannot answer this: the schema's `.default(DEFAULT_SKILLS_REPOS)`
- * materializes the key, so a parsed config can't tell "the user chose these" from
- * "the user said nothing". So we probe the raw file for the key's presence — the
- * same reason `ownWorktreeRetention` below reads the raw JSON.
- */
-export async function gatedSkillsRepos(repoRoot: string): Promise<Set<string>> {
-  const none = new Set<string>();
-  let raw: string;
-  try {
-    raw = await readFile(join(repoRoot, '.ai/cezar', 'config.json'), 'utf8');
-  } catch {
-    // No file — the defaults are in effect, so they are the opt-in set.
-    return new Set(DEFAULT_SKILLS_REPOS.map((r) => r.repo));
-  }
-  try {
-    const parsed: unknown = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') {
-      return new Set(DEFAULT_SKILLS_REPOS.map((r) => r.repo));
-    }
-    // The user took control of the source list — nothing is gated; a value the
-    // schema would refuse degrades to the default too (same as `loadConfig`).
-    if ((parsed as Record<string, unknown>).skillsRepos !== undefined) return none;
-    return new Set(DEFAULT_SKILLS_REPOS.map((r) => r.repo));
-  } catch {
-    // Malformed JSON degrades to the default (which loadConfig also does).
-    return new Set(DEFAULT_SKILLS_REPOS.map((r) => r.repo));
   }
 }
 

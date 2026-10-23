@@ -232,10 +232,16 @@ describe('harness parity — final autosave beside unrelated process churn', () 
       it(`${backend} R${row} ${continuation ? 'Continue' : 'fresh'} Finish commits without holding cleanup`, async () => {
         vi.stubEnv('CEZ_DELEGATION', '1');
         const save = worktrees.autosaveCommit;
-        const saves: Promise<unknown>[] = [];
+        const saves: ReturnType<typeof save>[] = [];
+        const settled = new Set<ReturnType<typeof save>>();
+        let onSaveStart: (() => void) | undefined;
         vi.spyOn(worktrees, 'autosaveCommit').mockImplementation((dir, reason, options) => {
-          const task = save(dir, reason, { ...options, timeoutMs: 1500, killGraceMs: 100, confirmMs: 100 });
+          // This cell exercises attribution, not a Git timeout. Real saves, including
+          // the Continue setup save, keep their normal command and cleanup budgets.
+          onSaveStart?.();
+          const task = save(dir, reason, options);
           saves.push(task);
+          void task.then(() => settled.add(task), () => settled.add(task));
           return task;
         });
         vi.spyOn(console, 'warn').mockImplementation(() => undefined);
@@ -252,16 +258,33 @@ describe('harness parity — final autosave beside unrelated process churn', () 
             }
             const dir = store.getRun(runId)!.worktreePath!;
             const signalled = join(mkdtempSync(join(tmpdir(), 'cez-unrelated-')), 'signalled');
+            let births = 0;
+            let birthsAtSaveStart = 0;
             const unrelated = spawn(process.execPath, ['-e', `
 for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => require('node:fs').writeFileSync(${JSON.stringify(signalled)}, signal));
-setInterval(() => require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 40)'], { stdio: 'ignore' }), 20);`], { cwd: dir, stdio: 'ignore' });
+// Keep creating children, but let each one exit before starting the next. A 20 ms
+// interval queues Node boots faster than one contended CPU can run them (hearsay-tools/cezarion#1308).
+function churn() {
+  const child = require('node:child_process').spawn(process.execPath, ['-e', "process.send('born'); setTimeout(() => {}, 40)"], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+  child.on('message', message => process.send(message));
+  child.once('exit', churn);
+}
+churn();`], { cwd: dir, stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+            unrelated.on('message', () => { births++; });
             const unrelatedExit = new Promise(resolve => unrelated.once('exit', resolve));
             try {
+              await waitFor(() => births > 0);
               writeFileSync(join(dir, 'progress.txt'), 'save me\n');
               saves.length = 0;
+              onSaveStart = () => { birthsAtSaveStart = births; };
               expect(manager.finish(runId)).toBe(true);
-              await waitFor(() => !manager.isActive(runId), 5000);
+              // bound: with CPU 1 and two busy loops, the bounded-churn save took
+              // 5.076 s (hearsay-tools/cezarion#1308). Allow 30 s for real Git and
+              // process attribution, then guard registry release separately below.
+              await waitFor(() => saves.length > 0 && saves.every(task => settled.has(task)), 30_000);
               expect(await Promise.all(saves)).toContain('committed');
+              expect(births).toBeGreaterThan(birthsAtSaveStart);
+              await waitFor(() => !manager.isActive(runId));
               const notes = store.readEvents(runId).filter(event => event.type === 'note').map(event => String(event.message));
               expect(notes.filter(note => /autosave (failed|unsuccessful)|termination not confirmed|cleanup/.test(note))).toEqual([]);
               expect(execFileSync('git', ['show', 'HEAD:progress.txt'], { cwd: dir, encoding: 'utf8' })).toBe('save me\n');

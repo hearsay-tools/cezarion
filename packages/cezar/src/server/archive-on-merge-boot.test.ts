@@ -7,7 +7,6 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import { seedRuns, readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { SkillsUpdateCoordinator } from '../skills-update.ts';
 import { RunManager } from '../workflows/run.ts';
 import { registerProject, listProjects, clearProjectProbeCache } from '../workspace/projects.ts';
 import { ProjectContexts } from './project-context.ts';
@@ -24,7 +23,6 @@ it.each([{ single: false, repository: 'r' }, { single: true, repository: 'r' }, 
   vi.mocked(lookupMergedPullRequests).mockClear();
   vi.stubEnv('CEZ_HOME', dir()); vi.stubEnv('CEZ_PROJECT_WARMUP', '0'); vi.stubEnv('CEZ_DRY_RUN', '1');
   vi.stubEnv('CEZ_ARCHIVE_ON_MERGE', '1'); vi.stubEnv('CEZ_SINGLE_PROJECT', single ? '1' : '0');
-  vi.spyOn(SkillsUpdateCoordinator.prototype, 'start').mockImplementation(() => {});
   const boot = dir(), cold = dir();
   for (const root of [boot, cold]) {
     execFileSync('git', ['init', '-q', root]);

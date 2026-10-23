@@ -109,10 +109,11 @@ describe('More sheet', () => {
     expect(within(sheet()).getAllByRole('link').map((a) => a.textContent)).toEqual(['Skills', 'Workflows', 'Project settings', 'Inbox'])
   })
 
-  it('shows the inbox count pill and the skills update pill', () => {
-    renderBar('/', { forge: true, inbox: true }, { inboxCount: 3, skillsUpdateAvailable: true })
+  it('shows the inbox count pill and no skills update pill', () => {
+    renderBar('/', { forge: true, inbox: true }, { inboxCount: 3 })
     open()
-    expect(within(sheet()).getByText('1 update')).toBeTruthy()
+    expect(sheet().querySelector('[data-slot="skills-update"]')).toBeNull()
+    expect(within(sheet()).queryByText('1 update')).toBeNull()
     expect(sheet().querySelector('[data-slot="inbox-count"]')!.textContent).toBe('3')
   })
 

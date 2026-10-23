@@ -30,7 +30,6 @@ export function MobileTabBar({
   signal,
   projectName,
   inboxCount,
-  skillsUpdateAvailable,
   showNewTask = true,
 }: {
   items: readonly NavItem[]
@@ -39,7 +38,6 @@ export function MobileTabBar({
   signal?: ProjectSignal
   projectName?: string | null
   inboxCount?: number | null
-  skillsUpdateAvailable?: boolean
   /** The floating New task button. Off on `/new`, where it would point at the page it is on. */
   showNewTask?: boolean
 }) {
@@ -139,7 +137,6 @@ export function MobileTabBar({
         items={items}
         activeTo={activeTo}
         inboxCount={inboxCount}
-        skillsUpdateAvailable={skillsUpdateAvailable}
       />
     </>
   )
