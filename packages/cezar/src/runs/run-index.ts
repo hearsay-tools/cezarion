@@ -19,28 +19,9 @@ const EMPTY: ColdRunIndex = { runs: [], truncated: false };
 const reportedUnreadable = new Set<string>();
 
 /**
- * The READ-ONLY reader of a project's runs, for the workspace-level run index (`GET
- * /workspace/runs-index`) — the one place that must read a project's runs WITHOUT owning it.
- *
- * `RunStore.open` cannot be used here and the reason is the whole point of this module. Opening a
- * store `mkdir`s `<dataDir>/runs/`, migrates or imports `runs.db`, and the caller that opens one
- * goes on to build a `ProjectContext` — which prunes orphan worktrees and calls
- * `manager.recover()`, resuming interrupted runs. Building the workspace index must never do any
- * of that: answering "which tasks exist" would restart agents across every registered project,
- * and typing into a search box would spend tokens. Cold projects are precisely the ones the index
- * exists to reach, so `contexts.peek()` (which returns nothing for them) is not an answer either.
- *
- * Once a project's `runs.db` has completed its import it is the only source: `runs.json` beside it
- * is frozen history (#779). The rows — with `archivedWindow`, the run lists' window (#864): every
- * unarchived run plus the newest archived roots — come from the stored summary column, read
- * through a read-only connection that creates no directory or database and runs no migration.
- * Before that, the legacy `runs.json` is parsed read-only, exactly as it always was. A database
- * that exists but cannot be read contributes nothing — never the stale `runs.json` beside it.
- *
- * What this does share with the store is the schema and `reconcileLoadedRun`, so a `running` row
- * left behind by a crashed process reads as interrupted here exactly as it would once the project
- * were opened for real. A second, subtly different parse of that field would show a task as
- * running in the palette and failed the moment you clicked it.
+ * Read project history without ownership or recovery side effects. Prefer completed SQLite
+ * imports; never fall back to stale JSON when that database is unreadable. Share run decoding
+ * and normalization with the store.
  */
 export function readRunIndexFromDisk(
   dataDir: string,

@@ -24,15 +24,8 @@ import {
 } from './types.ts';
 
 /**
- * The automations family's behavior, shared by the HTTP routes and the session tools
- * (hearsay-tools/cezarion#1465): one place decides what a create, an edit or a toggle does, so
- * the cockpit, `cez automation` and the MCP tools cannot disagree. The routes stay thin and keep
- * their wire shapes; `contract-parity.automations.test.ts` checks them.
- *
- * One-time schedules add three rules on top of the repeating ones: their writes take the project
- * lease (a launch holds it, so a write never races one — Cancelled always means no task was
- * created); every write heals the archive invariant first (`ScheduleRunner.healArchive`); and a
- * due time in the past is refused wherever a body sets one.
+ * Shared automation create/edit/toggle behavior for HTTP, CLI and tools. One-time writes take
+ * the project lease, heal archive state and reject invalid past due times.
  */
 
 export const ONCE_PAST_DUE = ONCE_PAST_DUE_MESSAGE;

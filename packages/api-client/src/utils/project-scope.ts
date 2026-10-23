@@ -1,17 +1,6 @@
 /**
- * Where a request goes: which API version, and which project's copy of it.
- *
- * Callers name a ROUTE (`/runs/123/diff`), never a URL. This module turns that into the real
- * path — `/api/v1/runs/123/diff`, or `/api/v1/p/<id>/runs/123/diff` when a project scope is
- * active — which is what makes the version a single fact in the codebase rather than a prefix
- * spelled at sixty call sites. A `v2` is one edit here.
- *
- * The scope itself is module-level rather than context-threaded on purpose: the API client
- * (client.ts) is a module of plain functions and its private `send()` is the single choke point
- * every request funnels through — threading a React context down into it would mean turning
- * every exported call into a hook. Instead the ProjectScopeProvider (project-scope-context.tsx)
- * writes the scope here as it mounts/changes, and the client reads it per request. One provider
- * per app (it wraps the routed tree), so there is exactly one writer.
+ * Build versioned API paths from routes and the active project scope. The routed provider is the
+ * sole scope writer; plain client functions read it per request.
  */
 
 /**
@@ -24,16 +13,8 @@
 export const API_PREFIX = '/api/v1'
 
 /**
- * Where the service lives, when it is not the origin serving this bundle.
- *
- * Empty is the cockpit's own case and the default: the service serves the page and owns
- * `/api/v1/*` under the same authority, so a root-relative request is correct and needs no
- * configuration. A separate product embedding this client — or a cockpit served from a
- * different origin than its API — sets it once at boot.
- *
- * Deliberately a setter rather than a build-time constant: this package is framework-neutral
- * (it cannot read Vite's `import.meta.env`), and a deployment that is configured at RUN time
- * — a `<meta>` tag in the served HTML — must be able to change it without a rebuild.
+ * Runtime API base for embedding or a separate service origin. Empty means same-origin
+ * root-relative requests; keep this framework-neutral.
  */
 let baseUrl = ''
 

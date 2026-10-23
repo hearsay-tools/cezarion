@@ -14,17 +14,8 @@ const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const dist = join(packageRoot, 'dist');
 
 /**
- * The `postbuild` contract inlining (`scripts/inline-contract.mjs`), checked on the real `dist`.
- *
- * This package is published; the contract it imports a zod VALUE from is not. The build therefore
- * bundles the contract into `dist/contract/` and repoints the emitted references at it. The bundle
- * alone is not enough: the scan repoints `.d.ts` files too, so declarations must ship beside it or
- * every repointed type import resolves to nothing and silently becomes `any`.
- *
- * Nothing else in the gate can see that. Every tsconfig in this repo sets `skipLibCheck`, which is
- * exactly what suppresses the resulting `TS7016`, and `check:pack` counts files rather than
- * type-checking them — so a build that shipped untyped declarations passed green. Hence this,
- * which runs after `npm run build` like the rest of `test:package`.
+ * Check contract inlining on the real built dist. Verify runtime and declaration resolution; use
+ * skipLibCheck:false for the declaration probe. Run after the build with test:package.
  */
 
 /** Every emitted file that names the bundled contract, and the specifier it names it by. */

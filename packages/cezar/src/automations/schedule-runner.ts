@@ -11,30 +11,9 @@ import {
 } from './types.ts';
 
 /**
- * The schedule kind's evaluator (spec 2026-10-02-scheduled-automations § Lifecycle): what fires
- * when a scheduled automation's occurrence comes due, by the timer or by hand.
- *
- * The one rule that matters is the AGE rule in `fire`: how late the occurrence is decides what
- * happens — on time (within the grace window) it is `launched`; late but within a day, the
- * LATEST missed occurrence fires once as `catch-up`; older, nothing fires and the log says how
- * many were skipped. The same rule applies whether the timer fired on time, the laptop slept, or
- * cezar just booted, and `nextRunAt` always advances from `max(occurrence, now)` — which is what
- * makes a burst impossible: a daily that slept three days fires one catch-up, not three.
- *
- * Everything runs under the #651 project lease. A held (or lost) lease is the one case that
- * must NOT advance `nextRunAt`: the state file is shared, so the loser moving it on would make
- * the winner — firing from the same on-disk state — skip the occurrence entirely. The loser logs
- * `skipped` and throws `ScheduleLeaseHeldError`, so the workspace floor retries it; by then the
- * winner's receipt turns the retry into a `duplicate`, never a second launch. Held leases and
- * duplicates are not failures and do not count towards the three-strike auto-pause.
- *
- * A one-time schedule (`once`, hearsay-tools/cezarion#1465) takes its own path in every entry
- * point (`fireOnce`, `runOnce`, `launchOnce`) and never reaches the age rule above. It has no
- * later occurrence: on time or late it launches once, past its cutoff it stops as `missed`, a
- * failed launch stops it as `failed`, and a launched task archives it. Every launch path reserves
- * the same receipt key, and the ARCHIVE INVARIANT holds the one-task guarantee across crashes: a
- * `once` that has a `launched` receipt is archived, whatever the definition file says yet
- * (`healArchive`). See `.ai/specs/2026-10-02-scheduled-automations.md` § One-time schedules.
+ * Evaluate due schedules under the project lease. Repeating schedules launch at most the latest
+ * eligible occurrence, then advance; lease contention must not consume or advance it. One-time
+ * schedules use their separate late-start policy.
  */
 
 export const SCHEDULE_GRACE_MS = 10 * 60_000;
@@ -68,12 +47,8 @@ export interface ScheduleRunnerHandle {
   onChange?: (automationId: string, revision: number) => void;
   now?: () => number;
   /**
-   * Settles crash-leftover `reserved` receipts against the project's run store, as boot does
-   * (`reconcileAutomationReceipts`). Boot reconciles only a project whose context already exists;
-   * a secondary project's is built lazily, and a reservation another process left after this one
-   * booted is never seen by boot at all. The fire calls this before treating a leftover as a
-   * duplicate, so the occurrence ends `launched` (a run claims it) or `launch-error` with a
-   * retryable `failed` row — never silently consumed. Absent: the duplicate path as before.
+   * Reconcile crash-leftover reservations before duplicate detection. Do not settle this process’s
+   * in-flight reservations. A receipt must resolve to its created run or a retryable launch error.
    */
   reconcile?: () => Promise<void>;
   /**

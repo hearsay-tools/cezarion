@@ -1,39 +1,8 @@
 #!/usr/bin/env node
-// Snapshot publish orchestrator (`node scripts/release-snapshot.mjs`) — the
-// side-effect half of src/release/snapshot.ts, invoked by the CI
-// `publish-snapshot` job after `npm run build` (spec
-// .ai/specs/2026-07-18-npm-preview-publish.md, #482).
-//
-// Also the engine behind the nightly channel (.github/workflows/nightly.yml):
-// same stamping and same publish order, reached by setting CEZ_RELEASE_CHANNEL=nightly
-// rather than by the event — see resolveChannel in src/release/snapshot.ts.
-//
-// Reads the CI facts from GitHub Actions' env, decides via computeSnapshot,
-// stamps every manifest in the release set (intra-release dependencies pinned
-// exact), publishes the non-`private` ones in DEPENDENCY ORDER — api-client,
-// then the service, then the alias — always with an explicit --tag so a snapshot can never move
-// `latest`, then emits a one-line JSON result to $GITHUB_OUTPUT for the
-// PR-comment and summary steps.
-//
-// If the run is cancelled part-way through the publishes (ci.yml's workflow-level
-// concurrency can still cancel a superseded PR run), the damage is benign: an
-// earlier package's pr-tag runs briefly ahead of a later one's, the exact-version
-// comment is never posted, and the next green run re-aligns every tag. Users
-// install through the alias, which is published LAST, so its tag only ever moves
-// once everything it depends on is already on the registry.
-//
-// Publishes with --ignore-scripts: the tarball-integrity gate (check:pack) has
-// already run as the last leg of the `npm run build` this job just executed,
-// and dist/ must exist for this script to even import. Re-running the build
-// via prepublishOnly would only double the job time.
-//
-// Degrades loudly, never red: no publishable channel → exit 0 with
-// attempted=false; NPM_TOKEN missing → forces --dry-run so the pipeline stays
-// green (and visibly unconfigured) until the admin adds the secret.
-//
-// Flags: --dry-run (stamp + npm publish --dry-run, no registry writes).
-// --pack-only stamps and writes snapshot-artifacts/<key>.tgz without publishing.
-// Env override for tests: CEZ_SNAPSHOT_ROOT (defaults to the repo root).
+// Publish snapshot/nightly releases from computeSnapshot decisions. Stamp the release set,
+// skip private manifests and publish dependencies first with an explicit non-latest tag.
+// The build and pack gate run beforehand; publishing uses --ignore-scripts.
+// Missing credentials or an ineligible channel degrade to the documented no-publish result.
 
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync, mkdirSync, renameSync } from 'node:fs';

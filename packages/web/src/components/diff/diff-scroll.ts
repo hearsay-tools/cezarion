@@ -1,30 +1,9 @@
 import type { DiffFileChange } from './types'
 
 /**
- * The diff's rendering-cost rules — pure data, no DOM (the wiring lives in `diff-view.tsx`,
- * so these stay table-testable). The sibling of `routes/task-thread/thread-scroll.ts`, and
- * deliberately the SAME doctrine, because the failure mode is the same one: a list whose
- * total size is unbounded by anything the user controls.
- *
- * THE PERFORMANCE RULE (mirrors thread-scroll.ts §"THE PERFORMANCE RULE"): up to
- * {@link DIFF_VIRTUALIZE_THRESHOLD} rendered rows the diff renders every file card flat, each
- * carrying `content-visibility: auto` — the browser skips style/layout/paint for off-screen
- * cards with zero behavior risk. Past the threshold the same cards go through virtua's
- * `<Virtualizer>`, which bounds the DOM itself.
- *
- * WHY THE FILE CARD IS THE VIRTUALIZED UNIT, not the line. Three properties of this view make
- * the card the honest granularity:
- *  - Sticky file headers survive. virtua absolutely-positions each item; a sticky header stays
- *    sticky because its containing block is still its own card box, exactly as in flat mode.
- *    Virtualizing individual LINES would put each header in its own item box, leaving it a
- *    zero-height sticky range — the header would stop tracking the file under the reader.
- *  - Syntax highlighting becomes lazy for free. Shiki tokenizes per file inside the card body
- *    (`useFileTokens`); an unmounted off-screen card tokenizes nothing. Tokenizing every file
- *    of a large changeset up front is the single biggest CPU cost this view had.
- *  - Per-file state (collapse, expanded context gaps) is the thing a reader actually mutates,
- *    so lifting it out of the card — which unmount now requires — is a small, closed change.
- * The remaining case the card granularity does NOT bound is ONE enormous file, whose rows are
- * a single item. That is what the per-row `content-visibility` in the card body covers.
+ * Pure diff rendering-cost rules. THE PERFORMANCE RULE: render flat with content-visibility up
+ * to DIFF_VIRTUALIZE_THRESHOLD; above it virtualize file cards. Cards retain sticky header
+ * ranges and lazy highlighting; a huge single file still needs row containment.
  */
 
 /** Rendered rows across all files, past which the file list goes through virtua. */

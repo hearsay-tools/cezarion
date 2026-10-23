@@ -2,6 +2,8 @@
 
 cezar is a **parallel coding-agents orchestrator**: a local cockpit (CLI + browser GUI) for running and tracking AI coding-agent tasks in a repo. You type a task, pick a workflow and a backend — Claude Code, Codex or OpenCode (experimental), or a mix per step — and watch it work live: steps, tool calls, tokens, diffs. Each task runs in its own git worktree, ends at a review gate (never auto-merges), and can be pushed as a draft PR through `gh`. Everything is local: no accounts, no database server, no cloud — state lives under `.ai/cezar/`: the run store is one embedded SQLite file (`runs.db`, `node:sqlite`, built into Node), the rest is plain JSON, NDJSON and Markdown. The server stack stays deliberately small: strict TypeScript (ESM, Node 24.15+), Hono + SSE, Zod at every boundary, and YAML workflows. The cockpit is React 19 + Vite + Tailwind v4 + shadcn/ui, compiled to static assets (the legacy vanilla UI was retired in R7). Every module is meant to be read in one sitting.
 
+Architecture decisions live in [docs/adr/](docs/adr/). Consult the relevant records before changing a mechanism.
+
 ## Issue and PR citations
 
 This fork is `hearsay-tools/cezarion`; upstream is `open-mercato/cezar`.

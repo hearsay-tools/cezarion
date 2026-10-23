@@ -401,14 +401,10 @@ export const AUTOSAVE_INTERVAL_MS = 90_000;
 
 export { CHECK_KILL_GRACE_MS, CHECK_TERMINATION_CONFIRM_MS } from './grouped-command.ts';
 
-/** The periodic autosave timer is opt-in (#471): off, a task branch carries only the
- *  agent's own commits plus the turn-end/pre-PR flushes — no mid-run "cezar autosave"
- *  noise interleaving PR history. The flushes (`autosaveCommit` at turn end and before
- *  a draft PR) are NOT gated: the task branch must still end holding the finished state.
- *  The turn-end and run-finalize flushes and the timer commit only while HEAD is that
- *  branch, though (hearsay-tools/cezarion#1004): on a branch the agent checked out they
- *  commit nothing. The timer's commits are reported as one coalesced handoff line per run
- *  of periodic commits (`recordHandoffPeriodicAutosave`), never as a cockpit note. */
+/**
+ * Periodic saves are opt-in. Turn-end, finalization and pre-PR flushes remain enabled; only
+ * pre-PR follows a repointed HEAD. Coalesce timer-save evidence in the handoff.
+ */
 export function periodicAutosaveEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CEZ_AUTOSAVE === '1';
 }
@@ -692,16 +688,8 @@ export const QUEUE_WATCHDOG_MS = 60_000;
 const NO_HOLDS: AccountHolds = { deadline: new Set(), inFlight: new Set() };
 
 /**
- * May this run start, given what its account is holding?
- *
- * The two kinds of hold bind different work, and getting that wrong has produced a bug in each
- * direction (spec 2026-08-03-auto-resume-after-usage-limit):
- *
- *  - a `deadline` hold means the window is KNOWN shut until an instant, so it blocks everything
- *    on that account — resumes included. Exempting them let four resumes fire at once and
- *    re-limit one after another, which is the stampede wearing a different hat.
- *  - an `inFlight` hold means a resume is testing the window right now and nothing is proven, so
- *    it blocks fresh work but not other resumes. Blocking those deadlocked a live workspace.
+ * A deadline hold blocks all work on its account. An in-flight resume holds fresh work only;
+ * other resumes must remain eligible.
  */
 function accountHeldFor(
   run: Pick<RunRecord, 'runner' | 'agentProfile' | 'status' | 'autoResumeAttempts'>,
@@ -714,14 +702,8 @@ function accountHeldFor(
 }
 
 /**
- * Which agent ACCOUNT a run's work runs on — the thing a provider usage limit actually closes
- * (spec 2026-08-03-auto-resume-after-usage-limit).
- *
- * Backend plus agent account, because those are the two axes a limit is scoped to: a Claude
- * limit must never stall a Codex task, and a second Claude login is a second budget. A record
- * that names no runner has not started yet and will take the configured default, which is what
- * `fallbackRunner` carries; a run that HAS started always carries its resolved runner (execute
- * persists it), and only started runs can be holding.
+ * Key usage-limit holds by resolved runner and account. fallbackRunner applies before a run
+ * records its runner.
  */
 export function runAccountKey(
   run: Pick<RunRecord, 'runner' | 'agentProfile'>,
@@ -731,15 +713,8 @@ export function runAccountKey(
 }
 
 /**
- * Is this run an automatic resume that has not completed a turn yet?
- *
- * Such a run is the work the reopened window is FOR, so the hold must never apply to it — not
- * its own, and not another resume's. Two resumes that hold each other is a deadlock the queue
- * cannot recover from: both sit `queued` with a counter and no deadline, each waiting for the
- * other to prove a window neither will ever get to test. That is the shape a live run produced
- * — two scheduled tasks fired, both went `queued`, and nothing in the workspace moved again.
- *
- * The hold exists to stop NEW work walking into a closed window. A resume is not new work.
+ * Whether an automatic resume has not completed its first turn. Such resumes bypass in-flight
+ * holds, but not a future deadline hold.
  */
 function resumeInFlight(run: Pick<RunRecord, 'status' | 'autoResumeAttempts'>): boolean {
   return (
@@ -1737,22 +1712,9 @@ export class RunManager {
   }
 
   /**
-   * `agentEnv` plus the agent-account variable for the profile this STEP runs under (spec
-   * 2026-07-29-agent-profiles), and the id it resolved to so the caller can record it.
-   *
-   * Resolved per step, not per run, because a workflow can mix backends: an override naming a
-   * Claude account says nothing about which Codex account a codex step should use. Resolution
-   * order, most specific first:
-   *
-   *   1. the step's ALREADY-RECORDED `profileId` — a resume or Continue must reattach to the
-   *      account that created the session, whatever the project has since been switched to;
-   *   2. the run's composer override, but only for steps on the run's own runner;
-   *   3. the project's stored selection, and failing that the discovered default.
-   *
-   * Read fresh every time. `~/.cezar/config.json` is shared by every cezar process on this
-   * machine, so a cached snapshot is a staleness bug, and one small JSON read is free next to
-   * spawning a CLI. Never throws: an unreadable home degrades to the default profile, which is
-   * exactly the behaviour that predates profiles.
+   * Resolve this step’s account environment from agent-accounts.json and record its id. Ordinary
+   * steps prefer the recorded account, then a matching run override, then project selection and
+   * default. Keep account and session ids paired; owned workers use pinned identity.
    */
   /**
    * Ordinary runs retain mutable discovery; owned runs require explicit durable evidence. With a
@@ -1942,25 +1904,9 @@ export class RunManager {
   }
 
   /**
-   * Install the run's skills where its agent's own skill lookup finds them, for the step start,
-   * Continue, restart recovery and a live `/name` alike (#286, #413, #1024, hearsay-tools/cezarion#1408).
-   * The roots are the selected step skill and a leading `/name`, looked up in the registry the
-   * run expands from (`state.skills`); a name that is no skill (`/compact`) installs nothing.
-   *
-   * The run's OWN task worktree gets every root and the companions their bodies name
-   * (`provisionSkills`): links to local and global skills, generated `SKILL.md` files, and marked
-   * team copies, in `.claude/skills`, `.agents/skills` and `.cursor/skills`, recorded in the
-   * worktree's git dir and kept out of git by a worktree-local `.gitignore`. Companions resolve
-   * against the ungated team list too, so a default team skill switched off in the picker still
-   * serves a skill that runs it: the selection curates the picker, it is no loading boundary.
-   *
-   * Any other cwd — worktree off, a non-git project, a Continue whose worktree is gone — is the
-   * main checkout or unknown, where those directories are LOCAL skills to `discoverSkills` that
-   * would shadow the team source for every later run. A directory team root gets a per-commit
-   * cache copy there instead, and nothing else is installed. So does a worktree where no copy of
-   * it landed, such as one whose three agent dirs all link out of it; one that took only some
-   * copies names the first that landed, since the runner's own dir may be the one skipped.
-   * Returns the step-start notes and, per team root, the directory its prompt must name.
+   * Provision the step skill and leading registry slash skill for start, Continue, recovery and
+   * live input. Use ungated companions in an owned task worktree; otherwise retain the cache
+   * fallback. Native slashes that are not registry skills install nothing.
    */
   private async provisionRunSkills(
     runId: string,
@@ -3492,19 +3438,8 @@ export class RunManager {
   }
 
   /**
-   * Make one `queued` RECORD executable again — the engine half a queued run needs but does not
-   * persist (`pendingJobs` / `pendingContinuations` are process-local, the record is not).
-   *
-   * Two callers, one path: boot recovery re-adopts everything the previous process was holding,
-   * and the queue watchdog re-adopts anything the running process has somehow lost. A queued
-   * record with no work item behind it is invisible to `pump()` and would sit there for good,
-   * which is the worst failure this engine has — the task is neither running nor failed, just
-   * silently never going to happen.
-   *
-   * A continuation is reconstructed first: its executable details are gone, but the pending
-   * `continue-N` step and the session before it are durable, which is enough. Otherwise the
-   * workflow is revived from the record. A run that can be neither is failed loudly rather than
-   * left in the queue as a ghost.
+   * Rebuild executable state for a durable queued record. Shared by recovery and the watchdog;
+   * reconstruct jobs or continuations before pumping.
    */
   private async reviveQueuedRun(run: RunRecord, reason: string): Promise<void> {
     if (this.isActive(run.id) || this.workerExecutionStopped(run.id)) return;
@@ -3903,16 +3838,9 @@ export class RunManager {
   }
 
   /**
-   * Take over a run whose owning process is gone (#779, plan step 3): a control (Stop, Continue,
-   * archive…) reached a run `runOwnership` calls `orphaned`. Its family is claimed, its live runs
-   * are settled rather than resumed (`settleOrphanedRun`: interrupted, or cancelled before they
-   * began), and the family is recovered as a restart would, which repairs it but finds nothing live
-   * to resume. The control that follows then acts on a run this process now owns — rather than on
-   * a record nobody owns, a dead end until a restart — and only Continue starts agent work, with
-   * the user's own input. With `stop` the control is Stop, which the adoption carries out itself:
-   * `runId` ends cancelled, as an accepted Stop reads, rather than interrupted. False when a live
-   * process holds it after all (or it is gone): the control is refused as another process's.
-   * Adoptions run one at a time, after any recovery already in progress.
+   * Adopt a dead owner’s family for a control, then recover the settled family without resuming
+   * work. Stop cancels its target; only Continue starts work. Serialize adoptions after recovery.
+   * False means missing or live-owned.
    */
   adoptOrphanedRun(runId: string, opts: { stop?: boolean } = {}): Promise<boolean> {
     const adoption = this.adoptionTail.then(async () => {
@@ -4144,17 +4072,8 @@ export class RunManager {
   }
 
   /**
-   * Make the armed timers agree with the records and the current setting. Runs on every `pump()`
-   * — which is where a settings change lands (a config PUT refreshes the shared semaphore, which
-   * pumps every manager) — and once from `recover()`.
-   *
-   * It is a RECONCILE rather than a one-shot restore because the deadline is durable state and
-   * the timer is not: a restart, a rebuilt project context, a manager disposed mid-wait, or a
-   * refusal all leave a record promising a resume that no timer is holding. Rebuilding from the
-   * record covers every one of those at once — the alternative is a hint counting down to a time
-   * that has already passed, which is exactly the failure this method exists to make impossible.
-   *
-   * Cheap: an in-memory scan, and arming is skipped for every run already held.
+   * Reconcile process-local resume timers from durable records on pump and recovery. Retire
+   * appointments when disabled or invalid; do not leave a deadline with no wake source.
    */
   private reconcileAutoResumes(): void {
     if (!this.semaphore.autoResumeOnUsageLimit()) {
@@ -4249,24 +4168,8 @@ export class RunManager {
   }
 
   /**
-   * The failsafe: a queue must never be able to wedge.
-   *
-   * Everything else in this file makes an idle queue CORRECT under some condition — a slot cap, a
-   * repo-root lease, and now a usage-limit hold. That is also what makes a wedged queue look
-   * correct, and the hold has already produced one in the field: two resumes fired together, each
-   * holding the account the other was waiting on, and the whole workspace stopped with every task
-   * `queued`. That specific bug is fixed and tested, but "the queue stopped and nothing will ever
-   * restart it" is too expensive a failure mode to leave resting on any single fix being right.
-   *
-   * The test is deliberately about JUSTIFICATION rather than about any particular bug: idling is
-   * legitimate while work is running (here or in another project), or while a real appointment is
-   * still ahead — a scheduled resume that will fire and pump on its own. Anything else is a
-   * queue with work in it, nothing running anywhere, and no event coming to wake it. That gets one
-   * forced sweep, which starts work under the ordinary caps and lets the account's real state
-   * re-assert itself: if the window truly is shut, that task meets the limit and re-establishes an
-   * honest hold, with a real deadline behind it this time.
-   *
-   * Public so a test can drive the wedge directly instead of waiting out the interval.
+   * Repair queued records missing executable state. Rescue an idle queue only when no running work
+   * or future appointment explains it; start through ordinary caps. Public for direct tests.
    */
   async rescueStalledQueue(now = Date.now()): Promise<void> {
     if (this.disposed) return;
@@ -4306,16 +4209,8 @@ export class RunManager {
   }
 
   /**
-   * The accounts this project is currently holding: one key per run parked on a usage-limit
-   * resume that has not come due yet (spec 2026-08-03-auto-resume-after-usage-limit).
-   *
-   * Published to the shared semaphore so the hold spans PROJECTS — one Claude account can be
-   * driving tasks in three repos, and a limit closes it for all of them. Derived from the
-   * records on every ask rather than tracked as state: a deadline that passes, a resume that
-   * fires, a cancel, an archive and a delete all lift the hold with no bookkeeping.
-   *
-   * Deliberately excludes a deadline that has already passed — that run is about to resume, and
-   * holding the queue for it would only stall the very work the window reopened for.
+   * Derive this project’s future-deadline and in-flight account holds from records for the shared
+   * semaphore. Past deadlines do not block the queue.
    */
   accountHolds(now = Date.now()): AccountHolds {
     const deadline = new Set<string>();
@@ -4409,22 +4304,9 @@ export class RunManager {
   private lastNamerKey = new Map<string, string>();
 
   /**
-   * Acquire the one-at-a-time lease for runs executing in `repoRoot`.
-   *
-   * A lease waiter is idle, so it parks in `waiting` and gives its
-   * `maxParallel` slot back (the #347 rule): isolated worktrees keep using
-   * every configured slot while root runs line up. The store status stays
-   * `running` — only the queue's busy count changes, so the GUI never shows a
-   * lease-blocked run as awaiting user input.
-   *
-   * The lease is held for the run's whole lifetime, including the idle
-   * `waiting` parks between agent turns. A parked session is still live and
-   * writes to the working tree the moment it resumes, so handing the tree to
-   * another run there would reintroduce the concurrent-edit bug (#438) this
-   * lease exists to prevent.
-   *
-   * Returns false when the run was cancelled while waiting: the lease was
-   * never granted and the caller must not touch the working tree.
+   * Acquire the exclusive repository-root lease. A waiter releases scheduling capacity but stays
+   * running in the store. Hold the lease across idle turns; false means cancellation before
+   * acquisition and forbids tree access.
    */
   private async acquireRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
     // `cancel()` can land between the run going `running` and reaching here,
@@ -4587,20 +4469,9 @@ export class RunManager {
   }
 
   /**
-   * Fold a queued run's persisted prompt — `run.task` plus everything stacked
-   * onto it (#472) — into the job input that is about to execute.
-   *
-   * Called from `pump()` immediately before `execute()`, which makes the RECORD
-   * the single source of truth for a queued run's prompt. Before this, the
-   * executing copy lived in `pendingJobs` (memory) while the record held a
-   * second one, so an edit that PATCHed the record silently did nothing until a
-   * restart. `recover()` rebuilds through the same helper, so both paths agree.
-   *
-   * **Read-only, and that is load-bearing.** It composes into the in-memory
-   * `input` and never writes the folded string back to `RunRecord.task`; the
-   * task and its stack stay separate on disk for the life of the run. Writing
-   * back would re-append the whole stack on every recovery and compound without
-   * bound — asserted directly by a test.
+   * Fold the persisted task and queued message stack immediately before execution. Keep durable
+   * record state authoritative over pendingJobs. Read-only: never write the composite back to
+   * RunRecord.task; task and stack stay separate.
    */
   private hydrateQueuedInput(runId: string, input: StartRunInput): StartRunInput {
     const run = this.store.getRun(runId);

@@ -9,17 +9,9 @@ import { toast } from '@/components/ui/toaster'
 import { SettingsField } from './settings-field'
 
 /**
- * Project settings → General → Task webhook (#589): where this project's opted-in tasks POST
- * their status changes, and the Bearer token they send.
- *
- * The token is write-only. The server never answers it, only `tokenSet`, so the field stays
- * empty and says "Token set" instead; leaving it empty on Save keeps the stored token, and
- * "Clear token" is the one way to remove it. "Send test" posts one `task.test` delivery to the
- * STORED webhook, so an unsaved edit is saved first rather than tested against what is on disk.
- *
- * The state checkboxes (hearsay-tools/cezarion#1356) start from the stored `triggers`, or the
- * default when none is stored. Save sends `triggers` only when the selection changed, so a URL
- * or token edit leaves a webhook without a stored list on the default.
+ * Edit the project webhook and selected states. Token is write-only: empty keeps it, explicit
+ * clear removes it. Save pending edits before testing the stored target; omit unchanged
+ * triggers.
  */
 /** The cockpit's name for each state and when a run is in it, in `WEBHOOK_TRIGGERS` order. */
 const TRIGGER_LABELS: Record<WebhookTrigger, { label: string; hint: string }> = {

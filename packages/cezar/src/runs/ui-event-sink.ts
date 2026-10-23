@@ -1,25 +1,7 @@
 /**
- * Protocol-v2 persistence + fan-out policy for one agent session — the
- * RunManager feeds every `UiEvent` a runner emits (`SessionOptions.onUiEvent`)
- * through one sink instance and the sink decides, per the spec's performance
- * guardrails (§"Normalized agent-event protocol v2" and
- * `.ai/analysis/cockpit-ui-redesign/protocol-rationale-and-performance.md` §5):
- *
- *  - `item.delta` is COALESCED per item (~40 ms flush) onto the live wire
- *    only — raw deltas NEVER hit the NDJSON file; replay needs no delta
- *    reduction because every item's final state rides `item.completed`.
- *  - Everything else persists as snapshots via `persist()` (the store stamps
- *    `seq`/`ts`, and `appendEvent` already fans persisted lines out live, so
- *    a persisted event is never double-emitted here).
- *  - `item.updated` hits disk only on a meaningful change (status flip, new
- *    diffs/title/…) — streamed-content-only growth goes to the live wire
- *    ephemerally, mirroring what the deltas already carry.
- *  - `usage.updated` is cumulative per session: persisted only when the
- *    total (or cost) actually moved, mirroring v1's token-usage cadence.
- *
- * Output errors are swallowed: v2 is additive and best-effort — a persist
- * failure (e.g. the run was deleted mid-flush) must never disturb the v1
- * stream or crash a timer callback.
+ * Persist meaningful v2 snapshots and usage changes; coalesce deltas onto the live wire only.
+ * appendEvent fans persisted events out once. Output failures remain best-effort so additive v2
+ * cannot fail the v1 session.
  */
 
 import type { StopReason, UiEvent, UiItem, UiItemDeltaEvent } from '../core/ui-events.ts';
@@ -30,15 +12,8 @@ export const DELTA_FLUSH_MS = 40;
 const MAX_DELTA_BUFFER = 64_000;
 
 /**
- * v2 lines share the NDJSON file and the store's event bus with v1, but ride
- * a DIFFERENT SSE event name (`ui-event` vs `run-event`) so the legacy UI —
- * which knew only `run-event` and JSON-dumped unknown types into the
- * transcript; retired in R7, but the name split stays as wire shape — never
- * saw them. The discriminator is the dotted namespace:
- * every v2 type on the wire is dotted (`item.started`, `turn.completed`, …)
- * and no v1 type is. v2's only undotted type, `image`, never reaches the
- * store: the sink drops it in favor of the v1 image pipeline (which persists
- * the file and re-emits a URL instead of raw base64).
+ * Persisted v1/v2 lines share sequence allocation but use run-event/ui-event SSE names. Dotted
+ * types identify v2; raw v2 image data is dropped in favor of the v1 file-backed image pipeline.
  */
 export function isV2WireEventType(type: string): boolean {
   return type.includes('.');

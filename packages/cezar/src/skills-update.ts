@@ -343,8 +343,10 @@ export class SkillsUpdateService {
 
 export interface SkillsUpdateProject { id: string; root: string; status?: string }
 
-/** Post-listen owner for background checks. Its tail deliberately swallows
- * failures: update availability can never reject or delay server startup. */
+/**
+ * Post-listen background coordinator. Queue checks and optional application serially; failures
+ * must not reject startup.
+ */
 export class SkillsUpdateCoordinator {
   private readonly roots = new Map<string, string>();
   private tail: Promise<void> = Promise.resolve();

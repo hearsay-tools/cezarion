@@ -1,35 +1,7 @@
 /**
- * Bundle `@open-mercato/cezar-contract` into `dist` after `tsc`.
- *
- * The contract and the api-client are PRIVATE and ship no build of their own — they are linked as
- * workspace packages and consumed as TypeScript source, which is what every other consumer wants:
- * the cockpit's Vite bundles them, vitest transforms them.
- *
- * This package is the exception, because it is PUBLISHED. `workspace/migrations.ts` imports
- * `workspaceUiStateSchema` — a zod value, not a type — so the installed CLI resolves the contract
- * at runtime, and a tarball naming a package npm has never seen would fail on install. So the
- * build folds it in: esbuild compiles the contract's source to one ESM file under `dist/contract/`,
- * `tsc` emits its declarations beside it, and the emitted references are repointed at both.
- *
- * The service imports contract values through module subpaths, so the scan matches those too and
- * repoints each to the same bundle: `index.js` re-exports every module and `index.d.ts` every
- * declaration, so a subpath's names all resolve there.
- *
- * Nothing is copied at the SOURCE level — the package graph still states the dependency, and this
- * runs only when `dist` actually names it. Delete this the day the contract is published, or the
- * day nothing here imports a contract VALUE.
- *
- * An optional first argument names a different `dist` to post-process — the cockpit e2e build
- * (`.ai/scripts/build-e2e.sh`) emits into an ignored mirror instead of this package's `dist`.
- *
- * DECLARATIONS ship next to the bundle, and that is not optional. The scan below matches `.d.ts`
- * as well as `.js`, so emitted type imports get repointed too (`dist/ui-state.d.ts` names
- * `WorkspaceUiState`). esbuild emits JavaScript only, so a bundle on its own leaves those
- * declarations naming a module TypeScript cannot resolve — `TS7016`, and the type silently
- * degrades to `any` for anyone consuming the published package. Every tsconfig here sets
- * `skipLibCheck`, so nothing in this repo would have said a word. `tsc --emitDeclarationOnly`
- * mirrors the contract's `src` tree into `dist/contract/`, which is what makes
- * `./contract/index.js` resolve to a real `./contract/index.d.ts`.
+ * Bundle private runtime contract code and declarations into the published service dist, then
+ * rewrite emitted root and subpath references. Keep source imports unchanged. Remove this step
+ * when private runtime resolution is no longer needed.
  */
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';

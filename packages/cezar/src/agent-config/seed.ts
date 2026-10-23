@@ -5,16 +5,8 @@ import { agentHomePaths } from '../paths.ts';
 import { CONFIG_FILES } from './catalog.ts';
 
 /**
- * Seed the agents' gitignored personal config layer into a run's worktree
- * (spec #404 §"The worktree problem"). A run's cwd is a worktree, so a repo-root
- * edit to a gitignored file (`.claude/settings.local.json`, `CLAUDE.local.md`)
- * would never reach the agent — the file does not exist there. Copying it in,
- * and excluding it via the shared `info/exclude`, makes the personal layer take
- * effect immediately without ever committing it. Mirrors `materializeSkillDir`.
- *
- * Only Claude's gitignored layer is seeded (the only vendor with a documented
- * untracked personal file). Tracked files keep honest "applies after commit"
- * semantics and are never touched here.
+ * Seed only supported gitignored personal config into task worktrees and exclude it from Git.
+ * Tracked files apply through commits and are never copied here.
  */
 
 function git(cwd: string, args: string[]): Promise<{ ok: boolean; stdout: string }> {

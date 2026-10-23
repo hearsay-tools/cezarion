@@ -6,22 +6,9 @@ import { useEffect, useState } from 'react'
 import type { RunEvent } from '@open-mercato/cezar-api-client'
 
 /**
- * The per-run event stream (`GET /api/runs/:id/events`), as a raw ordered list — R2 Step 2.4's
- * proof that the protocol-v2 pipe works end to end. Deliberately NO rendering and NO
- * interpretation: R3's thread view is the consumer that turns these into items; this hook only
- * owns the subscription mechanics that every consumer would otherwise get wrong the same way.
- *
- * The endpoint speaks TWO SSE event names on one socket (src/server/server.ts):
- *  - `run-event` — the v1 lines, what the legacy transcript renders;
- *  - `ui-event`  — protocol v2 (dotted types): persisted snapshots AND the ephemeral coalesced
- *    `item.delta` flushes, which never hit the NDJSON file.
- * Both land in the one list, in arrival (= `seq`) order, because v2 is *additive*: a consumer
- * migrating one panel at a time needs both vocabularies over one clock.
- *
- * Dedup MUST be `seq > maxSeq`, never equality or gap detection: the server replays the whole
- * NDJSON file on every (re)connect — dropping everything at or below the high-water mark is
- * what makes an EventSource auto-reconnect invisible — and ephemeral deltas consume seq numbers
- * that never reappear in a replay, so gaps are normal, not loss.
+ * Ordered run-event and ui-event subscription list. Keep both generations. Deduplicate by seq
+ * above the high-water mark; live-only events consume sequence numbers, so replay gaps are
+ * normal.
  */
 
 /** Both wire names. Exported so tests and future consumers subscribe to exactly this set. */

@@ -107,18 +107,8 @@ export function workspaceUiStatePath(): string {
 }
 
 /**
- * Agent accounts — extra config dirs for a second login of the same agent CLI, plus which one
- * each project uses (spec `2026-07-29-agent-profiles.md`).
- *
- * Its OWN file rather than a key in `config.json`, and that is the whole point: a cezar version
- * that has never heard of accounts does not open this file, so it cannot drop them. Living in
- * `config.json` made their survival depend on a `.passthrough()` in *another version's* source —
- * a guarantee this repo cannot make on behalf of a build the user might switch to, and one that
- * evaporates entirely the moment any version fails to parse that file and degrades to defaults
- * (the next merge-write then rewrites it without them).
- *
- * The per-project selections live here too, beside the accounts they name, so deleting an account
- * and scrubbing every reference to it stays ONE atomic write.
+ * Agent accounts and per-project selections use their own file. Account deletion and selection
+ * cleanup share one atomic write.
  */
 export function agentAccountsPath(): string {
   return join(cezarHomeDir(), 'agent-accounts.json');

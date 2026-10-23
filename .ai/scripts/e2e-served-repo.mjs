@@ -1,15 +1,8 @@
 #!/usr/bin/env node
-// The project the shared E2E server serves: a fresh isolated clone of this checkout, never the
-// checkout itself. Serving the checkout put the server's runs, task worktrees and every file a
-// spec seeds into the checkout's own .ai/cezar — in the main checkout that is the live cockpit's
-// data dir, which refuses a second server, and a successful boot would have written into it.
-//
-//   node .ai/scripts/e2e-served-repo.mjs <checkout> <target>          → prints the clone's root
-//   node .ai/scripts/e2e-served-repo.mjs --sync <checkout> <target>   → exit 3: HEAD moved
-//
-// <target> is replaced only when a previous call created it (removeLane's ownership checks).
-// --sync refreshes a reused server's clone in place: the server used to read the checkout live,
-// so an edited skill or workflow must reach it without a reboot.
+// Serve an owned isolated clone, never the live checkout.
+// node .ai/scripts/e2e-served-repo.mjs <checkout> <target> prepares the clone.
+// --sync <checkout> <target> refreshes fixture content; exit 3 means HEAD moved.
+// Replace targets only after removeLane ownership checks.
 import { spawnSync } from 'node:child_process';
 import { existsSync, realpathSync } from 'node:fs';
 import { cloneIsolatedCheckout, removeLane, syncCurrentEdits } from './e2e-lanes.mjs';

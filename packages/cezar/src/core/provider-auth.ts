@@ -83,33 +83,8 @@ const DEFAULT_MAX_BUFFER = 256 * 1024;
 
 const COMMAND_TIMEOUT_MS = 10_000;
 /**
- * How long a probe result stands before it is re-checked — deliberately ASYMMETRIC.
- *
- * Which login an agent is signed into is operating knowledge: it matters for every run, and it
- * changes only when someone runs `claude auth login`. Re-probing it every few seconds cost a CLI
- * shell-out per provider and per account on every page load, for an answer that had almost
- * certainly not changed. So a CONNECTED answer is kept for minutes.
- *
- * A NOT-CONNECTED answer is re-checked sooner, for ONE reason: display self-healing. If you log in
- * from a terminal, cezar cannot see it happen, so a card that says "disconnected" must eventually
- * find out on its own. The window is a minute rather than seconds because reading is now
- * stale-while-revalidate (see `status`): every expiry costs a background probe, and a cockpit
- * polling this endpoint would turn a five-second window into a spawn every five seconds, forever,
- * on any machine where one provider is logged out — which is most of them.
- *
- * What this window is NOT is a correctness mechanism for starting runs. `provider-action-gate.ts`
- * refuses to start a run against a provider it believes disconnected, and it re-verifies before it
- * refuses (`providerActionError` in `server.ts`) rather than trusting an aging negative. That
- * inversion is what makes a long window safe here: the only reader that must not be wrong pays for
- * its own certainty, on the rare path where it is about to say no.
- *
- * A stale CONNECTED answer needs no window at all: the run starts, and a credential that really has
- * gone bad surfaces as a runtime auth failure, which is latched and overrides this cache on the spot
- * (`withRuntimeFailures`).
- *
- * Anything cezar CAN observe invalidates explicitly instead of waiting for either window: opening a
- * login (`POST /providers/connect`), repointing or removing an account (`forgetProfileStatus`), and
- * a runtime rejection.
+ * Asymmetric display cache lifetimes: keep connected answers longer; recheck negatives sooner.
+ * Actions verify before refusing. Runtime incidents override ordinary cached status.
  */
 const CONNECTED_TTL_MS = 10 * 60_000;
 const UNSETTLED_TTL_MS = 60_000;
@@ -483,18 +458,8 @@ export class ProviderAuthService {
   }
 
   /**
-   * Every provider's authentication state — STALE-WHILE-REVALIDATE, the same policy the health
-   * snapshot uses.
-   *
-   * Once anything is known, a reader gets it immediately and an expired cache is refreshed BEHIND
-   * the answer instead of in front of it. Awaiting the refresh is what made `GET
-   * /providers/status` cost ~0.8s here (and ~3s on a slower box) every time the window lapsed:
-   * the endpoint is read by the cockpit on a poll, so "occasionally slow" means "slow in the UI,
-   * unpredictably". Only a genuinely cold cache waits, and after the boot warm there isn't one.
-   *
-   * `refresh: true` still blocks — it is what "Check again", `POST /providers/connect` and the
-   * action gate's verify-before-refuse use, and they are asking precisely because they need an
-   * answer that is true NOW.
+   * Serve known status while refreshing expired entries in the background. A cold cache or
+   * refresh:true waits for a probe.
    */
   status(options?: { refresh?: boolean }): Promise<ProviderStatusResponse> {
     if (process.env.CEZ_DRY_RUN === '1' || providerAuthChecksDisabled()) {
@@ -550,48 +515,10 @@ export class ProviderAuthService {
   }
 
   /**
-   * Ask the provider's OWN CLI whether a runtime rejection was real, and drop the incident when it
-   * was not. Resolves to the recovered row when it cleared one, `null` otherwise.
-   *
-   * `profile` aims the self-check at the account the failing step actually ran under (spec
-   * 2026-07-29-agent-profiles). Probing the bare default instead would answer a question nobody
-   * asked: a named account can be rejected while the default login is fine, and clearing the latch
-   * on the default's answer lets every future run on the broken account fail again. A named
-   * verification writes the per-account cache and stamps its row `profileId`; the default
-   * verification keeps folding into the whole-response cache exactly as before. The CALLER decides
-   * what to do when the recorded account cannot be resolved — for the runtime watcher that is
-   * "keep the latch" (an unverifiable incident is not a recovered one).
-   *
-   * A latch is raised by matching a runner's error text against
-   * {@link isRuntimeProviderAuthFailure} — a heuristic over vendor prose — and it then outranks every
-   * probe (`withRuntimeFailures`). Before this existed, `clearRuntimeAuthFailure` had exactly one
-   * caller, `POST /providers/:provider/retry`, so the only way out of a latch was a human opening
-   * Settings and pressing "Try again". That button clears the incident and re-probes, and it works,
-   * which is the whole diagnosis: the credentials were still there. A transient 401 and a false
-   * positive of the text match were both indistinguishable from a real logout, and both parked the
-   * cockpit until someone clicked.
-   *
-   * So the latch stays authoritative — it is raised instantly, and `provider-action-gate` keeps
-   * refusing to start runs against it — but it no longer stands unexamined. This is deliberately the
-   * same two steps the retry route performs, minus the human: probe, then clear.
-   *
-   * What it will NOT do:
-   * - clear an incident it did not observe. The id is captured before the probe and handed to
-   *   `clearRuntimeAuthFailure`, so a rejection that arrives mid-probe survives the answer to an
-   *   older question.
-   * - clear on anything but `connected`. `disconnected`, `not-installed` and `unknown` all leave the
-   *   latch alone; an inconclusive probe is not evidence of health.
-    * - spawn more than one probe per provider per {@link RUNTIME_AUTH_VERIFY_COOLDOWN_MS}. A
-    *   verification skipped by that cooldown returns `null`, leaves the latch standing, and arms ONE
-    *   deferred re-verification at cooldown expiry
-    *   ({@link ProviderAuthService.scheduleRuntimeVerification}) — the runtime watcher fires only on
-    *   the latch edge, so without it a re-latch inside the window could never be re-checked.
-    *
-    * `observed` names the incident generation the CALLER saw when it decided to check. The runtime
-    *   watcher resolves the failing account asynchronously before calling this, and a newer failure
-    *   can replace the incident during that wait — a check for the older question then stands down
-    *   at the door (no probe) instead of answering the newer one with the older aim.
-    */
+   * Verify the observed runtime incident with the failing account’s native CLI. Clear only a
+   * connected result for the same generation. Coalesce probes; a cooldown decline schedules one
+   * deferred check. Return recovered status or null.
+   */
   async verifyRuntimeAuthFailure(
     provider: ProviderId,
     profile?: { id: string; configDir: string | null },
@@ -650,17 +577,8 @@ export class ProviderAuthService {
   }
 
   /**
-   * A verification declined by the cooldown must not become a dead end. The runtime watcher fires
-   * only on the latch edge — a rejection that re-latches right after a successful check gets its
-   * check declined here, and nothing would ever re-ask the CLI: later error lines see a latch that
-   * already stands, and only Settings' Try again could clear it. So the declined request arms ONE
-   * deferred re-verification at cooldown expiry; later declined requests re-arm it (never stack
-   * it), the newest aim and generation winning. The retry is bound to the incident it was
-   * scheduled against: a newer failure that arrived meanwhile (a non-transition line the watcher
-   * skips) stands when it fires, because the queued aim may no longer be the account that failed
-   * and its answer must not clear what it was never asked about. Firing after the latch is gone
-   * is equally a no-op — {@link ProviderAuthService.verifyRuntimeAuthFailure} returns before
-   * probing — so the chain ends the moment the incident is answered.
+   * Schedule one cooldown retry bound to its account aim and incident generation. Replace earlier
+   * retries; a cleared or changed incident makes the retry a no-op.
    */
   private scheduleRuntimeVerification(
     provider: ProviderId,
@@ -677,20 +595,8 @@ export class ProviderAuthService {
   }
 
   /**
-   * Fold ONE freshly probed row into the cached response.
-   *
-   * Without this, dropping a latch would uncover whatever the last full probe happened to say about
-   * that provider — which can be older than the answer we just got, and on a cold-ish cache can be
-   * `unknown`. Clearing an incident only to reveal a stale contradiction would trade a red banner for
-   * a grey one. The cache TIMESTAMP is deliberately untouched: this corrects one row, it is not a
-   * full probe, and it must not extend the whole response's lifetime.
-   *
-   * The row also carries a FRESH generation, and a generation alone is not enough when the cache is
-   * cold: a full probe already in flight would land afterwards and, being a complete response, would
-   * replace the correction with rows gathered before the recovery was known (or discard it outright
-   * when `completed` is still unset). So when nothing is cached yet, the merge waits for the
-   * in-flight probe to land and folds over ITS answer — still generation-stamped, so a probe that
-   * started even later wins on its own merits.
+   * Merge one probed row without extending the full-response TTL. Fence against newer probes; on a
+   * cold cache merge after the in-flight full probe.
    */
   private rememberProbedRow(status: ProviderStatus): void {
     const generation = ++this.nextProbeGeneration;
@@ -786,17 +692,8 @@ export class ProviderAuthService {
   }
 
   /**
-   * One NON-default agent account's authentication state (spec 2026-07-29-agent-profiles).
-   *
-   * Deliberately a separate entry point from `status()`, which keeps answering exactly one row
-   * per provider — the discovered default — so `GET /api/v1/providers/status` is byte-identical
-   * for anyone with no extra accounts. Per-account rows are carried by the agent-profiles route.
-   *
-   * Cached on the same asymmetric lifetime as `status()` (`cacheTtlFor`: minutes for a connected
-   * answer, a minute for anything else), keyed by `(provider, profileId)` so two Claude accounts never read
-   * each other's answer. The runtime-auth latch is deliberately NOT applied: it is a coarse
-   * per-provider signal and stamping it onto every account of that provider would mark an
-   * untouched account as broken.
+   * Probe one named account, cached by provider and profile id. Keep default status unchanged. Do
+   * not apply the coarse provider runtime latch to every named account.
    */
   async profileStatus(
     provider: ProviderId,
@@ -847,21 +744,8 @@ export class ProviderAuthService {
   }
 
   /**
-   * The cached answer for one account, or `undefined` when nothing is known yet — WITHOUT
-   * spawning anything.
-   *
-   * Every probe shells out to an agent CLI, which costs hundreds of milliseconds per provider and
-   * per account. A route whose real job is "what exists" must not pay that: `GET /api/v1/health`
-   * already established this posture (it serves whatever the cache holds and never pays a `gh`
-   * shell-out), and this is the same rule for auth.
-   *
-   * The peeks deliberately ignore the TTLs below — they answer with the last thing known, however
-   * old. The short window exists to stop a stale NEGATIVE from blocking a run, and a peek blocks
-   * nothing: it fills in a dot on a settings page that offers Connect and a re-check right beside
-   * it. Applying the window here instead made the whole cache expire in five seconds on any machine
-   * where a single provider is logged out — which is most of them, since few people are signed into
-   * all three — and put the shell-out straight back on the page load this exists to protect.
-   * Callers that need a guaranteed-fresh answer call {@link status} or pass `refresh`.
+   * Read cached account status without spawning or enforcing TTL. Inventory callers can show
+   * last-known status; callers needing a fresh answer must probe.
    */
   peekProfileStatus(provider: ProviderId, profileId: string): ProviderStatus | undefined {
     if (process.env.CEZ_DRY_RUN === '1') {

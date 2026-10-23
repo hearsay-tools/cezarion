@@ -138,22 +138,8 @@ export function stepKind(step: WorkflowStepDef): 'agent' | 'check' {
 }
 
 /**
- * A guard note prepended to an agent step's prompt when the workflow chains
- * 2+ AGENT steps (#410): every step gets the SAME `input.task` text and shares
- * one run-level handoff journal, so a later step's fresh session can read an
- * earlier step's own "done" signal (its final report, its handoff Resume
- * notes) and — with nothing in its prompt saying otherwise — conclude the
- * OVERALL task is already achieved. Since only the chain's last step honors
- * `CEZ:DONE` as an early-completion signal (`run.ts`'s `interactive` gate),
- * this silently skipped exactly the last selected skill: it ended its first
- * turn with the marker instead of doing its own step's work.
- *
- * `index` is the position in `steps`; both the gate and the "step N of M"
- * numbering count agent steps only. Check steps are shell commands, not
- * sessions the model reasons about, so a workflow with one agent step and any
- * number of checks around it (the README's `implement` + `verify` shape) is
- * not a chain and gets no note — that single-step case stays byte-for-byte
- * unchanged. Returns undefined for check steps.
+ * Tell each chained agent step to complete its own goal before CEZ:DONE. An earlier step’s done
+ * report does not complete a later step’s work. Steps share the task and handoff journal.
  */
 export function chainStepNote(steps: WorkflowStepDef[], index: number): string | undefined {
   const step = steps[index];

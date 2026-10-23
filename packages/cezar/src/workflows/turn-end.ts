@@ -1,8 +1,7 @@
 /**
- * The turn-end rule (spec 2026-10-17-unified-waits, hearsay-tools/cezarion#1234): one decision
- * for both turn-end handlers and the boundary an acknowledgement settles late. Input already on
- * its way defers; done finishes; any open wait parks; a non-final workflow step completes; any
- * other turn end gets one nudge, then a human wait. There is no prose classification.
+ * Shared turn-end decision for initial sessions, Continue and late input ACKs. Owed input
+ * defers; done, waits and step completion take precedence. Final no-wait turns use bounded
+ * nudges then a human wait; never classify prose.
  */
 
 /** What a turn end knows when it decides. */

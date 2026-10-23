@@ -6,22 +6,9 @@ import { createRunInputBaseSchema } from './runs.ts';
 import { automationScheduleSchema } from './automation-schedule.ts';
 
 /**
- * The AUTOMATIONS family of `/api/v1` (#694) — the per-project GitHub triggers, their runtime
- * state, the manual "test filter" checks and the execution log.
- *
- * These shapes exist twice on purpose and only once as a DEFINITION of what the wire carries.
- * `packages/cezar/src/automations/types.ts` owns the STORAGE schemas: they are `.passthrough()`,
- * because a definitions/state/log file written by a newer cezar must survive a round trip through
- * an older one rather than lose keys it has never heard of. The schemas here are the CLOSED wire
- * half of those files — every key the routes actually answer with, and no index signature, so a
- * consumer compiles against a shape rather than against `unknown`. `src/server/
- * contract-parity.automations.test.ts` checks each response schema against the route that serves
- * it, in both directions.
- *
- * What that guard can and cannot see is worth knowing: a named key whose type drifts fails, and a
- * key this file makes required that the route does not send fails — but an EXTRA key arriving
- * through the storage schemas' catchall cannot, since the route's own type admits any key. That is
- * the same limit `contract-parity.workspace.test.ts` documents for the open GUI-pref bags.
+ * Closed automation wire schemas. Storage schemas preserve unknown keys separately. Parity
+ * checks compare named response fields in both directions; open storage catchalls limit
+ * extra-key detection.
  */
 
 // ---- the definition ------------------------------------------------------------------------

@@ -12,19 +12,9 @@ import { mergeWriteWorkspaceUiState } from './ui-state.ts';
 export { mergeWriteWorkspaceUiState } from './ui-state.ts';
 
 /**
- * Workspace config migrations (spec 2026-07-20-multi-project-workspace,
- * "Migrations"). Deliberately tiny and **config-files-only** — run state
- * (`runs.json`, NDJSON) keeps the existing additive-zod convention and never
- * migrates. Rules, verbatim from the spec:
- *
- * - **idempotent** — every migration is safe to re-run after a crash mid-way;
- * - **additive** — never deletes or rewrites the user's per-repo files;
- * - **non-blocking** — a failing migration logs ONE warning and boot proceeds
- *   degraded with in-memory defaults; it is never a boot failure (the
- *   zero-config law "a read-only home degrades to a smaller cockpit" holds);
- * - **concurrency-safe** — every write takes the same read-modify-write +
- *   atomic-rename path as all workspace writes (`mergeWriteWorkspaceConfig`),
- *   and two processes racing the same idempotent step converge.
+ * Idempotent, additive workspace-config migrations. Preserve per-repo files and degrade on
+ * failure. Use the shared merge writer, with its bounded concurrency guarantees. Run-database
+ * migrations belong to runs/run-database.ts, not this module.
  */
 
 export interface WorkspaceMigration {
