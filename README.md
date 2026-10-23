@@ -382,7 +382,7 @@ The moves that make the cockpit worth the browser tab:
 
 ## Cockpit tour
 
-Eight views, one browser window, all live over Server-Sent Events (seven until you opt into the Inbox):
+Task and project views share one browser window and live updates over Server-Sent Events:
 
 | View | What's in it |
 |---|---|
