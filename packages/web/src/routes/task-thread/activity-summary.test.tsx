@@ -109,3 +109,24 @@ it('keeps every value while the summary has no layout box', () => {
   resize(0)
   expect(visible()).toEqual(['opus'])
 })
+
+// hearsay-tools/cezarion#1537: the folded Activity header puts its 8px gap before the first shown
+// value. The summary counts that lead and draws it itself, so a value never shows into room
+// that only exists while nothing shows.
+it('counts the lead before the first shown value and draws it there', () => {
+  const resize = layout()
+  render(<ActivitySummary lead={8} items={[
+    { id: 'runner', priority: 2, content: 'claude' },
+    { id: 'model', priority: 4, content: 'auto' },
+  ]} />)
+  resize(47)
+  expect(visible()).toEqual([])
+  expect(document.querySelector<HTMLElement>('[data-summary-item="model"]')?.style.marginInlineStart).toBe('')
+  resize(48)
+  expect(visible()).toEqual(['auto'])
+  expect(document.querySelector<HTMLElement>('[data-summary-item="model"]')?.style.marginInlineStart).toBe('8px')
+  resize(98)
+  expect(visible()).toEqual(['claude', 'auto'])
+  expect(document.querySelector<HTMLElement>('[data-summary-item="runner"]')?.style.marginInlineStart).toBe('8px')
+  expect(document.querySelector<HTMLElement>('[data-summary-item="model"]')?.style.marginInlineStart).toBe('')
+})
