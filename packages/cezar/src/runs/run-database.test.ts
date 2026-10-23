@@ -514,13 +514,15 @@ describe('RunDatabase', () => {
     // which a schema-6 build would drop as unreadable.
     // Schema 8 (hearsay-tools/cezarion#1236): a usage-limited run is waiting with autoResumeAt,
     // which a schema-7 build would strip of its appointment and show as Needs you.
-    it('creates a fresh database at schema 8, migrates a v3 one keeping its rows, and refuses version 9', () => {
-      expect(RUN_DATABASE_SCHEMA_VERSION).toBe(8);
+    // Schema 9 (hearsay-tools/cezarion#1446): records may carry process waits, which a schema-8
+    // build would drop as unreadable.
+    it('creates a fresh database at schema 9, migrates a v3 one keeping its rows, and refuses version 10', () => {
+      expect(RUN_DATABASE_SCHEMA_VERSION).toBe(9);
       openDb().close();
       open.length = 0;
       const fresh = new DatabaseSync(path, { readOnly: true });
       try {
-        expect(fresh.prepare('PRAGMA user_version').get()).toEqual({ user_version: 8 });
+        expect(fresh.prepare('PRAGMA user_version').get()).toEqual({ user_version: 9 });
       } finally {
         fresh.close();
       }
@@ -535,8 +537,8 @@ describe('RunDatabase', () => {
       for (const db of open.splice(0)) db.close();
       const migrated = new DatabaseSync(path);
       try {
-        expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 8 });
-        migrated.exec('PRAGMA user_version = 9');
+        expect(migrated.prepare('PRAGMA user_version').get()).toEqual({ user_version: 9 });
+        migrated.exec('PRAGMA user_version = 10');
       } finally {
         migrated.close();
       }
