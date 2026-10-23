@@ -1584,6 +1584,7 @@ npm run typecheck    # refresh server declarations, then check all four workspac
 npm run typecheck:web # refresh server declarations, then check web sources
 npm test             # vitest — server + cockpit unit suites
 npm run test:changed # iteration only: tests related to branch + working-tree changes
+pnpm metrics <file> # function complexity; add --test <test-file> for coverage and CRAP
 npm run test:unit    # node:test — fast core-module tests
 npm run test:package # pack/install and exercise the built CLI
 npm run test:e2e     # real-browser cockpit suite (agent-browser)
@@ -1593,6 +1594,63 @@ npm run test:e2e:local # full browser suite in four isolated, concurrent lanes
 The four-lane local browser run needs roughly 8 GiB of RAM at peak. It keeps CI's
 serial-per-shard policy unchanged. See [cockpit E2E testing](packages/web/e2e/README.md#full-local-suite-in-four-lanes)
 for lane isolation, logs, and cleanup.
+
+Calculate metrics for one JavaScript or TypeScript file, or select a function:
+
+```bash
+pnpm metrics packages/contract/src/attention.ts
+pnpm metrics packages/contract/src/attention.ts --function deriveAttention
+pnpm --silent metrics packages/contract/src/attention.ts --line 150 --json
+pnpm metrics packages/contract/src/attention.ts --function deriveAttention --test packages/contract/src/attention.test.ts
+pnpm metrics packages/contract/src/attention.ts --coverage coverage/coverage-final.json
+```
+
+Complexity follows ESLint's classic convention, including short-circuit operators,
+optional chaining, default parameters and each non-default switch case. Functions,
+methods and arrow functions have separate scores. Module and class initialization
+are excluded. Use `Class.method` or `--line` when a name is ambiguous.
+
+CRAP is `C² × (1 − coverage)³ + C`, using executable line coverage within each
+function body. This is the line-coverage variant; the original proposal used
+basis-path coverage. An empty function uses its call counter. Missing coverage
+shows `unavailable`, or `null` for CRAP in JSON. It never assumes zero coverage.
+The command discovers `coverage/coverage-final.json` from the source directory
+up to the checkout root, then the current directory. An explicit `--coverage`
+selects an Istanbul JSON report. Reports older than the source leave CRAP unavailable;
+reports must describe the current source, so regenerate them after source changes.
+
+Repeat `--test` to collect coverage from several Vitest test files. This runs only
+the supplied tests in the unit projects, with two workers and a ten-minute limit.
+Coverage files are temporary and are removed after the calculation. A failed test
+run exits nonzero and produces no scores. Without `--test`, no tests run. Test logs
+go to stderr, so `--json` stdout contains only the report. This tool belongs to the
+checkout and is available after the normal dependency installation. Use
+`pnpm --silent metrics ... --json` to also suppress pnpm's command banner.
+
+The tool is bundled in the [check-code-quality skill](.ai/skills/check-code-quality/SKILL.md).
+Ask an agent to measure a file, function or module for a scoped stats report.
+That path uses available coverage and reports missing CRAP without starting the
+PR process. Ask explicitly for fresh coverage when needed.
+
+The skill's pre-PR path selects changed functions, fixes small problems, and files larger
+inherited refactors as `code-quality-improvement` issues. The scan report defines
+the limits: CRAP 30 and complexity 20. Scores equal to a limit pass. Copy the
+whole skill directory to use the tool in another repository.
+
+Run the complete pre-PR measurement with the bundled command:
+
+```bash
+node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
+  --runner node --test scripts/metrics.test.mjs --test scripts/changed-functions.test.mjs \
+  --test scripts/quality-check.test.mjs --node-import scripts/test-git-env.mjs \
+  --output .ai/analysis/code-quality.md
+```
+
+Select relevant tests for the changes. For Vitest, use `--runner vitest` and
+`--project` where needed. The command collects coverage once for all changed
+functions and writes Markdown plus JSON. Exit codes distinguish a pass (0),
+exceeded limits (1), and incomplete measurement (2). See the skill for how to
+resolve findings before opening a PR.
 
 For iteration, run affected test files or `npm run test:changed` (inspect with
 `-- --plan`; override the local main comparison with `-- --base=<ref>`).
