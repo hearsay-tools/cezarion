@@ -3,7 +3,7 @@
 // Short SQLite transactions make join/release/reclamation atomic, including after SIGKILL.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { connect, createServer } from 'node:net';
@@ -12,9 +12,9 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
 const windowsScript = resolve(import.meta.dirname, 'test-env-windows.ps1');
-function windowsProbe(mode, payload) {
+function windowsProbe(mode, payload, timeout = 15_000) {
   const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', windowsScript, mode, payload], {
-    encoding: 'utf8', windowsHide: true, timeout: 15_000,
+    encoding: 'utf8', windowsHide: true, timeout, maxBuffer: 64 * 1024,
   });
   if (result.status !== 0) return undefined;
   return result.stdout.trim();
@@ -48,6 +48,66 @@ function identity(pid) {
     if (ps.status === 0 && ps.stdout.trim()) return { start: ps.stdout.trim() };
   }
   return {};
+}
+
+// Diagnostics are transient and never participate in ownership or reclamation.
+// Limit reads as well as display size; command lines can contain arbitrary arguments.
+function commandLine(pid) {
+  try {
+    if (process.platform === 'linux') {
+      const fd = openSync(`/proc/${pid}/cmdline`, 'r');
+      try {
+        const buffer = Buffer.alloc(16 * 1024);
+        const length = readSync(fd, buffer, 0, buffer.length, 0);
+        return buffer.subarray(0, length).toString('utf8').split('\0').filter(Boolean);
+      } finally { closeSync(fd); }
+    }
+    const raw = process.platform === 'win32' ? windowsProbe('command', String(pid), 2000)
+      : process.platform === 'darwin' ? spawnSync('ps', ['-ww', '-o', 'command=', '-p', String(pid)], {
+        encoding: 'utf8', timeout: 2000, maxBuffer: 16 * 1024,
+      }) : undefined;
+    const text = typeof raw === 'string' ? raw : raw?.status === 0 ? raw.stdout.trim() : undefined;
+    // ps and Windows expose a rendered command, not argv. Keep that text for display;
+    // only recognize the simple, unambiguous Node invocation used by Squeal below.
+    return text ? { text } : undefined;
+  } catch { return undefined; }
+}
+
+function squealDaemon(argv) {
+  const name = value => value?.split(/[\\/]/).at(-1);
+  if (!['node', 'node.exe'].includes(name(argv[0]))) return false;
+  let index = 1;
+  while (['--no-warnings', '--disable-warning=ExperimentalWarning'].includes(argv[index])) index++;
+  return /(?:^|[\\/])dist[\\/]cli[\\/]squeal\.mjs$/.test(argv[index] ?? '') && argv[index + 1] === 'daemon';
+}
+
+const SQUEAL_GUIDANCE = 'If Squeal covers this spec, read its result with squeal status --wait 60000; do not start a duplicate run.';
+
+/** Best-effort snapshot, called only after the lease transaction commits.
+ * Probe overrides keep unreadable and changing process identities testable without
+ * changing real processes or making diagnostics a lease-acquisition option.
+ */
+export function describeTestEnvHolders(holders, { identify = identity, command = commandLine } = {}) {
+  let squeal = false;
+  const owners = holders.map(holder => {
+    const fallback = `pid ${holder.pid}`;
+    try {
+      if (!holder.start || identify(holder.pid).start !== holder.start) return fallback;
+      const result = command(holder.pid);
+      if (!result || identify(holder.pid).start !== holder.start) return fallback;
+      const argv = Array.isArray(result) ? result : undefined;
+      const text = (argv ? argv.join(' ') : result.text).replace(/[\x00-\x1f\x7f-\x9f]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (!text) return fallback;
+      // Only accept individually quoted/simple tokens from a rendered command.
+      // Embedded quotes or escapes make the hint uncertain; the command still prints.
+      const renderedArgs = argv ?? (/^(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s"']+)(?:\s+(?:"[^"\r\n]*"|'[^'\r\n]*'|[^\s"']+))*$/.test(result.text.trim())
+        ? result.text.trim().match(/"[^"\r\n]*"|'[^'\r\n]*'|[^\s"']+/g).map(arg => arg.replace(/^(?:"(.*)"|'(.*)')$/, '$1$2')) : []);
+      squeal ||= squealDaemon(renderedArgs);
+      const summary = text.length > 200 ? text.slice(0, 199) + '…' : text;
+      return `${fallback} (${summary})`;
+    } catch { return fallback; }
+  }).join(', ');
+  return { owners, guidance: squeal ? `\n${SQUEAL_GUIDANCE}` : '' };
 }
 
 // A shell can die before its build/clone child. Retain its group claim until the
@@ -158,9 +218,15 @@ export async function acquireTestEnvLease(root, { token, pid = process.pid, grou
         db.exec('ROLLBACK');
         throw error;
       }
-      const owners = holders.map(holder => `pid ${holder.pid}`).join(', ');
-      if (performance.now() >= deadline) throw new Error(`timed out waiting for test environment held by ${owners}; the active environment was left unchanged`);
-      if (!logged) { onWait?.(`waiting for test environment held by ${owners}`); logged = true; }
+      if (performance.now() >= deadline) {
+        const { owners, guidance } = describeTestEnvHolders(holders);
+        throw new Error(`timed out waiting for test environment held by ${owners}; the active environment was left unchanged${guidance}`);
+      }
+      if (!logged) {
+        const { owners, guidance } = describeTestEnvHolders(holders);
+        onWait?.(`waiting for test environment held by ${owners}${guidance}`);
+        logged = true;
+      }
       await delay(Math.min(100, Math.max(1, deadline - performance.now())));
     }
   } catch (error) { db.close(); throw error; }

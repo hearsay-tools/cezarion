@@ -5,6 +5,11 @@ if ($Mode -eq 'identity') {
   if ($target) { [string]$target.StartTime.ToUniversalTime().Ticks } else { 'gone' }
   exit
 }
+if ($Mode -eq 'command') {
+  $target = Get-CimInstance Win32_Process -Filter "ProcessId = $([int]$Payload)" -ErrorAction SilentlyContinue
+  if ($target.CommandLine) { $target.CommandLine.Substring(0, [Math]::Min(16384, $target.CommandLine.Length)) }
+  exit
+}
 Add-Type -TypeDefinition @'
 using System;
 using System.ComponentModel;
