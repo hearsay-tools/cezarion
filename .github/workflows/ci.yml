@@ -578,6 +578,7 @@ jobs:
     if: ${{ !cancelled() && needs.verify.result == 'success' && github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main' }}
     permissions:
       actions: read
+      checks: read
       contents: write
       issues: read
       pull-requests: write
