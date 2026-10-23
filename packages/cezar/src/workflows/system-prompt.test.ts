@@ -236,7 +236,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
   /** Returns once the run is terminal and the bookkeeping it started (turn-end markers, the
    *  namer) has landed. */
   async function runToEnd(
-    input: { task: string; systemPrompt?: string; generateFollowups?: boolean },
+    input: { task: string; systemPrompt?: string },
     selectedWorkflow: WorkflowDef = workflow,
   ): Promise<string> {
     expectNoLiveRun();
