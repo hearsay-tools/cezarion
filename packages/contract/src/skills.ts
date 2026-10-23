@@ -42,8 +42,7 @@ export { teamSkillRefSchema, type TeamSkillRef } from './team-skill-ref.ts';
 
 /**
  * A team skill from `GET /skills/importable`, whether or not the project switched it off. The
- * full definition lets the Skills catalog preview it.  from `GET /skills/importable`, independent of
- * whether it is enabled. The full definition lets the Skills catalog preview it before enabling.
+ * full definition lets the Skills catalog preview it before it is switched on.
  */
 export const importableSkillSchema = skillSchema;
 export type ImportableSkill = z.infer<typeof importableSkillSchema>;

@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { archiveFinishedRequestSchema, pinRunInputSchema } from '@open-mercato/cezar-contract/runs';
 import { permissionDecisionSchema } from '@open-mercato/cezar-contract/permissions';
 import { setWorkspaceUiStateInputSchema } from '@open-mercato/cezar-contract/workspace';
+import type { TeamSkillRef } from '@open-mercato/cezar-contract/skills';
 import type { z } from 'zod';
 import type { AppType } from './app-type.ts';
 
@@ -88,6 +89,12 @@ describe('every mutating route carries a typed body into AppType', () => {
   type WorkspaceUiStatePutBody = Schema['/api/v1/workspace/ui-state']['$put']['input']['json'];
   type _WorkspaceUiStateInputCheck = Assert<
     Mutual<z.infer<typeof setWorkspaceUiStateInputSchema>, WorkspaceUiStatePutBody>
+  >;
+
+  // PUT /ui-state takes the off-list as `{ repo, name }` refs, not bare names.
+  type UiStatePutBody = Schema['/api/v1/ui-state']['$put']['input']['json'];
+  type _UiStateDisabledTeamSkillsCheck = Assert<
+    Mutual<UiStatePutBody['disabledTeamSkills'], TeamSkillRef[] | undefined>
   >;
 
   type _PinInputChecks = [
