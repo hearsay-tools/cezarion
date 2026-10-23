@@ -349,8 +349,9 @@ async function handle(command) {
       return;
     case 'prompt':
       record({ userText: command.message, imageCount: (command.images ?? []).length });
-      // The delivery control reads the prompt Cezar sent, before a nudge's scripted answer replaces it.
-      return prompt({ ...command, message: answerNudge(command.message) }, command.message);
+      // The delivery control reads both the prompt Cezar sent and a nudge's scripted answer.
+      { const answered = answerNudge(command.message);
+        return prompt({ ...command, message: answered }, answered === command.message ? answered : `${command.message}\n${answered}`); }
     default:
       write({ ...(command.id ? { id: command.id } : {}), type: 'response', command: command.type, success: false, error: `Unknown command: ${command.type}` });
   }

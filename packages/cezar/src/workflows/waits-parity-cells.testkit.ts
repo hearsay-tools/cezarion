@@ -2271,6 +2271,9 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       /** The heartbeat words, oldest first: the Progress log keeps the newest at the top. */
       const words = (id: string) => [...readFileSync(handoffPath(join(root, '.ai/cezar'), id), 'utf8')
         .matchAll(/turn complete — status=([^\n]+)/g)].map(match => match[1]!).reverse();
+      /** The words that settle something. A nudged turn can end before its acknowledgement on its own
+       *  (OpenCode HTTP/SSE), which writes a plain `running` line before the acknowledgement settles it. */
+      const settledWords = (id: string) => words(id).filter(word => word !== 'running');
       const idleClose = async (id: string) => {
         (engine().active.get(id) as unknown as { idleTimer: NodeJS.Timeout & { _onTimeout(): void } }).idleTimer._onTimeout();
         await until(() => !manager.isActive(id) && store.getRun(id)?.status === 'waiting');
@@ -2296,7 +2299,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
         await until(() => gated(run.id));
         expect(humanOpen(run.id)).toEqual([expect.objectContaining({ via: 'no-wait', source: 'cezar' })]);
-        expect(words(run.id)).toEqual(['running (no-wait nudge)', 'waiting']);
+        expect(settledWords(run.id)).toEqual(['running (no-wait nudge)', 'waiting']);
       });
 
       it(`${runner} U27 U5 a Continue's no-wait turn end gets the nudge, then the no-wait human wait`, async () => {
@@ -2308,7 +2311,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         await until(() => prompted(runner, NO_WAIT_NUDGE).length === 2 && gated(run.id));
         expect(store.getRun(run.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
         expect(humanOpen(run.id)).toEqual([expect.objectContaining({ via: 'no-wait', source: 'cezar' })]);
-        expect(words(run.id)).toEqual(['running (no-wait nudge)', 'waiting', 'running (no-wait nudge)', 'waiting']);
+        expect(settledWords(run.id)).toEqual(['running (no-wait nudge)', 'waiting', 'running (no-wait nudge)', 'waiting']);
       });
 
       it(`${runner} U27 U5 a no-wait turn end an acknowledgement settles late opens the no-wait human wait and writes its line`, async () => {
@@ -2332,7 +2335,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         const { p, w } = await parentWithWorker(runner);
         await ignoreRefusal(runner, p.id, `Workers are still live: ${w.id}.`, () => workerWaits(p.id)[0]?.phase === 'open');
         expect(workerWaits(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'completion', workerIds: [w.id] })]);
-        expect(words(p.id).slice(-2)).toEqual(['running (completion nudge)', 'waiting']);
+        expect(settledWords(p.id).slice(-2)).toEqual(['running (completion nudge)', 'waiting']);
       });
 
       it(`${runner} U27 U6 a Continue's second refused done with live workers parks on the completion wait and logs waiting`, async () => {
@@ -2345,7 +2348,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(prompted(runner, refusal)).toHaveLength(1);
         expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
         expect(workerWaits(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'completion', workerIds: [w.id] })]);
-        expect(words(p.id).slice(-2)).toEqual(['running (completion nudge)', 'waiting']);
+        expect(settledWords(p.id).slice(-2)).toEqual(['running (completion nudge)', 'waiting']);
       });
 
       it(`${runner} U27 U6 a second refused done an acknowledgement settles late parks on the completion wait and logs waiting`, async () => {
