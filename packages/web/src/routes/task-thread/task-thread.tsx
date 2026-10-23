@@ -221,7 +221,7 @@ export function ThreadView({
   // id comes from the transcript, the same source the ask card renders from.
   const pendingAskId = history
     ? (typeof pendingAsk?.requestId === 'string' ? pendingAsk.requestId : undefined)
-    : currentThread.turns.flatMap(turn => turn.items).findLast(item => item.kind === 'ask' && !item.resolved)?.id
+    : currentThread.turns.flatMap(turn => turn.items).reverse().find(item => item.kind === 'ask' && !item.resolved)?.id
   const historyLoading = history !== undefined && (history.isPending || history.contextPending)
   useEffect(() => {
     if (!historyLoading) voiceStore.syncPendingAsk(run.id, pendingAskId)
