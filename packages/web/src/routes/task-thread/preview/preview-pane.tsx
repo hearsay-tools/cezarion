@@ -107,7 +107,7 @@ function statusFor(
     case 'downloading': return { tone: 'pending', label: 'downloading' }
     case 'download-failed': return { tone: 'danger', label: 'download failed' }
     case 'sandbox-failed': return { tone: 'danger', label: 'browser failed' }
-    case 'browser-exited': return { tone: 'danger', label: 'browser exited' }
+    case 'browser-exited': return { tone: 'danger', label: stage.reason === 'timeout' ? 'browser timed out' : 'browser exited' }
     case 'needs-approval': return { tone: 'neutral', label: 'not started' }
     case 'port-held': return { tone: 'danger', label: 'port in use' }
     case 'server-starting': return { tone: 'pending', label: `waiting for :${stage.server.port}` }

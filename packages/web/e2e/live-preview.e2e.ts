@@ -146,8 +146,22 @@ describe('live preview', () => {
     // First the pane leaves its state screens (server start, then the browser's cold launch, which
     // took over 10 s on a loaded CI runner: failure bundle live-preview/registers-runs-streams-
     // takes-a-click-and-stops-1, PR #792), so the frame check below gets its own wait budget. A
-    // launch that fails leaves a state screen up, and the bundle shows its reason.
-    browser.waitForFunction(`!document.querySelector('[data-slot="preview-pane"] [data-slot="preview-state"]')`)
+    // launch that fails leaves a terminal state screen up: the wait ends on it at once and the
+    // failure names the pane's reason, so the bundle states why the browser stopped. CI run
+    // 39864969030, job 120124823181 (artifact cockpit-failures-shard-1) shows Chrome stalling past
+    // the 30 s launch deadline; the launch now retries once (hearsay-tools/cezarion#1474).
+    const left = browser.waitForValue(
+      `(() => {
+        const state = document.querySelector('[data-slot="preview-pane"] [data-slot="preview-state"]');
+        if (!state) return 'gone';
+        const stage = state.getAttribute('data-state');
+        return ['browser-exited', 'sandbox-failed', 'chromium-missing'].includes(stage) ? stage + ': ' + state.textContent : null;
+      })()`,
+      value => typeof value === 'string',
+      // bound: two 30 s launch attempts, each after a server start (hearsay-tools/cezarion#1474)
+      { timeoutMs: 75_000 },
+    )
+    expect(left).toBe('gone')
 
     // The canvas holds the page: the fixture button's fill is green, not white or empty. The frame
     // must also be the size of the pane (Chromium's viewport follows the pane through a burst of

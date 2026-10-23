@@ -336,13 +336,20 @@ async function install(opts: DownloadChromiumOptions, platformKey: PlatformKey, 
 }
 
 export class ChromiumError extends Error {
+  /** How the process ended, when it ended on its own: its exit code, or the signal that stopped it. */
+  readonly exitCode?: number;
+  readonly signal?: string;
+
   constructor(
     readonly kind: 'not-installed' | 'sandbox' | 'timeout' | 'exited',
     readonly stderrTail: string,
     message: string,
+    exit: { exitCode?: number; signal?: string } = {},
   ) {
     super(message);
     this.name = 'ChromiumError';
+    if (exit.exitCode !== undefined) this.exitCode = exit.exitCode;
+    if (exit.signal !== undefined) this.signal = exit.signal;
   }
 }
 
@@ -350,6 +357,12 @@ const STDERR_TAIL_BYTES = 4096;
 const SANDBOX_FAILURE = /No usable sandbox|zygote_host_impl|setuid sandbox/;
 /** A cold start (fresh profile, loaded machine) can take well over 10 s; CI runners did (#781). */
 const LAUNCH_TIMEOUT_MS = 30_000;
+/** A launch that misses its deadline is killed and tried once more: on a CI runner Chrome stalled
+ *  past 30 s before it printed anything, while every launch on a loaded host took 2 s at most
+ *  (hearsay-tools/cezarion#1474). Only a timeout is retried; an exit fails at once. */
+const LAUNCH_ATTEMPTS = 2;
+/** How long a timed-out launch may take to exit after SIGKILL before the retry starts anyway. */
+const KILLED_EXIT_WAIT_MS = 5_000;
 
 /** Chromium's argv: the prototype's, without its automatic `--no-sandbox` for root.
  *  `--proxy-server=direct://` so Linux Chrome does not inherit HTTP(S)_PROXY: it will not send
@@ -391,10 +404,11 @@ function disablePasswordManagerLeakDetection(profileDir: string): void {
 
 /**
  * Starts headless Chromium on a loopback DevTools port of its choosing and resolves once it has
- * written `DevToolsActivePort` into the profile. Failure kills the process and says why. While it
- * runs, `CHROMIUM_PID_FILE` in the profile's parent names it. Leak detection is turned off in
- * the profile Preferences before spawn so Chrome's leaked-password dialog cannot freeze preview
- * input (hearsay-tools/cezarion#972).
+ * written `DevToolsActivePort` into the profile. A launch that misses the deadline is killed and
+ * tried once more (`LAUNCH_ATTEMPTS`); any other failure kills the process and says why at once.
+ * While it runs, `CHROMIUM_PID_FILE` in the profile's parent names it. Leak detection is turned
+ * off in the profile Preferences before spawn so Chrome's leaked-password dialog cannot freeze
+ * preview input (hearsay-tools/cezarion#972).
  */
 export async function launchChromium(
   bin: string,
@@ -404,6 +418,22 @@ export async function launchChromium(
 ): Promise<{ proc: ChildProcess; port: number }> {
   mkdirSync(profileDir, { recursive: true });
   disablePasswordManagerLeakDetection(profileDir);
+  const timeoutMs = opts.timeoutMs ?? LAUNCH_TIMEOUT_MS;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      return await launchOnce(bin, profileDir, env, timeoutMs);
+    } catch (error) {
+      if (!(error instanceof ChromiumError) || error.kind !== 'timeout') throw error;
+      if (attempt >= LAUNCH_ATTEMPTS) {
+        throw new ChromiumError('timeout', error.stderrTail, `Chromium did not open its DevTools port within ${timeoutMs / 1000} s, twice (${bin})`);
+      }
+    }
+  }
+}
+
+/** One launch attempt. A timed-out attempt is killed and has exited (or had `KILLED_EXIT_WAIT_MS`
+ *  to) before it rejects, so a retry does not share the profile with it. */
+async function launchOnce(bin: string, profileDir: string, env: NodeJS.ProcessEnv, timeoutMs: number): Promise<{ proc: ChildProcess; port: number }> {
   const portFile = join(profileDir, 'DevToolsActivePort');
   // A file from an earlier launch would hand back a port nobody listens on.
   rmSync(portFile, { force: true });
@@ -425,9 +455,12 @@ export async function launchChromium(
     tail = Buffer.concat([tail, chunk]).subarray(-STDERR_TAIL_BYTES);
   });
   let exit: string | undefined;
+  let ended: { exitCode?: number; signal?: string } = {};
   let missing = false;
+  const closed = new Promise<void>(resolve => proc.once('close', () => resolve()));
   proc.once('close', (code, signal) => {
     exit ??= `Chromium exited (${signal ?? code})`;
+    ended = signal ? { signal } : code === null ? {} : { exitCode: code };
   });
   proc.on('error', err => {
     exit ??= `Chromium could not start: ${err.message}`;
@@ -439,10 +472,9 @@ export async function launchChromium(
     proc.kill('SIGKILL');
     const stderrTail = tail.toString('utf8');
     if (missing) return new ChromiumError('not-installed', stderrTail, message);
-    return new ChromiumError(SANDBOX_FAILURE.test(stderrTail) ? 'sandbox' : kind, stderrTail, message);
+    return new ChromiumError(SANDBOX_FAILURE.test(stderrTail) ? 'sandbox' : kind, stderrTail, message, kind === 'exited' ? ended : {});
   };
 
-  const timeoutMs = opts.timeoutMs ?? LAUNCH_TIMEOUT_MS;
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (exit) throw fail('exited', exit);
@@ -450,7 +482,13 @@ export async function launchChromium(
       const port = Number(readFileSync(portFile, 'utf8').split('\n')[0]);
       if (port > 0) return { proc, port };
     }
-    if (Date.now() >= deadline) throw fail('timeout', `Chromium did not open its DevTools port within ${timeoutMs / 1000} s (${bin})`);
+    if (Date.now() >= deadline) {
+      const error = fail('timeout', `Chromium did not open its DevTools port within ${timeoutMs / 1000} s (${bin})`);
+      let timer: NodeJS.Timeout | undefined;
+      await Promise.race([closed, new Promise<void>(resolve => (timer = setTimeout(resolve, KILLED_EXIT_WAIT_MS)))]);
+      clearTimeout(timer);
+      throw error;
+    }
     await new Promise(resolve => setTimeout(resolve, 50));
   }
 }
