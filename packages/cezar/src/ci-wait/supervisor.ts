@@ -1,6 +1,6 @@
 import { setTimeout as delay } from 'node:timers/promises';
 import { ciWaitSchema, ciWaitResultSchema, type CiPrIdentity, type CiWait, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
-import { CiGithubError, CiSemaphore, GithubCiClient, type GithubCheck, type GithubPrMetadata } from './github.ts';
+import { CiGithubError, CiSemaphore, GithubCiClient, type GithubCheck, type GithubPrMergeState, type GithubPrMetadata } from './github.ts';
 
 export const CI_WATCHER_LIMIT = 4;
 /** PR-head probes, absent-check rechecks, and stale-watch rechecks. Not the discovery deadline. */
@@ -27,7 +27,8 @@ function outcome(checks: GithubCheck[]): CiWaitResult['outcome'] | undefined {
   if (checks.some(c => c.bucket === 'pass')) return 'passed';
   return 'skipped';
 }
-function observation(wait: CiWait, result: CiWaitResult['outcome'], rows: GithubCheck[], extra: Partial<Pick<CiWaitResult, 'observedHeadSha' | 'diagnostic'>> = {}): CiWaitResult {
+type ObservationExtra = Partial<Pick<CiWaitResult, 'observedHeadSha' | 'diagnostic' | 'mergeable' | 'mergeStateStatus' | 'mergedAt' | 'mergeCommitSha'>>;
+function observation(wait: CiWait, result: CiWaitResult['outcome'], rows: GithubCheck[], extra: ObservationExtra = {}): CiWaitResult {
   const checks = rows.slice(0, 100).map(row => ({name:clean(row.name,256),state:clean(row.state,256),link:safeLink(row.link)}));
   const value: CiWaitResult = { outcome: result, headSha: wait.headSha, observedAt: new Date().toISOString(), checks, totalChecks: rows.length, truncated: rows.length > checks.length || rows.some((row,i) => i < checks.length && (row.name !== checks[i]!.name || row.state !== checks[i]!.state || row.link !== checks[i]!.link)), ...extra };
   while (Buffer.byteLength(JSON.stringify(value)) > CI_RESULT_LIMIT && checks.length) { checks.pop(); value.truncated = true; }
@@ -55,6 +56,52 @@ export class CiWatcherSupervisor {
     return task;
   }
   close(): void { this.lifetime.abort(); }
+
+  /**
+   * Poll a merge wait every `CI_PROBE_MS`, the first read at once, taking the client's query permit
+   * per read and never a watcher slot. `MERGED` → `merged`, `CLOSED` → `closed`, a conflict →
+   * `conflicting` when the wait wakes on one; a head change and green checks keep it open.
+   * Transient failures retry inside the deadline, which then names the last one.
+   */
+  private async runMerge(wait: CiWait, caller: AbortSignal, signal: AbortSignal): Promise<CiWaitResult> {
+    let last: GithubPrMergeState | undefined;
+    let lastQueryError: CiGithubError | undefined;
+    let retry = 0;
+    const observe = (result: CiWaitResult['outcome'], extra: ObservationExtra = {}) => observation(wait, result, [], {
+      ...(last ? { mergeable: last.mergeable, mergeStateStatus: last.mergeStateStatus } : {}),
+      ...(last && last.headSha !== wait.headSha ? { observedHeadSha: last.headSha } : {}),
+      ...extra,
+    });
+    const failed = (error: unknown) => observe('error', {diagnostic: error instanceof CiGithubError ? `${error.code}: ${error.message}` : 'unavailable: CI watcher failed; register a new wait.'});
+    const stopped = () => {
+      const cancelled = caller.aborted || this.lifetime.signal.aborted;
+      return observe(cancelled ? 'cancelled' : 'deadline', !cancelled && lastQueryError ? { diagnostic: `${lastQueryError.code}: ${lastQueryError.message}` } : {});
+    };
+    while (!signal.aborted) {
+      try {
+        last = await this.github.mergeState(wait, signal);
+        signal.throwIfAborted();
+        retry = 0; lastQueryError = undefined;
+        if (last.state === 'MERGED') return observe('merged', { ...(last.mergedAt ? { mergedAt: last.mergedAt } : {}), ...(last.mergeCommitSha ? { mergeCommitSha: last.mergeCommitSha } : {}) });
+        if (last.state === 'CLOSED') return observe('closed', {diagnostic: 'The pull request was closed without merging.'});
+        if (wait.wakeOnConflict && last.mergeable === 'CONFLICTING') {
+          return observe('conflicting', {diagnostic: 'The pull request conflicts with its base and cannot merge until someone resolves it.'});
+        }
+        await delay(CI_PROBE_MS, undefined, { signal });
+      } catch (error) {
+        if (signal.aborted) return stopped();
+        if (error instanceof CiGithubError && (error.code === 'command_failed' || error.code === 'query_timeout')) {
+          lastQueryError = error;
+          const retryMs = CI_RETRY_MS[retry] ?? CI_PROBE_MS;
+          retry = Math.min(retry + 1, CI_RETRY_MS.length);
+          try { await delay(retryMs, undefined, { signal }); } catch { return stopped(); }
+          continue;
+        }
+        return failed(error);
+      }
+    }
+    return stopped();
+  }
 
   private async run(wait: CiWait, caller: AbortSignal): Promise<CiWaitResult> {
     const remaining = Date.parse(wait.deadline) - Date.now();
@@ -86,6 +133,8 @@ export class CiWatcherSupervisor {
         ? { diagnostic: `${lastQueryError.code}: ${lastQueryError.message}` } : {});
     };
     if (remaining <= 0 || signal.aborted) return stopped();
+    // A merge wait polls the PR's state and holds no watcher slot (hearsay-tools/cezarion#1425).
+    if (wait.until === 'merge') return this.runMerge(wait, caller, signal);
     const snapshot = async (): Promise<CiWaitResult | undefined> => {
       const before = (await readMetadata()).headSha;
       if (before !== wait.headSha) return observe('head_changed', { observedHeadSha: before });
