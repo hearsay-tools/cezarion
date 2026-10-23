@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { normalizeSidebarLimits, type UiState } from '@open-mercato/cezar-contract/workspace';
 
@@ -54,6 +55,23 @@ export function readProjectUiStateSync(repoRoot: string): UiState {
     return parseUiState(readFileSync(uiStatePath(repoRoot), 'utf8'));
   } catch {
     return {};
+  }
+}
+
+/**
+ * Replace the project's file in one step: write a sibling temporary file, then rename it over
+ * the old one. A reader, the synchronous one included, sees the old file or the new one, never
+ * a partial write it would read as `{}` and so as an empty team-skill off-list (#1494).
+ */
+export async function writeProjectUiState(repoRoot: string, state: UiState): Promise<void> {
+  const file = uiStatePath(repoRoot);
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+    await rename(temporary, file);
+  } catch (err) {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw err;
   }
 }
 

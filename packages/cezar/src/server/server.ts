@@ -233,7 +233,7 @@ import { checkoutRepo, type CloneRunner } from './checkout.ts';
 import { createProject, listGithubOwners, type CommandRunner } from './create-project.ts';
 import { armPreview, ProjectContextError, ProjectContexts, projectWarmupEnabled, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
-import { readProjectUiState, readUiState, uiStatePath } from '../ui-state.ts';
+import { readProjectUiState, readUiState, writeProjectUiState } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
 import { isLoopbackHostHeader, normalizeHostname, resolveCapabilities } from './capabilities.ts';
 import { applicationUpdateInputSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract/application-update';
@@ -3344,7 +3344,7 @@ export function createApp(deps: ServerDeps) {
       const merged = { ...(await readProjectUiState(repoRoot)), ...parsed.data };
       try {
         await mkdir(dataDir, { recursive: true });
-        await writeFile(uiStatePath(repoRoot), `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+        await writeProjectUiState(repoRoot, merged);
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
       }

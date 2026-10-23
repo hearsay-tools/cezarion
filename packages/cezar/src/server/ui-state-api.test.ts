@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import type { Hono } from 'hono';
@@ -67,6 +67,16 @@ describe('the ui-state API — skillUsage (#408)', () => {
     expect(res.status).toBe(200);
     expect(await (await get()).json()).toEqual({ disabledTeamSkills: [{ repo: 'acme/skills', name: 'x' }] });
     expect(rawFile().disabledTeamSkills).toEqual([{ repo: 'acme/skills', name: 'x' }]);
+  });
+
+  it('PUT replaces the file in one step, so a concurrent reader never sees a partial off-list (#1494)', async () => {
+    writeFileSync(uiStatePath(), JSON.stringify({ disabledTeamSkills: [{ repo: 'acme/skills', name: 'x' }] }));
+    const before = statSync(uiStatePath()).ino;
+    expect((await put({ skillUsage: { a: 1 } })).status).toBe(200);
+    // A rename puts a new inode in place; an in-place write keeps the old one and is seen half-done.
+    expect(statSync(uiStatePath()).ino).not.toBe(before);
+    expect(rawFile().disabledTeamSkills).toEqual([{ repo: 'acme/skills', name: 'x' }]);
+    expect(readdirSync(dirname(uiStatePath())).filter((name) => name.endsWith('.tmp'))).toEqual([]);
   });
 
   it('refuses a disabledTeamSkills entry without a name', async () => {
