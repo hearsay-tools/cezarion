@@ -54,10 +54,12 @@ export interface ThreadScrollControls {
   ownsMeasurementRestore: (viewKey: string) => boolean
   /** True while the reader is away from the live tail — the pill's visibility. */
   pillVisible: boolean
-  /** The pill's action: pin to the live tail and stick again. */
-  jumpToLatest: () => void
-  /** Navigate within loaded history, through virtua when the target is unmounted. */
-  jumpToRow: (key: string, index: number) => void
+  /** The pill's action: pin to the live tail and stick again. A focus target, when given,
+   *  receives focus once it exists under the scroller (the pending question, #1495). */
+  jumpToLatest: (focusTarget?: (root: HTMLElement) => HTMLElement | null) => void
+  /** Navigate within loaded history, through virtua when the target is unmounted. Focus goes to
+   *  `focusTarget(row)` when it returns an element, otherwise to the row itself. */
+  jumpToRow: (key: string, index: number, focusTarget?: (row: HTMLElement) => HTMLElement | null) => void
   /** Load one older page while preserving the current pixel anchor. */
   loadOlder: () => void
   /** Re-pin if stuck — the keyboard-settled hook (content height didn't change, but the
@@ -272,7 +274,7 @@ export function useThreadScroll(
   const pendingFocusRef = useRef<MutationObserver | null>(null)
   useEffect(() => () => pendingFocusRef.current?.disconnect(), [viewKey, contentEl])
 
-  const jumpToRow = useCallback((key: string, index: number) => {
+  const jumpToRow = useCallback((key: string, index: number, focusTarget?: (row: HTMLElement) => HTMLElement | null) => {
     const scroller = scrollElRef.current
     if (!scroller || !contentEl) return
     pendingRestoreRef.current = null
@@ -288,9 +290,10 @@ export function useThreadScroll(
     const focusRow = () => {
       const row = findRow()
       if (!row || getComputedStyle(row).visibility === 'hidden') return false
-      row.tabIndex = -1
-      row.focus({ preventScroll: true })
-      if (document.activeElement !== row) return false
+      const target = focusTarget?.(row) ?? row
+      if (target === row) row.tabIndex = -1
+      target.focus({ preventScroll: true })
+      if (document.activeElement !== target) return false
       pendingFocusRef.current?.disconnect()
       return true
     }
@@ -311,7 +314,7 @@ export function useThreadScroll(
     saveThreadScroll(viewKey, { top: scroller.scrollTop, atBottom: false })
   }, [contentEl, setOffset, viewKey])
 
-  const jumpToLatest = useCallback(() => {
+  const jumpToLatest = useCallback((focusTarget?: (root: HTMLElement) => HTMLElement | null) => {
     pendingFocusRef.current?.disconnect()
     const scroller = scrollElRef.current
     if (!scroller) return
@@ -326,12 +329,29 @@ export function useThreadScroll(
     const pin = () => {
       if (stuckRef.current) toBottom()
     }
+    // The refreshed tail can remount the transcript, so the target is looked up under the
+    // shell scroller, not the rows container, and focused when it exists.
+    const focus = () => {
+      const target = focusTarget?.(scroller)
+      if (!target) return false
+      target.focus({ preventScroll: true })
+      return document.activeElement === target
+    }
     void (onJumpToLatest?.() ?? Promise.resolve()).finally(() => {
       // Two frames: the history reset often paints the tail after the first rAF, so a single
       // native smooth scrollTo landed on the newest page's start instead of the live end.
       requestAnimationFrame(() => {
         pin()
-        requestAnimationFrame(pin)
+        requestAnimationFrame(() => {
+          pin()
+          // A wheel or key gesture since the click is the reader's intent: no late focus.
+          if (!focusTarget || !stuckRef.current || focus()) return
+          pendingFocusRef.current?.disconnect()
+          pendingFocusRef.current = new MutationObserver(() => {
+            if (stuckRef.current && focus()) pendingFocusRef.current?.disconnect()
+          })
+          pendingFocusRef.current.observe(scroller, { childList: true, subtree: true })
+        })
       })
     })
   }, [onJumpToLatest, viewKey, toBottom])
@@ -742,7 +762,8 @@ export function JumpToLatestPill({ onJump }: { onJump: () => void }) {
     <button
       type="button"
       data-slot="jump-to-latest"
-      onClick={onJump}
+      // Never forward the click event: the jump's optional argument is a focus target.
+      onClick={() => onJump()}
       className="pointer-events-auto inline-flex min-h-11 min-w-11 items-center gap-1.5 rounded-full border border-border bg-background px-3.5 text-xs font-medium text-muted-foreground shadow-modal hover:text-foreground"
     >
       <ArrowDownIcon aria-hidden className="size-3.5" />

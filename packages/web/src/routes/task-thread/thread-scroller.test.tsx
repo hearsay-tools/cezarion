@@ -174,6 +174,24 @@ describe('useThreadScroll — outside a shell scroller (jsdom, tests, storybook-
     scroller.remove()
   })
 
+  it('focuses the focus target inside the jumped-to row (#1495)', () => {
+    const { result } = renderHook(() => useThreadScroll('focus-target'))
+    const scroller = document.createElement('main')
+    scroller.dataset.slot = 'main'
+    const content = document.createElement('div')
+    const row = document.createElement('div')
+    row.dataset.rowKey = 'b'
+    const target = document.createElement('button')
+    row.append(target)
+    content.append(row)
+    scroller.append(content)
+    document.body.append(scroller)
+    act(() => result.current.attachContent(content))
+    act(() => result.current.jumpToRow('b', 1, (found) => found.querySelector('button')))
+    expect(document.activeElement).toBe(target)
+    scroller.remove()
+  })
+
   it('keeps a jumped-to message below sticky header chrome', () => {
     const { result } = renderHook(() => useThreadScroll('sticky'))
     const scroller = document.createElement('main')
@@ -700,6 +718,37 @@ describe('useThreadScroll — jump to latest', () => {
 
     expect(scrollTo).not.toHaveBeenCalled()
     expect(scroller.scrollTop).toBe(600)
+    hook.unmount()
+    scroller.remove()
+  })
+
+  it('focuses a target that mounts after the jump (#1495)', async () => {
+    const { scroller, hook } = attachScroller()
+    document.body.append(scroller)
+    await act(async () => {
+      hook.result.current.jumpToLatest((root) => root.querySelector<HTMLElement>('[data-testid="late"]'))
+      await Promise.resolve()
+    })
+    const late = document.createElement('button')
+    late.dataset.testid = 'late'
+    await act(async () => { scroller.append(late) })
+    expect(document.activeElement).toBe(late)
+    hook.unmount()
+    scroller.remove()
+  })
+
+  it('a wheel-up gesture drops a pending focus target (#1495)', async () => {
+    const { scroller, hook } = attachScroller()
+    document.body.append(scroller)
+    await act(async () => {
+      hook.result.current.jumpToLatest((root) => root.querySelector<HTMLElement>('[data-testid="late"]'))
+      await Promise.resolve()
+    })
+    fireEvent.wheel(scroller, { deltaY: -10 })
+    const late = document.createElement('button')
+    late.dataset.testid = 'late'
+    await act(async () => { scroller.append(late) })
+    expect(document.activeElement).not.toBe(late)
     hook.unmount()
     scroller.remove()
   })
