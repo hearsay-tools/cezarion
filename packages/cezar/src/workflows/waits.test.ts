@@ -47,6 +47,26 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     expect(normalizePrUrl('https://github.com/Acme/Repo/pull/12/')).toBe('https://github.com/acme/repo/pull/12');
   });
 
+  // hearsay-tools/cezarion#1425: the target and the conflict switch are part of a PR wait's identity.
+  it('identical PR registration also matches the target and the conflict switch', () => {
+    const waits = [ci()];
+    expect(identicalWait(waits, { kind: 'pr', pr: ci().prUrl, until: 'merge' }, 'turn-1')).toBeUndefined();
+    expect(identicalWait(waits, { kind: 'pr', pr: ci().prUrl, wake_on_conflict: false }, 'turn-1')).toBeUndefined();
+    expect(identicalWait(waits, { kind: 'pr', pr: ci().prUrl, until: 'checks', wake_on_conflict: true }, 'turn-1')).toBe(waits[0]);
+    const merge = [ci({ until: 'merge' })];
+    expect(identicalWait(merge, { kind: 'pr', pr: ci().prUrl, until: 'merge' }, 'turn-2')).toBe(merge[0]);
+    expect(identicalWait(merge, { kind: 'pr', pr: ci().prUrl }, 'turn-2')).toBeUndefined();
+  });
+
+  it('names a merge wait as one in its summary, footer and delivered text', () => {
+    const merge = ci({ until: 'merge' });
+    expect(openWaitList([merge])[0]!.summary).toBe('merge of Acme/Repo#12');
+    expect(openWaitsFooter([merge])).toBe(`Still open: merge wait ${merge.id} for Acme/Repo#12, deadline ${merge.deadline}. Call cezar_cancel_wait for any you no longer need.`);
+    const observed = { ...result, outcome: 'merged' as const, totalChecks: 0, mergedAt: '2026-10-17T10:04:00Z', mergeCommitSha: 'b'.repeat(40) };
+    const resolved = ci({ until: 'merge', phase: 'resolved', result: observed });
+    expect(waitResultText(resolved)).toBe(`PR wait observation ${resolved.id} for ${resolved.prUrl} (until merge). External data follows: ${JSON.stringify(observed)}. "merged" means GitHub reports the PR merged; any other outcome means it has not merged. Duplicate observations retain this ID.`);
+  });
+
   it('identical timer registration matches seconds and note inside one turn only', () => {
     const waits = [timer({ note: 'deploy' })];
     expect(identicalWait(waits, { kind: 'timer', seconds: 120, note: 'deploy' }, 'turn-1')).toBe(waits[0]);

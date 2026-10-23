@@ -2336,7 +2336,7 @@ export class RunManager {
         ...(parsed.note === undefined ? {} : { note: parsed.note }) };
       return this.openWait(runId, active, wait);
     }
-    const key = `${runId}\n${normalizePrUrl(parsed.pr)}`;
+    const key = `${runId}\n${normalizePrUrl(parsed.pr)}\n${parsed.until}\n${parsed.wake_on_conflict}`;
     const pending = this.ciRegistrations.get(key);
     if (pending) return pending.promise;
     const abort = new AbortController();

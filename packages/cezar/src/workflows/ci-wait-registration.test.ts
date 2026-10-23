@@ -89,6 +89,40 @@ describe('CI registration guards before and after metadata lookup', { timeout: 3
   });
 });
 
+// hearsay-tools/cezarion#1425: a checks wait never stands in for a merge wait on the same PR.
+describe('PR wait targets', { timeout: 30_000 }, () => {
+  useWorkerWaitFixture();
+  afterEach(() => vi.restoreAllMocks());
+  it('opens a checks wait and a merge wait on one PR as two waits, and shares one lookup for a repeat', async () => {
+    const gate = join(root, 'end-turn');
+    const wire = controlledWire({ firstResultGate: gate });
+    const run = await parent(); await until(wire.initialReceived);
+    const state = (manager as unknown as { active: Map<string, Record<string, unknown>> }).active.get(run.id)!;
+    let lookups = 0;
+    let release!: () => void;
+    vi.spyOn(CiWatcherSupervisor.prototype, 'resolve').mockImplementation(async () => { lookups++; await new Promise<void>(done => { release = done; }); return identity; });
+    const watched: unknown[] = [];
+    vi.spyOn(CiWatcherSupervisor.prototype, 'watch').mockImplementation(wait => { watched.push(wait); return new Promise(() => {}); });
+    try {
+      const generation = state.ciGeneration as string;
+      const checks = manager.registerWait(run.id, { kind: 'pr', pr }, 'cezar_wait', generation);
+      await until(() => lookups === 1); release();
+      const first = await checks;
+      const merges = [0, 1].map(() => manager.registerWait(run.id, { kind: 'pr', pr, until: 'merge', wake_on_conflict: false }, 'cezar_wait', generation));
+      await until(() => lookups === 2); release();
+      const [merge, repeat] = await Promise.all(merges);
+      expect(lookups).toBe(2);
+      expect(repeat!.id).toBe(merge!.id);
+      expect(merge!.id).not.toBe(first.id);
+      expect(store.getRun(run.id)?.waits).toEqual([
+        expect.objectContaining({ id: first.id, kind: 'pr', until: 'checks', wakeOnConflict: true }),
+        expect.objectContaining({ id: merge!.id, kind: 'pr', until: 'merge', wakeOnConflict: false }),
+      ]);
+      expect(watched).toEqual([expect.objectContaining({ until: 'checks', wakeOnConflict: true }), expect.objectContaining({ until: 'merge', wakeOnConflict: false })]);
+    } finally { vi.restoreAllMocks(); writeFileSync(gate, ''); }
+  });
+});
+
 describe('CI metadata lookup interruption', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   afterEach(() => vi.restoreAllMocks());

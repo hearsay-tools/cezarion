@@ -292,6 +292,31 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === receipt.id)).toHaveLength(1);
   });
 
+  // hearsay-tools/cezarion#1425: recovery re-arms a merge wait as a merge wait, with no live session.
+  it('rebuilds a parked merge wait after restart and delivers its merged result once', async () => {
+    let settle!: (result: CiWaitResult) => void;
+    const watched: CiWait[] = [];
+    const supervisor = { resolve: async () => identity, watch: (wait: CiWait) => { watched.push(wait); return new Promise<CiWaitResult>(done => { settle = done; }); }, close() {} };
+    externalResource.supervisor = supervisor;
+    Object.assign(manager, { ciSupervisor: supervisor });
+    const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
+    const state = (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(run.id)!;
+    const receipt = await manager.registerWait(run.id, { kind: 'pr', pr, until: 'merge', wake_on_conflict: false, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration);
+    await restart();
+    expect(manager.isActive(run.id)).toBe(false);
+    expect(watched.at(-1)).toMatchObject({ id: receipt.id, until: 'merge', wakeOnConflict: false });
+    // The committed row at the wake boundary already holds the result and its input.
+    let committed: { waits?: Wait[]; agentInputs?: Array<{ id: string; text: string }> } | undefined;
+    const engine = manager as unknown as { queueWaitWake(id: string): void };
+    const queue = engine.queueWaitWake.bind(manager);
+    vi.spyOn(engine, 'queueWaitWake').mockImplementation(id => { if (id === run.id) committed = readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === id); queue(id); });
+    settle({ outcome: 'merged', headSha: identity.headSha, observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false, mergedAt: '2026-10-23T09:00:00Z' });
+    await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
+    expect(committed?.waits?.find(wait => wait.id === receipt.id)).toMatchObject({ phase: 'resolved', until: 'merge', result: { outcome: 'merged' } });
+    expect(committed?.agentInputs?.find(input => input.id === receipt.id)?.text).toContain('(until merge)');
+    expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === receipt.id)).toHaveLength(1);
+  });
+
   it('cancellation retires the wait and never reopens the run on late completion', async () => {
     const external = github();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
@@ -361,7 +386,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const requests = manager.registerRequestWait(p.id, { requestIds: [request.id], timeoutSeconds: 30 });
     expect([workers.phase, requests.phase]).toEqual(['registered', 'registered']);
     const waits = store.getRun(p.id)!.waits!;
-    expect(waits.map(wait => [wait.id, wait.kind, wait.phase])).toEqual([[ci.id, 'ci', 'open'], [workers.id, 'worker', 'open'], [requests.id, 'worker', 'open']]);
+    expect(waits.map(wait => [wait.id, wait.kind, wait.phase])).toEqual([[ci.id, 'pr', 'open'], [workers.id, 'worker', 'open'], [requests.id, 'worker', 'open']]);
     expect(waits.find(wait => wait.id === workers.id)).toMatchObject({ via: 'cez-worker-wait', workerIds: [w.id] });
     expect(waits.find(wait => wait.id === requests.id)).toMatchObject({ via: 'cez-worker-wait', requestIds: [request.id] });
     expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');

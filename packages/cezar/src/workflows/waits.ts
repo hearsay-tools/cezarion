@@ -51,7 +51,7 @@ function clip(text: string, max = SUMMARY_MAX): string {
 }
 
 function summary(wait: Wait): string {
-  if (wait.kind === 'pr') return clip(`CI for ${wait.repository}#${wait.prNumber}`);
+  if (wait.kind === 'pr') return clip(`${wait.until === 'merge' ? 'merge of' : 'CI for'} ${wait.repository}#${wait.prNumber}`);
   if (wait.kind === 'human') {
     const first = wait.questions?.[0]?.question;
     return first === undefined ? 'human question' : clip(`human: ${first}`);
@@ -69,13 +69,15 @@ export function openWaitList(waits: readonly Wait[]): OpenWait[] {
 }
 
 /**
- * The open wait a registration repeats, if any. CI: the same PR, whatever its timeout. Timer: the
+ * The open wait a registration repeats, if any. PR: the same PR, target and conflict switch, whatever
+ * its timeout (hearsay-tools/cezarion#1425). Timer: the
  * same seconds and note, registered in the same turn (a later turn asking again means a new check).
  */
 export function identicalWait(waits: readonly Wait[], request: CezarWaitRequestInput, turnId: string): PrWaitEntry | TimerWaitEntry | undefined {
   return waits.find((wait): wait is PrWaitEntry | TimerWaitEntry => {
     if (wait.phase !== 'open' || request.kind === 'worker') return false; // worker waits: `identicalWorkerWait`
-    if (request.kind === 'pr') return wait.kind === 'pr' && normalizePrUrl(wait.prUrl) === normalizePrUrl(request.pr);
+    if (request.kind === 'pr') return wait.kind === 'pr' && normalizePrUrl(wait.prUrl) === normalizePrUrl(request.pr)
+      && wait.until === (request.until ?? 'checks') && wait.wakeOnConflict === (request.wake_on_conflict ?? true);
     return wait.kind === 'timer' && wait.seconds === request.seconds && wait.note === request.note && wait.turnId === turnId;
   });
 }
@@ -106,6 +108,7 @@ export function ciWatchRequest(wait: PrWaitEntry): CiWait {
  *  `workerStatus` names a worker's current status for a worker wait's text. */
 export function waitResultText(wait: Wait, { tools, workerStatus = () => 'unavailable' }: { tools: boolean; workerStatus?: (workerId: string) => string } = { tools: true }): string {
   if (wait.kind === 'pr') {
+    if (wait.until === 'merge') return `PR wait observation ${wait.id} for ${wait.prUrl} (until merge). External data follows: ${JSON.stringify(wait.result)}. "merged" means GitHub reports the PR merged; any other outcome means it has not merged. Duplicate observations retain this ID.`;
     return `CI wait observation ${wait.id} for ${wait.prUrl}. External data follows: ${JSON.stringify(wait.result)}. This observation is not merge approval or task completion. Reported checks may not include every expected workflow. Duplicate observations retain this ID.`;
   }
   if (isMonitoringTimer(wait)) return tools ? MONITORING_WAKE_NUDGE : MONITORING_WAKE_NUDGE_MARKERS;
@@ -149,7 +152,7 @@ export function openWaitsFooter(waits: readonly Wait[], { tools }: { tools: bool
   const open = waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait));
   if (!open.length) return undefined;
   const items = open.map((wait) => {
-    if (wait.kind === 'pr') return `CI wait ${wait.id} for ${wait.repository}#${wait.prNumber}, deadline ${wait.deadline}`;
+    if (wait.kind === 'pr') return `${wait.until === 'merge' ? 'merge' : 'CI'} wait ${wait.id} for ${wait.repository}#${wait.prNumber}, deadline ${wait.deadline}`;
     if (wait.kind === 'human') return `your question ${wait.id} to the user`;
     // Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301).
     if (wait.kind === 'worker') return `worker wait ${wait.id} on ${workerTargetPhrase(wait)}, ${wait.deadline === undefined ? 'no deadline' : `deadline ${wait.deadline}`}`;
