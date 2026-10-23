@@ -440,8 +440,11 @@ const server = createServer((req, res) => {
         crashWithStderr(body);
         return;
       }
+      // A configured control matches the prompt's text parts, never their JSON encoding.
+      let deliveryText = body;
+      if (delivery) try { deliveryText = JSON.parse(body).parts.map(part => part.text ?? '').join('\n'); } catch { /* not a prompt body */ }
       // A configured rejection decides alone: it adds "once" and "until lifted" to the native token.
-      if (delivery?.kind === 'reject' ? delivery.rejects(body) : body.includes('mock:reject-agent-post')) {
+      if (delivery?.kind === 'reject' ? delivery.rejects(deliveryText) : body.includes('mock:reject-agent-post')) {
         res.writeHead(503, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: 'agent prompt rejected' }));
         return;
@@ -475,9 +478,9 @@ const server = createServer((req, res) => {
         setTimeout(() => res.end(JSON.stringify({ info: info({}), parts: [] })), 250);
       } else {
       const ack = () => res.end(JSON.stringify({ info: info({}), parts: [] }));
-      if (delivery) delivery.ack(body, ack); else ack();
+      if (delivery) delivery.ack(deliveryText, ack); else ack();
       }
-      if (delivery) await delivery.holdResponse(body);
+      if (delivery) await delivery.holdResponse(deliveryText);
       // `mock:ack-only` → prompt_async is acknowledged and the session stays busy on heartbeats
       // with no turn until the next prompt, which it then runs (hearsay-tools/cezarion#1301).
       if (body.includes('mock:ack-only')) {

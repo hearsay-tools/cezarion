@@ -117,19 +117,23 @@ const send = !delivery ? sendNow : (value) => {
   }
   sendNow(value);
 };
-/** Admission of one queued prompt under a configured control: false when it was rejected. */
-function admitPrompt(command) {
+/** One queued prompt under a configured control, before any scenario branch answers it. A
+ * rejected prompt still reached pi's RPC, so it is recorded. A held response keeps the prompt
+ * queue pending until its frames are flushed: the next prompt's turn never starts inside it. */
+async function handleControlled(command) {
   if (delivery.rejects(command.message)) {
+    if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: command.message, imageCount: (command.images ?? []).length })}\n`);
     write({ id: command.id, type: 'response', command: 'prompt', success: false, error: { message: 'owned turn rejected' } });
-    return false;
+    return;
   }
   if (command.id !== undefined) deliveryTexts.set(command.id, command.message);
   const hold = delivery.holdResponse(command.message);
-  if (hold) {
-    const frames = heldFrames = [];
-    void hold.then(() => { heldFrames = undefined; for (const frame of frames) send(frame); });
-  }
-  return true;
+  const frames = hold ? heldFrames = [] : undefined;
+  await handleCommand(command);
+  if (!hold) return;
+  await hold;
+  heldFrames = undefined;
+  for (const frame of frames) send(frame);
 }
 
 /** One valid CEZ:ASK payload (spec #473), used by the `mock:ask` scenario. */
@@ -191,7 +195,11 @@ rl.on('line', (line) => {
 });
 rl.on('close', () => { queue.then(() => process.exit(0)); });
 
-async function handle(command) {
+function handle(command) {
+  return delivery && command.type === 'prompt' ? handleControlled(command) : handleCommand(command);
+}
+
+async function handleCommand(command) {
   if (command.type === 'prompt' && (command.message.includes('mock:autonomous') || command.message.startsWith('Continue working autonomously until the task is fully complete.'))) {
     const { autonomousReply } = await import('./mock-autonomous.mjs');
     // Recorded like every other prompt, so a test can count the autonomous nudges pi received.
@@ -259,8 +267,6 @@ async function handle(command) {
     }
   }
   if (command.type === 'prompt') command.message = answerNudge(command.message);
-  // After the recording hook: a rejected prompt still reached pi's RPC.
-  if (delivery && command.type === 'prompt' && !admitPrompt(command)) return;
   // `mock:ack-only` → the prompt is accepted and no agent run starts (hearsay-tools/cezarion#1301).
   if (command.type === 'prompt' && command.message.includes('mock:ack-only')) {
     send({ id: command.id, type: 'response', command: 'prompt', success: true });

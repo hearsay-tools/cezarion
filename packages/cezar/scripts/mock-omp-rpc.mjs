@@ -360,8 +360,11 @@ async function prompt(command) {
   const message = command.message;
   // Rejected before admission: OMP's error response only, no prompt_result (rpc-mode.ts).
   if (delivery?.rejects(message)) { fail(command, 'owned turn rejected'); return; }
+  // Every successful admission acknowledges through here, so a configured hold-ack holds it
+  // whichever scenario branch answers the prompt.
+  const ack = (extra) => { if (delivery) delivery.ack(message, () => respond(command, extra)); else respond(command, extra); };
   // `mock:ack-only` → the prompt is accepted and no agent run starts (hearsay-tools/cezarion#1301).
-  if (message.includes('mock:ack-only')) { respond(command); return; }
+  if (message.includes('mock:ack-only')) { ack(); return; }
   const gated = message.includes('mock:gate-prompt-ack');
   if (gated) {
     watchdogStall(message);
@@ -369,18 +372,18 @@ async function prompt(command) {
   }
   if (message.includes('mock:local-command')) {
     // A prompt OMP finished itself (a slash command): the response says so, no prompt_result.
-    respond(command, { agentInvoked: false });
+    ack({ agentInvoked: false });
     return;
   }
   if (message.includes('mock:local-result')) {
-    respond(command);
+    ack();
     write({ type: 'prompt_result', ...(command.id ? { id: command.id } : {}), agentInvoked: false, status: 'completed', sessionSettled: true });
     return;
   }
   if (message.includes('mock:prompt-error')) {
     // The prompt failed after admission, before the agent ran: the ack, an error response,
     // then its prompt_result (rpc-mode.ts `onError` + `RpcPromptResults.fail`).
-    respond(command);
+    ack();
     fail(command, 'Model not found: anthropic/claude-missing');
     write({ type: 'prompt_result', ...(command.id ? { id: command.id } : {}), agentInvoked: false, status: 'error', error: { message: 'Model not found: anthropic/claude-missing', provider: 'anthropic', model: 'claude-missing', retryable: false }, sessionSettled: true });
     return;
@@ -415,22 +418,22 @@ async function prompt(command) {
   if (message.includes('mock:silent-tail') || silentNudge(message)) {
     const silentEarly = await import('./mock-silent-tail.mjs');
     silentEarly.noteSilentTailPrompt(message);
-    if (silentEarly.isAckOnlyNudge(message)) { respond(command); return; }
+    if (silentEarly.isAckOnlyNudge(message)) { ack(); return; }
     if (silentEarly.isLateNudge(message)) {
-      respond(command);
+      ack();
       await silentEarly.sleep(silentEarly.LATE_REPLY_MS);
       beginTurn(command);
     } else {
-      respond(command);
+      ack();
       beginTurn(command);
     }
   } else if (message.includes('mock:deferred-turn-start')) {
     // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late.
-    respond(command);
+    ack();
     await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
     beginTurn(command);
   } else {
-  if (delivery) delivery.ack(message, () => respond(command)); else respond(command);
+  ack();
   beginTurn(command);
   }
   if (delivery) await delivery.holdResponse(message);

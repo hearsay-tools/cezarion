@@ -1,10 +1,11 @@
+import { spawn } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createDeliveryControl, readDeliveryControl, type DeliveryControlOptions, type DeliveryKind } from '../../scripts/mock-delivery-control.mjs';
 import { RUNNER_IDS, type AgentEvent, type AgentSession, type RunnerId } from './agent-runner.ts';
-import { driveSeam, exemptionFor, waitFor } from './harness-parity.testkit.ts';
+import { driveSeam, exemptionFor, HARNESS_ADAPTERS, waitFor } from './harness-parity.testkit.ts';
 
 // These tests exercise the native mocks as test infrastructure: ignoring a configured
 // control would make delivery tests silently run the ordinary scenario.
@@ -233,6 +234,12 @@ describe.each(RUNNER_IDS)('%s native delivery control', runner => {
     await seam(runner, holdResponse.path, async (session, wire) => {
       const input = send(session, 'mock:agent-echo hold-owned-response');
       await waitFor(holdResponse.held);
+      // The input is admitted while its content is held. Cursor print is the exception: its
+      // acknowledgement is its first model work, the same frame the hold withholds.
+      if (runner !== 'cursor') {
+        await input.done;
+        expect(input.state.rejected).toBe(false);
+      }
       // bound: proves an absence; unheld content would arrive within a few ms.
       await new Promise(resolve => setTimeout(resolve, 100));
       expect(echoed(wire, 'hold-owned-response')).toBe(false);
@@ -241,6 +248,15 @@ describe.each(RUNNER_IDS)('%s native delivery control', runner => {
       await input.done;
       expect(input.state.rejected).toBe(false);
       await waitFor(() => echoed(wire, 'hold-owned-response') && turnEnds(wire) === 2);
+      // A release is permanent: a later matching input on the same process is not held.
+      const later = send(session, 'mock:agent-echo hold-owned-response later');
+      await later.done;
+      await waitFor(() => echoed(wire, 'hold-owned-response later') && turnEnds(wire) === 3);
+    });
+    await seam(runner, holdResponse.path, async (session, wire) => {
+      const reopened = send(session, 'mock:agent-echo hold-owned-response reopened');
+      await reopened.done;
+      await waitFor(() => echoed(wire, 'hold-owned-response reopened'));
     });
   }, 60_000);
 
@@ -272,4 +288,95 @@ it('fails closed on an empty control variable', async () => {
   const observation = await driveSeam('codex', 'baseline', { spec: { env: { ...ENV_BASE, CEZ_MOCK_DELIVERY_CONTROL: '' } } });
   expect(observation.v1.some(event => event.type === 'turn-end')).toBe(false);
   expect(JSON.stringify(observation)).toContain('CEZ_MOCK_DELIVERY_CONTROL');
+}, 60_000);
+
+// Scenario branches that answer a prompt before the ordinary turn: a configured control still
+// decides their admission and acknowledgement, or it would fall through to a successful turn.
+describe('controls reach every scenario branch', () => {
+  it.each([
+    ['pi', 'mock:autonomous reject-owned-turn'],
+    ['omp', 'mock:ack-only reject-owned-turn'],
+  ] as const)('%s rejects %s', async (runner, text) => {
+    const rejectOnce = createDeliveryControl(tempRoot(), { kind: 'reject', match: 'reject-owned-turn' });
+    await seam(runner, rejectOnce.path, async session => {
+      const input = send(session, text);
+      await input.done;
+      expect(input.state.rejected).toBe(true);
+    });
+  }, 60_000);
+
+  it.each([
+    ['pi', 'mock:autonomous delay-owned-ack'],
+    ['omp', 'mock:ack-only delay-owned-ack'],
+    ['omp', 'mock:deferred-turn-start delay-owned-ack'],
+  ] as const)('%s holds the acknowledgement of %s', async (runner, text) => {
+    const holdAck = createDeliveryControl(tempRoot(), { kind: 'hold-ack', match: 'delay-owned-ack' });
+    await seam(runner, holdAck.path, async session => {
+      const input = send(session, text);
+      await waitFor(holdAck.held);
+      // bound: proves an absence; a settled acknowledgement would arrive within a few ms.
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(input.state.settled).toBe(false);
+      holdAck.release();
+      await input.done;
+      expect(input.state.rejected).toBe(false);
+    });
+  }, 60_000);
+
+  it('pi holds the response of mock:autonomous', async () => {
+    const holdResponse = createDeliveryControl(tempRoot(), { kind: 'hold-response', match: 'hold-owned-response' });
+    await seam('pi', holdResponse.path, async (session, wire) => {
+      const input = send(session, 'mock:autonomous hold-owned-response');
+      await waitFor(holdResponse.held);
+      await input.done;
+      // bound: proves an absence; unheld content would arrive within a few ms.
+      await new Promise(resolve => setTimeout(resolve, 100));
+      expect(turnEnds(wire)).toBe(1);
+      holdResponse.release();
+      await waitFor(() => turnEnds(wire) === 2);
+    });
+  }, 60_000);
+});
+
+it('opencode matches the prompt text, not its JSON encoding', async () => {
+  const persistent = createDeliveryControl(tempRoot(), { kind: 'reject', match: 'line one\nline "two"', persistent: true });
+  await seam('opencode', persistent.path, async session => {
+    const input = send(session, 'mock:agent-echo line one\nline "two"');
+    await input.done;
+    expect(input.state.rejected).toBe(true);
+  });
+}, 60_000);
+
+// A held response keeps pi's prompt queue in order: the next prompt's turn and user message
+// follow the held turn's settlement, exactly as on an unconfigured wire.
+it('pi keeps turn framing for a prompt queued behind a held response', async () => {
+  const frames = async (env: Record<string, string>, release?: () => void, held?: () => boolean) => {
+    const child = spawn(process.execPath, [HARNESS_ADAPTERS.pi.mockBin, '--mode', 'rpc'], {
+      cwd: tempRoot(), env: { ...process.env, ...ENV_BASE, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
+    const lines: Array<Record<string, unknown>> = [];
+    let buffer = '';
+    child.stdout.on('data', (chunk: Buffer) => {
+      buffer += chunk.toString();
+      for (let at = buffer.indexOf('\n'); at >= 0; at = buffer.indexOf('\n')) {
+        const line = buffer.slice(0, at); buffer = buffer.slice(at + 1);
+        try { lines.push(JSON.parse(line)); } catch { /* not a frame */ }
+      }
+    });
+    try {
+      for (const [id, text] of [['p1', 'mock:agent-echo held one'], ['p2', 'mock:agent-echo held two']]) {
+        child.stdin.write(`${JSON.stringify({ id, type: 'prompt', message: text })}\n`);
+      }
+      if (held && release) { await waitFor(held); release(); }
+      await waitFor(() => lines.filter(frame => frame.type === 'agent_settled').length === 2);
+      return lines.flatMap(frame => {
+        if (['agent_start', 'turn_start', 'agent_settled'].includes(String(frame.type))) return [String(frame.type)];
+        const message = frame.message as { role?: string; content?: Array<{ text?: string }> } | undefined;
+        return frame.type === 'message_start' && message?.role === 'user' ? [`user:${message.content?.[0]?.text}`] : [];
+      });
+    } finally { child.kill(); }
+  };
+  const ordinary = await frames({});
+  const hold = createDeliveryControl(tempRoot(), { kind: 'hold-response', match: 'held one' });
+  expect(await frames({ CEZ_MOCK_DELIVERY_CONTROL: hold.path }, hold.release, hold.held)).toEqual(ordinary);
+  expect(ordinary.filter(frame => frame.startsWith('user:'))).toEqual(['user:mock:agent-echo held one', 'user:mock:agent-echo held two']);
 }, 60_000);
