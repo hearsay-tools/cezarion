@@ -190,6 +190,27 @@ selector. PowerShell resolves it with
 `[IO.Path]::GetFullPath($ScreenshotPath)`, creates the parent directory, then
 checks `Test-Path` and a non-zero file length.
 
+#### Pick the cockpit theme
+
+The cockpit reads its theme from the `localStorage` key `cez-theme`, before
+first paint. It takes `light`, `dark` or `system`; a missing key or any other
+value gives dark. `system` follows the browser's `prefers-color-scheme`.
+Set the key on the open cockpit page, then reload, so the page applies it:
+
+```bash
+THEME=light   # or dark, or system
+"$AGENT_BROWSER_BIN" --session "$BROWSER_SESSION" eval "localStorage.setItem('cez-theme', '$THEME')" --json
+"$AGENT_BROWSER_BIN" --session "$BROWSER_SESSION" reload --json
+"$AGENT_BROWSER_BIN" --session "$BROWSER_SESSION" wait --fn "document.documentElement.classList.contains('light') === ('$THEME' === 'light')" --json
+"$AGENT_BROWSER_BIN" --session "$BROWSER_SESSION" screenshot --full "$ABS_SCREENSHOT_PATH" --json
+```
+
+The `wait` line checks the `light` class on `<html>`, which the cockpit sets
+for the light theme only. Drop it for `system`. It confirms the theme, not
+the page content: wait for the content you need, as in
+[interact](#interact), before the screenshot. The key is stored per origin,
+so it stays set for later pages in the same session.
+
 ### close
 
 ```bash
