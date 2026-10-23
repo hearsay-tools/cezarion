@@ -553,8 +553,6 @@ interface ActiveRun {
   /** Autonomous mode (#autonomous): nudge eligible turn ends until done or the cap.
    *  Pending input, native asks and lifecycle waits retain priority. */
   autonomous?: boolean;
-  archiveWhenDone?: boolean;
-  autoMergePr?: boolean;
   /** An eligible boundary nudge refused until the current transport becomes ready.
    * Retains its slot, bounded by the existing idle timer; never represents a sent input. */
   autonomousNudgePending?: AgentSession;
@@ -803,6 +801,8 @@ export interface StartRunInput {
   /** Autonomous mode (#autonomous): eligible turn ends auto-continue until done
    *  or the safety cap. Native asks, input delivery and lifecycle waits still apply. */
   autonomous?: boolean;
+  archiveWhenDone?: boolean;
+  autoMergePr?: boolean;
   /** Task webhook opt-in (#589). Persisted on the record at creation; read from there after. */
   notify?: boolean;
   /** Follow-up inbox generation (spec 007, #444). Omitted means enabled for

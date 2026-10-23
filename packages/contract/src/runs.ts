@@ -265,6 +265,9 @@ export const runRecordSchema = z.object({
   archiveWhenDone: z.boolean().optional(),
   autoMergePr: z.boolean().optional(),
   completionAction: completionActionSchema.optional(),
+  archiveBlocker: z.object({
+    message: z.string(), runId: z.string().optional(), pullRequestUrl: z.string().optional(),
+  }).optional(),
   /**
    * Provenance for a task a project GitHub automation launched (#694). Absent on every ordinary
    * run, which is what makes it additive — the cockpit shows the "from automation" link only when
