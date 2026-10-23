@@ -1948,9 +1948,8 @@ export class RunManager {
    * registry, the roots and the team list alike: a team skill switched off for the project is
    * never installed, not even for a skill that runs it, and a switch-off made after the run
    * started holds for the next step, a live `/name` and Continue. In the run's own task worktree
-   * every pass, one with no root included, also removes the copies cezar recorded of a skill
-   * whose own source and name are on the off-list (`withdrawProvisionedSkills`), and a recorded
-   * root that lost its copy gets another source's enabled copy; the user's own installs stay.
+   * every pass, one with no root included, also removes the copies cezar recorded of a name the
+   * off-list took away (`withdrawProvisionedSkills`); the user's own installs stay.
    *
    * Any other cwd — worktree off, a non-git project, a Continue whose worktree is gone — is the
    * main checkout or unknown, where those directories are LOCAL skills to `discoverSkills` that
@@ -1992,16 +1991,12 @@ export class RunManager {
       return { notes, filesDir, installed: [] };
     }
     const catalog = [...registry, ...filterDisabledTeamSkills(getTeamSkillsCached(this.repoRoot), disabled)];
-    // Every pass, one with no root included, removes cezar's copies of a switched-off source's
-    // skill, matched on that copy's own source and name (#1494): never inferred from what the
-    // in-memory catalog lacks, which before the team sources load is every team skill. A recorded
-    // root that lost its copy gets the enabled copy of its name, when the catalog has one.
-    const lost = await withdrawProvisionedSkills(state.cwd, disabled);
-    const replacements = lost.filter((name) => !roots.some((skill) => skill.name === name))
-      .flatMap((name) => catalog.filter((skill) => skill.name === name).slice(0, 1));
-    const passRoots = [...roots, ...replacements];
-    if (passRoots.length === 0 || stopped()) return { notes, filesDir, installed: [] };
-    const result = await provisionSkills(state.cwd, passRoots, catalog, { cancelled: stopped });
+    // A switched-off name that no enabled copy still offers leaves the worktree, even on a pass
+    // with no root (#1494). Only entries cezar recorded as its own are removed.
+    const offered = new Set(catalog.map((skill) => skill.name));
+    await withdrawProvisionedSkills(state.cwd, new Set(disabled.map((ref) => ref.name).filter((name) => !offered.has(name))));
+    if (roots.length === 0 || stopped()) return { notes, filesDir, installed: [] };
+    const result = await provisionSkills(state.cwd, roots, catalog, { cancelled: stopped });
     if (stopped()) return { notes, filesDir, installed: [] };
     for (const skill of teamRoots) {
       const written = result.teamCopies[skill.name] ?? [];
