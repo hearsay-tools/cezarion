@@ -43,7 +43,7 @@ describe('cezar-ci MCP server instructions', () => {
     try {
       expect((await on.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_preview_serve', 'cezar_preview_stop']);
       const instructions = on.client.getInstructions()!;
-      expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR, or want to re-check something later; end your turn after it answers.');
+      expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR or on a background job you started, or want to re-check something later; end your turn after it answers.');
       expect(instructions).toContain('- cezar_preview_serve: load when you have started, or are about to start, a web server the user should click through.');
     } finally { await on.close(); }
     for (const value of [undefined, '0', 'true']) {

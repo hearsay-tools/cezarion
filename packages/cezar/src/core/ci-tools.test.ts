@@ -22,8 +22,8 @@ describe('wait tool definitions', () => {
     expect(schema.type).toBe('object');
     // The Anthropic tool API refuses a top-level union; the kinds validate on the server.
     for (const key of ['oneOf', 'anyOf', 'allOf']) expect(schema).not.toHaveProperty(key);
-    expect(schema.properties).toMatchObject({ kind: { enum: ['ci', 'worker', 'timer'] } });
-    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['kind', 'mode', 'note', 'pr', 'request_ids', 'seconds', 'timeout_seconds', 'worker_ids']);
+    expect(schema.properties).toMatchObject({ kind: { enum: ['ci', 'worker', 'timer', 'process'] } });
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['exit_file', 'kind', 'mode', 'note', 'pid', 'pr', 'request_ids', 'seconds', 'timeout_seconds', 'worker_ids']);
     // hearsay-tools/cezarion#1234: the user is asked with cezar_ask, so no field here is one kind's card.
     expect(JSON.stringify(schema)).not.toContain('human');
     expect(waitToolDefinition.description).toContain('To wait for the user, call cezar_ask.');
@@ -65,7 +65,7 @@ describe('wait tool definitions', () => {
       expect(cezarTools(env).map(tool => tool.definition.name)).not.toContain('cezar_wait_for_ci');
       const instructions = cezarServerInstructions(env);
       expect(instructions).not.toContain('- cezar_wait_for_ci:');
-      expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR, or want to re-check something later; end your turn after it answers.');
+      expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR or on a background job you started, or want to re-check something later; end your turn after it answers.');
       expect(instructions).toContain('- cezar_ask: load for a user decision or missing input; provide the full draft or findings in its rendered context field.');
       expect(instructions).toContain('- cezar_cancel_wait: load when a wait you registered is no longer needed.');
     }
