@@ -109,6 +109,23 @@ describe('process waits through RunManager (hearsay-tools/cezarion#1446)', { tim
     await until(() => (store.getRun(run.id)?.waits ?? []).some((entry: Wait) => entry.kind === 'human' && entry.via === 'budget'));
   });
 
+  // AGENTS.md "Test the path with no live session": the cap at a resolution after a clean close.
+  it('a resolution at the spent budget with no live session is cancelled and opens the budget human wait', async () => {
+    const external = processes();
+    const run = await waitingParent();
+    const wait = await register(run.id, { pid: sleeper() });
+    (manager as unknown as { active: Map<string, { session: { end(): void } }> }).active.get(run.id)!.session.end();
+    await until(() => !manager.isActive(run.id));
+    store.updateRun(run.id, { automaticWakes: 40 });
+    external.settle({ outcome: 'exited' });
+    await until(() => settledById(run.id, wait.id)?.phase === 'cancelled');
+    expect(notes(run.id, `automatic process wake-up cap reached (40); process wait ${wait.id} cancelled`)).toHaveLength(1);
+    await until(() => (store.getRun(run.id)?.waits ?? []).some((entry: Wait) => entry.kind === 'human' && entry.via === 'budget' && entry.askSeq !== undefined));
+    expect(store.getRun(run.id)?.status).toBe('waiting');
+    expect(inputsFor(run.id, wait.id)).toEqual([]);
+    expect(manager.isActive(run.id)).toBe(false);
+  });
+
   it('Stop cancels the wait and aborts its watch, and signals nothing', async () => {
     const external = processes();
     const run = await waitingParent();
