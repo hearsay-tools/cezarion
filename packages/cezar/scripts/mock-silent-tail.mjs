@@ -11,11 +11,11 @@ export const FINAL_MESSAGE_STANDING = 'Here is where things stand.';
 export const SLOW_DONE_PREFIX = 'Working on the wrap-up.';
 // Cezar's no-wait nudge absorbed the final-message nudge (hearsay-tools/cezarion#1234).
 export const FINAL_MESSAGE_NUDGE_PREFIX = 'Your turn ended without a wait or done.';
-/** Bound in F9/F11 is 300 ms; reply after expiry. */
+/** F9/F11 gate replies on CEZ_MOCK_RELEASE_FILE; ungated callers use this delay. */
 export const LATE_REPLY_MS = 500;
 /** Bound in F10 is 300 ms; first content is immediate, turn-end after this. */
 export const SLOW_DONE_TAIL_MS = 400;
-/** F11: after native turn-start, hold before content longer than the test poll window. */
+/** F11 gates content on `${CEZ_MOCK_RELEASE_FILE}.content`; ungated callers use this delay. */
 export const LATE_TURN_START_HOLD_MS = 800;
 
 export function sleep(ms) {

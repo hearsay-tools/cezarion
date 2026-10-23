@@ -537,12 +537,6 @@
     },
     {
       "file": "core/workflow-final-message-parity.test.ts",
-      "rule": "short-bound",
-      "site": "await waitFor(() => store.getRun(runId)?.status === 'running', 400);",
-      "count": 1
-    },
-    {
-      "file": "core/workflow-final-message-parity.test.ts",
       "rule": "sleep",
       "site": "await new Promise(resolve => setTimeout(resolve, 150));",
       "count": 1
