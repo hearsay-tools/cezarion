@@ -21,11 +21,14 @@ beforeEach(async () => {
 afterAll(async () => { browser?.close(); await fixture?.stop() })
 
 type Request = Parameters<Parameters<AgentBrowser['withCdp']>[0]>[0]
-const read = async (request: Request, session: string, expression: string) =>
-  (await request('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, session)).result.value
-const waitText = (request: Request, session: string, text: string) => pollFor(async () =>
+const read = async (request: Request, session: string, expression: string) => {
+  const { result, exceptionDetails } = await request('Runtime.evaluate', { expression, returnByValue: true, awaitPromise: true }, session)
+  if (exceptionDetails) throw new Error(`CDP evaluation failed: ${JSON.stringify(exceptionDetails)}; expression: ${expression}`)
+  return result.value
+}
+const waitText = (request: Request, session: string, text: string, deadline = Infinity) => pollFor(async () =>
   await read(request, session, `document.body.innerText.includes(${JSON.stringify(text)})`) ? true : undefined,
-  async () => `transcript never contained ${text}: ${await read(request, session, 'document.body.innerText')}`, { timeoutMs: 22_000, tries: 100 })
+  async () => `transcript never contained ${text}: ${await read(request, session, 'document.body.innerText')}`, { timeoutMs: 22_000, tries: 100, deadline })
 
 it.each([false, true])('ten mixed tabs (separate visible windows: %s) share worker transport and preserve project transcripts', async windows => {
   await browser.withCdp(async (request, subscribe) => {
@@ -119,11 +122,25 @@ it.each([false, true])('ten mixed tabs (separate visible windows: %s) share work
 })
 
 it('blocked SharedWorker uses finite HTTP in ten visible windows and aborts on pagehide', async () => {
+  // bound: share 50 s across this row's polling phases, reserving 10 s of its
+  // 60 s timeout for probe abort/drain, lifecycle commands and target cleanup.
+  // Budget proof: https://github.com/hearsay-tools/cezarion/pull/1569#discussion_r4364129346
+  // Ten 9 s page predicates: 1/1 old probes ran 90 s; 1/1 fixed probes rejected
+  // within the shared 50 s deadline instead of accumulating ten fresh budgets.
+  const deadline = Date.now() + 50_000
   await browser.withCdp(async (request, subscribe) => {
     const pages: Array<{ targetId: string; sessionId: string }> = []
     const persistent: string[] = []
+    const projects = new Map<string, { url: string; status?: number; failure?: unknown }>()
     const off = subscribe(event => {
       if (event.method === 'Network.webSocketCreated' || event.method === 'Network.responseReceived' && event.params.response.mimeType === 'text/event-stream') persistent.push(event.method)
+      const key = `${event.sessionId}:${event.params.requestId}`
+      if (event.method === 'Network.requestWillBeSent' && new URL(event.params.request.url).pathname === '/api/v1/projects') {
+        projects.set(key, { url: event.params.request.url })
+      }
+      const project = projects.get(key)
+      if (project && event.method === 'Network.responseReceived') project.status = event.params.response.status
+      if (project && event.method === 'Network.loadingFailed') project.failure = event.params
     })
     try {
       for (let i = 0; i < 10; i++) {
@@ -134,23 +151,79 @@ it('blocked SharedWorker uses finite HTTP in ten visible windows and aborts on p
         pages.push({ targetId, sessionId })
       }
       const run = fixture.runs[0]!
-      await Promise.all(pages.map(page => request('Page.navigate', { url: `${fixture.origin}/p/${run.projectId}/tasks/${run.runId}` }, page.sessionId)))
-      await Promise.all(pages.map(page => waitText(request, page.sessionId, `Tab fixture transcript ${run.runId}`)))
+      // hearsay-tools/cezarion#1547: parallel startup failed 1/1 loaded diagnostics;
+      // telemetry left 8/10 documents loading. Bundle:
+      // .ai/qa/failures/selected/blocked-SharedWorker-uses-finite-HTTP-in-ten-visible-windows-and-aborts-on-pageh-1/
+      // probe.json: "probe exceeded 2000ms", captured after cleanup at about:blank;
+      // pre-cleanup state and run counts: https://github.com/hearsay-tools/cezarion/pull/1569#discussion_r4363857533
+      // Reproduce with `taskset -c 17 npm run test:e2e -- tab-coordination.e2e.ts -t 'blocked SharedWorker uses finite HTTP'`
+      // plus two owned busy loops on CPU17. Sequential startup passed 1/1 scratch
+      // proofs and 10/10 tracked acceptance processes; no retries. Old global setup
+      // ran under load; fixed global setup preceded burners, with fresh tab fixtures
+      // under load in both. Sequential startup took 2852–5620 ms per document with
+      // the same predicate and 22 s guard, increasing aggregate setup allowance.
+      // The shared 50 s deadline caps polling across the unchanged 60 s row;
+      // later concurrent checks still use all ten windows.
+      for (const page of pages) {
+        await request('Page.navigate', { url: `${fixture.origin}/p/${run.projectId}/tasks/${run.runId}` }, page.sessionId)
+        await waitText(request, page.sessionId, `Tab fixture transcript ${run.runId}`, deadline)
+      }
       const text = `finite-${Date.now()}`
       await fixture.control({ publish: text, runs: [run] })
-      await Promise.all(pages.map(page => waitText(request, page.sessionId, text)))
+      await Promise.all(pages.map(page => waitText(request, page.sessionId, text, deadline)))
       for (const snapshot of [false, true]) {
         const typing = `unfinished-${snapshot}-${Date.now()}`
         await fixture.control({ ephemeral: typing, snapshot, runs: [run] })
-        await Promise.all(pages.map(page => waitText(request, page.sessionId, typing)))
+        await Promise.all(pages.map(page => waitText(request, page.sessionId, typing, deadline)))
       }
       expect(persistent).toEqual([])
-      expect(await read(request, pages[0]!.sessionId, `(async()=>{const r=await fetch('/api/v1/projects',{signal:AbortSignal.timeout(2000)});return r.ok})()`)).toBe(true)
+      const session = pages[0]!.sessionId
+      // Evidence: hearsay-tools/cezarion CI run 39973711080, cockpit-failures-shard-3
+      // artifact 12510856696, bundle .ai/qa/failures/tab-coordination/
+      // blocked-SharedWorker-uses-finite-HTTP-in-ten-visible-windows-and-aborts-on-pageh-1/:
+      // probe.json records "expected {} to be true" after cleanup at about:blank.
+      // Reproduce with `npm run test:e2e -- tab-coordination.e2e.ts -t 'blocked SharedWorker uses finite HTTP'`
+      // and CDP Network.emulateNetworkConditions latency=2500 before this request:
+      // 1 of 1 failed before; 1 of 1 passed after under the same delayed-response condition.
+      // Start one request. Poll its result, never retry the request or its failure.
+      await read(request, session, `(() => {
+        const probe = window.__finiteHttpProbe = { controller: new AbortController() };
+        probe.done = (async () => {
+          try {
+            const response = await fetch('/api/v1/projects', { signal: probe.controller.signal });
+            await response.text();
+            probe.result = { ok: response.ok, url: response.url, status: response.status };
+          } catch (error) {
+            probe.result = { error: { name: error.name, message: error.message } };
+          }
+        })();
+        return true;
+      })()`)
+      try {
+        // bound: ten visible documents contend for HTTP/1.1 slots. Use the same 20 s
+        // demand-drain guard as teardown; completion is the response body, not elapsed time.
+        const response = await pollFor(
+          async () => await read(request, session, 'window.__finiteHttpProbe.result'),
+          () => 'the finite projects request never completed',
+          { timeoutMs: 20_000, tries: 100, deadline },
+        )
+        expect(response).toMatchObject({ ok: true, url: `${fixture.origin}/api/v1/projects`, status: 200 })
+      } finally {
+        // Abort on a failed wait and drain before pagehide or target cleanup.
+        await read(request, session, `(async () => {
+          window.__finiteHttpProbe.controller.abort();
+          await window.__finiteHttpProbe.done;
+          delete window.__finiteHttpProbe;
+          return true;
+        })()`)
+      }
       await request('Runtime.evaluate', { expression: 'window.dispatchEvent(new Event("pagehide"))' }, pages[0]!.sessionId)
       await request('Runtime.evaluate', { expression: 'window.dispatchEvent(new PageTransitionEvent("pageshow",{persisted:true}))' }, pages[0]!.sessionId)
       const restored = `${text}-restored`
       await fixture.control({ publish: restored, runs: [run] })
-      await waitText(request, pages[0]!.sessionId, restored)
+      await waitText(request, pages[0]!.sessionId, restored, deadline)
+    } catch (error) {
+      throw new Error(`${String(error)}; projects network: ${JSON.stringify([...projects])}`, { cause: error })
     } finally { off(); await Promise.all(pages.map(page => request('Target.closeTarget', { targetId: page.targetId }))) }
   })
 })

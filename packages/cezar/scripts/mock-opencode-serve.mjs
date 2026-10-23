@@ -503,7 +503,7 @@ const server = createServer((req, res) => {
           beats.unref?.();
           return;
         }
-        if (silent.isLateNudge(prompt)) await silent.sleep(silent.LATE_REPLY_MS);
+        if (silent.isLateNudge(prompt)) await waitForMockRelease(silent.LATE_REPLY_MS);
       }
       // hearsay-tools/cezarion#1112: the acknowledged prompt streams its turn late.
       if (body.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();

@@ -218,7 +218,7 @@ async function handleCommand(command) {
       send({ id: command.id, type: 'response', command: 'prompt', success: true });
       const kind = silent.finalMessageNudgeKind();
       if (kind === 'ack-only') return;
-      if (kind === 'late') await silent.sleep(silent.LATE_REPLY_MS);
+      if (kind === 'late') await waitForMockRelease(silent.LATE_REPLY_MS);
       send({ type: 'agent_start' });
       send({ type: 'turn_start' });
       if (kind === 'silent') sendThinking(silent.SILENT_TAIL_REASONING);
