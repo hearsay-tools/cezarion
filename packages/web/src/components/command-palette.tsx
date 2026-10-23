@@ -29,7 +29,7 @@ import { useCommandShortcut, useKeyShortcut } from '@/lib/use-command-shortcut'
 import { useProjectOrder } from '@/lib/use-project-order'
 import { useVoiceProposal } from '@/lib/voice/proposal-store'
 import { useVoiceCommand } from '@/components/voice/use-voice-command'
-import { VoiceRows } from '@/components/voice/voice-rows'
+import { CONFIRM_PLACEHOLDER, VoiceConfirm, VoiceRows } from '@/components/voice/voice-rows'
 
 /**
  * The ⌘K command palette (spec, "Cross-cutting"): projects, tasks, views, actions, skills —
@@ -478,7 +478,7 @@ function PaletteContent({
   return (
     <>
       <CommandInput
-        placeholder="Search projects, tasks, views, actions, skills…"
+        placeholder={voice.confirm ? CONFIRM_PLACEHOLDER : 'Search projects, tasks, views, actions, skills…'}
         value={search}
         onValueChange={setSearch}
         onKeyDown={(event) => {
@@ -491,176 +491,188 @@ function PaletteContent({
           the bottom edge as violently as the old centring moved the top. */}
       {/* Docked, the list stays short so the palette covers less of the card behind it. */}
       <CommandList className={docked ? 'max-h-[28vh]' : 'max-h-[55vh] min-h-[14rem] sm:max-h-[60vh] lg:max-h-[68vh]'}>
-        <VoiceRows row={voice.row} committable={search.trim() !== ''} onSelect={voice.onSelect} />
-        {/* A voice row answers the sentence; "nothing matches" would contradict it. */}
-        {voice.row ? null : <CommandEmpty>Nothing matches.</CommandEmpty>}
+        {/* A proposal waiting for its confirmation replaces the search: one panel, so the screen
+            says what Return does (hearsay-tools/cezarion#1461). Typing brings the search back. */}
+        {voice.confirm ? (
+          <VoiceConfirm
+            confirm={voice.confirm}
+            notice={voice.row?.kind === 'notice' ? voice.row.text : undefined}
+            onConfirm={voice.onConfirm}
+          />
+        ) : (
+          <>
+            <VoiceRows row={voice.row} committable={search.trim() !== ''} onSelect={voice.onSelect} />
+            {/* A voice row answers the sentence; "nothing matches" would contradict it. */}
+            {voice.row ? null : <CommandEmpty>Nothing matches.</CommandEmpty>}
 
-        {/* First, headless, and the row an empty query pre-selects: opening ⌘K and pressing
-            Enter starts a task. It used to sit ninth in Views with a duplicate down in Actions;
-            one authoritative row at the top is what "New task" being the default means. */}
-        <CommandGroup>
-          <CommandItem
-            value="new task"
-            data-slot="palette-view"
-            data-nav-to="/new"
-            onSelect={() => go('/new')}
-          >
-            <PlusIcon aria-hidden="true" />
-            New task
-            <CommandShortcut>C</CommandShortcut>
-          </CommandItem>
-        </CommandGroup>
-
-        {/* Only in the DEFAULT view. Once you type, splitting tasks by read-state is noise: it
-            floats a section of near-misses above the exact match you are looking for, purely
-            because that section renders first. Searching gets one ranked Tasks list. */}
-        {!searching && recentlyFinished.length > 0 ? (
-          <CommandGroup heading="Recently finished">
-            {recentlyFinished.map((task) => (
-              <TaskItem
-                key={taskKey(task)}
-                task={task}
-                projectName={taskProjectName(task)}
-                showProject={showProjectOnTasks}
-                now={now}
-                onSelect={selectTask}
-              />
-            ))}
-          </CommandGroup>
-        ) : null}
-
-        <CommandGroup heading="Views">
-          {/* The one GLOBAL view, listed first because it is the only row here that is not
-              about the project you are standing in. Multi-project only, matching the sidebar:
-              with one project it would be that project's own Tasks page under another name. */}
-          {multiProject ? (
-            <CommandItem
-              value="view All tasks"
-              data-slot="palette-view"
-              data-nav-to="/tasks"
-              onSelect={() => goGlobal('/tasks')}
-            >
-              <LayersIcon aria-hidden="true" />
-              All tasks
-            </CommandItem>
-          ) : null}
-          {visibleNavItems({
-            forge: health.data?.forge?.available === true,
-            inbox: health.data?.capabilities.followups === true,
-            automations: health.data?.capabilities.automations === true,
-          }).map((item) => {
-            const Icon = item.icon
-            return (
+            {/* First, headless, and the row an empty query pre-selects: opening ⌘K and pressing
+                Enter starts a task. It used to sit ninth in Views with a duplicate down in Actions;
+                one authoritative row at the top is what "New task" being the default means. */}
+            <CommandGroup>
               <CommandItem
-                key={item.to}
-                // The `view` prefix keeps values unique across groups and gives "view git" a
-                // deterministic hit; the value is filter fodder, never rendered.
-                value={`view ${item.label}`}
+                value="new task"
                 data-slot="palette-view"
-                data-nav-to={item.to}
-                onSelect={() => go(item.to)}
+                data-nav-to="/new"
+                onSelect={() => go('/new')}
               >
-                <Icon aria-hidden="true" />
-                {item.label}
+                <PlusIcon aria-hidden="true" />
+                New task
+                <CommandShortcut>C</CommandShortcut>
               </CommandItem>
-            )
-          })}
-        </CommandGroup>
+            </CommandGroup>
 
-        {orderedProjects.length > 0 ? (
-          <CommandGroup heading="Projects">
-            {orderedProjects.map((project) => {
-              const active = project.id === activeProjectId
-              // Nothing to open: the folder is gone. The row stays listed (Settings → Projects
-              // owns removing it) but cannot be picked, rather than navigating into a project
-              // whose every request 4xxs — the same rule the composer's project pill applies.
-              const missing = project.status === 'missing'
-              return (
+            {/* Only in the DEFAULT view. Once you type, splitting tasks by read-state is noise: it
+                floats a section of near-misses above the exact match you are looking for, purely
+                because that section renders first. Searching gets one ranked Tasks list. */}
+            {!searching && recentlyFinished.length > 0 ? (
+              <CommandGroup heading="Recently finished">
+                {recentlyFinished.map((task) => (
+                  <TaskItem
+                    key={taskKey(task)}
+                    task={task}
+                    projectName={taskProjectName(task)}
+                    showProject={showProjectOnTasks}
+                    now={now}
+                    onSelect={selectTask}
+                  />
+                ))}
+              </CommandGroup>
+            ) : null}
+
+            <CommandGroup heading="Views">
+              {/* The one GLOBAL view, listed first because it is the only row here that is not
+                  about the project you are standing in. Multi-project only, matching the sidebar:
+                  with one project it would be that project's own Tasks page under another name. */}
+              {multiProject ? (
                 <CommandItem
-                  key={project.id}
-                  // The `project` prefix keeps values unique across groups; the id is what makes
-                  // two same-named registry entries separately reachable.
-                  value={`project ${project.name} ${project.id}`}
-                  // The root is how you tell apart two checkouts of one repo — searchable, but
-                  // not worth a line of its own in a row this dense.
-                  keywords={[project.root]}
-                  data-slot="palette-project"
-                  data-project-id={project.id}
-                  disabled={missing}
-                  onSelect={() => goProject(project.id)}
+                  value="view All tasks"
+                  data-slot="palette-view"
+                  data-nav-to="/tasks"
+                  onSelect={() => goGlobal('/tasks')}
                 >
-                  <FolderOpenIcon aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                  {missing ? (
-                    <span className="shrink-0 text-xs text-soft-foreground">folder not found</span>
-                  ) : project.branch !== undefined ? (
-                    <span className="shrink-0 font-mono text-xs text-soft-foreground">
-                      {project.branch}
-                    </span>
-                  ) : null}
-                  {active ? (
-                    <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
-                  ) : null}
+                  <LayersIcon aria-hidden="true" />
+                  All tasks
                 </CommandItem>
-              )
-            })}
-          </CommandGroup>
-        ) : null}
+              ) : null}
+              {visibleNavItems({
+                forge: health.data?.forge?.available === true,
+                inbox: health.data?.capabilities.followups === true,
+                automations: health.data?.capabilities.automations === true,
+              }).map((item) => {
+                const Icon = item.icon
+                return (
+                  <CommandItem
+                    key={item.to}
+                    // The `view` prefix keeps values unique across groups and gives "view git" a
+                    // deterministic hit; the value is filter fodder, never rendered.
+                    value={`view ${item.label}`}
+                    data-slot="palette-view"
+                    data-nav-to={item.to}
+                    onSelect={() => go(item.to)}
+                  >
+                    <Icon aria-hidden="true" />
+                    {item.label}
+                  </CommandItem>
+                )
+              })}
+            </CommandGroup>
 
-        {otherTasks.length > 0 ? (
-          <CommandGroup heading="Tasks">
-            {otherTasks.map((task) => (
-              <TaskItem
-                key={taskKey(task)}
-                task={task}
-                projectName={taskProjectName(task)}
-                showProject={showProjectOnTasks}
-                now={now}
-                onSelect={selectTask}
-              />
-            ))}
-          </CommandGroup>
-        ) : null}
+            {orderedProjects.length > 0 ? (
+              <CommandGroup heading="Projects">
+                {orderedProjects.map((project) => {
+                  const active = project.id === activeProjectId
+                  // Nothing to open: the folder is gone. The row stays listed (Settings → Projects
+                  // owns removing it) but cannot be picked, rather than navigating into a project
+                  // whose every request 4xxs — the same rule the composer's project pill applies.
+                  const missing = project.status === 'missing'
+                  return (
+                    <CommandItem
+                      key={project.id}
+                      // The `project` prefix keeps values unique across groups; the id is what makes
+                      // two same-named registry entries separately reachable.
+                      value={`project ${project.name} ${project.id}`}
+                      // The root is how you tell apart two checkouts of one repo — searchable, but
+                      // not worth a line of its own in a row this dense.
+                      keywords={[project.root]}
+                      data-slot="palette-project"
+                      data-project-id={project.id}
+                      disabled={missing}
+                      onSelect={() => goProject(project.id)}
+                    >
+                      <FolderOpenIcon aria-hidden="true" />
+                      <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                      {missing ? (
+                        <span className="shrink-0 text-xs text-soft-foreground">folder not found</span>
+                      ) : project.branch !== undefined ? (
+                        <span className="shrink-0 font-mono text-xs text-soft-foreground">
+                          {project.branch}
+                        </span>
+                      ) : null}
+                      {active ? (
+                        <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
+                      ) : null}
+                    </CommandItem>
+                  )
+                })}
+              </CommandGroup>
+            ) : null}
 
-        <CommandGroup heading="Actions">
-          <CommandItem
-            value="action toggle theme"
-            data-slot="palette-action"
-            data-action="toggle-theme"
-            onSelect={() => {
-              setTheme(nextTheme)
-              close()
-            }}
-          >
-            <SunMoonIcon aria-hidden="true" />
-            Toggle theme
-            <CommandShortcut className="tracking-normal">
-              {theme} → {nextTheme}
-            </CommandShortcut>
-          </CommandItem>
-        </CommandGroup>
+            {otherTasks.length > 0 ? (
+              <CommandGroup heading="Tasks">
+                {otherTasks.map((task) => (
+                  <TaskItem
+                    key={taskKey(task)}
+                    task={task}
+                    projectName={taskProjectName(task)}
+                    showProject={showProjectOnTasks}
+                    now={now}
+                    onSelect={selectTask}
+                  />
+                ))}
+              </CommandGroup>
+            ) : null}
 
-        {orderedSkills.length > 0 ? (
-          <CommandGroup heading="Skills">
-            {orderedSkills.map((skill) => (
+            <CommandGroup heading="Actions">
               <CommandItem
-                key={skill.path}
-                // The path suffix keeps values unique when a project skill shadows a global
-                // one of the same name — both stay selectable.
-                value={`skill ${skill.name} ${skill.path}`}
-                keywords={skill.description ? [skill.description] : undefined}
-                data-slot="palette-skill"
-                data-skill={skill.name}
-                onSelect={() => go(`/new?skill=${encodeURIComponent(skill.name)}`)}
+                value="action toggle theme"
+                data-slot="palette-action"
+                data-action="toggle-theme"
+                onSelect={() => {
+                  setTheme(nextTheme)
+                  close()
+                }}
               >
-                <span className="shrink-0 font-medium">{skill.name}</span>
-                {skill.description ? (
-                  <span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">{skill.description}</span>
-                ) : null}
+                <SunMoonIcon aria-hidden="true" />
+                Toggle theme
+                <CommandShortcut className="tracking-normal">
+                  {theme} → {nextTheme}
+                </CommandShortcut>
               </CommandItem>
-            ))}
-          </CommandGroup>
-        ) : null}
+            </CommandGroup>
+
+            {orderedSkills.length > 0 ? (
+              <CommandGroup heading="Skills">
+                {orderedSkills.map((skill) => (
+                  <CommandItem
+                    key={skill.path}
+                    // The path suffix keeps values unique when a project skill shadows a global
+                    // one of the same name — both stay selectable.
+                    value={`skill ${skill.name} ${skill.path}`}
+                    keywords={skill.description ? [skill.description] : undefined}
+                    data-slot="palette-skill"
+                    data-skill={skill.name}
+                    onSelect={() => go(`/new?skill=${encodeURIComponent(skill.name)}`)}
+                  >
+                    <span className="shrink-0 font-medium">{skill.name}</span>
+                    {skill.description ? (
+                      <span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">{skill.description}</span>
+                    ) : null}
+                  </CommandItem>
+                ))}
+              </CommandGroup>
+            ) : null}
+          </>
+        )}
       </CommandList>
       {cappedProjects.length > 0 ? (
         <p data-slot="palette-search-truncated" role="status" className="border-t border-border px-3 py-2 text-[11px] text-soft-foreground">

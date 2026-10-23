@@ -12,7 +12,9 @@ import { voiceViewOf } from '@/lib/voice/view'
 import { VOICE_TEXT_MAX, type VoiceView } from '@open-mercato/cezar-api-client/contract/voice'
 import type { RunSummary, VoiceDecideRequest, VoiceDecision, VoiceOutcome } from '@open-mercato/cezar-api-client'
 import {
+  answerLines,
   answerRowText,
+  confirmHeading,
   noTasksNotice,
   openRowText,
   pastEndNotice,
@@ -40,6 +42,8 @@ export const VOICE_ROW_VALUE = 'voice-will-do'
 
 /** `pending`: the sentence's decision has not arrived yet. */
 export type VoiceRow = { kind: 'will-do' | 'notice'; text: string; choices?: string[]; pending?: true }
+/** A shown proposal, for the palette's confirmation panel: who it goes to and what it says. */
+export type VoiceConfirmation = { heading: string; lines: string[] }
 export type VoiceMode = 'idle' | 'preview' | 'choosing' | 'proposal'
 
 /** How long the text must stay unchanged before the palette asks the engine. */
@@ -168,11 +172,11 @@ function taskTitle(runs: readonly RunSummary[], runId: string): string | undefin
   return run ? runTitle(run) : undefined
 }
 
-function proposalText(proposal: VoiceProposal, runs: readonly RunSummary[]): string {
-  const title = taskTitle(runs, proposal.runId)
+function confirmationOf(proposal: VoiceProposal, runs: readonly RunSummary[]): VoiceConfirmation {
+  const heading = confirmHeading(proposal.kind, taskTitle(runs, proposal.runId))
   return proposal.kind === 'answer'
-    ? answerRowText(proposal.answers, voiceStore.headersFor(proposal.runId, proposal.askRequestId), title)
-    : tellRowText(proposal.text, title)
+    ? { heading, lines: answerLines(proposal.answers, voiceStore.headersFor(proposal.runId, proposal.askRequestId)) }
+    : { heading, lines: [proposal.text] }
 }
 
 /** Return falls back to the row cmdk would select without voice: the first ordinary row. Return
@@ -181,7 +185,15 @@ function clickFirstItem() {
   document.querySelector<HTMLElement>('[cmdk-item]:not([data-slot^="voice-"]):not([data-disabled="true"])')?.click()
 }
 
-const OFF = { row: undefined, mode: 'idle' as const, onEnter: () => false, onClose: () => {}, onSelect: () => {} }
+const OFF = {
+  row: undefined,
+  confirm: undefined,
+  mode: 'idle' as const,
+  onEnter: () => false,
+  onClose: () => {},
+  onSelect: () => {},
+  onConfirm: () => {},
+}
 
 export function useVoiceCommand(args: {
   enabled: boolean
@@ -192,12 +204,17 @@ export function useVoiceCommand(args: {
   clearText(): void
 }): {
   row: VoiceRow | undefined
+  /** Set while a proposal waits for its confirmation in an empty input: the palette shows it
+   *  instead of its search results. */
+  confirm: VoiceConfirmation | undefined
   mode: VoiceMode
   /** True when voice handled the key (and prevented cmdk's own Return). */
   onEnter(event: React.KeyboardEvent): boolean
   onClose(): void
   /** A click on a voice row: the Will do row commits, a numbered row picks. */
   onSelect(choice?: number): void
+  /** A click on the confirmation panel: the same as Return in the empty input. */
+  onConfirm(): void
 } {
   const { enabled } = args
   const runs = useRuns().data
@@ -555,12 +572,11 @@ export function useVoiceCommand(args: {
     row = previewRow(settled.result, settled.key, { runs: runs ?? [], sidebarView, openRunId })
   } else if (voiceable(trimmed) && pick === null) {
     row = { kind: 'will-do', text: 'Reading…', pending: true }
-  } else if (proposal && trimmed === '') {
-    row = { kind: 'will-do', text: proposalText(proposal, runs ?? []) }
   }
+  const confirm = proposal && trimmed === '' && !choosingLive ? confirmationOf(proposal, runs ?? []) : undefined
 
   const mode: VoiceMode = choosingLive ? 'choosing' : proposal ? 'proposal' : voiceable(trimmed) ? 'preview' : 'idle'
-  return { row, mode, onEnter, onClose, onSelect }
+  return { row, confirm, mode, onEnter, onClose, onSelect, onConfirm: confirmProposal }
 }
 
 /** The Will do row for a decision that has not been committed yet. */

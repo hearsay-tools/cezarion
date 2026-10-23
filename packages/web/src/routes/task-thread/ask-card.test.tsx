@@ -493,7 +493,7 @@ describe('AskCard voice proposals', () => {
     const scrollIntoView = vi.fn()
     Element.prototype.scrollIntoView = scrollIntoView
     renderAsk(voiceAsk)
-    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).toBeNull()
+    expect(card().getAttribute('data-voice-proposal')).toBeNull()
     propose('d1', { question: 0, kind: 'option', labels: ['Vitest'] }, { question: 1, kind: 'other', text: 'use both' })
 
     expect(pressed(/Vitest/)).toBe('true')
@@ -504,9 +504,8 @@ describe('AskCard voice proposals', () => {
     expect(card().getAttribute('data-voice-proposal')).toBe('true')
     expect(screen.getByRole('group', { name: 'Which test library?' }).getAttribute('data-voice-filled')).toBe('true')
     expect(build.getAttribute('data-voice-filled')).toBe('true')
-    expect(document.querySelector('[data-slot="ask-voice-prompt"]')?.textContent).toBe(
-      'Send these answers? Say “yes, confirmed” or press Return.',
-    )
+    // The palette's confirmation panel says how to confirm; the card only shows what it filled.
+    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).toBeNull()
     expect(scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' })
     // Nothing is sent until the proposal is confirmed.
     expect(mutateAsync).not.toHaveBeenCalled()
@@ -524,7 +523,6 @@ describe('AskCard voice proposals', () => {
     expect(pressed(/Vitest/)).toBe('false')
     expect(pressed(/Vite$/)).toBe('false')
     expect(card().getAttribute('data-voice-proposal')).toBeNull()
-    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).toBeNull()
     expect(document.querySelector('[data-voice-filled]')).toBeNull()
   })
 
@@ -563,7 +561,7 @@ describe('AskCard voice proposals', () => {
     expect(result).toEqual({ ok: false, unanswered: [{ index: 1, header: 'Build' }] })
     expect(mutateAsync).not.toHaveBeenCalled()
     expect(voiceStore.getProposal()).toBeDefined()
-    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).not.toBeNull()
+    expect(card().getAttribute('data-voice-proposal')).toBe('true')
   })
 
   it('confirm sends what the card shows after a manual change', async () => {
@@ -602,7 +600,7 @@ describe('AskCard voice proposals', () => {
     })
     expect(pressed(/date-fns/)).toBe('true')
     expect(mutateAsync).not.toHaveBeenCalled()
-    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).not.toBeNull()
+    expect(card().getAttribute('data-voice-proposal')).toBe('true')
     act(() => {
       voiceStore.confirm()
     })
@@ -623,7 +621,6 @@ describe('AskCard voice proposals', () => {
     expect(mutateAsync).not.toHaveBeenCalled()
     expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
     expect(card().getAttribute('data-voice-proposal')).toBe('true')
-    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).not.toBeNull()
     expect(document.querySelectorAll('[data-voice-filled]')).toHaveLength(2)
     // The snapshot survived: cancel puts the card back to empty.
     act(() => voiceStore.cancel())
@@ -674,7 +671,6 @@ describe('AskCard voice proposals', () => {
     expect(pressed(/Vitest/)).toBe('true')
     expect(card().getAttribute('data-voice-proposal')).toBe('true')
     expect(screen.getByRole('group', { name: 'Which test library?' }).getAttribute('data-voice-filled')).toBe('true')
-    expect(document.querySelector('[data-slot="ask-voice-prompt"]')).not.toBeNull()
     // Coming back into view is not a new proposal: the card does not pull the scroll to itself.
     expect(scrollIntoView).not.toHaveBeenCalled()
 

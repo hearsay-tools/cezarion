@@ -1,5 +1,5 @@
 import { CommandGroup, CommandItem } from '@/components/ui/command'
-import { VOICE_ROW_VALUE, type VoiceRow } from './use-voice-command'
+import { VOICE_ROW_VALUE, type VoiceConfirmation, type VoiceRow } from './use-voice-command'
 
 /**
  * The palette's voice rows (spec 2026-10-21-voice-mode, § Input): the Will do row, the numbered
@@ -57,6 +57,57 @@ export function VoiceRows({
           <span className="min-w-0 flex-1 truncate">{choice}</span>
         </CommandItem>
       ))}
+    </CommandGroup>
+  )
+}
+
+/** The input's placeholder while the confirmation panel shows. */
+export const CONFIRM_PLACEHOLDER = 'Say “yes, confirmed” or press Return to send…'
+
+/**
+ * A proposal waiting for its confirmation (spec 2026-10-21-voice-mode, § Confirmation), shown in
+ * place of the palette's search results while the input is empty: who it goes to, everything it
+ * says, and the two keys that end it. The panel is the only row, so cmdk selects it, and the
+ * highlight matches what Return does. A refused confirmation keeps it, with the reason above.
+ */
+export function VoiceConfirm({
+  confirm,
+  notice,
+  onConfirm,
+}: {
+  confirm: VoiceConfirmation
+  notice: string | undefined
+  onConfirm(): void
+}) {
+  return (
+    <CommandGroup forceMount data-slot="voice-confirm-panel">
+      {notice ? (
+        <p role="status" className="px-2 py-1.5 text-sm text-foreground">
+          {notice}
+        </p>
+      ) : null}
+      <CommandItem
+        forceMount
+        value="voice-confirm"
+        data-slot="voice-confirm"
+        onSelect={onConfirm}
+        className="flex-col items-start gap-1"
+      >
+        <span className="text-xs text-soft-foreground">{confirm.heading}</span>
+        {confirm.lines.map((line, index) => (
+          <span key={index} className="w-full whitespace-pre-wrap break-words">
+            {line}
+          </span>
+        ))}
+      </CommandItem>
+      <div data-slot="voice-confirm-hints" className="flex gap-4 px-2 pt-2 pb-1 text-xs text-muted-foreground">
+        <span>
+          <kbd className="font-sans text-soft-foreground">↵</kbd> Send
+        </span>
+        <span>
+          <kbd className="font-sans text-soft-foreground">Esc</kbd> Cancel
+        </span>
+      </div>
     </CommandGroup>
   )
 }

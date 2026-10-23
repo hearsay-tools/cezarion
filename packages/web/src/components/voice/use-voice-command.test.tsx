@@ -320,7 +320,8 @@ describe('useVoiceCommand', () => {
     expect(confirm).not.toHaveBeenCalled()
     expect(harness.result.current.text).toBe('')
     expect(harness.result.current.voice.mode).toBe('proposal')
-    expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Answer Library: Vitest' })
+    expect(harness.result.current.voice.row).toBeUndefined()
+    expect(harness.result.current.voice.confirm).toEqual({ heading: 'Answer the question', lines: ['Library: Vitest'] })
 
     // A later Return in the emptied input is the confirmation.
     expect(enter(harness).handled).toBe(true)
@@ -404,7 +405,46 @@ describe('useVoiceCommand', () => {
     await proposeAnswer(harness, 2, [option(1, 'Fast')])
 
     expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith(DECISION_ID(1), 'replaced')
-    expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Answer Library: Vitest; Build: Fast' })
+    expect(harness.result.current.voice.confirm).toEqual({
+      heading: 'Answer the question',
+      lines: ['Library: Vitest', 'Build: Fast'],
+    })
+  })
+
+  it('describes a waiting tell for the confirmation panel until the user types', async () => {
+    mocks.openRunId = 'r1'
+    mocks.runs = [voiceRun({ id: 'r1', title: 'Fix flaky shard', status: 'waiting' })]
+    voiceStore.registerComposer({
+      runId: 'r1',
+      getDraft: () => '',
+      setDraft: () => true,
+      clearVoiceDraft: () => true,
+      submit: () => true,
+    })
+    const harness = setup()
+    type(harness, 'tell it: ship it')
+    enter(harness)
+    await answer(calls[0], { action: 'tell', decisionId: DECISION_ID(1), runId: 'r1', text: 'ship it', confidence: 0.9 })
+
+    expect(harness.result.current.voice.confirm).toEqual({ heading: 'Send to “Fix flaky shard”', lines: ['ship it'] })
+    // Typing is a new search ("yes, confirmed", "no", another sentence): the panel steps aside.
+    type(harness, 'y')
+    expect(harness.result.current.voice.confirm).toBeUndefined()
+    type(harness, '')
+    act(() => harness.result.current.voice.onConfirm())
+    expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith(DECISION_ID(1), 'confirmed')
+  })
+
+  it('names the task in the answer panel and keeps a refusal beside it', async () => {
+    mocks.openRunId = 'r1'
+    mocks.runs = [voiceRun({ id: 'r1', title: 'Fix flaky shard', status: 'waiting' })]
+    voiceStore.registerAskCard(card(['Library', 'Build']))
+    const harness = setup()
+    await proposeAnswer(harness, 1, [option(0, 'Vitest')])
+
+    expect(enter(harness).handled).toBe(true)
+    expect(harness.result.current.voice.confirm).toEqual({ heading: 'Answer “Fix flaky shard”', lines: ['Library: Vitest'] })
+    expect(harness.result.current.voice.row).toEqual({ kind: 'notice', text: 'Question 2 (Build) still needs an answer.' })
   })
 
   it('says why a proposal could not be made', async () => {

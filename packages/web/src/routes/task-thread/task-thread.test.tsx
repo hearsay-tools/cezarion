@@ -329,12 +329,12 @@ describe('ThreadView', () => {
     expect(textarea.placeholder).toBe('Message the agent — / for skills, @ for files…')
   })
 
-  it('a voice tell fills the composer, shows its prompt, cancels back to empty', () => {
+  it('a voice tell fills and marks the composer, cancels back to empty', () => {
     const thread = run('running')
     renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
     const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
     const tell = { kind: 'tell', decisionId: 'd1', runId: thread.id, text: 'use the second plan' } as const
-    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
+    expect(document.querySelector('[data-slot="composer"]')?.hasAttribute('data-voice-proposal')).toBe(false)
 
     let result: ReturnType<typeof voiceStore.propose> | undefined
     act(() => {
@@ -343,13 +343,11 @@ describe('ThreadView', () => {
     expect(result).toEqual({ ok: true })
     expect(textarea.value).toBe('use the second plan')
     expect(document.querySelector('[data-slot="composer"]')?.getAttribute('data-voice-proposal')).toBe('true')
-    expect(document.querySelector('[data-slot="composer-voice-prompt"]')?.textContent).toBe(
-      'Send this message? Say “yes, confirmed” or press Return.',
-    )
+    // The palette's confirmation panel says how to confirm; the composer only shows what it filled.
+    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
 
     act(() => voiceStore.cancel())
     expect(textarea.value).toBe('')
-    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
     expect(document.querySelector('[data-slot="composer"]')?.hasAttribute('data-voice-proposal')).toBe(false)
   })
 
@@ -377,10 +375,10 @@ describe('ThreadView', () => {
     })
     expect(voiceStore.getProposal()).toBeUndefined()
     expect(textarea.value).toBe('')
-    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
+    expect(document.querySelector('[data-slot="composer"]')?.hasAttribute('data-voice-proposal')).toBe(false)
   })
 
-  it('a refused confirm keeps the tell, its draft and its prompt', () => {
+  it('a refused confirm keeps the tell, its draft and its mark', () => {
     const thread = run('running')
     const { rerender, queryClient } = renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
     const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
@@ -400,7 +398,7 @@ describe('ThreadView', () => {
     expect(result).toEqual({ ok: false, reason: 'busy' })
     expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
     expect(textarea.value).toBe('hello')
-    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).not.toBeNull()
+    expect(document.querySelector('[data-slot="composer"]')?.getAttribute('data-voice-proposal')).toBe('true')
   })
 
   it('switching to another task clears the tell proposed for the first', () => {
@@ -419,7 +417,6 @@ describe('ThreadView', () => {
     expect((screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement).value).toBe('')
     expect(voiceStore.getProposal()).toBeUndefined()
     expect(voiceStore.lastDrop()).toBe('task-closed')
-    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
     expect(document.querySelector('[data-slot="composer"]')?.hasAttribute('data-voice-proposal')).toBe(false)
   })
 

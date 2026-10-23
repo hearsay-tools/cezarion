@@ -282,7 +282,20 @@ describe('palette voice mode', () => {
     expect(overlay()?.className).toContain('bg-transparent')
     expect(input.value).toBe('')
     expect(document.activeElement).toBe(input)
-    expect(screen.getByText('Answer “Pick a library”: Library: Vitest')).toBeTruthy()
+    // The confirmation panel replaces the search: one highlighted row saying what Return sends.
+    const panel = document.querySelector('[data-slot="voice-confirm"]')
+    expect(panel?.textContent).toBe('Answer “Pick a library”Library: Vitest')
+    expect(panel?.getAttribute('data-selected')).toBe('true')
+    expect(document.querySelectorAll('[cmdk-item]')).toHaveLength(1)
+    expect(input.placeholder).toBe('Say “yes, confirmed” or press Return to send…')
+    expect(document.querySelector('[data-slot="voice-confirm-hints"]')?.textContent).toBe('↵ SendEsc Cancel')
+
+    // Typing ("yes, confirmed", "no", a new sentence) brings the search back.
+    fireEvent.change(input, { target: { value: 'y' } })
+    expect(document.querySelector('[data-slot="voice-confirm"]')).toBeNull()
+    expect(input.placeholder).toBe('Search projects, tasks, views, actions, skills…')
+    fireEvent.change(input, { target: { value: '' } })
+    await waitFor(() => expect(document.querySelector('[data-slot="voice-confirm"]')?.getAttribute('data-selected')).toBe('true'))
 
     // Esc closes the palette, which drops the proposal and reports it.
     fireEvent.keyDown(input, { key: 'Escape' })
