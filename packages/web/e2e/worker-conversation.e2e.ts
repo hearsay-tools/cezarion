@@ -5,7 +5,7 @@ import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { seedTranscript } from './seed-transcript'
 
-import { waitForSettledSample } from './visual-ready'
+import { settleVisual, waitForSettledSample } from './visual-ready'
 import { messageClockExpression } from './transcript-measurements'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
@@ -238,8 +238,13 @@ describe('chronological worker conversation', () => {
       focusWithKeyboard(browser, `${request} [data-slot="conversation-body-toggle"]`)
       browser.press('Space')
       browser.waitForFunction(`document.querySelector('${request} [data-slot="conversation-body-toggle"]').getAttribute('aria-expanded') === 'false'`)
+      // After collapsing the request, render and settle the lazy reply row before
+      // agent-browser reads click coordinates. CI run 39991752744 left Show message closed.
+      hoverVisiblePoint(browser, `${replyCard} [data-slot="conversation-body-toggle"]`)
+      settleVisual(browser, replyCard)
       browser.click(`${replyCard} [data-slot="conversation-body-toggle"]`)
       expect(browser.waitForValue<string>(`document.querySelector('${replyCard} [data-slot="conversation-body"]').textContent`, value => value.includes(reply.text))).toContain(reply.text)
+      settleVisual(browser, replyCard)
       browser.click(`${replyCard} [data-slot="conversation-body-toggle"]`)
       browser.waitForFunction(`document.querySelector('${replyCard} [data-slot="conversation-body-toggle"]').getAttribute('aria-expanded') === 'false'`)
       focusWithKeyboard(browser, `${replyCard} ${connector}`)
