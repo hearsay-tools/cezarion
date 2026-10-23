@@ -347,6 +347,17 @@ attached to the old env's dead `baseUrl` and repeated its browser notes.
 
 Seeded NDJSON transcripts must go through `seedTranscript` from `seed-transcript.ts`; every nonblank line needs `seq` and `ts` (and `type`), and validation reports the line number and event type before writing.
 
+## A plain dry-run reply parks on a "Next step" card
+
+A dry-run task whose reply has no marker does not park with the composer alone. Cezar's no-wait
+nudge (hearsay-tools/cezarion#1234) asks the mock again, and every native mock answers the nudge
+with a "Next step" question card. `packages/cezar/scripts/mock-nudge.mjs` is the source of that
+card. A spec that needs a task parked `waiting` with no question card sets
+`CEZ_MOCK_NUDGE_REPLY=plain` on its fixture server: the mocks then answer the nudge in plain text,
+and the run reaches the no-wait fallback. A spec that boots its own server passes
+`fixtureServeEnv(root, { CEZ_MOCK_NUDGE_REPLY: 'plain' })`, as `voice.e2e.ts` does. On the shared
+server, pass `--server-env=CEZ_MOCK_NUDGE_REPLY=plain`.
+
 ## Full local suite in four lanes
 
 Run `npm run test:e2e:local` for the complete suite on a machine with roughly **8 GiB
