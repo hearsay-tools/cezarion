@@ -25,8 +25,8 @@ import { NewTaskRoute } from './new-task'
 
 /**
  * The /new screen against a mocked API: picker data flows (runner hidden on single-backend
- * hosts, model presets switching per runner, variants gated on git), the EXACT submit bodies
- * (workflow vs skill vs variants — the wire contract with POST /api/v1/runs), lastTask
+ * hosts, model presets switching per runner, worktrees gated on git), the EXACT submit bodies
+ * (workflow vs skill — the wire contract with POST /api/v1/runs), lastTask
  * persistence, draft survival across unmounts, ?skill/?ref prefill, and the suggested chips.
  */
 
@@ -398,14 +398,12 @@ describe('the hero surface', () => {
     fireEvent.click(await screen.findByRole('menuitemradio', { name: /sonnet/ }))
     expect(summary.parentElement?.textContent).toContain('sonnet')
     fireEvent.change(textarea(), { target: { value: 'Keep this draft' } })
-    fireEvent.pointerDown(screen.getByRole('button', { name: 'Parallel variants' }))
-    fireEvent.click(await screen.findByRole('menuitemradio', { name: /×2 variants/ }))
     const originalTextarea = textarea()
     fireEvent.click(summary)
     fireEvent.click(summary)
     expect(textarea()).toBe(originalTextarea)
     expect(textarea().value).toBe('Keep this draft')
-    expect(screen.getByRole('button', { name: 'Parallel variants' }).textContent).toContain('×2')
+    expect(screen.queryByRole('button', { name: 'Parallel variants' })).toBeNull()
     expect(screen.getByRole('button', { name: /^Model · / })).toBe(model)
   })
 
@@ -453,7 +451,7 @@ describe('picker data flows', () => {
     expect(editor.contains(model)).toBe(false)
     expect(document.querySelector('[data-slot="composer-agent-options"]')?.contains(model)).toBe(true)
     expect(execution.contains(model)).toBe(false)
-    expect(execution.contains(variants)).toBe(true)
+    expect(variants).toBeNull()
   })
 
   it('uses one in-pill Field · value grammar for Model, Runner, and Effort (#272)', async () => {
@@ -597,7 +595,7 @@ describe('picker data flows', () => {
 
   it('drops a persisted model preset that belongs to another runner', async () => {
     writeDraft({
-      text: '', source: null, runner: 'codex', agentProfile: null, model: 'claude-opus-4-8', effort: null, variants: 1,
+      text: '', source: null, runner: 'codex', agentProfile: null, model: 'claude-opus-4-8', effort: null, retiredVariants: false,
       planFirst: false, worktree: null, autonomous: null, generateFollowups: null,
     })
     serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
@@ -654,25 +652,21 @@ describe('picker data flows', () => {
     })
   })
 
-  it('gates variants on git: no repo → pill disabled with the honest reason, base pill gone', async () => {
+  it('has no parallel variant control, including without git', async () => {
     serve({ health: HEALTH_NO_GIT, repo: REPO_NO_GIT })
     renderNewTask()
     await pillReady()
-    const pill = document.querySelector('[data-slot="variants-pill"]') as HTMLButtonElement
-    expect(pill.disabled).toBe(true)
-    expect(pill.title).toContain('need a git repository')
+    expect(document.querySelector('[data-slot="variants-pill"]')).toBeNull()
     expect(document.querySelector('[data-slot="base-pill"]')).toBeNull()
   })
 
   // #791: health is bound to the boot folder, so a cezar booted outside a git repo answered
   // `repo: null` for EVERY project. Reading git state from the project-scoped `/repo` instead is
   // what keeps the worktree controls alive for a git project under a non-git boot root.
-  it('gates variants on the project repo, not the boot folder: boot without git still offers worktrees', async () => {
+  it('offers worktrees for the project repo even when the boot folder has no git', async () => {
     serve({ health: HEALTH_NO_GIT, repo: REPO })
     renderNewTask()
     await pillReady()
-    const pill = document.querySelector('[data-slot="variants-pill"]') as HTMLButtonElement
-    expect(pill.disabled).toBe(false)
     expect(document.querySelector('[data-slot="worktree-toggle"]')).not.toBeNull()
     fireEvent.change(textarea(), { target: { value: 'Fix the composer git detection' } })
     await startTask()
@@ -1258,7 +1252,7 @@ describe('submit', () => {
     // lands in its errored state immediately and the test stays deterministic.
     writeDraft({
       text: '', source: { source: 'skill', ref: 'om-fix' }, runner: null, agentProfile: null, model: null, effort: null,
-      variants: 1, planFirst: false, worktree: null, autonomous: null, generateFollowups: null,
+      retiredVariants: false, planFirst: false, worktree: null, autonomous: null, generateFollowups: null,
     })
     serve({ createRun: { id: 'run-9' }, uiStateStatus: 404 })
     renderNewTask()
@@ -1396,33 +1390,19 @@ describe('submit', () => {
     expect(postedBody()).toMatchObject({ workflow: 'quick-task', worktree: false })
   })
 
-  it('picking a model and ×2 variants rides along; {runs} answer navigates to the FIRST variant', async () => {
-    serve({ createRun: { runs: [{ id: 'v-a' }, { id: 'v-b' }] } })
+  it('preserves old draft text and requires a choice before launching one task', async () => {
+    localStorage.setItem('cez-new-task-draft', JSON.stringify({ text: 'Race two attempts', variants: 2 }))
+    serve()
     renderNewTask()
     await pillReady()
-
-    fireEvent.pointerDown(document.querySelector('[data-slot="model-pill"]') as HTMLElement)
-    let options = await screen.findAllByRole('menuitemradio')
-    fireEvent.click(options.find((o) => o.textContent?.includes('sonnet')) as HTMLElement)
-    await waitFor(() => expect(screen.queryAllByRole('menuitemradio')).toHaveLength(0))
-
-    fireEvent.pointerDown(document.querySelector('[data-slot="variants-pill"]') as HTMLElement)
-    options = await screen.findAllByRole('menuitemradio')
-    fireEvent.click(options.find((o) => o.textContent?.includes('×2')) as HTMLElement)
-    await waitFor(() =>
-      expect((document.querySelector('[data-slot="variants-pill"]') as HTMLElement).textContent).toContain('×2'),
-    )
-
-    fireEvent.change(textarea(), { target: { value: 'Race two attempts' } })
+    expect(screen.getByRole('alert').textContent).toContain('Parallel variants are removed')
+    fireEvent.click(screen.getByRole('button', { name: 'Start task' }))
+    await waitFor(() => expect(screen.getByText(/Choose Use one task/)).toBeTruthy())
+    expect(requests.filter(request => request.method === 'POST' && request.url === '/api/v1/runs')).toHaveLength(0)
+    fireEvent.click(screen.getByRole('button', { name: 'Use one task' }))
     await startTask()
-
-    expect(postedBody()).toEqual({
-      task: 'Race two attempts',
-      workflow: 'quick-task',
-      model: 'sonnet',
-      variants: 2,
-    })
-    await waitFor(() => expect(location()).toBe('/tasks/v-a'))
+    expect(postedBody()).toMatchObject({ task: 'Race two attempts' })
+    expect(postedBody()).not.toHaveProperty('variants')
   })
 
   it('shows a locked native default but omits it from the direct run request', async () => {

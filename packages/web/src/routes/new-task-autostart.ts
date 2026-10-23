@@ -40,7 +40,6 @@ export function bookmarkletRunBody(
     model: '',
     runner,
     defaultRunner,
-    variants: 1,
     images: [],
     // Absent for every saved bookmarklet (legacy links have no `todo`), so this stays off the
     // wire exactly as before — but if an in-app link ever arms auto, the inbox bookkeeping

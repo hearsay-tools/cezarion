@@ -836,7 +836,7 @@ describe('TaskQuickList', () => {
       renderList({ runs: variants() })
 
       // A sibling of the toggle button, never its child — a link inside a button is invalid.
-      const link = screen.getByRole('link', { name: 'Compare the variants of Add skills autocomplete' })
+      const link = screen.getByRole('link', { name: 'View retained results of Add skills autocomplete' })
       expect(link.getAttribute('href')).toBe('/compare/g1')
       expect(link.closest('button')).toBeNull()
     })

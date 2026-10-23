@@ -14,8 +14,8 @@ export function CompareLoading() {
       <CenteredState
         icon={<LoaderCircleIcon className="motion-safe:animate-spin" />}
         tone="neutral"
-        title="Loading variants…"
-        subtitle="Fetching every variant's status, spend and diff summary."
+        title="Loading retained results…"
+        subtitle="Reading the historical task group."
       />
     </div>
   )

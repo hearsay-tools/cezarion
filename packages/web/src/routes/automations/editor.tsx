@@ -127,6 +127,10 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
     >
       <form className="automation-editor grid min-w-0 gap-5 md:grid-cols-[minmax(0,1fr)_320px] md:items-start" onSubmit={submit}>
         <div className="grid min-w-0 gap-5">
+          {draft.retiredVariants ? <section role="alert" className="flex flex-col items-start gap-3 rounded-xl border border-border bg-card p-4">
+            <p>Parallel variants are removed. This automation requests multiple candidates and cannot launch. Use one task, or ask that task to compare approaches with owned workers.</p>
+            <Button type="button" variant="outline" className="min-h-11" onClick={() => patch({ retiredVariants: false })}>Use one task</Button>
+          </section> : null}
           <Section title="Name" section="name" failure={failure}>
             <div className="grid gap-2">
               <Label htmlFor="automation-name">Name</Label>

@@ -180,7 +180,7 @@ describe('pushed task screen top bar', () => {
 
   it('titles a compare route itself', () => {
     renderScreen('/compare/grp-1')
-    expect(within(topBar()).getByText('Compare variants')).toBeTruthy()
+    expect(within(topBar()).getByText('Retained results')).toBeTruthy()
     expect(within(topBar()).getByRole('button', { name: 'Back' })).toBeTruthy()
   })
 

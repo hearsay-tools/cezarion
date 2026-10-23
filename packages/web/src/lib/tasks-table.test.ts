@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest'
 
 import type { ProcessUsage, RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
 import {
-  compareGroups,
   filterRuns,
   finishedRunCount,
   formatCost,
@@ -631,47 +630,6 @@ describe('usageCells', () => {
     const cells = usageCells(run({ status: 'running' }), undefined)
     expect(cells.cpu).toEqual({ text: '', kind: 'none' })
     expect(cells.mem).toEqual({ text: '', kind: 'none' })
-  })
-})
-
-describe('compareGroups', () => {
-  const finishedPair = (groupId: string, status: RunRecord['status'] = 'review'): [RunSummary, RunSummary] => [
-    run({ groupId, variant: 'A', title: 'Add autocomplete (A)', status }),
-    run({ groupId, variant: 'B', title: 'Add autocomplete (B)', status }),
-  ]
-
-  it('offers a strip for a group whose variants are all terminal', () => {
-    expect(compareGroups(finishedPair('g1'), 'active')).toEqual([
-      { groupId: 'g1', title: 'Add autocomplete', count: 2 },
-    ])
-  })
-
-  it('counts review/failed/cancelled as terminal, matching the legacy compare gate', () => {
-    const [a, b] = finishedPair('g1')
-    expect(compareGroups([a, { ...b, status: 'failed' }], 'active')).toHaveLength(1)
-    expect(compareGroups([a, { ...b, status: 'cancelled' }], 'active')).toHaveLength(1)
-  })
-
-  it('withholds the strip while any variant is still in flight', () => {
-    const [a, b] = finishedPair('g1')
-    for (const status of ['running', 'queued', 'waiting'] as const) {
-      expect(compareGroups([a, { ...b, status }], 'active')).toEqual([])
-    }
-  })
-
-  it('is not a comparison with one member left in view', () => {
-    const [a, b] = finishedPair('g1')
-    expect(compareGroups([a, { ...b, archived: true }], 'active')).toEqual([])
-  })
-
-  it('scopes to the view — an archived group belongs to the Archived tab', () => {
-    const archivedPair = finishedPair('g2', 'done').map((r) => ({ ...r, archived: true }))
-    expect(compareGroups(archivedPair, 'active')).toEqual([])
-    expect(compareGroups(archivedPair, 'archived')).toEqual([{ groupId: 'g2', title: 'Add autocomplete', count: 2 }])
-  })
-
-  it('ignores ungrouped runs entirely', () => {
-    expect(compareGroups([run(), run()], 'active')).toEqual([])
   })
 })
 

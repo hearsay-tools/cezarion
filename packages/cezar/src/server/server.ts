@@ -23,7 +23,7 @@ import { workerCapacity } from '../delegation/capacity.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
 import { githubItemParamsSchema } from '@open-mercato/cezar-contract/github';
-import { CLIENT_REQUEST_VARIANTS_ERROR, toRunSummary } from '@open-mercato/cezar-contract/runs';
+import { PARALLEL_VARIANTS_REMOVED, singleRunVariantsSchema, toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { workerEmptyRequestSchema, runRelationshipsSchema } from '@open-mercato/cezar-contract/delegation';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -76,7 +76,6 @@ import {
   notifyRunInputSchema,
   type GroupResponse,
   type GroupVariant,
-  type PickVariantResponse,
   type RunIndexEntry,
   type RunsIndexResponse,
 } from '@open-mercato/cezar-contract/runs';
@@ -638,11 +637,9 @@ const startRunSchema = z
     // own selection, then the discovered default. Bounded like a profile id in the workspace
     // schema, so a value this route accepts can never be degraded away by the next load.
     agentProfile: z.string().max(64).optional(),
-    // Parallel variants (spec 010): ×2/×3 runs the task as 2–3 competing
-    // agents in separate worktrees; the user compares diffs and picks one.
-    variants: z.number().int().min(1).max(3).optional(),
-    // Composer worktree opt-out (#worktree-toggle): false runs in the repo
-    // working tree. Ignored when variants > 1.
+    // Refuse retired multi-candidate requests before any launch side effects.
+    variants: singleRunVariantsSchema,
+    // Composer worktree opt-out: false runs in the repo working tree.
     worktree: z.boolean().optional(),
     // Autonomous mode (#autonomous): the run never parks at `waiting` — it
     // auto-continues until the agent signals done. No "needs you" is raised.
@@ -678,14 +675,7 @@ const startRunSchema = z
   })
   .refine((b) => Boolean(b.workflow) !== Boolean(b.steps), {
     message: 'provide either "workflow" or "steps", not both',
-  })
-  .refine((b) => !(b.clientRequestId && (b.variants ?? 1) > 1), {
-    message: CLIENT_REQUEST_VARIANTS_ERROR,
   });
-
-const pickSchema = z.object({
-  runId: z.string().min(1),
-});
 
 const planSchema = z.object({
   // Same bound as `startRunSchema.task` — this flows into `planChain` (#429).
@@ -4102,27 +4092,6 @@ export function createApp(deps: ServerDeps) {
         if (parsed.data.todoId) await noteTodoStarted(dataDir, parsed.data.todoId, result.run.id);
         return c.json(result.run, 201 as const);
       }
-      const variants = parsed.data.variants ?? 1;
-      if (variants > 1) {
-        // Variants live in worktrees — without git there's nothing to isolate
-        // them with, so this degrades to a clear 400 instead of stepping on
-        // one shared working tree.
-        const repo = await getRepoInfo(repoRoot);
-        if (!repo) {
-          return c.json(
-            {
-              error:
-                'parallel variants need a git repository (each variant runs in its own worktree) — run ×1 here, or start cezar inside a git repo',
-            },
-            400,
-          );
-        }
-        const runs = manager.startVariants(workflow, input, variants);
-        // The entry points at the first variant — the thread the composer navigates to.
-        const first = runs[0];
-        if (parsed.data.todoId && first) await noteTodoStarted(dataDir, parsed.data.todoId, first.id);
-        return c.json({ runs }, 201);
-      }
       const run = manager.startRun(workflow, input);
       if (parsed.data.todoId) await noteTodoStarted(dataDir, parsed.data.todoId, run.id);
       return c.json(run, 201);
@@ -4918,7 +4887,7 @@ export function createApp(deps: ServerDeps) {
       } finally { release(); }
     });
 
-  // ---- parallel variants (spec 010) -----------------------------------------
+  // ---- retained variant groups (spec 010) -----------------------------------------
 
   const groupRuns = (store: RunStore, groupId: string): RunRecord[] =>
     store
@@ -4955,65 +4924,8 @@ export function createApp(deps: ServerDeps) {
       } satisfies GroupResponse);
     })
 
-    // "Pick this one": the winner rests at `review` (spec 009 takes it from
-    // there — send back / draft PR / finish); the losers are cancelled if
-    // alive, archived, and their worktrees + branches removed.
-    .post('/groups/:groupId/pick', jsonZodValidator(pickSchema), async (c) => {
-      const { root: repoRoot, dataDir, store, manager } = c.get('project');
-      const runs = groupRuns(store, c.req.param('groupId'));
-      if (runs.length === 0) return c.json({ error: 'not found' }, 404);
-      const parsed = { data: c.req.valid('json') };
-      const winner = runs.find((r) => r.id === parsed.data.runId);
-      if (!winner) return c.json({ error: 'runId is not part of this group' }, 404);
-      if (manager.isActive(winner.id)) {
-        return c.json({ error: 'this variant is still active — wait for it to finish first' }, 409);
-      }
-
-      const blocker = autosaveCleanupBlocker(dataDir, winner.id);
-      if (blocker) return c.json({ error: blocker }, 409);
-
-      // Winner: a non-review terminal state with a non-empty diff flips to
-      // `review` (the settleSuccess rule) — but only when the review gate applies
-      // (#489): it is enabled (`reviewGateEnabled`, default off) AND the winner is
-      // not autonomous. An autonomous / gate-off winner keeps its `done` state with
-      // the diff left in the worktree; an empty diff (or no worktree) stays too.
-      if (
-        winner.status !== 'review' &&
-        winner.worktreePath &&
-        existsSync(winner.worktreePath) &&
-        winner.autonomous !== true &&
-        reviewGateEnabled(await loadConfig(repoRoot))
-      ) {
-        const diff = await worktreeDiff(winner.worktreePath, winner.baseBranch ?? 'HEAD');
-        if (diff.trim().length > 0 && !diff.startsWith('(diff failed')) {
-          store.updateRun(winner.id, { status: 'review' });
-        }
-      }
-      const losers = runs.filter((r) => r.id !== winner.id);
-      store.appendEvent(winner.id, {
-        type: 'lifecycle',
-        message: `picked from ${runs.length} variants — ${losers.length} other variant(s) archived`,
-      });
-      appendHandoffHeartbeat(dataDir, winner.id, `picked from ${runs.length} variants`);
-
-      for (const loser of losers) {
-        if (manager.isActive(loser.id)) manager.cancel(loser.id);
-        // Owned workers use verified cleanup exclusively, even after history becomes deletable.
-        if (loser.delegation?.role === 'worker' || !store.canDeleteRun(loser.id)) continue;
-        if (loser.worktreePath) await releaseThenRemoveWorktree({ previewHost: deps.previewHost }, loser.id, repoRoot, loser.worktreePath, loser.branch);
-        store.updateRun(loser.id, { worktreePath: undefined, branch: undefined });
-        store.setArchived(loser.id, true);
-        store.appendEvent(loser.id, {
-          type: 'lifecycle',
-          message: `variant ${winner.variant ?? '?'} was picked — this variant is archived, its worktree removed`,
-        });
-      }
-      // Spread: `getRun` may answer undefined, and an undefined VALUE is dropped by
-      // JSON.stringify — so writing the key unconditionally typed the route as sending a key it
-      // does not. contract/workflows.ts says `.optional()`, which is what a client receives.
-      const picked = store.getRun(winner.id);
-      return c.json({ ...(picked !== undefined ? { winner: picked } : {}) });
-    });
+    // Old clients receive an explicit refusal. This route never mutates retained results.
+    .post('/groups/:groupId/pick', (c) => c.json({ error: PARALLEL_VARIANTS_REMOVED }, 410));
 
   // ---- chained family: open-targets (project-scoped) ----
   const openTargetsRoutes = new Hono<ProjectApiEnv>()

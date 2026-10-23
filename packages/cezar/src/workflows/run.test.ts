@@ -373,31 +373,6 @@ describe('RunManager reported cost accounting', () => {
   }, 30_000);
 });
 
-it('parallel variants ignore a worktree opt-out and retain isolated mode', async () => {
-  const repoRoot = mkdtempSync(join(tmpdir(), 'cez-variant-isolation-'));
-  const store = RunStore.open(join(repoRoot, '.ai/cezar'));
-  try {
-    const manager = createFixtureManager(store, repoRoot, {
-      semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }),
-    });
-    const records = manager.startVariants(
-      {
-        name: 'quick-task',
-        description: 'x',
-        source: 'built-in',
-        steps: [{ id: 'work', name: 'Work', prompt: '{{task}}' }],
-      },
-      { task: 'compare approaches', worktree: false },
-      2,
-    );
-
-    expect(records.map((record) => record.worktree)).toEqual([undefined, undefined]);
-  } finally {
-    await drainFixtureManagers(repoRoot);
-    store.flush();
-    rmSync(repoRoot, { recursive: true, force: true });
-  }
-});
 
 /**
  * Turn-end bookkeeping (#389, task auto-naming spec) against a REAL fixture
