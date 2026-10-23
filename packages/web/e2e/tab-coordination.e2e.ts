@@ -145,9 +145,18 @@ it('blocked SharedWorker uses finite HTTP in ten visible windows and aborts on p
         pages.push({ targetId, sessionId })
       }
       const run = fixture.runs[0]!
-      // hearsay-tools/cezarion#1547: CPU17/two-loop proof left 8/10 documents loading
-      // after parallel startup. Sequential startup took 2852–5620 ms per document
-      // with the same transcript predicate and bound. Later checks use all ten windows.
+      // hearsay-tools/cezarion#1547: parallel startup failed 1/1 loaded diagnostics;
+      // telemetry left 8/10 documents loading. Bundle:
+      // .ai/qa/failures/selected/blocked-SharedWorker-uses-finite-HTTP-in-ten-visible-windows-and-aborts-on-pageh-1/
+      // probe.json: "probe exceeded 2000ms", captured after cleanup at about:blank;
+      // pre-cleanup state and run counts: https://github.com/hearsay-tools/cezarion/pull/1569#discussion_r4363857533
+      // Reproduce with `taskset -c 17 npm run test:e2e -- tab-coordination.e2e.ts -t 'blocked SharedWorker uses finite HTTP'`
+      // plus two owned busy loops on CPU17. Sequential startup passed 1/1 scratch
+      // proofs and 10/10 tracked acceptance processes; no retries. Old global setup
+      // ran under load; fixed global setup preceded burners, with fresh tab fixtures
+      // under load in both. Sequential startup took 2852–5620 ms per document with
+      // the same predicate and 22 s guard, increasing aggregate setup allowance.
+      // The 60 s row bound and later concurrent checks in all ten windows remain.
       for (const page of pages) {
         await request('Page.navigate', { url: `${fixture.origin}/p/${run.projectId}/tasks/${run.runId}` }, page.sessionId)
         await waitText(request, page.sessionId, `Tab fixture transcript ${run.runId}`)
