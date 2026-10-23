@@ -208,7 +208,7 @@ it('cezar_wait advertises the process fields and tells the agent how to write th
   expect(description).toContain('Use a new exit file name for each command: a file that already exists resolves the wait at once.');
   expect(description).toContain('The job outlives this session and Cezar does not stop it.');
   const refused = cezarWaitRequestSchema.safeParse({ kind: 'human' });
-  expect(waitInvalidInput(refused.success ? undefined : refused.error)).toBe('`kind` must be "ci", "worker", "timer" or "process"; ask the user with cezar_ask.');
+  expect(waitInvalidInput(refused.success ? undefined : refused.error)).toBe('`kind` must be "pr", "worker", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.');
   const pid = cezarWaitRequestSchema.safeParse({ kind: 'process', pid: 1 });
   expect(waitInvalidInput(pid.success ? undefined : pid.error)).toBe('`pid` must be an integer of at least 2: the PID that `echo $!` printed (kind "process").');
 });
