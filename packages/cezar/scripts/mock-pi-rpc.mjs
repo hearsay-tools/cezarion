@@ -2,6 +2,8 @@
 // Load only when configured: ordinary mock turns retain their event-loop ordering.
 const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
   : (await import('./mock-failure-control.mjs')).readFailureControl();
+const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
+  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['reject', 'hold-ack', 'hold-response']);
 // Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
 import { spawn as watchdogSpawn } from 'node:child_process';
 import { closeSync as watchdogCloseInput, renameSync as watchdogRename, writeFileSync as watchdogWrite, existsSync as promptAckReleased } from 'node:fs';
@@ -69,7 +71,7 @@ let steeringMode = 'one-at-a-time';
 // The prompt a queued handler is running; pi records it as the turn's user message.
 let currentPrompt;
 let resumeAfterAsk = false;
-const send = (value) => {
+const sendNow = (value) => {
   if (value?.type === 'turn_start' && !activeTurn) {
     activeTurn = { steers: [], late: false };
     write(value);
@@ -98,6 +100,37 @@ const send = (value) => {
   }
   write(value);
 };
+// A configured delivery control decides when a prompt's acknowledgement and its turn content
+// go out. Every scripted branch sends through here, so none of them needs its own hook.
+const deliveryTexts = new Map();
+let heldFrames;
+const send = !delivery ? sendNow : (value) => {
+  if (value?.type === 'response' && value.command === 'prompt' && value.success && deliveryTexts.has(value.id)) {
+    const text = deliveryTexts.get(value.id);
+    deliveryTexts.delete(value.id);
+    delivery.ack(text, () => sendNow(value));
+    return;
+  }
+  if (heldFrames && value?.type !== 'response' && value?.type !== 'agent_start' && value?.type !== 'turn_start') {
+    heldFrames.push(value);
+    return;
+  }
+  sendNow(value);
+};
+/** Admission of one queued prompt under a configured control: false when it was rejected. */
+function admitPrompt(command) {
+  if (delivery.rejects(command.message)) {
+    write({ id: command.id, type: 'response', command: 'prompt', success: false, error: { message: 'owned turn rejected' } });
+    return false;
+  }
+  if (command.id !== undefined) deliveryTexts.set(command.id, command.message);
+  const hold = delivery.holdResponse(command.message);
+  if (hold) {
+    const frames = heldFrames = [];
+    void hold.then(() => { heldFrames = undefined; for (const frame of frames) send(frame); });
+  }
+  return true;
+}
 
 /** One valid CEZ:ASK payload (spec #473), used by the `mock:ask` scenario. */
 const ASK_MARKER_BODY = "{\"questions\":[{\"header\":\"Library\",\"question\":\"Which test library?\",\"multiSelect\":false,\"options\":[{\"label\":\"Vitest\",\"description\":\"Use the existing test runner\"},{\"label\":\"Node test\",\"description\":\"Use node:test\"}]}]}";
@@ -159,6 +192,7 @@ rl.on('line', (line) => {
 rl.on('close', () => { queue.then(() => process.exit(0)); });
 
 async function handle(command) {
+  if (delivery && command.type === 'prompt' && !admitPrompt(command)) return;
   if (command.type === 'prompt' && (command.message.includes('mock:autonomous') || command.message.startsWith('Continue working autonomously until the task is fully complete.'))) {
     const { autonomousReply } = await import('./mock-autonomous.mjs');
     // Recorded like every other prompt, so a test can count the autonomous nudges pi received.
@@ -287,13 +321,11 @@ async function handle(command) {
     sendText([text.slice(0, 5), text.slice(5)]);
     sendTurnEnd();
   } else if (command.type === 'prompt' && command.message.includes('mock:turn-messages:')) {
-    // owned-input-delivery.testkit.ts patches the two lines below; keep them verbatim.
     const { turnMessages } = await import('./mock-turn-messages.mjs');
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' }); send({ type: 'turn_start' });
     for (const text of turnMessages(command.message)) sendText([text]);
     sendTurnEnd();
-    // owned-input-delivery.testkit.ts patches the branch line below and the four send lines under it; keep them verbatim.
   } else if (command.type === 'prompt' && command.message.includes('mock:agent-echo')) {
     // rpc-lifecycle.ndjson's normal prompt/assistant/settled sequence.
     send({ id: command.id, type: 'response', command: 'prompt', success: true });

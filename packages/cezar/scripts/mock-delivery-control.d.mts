@@ -15,6 +15,7 @@ export function readDeliveryControl(supportedKinds: readonly DeliveryKind[]): {
   rejects(text: string): boolean;
   /** Sends the acknowledgement now, or after release for a matching hold-ack, without blocking the caller. */
   ack(text: string, send: () => void): void;
-  /** Resolves at once, or after release for a matching hold-response. */
-  holdResponse(text: string): Promise<void>;
+  /** Undefined when nothing is held; for a matching hold-response, a promise that resolves on release.
+   *  A synchronous answer lets a mock that cannot await decide at once whether to buffer. */
+  holdResponse(text: string): Promise<void> | undefined;
 };

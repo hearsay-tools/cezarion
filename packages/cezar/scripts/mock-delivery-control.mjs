@@ -61,10 +61,10 @@ export function readDeliveryControl(supportedKinds) {
       writeFileSync(`${path}.held`, '');
       const timer = setInterval(() => { if (released()) { clearInterval(timer); send(); } }, 5);
     },
-    async holdResponse(text) {
-      if (!matches('hold-response', text) || released()) return;
+    holdResponse(text) {
+      if (!matches('hold-response', text) || released()) return undefined;
       writeFileSync(`${path}.held`, '');
-      while (!released()) await new Promise(resolve => setTimeout(resolve, 5));
+      return (async () => { while (!released()) await new Promise(resolve => setTimeout(resolve, 5)); })();
     },
   };
 }

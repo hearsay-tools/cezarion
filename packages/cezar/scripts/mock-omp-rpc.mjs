@@ -2,6 +2,8 @@
 // Load only when configured: ordinary mock turns retain their event-loop ordering.
 const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
   : (await import('./mock-failure-control.mjs')).readFailureControl();
+const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
+  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['reject', 'hold-ack', 'hold-response']);
 // Offline OMP (Oh My Pi) `--mode rpc` mock in OMP's own wire shape (v18.4.11, #595): the `ready`
 // frame, id-echoed responses, `prompt_result`, `session_settled`. Startup argv and model errors
 // are copied from the real binary (2026-10-05). Keep it standalone: optional scenario helpers
@@ -354,9 +356,10 @@ async function handle(command) {
   }
 }
 
-// owned-input-delivery.testkit.ts patches the two lines below to reject one prompt; keep them verbatim.
 async function prompt(command) {
   const message = command.message;
+  // Rejected before admission: OMP's error response only, no prompt_result (rpc-mode.ts).
+  if (delivery?.rejects(message)) { fail(command, 'owned turn rejected'); return; }
   // `mock:ack-only` → the prompt is accepted and no agent run starts (hearsay-tools/cezarion#1301).
   if (message.includes('mock:ack-only')) { respond(command); return; }
   const gated = message.includes('mock:gate-prompt-ack');
@@ -422,15 +425,15 @@ async function prompt(command) {
       beginTurn(command);
     }
   } else if (message.includes('mock:deferred-turn-start')) {
-    // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late. A
-    // separate branch: owned-input-delivery.testkit.ts patches the exact two `else` lines below.
+    // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late.
     respond(command);
     await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
     beginTurn(command);
   } else {
-  respond(command);
+  if (delivery) delivery.ack(message, () => respond(command)); else respond(command);
   beginTurn(command);
   }
+  if (delivery) await delivery.holdResponse(message);
   if (message.includes('mock:multi-pr-refs')) {
     const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
     assistantThinking(unrelatedPr);

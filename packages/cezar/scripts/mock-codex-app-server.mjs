@@ -2,6 +2,8 @@
 // Load only when configured: ordinary mock turns retain their event-loop ordering.
 const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
   : (await import('./mock-failure-control.mjs')).readFailureControl();
+const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
+  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['reject', 'hold-ack', 'hold-response']);
 // Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
 import { spawn as watchdogSpawn } from 'node:child_process';
 import { closeSync as watchdogCloseInput, renameSync as watchdogRename, writeFileSync as watchdogWrite } from 'node:fs';
@@ -268,9 +270,9 @@ rl.on('line', async (line) => {
     } else {
       emit({ id: msg.id, result: { thread: { id: msg.params?.threadId }, sandbox } });
     }
-    // owned-input-delivery.testkit.ts patches the branch line below to reject one turn; keep it verbatim.
   } else if (msg.method === 'turn/start') {
     const openingCrashText = msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '';
+    if (delivery?.rejects(openingCrashText)) { emit({ id: msg.id, error: { code: -32603, message: 'owned turn rejected' } }); return; }
     if (openingCrashText.includes('mock:crash-stderr-pre-ack')) {
       const { crashWithStderr } = await import('./mock-runner-crash.mjs');
       crashWithStderr(openingCrashText, '{"method":"turn/started","params":');
@@ -278,9 +280,9 @@ rl.on('line', async (line) => {
     }
     if (rejectedPermissionOverride) permissionWarning();
     activeTurnId = 'turn_mock_1';
-    // owned-input-delivery.testkit.ts patches the exact `emit(...)` line below; keep it verbatim.
     if (msg.mockHeldSteer) { /* the steer was acknowledged */ } else if (process.env.CEZ_MOCK_CODEX_LATE_START_ACK === '1' && startSerial++ > 0) lateStartAck = msg.id; else {
-    emit({ id: msg.id, result: { turn: { id: 'turn_mock_1' } } });
+    const ack = () => emit({ id: msg.id, result: { turn: { id: 'turn_mock_1' } } });
+    if (delivery) delivery.ack(openingCrashText, ack); else ack();
     }
     const turnText = answerNudge(msg.params?.input?.map?.((part) => part.text ?? '').join('\n') ?? '');
     // `mock:ack-only` → turn/start is acknowledged and the turn does not start until a steer arrives
@@ -299,6 +301,7 @@ rl.on('line', async (line) => {
     if (!turnText.includes('mock:no-progress-ack-only')) {
     emit({ method: 'turn/started', params: { turn: { id: 'turn_mock_1', status: 'inProgress', items: [] } } });
     }
+    if (delivery) await delivery.holdResponse(turnText);
     if (silent?.isLateTurnStartNudge(turnText)) await silent.sleep(silent.LATE_TURN_START_HOLD_MS);
     // The real app-server records the turn's own input as a userMessage item,
     // echoing clientUserMessageId as clientId (probe 0.155.1, #505).
@@ -445,7 +448,6 @@ rl.on('line', async (line) => {
       completeSteerTurn(turnId);
       return;
     }
-    // owned-input-delivery.testkit.ts widens the condition below to its delay marker; keep it verbatim.
     if (turnText.includes('mock:agent-echo')) {
       // Same documented agentMessage/turn completion frames as the baseline below.
       emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: `item_echo_${++echoSerial}`, text: turnText } } });

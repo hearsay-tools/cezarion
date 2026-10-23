@@ -2,6 +2,8 @@
 // Load only when configured: ordinary mock turns retain their event-loop ordering.
 const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
   : (await import('./mock-failure-control.mjs')).readFailureControl();
+const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
+  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['reject', 'hold-ack', 'hold-response']);
 // Keep this fixture standalone: lifecycle tests copy the runner into a temp directory.
 import { spawn as watchdogSpawn } from 'node:child_process';
 import { renameSync as watchdogRename, writeFileSync as watchdogWrite } from 'node:fs';
@@ -45,8 +47,6 @@ function watchdogStall(prompt) {
 // arrive over SSE afterwards, so a correct stream (v1 and v2 alike) must
 // take its turn-end from `session.idle`, never from the HTTP response.
 import { createHash } from 'node:crypto';
-// Aliased: owned-input-delivery.testkit.ts prepends its own `existsSync`/`writeFileSync` import,
-// and a second import of the same name is a SyntaxError.
 import { appendFileSync, existsSync as sessionStoreExists, mkdirSync, readFileSync, writeFileSync as sessionStoreWrite } from 'node:fs';
 import { createServer } from 'node:http';
 // Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
@@ -440,8 +440,8 @@ const server = createServer((req, res) => {
         crashWithStderr(body);
         return;
       }
-      // owned-input-delivery.testkit.ts patches the line below to reject one prompt; keep it verbatim.
-      if (body.includes('mock:reject-agent-post')) {
+      // A configured rejection decides alone: it adds "once" and "until lifted" to the native token.
+      if (delivery?.kind === 'reject' ? delivery.rejects(body) : body.includes('mock:reject-agent-post')) {
         res.writeHead(503, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ error: 'agent prompt rejected' }));
         return;
@@ -474,9 +474,10 @@ const server = createServer((req, res) => {
         // F7: SSE turn-end before HTTP ACK so parkAfterAck applies the silent-tail nudge.
         setTimeout(() => res.end(JSON.stringify({ info: info({}), parts: [] })), 250);
       } else {
-      // owned-input-delivery.testkit.ts patches the exact line below to hold the ACK; keep it verbatim.
-      res.end(JSON.stringify({ info: info({}), parts: [] }));
+      const ack = () => res.end(JSON.stringify({ info: info({}), parts: [] }));
+      if (delivery) delivery.ack(body, ack); else ack();
       }
+      if (delivery) await delivery.holdResponse(body);
       // `mock:ack-only` → prompt_async is acknowledged and the session stays busy on heartbeats
       // with no turn until the next prompt, which it then runs (hearsay-tools/cezarion#1301).
       if (body.includes('mock:ack-only')) {
@@ -564,7 +565,6 @@ const server = createServer((req, res) => {
         send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
         return;
       }
-      // owned-input-delivery.testkit.ts widens the condition below to its delay marker; keep it verbatim.
       if (body.includes('mock:agent-echo')) {
         send({ type: 'message.updated', properties: { info: info({}) } });
         send({ type: 'message.part.updated', properties: { part: {
