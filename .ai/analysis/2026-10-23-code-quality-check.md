@@ -2,7 +2,7 @@
 
 Result: PASS.
 
-Pinned baseline: `889e604e253581e2d36b4e8b56550c22412b3631`. Head: `215dace1e8ae117daa2898d1122aa941b10a51fc`.
+Pinned baseline: `006f1712f0bb65dd24a8d51ee9487ed06db1f557`. Head: `88789c62d080dfeeac68e1489887b3becc78659f`.
 
 Checked 211/211 changed functions across 9 files.
 Limits: complexity > 20 or CRAP > 30. Equality passes.

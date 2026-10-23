@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "status": "pass",
-  "base": "889e604e253581e2d36b4e8b56550c22412b3631",
-  "target": "889e604e253581e2d36b4e8b56550c22412b3631",
-  "head": "215dace1e8ae117daa2898d1122aa941b10a51fc",
+  "base": "006f1712f0bb65dd24a8d51ee9487ed06db1f557",
+  "target": "006f1712f0bb65dd24a8d51ee9487ed06db1f557",
+  "head": "88789c62d080dfeeac68e1489887b3becc78659f",
   "thresholds": {
     "crap": 30,
     "complexity": 20
