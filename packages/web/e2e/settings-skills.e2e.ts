@@ -21,7 +21,8 @@ import {
  * Reachability: fully reachable. The server discovers skills fresh on every GET, so the
  * suite seeds two real project skills into this worktree's `.ai/skills/` (removed in
  * afterAll) — the catalog renders them bold and first (#377) next to whatever global skills
- * the host machine genuinely has. Refresh hits the real POST (no team repos configured in
+ * the host machine genuinely has — plus enough filler project skills that the list overflows
+ * on any host. Refresh hits the real POST (no team repos configured in
  * dry-run → a fast no-op fetch answering the same catalog), which is exactly the #384
  * scenario: a refetch must not lose selection. The team-skill switch case configures a local
  * skills repo for its own duration and restores the config, ui-state and team list after.
@@ -35,6 +36,10 @@ const DESKTOP = { width: 1440, height: 900 }
 const skillsDir = resolve(servedRoot(), '.ai/skills')
 const ALPHA = 'e2e-alpha-skill'
 const BETA = 'e2e-beta-skill'
+// The #384 case scrolls the list, so it must overflow. CI's runner has no global skills, and the
+// default team catalog that used to fill the list there is gone (#1494): the case read scrollTop 0
+// (CI run 39983148239, shard 4/4). The fillers sort after ALPHA and BETA.
+const FILLERS = Array.from({ length: 40 }, (_, i) => `e2e-zz-filler-${String(i).padStart(2, '0')}`)
 
 let browser: AgentBrowser
 let baseUrl: string
@@ -60,6 +65,9 @@ beforeAll(async () => {
     `---\nname: ${BETA}\ndescription: The second seeded skill\n---\n\nDo the beta thing.\n`,
     'utf8',
   )
+  for (const name of FILLERS) {
+    writeFileSync(resolve(skillsDir, `${name}.md`), `---\nname: ${name}\ndescription: Filler\n---\n\nFiller.\n`, 'utf8')
+  }
   browser = AgentBrowser.open(sessionId)
   browser.setViewport(DESKTOP.width, DESKTOP.height)
 })
@@ -68,6 +76,7 @@ afterAll(() => {
   // Never leave test skills in a developer's catalog.
   rmSync(resolve(skillsDir, `${ALPHA}.md`), { force: true })
   rmSync(resolve(skillsDir, `${BETA}.md`), { force: true })
+  for (const name of FILLERS) rmSync(resolve(skillsDir, `${name}.md`), { force: true })
   if (createdSkillsDir) rmSync(skillsDir, { recursive: true, force: true })
   browser?.close()
 })
@@ -268,7 +277,7 @@ describe('settings → skills against the live dry-run server', () => {
       `document.querySelector('[data-slot="skills-detail"] [data-slot="skill-detail"] h2')?.textContent === '${BETA}'`,
     )
 
-    // The host's real global catalog makes the list overflow — pin a scroll offset on it.
+    // The filler skills make the list overflow — pin a scroll offset on it.
     // The read-back must be 150: if the container did not truly overflow the browser would
     // clamp to 0 and the whole scroll assertion would be vacuous.
     browser.evaluate(`document.querySelector('[data-slot="skill-rows"]').scrollTop = 150`)
