@@ -43,7 +43,7 @@ import { latestPlanEntries, type ThreadState } from './thread-state'
 /**
  * **Session activity** (#402, hearsay-tools/cezarion#1333) — the single card above the composer
  * that owns everything about the session apart from its title, actions and tabs. One summary row
- * (`Session activity · ◷ Waiting for CI · $1.26`); underneath, the current status with its waits,
+ * (`Activity · ◷ Waiting for CI · ⟳ Do the task · $1.26`); underneath, the current status with its waits,
  * then one row per section — workflow, subagents, workers, plan, usage & agent, workspace — each
  * opening its own detail in place.
  *
@@ -191,8 +191,15 @@ function SessionActivityCard({
     ...(cost ? [{ id: 'cost', priority: 1, content: cost }] : []),
     ...(tokens ? [{ id: 'tokens', priority: 0, content: tokens }] : []),
   ]
+  // The folded header names the step the Workflow row would show, through the same index and glyph,
+  // so the two can never disagree (hearsay-tools/cezarion#1478).
+  const activeStep = workflow.length > 0 ? workflow[activeStepIndex(workflow)]! : undefined
+  const activeStepState = activeStep ? railVisual(activeStep.status) : undefined
+  const stepLabel = activeStep ? `; step ${activeStep.name}, ${activeStepState === 'active' ? 'running' : activeStepState}` : ''
+  // Status and step sit before the summary, outside its priority list: the summary takes only the
+  // space they leave (`flex-1` is a zero basis), drops its own items first, and only then does the
+  // step name shrink to an ellipsis. The glyph and a few characters always stay.
   const foldedSummary: SummaryItem[] = [
-    { id: 'status', priority: 5, content: <span data-slot="run-activity-status" className={cn('inline-flex items-center gap-1.5', allComplete ? 'text-success' : failed && 'text-danger')}>{glyph}{statusText}</span> },
     { id: 'runner', priority: 2, content: identity.runner },
     { id: 'model', priority: 4, content: identity.model },
     { id: 'effort', priority: 3, content: identity.effort },
@@ -212,7 +219,7 @@ function SessionActivityCard({
       <button
         type="button"
         aria-expanded={open}
-        aria-label={`Session activity: ${statusText}${conflicts.length ? '; pull request conflicts' : ''}${cost ? `; cost ${cost}` : ''}${!open ? `; runner ${identity.runner}; model ${identity.model}; effort ${identity.effort}${summaryReferences.length ? `; ${summaryReferences.map(reference => `${reference.kind} #${reference.number}`).join('; ')}` : ''}` : ''}`}
+        aria-label={`Session activity: ${statusText}${conflicts.length ? '; pull request conflicts' : ''}${cost ? `; cost ${cost}` : ''}${!open ? `${stepLabel}; runner ${identity.runner}; model ${identity.model}; effort ${identity.effort}${summaryReferences.length ? `; ${summaryReferences.map(reference => `${reference.kind} #${reference.number}`).join('; ')}` : ''}` : ''}`}
         onClick={() => {
           openByRun.set(run.id, !open)
           setOpen(!open)
@@ -220,8 +227,21 @@ function SessionActivityCard({
         className="flex min-h-11 w-full min-w-0 items-center gap-2.5 px-3.5 py-2 text-start text-[14px] hover:bg-muted/40 active:bg-muted focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
       >
         <LayersIcon aria-hidden className="size-4 shrink-0 text-accent-text" />
-        <span className="shrink-0 font-semibold">Session activity</span>
-        {open ? null : <ActivitySummary items={foldedSummary} />}
+        {/* "Activity", not "Session activity": the whole page is the session, and the shorter
+            label leaves a phone room for the step. The accessible name keeps the full one. */}
+        <span className="shrink-0 font-semibold">Activity</span>
+        {open ? null : (
+          <>
+            <span data-slot="run-activity-status" className={cn('inline-flex shrink-0 items-center gap-1.5 text-[13px] whitespace-nowrap text-muted-foreground', allComplete ? 'text-success' : failed && 'text-danger')}>{glyph}{statusText}</span>
+            {activeStep ? (
+              <span data-slot="run-activity-step" className="flex min-w-[calc(1.375rem+3ch)] shrink items-center gap-1.5 text-[13px] text-muted-foreground">
+                <WorkflowGlyph steps={workflow} decorative />
+                <span data-slot="run-activity-step-name" title={activeStep.name} className="min-w-0 truncate">{activeStep.name}</span>
+              </span>
+            ) : null}
+            <ActivitySummary items={foldedSummary} />
+          </>
+        )}
         {open && cost ? <span data-slot="run-activity-cost" className="ms-auto shrink-0 text-[13px] text-muted-foreground tabular-nums">{cost}</span> : null}
         <ChevronDownIcon
           aria-hidden
@@ -390,15 +410,15 @@ function AutomationOrigin({ run, available }: { run: ApiRun; available: boolean 
  *  danger X for a failed or cancelled one, a faint circle for one that has not started. All
  *  four, not just the spinner: falling through to the check mark told a reader that a step
  *  which failed, or never ran, had gone fine. */
-function WorkflowGlyph({ steps }: { steps: StepState[] }) {
+function WorkflowGlyph({ steps, decorative = false }: { steps: StepState[]; decorative?: boolean }) {
   const visual = railVisual(steps[activeStepIndex(steps)]!.status)
   const base = 'size-4 shrink-0'
   switch (visual) {
     case 'active':
       return (
         <LoaderCircleIcon
-          role="status"
-          aria-label="Step running"
+          // Decorative inside the folded header: its button already names the step and its state.
+          {...(decorative ? { 'aria-hidden': true } : { role: 'status', 'aria-label': 'Step running' })}
           data-slot="workflow-glyph"
           data-visual={visual}
           // stroke-pending, not text-*: amber is a dot & spinner color only (guardian rule).
