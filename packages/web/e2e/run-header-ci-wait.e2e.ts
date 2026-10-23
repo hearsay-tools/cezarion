@@ -22,11 +22,11 @@ const viteCli = resolve(dirname(createRequire(import.meta.url).resolve('vite/pac
 const fixtureDir = resolve(webRoot, '.e2e-fixtures', `ci-header-${process.pid}`)
 const artifacts = resolve(webRoot, '../../.ai/qa/artifacts_e2e/run-header-ci-wait')
 const repository = `${'long-owner-'.repeat(3)}/${'long-repository-'.repeat(5)}`
-type CiWait = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'ci' }>
+type CiWait = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'pr' }>
 type TimerWait = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'timer' }>
 const wait: CiWait = {
-  id: '00000000-0000-4000-8000-000000000474', kind: 'ci', source: 'agent', via: 'cezar_wait',
-  generation: 'generation', turnId: 'turn', timeoutSeconds: 1800,
+  id: '00000000-0000-4000-8000-000000000474', kind: 'pr', source: 'agent', via: 'cezar_wait',
+  generation: 'generation', turnId: 'turn', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
   repository, prNumber: 474, prUrl: 'https://github.com/owner/repo/pull/474',
   headSha: '123456789abcdef', registeredAt: '2026-09-22T12:00:00.000Z',
   deadline: '2026-09-22T12:30:00.000Z', phase: 'open',

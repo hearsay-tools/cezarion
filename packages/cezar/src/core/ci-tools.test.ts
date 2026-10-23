@@ -180,9 +180,9 @@ describe('CI H1 executable harness parity', () => {
       const controller = await CiToolController.start();
       const dir = mkdtempSync(join(tmpdir(), 'cez-ci-call-'));
       let registrations = 0;
-      const wait = { id: '11111111-1111-4111-8111-111111111111', generation: 'gen', turnId: 'turn', timeoutSeconds: 1800, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'registered' as const };
+      const wait = { id: '11111111-1111-4111-8111-111111111111', generation: 'gen', turnId: 'turn', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'registered' as const };
       const session = controller.provision({
-        registerWait: async () => { registrations++; return { answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'ci', source: 'agent', via: 'cezar_wait', phase: 'open' } }; },
+        registerWait: async () => { registrations++; return { answer: { ok: true, wait_id: wait.id, kind: 'pr', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'pr', source: 'agent', via: 'cezar_wait', phase: 'open' } }; },
         cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }),
         ask: async () => { throw new Error('not an ask test'); },
         finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', open_waits: [] }),
@@ -215,16 +215,16 @@ describe('CI H1 executable harness parity', () => {
 // runner's own tool list and reach this session's handlers through its native wire, fresh and
 // resumed, through the real bundled adapter (or the Pi/OMP extension).
 describe('U0 wait tools on every native wire', () => {
-  const wait = { id: '11111111-1111-4111-8111-111111111111', kind: 'ci' as const, source: 'agent' as const, via: 'cezar_wait' as const, generation: 'gen', turnId: 'turn', timeoutSeconds: 1800, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'open' as const };
-  const openWaits = [{ wait_id: wait.id, kind: 'ci' as const, deadline: wait.deadline, summary: 'CI for owner/repo#1' }];
+  const wait = { id: '11111111-1111-4111-8111-111111111111', kind: 'pr' as const, source: 'agent' as const, via: 'cezar_wait' as const, generation: 'gen', turnId: 'turn', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'open' as const };
+  const openWaits = [{ wait_id: wait.id, kind: 'pr' as const, deadline: wait.deadline, summary: 'CI for owner/repo#1' }];
   const call = (name: string, args: unknown) => `mock:cezar-tool ${name} ${Buffer.from(JSON.stringify(args)).toString('base64url')}`;
   const context = '## Findings\n\n- the parser drops comments';
   const questions = [{ header: 'Area', question: 'Which area should I start with?', multiSelect: false, options: [{ label: 'Parser' }, { label: 'Lexer' }] }];
   const humanId = '22222222-2222-4222-8222-222222222222';
   const humanOpen = [{ wait_id: humanId, kind: 'human' as const, summary: 'human: Which area should I start with?' }];
   const cases = [
-    { tool: 'cezar_wait', args: { kind: 'ci', pr: wait.prUrl }, resume: false },
-    { tool: 'cezar_wait', args: { kind: 'ci', pr: wait.prUrl }, resume: true },
+    { tool: 'cezar_wait', args: { kind: 'pr', pr: wait.prUrl }, resume: false },
+    { tool: 'cezar_wait', args: { kind: 'pr', pr: wait.prUrl }, resume: true },
     { tool: 'cezar_cancel_wait', args: { wait_id: wait.id }, resume: false },
     // hearsay-tools/cezarion#1234: the user is asked through cezar_ask, with its card.
     { tool: 'cezar_ask', args: { context, questions }, resume: false },
@@ -252,7 +252,7 @@ describe('U0 wait tools on every native wire', () => {
       const session = controller.provision({
         registerWait: async (request, via) => {
           calls.push(['wait', request, via]);
-          return { answer: { ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: openWaits }, wait };
+          return { answer: { ok: true, wait_id: wait.id, kind: 'pr', deadline: wait.deadline, open_waits: openWaits }, wait };
         },
         ask: async request => { calls.push(['ask', request]); return { ok: true, wait_id: humanId, open_waits: humanOpen }; },
         cancelWait: async request => { calls.push(['cancel', request]); return { cancelled: true, wait_id: wait.id, open_waits: [] }; },
@@ -274,7 +274,7 @@ describe('U0 wait tools on every native wire', () => {
           expect(hint).toBe('Asked. Cezar shows the context and question card to the user. End your turn; the user\'s answer wakes you.');
         } else if (tool === 'cezar_wait') {
           expect(calls).toEqual([['wait', { ...args, timeout_seconds: 1800 }, 'cezar_wait']]);
-          expect(JSON.parse(json)).toEqual({ ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: openWaits });
+          expect(JSON.parse(json)).toEqual({ ok: true, wait_id: wait.id, kind: 'pr', deadline: wait.deadline, open_waits: openWaits });
           expect(hint).toBe('Registered. End your turn to wait; any open wait wakes you when it resolves.');
         } else if (tool === 'cezar_done') {
           expect(calls).toEqual([['done', {}]]);

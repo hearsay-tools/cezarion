@@ -27,8 +27,8 @@ vi.mock('node:timers/promises', async importOriginal => {
  }};
 });
 const fixture=fileURLToPath(new URL('../ci-wait/fixtures/gh.mjs',import.meta.url));
-const ciWaitOf=(id:string)=>store.getRun(id)?.waits?.find(wait=>wait.kind==='ci');
-const lastWaitOf=(id:string)=>store.getRun(id)?.lastWaits?.find(wait=>wait.kind==='ci');
+const ciWaitOf=(id:string)=>store.getRun(id)?.waits?.find(wait=>wait.kind==='pr');
+const lastWaitOf=(id:string)=>store.getRun(id)?.lastWaits?.find(wait=>wait.kind==='pr');
 
 describe('CI query retries across native harnesses', {timeout:30_000},()=>{
  useWorkerWaitFixture();
@@ -53,7 +53,7 @@ describe('CI query retries across native harnesses', {timeout:30_000},()=>{
     const run=manager.startRun(QUICK_TASK_WORKFLOW,{task:HARNESS_ADAPTERS[runner].scenarios.baseline!,runner});
     await until(()=>store.getRun(run.id)?.status==='waiting');
     const engine=manager as unknown as {active:Map<string,{ciGeneration:string}>};
-    await manager.registerWait(run.id,{kind:'ci',pr:'https://github.com/org/repo/pull/12',timeout_seconds:120},'cezar_wait',engine.active.get(run.id)!.ciGeneration);
+    await manager.registerWait(run.id,{kind:'pr',pr:'https://github.com/org/repo/pull/12',timeout_seconds:120},'cezar_wait',engine.active.get(run.id)!.ciGeneration);
     await until(()=>probes.size===1 || !!lastWaitOf(run.id)?.deliveredAt);
     expect(lastWaitOf(run.id)).toBeUndefined();
     await until(()=>ciWaitOf(run.id)?.phase==='open' && store.getRun(run.id)?.status==='waiting');

@@ -27,7 +27,7 @@ import {
   workerWaitEntryToLegacy,
   openWaitSchema,
   waitViaSchema,
-  type CiWaitEntry,
+  type PrWaitEntry,
   type DeadlinedWorkerWaitEntry,
   type HumanWaitEntry,
   type TimerWaitEntry,
@@ -45,9 +45,9 @@ const CI_ID = '11111111-1111-4111-8111-111111111111';
 const TIMER_ID = '22222222-2222-4222-8222-222222222222';
 const HEAD = 'a'.repeat(40);
 
-function openCi(over: Partial<CiWaitEntry> = {}): CiWaitEntry {
+function openCi(over: Partial<PrWaitEntry> = {}): PrWaitEntry {
   return {
-    kind: 'ci',
+    kind: 'pr',
     id: CI_ID,
     source: 'agent',
     via: 'cezar_wait',
@@ -60,7 +60,7 @@ function openCi(over: Partial<CiWaitEntry> = {}): CiWaitEntry {
     prNumber: 12,
     headSha: HEAD,
     generation: 'gen-1',
-    timeoutSeconds: 1800,
+    timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
     ...over,
   };
 }
@@ -158,7 +158,7 @@ describe('computeWaitingOn', () => {
   it('orders waitingOn human > usage limit > workers > CI > timer', () => {
     const ci = openCi({ deadline: '2026-10-17T15:40:00.000Z' });
     const timer = openTimer({ deadline: '2026-10-17T15:05:00.000Z' });
-    expect(computeWaitingOn({ waits: [timer, ci] })?.kind).toBe('ci');
+    expect(computeWaitingOn({ waits: [timer, ci] })?.kind).toBe('pr');
     expect(computeWaitingOn({ waits: [timer] })?.kind).toBe('timer');
     expect(computeWaitingOn({ waits: [ci, ...completionWaits()] })?.kind).toBe('workers');
     expect(computeWaitingOn({ waits: [ci], autoResumeAt: '2026-10-17T16:00:00.000Z' })?.kind).toBe('usage-limit');
@@ -179,7 +179,7 @@ describe('computeWaitingOn', () => {
     const late = openCi({ id: '66666666-6666-4666-8666-666666666666', deadline: '2026-10-17T16:00:00.000Z', prNumber: 9 });
     const early = openCi({ deadline: '2026-10-17T15:30:00Z' });
     expect(computeWaitingOn({ waits: [late, early] })).toEqual({
-      kind: 'ci', waitId: CI_ID, prUrl: early.prUrl, repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:30:00Z',
+      kind: 'pr', until: 'checks', waitId: CI_ID, prUrl: early.prUrl, repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:30:00Z',
     });
     const laterTimer = openTimer({ id: '77777777-7777-4777-8777-777777777777', deadline: '2026-10-17T15:50:00.000Z' });
     expect(computeWaitingOn({ waits: [laterTimer, openTimer({ note: 'deploy' })] })).toEqual({
@@ -194,10 +194,10 @@ describe('computeWaitingOn', () => {
 
   it('counts a worker wait that is still open, not one whose wake is already queued', () => {
     expect(computeWaitingOn({ waits: completionWaits() })?.kind).toBe('workers');
-    expect(computeWaitingOn({ waits: [...completionWaits({ phase: 'resolved' }), openCi()] })?.kind).toBe('ci');
-    expect(computeWaitingOn({ delegation: { role: 'invalid' }, waits: [openCi()] })?.kind).toBe('ci');
+    expect(computeWaitingOn({ waits: [...completionWaits({ phase: 'resolved' }), openCi()] })?.kind).toBe('pr');
+    expect(computeWaitingOn({ delegation: { role: 'invalid' }, waits: [openCi()] })?.kind).toBe('pr');
     // An old row's `delegation.wait` is not read: the store moves it into the list on open.
-    expect(computeWaitingOn({ delegation: parkedRootWait(), waits: [openCi()] })?.kind).toBe('ci');
+    expect(computeWaitingOn({ delegation: parkedRootWait(), waits: [openCi()] })?.kind).toBe('pr');
     expect(computeWaitingOn({ delegation: parkedRootWait() })).toBeUndefined();
   });
 
@@ -219,14 +219,14 @@ describe('computeWaitingOn', () => {
 describe('resolveWaitingOn', () => {
   it('prefers a summary\'s waitingOn and derives it from a record without one', () => {
     expect(resolveWaitingOn({ waitingOn: { kind: 'human' }, waits: [openCi()] })).toEqual({ kind: 'human' });
-    expect(resolveWaitingOn({ waits: [openCi()] })?.kind).toBe('ci');
+    expect(resolveWaitingOn({ waits: [openCi()] })?.kind).toBe('pr');
     expect(resolveWaitingOn({})).toBeUndefined();
   });
 });
 
 describe('cezar_wait request', () => {
   it('accepts the ci and timer request shapes and refuses the rest', () => {
-    expect(cezarWaitRequestSchema.parse({ kind: 'ci', pr: 'https://github.com/o/r/pull/1' })).toMatchObject({ timeout_seconds: 1800 });
+    expect(cezarWaitRequestSchema.parse({ kind: 'pr', pr: 'https://github.com/o/r/pull/1' })).toMatchObject({ timeout_seconds: 1800 });
     // hearsay-tools/cezarion#1234: the user is asked through cezar_ask, never cezar_wait.
     expect(cezarWaitRequestSchema.safeParse({ kind: 'human', questions: CARD }).success).toBe(false);
     expect(cezarWaitRequestSchema.safeParse({ kind: 'timer', seconds: 59 }).success).toBe(false);
@@ -235,9 +235,9 @@ describe('cezar_wait request', () => {
   });
 
   it('keeps the ci bounds of cezar_wait_for_ci and refuses stray keys', () => {
-    expect(cezarWaitRequestSchema.safeParse({ kind: 'ci', pr: 'https://github.com/o/r/pull/1', timeout_seconds: 0 }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: 'ci', pr: 'https://github.com/o/r/pull/1', timeout_seconds: 7201 }).success).toBe(false);
-    expect(cezarWaitRequestSchema.safeParse({ kind: 'ci', pr: 'https://example.com/nope' }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'pr', pr: 'https://github.com/o/r/pull/1', timeout_seconds: 0 }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'pr', pr: 'https://github.com/o/r/pull/1', timeout_seconds: 7201 }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'pr', pr: 'https://example.com/nope' }).success).toBe(false);
     expect(cezarWaitRequestSchema.safeParse({ kind: 'timer', seconds: 60, pr: 'https://github.com/o/r/pull/1' }).success).toBe(false);
     expect(cezarWaitRequestSchema.parse({ kind: 'timer', seconds: 7200, note: 'deploy' })).toEqual({ kind: 'timer', seconds: 7200, note: 'deploy' });
     expect(cezarWaitRequestSchema.safeParse({ kind: 'timer', seconds: 60, note: 'x'.repeat(513) }).success).toBe(false);
@@ -251,26 +251,26 @@ describe('cezar_wait request', () => {
 });
 
 describe('answers', () => {
-  const openWait = { wait_id: CI_ID, kind: 'ci' as const, deadline: '2026-10-17T15:40:00.000Z', summary: 'CI on o/r#12' };
+  const openWait = { wait_id: CI_ID, kind: 'pr' as const, deadline: '2026-10-17T15:40:00.000Z', summary: 'CI on o/r#12' };
 
   it('parses accepted and refused cezar_wait answers', () => {
-    expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: CI_ID, kind: 'ci', deadline: openWait.deadline, open_waits: [openWait] }).ok).toBe(true);
+    expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: CI_ID, kind: 'pr', deadline: openWait.deadline, open_waits: [openWait] }).ok).toBe(true);
     expect(cezarWaitAnswerSchema.parse({ ok: false, code: 'timers_disabled', message: 'no timers' }).ok).toBe(false);
     expect(cezarWaitAnswerSchema.safeParse({ ok: false, code: 'not_a_code', message: 'x' }).success).toBe(false);
-    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind: 'ci', deadline: openWait.deadline }).success).toBe(false);
+    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind: 'pr', deadline: openWait.deadline }).success).toBe(false);
   });
 
   // hearsay-tools/cezarion#1234: a CI or timer wait always carries its deadline; a human wait never does.
   it('ties the deadline to the kind, in the answer and in every open wait', () => {
     const human = { wait_id: HUMAN_ID, kind: 'human' as const, summary: 'human: Which module?' };
-    expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: CI_ID, kind: 'ci', deadline: openWait.deadline, open_waits: [openWait, human] }).ok).toBe(true);
+    expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: CI_ID, kind: 'pr', deadline: openWait.deadline, open_waits: [openWait, human] }).ok).toBe(true);
     // cezar_wait opens no human wait, so its answer never names one.
     expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, kind: 'human', open_waits: [human] }).success).toBe(false);
     for (const kind of ['ci', 'timer'] as const) {
       expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, open_waits: [] }).success).toBe(false);
       expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, deadline: openWait.deadline, open_waits: [{ ...openWait, kind, deadline: undefined }] }).success).toBe(false);
     }
-    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind: 'ci', deadline: openWait.deadline, open_waits: [{ ...human, deadline: openWait.deadline }] }).success).toBe(false);
+    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind: 'pr', deadline: openWait.deadline, open_waits: [{ ...human, deadline: openWait.deadline }] }).success).toBe(false);
     expect(cezarCancelWaitAnswerSchema.safeParse({ cancelled: true, wait_id: CI_ID, open_waits: [{ ...human, deadline: openWait.deadline }] }).success).toBe(false);
   });
 
@@ -303,7 +303,7 @@ describe('human waits', () => {
     expect(computeWaitingOn({ waits: [openCi(), openTimer(), openHuman()], autoResumeAt: '2026-10-17T16:00:00.000Z' }))
       .toEqual({ kind: 'human' });
     for (const phase of ['delivered', 'cancelled'] as const) {
-      expect(computeWaitingOn({ waits: [openCi(), openHuman({ phase })] })?.kind).toBe('ci');
+      expect(computeWaitingOn({ waits: [openCi(), openHuman({ phase })] })?.kind).toBe('pr');
     }
   });
 
@@ -551,7 +551,7 @@ describe('deadline-less cezar worker entries (hearsay-tools/cezarion#1301)', () 
     // Workers keep their priority over CI: the bare entry wins and carries no deadline.
     expect(resolveWaitingOn({ waits: [bare, ci] })).toEqual({ kind: 'workers', count: 1 });
     expect(resolveWaitingOn({ waits: [bare] })).toEqual({ kind: 'workers', count: 1 });
-    expect(computeWaitingOn({ waits: [ci] })).toMatchObject({ kind: 'ci', deadline: ci.deadline });
+    expect(computeWaitingOn({ waits: [ci] })).toMatchObject({ kind: 'pr', deadline: ci.deadline });
   });
 
   it('the legacy WorkerWait shape still requires a deadline, and renders only deadlined entries', () => {
@@ -617,5 +617,45 @@ describe('asksQuestion', () => {
     expect(asksQuestion({ waits: [human({ source: 'cezar', via: 'budget' })] })).toBe(false);
     expect(asksQuestion({ waits: [human({ phase: 'resolved' })] })).toBe(false);
     expect(asksQuestion({})).toBe(false);
+  });
+});
+
+// hearsay-tools/cezarion#1425: kind "pr" replaces kind "ci" and adds the merge target.
+describe('PR waits', () => {
+  const pr = 'https://github.com/o/r/pull/1';
+  const openPr = (over: Record<string, unknown> = {}) => ({ ...openCi(), kind: 'pr', until: 'checks' as const, wakeOnConflict: true, ...over });
+
+  it('defaults a pr request to the checks target, conflicts waking, 1800 seconds', () => {
+    expect(cezarWaitRequestSchema.parse({ kind: 'pr', pr })).toEqual({ kind: 'pr', pr, until: 'checks', wake_on_conflict: true, timeout_seconds: 1800 });
+    expect(cezarWaitRequestSchema.parse({ kind: 'pr', pr, until: 'merge', wake_on_conflict: false, timeout_seconds: 7200 }))
+      .toEqual({ kind: 'pr', pr, until: 'merge', wake_on_conflict: false, timeout_seconds: 7200 });
+  });
+
+  it('refuses kind ci, an unknown target and merge waits past 7200 seconds', () => {
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'ci', pr }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'pr', pr, until: 'land' }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'pr', pr, until: 'merge', timeout_seconds: 7201 }).success).toBe(false);
+  });
+
+  it('stores until and wakeOnConflict on a pr entry, both required', () => {
+    expect(waitSchema.parse(openPr({ until: 'merge', wakeOnConflict: false }))).toMatchObject({ kind: 'pr', until: 'merge', wakeOnConflict: false });
+    const { until: _until, ...noTarget } = openPr();
+    expect(waitSchema.safeParse(noTarget).success).toBe(false);
+  });
+
+  it('accepts merged and closed outcomes with the merge facts', () => {
+    const result = { outcome: 'merged', headSha: HEAD, observedAt: '2026-10-17T15:20:00.000Z', checks: [], totalChecks: 0, truncated: false,
+      mergedAt: '2026-10-17T15:19:00Z', mergeCommitSha: 'b'.repeat(40) };
+    expect(waitSchema.parse(openPr({ until: 'merge', phase: 'resolved', result }))).toMatchObject({ result: { outcome: 'merged' } });
+    expect(waitSchema.safeParse(openPr({ phase: 'resolved', result: { ...result, outcome: 'closed', mergedAt: undefined, mergeCommitSha: undefined } })).success).toBe(true);
+  });
+
+  it('names the target in waitingOn', () => {
+    expect(computeWaitingOn({ waits: [openPr({ until: 'merge' }) as never] })).toMatchObject({ kind: 'pr', until: 'merge', prNumber: 12 });
+  });
+
+  it('reads a stored ci waitingOn as a pr checks wait', () => {
+    expect(waitingOnSchema.parse({ kind: 'ci', waitId: CI_ID, prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' }))
+      .toEqual({ kind: 'pr', until: 'checks', waitId: CI_ID, prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' });
   });
 });

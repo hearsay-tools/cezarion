@@ -69,8 +69,8 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     try {
       const w = await worker(p.id);
       const tools = handlers(p.id);
-      const ci = await tools.registerWait({ kind: 'ci', pr, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
-      expect(ci.answer).toMatchObject({ ok: true, kind: 'ci' });
+      const ci = await tools.registerWait({ kind: 'pr', pr, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal);
+      expect(ci.answer).toMatchObject({ ok: true, kind: 'pr' });
       const answer = (await tools.registerWait({ kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
       expect(answer).toMatchObject({ ok: true, kind: 'worker' });
       if (!answer.ok) throw Error('refused');
@@ -657,7 +657,7 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     const { run: p, release } = await heldParent();
     const w = await worker(p.id);
     const tools = handlers(p.id);
-    const ci = (await tools.registerWait({ kind: 'ci', pr, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
+    const ci = (await tools.registerWait({ kind: 'pr', pr, timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
     const workers = (await tools.registerWait({ kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
     if (!ci.ok || !workers.ok) throw Error('refused');
     release();

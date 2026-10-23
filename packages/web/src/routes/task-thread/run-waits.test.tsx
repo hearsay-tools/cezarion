@@ -41,11 +41,11 @@ function renderWaits(record: ApiRun) {
 }
 
 describe('RunWaitDetails', () => {
-  type CiEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'ci' }>
+  type CiEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'pr' }>
   type TimerEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'timer' }>
   const ciEntry = (extra: Partial<CiEntry> = {}): CiEntry => ({
-    id: '00000000-0000-4000-8000-000000000474', kind: 'ci', source: 'agent', via: 'cezar_wait',
-    generation: 'session-1', turnId: 'turn-1', timeoutSeconds: 1800,
+    id: '00000000-0000-4000-8000-000000000474', kind: 'pr', source: 'agent', via: 'cezar_wait',
+    generation: 'session-1', turnId: 'turn-1', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
     prUrl: 'https://github.com/owner/repo/pull/474', repository: 'owner/repo', prNumber: 474,
     headSha: '123456789abcdef', registeredAt: '2026-09-22T12:00:00.000Z',
     deadline: '2026-09-22T12:30:00.000Z', phase: 'open', ...extra,
@@ -242,6 +242,23 @@ describe('RunWaitDetails', () => {
     renderWaits(run('waiting', { waits: [later, timerEntry()] }))
     expect(ciItems()).toHaveLength(0)
     expect(timerItems()).toHaveLength(1)
+  })
+
+  // hearsay-tools/cezarion#1425: a merge wait says what it waits for and how it ended.
+  it('names an open merge wait and its merged, closed and timed-out results', () => {
+    renderWaits(run('waiting', { waits: [ciEntry({ until: 'merge' })] }))
+    expect(screen.getByText('Waiting for merge')).toBeTruthy()
+    cleanup()
+    for (const [outcome, label] of [
+      ['merged', 'PR merged'],
+      ['closed', 'PR closed without merge — inspect the PR'],
+      ['deadline', 'Merge wait timed out — the PR has not merged'],
+      ['conflicting', 'PR has merge conflicts — inspect the PR; not merged'],
+    ] as const) {
+      renderWaits(run('done', { lastWaits: [ciEntry({ until: 'merge', phase: 'delivered', result: observed(outcome) })] }))
+      expect(screen.getByText(label)).toBeTruthy()
+      cleanup()
+    }
   })
 
   it('renders nothing for a run with no waits at all', () => {

@@ -5,7 +5,7 @@ import type { ApiRun, RunStatus } from '@open-mercato/cezar-api-client'
 
 import { runStatusLine, statusLineText } from './run-status'
 
-type CiEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'ci' }>
+type CiEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'pr' }>
 type TimerEntry = Extract<NonNullable<ApiRun['waits']>[number], { kind: 'timer' }>
 
 const run = (status: RunStatus, extra: Partial<ApiRun> = {}): ApiRun => ({
@@ -22,8 +22,8 @@ const run = (status: RunStatus, extra: Partial<ApiRun> = {}): ApiRun => ({
 })
 
 const ciEntry = (extra: Partial<CiEntry> = {}): CiEntry => ({
-  id: '00000000-0000-4000-8000-000000000474', kind: 'ci', source: 'agent', via: 'cezar_wait',
-  generation: 'session-1', turnId: 'turn-1', timeoutSeconds: 1800,
+  id: '00000000-0000-4000-8000-000000000474', kind: 'pr', source: 'agent', via: 'cezar_wait',
+  generation: 'session-1', turnId: 'turn-1', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
   prUrl: 'https://github.com/owner/repo/pull/474', repository: 'owner/repo', prNumber: 474,
   headSha: '123456789abcdef', registeredAt: '2026-10-20T12:00:00.000Z',
   deadline: '2026-10-20T12:30:00.000Z', phase: 'open', ...extra,

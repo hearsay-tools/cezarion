@@ -44,7 +44,7 @@ async function ciRefusalGate() {
 
 const pr = 'https://github.com/acme/repo/pull/12';
 const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
-const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'ci');
+const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'pr');
 
 // hearsay-tools/cezarion#1235 phase 3a: worker waits are entries in the wait list beside CI, so the
 // R27 refusal (#713: no CI wait while a worker wait is pending or owed) is gone. These cells pin
@@ -67,7 +67,7 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
       const tools = controller.provision(manager.cezarToolHandlers(run.id, state.ciGeneration));
       const child = await worker(run.id);
       const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
-      await expect(callCezarWait({ kind: 'ci', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'ci' });
+      await expect(callCezarWait({ kind: 'pr', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'pr' });
       const ci = ciWaitOf(run.id);
       expect(ci).toMatchObject({ phase: 'open' });
       fixtureUpdateRun(child.id, { status: 'done' });
@@ -77,7 +77,7 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
       expect(queued()?.deliveredAt).toBeUndefined();
       expect(store.readEvents(run.id).filter(e => e.type === 'turn-end')).toHaveLength(0);
       // The same CI registration is answered again while the worker result is owed.
-      await expect(callCezarWait({ kind: 'ci', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'ci' });
+      await expect(callCezarWait({ kind: 'pr', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'pr' });
       expect(ciWaitOf(run.id)?.id).toBe(ci!.id);
       wire.release();
       await until(() => !!queued()?.deliveredAt && !waitOf(store.getRun(run.id)));
@@ -126,7 +126,7 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
         const next = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
         manager.reconcileWorkerWaits();
         manager.cancelWorkerWait(run.id, next.id);
-        await expect(callCezarWait({ kind: 'ci', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'ci' });
+        await expect(callCezarWait({ kind: 'pr', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'pr' });
       } finally { wire.release(); await controller.close(); }
     });
   }

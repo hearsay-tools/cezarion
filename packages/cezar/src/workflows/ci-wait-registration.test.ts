@@ -7,7 +7,7 @@ import type { RunRecord } from '../runs/store.ts';
 
 const pr = 'https://github.com/acme/repo/pull/12';
 const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
-const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'ci');
+const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'pr');
 // hearsay-tools/cezarion#1233 dropped `human_ask_pending` and `human_ask_unanswered`: a wait now
 // registers under a pending question, which outranks it in `waitingOn` (pinned below).
 const codes = ['manager_disposed', 'capability_revoked', 'run_missing', 'run_not_running', 'run_stopping',
@@ -36,7 +36,7 @@ describe('CI registration guards before and after metadata lookup', { timeout: 3
       return identity;
     });
     vi.spyOn(CiWatcherSupervisor.prototype, 'watch').mockReturnValue(new Promise(() => {}));
-    const call = () => manager.registerWait(run.id, { kind: 'ci', pr, timeout_seconds: 30 }, 'cezar_wait', previous.ciGeneration as string, capability.signal);
+    const call = () => manager.registerWait(run.id, { kind: 'pr', pr, timeout_seconds: 30 }, 'cezar_wait', previous.ciGeneration as string, capability.signal);
     // Attach the rejection assertion before releasing the pending operation.
     const pending = duringLookup ? call() : undefined;
     const assertion = pending ? expect(pending).rejects.toMatchObject({ code }) : undefined;
@@ -82,7 +82,7 @@ describe('CI registration guards before and after metadata lookup', { timeout: 3
     if (kind === 'pending') state.pendingHumanAsk = true;
     else vi.spyOn(engine, 'hasUnansweredHumanAsk').mockReturnValue(true);
     try {
-      const ci = await manager.registerWait(run.id, { kind: 'ci', pr, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration as string);
+      const ci = await manager.registerWait(run.id, { kind: 'pr', pr, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration as string);
       const timer = await manager.registerWait(run.id, { kind: 'timer', seconds: 60 }, 'cezar_wait', state.ciGeneration as string);
       expect(store.getRun(run.id)?.waits?.map(wait => wait.id)).toEqual([ci.id, timer.id]);
     } finally { state.pendingHumanAsk = false; vi.restoreAllMocks(); writeFileSync(gate, ''); }
@@ -106,7 +106,7 @@ describe('CI metadata lookup interruption', { timeout: 30_000 }, () => {
     const capability = new AbortController();
     let fail!: (reason: Error) => void;
     vi.spyOn(CiWatcherSupervisor.prototype, 'resolve').mockImplementation(() => new Promise((_resolve, reject) => { fail = reject; }));
-    const pending = manager.registerWait(run.id, { kind: 'ci', pr, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration, capability.signal);
+    const pending = manager.registerWait(run.id, { kind: 'pr', pr, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration, capability.signal);
     const assertion = expect(pending).rejects.toMatchObject({ code });
     try {
       // Keyed by run and normalised PR URL since hearsay-tools/cezarion#1233.

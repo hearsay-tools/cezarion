@@ -37,7 +37,7 @@ import {
   TIMER_MIN_SECONDS,
   WAIT_LIMIT,
 } from '@open-mercato/cezar-contract/waits';
-import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, CiWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry, WorkerWait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, PrWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry, WorkerWait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { matchesRunQuery, sqlPrefilterTokens } from './run-search.ts';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { HistoryCompressor } from './history-compressor.ts';
@@ -419,8 +419,14 @@ export const runRecordSchema = z.object({
 const LEGACY_WAIT_KEYS = ['ciWait', 'lastCiWait', 'lastCiWaitError', 'monitoringWakeAt', 'monitoringWakeCapReached', 'activity', 'hasPendingHumanAsk'] as const;
 const UNREADABLE_WAIT = 'Wait unavailable — a saved wait is unreadable; register a new wait.';
 
+/** A stored `waits`/`lastWaits` entry of kind `ci`, the kind `pr` replaced (hearsay-tools/cezarion#1425). */
+const isCiKindEntry = (entry: unknown) => !!entry && typeof entry === 'object' && (entry as { kind?: unknown }).kind === 'ci';
+function hasCiKindEntries(row: Record<string, unknown>): boolean {
+  return (['waits', 'lastWaits'] as const).some((key) => Array.isArray(row[key]) && (row[key] as unknown[]).some(isCiKindEntry));
+}
+
 function hasLegacyWaitFields(row: unknown): boolean {
-  return !!row && typeof row === 'object' && (LEGACY_WAIT_KEYS.some((key) => key in row) || agentWorkerWaits(row as Record<string, unknown>).length > 0 || rootCompletion(row as Record<string, unknown>) !== undefined);
+  return !!row && typeof row === 'object' && (LEGACY_WAIT_KEYS.some((key) => key in row) || hasCiKindEntries(row as Record<string, unknown>) || agentWorkerWaits(row as Record<string, unknown>).length > 0 || rootCompletion(row as Record<string, unknown>) !== undefined);
 }
 
 /** A root's stored `delegation.completion` (the old completion gate's marker), which schema 7 reads
@@ -453,10 +459,10 @@ function agentWorkerWaits(row: Record<string, unknown>): Array<{ key: 'wait' | '
 
 /** A legacy `CiWait` as a wait entry. Its wake input's id was the wait's own (`wakeId`, which
  *  `run.ts` set to the wait id), so the entry keeps that id and delivery still finds the input. */
-export function ciWaitEntry(wait: CiWait): CiWaitEntry {
+export function ciWaitEntry(wait: CiWait): PrWaitEntry {
   const { wakeId: _wakeId, phase, result, deliveredAt, ...identity } = wait;
   return {
-    ...identity, kind: 'ci', source: 'agent', via: 'cezar_wait_for_ci',
+    ...identity, kind: 'pr', source: 'agent', via: 'cezar_wait_for_ci',
     phase: phase === 'registered' || phase === 'parked' ? 'open' : phase === 'wake-pending' ? 'resolved' : phase === 'delivered' ? 'delivered' : 'cancelled',
     ...(result ? { result, resolvedAt: result.observedAt } : {}),
     ...(deliveredAt ? { deliveredAt } : {}),
@@ -535,7 +541,7 @@ function legacyWaitId(name: string): string {
  * Upgrade-on-read (store schema 4, spec 2026-10-17-unified-waits): read a schema-3 record's CI and
  * monitoring fields into its wait list, then delete them. Mutates `row`, before validation.
  *
- * - `ciWait`: `registered`/`parked` → an open `ci` wait, `wake-pending` → resolved (resolved when
+ * - `ciWait`: `registered`/`parked` → an open `pr` checks wait, `wake-pending` → resolved (resolved when
  *   its result was observed), `delivered`/`withdrawn` → `lastWaits` as delivered/cancelled.
  * - `lastCiWait` → `lastWaits`: `delivered` stays delivered, anything else was withdrawn intent and
  *   reads as cancelled. `lastCiWaitError` → `lastWaitsError`.
@@ -561,6 +567,9 @@ function legacyWaitId(name: string): string {
  *   between the delivery checkpoint and the resume: the run reads `running`, so recovery resumes
  *   it. A wake an inbox read acknowledged, or one beside a pending question, resumes nothing.
  *
+ * - A `waits`/`lastWaits` entry of kind `ci` (hearsay-tools/cezarion#1425) → kind `pr` with
+ *   `until: 'checks'` and `wakeOnConflict: true`, what a `ci` wait did.
+ *
  * An unreadable legacy CI wait gets the per-entry salvage `parseRunRecords` gives `waits`: it is
  * dropped, `lastWaitsError` says so, and the status is left alone. A `waiting` run with no open
  * wait reads as Needs you, which a human can resume.
@@ -576,6 +585,11 @@ const resumeParked = (row: Record<string, unknown>) => setLiveStatus(row, 'waiti
 
 export function upgradeLegacyWaits(row: Record<string, unknown>): void {
   if (!hasLegacyWaitFields(row)) return;
+  // Kind `ci` waited for checks and woke on a conflict (hearsay-tools/cezarion#1425).
+  for (const key of ['waits', 'lastWaits'] as const) {
+    if (Array.isArray(row[key])) row[key] = (row[key] as unknown[]).map((entry) => isCiKindEntry(entry)
+      ? { ...(entry as object), kind: 'pr', until: 'checks', wakeOnConflict: true } : entry);
+  }
   const opened: Wait[] = [];
   const settled: Wait[] = [];
   let unreadable = false;
@@ -3027,7 +3041,7 @@ export class RunStore extends EventEmitter {
   /** Legacy CI delivery over `commitWaitDelivery`: only a resolved CI wait's own input. Kept until
    *  its callers move (unified waits, Task 4). */
   commitCiWaitDelivery(id: string, inputId: string): void {
-    if (!this.peek(id)?.waits?.some((wait) => wait.kind === 'ci' && wait.phase === 'resolved' && wait.id === inputId)) return;
+    if (!this.peek(id)?.waits?.some((wait) => wait.kind === 'pr' && wait.phase === 'resolved' && wait.id === inputId)) return;
     this.commitWaitDelivery(id, [inputId]);
   }
 

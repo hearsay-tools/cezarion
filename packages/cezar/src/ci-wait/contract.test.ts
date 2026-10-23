@@ -6,7 +6,7 @@ import { cezarServerInstructions, cezarToolEnvNames, cezarTools, doneToolDefinit
 
 describe('CI wait contract', () => {
   it('defaults timeout and rejects model-supplied authority and malformed PR URLs', () => {
-    expect(ciWaitRequestSchema.parse({ pr: 'https://github.com/org/repo/pull/12' })).toEqual({ pr: 'https://github.com/org/repo/pull/12', timeout_seconds: 1800 });
+    expect(ciWaitRequestSchema.parse({ pr: 'https://github.com/org/repo/pull/12' })).toEqual({ pr: 'https://github.com/org/repo/pull/12', until: 'checks', wake_on_conflict: true, timeout_seconds: 1800 });
     for (const pr of ['http://github.com/a/b/pull/1', 'https://user@github.com/a/b/pull/1', 'https://github.com:443/a/b/pull/1', 'https://github.com/a/b/pull/0', 'https://github.com/a/b/pull/1?q=x', 'https://github.com/a/b/pull/1#x', 'https://github.com/a/b/pull/1/', 'https://github.com/a/b/pull/9007199254740993']) {
       expect(ciWaitRequestSchema.safeParse({ pr }).success, pr).toBe(false);
     }
@@ -175,7 +175,7 @@ describe('private preview-serve route', () => {
 
 it('cezar_wait advertises worker fields with their bounds', () => {
   const schema = waitToolDefinition.inputSchema as { properties: Record<string, any> };
-  expect(schema.properties.kind.enum).toEqual(['ci', 'worker', 'timer']);
+  expect(schema.properties.kind.enum).toEqual(['pr', 'worker', 'timer']);
   expect(schema.properties.kind.description).toMatch(/worker/);
   for (const key of ['worker_ids', 'request_ids']) {
     expect(schema.properties[key]).toMatchObject({ type: 'array', minItems: 1, maxItems: 32 });

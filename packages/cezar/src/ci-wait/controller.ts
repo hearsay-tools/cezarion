@@ -12,7 +12,7 @@ import { previewStopResult } from '../preview/registration.ts';
 import { askErrorMessage, askInvalidInput, ciErrorMessage, doneErrorMessage, doneInvalidInput, previewInvalidInput, previewOversized, previewRefusal, scheduleInvalidInput, scheduleRefusal, waitInvalidInput } from './errors.ts';
 import { automationsToolEnabled, previewToolEnabled } from './tools.ts';
 import { SCHEDULED_TASK_LIMITS, scheduleTaskAnswerSchema, scheduleTaskRequestSchema, scheduledTasksAnswerSchema, scheduledTasksRequestSchema, type ScheduleTaskAnswer, type ScheduleTaskRequest, type ScheduledTasksAnswer, type ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
-import { cezarAskAnswerSchema, cezarAskRequestSchema, cezarCancelWaitAnswerSchema, cezarCancelWaitRequestSchema, cezarDoneAnswerSchema, cezarDoneRequestSchema, cezarWaitAnswerSchema, cezarWaitRequestSchema, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarCancelWaitRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitAnswer, type CezarWaitRequest, type Wait, type WaitVia } from '@open-mercato/cezar-contract/waits';
+import { cezarAskAnswerSchema, cezarAskRequestSchema, cezarCancelWaitAnswerSchema, cezarCancelWaitRequestSchema, cezarDoneAnswerSchema, cezarDoneRequestSchema, cezarWaitAnswerSchema, cezarWaitRequestSchema, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarCancelWaitRequest, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitAnswer, type CezarWaitRequest, type CezarWaitRequestInput, type Wait, type WaitVia } from '@open-mercato/cezar-contract/waits';
 import { ciWaitErrorCodeSchema } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, previewStopResultSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { jsonZodValidator } from '../server/validators.ts';
@@ -31,7 +31,7 @@ type PreviewStop = (request: PreviewStopRequest, signal: AbortSignal) => Promise
 /** The session's trusted callbacks: run identity comes from here, never from the model's arguments. */
 export type CezarToolHandlers = {
   /** `via` names the tool that opened the wait. */
-  registerWait: (request: CezarWaitRequest, via: WaitVia, signal: AbortSignal) => Promise<WaitRegistration>;
+  registerWait: (request: CezarWaitRequestInput, via: WaitVia, signal: AbortSignal) => Promise<WaitRegistration>;
   /** `cezar_ask` (hearsay-tools/cezarion#1234): opens the run's human wait with its card. */
   ask: (request: CezarAskRequest, signal: AbortSignal) => Promise<CezarAskAnswer>;
   cancelWait: (request: CezarCancelWaitRequest, signal: AbortSignal) => Promise<CezarCancelWaitAnswer>;

@@ -300,9 +300,9 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       it(`${runner} U1 ci and timer register through cezar_wait on the native wire, park, and wake with their result`, async () => {
         const external = github();
         nativeWire(runner);
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'ci', pr }), runner });
-        await until(() => parkedOn(run.id, waitOfKind(run.id, 'ci')));
-        const ci = waitOfKind(run.id, 'ci')!;
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'pr', pr }), runner });
+        await until(() => parkedOn(run.id, waitOfKind(run.id, 'pr')));
+        const ci = waitOfKind(run.id, 'pr')!;
         expect(ci).toMatchObject({ via: 'cezar_wait', source: 'agent', prUrl: pr });
         expect(manager.isActive(run.id)).toBe(true);
         external.settle();
@@ -324,10 +324,10 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       it(`${runner} U4 cezar_cancel_wait cancels and no observation is delivered`, async () => {
         const external = github();
         nativeWire(runner);
-        const opened = toolCall('cezar_wait', { kind: 'ci', pr }), cancelled = toolCall('cezar_cancel_wait', { wait_id: 'last' });
+        const opened = toolCall('cezar_wait', { kind: 'pr', pr }), cancelled = toolCall('cezar_cancel_wait', { wait_id: 'last' });
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: `${opened} ${cancelled}`, runner });
-        await until(() => store.getRun(run.id)?.lastWaits?.some(wait => wait.kind === 'ci') === true && store.getRun(run.id)?.status === 'waiting');
-        const ci = store.getRun(run.id)!.lastWaits!.find(wait => wait.kind === 'ci')!;
+        await until(() => store.getRun(run.id)?.lastWaits?.some(wait => wait.kind === 'pr') === true && store.getRun(run.id)?.status === 'waiting');
+        const ci = store.getRun(run.id)!.lastWaits!.find(wait => wait.kind === 'pr')!;
         expect(ci).toMatchObject({ phase: 'cancelled', via: 'cezar_wait' });
         expect(external.aborted()).toBe(true);
         const turns = store.readEvents(run.id).filter(event => event.type === 'turn-end').length;
@@ -350,17 +350,17 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       it(`${runner} U2 ci and timer open: the timer wakes, ci stays open and is in the footer, the turn end re-parks without re-registering, the later ci result is delivered`, async () => {
         const external = github();
         nativeWire(runner);
-        const opened = `${toolCall('cezar_wait', { kind: 'ci', pr })} ${toolCall('cezar_wait', { kind: 'timer', seconds: 60, note: 'u2' })}`;
+        const opened = `${toolCall('cezar_wait', { kind: 'pr', pr })} ${toolCall('cezar_wait', { kind: 'timer', seconds: 60, note: 'u2' })}`;
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: opened, runner });
-        await until(() => parkedOn(run.id, waitOfKind(run.id, 'ci')) && waitOfKind(run.id, 'timer')?.phase === 'open');
-        const ci = waitOfKind(run.id, 'ci')!, timer = waitOfKind(run.id, 'timer')!;
+        await until(() => parkedOn(run.id, waitOfKind(run.id, 'pr')) && waitOfKind(run.id, 'timer')?.phase === 'open');
+        const ci = waitOfKind(run.id, 'pr')!, timer = waitOfKind(run.id, 'timer')!;
         const turns = turnEnds(run.id);
         fireTimer(timer.id);
         await until(() => settled(run.id, timer.id)?.phase === 'delivered' && prompted(runner, timerText(timer, 'u2')).length > 0);
         const wake = prompted(runner, timerText(timer, 'u2')).at(-1)!;
         expect(wake).toContain(`\n\nStill open: CI wait ${ci.id} for acme/repo#12`);
         expect(wake).not.toContain(`timer ${timer.id}`);
-        await until(() => turnEnds(run.id) > turns && parkedOn(run.id, waitOfKind(run.id, 'ci')));
+        await until(() => turnEnds(run.id) > turns && parkedOn(run.id, waitOfKind(run.id, 'pr')));
         expect(store.getRun(run.id)?.waits).toEqual([expect.objectContaining({ id: ci.id, phase: 'open' })]);
         external.settle();
         await until(() => settled(run.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
@@ -371,18 +371,18 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       it(`${runner} U3 a human message during a ci wait is delivered, the wait stays open, and its result arrives in a later turn`, async () => {
         const external = github();
         nativeWire(runner);
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'ci', pr }), runner });
-        await until(() => parkedOn(run.id, waitOfKind(run.id, 'ci')));
-        const ci = waitOfKind(run.id, 'ci')!;
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'pr', pr }), runner });
+        await until(() => parkedOn(run.id, waitOfKind(run.id, 'pr')));
+        const ci = waitOfKind(run.id, 'pr')!;
         const turns = turnEnds(run.id);
         const text = `${HARNESS_ADAPTERS[runner].scenarios.hold!}\nPlease also update the docs`;
         expect(manager.sendMessage(run.id, [{ type: 'text', text }])).toBe(true);
         await until(() => prompted(runner, 'Please also update the docs').length > 0);
         expect(prompted(runner, 'Please also update the docs').at(-1)).toContain(`\n\nStill open: CI wait ${ci.id} for acme/repo#12`);
-        expect(waitOfKind(run.id, 'ci')).toMatchObject({ id: ci.id, phase: 'open' });
+        expect(waitOfKind(run.id, 'pr')).toMatchObject({ id: ci.id, phase: 'open' });
         expect(external.aborted()).toBe(false);
-        await until(() => turnEnds(run.id) > turns && parkedOn(run.id, waitOfKind(run.id, 'ci')));
-        expect(waitOfKind(run.id, 'ci')?.id).toBe(ci.id);
+        await until(() => turnEnds(run.id) > turns && parkedOn(run.id, waitOfKind(run.id, 'pr')));
+        expect(waitOfKind(run.id, 'pr')?.id).toBe(ci.id);
         external.settle();
         await until(() => settled(run.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
         expect(prompted(runner, `CI wait observation ${ci.id}`).at(-1)).not.toContain('Please also update the docs');
@@ -393,9 +393,9 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       it(`${runner} U7 cezar_wait, the monitoring line and ScheduleWakeup land in the same wait list`, async () => {
         github();
         nativeWire(runner);
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'ci', pr }), runner });
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'pr', pr }), runner });
         await until(() => parkedOn(run.id, viaOf(run.id, 'cezar_wait')));
-        expect(viaOf(run.id, 'cezar_wait')).toMatchObject({ kind: 'ci', prUrl: pr });
+        expect(viaOf(run.id, 'cezar_wait')).toMatchObject({ kind: 'pr', prUrl: pr });
         let turns = turnEnds(run.id);
         expect(manager.sendMessage(run.id, [{ type: 'text', text: messagesPrompt(runner, ['Still waiting for CI.\nCEZ:MONITORING']) }])).toBe(true);
         await until(() => turnEnds(run.id) > turns && parkedOn(run.id, viaOf(run.id, 'cezar_wait')));
@@ -418,13 +418,13 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       });
 
       // hearsay-tools/cezarion#1268: exercise the marker on each runner's native wire.
-      for (const kind of ['ci', 'timer', 'worker'] as const) {
+      for (const kind of ['pr', 'timer', 'worker'] as const) {
         it(`${runner} U7m the monitoring line adds no timer beside an open ${kind} wait`, async () => {
           const external = github();
           nativeWire(runner);
           const family = kind === 'worker' ? await parentWithWorker(runner) : undefined;
           const run = family?.p ?? manager.startRun(QUICK_TASK_WORKFLOW, {
-            task: toolCall('cezar_wait', kind === 'ci' ? { kind, pr } : { kind: 'timer', seconds: 600, note: 'u7m' }), runner,
+            task: toolCall('cezar_wait', kind === 'pr' ? { kind, pr } : { kind: 'timer', seconds: 600, note: 'u7m' }), runner,
           });
           if (family) await parentTurn(run.id, toolCall('cezar_wait', { kind: 'worker', worker_ids: [family.w.id], timeout_seconds: 600 }), () => workerWaits(run.id).length === 1);
           await until(() => parkedOn(run.id, waitOfKind(run.id, kind)));
@@ -473,12 +473,12 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         await until(() => store.getRun(run.id)?.status === 'waiting');
       });
 
-      for (const kind of ['ci', 'timer'] as const) {
+      for (const kind of ['pr', 'timer'] as const) {
         it(`${runner} U8 a ${kind} park keeps its slot and wakes without queueing at maxParallel 1`, async () => {
           const external = github();
           nativeWire(runner);
           expect(semaphore.maxParallel()).toBe(1);
-          const request = kind === 'ci' ? { kind, pr } : { kind, seconds: 60, note: 'u8' };
+          const request = kind === 'pr' ? { kind, pr } : { kind, seconds: 60, note: 'u8' };
           // These live mock servers must not overwrite each other's session JSON. U8 never
           // restarts either server; keep their shared args file for native prompt assertions.
           if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8-parked-sessions.json');
@@ -498,7 +498,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
             const queue = (manager as unknown as { queue: string[] }).queue;
             const push = vi.spyOn(queue, 'push');
             checkpoint('u8-wake-delivered');
-            if (kind === 'ci') external.settle(); else fireTimer(wait.id);
+            if (kind === 'pr') external.settle(); else fireTimer(wait.id);
             await until(() => settled(parked.id, wait.id)?.phase === 'delivered');
             expect(store.getRun(blocker.id)?.status).toBe('running');
             expect(push.mock.calls.flat()).not.toContain(parked.id);
@@ -547,9 +547,9 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           const external = github();
           nativeWire(runner);
           if (runner === 'opencode') process.env.CEZ_MOCK_OPENCODE_SESSIONS_FILE = join(root, 'u8h-sessions.json');
-          const parked = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'ci', pr }), runner });
-          await until(() => parkedOn(parked.id, waitOfKind(parked.id, 'ci')));
-          const wait = waitOfKind(parked.id, 'ci')!;
+          const parked = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'pr', pr }), runner });
+          await until(() => parkedOn(parked.id, waitOfKind(parked.id, 'pr')));
+          const wait = waitOfKind(parked.id, 'pr')!;
           expect(engine().monitoring.has(parked.id)).toBe(true);
           // Another task on the same account waits out a usage limit, or its resume is testing the
           // window (hearsay-tools/cezarion#1236).
@@ -637,7 +637,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         };
         const first = await open({ kind: 'timer', seconds: 60, note: 'u10 first' });
         const second = await open({ kind: 'timer', seconds: 61, note: 'u10 second' });
-        const ci = await open({ kind: 'ci', pr, timeout_seconds: 600 });
+        const ci = await open({ kind: 'pr', pr, timeout_seconds: 600 });
         const state = engine().active.get(run.id)!;
         store.updateRun(run.id, { automaticWakes: 39 });
         // The first wake reaches the native wire; its provider acknowledgement is held.
@@ -663,7 +663,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(notes()).toContain(`automatic timer wake-up cap reached (40); timer ${second.id} cancelled`);
         expect(prompted(runner, `Timer ${second.id} fired`)).toEqual([]);
         // A CI result is an external event: it still wakes the agent at the cap and is not charged.
-        await until(() => parkedOn(run.id, waitOfKind(run.id, 'ci')));
+        await until(() => parkedOn(run.id, waitOfKind(run.id, 'pr')));
         external.settle();
         await until(() => settled(run.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
         expect(store.getRun(run.id)?.automaticWakes).toBe(40);
@@ -968,14 +968,14 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         await until(() => store.getRun(p.id)?.status === 'waiting');
       });
 
-      for (const kind of ['ci', 'timer'] as const) {
+      for (const kind of ['pr', 'timer'] as const) {
         it(`${runner} U9 provider failure with a ${kind} wait open leaves the run recoverable and the next wake delivers`, async () => {
           const external = github();
           const wire = gatedProviderFailure(root, runner);
           const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
           await until(wire.held);
           const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
-          const request = kind === 'ci' ? { kind, pr, timeout_seconds: 30 } as const : { kind, seconds: 60, note: 'u9' } as const;
+          const request = kind === 'pr' ? { kind, pr, timeout_seconds: 30 } as const : { kind, seconds: 60, note: 'u9' } as const;
           const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
           expect(registered.answer).toMatchObject({ ok: true, kind });
           if (!('wait' in registered)) throw Error('registration refused');
@@ -986,7 +986,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           await until(() => engine().active.get(run.id) !== failedState);
           expect(store.getRun(run.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe('open');
           expect(store.getRun(run.id)?.status).not.toBe('failed');
-          if (kind === 'ci') external.settle(); else fireTimer(wait.id);
+          if (kind === 'pr') external.settle(); else fireTimer(wait.id);
           await until(() => settled(run.id, wait.id)?.phase === 'delivered');
           expect(inputsFor(run.id, wait.id)).toHaveLength(1);
           await until(() => store.getRun(run.id)?.status === 'waiting');
@@ -1000,7 +1000,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
           await until(() => store.getRun(run.id)?.status === 'waiting');
           const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
-          const request = kind === 'ci' ? { kind, pr, timeout_seconds: 30 } as const : { kind, seconds: 60, note: 'u9' } as const;
+          const request = kind === 'pr' ? { kind, pr, timeout_seconds: 30 } as const : { kind, seconds: 60, note: 'u9' } as const;
           const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
           if (!('wait' in registered)) throw Error('registration refused');
           const wait = registered.wait;
@@ -1010,7 +1010,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           expect(store.getRun(run.id)?.status).toBe('waiting');
           expect(store.getRun(run.id)?.error).toBeUndefined();
           expect(store.getRun(run.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe('open');
-          if (kind === 'ci') external.settle(); else fireTimer(wait.id);
+          if (kind === 'pr') external.settle(); else fireTimer(wait.id);
           await until(() => settled(run.id, wait.id)?.phase === 'delivered');
           expect(inputsFor(run.id, wait.id)).toHaveLength(1);
           await until(() => store.getRun(run.id)?.status === 'waiting');
@@ -1159,10 +1159,10 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(uncollected).toMatchObject({ ok: false, code: 'workers_uncollected', workers: [{ worker_id: w.id, reason: 'uncollected' }] });
         expect(uncollected.message).toContain(`worker collect ${w.id}`);
         await collect(w.id);
-        const accepted = await turn(`${toolCall('cezar_wait', { kind: 'ci', pr })} ${toolCall('cezar_done', {})}`);
-        const ci = store.getRun(p.id)?.lastWaits?.find(wait => wait.kind === 'ci');
+        const accepted = await turn(`${toolCall('cezar_wait', { kind: 'pr', pr })} ${toolCall('cezar_done', {})}`);
+        const ci = store.getRun(p.id)?.lastWaits?.find(wait => wait.kind === 'pr');
         expect(accepted).toMatchObject({ ok: true, finishes: 'at_turn_end' });
-        expect(accepted.open_waits).toEqual(expect.arrayContaining([expect.objectContaining({ wait_id: ci?.id, kind: 'ci' })]));
+        expect(accepted.open_waits).toEqual(expect.arrayContaining([expect.objectContaining({ wait_id: ci?.id, kind: 'pr' })]));
         await until(() => terminal.includes(store.getRun(p.id)?.status ?? '') && !manager.isActive(p.id));
         expect(ci).toMatchObject({ phase: 'cancelled', via: 'cezar_wait' });
         expect(store.getRun(p.id)?.waits ?? []).toEqual([]);
@@ -1402,9 +1402,9 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       it(`${runner} U2w ci and worker open: the worker resolving wakes the agent with ci still open and in the footer, and the later ci result is delivered`, async () => {
         const external = github();
         const { p, w } = await parentWithWorker(runner);
-        const opened = `${toolCall('cezar_wait', { kind: 'ci', pr })} ${toolCall('cezar_wait', { kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 })}`;
-        await parentTurn(p.id, opened, () => waitOfKind(p.id, 'ci')?.phase === 'open' && workerWaits(p.id)[0]?.phase === 'open');
-        const ci = waitOfKind(p.id, 'ci')!, workers = workerWaits(p.id)[0]!;
+        const opened = `${toolCall('cezar_wait', { kind: 'pr', pr })} ${toolCall('cezar_wait', { kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 })}`;
+        await parentTurn(p.id, opened, () => waitOfKind(p.id, 'pr')?.phase === 'open' && workerWaits(p.id)[0]?.phase === 'open');
+        const ci = waitOfKind(p.id, 'pr')!, workers = workerWaits(p.id)[0]!;
         expect(workers).toMatchObject({ via: 'cezar_wait', source: 'agent', workerIds: [w.id] });
         const turns = turnEnds(p.id);
         fixtureUpdateRun(w.id, { status: 'done' });
@@ -1413,7 +1413,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(wake).toContain(`Still open: CI wait ${ci.id} for acme/repo#12`);
         expect(wake).not.toContain(`worker wait ${workers.id}`);
         expect(external.aborted()).toBe(false);
-        await until(() => turnEnds(p.id) > turns && parkedOn(p.id, waitOfKind(p.id, 'ci')));
+        await until(() => turnEnds(p.id) > turns && parkedOn(p.id, waitOfKind(p.id, 'pr')));
         expect(agentWaits(p.id)).toEqual([expect.objectContaining({ id: ci.id, phase: 'open' })]);
         external.settle();
         await until(() => settled(p.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);
@@ -1444,9 +1444,9 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       it(`${runner} U2c ci and worker open: the ci result wakes the agent with the worker wait still open and in the footer, and the later worker result is delivered`, async () => {
         const external = github();
         const { p, w } = await parentWithWorker(runner);
-        const opened = `${toolCall('cezar_wait', { kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 })} ${toolCall('cezar_wait', { kind: 'ci', pr })}`;
-        await parentTurn(p.id, opened, () => waitOfKind(p.id, 'ci')?.phase === 'open' && workerWaits(p.id)[0]?.phase === 'open');
-        const ci = waitOfKind(p.id, 'ci')!, workers = workerWaits(p.id)[0]!;
+        const opened = `${toolCall('cezar_wait', { kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 })} ${toolCall('cezar_wait', { kind: 'pr', pr })}`;
+        await parentTurn(p.id, opened, () => waitOfKind(p.id, 'pr')?.phase === 'open' && workerWaits(p.id)[0]?.phase === 'open');
+        const ci = waitOfKind(p.id, 'pr')!, workers = workerWaits(p.id)[0]!;
         const turns = turnEnds(p.id);
         external.settle();
         await until(() => settled(p.id, ci.id)?.phase === 'delivered' && prompted(runner, `CI wait observation ${ci.id}`).length > 0);

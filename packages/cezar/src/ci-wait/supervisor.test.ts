@@ -9,7 +9,7 @@ import { GithubCiClient } from './github.ts';
 const fixture = fileURLToPath(new URL('./fixtures/gh.mjs', import.meta.url));
 const supervisors: CiWatcherSupervisor[] = [];
 const dirs: string[] = [];
-const wait = (seconds = 30): CiWait => ({id:crypto.randomUUID(),generation:'generation',turnId:'turn',prUrl:'https://github.com/org/repo/pull/12',repository:'org/repo',prNumber:12,headSha:'a'.repeat(40),registeredAt:new Date().toISOString(),deadline:new Date(Date.now()+seconds*1000).toISOString(),timeoutSeconds:seconds,phase:'registered'});
+const wait = (seconds = 30): CiWait => ({id:crypto.randomUUID(),generation:'generation',turnId:'turn',prUrl:'https://github.com/org/repo/pull/12',repository:'org/repo',prNumber:12,headSha:'a'.repeat(40),registeredAt:new Date().toISOString(),deadline:new Date(Date.now()+seconds*1000).toISOString(),timeoutSeconds:seconds,until:'checks',wakeOnConflict:true,phase:'registered'});
 function supervisor(mode: string, env: Record<string,string> = {}, github?: GithubCiClient) {
  const s = new CiWatcherSupervisor({github: github ?? new GithubCiClient({command:{file:process.execPath,args:[fixture]},env:{...process.env,CI_FIXTURE_MODE:mode,...env}})}); supervisors.push(s); return s;
 }
