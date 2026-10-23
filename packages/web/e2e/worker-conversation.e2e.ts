@@ -97,6 +97,26 @@ function waitForFocusedCard(selector: string) {
   })()`)
 }
 
+/** The heights of a virtual row's virtua item and of virtua's list, which is the sum of the
+ *  item sizes virtua has applied. */
+type VirtualRowHeights = { row: number; list: number }
+const virtualRowHeightsExpression = (selector: string) => `(() => {
+  const item = document.querySelector(${JSON.stringify(selector)})?.closest('[data-slot="thread-row"]')?.parentElement;
+  const list = item?.parentElement;
+  return item && list ? { row: item.getBoundingClientRect().height, list: list.getBoundingClientRect().height } : null;
+})()`
+
+function virtualRowHeights(selector: string): VirtualRowHeights {
+  return waitForSettledSample<VirtualRowHeights>(browser, virtualRowHeightsExpression(selector))
+}
+
+/** Waits until virtua has applied a virtual row's new height: its list changed by the same amount.
+ *  A scroll before that windows the rows with the old size and can unmount the row. */
+function waitForVirtualRowMeasured(selector: string, before: VirtualRowHeights) {
+  waitForSettledSample<VirtualRowHeights>(browser, virtualRowHeightsExpression(selector),
+    now => Math.abs(now.row - before.row) > 1 && Math.abs(now.list - before.list - (now.row - before.row)) <= 1)
+}
+
 describe('chronological worker conversation', () => {
   it('keeps every message clock at its card’s top-right edge, even when worker headings wrap', () => {
     try {
@@ -293,6 +313,7 @@ describe('chronological worker conversation', () => {
     expect(top).toBeGreaterThanOrEqual(0)
     expect(top).toBeLessThan(500)
     focusWithKeyboard(browser, `${request} [data-slot="conversation-body-toggle"]`)
+    const collapsed = virtualRowHeights(request)
     browser.press('Enter')
     const body = browser.waitForValue<{ height: number; text: string; reference: string | null }>(`(() => {
       const body = document.querySelector('${request} [data-slot="conversation-body"]');
@@ -302,6 +323,18 @@ describe('chronological worker conversation', () => {
     expect(body.height).toBeGreaterThan(900)
     expect(body.text).toContain('Paragraph 44')
     expect(body.reference).toBe('https://example.com/')
+    // Let virtua apply the expanded height before the Tab start scrolls: a scroll first
+    // windows the rows with the collapsed height and unmounts this card. Evidence:
+    // worker-conversation failed with "focus never reached … it is on
+    // button.pointer-events-auto.inline-flex.min-h-11" (bundle
+    // .ai/qa/failures/worker-conversation/expands-a-long-body-and-preserves-it-across-virtual-row-navigation-1/:
+    // probe.json active element data-slot="jump-to-latest"; snapshot.txt has no conversation card;
+    // CI run 40017980734, cockpit-failures-shard-1 artifact 12530555246,
+    // hearsay-tools/cezarion#1573). Reproduce with an AGENT_BROWSER_INIT_SCRIPTS script that holds
+    // ResizeObserver callbacks for 1.5 s from the expanding Enter, on
+    // `npm run test:e2e -- worker-conversation.e2e.ts -t 'expands a long body'`:
+    // 5 of 5 runs failed before, 5 of 5 passed after.
+    waitForVirtualRowMeasured(request, collapsed)
     focusWithKeyboard(browser, `${request} ${connector}`)
     browser.press('Enter')
     waitForFocusedCard(replyCard)
@@ -311,8 +344,11 @@ describe('chronological worker conversation', () => {
     waitForFocusedCard(request)
     expect(browser.waitForValue<string>(`document.querySelector('${request} [data-slot="conversation-body-toggle"]').getAttribute('aria-expanded')`)).toBe('true')
     focusWithKeyboard(browser, `${request} [data-slot="conversation-body-toggle"]`)
+    const expanded = virtualRowHeights(request)
     browser.press('Space')
     browser.waitForFunction(`document.querySelector('${request} [data-slot="conversation-body-toggle"]').getAttribute('aria-expanded') === 'false'`)
+    // The collapse changes the row height too.
+    waitForVirtualRowMeasured(request, expanded)
     focusWithKeyboard(browser, `${request} ${connector}`)
     browser.press('Enter')
     waitForFocusedCard(replyCard)
