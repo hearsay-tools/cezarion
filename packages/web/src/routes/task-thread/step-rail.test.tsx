@@ -106,6 +106,11 @@ describe('activeStepIndex — who the summary speaks for', () => {
     // handing back a -1 that would silently address the wrong element.
     expect(activeStepIndex([])).toBe(0)
   })
+
+  // hearsay-tools/cezarion#1478 review: a skipped step never runs, so it is not the next step.
+  it('passes over a skipped step to the next one still to run', () => {
+    expect(activeStepIndex([step('a', 'done'), step('b', 'skipped'), step('c', 'pending')])).toBe(2)
+  })
 })
 
 describe('WorkflowSteps — the collapsible header summary', () => {

@@ -685,6 +685,17 @@ describe('Session activity — folded workflow step (#1478)', () => {
     expect(summary().getAttribute('aria-label')).toContain(`; step Do the task, ${spoken}`)
   })
 
+  it('names the next step to run, not a skipped one before it', () => {
+    renderDock(fresh({ status: 'waiting', steps: [
+      { ...steps[0]!, status: 'done' },
+      { id: 'lint', name: 'Lint', kind: 'check', status: 'skipped', iterations: 1, tokensUsed: 0 },
+      { ...steps[1]!, status: 'pending' },
+    ] }), [])
+    fold()
+    expect(name()?.textContent).toBe('Verify')
+    expect(summary().getAttribute('aria-label')).toContain('; step Verify, pending')
+  })
+
   it('omits the step slot for a run without steps', () => {
     renderDock(fresh({ steps: [] }), [])
     fold()
