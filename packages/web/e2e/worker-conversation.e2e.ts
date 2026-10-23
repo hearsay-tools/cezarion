@@ -238,8 +238,16 @@ describe('chronological worker conversation', () => {
       focusWithKeyboard(browser, `${request} [data-slot="conversation-body-toggle"]`)
       browser.press('Space')
       browser.waitForFunction(`document.querySelector('${request} [data-slot="conversation-body-toggle"]').getAttribute('aria-expanded') === 'false'`)
-      // After collapsing the request, render and settle the lazy reply row before
-      // agent-browser reads click coordinates. CI run 39991752744 left Show message closed.
+      // After collapsing the request, render and settle the reply row before pointer clicks.
+      // Evidence: worker-conversation failed with last value "Show message" (bundle
+      // .ai/qa/failures/worker-conversation/keeps-direction-and-interleaved-work-visible-mobile-light-comfortable-1/:
+      // probe.json lastValue="Show message"; snapshot.txt reply toggle expanded=false).
+      // CI run 39991752744, cockpit-failures-shard-1 artifact 12517699947:
+      // https://github.com/hearsay-tools/cezarion/actions/runs/39991752744/artifacts/12517699947
+      // Reproduce: npm run test:e2e -- worker-conversation.e2e.ts -t 'keeps direction and interleaved work visible: mobile-light-comfortable'
+      // CI command: npm run test:e2e -- --shard=1/4; 1 of 1 runs failed before (0db0c8d16),
+      // 1 of 1 passed after (28cab79d9, run 39995644693). Local agent-browser 0.39.2
+      // scratch full-spec runs passed 1 of 1 before and 1 of 1 after; no local red reproduced.
       hoverVisiblePoint(browser, `${replyCard} [data-slot="conversation-body-toggle"]`)
       settleVisual(browser, replyCard)
       browser.click(`${replyCard} [data-slot="conversation-body-toggle"]`)
