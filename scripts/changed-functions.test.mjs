@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -123,4 +123,35 @@ test('the real scanner runs from a different repository and returns machine-read
   const result = JSON.parse(execFileSync(process.execPath, [script.pathname, '--base', f.base], { cwd: f.cwd, encoding: 'utf8' }));
   assert.equal(result.root, f.cwd);
   assert.equal(result.files[0].functions[0].name, 'added');
+});
+
+test('every Git call after baseline resolution uses its pinned attribute source', t => {
+  const f = repo(t);
+  f.write('file.ts', 'function choose(x) { return x || 0; }');
+  const executable = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+  const bin = join(f.cwd, 'bin');
+  const log = join(f.cwd, 'git-calls.jsonl');
+  mkdirSync(bin);
+  writeFileSync(join(bin, 'package.json'), '{"type":"module"}');
+  const shim = join(bin, 'git');
+  writeFileSync(shim, `#!${process.execPath}
+    import { appendFileSync } from 'node:fs';
+    import { spawnSync } from 'node:child_process';
+    const args = process.argv.slice(2);
+    appendFileSync(${JSON.stringify(log)}, JSON.stringify(args) + '\\n');
+    const result = spawnSync(${JSON.stringify(executable)}, args, { stdio: 'inherit' });
+    process.exit(result.status ?? 1);
+  `);
+  chmodSync(shim, 0o755);
+  const script = new URL('../.ai/skills/check-code-quality/scripts/changed-functions.mjs', import.meta.url);
+  execFileSync(process.execPath, [script.pathname, '--base', f.base], {
+    cwd: f.cwd, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+  const calls = readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+  const resolved = calls.findIndex(args => args[0] === 'merge-base');
+  assert.ok(resolved >= 0);
+  const reads = calls.slice(resolved + 1);
+  assert.ok(reads.some(args => args.includes('show')), 'baseline source was read');
+  for (const args of reads) assert.equal(args[0], `--attr-source=${f.base}`, JSON.stringify(args));
+  assert.ok(reads.some(args => args.includes('--no-textconv')), 'raw content reads disable text conversion');
 });

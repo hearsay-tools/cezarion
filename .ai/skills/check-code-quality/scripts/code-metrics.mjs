@@ -11,6 +11,14 @@ const branchTypes = new Set([
 ]);
 const classInitializers = new Set(['ClassProperty', 'ClassPrivateProperty', 'ClassAccessorProperty', 'StaticBlock']);
 
+function* childNodes(node, skipKey) {
+  for (const [key, value] of Object.entries(node)) {
+    if (skipKey && key === 'key') continue;
+    const children = Array.isArray(value) ? value : [value];
+    for (const child of children) if (child?.type) yield child;
+  }
+}
+
 function functionName(node, parent, ancestors) {
   if (node.id?.name) return node.id.name;
   const key = node.key ?? (['ObjectProperty', 'ClassProperty', 'ClassPrivateProperty', 'ClassAccessorProperty'].includes(parent?.type) ? parent.key : undefined);
@@ -62,12 +70,7 @@ export function analyzeSource(source, filename) {
       || (node.type === 'AssignmentExpression' && ['&&=', '||=', '??='].includes(node.operator))
       || (['OptionalMemberExpression', 'OptionalCallExpression'].includes(node.type) && node.optional)
     )) owner.complexity++;
-    for (const [key, value] of Object.entries(node)) {
-      if (method && key === 'key') continue;
-      if (Array.isArray(value)) {
-        for (const child of value) if (child?.type) visit(child, owner, node, [...ancestors, node]);
-      } else if (value?.type) visit(value, owner, node, [...ancestors, node]);
-    }
+    for (const child of childNodes(node, method)) visit(child, owner, node, [...ancestors, node]);
   }
   visit(ast.program, undefined, undefined, []);
   return functions.sort((a, b) => a.start - b.start);
