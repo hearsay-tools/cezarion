@@ -238,6 +238,12 @@ export function signalExitedSession(child: ChildProcess, signal: 'SIGTERM' | 'SI
 }
 
 /** The pgid of a registered, still-running grouped leader, for the worker process ledger. */
+/** Whether `pid` leads a session this process spawned: an agent's own process, which a process
+ *  wait refuses because it ends only with the session (hearsay-tools/cezarion#1446). */
+export function isSessionLeader(pid: number): boolean {
+  return leaders.has(pid);
+}
+
 export function sessionGroupOf(pid: number): number | undefined {
   const leader = leaders.get(pid);
   return leader && !exited(leader.child) ? pid : undefined;
