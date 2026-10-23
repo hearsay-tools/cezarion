@@ -33,7 +33,12 @@ function formatAnswer(question: UiAskQuestion, labels: string[], otherAnswer?: s
  * as its opening prompt. The composer below stays available for a free-form
  * "Other". Once resolved, the card collapses to a compact summary.
  */
-export function AskCard({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
+export function AskCard({ ask, run, onShowOrigin }: {
+  ask: ThreadAsk
+  run: ApiRun
+  /** The pinned copy's link back to where the agent asked (hearsay-tools/cezarion#1495). */
+  onShowOrigin?: () => void
+}) {
   // An answered card is a static summary — split so the delivery hook (two mutations and a
   // provider-status subscription) only mounts for a question that can still be answered.
   // Threads accumulate asks; every resolved one would otherwise carry live machinery for a
@@ -54,8 +59,25 @@ export function AskCard({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
       </div>
     )
   }
-  if (ask.routedToParent) return <RoutedAsk ask={ask} />
-  return <PendingAsk ask={ask} run={run} />
+  const showOrigin = ask.placement === 'pinned' && onShowOrigin ? onShowOrigin : undefined
+  if (ask.routedToParent) return <RoutedAsk ask={ask} onShowOrigin={showOrigin} />
+  return <PendingAsk ask={ask} run={run} onShowOrigin={showOrigin} />
+}
+
+/** The pinned copy's link to the question's original place in the transcript. */
+function ShowOriginLink({ onShowOrigin }: { onShowOrigin: () => void }) {
+  return (
+    <Button
+      type="button"
+      variant="ghost"
+      size="sm"
+      data-slot="ask-show-origin"
+      className="mbs-2 min-h-11 min-w-11 px-2 text-xs font-medium text-muted-foreground underline underline-offset-4"
+      onClick={onShowOrigin}
+    >
+      Show where it was asked
+    </Button>
+  )
 }
 
 /**
@@ -79,11 +101,12 @@ function AskContext({ text }: { text: string }) {
 
 /** A worker's question sent to its parent task (#505): read-only here, answered there. If the
  *  parent can no longer answer, the question falls back and this becomes the ordinary card. */
-function RoutedAsk({ ask }: { ask: ThreadAsk }) {
+function RoutedAsk({ ask, onShowOrigin }: { ask: ThreadAsk; onShowOrigin: (() => void) | undefined }) {
   return (
     <div
       data-slot="ask-card"
       data-resolved="false"
+      data-pinned={ask.placement === 'pinned' ? 'true' : undefined}
       data-routed="parent"
       className="rounded-lg border border-border bg-card px-4 pt-3.5 pb-3.5"
     >
@@ -128,12 +151,13 @@ function RoutedAsk({ ask }: { ask: ThreadAsk }) {
         )}
         .
       </p>
+      {onShowOrigin ? <ShowOriginLink onShowOrigin={onShowOrigin} /> : null}
     </div>
   )
 }
 
 /** The unanswered card: option chips wired to whichever delivery seam the run's state allows. */
-function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
+function PendingAsk({ ask, run, onShowOrigin }: { ask: ThreadAsk; run: ApiRun; onShowOrigin: (() => void) | undefined }) {
   const delivery = useAskAnswer(run)
   const blocked = delivery.blockedBy !== undefined
   const questions = ask.questions
@@ -240,6 +264,7 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
       ref={rootRef}
       data-slot="ask-card"
       data-resolved="false"
+      data-pinned={ask.placement === 'pinned' ? 'true' : undefined}
       data-delivery={delivery.mode}
       data-voice-proposal={voiceAnswers ? 'true' : undefined}
       className="rounded-lg border border-accent-strong/25 bg-accent-strong/[0.04] px-4 pt-3.5 pb-3.5"
@@ -326,6 +351,7 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
           {delivery.error}
         </p>
       ) : null}
+      {onShowOrigin ? <ShowOriginLink onShowOrigin={onShowOrigin} /> : null}
     </div>
   )
 }
@@ -367,7 +393,7 @@ function AskQuestionBlock({
   }
 
   return (
-    <div role="group" aria-label={question.question} data-voice-filled={voiceFilled ? 'true' : undefined}>
+    <div data-slot="ask-question" role="group" aria-label={question.question} data-voice-filled={voiceFilled ? 'true' : undefined}>
       <div className="mb-0.5 flex items-center gap-2">
         <span className="rounded-md bg-accent-strong px-1.5 py-0.5 text-[12px] font-semibold uppercase tracking-wide text-accent-strong-foreground">
           {question.header}
