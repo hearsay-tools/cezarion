@@ -86,6 +86,8 @@ describe('automation task templates', () => {
     const root = await mkdtemp(join(tmpdir(), 'cezar-completion-template-'));
     const store = RunStore.open(join(root, '.ai/cezar'));
     const manager = createFixtureManager(store, root, { semaphore: new WorkspaceSemaphore({ initial: { maxParallel: 0 } }) });
+    // These queued tasks exercise saved options, without invoking the title model.
+    vi.stubEnv('CEZ_AUTONAME', '0');
     try {
       const choices = [{}, { archiveWhenDone: true }, { autoMergePr: true }, { archiveWhenDone: true, autoMergePr: true }, { archiveWhenDone: false, autoMergePr: false }];
       for (const [index, completion] of choices.entries()) {
@@ -114,9 +116,11 @@ describe('automation task templates', () => {
         }
       }
     } finally {
-      await drainFixtureManagers(root);
-      store.close();
-      await rm(root, { recursive: true, force: true });
+      try {
+        await drainFixtureManagers(root);
+        store.close();
+        await rm(root, { recursive: true, force: true });
+      } finally { vi.unstubAllEnvs(); }
     }
   });
 
