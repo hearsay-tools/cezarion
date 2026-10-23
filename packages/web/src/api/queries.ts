@@ -72,9 +72,6 @@ import {
   getWorkflows,
   getWorkspaceConfig,
   getWorkspaceUiState,
-  getSkillsUpdate,
-  checkSkillsUpdate,
-  applySkillsUpdate,
   getWorktrees,
   editQueuedMessage,
   markRunSeen,
@@ -126,7 +123,6 @@ import type {
   RunSummary,
   SelectAgentProfileInput,
   SetAgentConfigInput,
-  SkillsUpdateState,
   UpdateAgentProfileInput,
   UpdateProjectInput,
   NotifyRunInput,
@@ -193,7 +189,7 @@ export const queryKeys = {
   get skillsReady() {
     return [queryScope(), 'skills', 'ready'] as const
   },
-  /** Children of `skills`: the default skills the catalog can enable. Sharing the `skills`
+  /** Children of `skills`: every team skill, on or off, each with a switch. Sharing the `skills`
    *  prefix means a refresh that invalidates the catalog re-reads the importable list too. */
   get importableSkills() {
     return [queryScope(), 'skills', 'importable'] as const
@@ -311,7 +307,6 @@ export const workspaceQueryKeys = {
   /** One account's auth state — a child of `agentProfiles`, so removing an account drops it too. */
   agentAccountStatus: (routeId: string) =>
     ['workspace', 'agent-profiles', 'status', routeId] as const,
-  skillsUpdate: (projectId: string) => ['workspace', 'skills-update', projectId] as const,
   /** One directory listing from `GET /api/fs/browse` (step 4.2's folder picker). Keyed by the
    *  browsed path — `null` is the browse root, whose absolute location only the server knows.
    *  Not scope-led: there is one filesystem behind the workspace, not one per project. */
@@ -1230,8 +1225,8 @@ export function useSkills(enabled = true) {
   return skills
 }
 
-/** Every skill the default (vendor) repo offers, enabled or not, as full definitions so the Skills
- *  catalog can preview one before it is enabled. Same fast-then-`wait=1` convergence as
+/** Every team skill the configured sources offer, on or off, as full definitions so the Skills
+ *  catalog can preview one before it is switched on. Same fast-then-`wait=1` convergence as
  *  `useSkills`: the catalog renders whatever the cache holds, then the cold-clone wait fills it in. */
 export function useImportableSkills(enabled = true) {
   const queryClient = useQueryClient()
@@ -1443,32 +1438,6 @@ export function useAgentProfiles() {
     queryKey: workspaceQueryKeys.agentProfiles,
     queryFn: ({ signal }) => getAgentProfiles({ signal }),
   })
-}
-
-export function useSkillsUpdate(projectId: string, enabled = true) {
-  const query = useQuery({
-    queryKey: workspaceQueryKeys.skillsUpdate(projectId),
-    queryFn: ({ signal }) => getSkillsUpdate(projectId, { signal }),
-    enabled,
-  })
-  const transient = query.data?.status === undefined || ['idle', 'checking', 'updating'].includes(query.data.status)
-  useLiveRead(`/api/v1/workspace/skills-update?projectId=${encodeURIComponent(projectId)}`, workspaceQueryKeys.skillsUpdate(projectId), liveRefetchInterval(enabled && transient ? 60_000 : false))
-  return query
-}
-
-export function useCheckSkillsUpdate(projectId: string) {
-  const queryClient = useQueryClient()
-  const key = workspaceQueryKeys.skillsUpdate(projectId)
-  return useMutation({
-    mutationFn: () => checkSkillsUpdate(projectId),
-    onSuccess: (state) => queryClient.setQueryData(key, state),
-  })
-}
-
-export function useApplySkillsUpdate(projectId: string) {
-  const queryClient = useQueryClient()
-  const key = workspaceQueryKeys.skillsUpdate(projectId)
-  return useMutation({ mutationFn: () => applySkillsUpdate(projectId), onSuccess: (state) => queryClient.setQueryData(key, state) })
 }
 
 /** Rename a run (#389): `PATCH /api/runs/:id`. Invalidates `runs.*` so the list and the detail

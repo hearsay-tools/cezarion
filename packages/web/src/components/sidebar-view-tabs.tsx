@@ -9,12 +9,11 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from './ui/t
 /** Primary tabs that fit beside the More button with the widest active label unclipped. */
 const MAX_PRIMARY_WITH_MORE = 5
 
-export function SidebarViewTabs({ items, activeTo, needsYou = false, inboxCount, skillsUpdateAvailable, onNavigate }: {
+export function SidebarViewTabs({ items, activeTo, needsYou = false, inboxCount, onNavigate }: {
   items: NavItem[]
   activeTo: string | null
   needsYou?: boolean
   inboxCount?: number | null
-  skillsUpdateAvailable?: boolean
   onNavigate?: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -44,10 +43,10 @@ export function SidebarViewTabs({ items, activeTo, needsYou = false, inboxCount,
     {primary.map(item => {
       const active = item.to === activeTo
       const Icon = item.icon
-      const dot = item.to === '/' && needsYou && !active ? 'bg-pending-strong' : item.to === '/skills' && skillsUpdateAvailable ? 'bg-info' : null
+      const dot = item.to === '/' && needsYou && !active
       return <Tooltip key={item.to}><TooltipTrigger asChild><Link to={item.to} onClick={onNavigate} data-view-tab aria-label={item.label} aria-current={active ? 'page' : undefined}
         className={cn('relative flex h-[30px] min-w-0 items-center justify-center rounded-[7px] text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring max-md:min-h-11 max-md:min-w-11', active ? 'shrink-0 gap-1.5 bg-sidebar-row-selected px-[9px] text-[12px] font-semibold text-foreground' : 'w-7 shrink-0')}>
-        <span className="relative"><Icon className="size-[15px] shrink-0" aria-hidden="true" />{dot ? <span aria-label={item.to === '/' ? 'Tasks need you' : 'Skills update available'} data-slot={item.to === '/' ? 'nav-needs-you-dot' : 'nav-update-marker'} className={cn('absolute -top-1 -right-1 size-[7px] rounded-full border-[1.5px] border-sidebar', dot)} /> : null}</span>
+        <span className="relative"><Icon className="size-[15px] shrink-0" aria-hidden="true" />{dot ? <span aria-label="Tasks need you" data-slot="nav-needs-you-dot" className="absolute -top-1 -right-1 size-[7px] rounded-full border-[1.5px] border-sidebar bg-pending-strong" /> : null}</span>
         {active ? <span className="truncate">{item.label}</span> : null}
       </Link></TooltipTrigger><TooltipContent side="bottom" sideOffset={6} style={{ pointerEvents: 'none' }}>{item.label}</TooltipContent></Tooltip>
     })}

@@ -656,6 +656,9 @@ export function AppRoutes() {
           these win regardless of order — listed here for readability. */}
       {/* No index page: the area lands on its first section (`GLOBAL_SETTINGS_HOME`). */}
       <Route path="/settings/global" element={<Navigate to={GLOBAL_SETTINGS_HOME} replace />} />
+      {/* Settings → Skills (skill updates) was removed (hearsay-tools/cezarion#1494). Its
+          bookmarks land on the Skills page, through the flat-path redirect into the boot project. */}
+      <Route path="/settings/global/skills" element={<Navigate to="/skills" replace />} />
       {visibleSettingsSections('global', capabilities).map((section) => (
         <Route
           key={section.id}

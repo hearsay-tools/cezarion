@@ -1,5 +1,7 @@
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { AgentBrowser, bootProjectId, readTestEnv, servedRoot } from './agent-browser'
@@ -21,7 +23,8 @@ import {
  * afterAll) — the catalog renders them bold and first (#377) next to whatever global skills
  * the host machine genuinely has. Refresh hits the real POST (no team repos configured in
  * dry-run → a fast no-op fetch answering the same catalog), which is exactly the #384
- * scenario: a refetch must not lose selection. Nothing else mutates state.
+ * scenario: a refetch must not lose selection. The team-skill switch case configures a local
+ * skills repo for its own duration and restores the config, ui-state and team list after.
  */
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -112,8 +115,7 @@ describe('settings → skills against the live dry-run server', () => {
         const selected = browser.evaluate(contrastSampleExpression(selectedSelector)) as ContrastSample
         expect(selected.ratio, `${variant.id} selected: ${selected.foreground} on ${selected.background}`).toBeGreaterThanOrEqual(4.5)
 
-        // Scroll BETA into view: the update card now heads the list (#1408), so at 360×640 the row
-        // starts under the mobile tab bar. Evidence: this case failed with "covered by
+        // Scroll BETA into view: at 360×640 the row can start under the mobile tab bar. Evidence: this case failed with "covered by
         // <a.relative.flex inside div#root>" (bundle .ai/qa/failures/settings-skills/
         // keeps-selected-and-hovered-skill-descriptions-AA-readable-with-visible-keyboard--1/:
         // probe.json hover refused at the click point; PR #1424 comment 6316871712). Reproduce with
@@ -150,16 +152,15 @@ describe('settings → skills against the live dry-run server', () => {
   })
 
   it('every row has its own switch with a 44 px target at 360×640, light and dark (#1408)', () => {
-    // Dry-run has no default team skills, so the seeded project skills show their locked
-    // "always enabled" switch; a live switch shares the same component and hit area.
+    // The seeded project skills show their locked "always enabled" switch; a live team-skill
+    // switch shares the same component and hit area.
     const toggle = `[data-slot="skills-list"] [data-slot="skill-switch"][data-skill="${ALPHA}"]`
     browser.goto(`${baseUrl}${scoped('/skills')}`)
     browser.waitForFunction(`document.querySelector(${JSON.stringify(toggle)}) !== null`)
     try {
       for (const variant of contrastQaVariants.filter((v) => v.id.startsWith('mobile-') && v.density === 'comfortable')) {
         applyContrastQaVariant(browser, variant)
-        // Scroll the switch into view: the update card heads the list, so at 360×640 the row starts
-        // below the fold. Evidence: this case failed with "hit area: expected [ false, false,
+        // Scroll the switch into view: at 360×640 the row can start below the fold. Evidence: this case failed with "hit area: expected [ false, false,
         // false, false ]" (bundle .ai/qa/failures/settings-skills/
         // every-row-has-its-own-switch-with-a-44-px-target-at-360-640-light-and-dark-1408-1/:
         // probe.json all four elementFromPoint probes missed; PR #1424 comment 6316871712).
@@ -195,29 +196,51 @@ describe('settings → skills against the live dry-run server', () => {
     }
   })
 
-  it('a default skill switches off and back on by keyboard, and the project saves each change (#1408)', async () => {
-    // Dry-run serves the default team skills, so their live switches are reachable here.
-    const uiStateFile = resolve(servedRoot(), '.ai/cezar/ui-state.json')
+  it('a team skill switches off and back on by keyboard, and the project saves each change (#1494)', async () => {
+    // Dry-run configures no team source, so this case adds a local skills repo for its duration.
+    const cezarDir = resolve(servedRoot(), '.ai/cezar')
+    const configFile = resolve(cezarDir, 'config.json')
+    const uiStateFile = resolve(cezarDir, 'ui-state.json')
+    const savedConfig = existsSync(configFile) ? readFileSync(configFile, 'utf8') : null
     const savedUiState = existsSync(uiStateFile) ? readFileSync(uiStateFile, 'utf8') : null
-    const live = '[data-slot="skills-list"] [data-slot="skill-switch"]:not([data-locked]):not([disabled])'
-    browser.goto(`${baseUrl}${scoped('/skills')}`)
-    const name = String(browser.waitForValue(
-      `document.querySelector(${JSON.stringify(live)})?.getAttribute('data-skill') ?? null`,
-      (value) => typeof value === 'string' && value.length > 0,
-    ))
+    const source = mkdtempSync(join(tmpdir(), 'cez-e2e-team-skills-'))
+    const name = 'e2e-team-skill'
+    const git = (args: string[]) => execFileSync('git', args, { cwd: source, stdio: 'ignore' })
+    git(['init', '-q', '-b', 'main'])
+    mkdirSync(join(source, name))
+    writeFileSync(join(source, name, 'SKILL.md'), `---\nname: ${name}\ndescription: An e2e team skill\n---\n\nDo the team thing.\n`)
+    git(['add', '-A'])
+    git(['-c', 'user.name=cezar e2e', '-c', 'user.email=e2e@example.com', 'commit', '-q', '-m', 'skills'])
+    const refreshTeamSkills = async () => {
+      const response = await fetch(`${baseUrl}/api/v1/p/${bootProject}/skills/refresh`, { method: 'POST' })
+      expect(response.ok).toBe(true)
+    }
     const toggle = `[data-slot="skills-list"] [data-slot="skill-switch"][data-skill="${name}"]`
-    const saved = (included: boolean) => pollFor(async (signal) => {
-      const state = await pollJson<{ importedSkills?: string[] }>(`${baseUrl}/api/v1/p/${bootProject}/ui-state`, signal)
-      return Array.isArray(state.importedSkills) && state.importedSkills.includes(name) === included ? state : undefined
-    }, () => `ui-state never saved ${name} as ${included ? 'enabled' : 'disabled'}`, { timeoutMs: 10_000, intervalMs: 100 })
+    const saved = (off: boolean) => pollFor(async (signal) => {
+      const state = await pollJson<{ disabledTeamSkills?: Array<{ repo: string; name: string }> }>(
+        `${baseUrl}/api/v1/p/${bootProject}/ui-state`,
+        signal,
+      )
+      const listed = (state.disabledTeamSkills ?? []).some((ref) => ref.repo === source && ref.name === name)
+      return Array.isArray(state.disabledTeamSkills) && listed === off ? state : undefined
+    }, () => `ui-state never saved ${name} as ${off ? 'off' : 'on'}`, { timeoutMs: 10_000, intervalMs: 100 })
     try {
+      const config = savedConfig === null ? {} : (JSON.parse(savedConfig) as Record<string, unknown>)
+      mkdirSync(cezarDir, { recursive: true })
+      writeFileSync(configFile, JSON.stringify({ ...config, skillsRepos: [{ repo: source, ref: 'main' }] }), 'utf8')
+      await refreshTeamSkills()
+      browser.goto(`${baseUrl}${scoped('/skills')}`)
+      expect(browser.waitForValue(
+        `document.querySelector(${JSON.stringify(`${toggle}:not([disabled])`)})?.getAttribute('aria-label') ?? null`,
+        (value) => typeof value === 'string',
+      )).toBe(`Enable ${name}`)
       focusWithKeyboard(browser, toggle)
       browser.press('Space')
       expect(browser.waitForValue(
         `document.querySelector('[data-slot="skills-group-available"] [data-slot="skill-row"][data-skill="${name}"]') !== null`,
         (value) => value === true,
       )).toBe(true)
-      await saved(false)
+      await saved(true)
       // The row moved groups; its switch is a new element, so focus it again before the second press.
       focusWithKeyboard(browser, toggle)
       browser.press('Space')
@@ -225,10 +248,17 @@ describe('settings → skills against the live dry-run server', () => {
         `document.querySelector(${JSON.stringify(toggle)})?.getAttribute('aria-checked') ?? null`,
         (value) => value === 'true',
       )).toBe('true')
-      await saved(true)
+      await saved(false)
     } finally {
+      if (savedConfig === null) rmSync(configFile, { force: true })
+      else writeFileSync(configFile, savedConfig, 'utf8')
       if (savedUiState === null) rmSync(uiStateFile, { force: true })
       else writeFileSync(uiStateFile, savedUiState, 'utf8')
+      // Drop the team skill from the shared server's cached list too.
+      await refreshTeamSkills()
+      rmSync(source, { recursive: true, force: true })
+      browser.goto(`${baseUrl}${scoped('/skills')}`)
+      browser.waitForFunction(`document.querySelector('${row(ALPHA)}') !== null`)
     }
   })
 
