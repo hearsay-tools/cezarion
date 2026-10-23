@@ -29,7 +29,7 @@ The private route inventory was **GET and POST `/api/v1/tools/ci-wait`** over a
 process-owned Unix socket / Windows named pipe only. GET holds the adapter's
 owner-lifetime connection; POST used shared request-validation middleware and
 contract request/receipt/error shapes. hearsay-tools/cezarion#1236 removed the POST
-and `cezar_wait_for_ci`: H1 now calls `cezar_wait` with `kind: "ci"` through
+and `cezar_wait_for_ci`: H1 now calls `cezar_wait` with `kind: "pr"` (named `"ci"` before hearsay-tools/cezarion#1425) through
 `POST /api/v1/tools/wait`, and the GET keeps its historical path. It is not mounted on the cockpit app.
 `CiToolApp` exposes the chained Hono type. SIGKILL of the owning controller is
 covered by `controller.test.ts`; it closes the MCP adapter without model work.

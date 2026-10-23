@@ -2803,7 +2803,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   describeRunners('harness parity — monitoring wrap-up contract (#399)', () => {
     const promptRules = [
       'When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.',
-      'call cezar_wait with kind "ci" for a pull request\'s checks or kind "timer" to re-check later, then end your turn.',
+      'call cezar_wait with kind "pr" for a pull request\'s checks or its merge, or kind "timer" to re-check later, then end your turn.',
     ];
     const wakeRules = [
       'When the goal is complete and verified, call cezar_done.',

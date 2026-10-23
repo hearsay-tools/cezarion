@@ -61,7 +61,7 @@ describe('cezar-ci MCP server instructions', () => {
     try {
       const wait = (await client.listTools()).tools.find(tool => tool.name === 'cezar_wait')!;
       const properties = wait.inputSchema.properties as Record<string, any>;
-      expect(properties.kind.enum).toEqual(['ci', 'worker', 'timer']);
+      expect(properties.kind.enum).toEqual(['pr', 'worker', 'timer']);
       for (const key of ['worker_ids', 'request_ids']) {
         expect(properties[key]).toMatchObject({ type: 'array', minItems: 1, maxItems: 32 });
         expect(properties[key].description).toMatch(/^kind "worker":/);
