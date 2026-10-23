@@ -58,7 +58,7 @@ import { HandoffAction, useHandoffActionVisible } from './handoff-action'
 import { Markdown } from './markdown'
 import { TaskFileScope } from './task-file-scope'
 import { archiveInComposer, resumeHint, runActionFlags } from './run-actions'
-import { ParentTaskLink } from './parent-task-link'
+import { CompactParentTaskLink, ParentTaskLink } from './parent-task-link'
 
 /**
  * The run header (spec §"Task thread" → Header): editable title + status pill, the meta line,
@@ -247,6 +247,7 @@ export function RunHeader({
         {barSlot ? (
           <MobileRunBarPortal slot={barSlot}>
             <MobileRunTitle run={run} />
+            {run.delegation?.role === 'worker' ? <CompactParentTaskLink id={run.delegation.parentRunId} /> : null}
             {actionsKebab}
           </MobileRunBarPortal>
         ) : (

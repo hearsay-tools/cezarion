@@ -391,8 +391,10 @@ retention remains unchanged aside from counting finished workers in keep-N.
 
 A worker links to its parent above the title in the shared RunHeader, present on
 Session, Changes, Commits, and Files tabs, on desktop and phones. This link stays
-outside the Session activity disclosures. Roots list workers with status and
-links in the Session activity Workers section; workers omit that section. Worker
+outside the Session activity disclosures. A compact Parent link in the fixed
+phone top bar stays visible at the bottom of a long transcript. It uses the
+known parent ID without waiting for the parent record lookup. Roots list workers
+with status and links in the Session activity Workers section; workers omit that section. Worker
 wait details live under status, and cleanup notices live in Workspace. Existing
 task lists identify worker rows without changing normal grouping or requiring a
 separate dashboard.

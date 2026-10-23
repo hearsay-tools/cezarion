@@ -9,6 +9,7 @@ import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { seedTranscript } from './seed-transcript'
+import { largeThreadEvents } from './fixtures/make-large-thread'
 // fixture-server starts: 1
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -16,6 +17,7 @@ const parentId = randomUUID(), orphanId = randomUUID(), absentId = randomUUID()
 const waitingId = randomUUID(), askId = randomUUID(), emptyId = randomUUID()
 const loadingId = randomUUID(), errorId = randomUUID()
 const requestParentId = randomUUID(), requestWorkerId = randomUUID()
+const longWorkerId = randomUUID()
 const ids = Array.from({ length: 32 }, () => randomUUID())
 const now = new Date().toISOString()
 const region = '[aria-label="Task relationships"]'
@@ -37,6 +39,7 @@ beforeAll(async () => {
     record(parentId, 'Relationship parent with 32 workers', { delegation: rootMetadata(ids), issueNumber: 751, steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }] }),
     ...ids.map((id, i) => record(id, `Owned worker ${i + 1}`, { archived: i === 31, delegation: worker(id, parentId, i === 0 ? { destroy: { requestedAt: now, phase: 'incomplete', remaining: ['branch'], error: 'Branch is checked out elsewhere' } } : {}) })),
     record(orphanId, 'Worker with unavailable parent', { delegation: worker(orphanId, absentId) }),
+    record(longWorkerId, 'Worker with a long task title that must fit beside Parent and the title controls', { delegation: worker(longWorkerId, parentId), steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }] }),
     record(waitingId, 'Waiting root fixture', { status: 'waiting', delegation: { ...rootMetadata([absentId]), wait: wait() } }),
     // Every ask opens a human wait; attention reads it (hearsay-tools/cezarion#1236, phase 4b).
     record(askId, 'Question root fixture', { status: 'waiting', delegation: { ...rootMetadata([absentId]), wait: wait() },
@@ -52,6 +55,7 @@ beforeAll(async () => {
     { seq: 2, ts: now, runId: askId, stepId: 'task', type: 'agent-input', input: { id: randomUUID(), source: 'agent', parentRunId: parentId, text: 'Preserve the human question', createdAt: now } },
   ]
   seedTranscript(join(root, '.ai/cezar/runs', `${askId}.ndjson`), events.map(event => JSON.stringify(event)).join('\n') + '\n')
+  seedTranscript(join(root, '.ai/cezar/runs', `${longWorkerId}.ndjson`), largeThreadEvents(40).map(event => JSON.stringify({ ...event, runId: longWorkerId })).join('\n') + '\n')
   // A second real registered project exercises the slim workspace index in Tasks/palette.
   const other = join(root, 'other-project')
   execFileSync('git', ['init', '-q', '-b', 'main', other])
@@ -182,6 +186,58 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     browser.screenshot(join(artifacts, `worker-parent-${width}-${theme}.png`), { viewport: true })
     browser.click(parentLink)
     browser.waitForFunction(`location.pathname === '${route(parentId)}' && document.querySelector('[data-slot="run-activity-workers"]') !== null`)
+  }, 120_000)
+}
+
+for (const width of [320, 360]) for (const theme of ['light', 'dark']) {
+  it(`${width}px ${theme}: fixed Parent remains usable at the bottom of a long worker transcript`, () => {
+    browser.setViewport(width, 800)
+    browser.goto(`${base}/settings/global/appearance`)
+    browser.waitForFunction(`document.querySelector('[data-slot="appearance-theme"]') !== null`)
+    clickAppearanceControl(browser, 'theme', theme)
+    browser.waitForFunction(`localStorage.getItem('cez-theme') === '${theme}'`)
+    browser.goto(`${base}${route(longWorkerId)}`)
+    browser.waitForFunction(`document.body.textContent.includes('Pass 40:')`)
+    const link = '[data-slot="mobile-parent-task-link"]'
+    browser.waitForFunction(`document.querySelector('${link}') !== null`)
+    browser.evaluate(`(() => { const main = document.querySelector('[data-slot="main"]'); main.scrollTop = main.scrollHeight; })()`)
+    const facts = waitForSettledSample(browser, `(() => {
+      const main = document.querySelector('[data-slot="main"]'), link = document.querySelector('${link}');
+      const r = link.getBoundingClientRect(), title = document.querySelector('[data-slot="mobile-run-title"] h1');
+      const controls = [...document.querySelectorAll('[data-slot="mobile-top-bar"] a, [data-slot="mobile-top-bar"] button')];
+      return { scroll: main.scrollTop, bottomGap: main.scrollHeight - main.scrollTop - main.clientHeight,
+        breadcrumbBottom: document.querySelector('[data-slot="parent-task-link"]').getBoundingClientRect().bottom,
+        visible: r.top >= 0 && r.bottom <= innerHeight, height: r.height, width: r.width,
+        hit: link.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)),
+        controls: controls.map(el => { const b = el.getBoundingClientRect(); return { name: el.getAttribute('aria-label'), x: b.x, right: b.right, height: b.height }; }),
+        titleWidth: title.getBoundingClientRect().width, titleOverflow: getComputedStyle(title).textOverflow,
+        overflow: document.documentElement.scrollWidth > innerWidth, theme: document.documentElement.classList.contains('light') === ${theme === 'light'},
+        href: link.getAttribute('href') };
+    })()`) as { scroll: number; bottomGap: number; breadcrumbBottom: number; visible: boolean; height: number; width: number; hit: boolean; controls: { name: string; x: number; right: number; height: number }[]; titleWidth: number; titleOverflow: string; overflow: boolean; theme: boolean; href: string }
+    observations.push({ case: 'mobile parent at transcript bottom', viewportWidth: width, selectedTheme: theme, ...facts })
+    expect(facts.scroll).toBeGreaterThan(1000)
+    expect(facts.bottomGap).toBeLessThanOrEqual(1)
+    expect(facts.breadcrumbBottom).toBeLessThan(0)
+    expect(facts.visible).toBe(true); expect(facts.hit).toBe(true)
+    expect(facts.height).toBeGreaterThanOrEqual(44); expect(facts.width).toBeGreaterThanOrEqual(44)
+    expect(facts.overflow).toBe(false); expect(facts.theme).toBe(true)
+    expect(facts.titleWidth).toBeGreaterThan(0); expect(facts.titleOverflow).toBe('ellipsis')
+    expect(facts.href).toBe(route(parentId))
+    expect(facts.controls.map(control => control.name)).toEqual(['Back', 'Rename task', `Parent task ${parentId}`, 'Run actions'])
+    for (const [index, control] of facts.controls.entries()) {
+      expect(control.height).toBeGreaterThanOrEqual(44)
+      expect(control.x).toBeGreaterThanOrEqual(index ? facts.controls[index - 1]!.right : 0)
+      expect(control.right).toBeLessThanOrEqual(width)
+    }
+    browser.evaluate(`document.querySelector('[data-slot="mobile-run-bar"] [aria-label="Rename task"]').focus()`)
+    browser.press('Tab')
+    const focus = waitForSettledSample(browser, `({ focused: document.activeElement === document.querySelector('${link}'), outline: getComputedStyle(document.querySelector('${link}')).outlineStyle })`) as { focused: boolean; outline: string }
+    expect(focus.focused).toBe(true)
+    expect(focus.outline).toBe('solid')
+    browser.screenshot(join(artifacts, `worker-parent-bottom-${width}-${theme}.png`), { viewport: true })
+    browser.press('Enter')
+    browser.waitForFunction(`location.pathname === '${route(parentId)}' && document.querySelector('h1')?.textContent.includes('Relationship parent')`)
+    expect(browser.count(link)).toBe(0)
   }, 120_000)
 }
 

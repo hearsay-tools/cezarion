@@ -4,6 +4,21 @@ import { Button } from '@/components/ui/button'
 import { Link } from '@/lib/project-router'
 import { runTitle } from '@/lib/task-groups'
 
+/** The fixed phone bar needs only the known ID, so navigation never waits on a lookup. */
+export function CompactParentTaskLink({ id }: { id: string }) {
+  return (
+    <Link
+      to={`/tasks/${id}`}
+      aria-label={`Parent task ${id}`}
+      data-slot="mobile-parent-task-link"
+      className="inline-flex shrink-0 items-center justify-center gap-1 rounded-sm px-2 text-[13px] text-muted-foreground [min-block-size:2.75rem] [min-inline-size:2.75rem] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring active:bg-muted active:text-foreground"
+    >
+      <ArrowUpIcon aria-hidden className="shrink-0 [block-size:1.2cap] [inline-size:auto]" />
+      Parent
+    </Link>
+  )
+}
+
 /** Parent navigation stays outside the activity disclosures and on every task tab. */
 export function ParentTaskLink({ id }: { id: string }) {
   const parent = useRun(id)

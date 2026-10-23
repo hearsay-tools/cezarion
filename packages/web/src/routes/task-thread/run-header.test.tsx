@@ -8,6 +8,7 @@ import { createQueryClient } from '@/api/query-client'
 import { ProjectScopeProvider } from '@/api/project-scope-context'
 import type { ApiRun, RunStatus, StepState } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
+import { MobileRunBarSlotContext } from '@/components/mobile-run-bar'
 
 import { RunHeader, visibleItemTabs, type RunTab } from './run-header'
 import { PreviewPaneContext, type PreviewPane } from './preview/preview-state'
@@ -90,6 +91,7 @@ function renderHeader(
   onMarkedUnread?: () => void,
   tab: RunTab = 'session',
   projectId: string | null = null,
+  mobileSlot: HTMLElement | null = null,
 ) {
   const prefix = projectId ? `/p/${projectId}` : ''
   return render(
@@ -99,7 +101,7 @@ function renderHeader(
         <Routes>
           <Route
             path={`${prefix}/tasks/:id`}
-            element={<RunHeader run={record} tab={tab} onMarkedUnread={onMarkedUnread} />}
+            element={<MobileRunBarSlotContext.Provider value={mobileSlot}><RunHeader run={record} tab={tab} onMarkedUnread={onMarkedUnread} /></MobileRunBarSlotContext.Provider>}
           />
           <Route path="/" element={<div data-slot="home-probe" />} />
         </Routes>
@@ -142,6 +144,51 @@ it('retains the parent link after lookup failure and retries the parent record',
   fireEvent.click(screen.getByRole('button', { name: 'Retry parent task' }))
   await waitFor(() => expect(link.textContent).toContain('Recovered parent'))
   expect(screen.queryByText('Parent record unavailable or deleted')).toBeNull()
+})
+
+describe('fixed mobile parent navigation', () => {
+  function phoneSlot() {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener: vi.fn(), removeEventListener: vi.fn() })))
+    const slot = document.createElement('div')
+    document.body.append(slot)
+    return slot
+  }
+
+  afterEach(() => document.querySelector('[data-slot="test-mobile-bar"]')?.remove())
+
+  it.each<RunTab>(['session', 'changes', 'commits', 'files', { kind: 'issue', number: 751 }, { kind: 'pr', number: 752 }])('portals a compact scoped parent link on %j before lookup and after failure', async tab => {
+    stubFetch({ [`/api/v1/p/sample/runs/${parentId}`]: () => jsonResponse({ error: 'not found' }, 404) })
+    const slot = phoneSlot()
+    slot.dataset.slot = 'test-mobile-bar'
+    renderHeader(workerRun(), undefined, tab, 'sample', slot)
+    const bar = within(slot)
+    const link = bar.getByRole('link', { name: `Parent task ${parentId}` })
+    expect(link.textContent?.trim()).toBe('Parent')
+    expect(link.getAttribute('href')).toBe(`/p/sample/tasks/${parentId}`)
+    expect(link.closest('[data-slot="run-header"]')).toBeNull()
+    expect(bar.getByRole('heading', { level: 1 })).toBeTruthy()
+    expect(bar.getByRole('button', { name: 'Rename task' })).toBeTruthy()
+    expect(bar.getByRole('button', { name: 'Run actions' })).toBeTruthy()
+    expect(await screen.findByText('Parent record unavailable or deleted')).toBeTruthy()
+    expect(bar.getByRole('link', { name: `Parent task ${parentId}` })).toBe(link)
+  })
+
+  it.each([undefined, { role: 'root', permissions: [], receipts: [] }] satisfies ApiRun['delegation'][])('omits the mobile parent link for nonworkers: %j', delegation => {
+    stubFetch()
+    const slot = phoneSlot()
+    slot.dataset.slot = 'test-mobile-bar'
+    renderHeader(run('done', { delegation }), undefined, 'session', null, slot)
+    expect(within(slot).queryByRole('link', { name: /Parent task/ })).toBeNull()
+    expect(within(slot).getByRole('heading', { level: 1 })).toBeTruthy()
+  })
+
+  it('keeps the desktop breadcrumb without publishing a mobile action', () => {
+    stubFetch()
+    const slot = document.createElement('div')
+    renderHeader(workerRun(), undefined, 'session', null, slot)
+    expect(slot.childElementCount).toBe(0)
+    expect(screen.getByRole('link', { name: `Parent task ${parentId}` }).closest('[data-slot="run-header"]')).toBeTruthy()
+  })
 })
 
 const actionBar = () => {
