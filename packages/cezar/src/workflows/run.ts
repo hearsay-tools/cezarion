@@ -1949,9 +1949,8 @@ export class RunManager {
    * never installed, not even for a skill that runs it, and a switch-off made after the run
    * started holds for the next step, a live `/name` and Continue. In the run's own task worktree
    * every pass, one with no root included, also removes the copies cezar recorded of a skill
-   * whose own source and name are on the off-list (`withdrawProvisionedSkills`), then reconciles
-   * every recorded root, so one that lost its copy gets an enabled copy once the catalog offers
-   * one; the user's own installs stay.
+   * whose own source and name are on the off-list (`withdrawProvisionedSkills`), and a recorded
+   * root that lost its copy gets another source's enabled copy; the user's own installs stay.
    *
    * Any other cwd — worktree off, a non-git project, a Continue whose worktree is gone — is the
    * main checkout or unknown, where those directories are LOCAL skills to `discoverSkills` that
@@ -1992,19 +1991,17 @@ export class RunManager {
       for (const skill of teamRoots) await cacheCopy(skill);
       return { notes, filesDir, installed: [] };
     }
-    const loadedTeam = getTeamSkillsCached(this.repoRoot);
-    const catalog = [...registry, ...filterDisabledTeamSkills(loadedTeam, disabled)];
-    // Every pass, one with no root included, first removes cezar's copies of a switched-off
-    // source's skill, matched on that copy's own source and name (#1494). An older flat team copy
-    // that knows no source goes only when the loaded team list offers its name and every copy is
-    // switched off; a name not offered yet (sources still loading) is kept.
-    const offered = new Set(catalog.map((skill) => skill.name));
-    const orphaned = new Set(loadedTeam.map((skill) => skill.name).filter((name) => !offered.has(name)));
-    await withdrawProvisionedSkills(state.cwd, disabled, orphaned);
-    if (stopped()) return { notes, filesDir, installed: [] };
-    // Then a full pass reconciles every recorded root, so one whose copy went (withdrawn above, by
-    // an earlier pass, or before a crash) gets its enabled copy as soon as the catalog offers one.
-    const result = await provisionSkills(state.cwd, roots, catalog, { cancelled: stopped });
+    const catalog = [...registry, ...filterDisabledTeamSkills(getTeamSkillsCached(this.repoRoot), disabled)];
+    // Every pass, one with no root included, removes cezar's copies of a switched-off source's
+    // skill, matched on that copy's own source and name (#1494): never inferred from what the
+    // in-memory catalog lacks, which before the team sources load is every team skill. A recorded
+    // root that lost its copy gets the enabled copy of its name, when the catalog has one.
+    const lost = await withdrawProvisionedSkills(state.cwd, disabled);
+    const replacements = lost.filter((name) => !roots.some((skill) => skill.name === name))
+      .flatMap((name) => catalog.filter((skill) => skill.name === name).slice(0, 1));
+    const passRoots = [...roots, ...replacements];
+    if (passRoots.length === 0 || stopped()) return { notes, filesDir, installed: [] };
+    const result = await provisionSkills(state.cwd, passRoots, catalog, { cancelled: stopped });
     if (stopped()) return { notes, filesDir, installed: [] };
     for (const skill of teamRoots) {
       const written = result.teamCopies[skill.name] ?? [];
@@ -2019,8 +2016,7 @@ export class RunManager {
       }
     }
     const others = result.installed.filter((name) => !teamRoots.some((skill) => skill.name === name));
-    // A rootless reconcile pass reports only what it installed, not a closure it did not ask for.
-    if (others.length > 0 || (result.truncated && roots.length > 0)) {
+    if (others.length > 0 || result.truncated) {
       notes.push(`skills installed in the task's workspace: ${others.join(', ') || 'none new'}` +
         (result.truncated ? `; closure capped at ${MAX_SKILL_CLOSURE}, skipped ${result.truncated} and later` : ''));
     }
