@@ -74,7 +74,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
       const answer = (await tools.registerWait({ kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }, 'cezar_wait', new AbortController().signal)).answer;
       expect(answer).toMatchObject({ ok: true, kind: 'worker' });
       if (!answer.ok) throw Error('refused');
-      expect(answer.open_waits.map(wait => wait.kind).sort()).toEqual(['ci', 'worker']);
+      expect(answer.open_waits.map(wait => wait.kind).sort()).toEqual(['pr', 'worker']);
       expect(entryOf(p.id, answer.wait_id)).toMatchObject({ kind: 'worker', via: 'cezar_wait', phase: 'open', workerIds: [w.id], outcomes: [], revisions: [{ workerId: w.id, revision: 0 }] });
       const delegation = store.getRun(p.id)?.delegation;
       expect(delegation?.role === 'root' ? delegation.wait : undefined).toBeUndefined();

@@ -266,7 +266,7 @@ describe('answers', () => {
     expect(cezarWaitAnswerSchema.parse({ ok: true, wait_id: CI_ID, kind: 'pr', deadline: openWait.deadline, open_waits: [openWait, human] }).ok).toBe(true);
     // cezar_wait opens no human wait, so its answer never names one.
     expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: HUMAN_ID, kind: 'human', open_waits: [human] }).success).toBe(false);
-    for (const kind of ['ci', 'timer'] as const) {
+    for (const kind of ['pr', 'timer'] as const) {
       expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, open_waits: [] }).success).toBe(false);
       expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: CI_ID, kind, deadline: openWait.deadline, open_waits: [{ ...openWait, kind, deadline: undefined }] }).success).toBe(false);
     }
