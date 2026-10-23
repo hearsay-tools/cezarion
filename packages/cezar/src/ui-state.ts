@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { normalizeSidebarLimits, type UiState } from '@open-mercato/cezar-contract/workspace';
@@ -37,15 +38,35 @@ export async function readUiState(repoRoot: string): Promise<UiState> {
 
 /** The project's own file. Writes merge from this. */
 export async function readProjectUiState(repoRoot: string): Promise<UiState> {
+  try {
+    return parseUiState(await readFile(uiStatePath(repoRoot), 'utf8'));
+  } catch {
+    return {}; // Missing or unreadable: an empty preference bag.
+  }
+}
+
+/**
+ * `readProjectUiState` for a synchronous caller: a live message is expanded inside
+ * `sendMessage`, which answers synchronously, and must see the off-list as it is now (#1494).
+ */
+export function readProjectUiStateSync(repoRoot: string): UiState {
+  try {
+    return parseUiState(readFileSync(uiStatePath(repoRoot), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+function parseUiState(text: string): UiState {
   let state: UiState = {};
   try {
-    const parsed: unknown = JSON.parse(await readFile(uiStatePath(repoRoot), 'utf8'));
+    const parsed: unknown = JSON.parse(text);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       state = parsed as UiState;
       if ('sidebarLimits' in state) state = { ...state, sidebarLimits: normalizeSidebarLimits(state.sidebarLimits) };
     }
   } catch {
-    // Missing or unreadable: an empty preference bag.
+    // Malformed: an empty preference bag.
   }
   return state;
 }

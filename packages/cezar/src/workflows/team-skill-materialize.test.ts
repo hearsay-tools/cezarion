@@ -39,6 +39,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
   let manager: RunManager;
   let launches: AgentRunSpec[];
   let sessions: Array<() => void>;
+  let sent: string[];
   let cleanup: string[];
 
   beforeEach(async () => {
@@ -47,6 +48,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     vi.stubEnv('CEZ_AUTONAME', '0');
     launches = [];
     sessions = [];
+    sent = [];
     cleanup = [];
     home = mkdtempSync(join(tmpdir(), 'cez-team-dir-home-'));
     cleanup.push(home);
@@ -78,7 +80,10 @@ describe('team directory skills never land in the main checkout (#1024)', { time
         const session: AgentSession = {
           result,
           get open() { return open; },
-          sendMessage: () => open,
+          sendMessage: (content) => {
+            sent.push(content.map((block) => (block.type === 'text' ? block.text : '')).join('\n'));
+            return open;
+          },
           sendAgentMessage: () => open ? Promise.resolve() : false,
           discardQueuedMessages: () => undefined,
           holdsHumanInput: () => false,
@@ -361,6 +366,58 @@ describe('team directory skills never land in the main checkout (#1024)', { time
       expect(existsSync(join(run.spec.cwd, agentDir, 'skills', TEAM_SKILL)), `${agentDir} team`).toBe(false);
     }
     await run.finish();
+  });
+
+  it('a live /name of a team skill switched off during the run is not expanded (#1494)', async () => {
+    const { repo } = await seedTeamSource();
+    // The run's saved registry holds the team skill: it was on when the run started.
+    const run = await launch(promptWorkflow, 'go');
+    switchOff(repo);
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: `/${TEAM_SKILL} now` }])).toBe(true);
+    await vi.waitFor(() => expect(sent.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
+    expect(sent.join('\n')).not.toContain(V1_BODY);
+    expect(sent.join('\n')).toContain(`/${TEAM_SKILL} now`);
+    await run.finish();
+  });
+
+  it('the same live /name is expanded while its team skill is switched on (#1494 guard)', async () => {
+    await seedTeamSource();
+    const run = await launch(promptWorkflow, 'go');
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: `/${TEAM_SKILL} now` }])).toBe(true);
+    await vi.waitFor(() => expect(sent.join('\n')).toContain(V1_BODY), { timeout: LAUNCH_WAIT_MS });
+    await run.finish();
+  });
+
+  it('a later step does not run a skill switched off while an earlier step ran (#1494)', async () => {
+    const { repo } = await seedTeamSource();
+    const twoSteps = plannedWorkflow([
+      { id: 'first', name: 'first', prompt: '{{task}}' },
+      ...skillTaskSteps(TEAM_SKILL),
+      { id: 'verify', command: 'true' },
+    ]);
+    const before = launches.length;
+    const record = manager.startRun(twoSteps, { task: 'go' });
+    await vi.waitFor(() => expect(launches.length).toBe(before + 1), { timeout: LAUNCH_WAIT_MS });
+    switchOff(repo);
+    sessions[before]!();
+    await vi.waitFor(() => expect(launches.length).toBe(before + 2), { timeout: LAUNCH_WAIT_MS });
+    expect(launches[before + 1]!.systemPrompt ?? '').not.toContain(V1_BODY);
+    sessions[before + 1]!();
+    await vi.waitFor(() => expect(manager.isActive(record.id)).toBe(false), { timeout: LAUNCH_WAIT_MS });
+  });
+
+  // Guard: Continue rediscovers the registry, so it held before #1494's prompt-side filter too.
+  it("Continue does not re-send the step skill's instructions after it was switched off (#1494 guard)", async () => {
+    const { repo } = await seedTeamSource();
+    const run = await runToEnd(undefined);
+    expect(run.spec.systemPrompt).toContain(V1_BODY);
+    switchOff(repo);
+    const before = launches.length;
+    expect(manager.continueRun(run.id, { text: `/${TEAM_SKILL} keep going` })).toEqual({ ok: true });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(before), { timeout: LAUNCH_WAIT_MS });
+    expect(launches[before]!.systemPrompt ?? '').not.toContain(V1_BODY);
+    expect(launches[before]!.userPrompt).not.toContain(V1_BODY);
+    sessions[before]!();
   });
 
   it('Continue leaves copies installed before a switch-off in place: nothing is removed mid-task (#1494)', async () => {
