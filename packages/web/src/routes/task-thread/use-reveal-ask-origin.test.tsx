@@ -65,8 +65,20 @@ describe('useRevealAskOrigin (#1495)', () => {
     expect(h.loadOlder).toHaveBeenCalledOnce()
     hook.rerender({ ...props, history: { ...h, visibleEvents: [{ seq: 300 } as RunEvent] } })
     expect(h.loadOlder).toHaveBeenCalledTimes(2)
+    // A page that also carries the session start (seq 1) is still older work to load.
+    hook.rerender({ ...props, history: { ...h, visibleEvents: [{ seq: 1 } as RunEvent, { seq: 200 } as RunEvent] } })
+    expect(h.loadOlder).toHaveBeenCalledTimes(3)
     hook.rerender({ ...props, rows: [originRow('q1'), noteRow], history: { ...h, visibleEvents: [{ seq: 5 } as RunEvent] } })
     expect(jumpToRow).toHaveBeenCalledOnce()
+    expect(hook.result.current.seeking).toBe(false)
+  })
+
+  it('stops when the ask event is loaded but its row is not', () => {
+    const jumpToRow = vi.fn()
+    const h = history({ visibleEvents: [{ seq: 10 } as RunEvent] })
+    const hook = setup({ pendingAskId: 'q1', askSeq: 10, rows: [noteRow], history: h, jumpToRow })
+    act(() => hook.result.current.reveal())
+    expect(h.loadOlder).not.toHaveBeenCalled()
     expect(hook.result.current.seeking).toBe(false)
   })
 

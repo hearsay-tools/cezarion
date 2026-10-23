@@ -72,7 +72,7 @@ function ShowOriginLink({ onShowOrigin }: { onShowOrigin: () => void }) {
       variant="ghost"
       size="sm"
       data-slot="ask-show-origin"
-      className="mt-2 min-h-11 min-w-11 px-2 text-xs font-medium text-muted-foreground underline underline-offset-4"
+      className="mbs-2 min-h-11 min-w-11 px-2 text-xs font-medium text-muted-foreground underline underline-offset-4"
       onClick={onShowOrigin}
     >
       Show where it was asked

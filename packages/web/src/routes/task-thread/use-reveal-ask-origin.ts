@@ -29,7 +29,10 @@ export function useRevealAskOrigin({ pendingAskId, askSeq, rows, history, jumpTo
   const [seekingFor, setSeekingFor] = useState<string | undefined>(undefined)
   const reveal = useCallback(() => setSeekingFor(pendingAskId), [pendingAskId])
 
-  const oldestSeq = history?.visibleEvents[0]?.seq
+  // Whether the ask's own event is loaded, not the oldest loaded seq: a page can also carry
+  // events older than its window (the session start), which would end the walk too early.
+  const visibleEvents = history?.visibleEvents
+  const askLoaded = askSeq !== undefined && (visibleEvents?.some(({ seq }) => seq === askSeq) ?? false)
   const hasOlder = history?.hasOlder ?? false
   const isFetchingOlder = history?.isFetchingOlder ?? false
   const olderError = history?.olderError
@@ -46,15 +49,14 @@ export function useRevealAskOrigin({ pendingAskId, askSeq, rows, history, jumpTo
       jumpToRow(origin.key, origin.index, focusMarker)
       return
     }
-    const older = loadOlder !== undefined && hasOlder && olderError === undefined &&
-      askSeq !== undefined && (oldestSeq === undefined || oldestSeq > askSeq)
+    const older = loadOlder !== undefined && hasOlder && olderError === undefined && askSeq !== undefined && !askLoaded
     if (!older) {
       setSeekingFor(undefined)
       return
     }
-    // One page at a time: the next pass runs when the page lands and the rows change.
+    // One page at a time: the next pass runs when the page lands (`visibleEvents` changes).
     if (!isFetchingOlder) void loadOlder().catch(() => {})
-  }, [seekingFor, pendingAskId, rows, oldestSeq, hasOlder, isFetchingOlder, olderError, loadOlder, askSeq, jumpToRow])
+  }, [seekingFor, pendingAskId, rows, visibleEvents, askLoaded, hasOlder, isFetchingOlder, olderError, loadOlder, askSeq, jumpToRow])
 
   return { reveal, seeking: seekingFor !== undefined && seekingFor === pendingAskId }
 }
