@@ -41,7 +41,6 @@ export function MoreSheet({
   items,
   activeTo,
   inboxCount = null,
-  skillsUpdateAvailable = false,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -53,7 +52,6 @@ export function MoreSheet({
   items: readonly NavItem[]
   activeTo: string | null
   inboxCount?: number | null
-  skillsUpdateAvailable?: boolean
 }) {
   const byPath = new Map(items.map((item) => [item.to, item]))
   const fixed: Row[] = FIXED_ROWS.flatMap(({ to, label }) => {
@@ -80,11 +78,6 @@ export function MoreSheet({
       >
         <Icon aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate">{label}</span>
-        {to === '/skills' && skillsUpdateAvailable ? (
-          <span data-slot="skills-update" className="shrink-0 rounded-full bg-muted px-[10px] py-[3px] text-[12.5px] font-medium text-foreground">
-            1 update
-          </span>
-        ) : null}
         {to === '/inbox' && inboxCount ? (
           <span data-slot="inbox-count" className="shrink-0 rounded-full bg-inbox-count px-[10px] py-[3px] text-[12.5px] font-semibold text-inbox-count-foreground">
             {inboxCount}

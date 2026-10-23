@@ -1,13 +1,14 @@
-import { readFile } from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { normalizeSidebarLimits, type UiState } from '@open-mercato/cezar-contract/workspace';
-import { readWorkspaceUiState } from './workspace/ui-state.ts';
 
 /**
  * `.ai/cezar/ui-state.json` — small GUI preferences the cockpit persists (files, not a DB).
  * The server owns the schema and the writes (`PUT /api/ui-state` in `src/server/server.ts`);
- * this is the shared read path, so the CLI can honour a preference the cockpit set (#391's
- * `dismissedSkillsBanner`) without a second notion of where the file lives.
+ * this is the shared read path, so the CLI can honour a preference the cockpit set (for example
+ * `disabledTeamSkills`) without a second notion of where the file lives.
  *
  * Same zero-config rule as `src/config.ts`: missing, unreadable or malformed all degrade to
  * `{}` — an absent preference, never a throw, never a blocked startup.
@@ -17,10 +18,8 @@ export function uiStatePath(repoRoot: string): string {
 }
 
 /**
- * Read `ui-state.json` on demand — never cached, never throws. A project with no
- * `importedSkills` array of its own takes the legacy workspace-level array, so a selection an
- * older cockpit saved there still applies; a project array, even `[]`, always wins
- * (hearsay-tools/cezarion#1408).
+ * Read `ui-state.json` on demand — never cached, never throws. Only the project's own file is
+ * read: no workspace-level key is merged in.
  *
  * Typed by the CONTRACT (`UiState`), not by a loose record: `GET /api/v1/ui-state` answers this
  * value verbatim, so a `Record<string, unknown>` here made the route name no key at all and the
@@ -35,30 +34,57 @@ export function uiStatePath(repoRoot: string): string {
  * by `uiStateBody`) is what actually enforces it.
  */
 export async function readUiState(repoRoot: string): Promise<UiState> {
-  return withLegacySkillSelection(await readProjectUiState(repoRoot));
+  return readProjectUiState(repoRoot);
+}
+
+/** The project's own file. Writes merge from this. */
+export async function readProjectUiState(repoRoot: string): Promise<UiState> {
+  try {
+    return parseUiState(await readFile(uiStatePath(repoRoot), 'utf8'));
+  } catch {
+    return {}; // Missing or unreadable: an empty preference bag.
+  }
 }
 
 /**
- * The project's own file, without the legacy workspace fallback. Writes merge from this, so a
- * save of another preference never copies an inherited selection into the project (#1408).
+ * `readProjectUiState` for a synchronous caller: a live message is expanded inside
+ * `sendMessage`, which answers synchronously, and must see the off-list as it is now (#1494).
  */
-export async function readProjectUiState(repoRoot: string): Promise<UiState> {
+export function readProjectUiStateSync(repoRoot: string): UiState {
+  try {
+    return parseUiState(readFileSync(uiStatePath(repoRoot), 'utf8'));
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Replace the project's file in one step: write a sibling temporary file, then rename it over
+ * the old one. A reader, the synchronous one included, sees the old file or the new one, never
+ * a partial write it would read as `{}` and so as an empty team-skill off-list (#1494).
+ */
+export async function writeProjectUiState(repoRoot: string, state: UiState): Promise<void> {
+  const file = uiStatePath(repoRoot);
+  const temporary = `${file}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
+    await rename(temporary, file);
+  } catch (err) {
+    await rm(temporary, { force: true }).catch(() => undefined);
+    throw err;
+  }
+}
+
+function parseUiState(text: string): UiState {
   let state: UiState = {};
   try {
-    const parsed: unknown = JSON.parse(await readFile(uiStatePath(repoRoot), 'utf8'));
+    const parsed: unknown = JSON.parse(text);
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       state = parsed as UiState;
       if ('sidebarLimits' in state) state = { ...state, sidebarLimits: normalizeSidebarLimits(state.sidebarLimits) };
     }
   } catch {
-    // Missing or unreadable: an empty preference bag.
+    // Malformed: an empty preference bag.
   }
   return state;
-}
-
-/** `state` with the legacy workspace selection filled in when the project has none of its own. */
-export async function withLegacySkillSelection(state: UiState): Promise<UiState> {
-  if (Array.isArray(state.importedSkills)) return state;
-  const legacy = await readWorkspaceUiState();
-  return Array.isArray(legacy.importedSkills) ? { ...state, importedSkills: legacy.importedSkills } : state;
 }

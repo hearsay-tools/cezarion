@@ -568,22 +568,11 @@ describe('AppShell', () => {
       expect(sidebar().querySelector('[data-slot="overflow-inbox-dot"]')).toBeNull()
     })
 
-    it('renders a quiet accessible Skills update marker in the desktop navigation only', () => {
-      renderShell('/', { skillsUpdateAvailable: true })
-      const markers = document.querySelectorAll('[data-slot="nav-update-marker"]')
-      expect(markers).toHaveLength(1)
-      for (const marker of markers) {
-        expect(marker.getAttribute('aria-label')).toBe('Skills update available')
-        expect(marker.innerHTML).not.toContain('animate-')
-      }
-      // The phone drawer carries no nav (#621): the marker's mobile home is the tab bar's More.
-      fireEvent.click(screen.getByRole('button', { name: /^Open projects/ }))
-      expect(document.querySelectorAll('[data-slot="nav-update-marker"]')).toHaveLength(1)
-    })
-
-    it('renders no Skills marker without an actionable update', () => {
+    it('renders no Skills update marker or badge (hearsay-tools/cezarion#1494)', () => {
       renderShell()
       expect(document.querySelector('[data-slot="nav-update-marker"]')).toBeNull()
+      expect(document.querySelector('[data-slot="skills-update"]')).toBeNull()
+      expect(document.querySelector('[aria-label="Skills update available"]')).toBeNull()
     })
 
     it('reserves the quick-list, tools and composer slots for later Steps', () => {
