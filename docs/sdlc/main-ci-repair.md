@@ -54,3 +54,11 @@ failures that start after the cancellation, evidence before routing, and retry
 recovery. The workflow test pins the trigger,
 permissions, trusted checkout and shared lock. Preview the local automation before
 enabling it; a preview does not launch tasks or advance its execution cursor.
+
+Merge-group failures do not enter this push-only repair path. They remain visible
+in the queue and leave the PR unmerged. Main push failures still enter it,
+including full verification after missing queue proof and snapshot failures.
+A failed metadata probe alone does not prevent successful full fallback or its
+snapshot. See [queue CI and recovery](ci.md#merge-queue-and-exact-commit-reuse).
+For fresh verification, use Re-run all jobs or bare workflow dispatch; partial
+retries can retain historical successful proof for the same immutable commit.

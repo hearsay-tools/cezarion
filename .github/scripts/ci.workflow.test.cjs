@@ -24,7 +24,7 @@ test('dispatched verification checks out the attributed SHA even after its branc
     const checkout = ci.jobs[name].steps.find((s) => s.uses?.startsWith('actions/checkout@'));
     const expression = checkout.with.ref.slice(3, -2).trim();
     const ref = runInNewContext(expression, { github: {
-      event: { pull_request: {} }, ref: 'refs/heads/release/v0.13.6', sha: 'a'.repeat(40),
+      event: { pull_request: {}, merge_group: {} }, ref: 'refs/heads/release/v0.13.6', sha: 'a'.repeat(40),
     }, inputs: {}, steps: { 'resolve-dispatch': { outputs: {} } } });
     assert.equal(ref, 'a'.repeat(40), `${name} must verify the commit receiving the check`);
     assert.equal(checkout.with['persist-credentials'], false);
@@ -36,7 +36,7 @@ function runShell(command, env = {}) {
   return spawnSync('bash', ['-e', '-c', command], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: { ...process.env, ...env },
+    env: { ...process.env, CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', EVENT_NAME: 'pull_request_target', ...env },
   });
 }
 
@@ -202,7 +202,8 @@ test('ledger-only PRs skip both matrices but cannot bypass the required build an
   for (const name of ['vitest', 'node-floor', 'cockpit-browser']) {
     // Actions permits hyphens in property names; JavaScript requires brackets.
     const condition = ci.jobs[name].if.replace(/needs\.([a-z]+-[a-z]+)/g, "needs['$1']");
-    assert.equal(runInNewContext(condition, { needs: {
+    assert.equal(runInNewContext(condition, { cancelled: () => false, needs: {
+      'queue-proof': { result: 'success', outputs: { verified: 'false' } },
       'change-surface': { outputs: { surface } }, 'classify-pr': { outputs: { bump_pr: 'false' } },
     } }), false, name);
   }
@@ -219,15 +220,15 @@ test('ledger-only PRs skip both matrices but cannot bypass the required build an
   }] });
   assert.equal(renamed.output, 'surface=full-matrix\n');
   assert.ok(ci.jobs['build-and-package'].steps.some(step => step.run === 'npm run test:unit'));
-  assert.equal(ci.jobs['build-and-package'].if, undefined);
+  assert.match(ci.jobs['build-and-package'].if, /!cancelled\(\)/);
 });
 
 test('classification is not a path filter and build-and-package stays unconditional', () => {
   const ci = workflow();
   assert.equal(ci.on.pull_request_target.paths, undefined);
   assert.equal(ci.on.push.paths, undefined);
-  assert.equal(ci.jobs['build-and-package'].if, undefined);
-  assert.equal(ci.jobs['build-and-package'].needs, undefined);
+  assert.match(ci.jobs['build-and-package'].if, /!cancelled\(\)/);
+  assert.equal(ci.jobs['build-and-package'].needs, 'queue-proof');
 });
 
 test('build-and-package lints workflows with pinned, hash-verified actionlint and shellcheck (hearsay-tools/cezarion#1130)', () => {
@@ -307,7 +308,7 @@ test('bot-authored release/v* PRs skip Vitest and cockpit E2E via classify-pr fi
   assert.deepEqual(classify.permissions, { contents: 'read', 'pull-requests': 'read' });
   assert.equal(classify.outputs.bump_pr, '${{ steps.classify.outputs.bump_pr }}');
   const checkout = classify.steps.find((step) => step.name === 'Check out trusted classifier');
-  assert.equal(checkout.with.ref, "${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha || github.sha }}");
+  assert.equal(checkout.with.ref, "${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha || github.event.merge_group.base_sha || github.sha }}");
   assert.equal(checkout.with['persist-credentials'], false);
   const classifyStep = classify.steps.find((step) => step.id === 'classify');
   assert.match(classifyStep.run, /release-bump-pr\.cjs/);
@@ -320,9 +321,9 @@ test('bot-authored release/v* PRs skip Vitest and cockpit E2E via classify-pr fi
   assert.equal(classifyStep.env.EVENT_NAME, '${{ github.event_name }}');
   assert.equal(classifyStep.env.PR_AUTHOR, '${{ github.event.pull_request.user.login }}');
   assert.equal(classifyStep.env.EXPECTED_HEAD_SHA, '${{ github.event.pull_request.head.sha || github.sha }}');
-  assert.deepEqual(ci.jobs.vitest.needs, ['change-surface', 'classify-pr']);
-  assert.deepEqual(ci.jobs['cockpit-browser'].needs, ['change-surface', 'classify-pr']);
-  assert.deepEqual(ci.jobs['node-floor'].needs, ['change-surface', 'classify-pr']);
+  assert.deepEqual(ci.jobs.vitest.needs, ['queue-proof', 'change-surface', 'classify-pr']);
+  assert.deepEqual(ci.jobs['cockpit-browser'].needs, ['queue-proof', 'change-surface', 'classify-pr']);
+  assert.deepEqual(ci.jobs['node-floor'].needs, ['queue-proof', 'change-surface', 'classify-pr']);
   assert.match(ci.jobs.vitest.if, /needs\.classify-pr\.outputs\.bump_pr != 'true'/);
   assert.match(ci.jobs['cockpit-browser'].if, /needs\.classify-pr\.outputs\.bump_pr != 'true'/);
   assert.ok(ci.jobs.verify.needs.includes('classify-pr'));
@@ -467,7 +468,7 @@ test('event routing keeps one PR verifier and preserves push/manual publication 
   ]) {
     const github = { event_name: event, ref, repository: 'o/n', event: { pull_request: { head: { repo: { full_name: fork ? 'fork/n' : 'o/n' } } } } };
     assert.equal(runInNewContext(ci.jobs['prepare-pr-snapshot'].if, { github }), prepare);
-    assert.equal(runInNewContext(ci.jobs['publish-snapshot'].if, { github }), publish);
+    assert.equal(runInNewContext(ci.jobs['publish-snapshot'].if, { github, cancelled: () => false, needs: { verify: { result: 'success' } } }), publish);
   }
   const group = (pr, sha) => ci.concurrency.group.replace(/\$\{\{(.*?)\}\}/g, (_, expression) => runInNewContext(expression, {
     github: { workflow: 'CI', sha, ref: 'refs/heads/main', event: { pull_request: { number: pr } } }, inputs: {},

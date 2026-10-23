@@ -137,7 +137,7 @@ test('main push CI routes only after evidence and repairs routing after retry',a
  assert.match(h.state.issues[0].body,/workflow run/);
 });
 test('CI accepts only same-repository main pushes',async()=>{
- for(const patch of [{event:'pull_request_target'},{event:'workflow_dispatch'},{event:undefined},{head_branch:'release/x'},{head_repository:{full_name:'foreign/repo'}}]) {
+ for(const patch of [{event:'merge_group'},{event:'pull_request_target'},{event:'workflow_dispatch'},{event:undefined},{head_branch:'release/x'},{head_repository:{full_name:'foreign/repo'}}]) {
   const h=harness();mainCi(h,patch);await reportFailure(h.options);assert.equal(h.calls.length,0);
  }
 });
