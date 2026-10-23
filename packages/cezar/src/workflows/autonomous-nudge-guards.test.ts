@@ -180,9 +180,9 @@ describe('autonomous nudge priority and lifecycle guards', () => {
 
   it('a pending autonomous retry is not replaced by the no-wait nudge', () => {
     pendingBoundary();
-    expect(manager['applyTurnEnd'](id, state, 'task', {
-      finalStep: true, monitoring: false, question: false, nudgedLastTurn: false,
-    })).toBe('defer');
+    // The turn end an acknowledgement settles late decides by the same rule (hearsay-tools/cezarion#1525).
+    expect(manager['settleTurn'](id, state, 'ack', manager['boundaryTurn'](id, state, session, false))).toBe(true);
+    expect(state.autonomousNudgePending).toBe(session);
     expect(session.sendAgentMessage).not.toHaveBeenCalled();
     expect(session.sendMessage).not.toHaveBeenCalled();
     expect(store.readEvents(id).some(e => e.type === 'note' && String(e.message).startsWith(NO_WAIT_NUDGE_NOTE))).toBe(false);
