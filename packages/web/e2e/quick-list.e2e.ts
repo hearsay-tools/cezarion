@@ -214,10 +214,32 @@ describe('task quick-list', () => {
   })
 
   it('groups attention before finished outcomes while retaining independent status rows', () => {
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"]')].map(h => h.dataset.bucket)`)).toEqual(['Needs you', 'Finished'])
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"] [data-slot="task-row"]')].map(row => row.dataset.runId)`)).toEqual(['fix-review-pr', 'fix-done', 'fix-failed'])
-    expect(browser.count('[data-slot="quick-list-bucket"] [data-slot="group-tile"]')).toBe(1)
-    expect(browser.text('[data-slot="quick-list-bucket"]')).toContain('Structured changes endpoint for the git view')
+    // Sample the complete grouping at the assertion, after any setup-time remount.
+    // Evidence: .ai/qa/failures/quick-list/groups-attention-before-finished-outcomes-while-retaining-independent-status-row-1/
+    // in CI run 39934997946, cockpit-failures-shard-4 artifact 12493998500:
+    // probe.json records []; snapshot.txt and screenshot.png show both buckets and all rows.
+    // Controlled proof: ignored scratch copies detach both buckets for exactly their first read,
+    // then restore them in a microtask. `npm exec -- vitest run --config
+    // .ai/qa/1509-proof/vitest.config.ts -t 'groups attention before finished outcomes'`:
+    // 1 of 1 failed before; 1 of 1 passed after, with the same detach/restore and no burners.
+    const expectedBuckets = ['Needs you', 'Finished']
+    const expectedRows = ['fix-review-pr', 'fix-done', 'fix-failed']
+    const title = 'Structured changes endpoint for the git view'
+    const sample = browser.waitForValue<{ buckets: string[]; rows: string[]; groups: number; text: string }>(`(() => {
+      const buckets = [...document.querySelectorAll('[data-slot="quick-list-bucket"]')]
+      return {
+        buckets: buckets.map(bucket => bucket.dataset.bucket),
+        rows: buckets.flatMap(bucket => [...bucket.querySelectorAll('${ROW}')].map(row => row.dataset.runId)),
+        groups: buckets.reduce((count, bucket) => count + bucket.querySelectorAll('${TILE}').length, 0),
+        text: buckets[0]?.textContent ?? '',
+      }
+    })()`, value => JSON.stringify(value.buckets) === JSON.stringify(expectedBuckets)
+      && JSON.stringify(value.rows) === JSON.stringify(expectedRows)
+      && value.groups === 1 && value.text.includes(title))
+    expect(sample.buckets).toEqual(expectedBuckets)
+    expect(sample.rows).toEqual(expectedRows)
+    expect(sample.groups).toBe(1)
+    expect(sample.text).toContain(title)
   })
 
   it('keeps selected and hovered sidebar task metadata AA-readable', () => {
@@ -274,13 +296,18 @@ describe('task quick-list', () => {
   })
 
   it('paints one dot per row, in the tone deriveAttention picked', () => {
-    const tones = browser.evaluate(`(() => {
-      const of = (id) => {
-        const dot = document.querySelector('[data-run-id="' + id + '"] [data-slot="status-dot"]')
-        return dot && { tone: dot.dataset.tone, pulses: getComputedStyle(dot).animationName !== 'none' }
+    // This test can run alone: the setup bucket does not settle these three dots.
+    const sample = browser.waitForValue<{ tones: Record<string, { tone: string; pulses: boolean }>; width: string }>(`(() => {
+      const dots = ['fix-review-pr', 'fix-done', 'fix-failed'].map(id =>
+        document.querySelector('${ROW}[data-run-id="' + id + '"] [data-slot="status-dot"]'))
+      if (dots.some(dot => !dot)) return null
+      const of = dot => ({ tone: dot.dataset.tone, pulses: getComputedStyle(dot).animationName !== 'none' })
+      return {
+        tones: { review: of(dots[0]), done: of(dots[1]), failed: of(dots[2]) },
+        width: getComputedStyle(dots[1]).width,
       }
-      return { review: of('fix-review-pr'), done: of('fix-done'), failed: of('fix-failed') }
-    })()`) as Record<string, { tone: string; pulses: boolean }>
+    })()`)
+    const { tones } = sample
 
     // Review is info blue since the #617 status key (it used to be brand teal, which read as done).
     expect(tones.review).toEqual({ tone: 'info', pulses: true })
@@ -289,36 +316,45 @@ describe('task quick-list', () => {
     expect(tones.failed).toEqual({ tone: 'danger', pulses: false })
 
     // The design system's size rule, resolved by the real CSS rather than asserted from a class.
-    expect(
-      browser.evaluate(
-        `getComputedStyle(document.querySelector('[data-run-id="fix-done"] [data-slot="status-dot"]')).width`
-      )
-    ).toBe('7px')
+    expect(sample.width).toBe('7px')
   })
 
   it('links a row to its task, and the PR chip to the PR', () => {
-    expect(browser.evaluate(`document.querySelector('[data-run-id="fix-done"] a').getAttribute('href')`)).toBe(
-      scoped('/tasks/fix-done')
-    )
+    // Read both rows together; an absent chip on a missing row proves nothing.
+    const sample = browser.waitForValue<{
+      href: string; chip: { noHover: boolean; tag: string; inert: string | null; text: string }; doneChips: number
+    }>(`(() => {
+      const done = document.querySelector('${ROW}[data-run-id="fix-done"]')
+      const link = done?.querySelector('a')
+      const el = document.querySelector('${ROW}[data-run-id="fix-review-pr"] [data-slot="pr-chip"]')
+      if (!link || !el) return null
+      return {
+        href: link.getAttribute('href'),
+        chip: { noHover: matchMedia('(hover: none)').matches, tag: el.tagName, inert: el.dataset.inert ?? null, text: el.textContent },
+        doneChips: done.querySelectorAll('[data-slot="pr-chip"]').length,
+      }
+    })()`)
+    expect(sample.href).toBe(scoped('/tasks/fix-done'))
 
     // This spec's headless Chrome reports `hover: none`, which is the touch path (#617 01b): the
     // sidebar reference is plain text there, and the whole row is the tap target. The pointer
     // path (a real link with the status panel) is pinned in selection-states, which forces a
     // hover-capable pointer, and in the unit suite.
-    const chip = browser.evaluate(`(() => {
-      const el = document.querySelector('[data-run-id="fix-review-pr"] [data-slot="pr-chip"]')
-      return { noHover: matchMedia('(hover: none)').matches, tag: el.tagName, inert: el.dataset.inert ?? null, text: el.textContent }
-    })()`) as { noHover: boolean; tag: string; inert: string | null; text: string }
-    expect(chip).toEqual({ noHover: true, tag: 'SPAN', inert: 'true', text: '#396' })
+    expect(sample.chip).toEqual({ noHover: true, tag: 'SPAN', inert: 'true', text: '#396' })
 
     // Only the run that has one.
-    expect(browser.count('[data-run-id="fix-done"] [data-slot="pr-chip"]')).toBe(0)
+    expect(sample.doneChips).toBe(0)
   })
 
   it('expands the variant group into per-variant rows, and collapses it again', () => {
     // Scoped to the quick-list's rows: the Tasks table (Step 3.4) legitimately lists each
     // variant as its own row, so a bare data-run-id would match the table too.
-    expect(browser.count(`${ROW}[data-run-id="fix-var-a"]`)).toBe(0)
+    const collapsedMembers = browser.waitForValue<number>(`(() => {
+      const group = document.querySelector('${TILE}')
+      return group?.getAttribute('aria-expanded') === 'false'
+        ? document.querySelectorAll('${ROW}[data-run-id="fix-var-a"]').length : null
+    })()`)
+    expect(collapsedMembers).toBe(0)
 
     browser.click(TILE)
     browser.waitForFunction(`document.querySelector('${ROW}[data-run-id="fix-var-a"]') !== null`)
