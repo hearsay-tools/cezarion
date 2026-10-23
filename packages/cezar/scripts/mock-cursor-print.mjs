@@ -167,7 +167,8 @@ if (prompt.includes('mock:silent-tail') || prompt.includes('mock:tool-tail') ||
     if (origin === 'silent-tail-late-reply') await new Promise(resolve => setTimeout(resolve, silent.LATE_REPLY_MS));
     if (origin === 'silent-tail-slow-done') {
       assistant(silent.SLOW_DONE_PREFIX);
-      await new Promise(resolve => setTimeout(resolve, silent.SLOW_DONE_TAIL_MS));
+      // F10 can hold DONE while its test advances the reply clock; the default stays 400 ms.
+      await waitForRelease(silent.SLOW_DONE_TAIL_MS);
     }
     if (origin === 'silent-tail-again') { result(''); process.exit(0); }
     finish(origin === 'tool-tail' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE);
