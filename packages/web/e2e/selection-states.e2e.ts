@@ -143,19 +143,8 @@ function checkNavSelection(variant: ContrastQaVariant, { base, projectId, nav: n
     samples.push({ variant: variantId, target, state, ...sample })
     expect(sample.ratio, `${state}: ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(min)
   }
-  // Dry-run reports a tracked skills installation as absent, so no update marker can exist
-  // there (skills-update.e2e.ts). The route the nav reads is stubbed instead, with a body the
-  // contract accepts; nothing in the rendered DOM is written.
-  const skillsRoute = '**/api/v1/workspace/skills-update?*'
-  browser.routeJson(skillsRoute, { status: 'available', available: true, autoUpdateEnabled: false, inherited: true,
-    checkedAt: new Date().toISOString(), updatedAt: null, needsUpgradeNotes: false,
-    scopes: [{ scope: 'project', status: 'available', available: true, skills: ['om-review'], checkedAt: new Date().toISOString(), updatedAt: null }] })
-  try {
-    checkNavBody(variant, { base, projectId, container, navSelector, fill, amber, open, record })
-    checkNeedsYouDot(variant, { base, projectId, container, open, record })
-  } finally {
-    browser.unroute(skillsRoute)
-  }
+  checkNavBody(variant, { base, projectId, container, navSelector, fill, amber, open, record })
+  checkNeedsYouDot(variant, { base, projectId, container, open, record })
 }
 
 type Open = (path: string, ready: string) => void
@@ -192,25 +181,11 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
   record(tasksNav, 'selected nav label', 4.5)
   record(`${tasksNav} svg`, 'selected nav icon', 3)
 
-  // The skills update marker, rendered by the real nav from the stubbed skills-update route: a
-  // 7px --info dot, 3:1 against the row it sits on — at rest here, then hovered and selected.
+  // The Skills nav item carries no update marker (hearsay-tools/cezarion#1494).
   const skills = `${nav} a[href$="/skills"]`
-  const dot = `${skills} [data-slot="nav-update-marker"]`
-  type Marker = { width: number; height: number; bg: string; info: string; row: string }
-  const marker = `(() => {
-    const el = document.querySelector(${JSON.stringify(dot)}); if (!el || el.getBoundingClientRect().width === 0) return null
-    ${resolveFn}
-    const r = el.getBoundingClientRect()
-    return { width: r.width, height: r.height, bg: getComputedStyle(el).backgroundColor, info: resolve('var(--info)'),
-      row: getComputedStyle(document.querySelector(${JSON.stringify(skills)})).backgroundColor }
-  })()`
-  const atRest = waitForSettledSample(browser, marker) as Marker
-  expect({ width: atRest.width, height: atRest.height, bg: atRest.bg, row: atRest.row })
-    .toEqual({ width: 7, height: 7, bg: atRest.info, row: 'rgba(0, 0, 0, 0)' })
-  record(dot, 'update marker at rest', 3, 'background-color', 'parent')
+  expect(browser.count(`${skills} [data-slot="nav-update-marker"]`)).toBe(0)
 
-  // Hover, any nav item: the neutral row hover, with foreground label and icon (and the marker
-  // still readable on that fill).
+  // Hover, any nav item: the neutral row hover, with foreground label and icon.
   hoverVisiblePoint(browser, skills)
   type Ink = { bg: string; label: string; icon: string; ink: string; weight: string; width: number; height: number }
   const ink = (selector: string) => `(() => {
@@ -225,15 +200,12 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
   expect({ label: hovered.label, icon: hovered.icon }).toEqual({ label: hovered.ink, icon: hovered.ink })
   record(skills, 'hover nav label', 4.5)
   record(`${skills} svg`, 'hover nav icon', 3)
-  record(dot, 'update marker on hover', 3, 'background-color', 'parent')
   browser.screenshot(`${artifacts}/states-nav-${variant.id}.png`, { viewport: true })
 
-  // Selected: the Skills page lights its own row, marker and all.
-  open('/skills', '[data-slot="nav-update-marker"]')
-  const onSelected = waitForSettledSample(browser, marker) as Marker
-  expect(onSelected.row).toBe(fill.selected)
-  expect({ width: onSelected.width, height: onSelected.height, bg: onSelected.bg }).toEqual({ width: 7, height: 7, bg: onSelected.info })
-  record(dot, 'update marker on the selected row', 3, 'background-color', 'parent')
+  // Selected: the Skills page lights its own row.
+  open('/skills', `${navSelector} a[href$="/skills"][aria-current="page"]`)
+  const onSelected = browser.waitForValue(normalizeColorExpression(ink(skills)), (v: Ink | null) => v?.bg === fill.selected) as Ink
+  expect(onSelected.bg).toBe(fill.selected)
 
   // New task on /new: the same fill as the selected nav item and the selected task row.
   const newTask = `${container}[data-sidebar-item="new-task"]`

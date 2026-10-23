@@ -18,9 +18,6 @@
 [data-slot="skill-body"] h1 { font-size: 18px; font-weight: 600; }
 [data-slot="skill-body"] h2 { font-size: 18px; font-weight: 600; }
 [data-slot="skill-body"] h3 { font-size: 14px; font-weight: 600; }
-[data-slot="skills-update-card"] { background: var(--card); border-radius: 10px; }
-[data-slot="skills-update-card"] > div:first-child { gap: 16px; }
-[data-slot="skills-update-card"] > div > div > p:first-child { font-size: 14px; font-weight: 400; }
 [data-slot="wb-metadata"] { gap: 14px; }
 [data-slot="wb-load"] { margin-block-end: -6px; }
 [data-slot="wb-load"] label { font-size: 11px; }
@@ -81,7 +78,7 @@
 }
 [data-slot="skills-section"] > header a { font-size: 13px; font-weight: 600; }
 .sw-detail-source, [data-slot="wb-step-grip"] span { background: var(--task-brand-selected); }
-[data-route="workflows"] button, [data-slot="skills-update-card"] button { font-size: 12px; font-weight: 500; border-radius: 8px; }
+[data-route="workflows"] button { font-size: 12px; font-weight: 500; border-radius: 8px; }
 :is([data-slot="wb-import-panel"], [data-slot="wb-add-dialog"], .sw-workflow-confirm) button { font-size: 12px; font-weight: 400; border-radius: 8px; }
 .sw-workflow-confirm [data-slot="alert-dialog-title"] { line-height: 1.6; }
 .sw-workflow-confirm [data-slot="alert-dialog-description"] { font-size: 13px; line-height: 1.6; }
@@ -97,8 +94,6 @@
 
 /* Pen strokes overlay the frame; CSS borders consume one pixel of its padding. */
 [data-slot="skills-detail"] > div { padding: 19px; }
-[data-slot="skills-update-card"] { padding: 15px; }
-[data-slot="skills-update-card"] > div > div > p:nth-child(2) { font-size: 11px; }
 
 /* Match the approved frame's overlay strokes without shrinking its text columns. */
 [data-slot="skills-list"] { padding: 11px; }
@@ -187,7 +182,4 @@
   [data-slot="skill-row"][aria-current="page"] { box-shadow: inset 0 -1px var(--border); }
 }
 [data-slot="wb-yaml-toggle"] svg { margin-inline-end: 0; }
-[data-slot="skills-update-card"] > div > div > p:first-child { line-height: 22px; }
-[data-slot="skills-update-card"] > div > div > p:nth-child(2) { line-height: 18px; }
-[data-slot="skills-update-card"] button { gap: 8px; padding-inline: 11px; }
 [data-slot="wb-description"] { field-sizing: content; padding: 13px; font-size: 13px; line-height: 21px; color: var(--muted-foreground); }

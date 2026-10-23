@@ -130,7 +130,6 @@ const GLOBAL_SECTIONS = [
   'notifications',
   'resources',
   'tasks',
-  'skills',
   // Agent accounts (spec 2026-07-29-agent-profiles) sit beside Projects: both describe the
   // machine and the person at it, not any one repo.
   'accounts',
@@ -161,7 +160,7 @@ describe('the section registry', () => {
     // Accounts survives: a single-project cockpit still runs on ONE of possibly several logins,
     // so "which account" is orthogonal to "how many projects".
     expect(visibleSettingsSections('global', { singleProject: true }).map((s) => s.id)).toEqual([
-      'appearance', 'notifications', 'resources', 'tasks', 'skills', 'accounts',
+      'appearance', 'notifications', 'resources', 'tasks', 'accounts',
     ])
     expect(visibleSettingsSections('global', { singleProject: false }).map((s) => s.id)).toEqual(GLOBAL_SECTIONS)
     expect(visibleSettingsSections('global').map((s) => s.id)).toEqual(GLOBAL_SECTIONS)
@@ -230,9 +229,8 @@ describe('the settings shell', () => {
     expect(nav.querySelector('[data-section="resources"]')?.getAttribute('href')).toBe(
       '/settings/global/resources',
     )
-    expect(nav.querySelector('[data-section="skills"]')?.getAttribute('href')).toBe(
-      '/settings/global/skills',
-    )
+    // Settings has no Skills section (hearsay-tools/cezarion#1494).
+    expect(nav.querySelector('[data-section="skills"]')).toBeNull()
   })
 
   it('/settings is the project registry as an index — one card per visible section', () => {

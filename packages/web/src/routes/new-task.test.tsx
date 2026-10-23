@@ -165,8 +165,6 @@ const WORKSPACE_CONFIG: WorkspaceConfigResponse = {
   agentDefaults: {},
   browseRoot: '~/',
   projectsDir: '~/cezar/projects',
-  skillsAutoUpdate: null,
-  effectiveSkillsAutoUpdate: true,
   archiveOnMerge: null,
   effectiveArchiveOnMerge: false,
   archiveOnMergeSource: 'default',

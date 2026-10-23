@@ -28,8 +28,6 @@ function serve(resources: Partial<WorkspaceConfigResponse['resources']> = {}) {
     agentDefaults: {},
     browseRoot: '~/',
     projectsDir: '~/cezar/projects',
-    skillsAutoUpdate: null,
-    effectiveSkillsAutoUpdate: true,
     archiveOnMerge: null,
     effectiveArchiveOnMerge: false,
     archiveOnMergeSource: 'default',

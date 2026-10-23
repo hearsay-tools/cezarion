@@ -4,7 +4,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
-import { SkillsUpdateCoordinator } from '../skills-update.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { clearProjectProbeCache, listProjects, registerProject } from '../workspace/projects.ts';
 import { ProjectContexts } from './project-context.ts';
@@ -31,7 +30,6 @@ describe('startServer cockpit address', () => {
     delete process.env.CEZ_PROJECT_WARMUP;
     delete process.env.CEZ_SINGLE_PROJECT;
     clearProjectProbeCache();
-    vi.spyOn(SkillsUpdateCoordinator.prototype, 'start').mockImplementation(() => undefined);
   });
 
   afterEach(() => {

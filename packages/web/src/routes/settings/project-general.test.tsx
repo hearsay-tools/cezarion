@@ -115,8 +115,6 @@ function seededClient({
   client.setQueryData(workspaceQueryKeys.config, {
     browseRoot: '~/',
     projectsDir: '~/cezar/projects',
-    skillsAutoUpdate: null,
-    effectiveSkillsAutoUpdate: true,
     composerDefaults: {
       autonomous: null,
       worktree: null,

@@ -59,8 +59,6 @@ export type AppShellProps = {
   /** Repo + branch for the brand chip. Null until Step 3.1/3.2 wires `/api/health` — the chip
    *  is simply absent rather than showing an invented repo name. */
   repo?: RepoChip | null
-  /** A quiet, accessible marker on Skills when a checked update remains actionable. */
-  skillsUpdateAvailable?: boolean
   /** Running cezar version beside the wordmark. Null while health is unknown. */
   version?: string | null
   /** The npm registry's newer version, when the server's update check found one (#368). */
@@ -154,7 +152,6 @@ export function AppShell({
   children,
   breadcrumb,
   repo = null,
-  skillsUpdateAvailable = false,
   version = null,
   latestVersion = null,
   applicationUpdate,
@@ -272,7 +269,6 @@ export function AppShell({
     activeTo,
     items: visibleNavItems({ forge: forgeAvailable, automations: automationsAvailable }),
     repo,
-    skillsUpdateAvailable,
     version,
     latestVersion,
     applicationUpdate,
@@ -359,7 +355,6 @@ export function AppShell({
                   activeTo={activeTo}
                   signal={tabBarSignal}
                   projectName={mobileProjects?.projects.find((project) => project.id === currentProjectId)?.name ?? repo?.name ?? null}
-                  skillsUpdateAvailable={skillsUpdateAvailable}
                   showNewTask={areaPathname !== '/new'}
                 />
               </div>
@@ -375,7 +370,6 @@ type NavProps = {
   activeTo: string | null
   items: NavItem[]
   repo: RepoChip | null
-  skillsUpdateAvailable: boolean
   version: string | null
   latestVersion: string | null
   applicationUpdate?: ApplicationUpdateState
@@ -612,7 +606,6 @@ function SidebarContent({
   activeTo,
   items,
   repo,
-  skillsUpdateAvailable,
   version,
   latestVersion,
   applicationUpdate,
@@ -676,7 +669,7 @@ function SidebarContent({
       </div>
 
       {sessionScope ? <div className="shrink-0 px-3 pt-2">{sessionScope}</div> : null}
-      <SidebarViewTabs items={items} activeTo={activeTo} needsYou={needsYou} skillsUpdateAvailable={skillsUpdateAvailable} onNavigate={onNavigate} />
+      <SidebarViewTabs items={items} activeTo={activeTo} needsYou={needsYou} onNavigate={onNavigate} />
       <div data-slot="project-task-navigation" className={'min-h-0 flex-1 overflow-y-auto overscroll-contain p-3'}>
         <SidebarNavigateContext.Provider value={onNavigate}>
           {sidebarList ?? <div data-slot="task-quick-list">{taskQuickList}</div>}

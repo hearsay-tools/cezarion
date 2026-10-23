@@ -367,7 +367,6 @@ describe('the global settings area (/settings/global)', () => {
     ['/settings/global/appearance', 'settings-global-appearance', 'Appearance'],
     ['/settings/global/notifications', 'settings-global-notifications', 'Notifications'],
     ['/settings/global/resources', 'settings-global-resources', 'Resources'],
-    ['/settings/global/skills', 'settings-global-skills', 'Skills'],
     ['/settings/global/projects', 'settings-global-projects', 'Projects'],
   ]
   for (const [url, route, title] of GLOBAL_CASES) {
@@ -380,6 +379,12 @@ describe('the global settings area (/settings/global)', () => {
       expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
     })
   }
+
+  it('/settings/global/skills (removed, hearsay-tools/cezarion#1494) lands on the Skills page', () => {
+    renderAt('/settings/global/skills')
+    expect(currentPathname()).toBe(`/p/${BOOT}/skills`)
+    expect(routeName()).toBe('skills')
+  })
 
   it('/settings/global has no index page: it lands on Appearance', () => {
     renderAt('/settings/global')

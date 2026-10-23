@@ -128,7 +128,6 @@ import type {
   WorkflowsResponse,
   WorkspaceConfigResponse,
   WorkspaceUiState,
-  SkillsUpdateState,
   WorkerDestroyResult,
   VoiceDecideRequest,
   VoiceDecision,
@@ -695,8 +694,8 @@ export async function refreshSkills(): Promise<Skill[]> {
   )
 }
 
-/** The default (vendor) repo's full skill list — every skill the "Import skills" panel can
- *  offer, regardless of import state. Empty once a repo configures its own `skillsRepos`. */
+/** Every team skill the configured `skillsRepos` offer, including those this project switched
+ *  off. Empty without `skillsRepos`. */
 export async function getImportableSkills(opts?: ReadOptions): Promise<ImportableSkill[]> {
   return unwrap(
     await cez.api.v1.p[':projectId'].skills.importable.$get(
@@ -2212,34 +2211,6 @@ export async function removeAgentProfile(id: string): Promise<RemoveAgentProfile
       param: { id: encodeURIComponent(id) },
     }),
     `/workspace/agent-profiles/${encodeURIComponent(id)}`,
-  )
-}
-
-/** Cached Open Mercato update state for one registered project. The GET is immediate; the
- * server may start a stale detection-only refresh after taking its snapshot. */
-export async function getSkillsUpdate(
-  projectId: string,
-  opts?: ReadOptions,
-): Promise<SkillsUpdateState> {
-  return unwrap(
-    await cez.api.v1.workspace['skills-update'].$get({ query: { projectId } }, init(opts)),
-    `/workspace/skills-update?projectId=${encodeURIComponent(projectId)}`,
-  )
-}
-
-/** Force a bounded detection pass. The browser supplies identity only, never executable input. */
-export async function checkSkillsUpdate(projectId: string): Promise<SkillsUpdateState> {
-  return unwrap(
-    await cez.api.v1.workspace['skills-update'].check.$post({ json: { projectId } }),
-    '/workspace/skills-update/check',
-  )
-}
-
-/** Apply the server-owned, lock-authorized update set. Identity is the only browser input. */
-export async function applySkillsUpdate(projectId: string): Promise<SkillsUpdateState> {
-  return unwrap(
-    await cez.api.v1.workspace['skills-update'].apply.$post({ json: { projectId } }),
-    '/workspace/skills-update/apply',
   )
 }
 

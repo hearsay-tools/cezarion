@@ -762,7 +762,8 @@ function initialTeamSkillsLoad(repoRoot: string): Promise<Skill[]> {
 }
 
 /**
- * The current team-skill list for this project, straight from memory. The
+ * The current team-skill list for this project, straight from memory: one entry per source and
+ * name, in source order, so one name can appear once per source (see `mergeSourceLists`). The
  * first call per `repoRoot` kicks off an async background load (clone + list)
  * and returns immediately — the GUI refetches, so remote skills appear moments
  * later instead of blocking the first `GET /api/skills`.
@@ -837,13 +838,19 @@ function fetchBareSource(repo: string): Promise<void> {
   return work;
 }
 
-/** First source wins a name, in configured source order. */
+/**
+ * Every source's copy of a name, in configured source order (#1494). Only an exact source and
+ * name repeat (one `repo` listed at two refs) collapses, to the first. Name precedence is
+ * `discoverSkills`'s, which applies the project's off-list first: switching one source's copy
+ * off must leave the next source's copy to win.
+ */
 function mergeSourceLists(lists: Array<Skill[] | undefined>): Skill[] {
   const out: Skill[] = [];
   const seen = new Set<string>();
   for (const skill of lists.flatMap((list) => list ?? [])) {
-    if (seen.has(skill.name)) continue;
-    seen.add(skill.name);
+    const key = JSON.stringify([skill.team?.repo, skill.name]);
+    if (seen.has(key)) continue;
+    seen.add(key);
     out.push(skill);
   }
   return out;

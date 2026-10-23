@@ -38,7 +38,6 @@ import {
   unavailableProviderMessage,
 } from './server/provider-action-gate.ts';
 import { checkForUpdate } from './update-check.ts';
-import { printSkillsBanner } from './skills-banner.ts';
 import { loadWorkspaceConfig } from './workspace/config.ts';
 import { runMigrations } from './workspace/migrations.ts';
 import { registerProject, shouldRegisterProject } from './workspace/projects.ts';
@@ -95,8 +94,8 @@ Options:
   -h, --help                  show this help
 
 Zero config: uses your logged-in \`claude\` CLI (and \`gh\` for GitHub bits).
-Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repo
-(default open-mercato/skills; override via .ai/cezar/config.json);
+Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repos
+(team skills come from "skillsRepos" in .ai/cezar/config.json; none by default);
 workflows in .ai/cezar/workflows/.`;
 
 async function main(): Promise<void> {
@@ -413,8 +412,6 @@ async function serveCommand(
     console.log(`  ${mark} ${check.name.padEnd(6)} ${detail}`);
   }
   console.log(`\n  cockpit → ${url}\n`);
-  // Silenced by CEZ_NO_BANNER=1 or by dismissing the cockpit's banner (#391).
-  await printSkillsBanner(repoRoot);
 
   const shutdown = (signal: NodeJS.Signals) => {
     // Dev servers run in their own process groups: stop them before this process exits.

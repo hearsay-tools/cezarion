@@ -1,8 +1,8 @@
 import { useRef, type ReactNode } from 'react'
 import { useLocation } from 'react-router'
 
-import { useHealth, useProjectRuns, useProjects, useSkillsUpdate } from '@/api/queries'
-import type { HealthResponse, SkillsUpdateState } from '@open-mercato/cezar-api-client'
+import { useHealth, useProjectRuns, useProjects } from '@/api/queries'
+import type { HealthResponse } from '@open-mercato/cezar-api-client'
 import { AppShell, type RepoChip } from '@/components/app-shell'
 import { useApplicationUpdate } from '@/components/use-application-update'
 import { CommandPalette } from '@/components/command-palette'
@@ -41,12 +41,6 @@ export function repoChipOf(health: HealthResponse | undefined): RepoChip | null 
   return { name, branch: repo.branch }
 }
 
-/** Only a checked, still-actionable result earns chrome. An update failure may retain a proven
- * available scope, so keep that signal; all unknown/transient/degraded states stay quiet. */
-export function skillsUpdateMarkerOf(state: SkillsUpdateState | undefined): boolean {
-  return state?.available === true && (state.status === 'available' || state.status === 'error')
-}
-
 /**
  * The app shell, wired to live data.
  *
@@ -67,10 +61,6 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
   // GitHub automations are opt-in too (#801) — same honesty rule: without the server's word for
   // it the nav must not offer a tab whose every request would 409.
   const automationsAvailable = shellHealth?.capabilities.automations === true
-  // One query in the shell feeds every rendering of the active project's navigation (desktop,
-  // mobile drawer, and grouped sidebar). Routes reuse this TanStack Query cache entry.
-  const skillsUpdate = useSkillsUpdate(projectId ?? '', projectId !== null)
-  const skillsUpdateAvailable = skillsUpdateMarkerOf(skillsUpdate.data)
   // Unread done items (#unread-done-items) for the Tasks badge. Reads the same active-scope run
   // list the sidebar quick-list and Tasks table already hold — one cache entry, no extra fetch.
   const projectsQuery = useProjects()
@@ -141,7 +131,6 @@ export function AppShellContainer({ children }: { children: ReactNode }) {
         applicationUpdateError={applicationUpdate.error}
         applicationUpdateBusy={applicationUpdate.busy}
         applicationUpdateOffline={applicationUpdate.offline || health.isError}
-        skillsUpdateAvailable={skillsUpdateAvailable}
         // Hidden until health confirms the forge driver (R6 Step 1.1) — same honesty rule as
         // the chips: the nav must not claim a GitHub tab it cannot back. The Tools menu's
         // forge note says why it is absent.

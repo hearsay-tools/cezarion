@@ -63,7 +63,7 @@ const NEVER = [
     'packages/cezar/src/workspace/{agent-accounts,agent-profiles}.ts',
     'packages/cezar/src/delegation/{credentials,execution-identity,policy}.ts', 'packages/cezar/src/workflows/types.ts',
     'packages/cezar/src/server-install/**', 'packages/cezar/src/application-update/**',
-    'packages/cezar/src/{skills-update,skills-remote,install-as-command}.ts',
+    'packages/cezar/src/{skills-remote,install-as-command}.ts',
     'packages/web/src/lib/bookmarklet.ts', 'packages/web/src/api/agent-accounts.ts',
     'packages/web/src/routes/task-thread/{link-safety-dialog,task-link}.tsx',
   ] },

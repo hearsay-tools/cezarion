@@ -41,7 +41,7 @@ let cez: ChildProcess | undefined;
 const agents: number[] = [];
 
 const env = () => {
-  const vars: NodeJS.ProcessEnv = { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: join(root, 'home'), CEZ_NO_BANNER: '1',
+  const vars: NodeJS.ProcessEnv = { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: join(root, 'home'),
     CEZ_CLAUDE_BIN: join(root, 'stalling-agent.mjs') };
   delete vars.CEZ_AUTOMATIONS;
   return vars;

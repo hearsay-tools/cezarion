@@ -47,7 +47,7 @@ beforeAll(async () => {
     { ...record, id: 'long', title: 'Long collection', issueNumber: undefined, pullRequests: Array.from({ length: 25 }, (_, n) => ({ number: 300 + n, url: `https://github.com/mock/repo/pull/${300 + n}`, source: 'created' })) },
     { ...record, id: 'legacy', title: 'Legacy task', pullRequests: undefined, prNumber: 128, issueNumber: undefined }]))
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
-    env: fixtureServeEnv(root, { CEZ_SKILLS_AUTO_UPDATE: '0' }), stdio: 'ignore',
+    env: fixtureServeEnv(root), stdio: 'ignore',
   })
   base = await waitForFixtureServer(server)
   project = await bootProjectId(base)

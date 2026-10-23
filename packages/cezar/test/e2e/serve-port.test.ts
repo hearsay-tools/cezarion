@@ -67,7 +67,7 @@ async function fixture() {
   const start = (directory: string, args: string[] = []) => {
     const child = spawn(process.execPath, [...cliArgs, ...args, '--no-open'], {
       cwd: directory,
-      env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_NO_BANNER: '1', CEZ_SKILLS_AUTO_UPDATE: '0', CEZ_AUTONAME: '0', CEZ_REMOTE: '0' },
+      env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_AUTONAME: '0', CEZ_REMOTE: '0' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     children.push(child);
