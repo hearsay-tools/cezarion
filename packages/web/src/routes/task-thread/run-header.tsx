@@ -58,6 +58,7 @@ import { HandoffAction, useHandoffActionVisible } from './handoff-action'
 import { Markdown } from './markdown'
 import { TaskFileScope } from './task-file-scope'
 import { archiveInComposer, resumeHint, runActionFlags } from './run-actions'
+import { CompactParentTaskLink, ParentTaskLink } from './parent-task-link'
 
 /**
  * The run header (spec §"Task thread" → Header): editable title + status pill, the meta line,
@@ -239,12 +240,14 @@ export function RunHeader({
     >
       {run.archived && run.autoArchive?.reason === 'pull-requests-merged' && run.autoArchive.archivedAt === run.archivedAt ? <p data-slot="auto-archive-reason" className="text-[13px] text-muted-foreground">Archived automatically after all associated PRs merged.</p> : null}
       <div className="w-full">
+        {run.delegation?.role === 'worker' ? <ParentTaskLink id={run.delegation.parentRunId} /> : null}
         {/* Pushed phone screen (#621): the shell's top bar carries back, the title and the run
             actions. hearsay-tools/cezarion#1333 took the state line out of it: the run's status
             lives in Session activity, the one card both viewports read. */}
         {barSlot ? (
           <MobileRunBarPortal slot={barSlot}>
             <MobileRunTitle run={run} />
+            {run.delegation?.role === 'worker' ? <CompactParentTaskLink id={run.delegation.parentRunId} /> : null}
             {actionsKebab}
           </MobileRunBarPortal>
         ) : (
