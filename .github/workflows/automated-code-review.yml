@@ -374,9 +374,10 @@ jobs:
     needs: [validate-provider, review-round]
     if: needs.validate-provider.outputs.provider == 'codex' && needs.review-round.outputs.can_review == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     outputs:
       artifact_id: ${{ steps.upload.outputs.artifact-id }}
+      output_present: ${{ steps.require-review.outputs.output_present }}
     permissions:
       actions: read
       contents: read
@@ -425,6 +426,30 @@ jobs:
             --out pull-request/.review-context/ci-results.md \
             --require-success
 
+      # Policy code belongs to this trusted workflow revision. In a manual
+      # branch dispatch it must not silently use the old policy from PR base.
+      - name: Checkout trusted review policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .review-policy
+          sparse-checkout: .github/scripts/codex-review-budget.cjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Select Codex review budget
+        id: review-budget
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          PR_NUMBER: ${{ needs.review-round.outputs.pr_number }}
+        with:
+          script: |
+            const { selectBudget } = require('./.review-policy/.github/scripts/codex-review-budget.cjs');
+            const minutes = await selectBudget({ github, ...context.repo,
+              pullNumber: Number(process.env.PR_NUMBER), warn: core.warning });
+            core.info(`Codex review budget: ${minutes} minutes (30-minute job limit).`);
+            core.setOutput('minutes', minutes);
+
       - name: Run Codex review
         id: codex-review
         # The action can write a complete review and then never return,
@@ -435,7 +460,7 @@ jobs:
         # publishes the review Codex already wrote. Cancelling the job
         # would skip that step too, so the guard has to sit on the step.
         continue-on-error: true
-        timeout-minutes: 12
+        timeout-minutes: ${{ fromJSON(steps.review-budget.outputs.minutes) }}
         uses: openai/codex-action@52fe01ec70a42f454c9d2ebd47598f9fd6893d56  # v1.11
         with:
           openai-api-key: ${{ secrets.OPENAI_API_KEY }}
@@ -450,6 +475,7 @@ jobs:
           output-schema-file: trusted-review/.github/schemas/review-findings.schema.json
 
       - name: Require a complete Codex review
+        id: require-review
         env:
           REVIEW_OUTCOME: ${{ steps.codex-review.outcome }}
           FINDINGS: pull-request/review-findings.json
@@ -462,6 +488,7 @@ jobs:
             echo "::error::Codex review step ended '$REVIEW_OUTCOME' and $FINDINGS does not hold a JSON object." >&2
             exit 1
           fi
+          echo 'output_present=true' >> "$GITHUB_OUTPUT"
           if [ "$REVIEW_OUTCOME" != 'success' ]; then
             echo "::warning::Codex review step ended '$REVIEW_OUTCOME', but it had already written a complete $FINDINGS, so this run publishes that review. See openai/codex-action#150."
           fi
@@ -598,9 +625,39 @@ jobs:
     # shows there as "Review / Review verdict" and names the reason it failed.
     name: Review verdict
     runs-on: ubuntu-latest
-    permissions: {}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      checks: read
     steps:
+      - name: Checkout trusted review diagnostics
+        if: needs.validate-provider.outputs.provider == 'codex' && needs.codex-review.result == 'failure'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.workflow_sha }}
+          path: .review-policy
+          sparse-checkout: .github/scripts/codex-review-budget.cjs
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Diagnose failed Codex review
+        id: codex-failure
+        if: ${{ !cancelled() && needs.validate-provider.outputs.provider == 'codex' && needs.codex-review.result == 'failure' }}
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          OUTPUT_PRESENT: ${{ needs.codex-review.outputs.output_present }}
+        with:
+          script: |
+            const { failureMessage } = require('./.review-policy/.github/scripts/codex-review-budget.cjs');
+            const message = await failureMessage({ github, ...context.repo,
+              runId: context.runId, runAttempt: Number(process.env.GITHUB_RUN_ATTEMPT),
+              outputPresent: process.env.OUTPUT_PRESENT === 'true' });
+            core.setOutput('message', message);
+
       - name: Require the selected review path to succeed
+        # A diagnostic checkout/API failure must not skip the failed verdict.
+        if: ${{ always() }}
         env:
           VALIDATE_RESULT: ${{ needs.validate-provider.result }}
           REVIEW_ROUND_RESULT: ${{ needs.review-round.result }}
@@ -608,6 +665,7 @@ jobs:
           PROVIDER: ${{ needs.validate-provider.outputs.provider }}
           CLAUDE_RESULT: ${{ needs.claude-review.result }}
           CODEX_RESULT: ${{ needs.codex-review.result }}
+          CODEX_FAILURE_MESSAGE: ${{ steps.codex-failure.outputs.message }}
           POST_RESULT: ${{ needs.post-review.result }}
           NEW_THREADS: ${{ needs.post-review.outputs.new_threads }}
           OPEN_THREADS: ${{ needs.post-review.outputs.open_threads }}
@@ -618,7 +676,14 @@ jobs:
           if [ "$CAN_REVIEW" != 'false' ]; then
             case "$PROVIDER" in
               claude) [ "$CLAUDE_RESULT" = 'success' ] || exit 1 ;;
-              codex) [ "$CODEX_RESULT" = 'success' ] || exit 1 ;;
+              codex)
+                if [ "$CODEX_RESULT" != 'success' ]; then
+                  message="${CODEX_FAILURE_MESSAGE:-Codex review did not succeed; diagnostic evidence is unavailable. See the codex-review job.}"
+                  printf '%s\n' "::error::$message"
+                  printf '%s\n' "$message" >> "$GITHUB_STEP_SUMMARY"
+                  exit 1
+                fi
+                ;;
               *) exit 1 ;;
             esac
           fi
