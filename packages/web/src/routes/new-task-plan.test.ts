@@ -20,6 +20,12 @@ const STEPS: WorkflowStepDef[] = [
 ]
 const ids = (steps: WorkflowStepDef[]) => steps.map((s) => s.id)
 
+it('retains completion choices when starting an approved plan', () => {
+  const input = { task: 'Ship', steps: STEPS, model: '', runner: 'claude' as const, variants: 1, images: [] }
+  expect(buildPlannedRunBody(input)).not.toHaveProperty('autoMergePr')
+  expect(buildPlannedRunBody({ ...input, archiveWhenDone: true, autoMergePr: true })).toMatchObject({ archiveWhenDone: true, autoMergePr: true })
+})
+
 describe('removeStep', () => {
   it.each([
     { name: 'first', index: 0, expected: ['verify', 'review'] },

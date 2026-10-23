@@ -380,6 +380,25 @@ const postedBody = () => requests.find((r) => r.method === 'POST' && r.url === '
 // ---- the hero surface -------------------------------------------------------------------------
 
 describe('the hero surface', () => {
+  it('keeps default-off completion switches in the draft and sends them on create', async () => {
+    serve()
+    const view = renderNewTask()
+    await pillReady()
+    for (const name of ['Archive when Done', 'Auto-merge PR']) {
+      const control = screen.getByRole('switch', { name })
+      expect(control.getAttribute('aria-checked')).toBe('false')
+      fireEvent.click(control)
+    }
+    view.unmount()
+    renderNewTask()
+    await pillReady()
+    expect(screen.getByRole('switch', { name: 'Auto-merge PR' }).getAttribute('aria-checked')).toBe('true')
+    expect(screen.getByRole('switch', { name: 'Archive when Done' }).getAttribute('aria-checked')).toBe('true')
+    fireEvent.change(textarea(), { target: { value: 'Ship it' } })
+    await startTask()
+    expect(postedBody()).toMatchObject({ archiveWhenDone: true, autoMergePr: true })
+  })
+
   it('keeps run options in a disclosure separate from prompt, agent selection, and submission', async () => {
     serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
     renderNewTask()
@@ -598,7 +617,7 @@ describe('picker data flows', () => {
   it('drops a persisted model preset that belongs to another runner', async () => {
     writeDraft({
       text: '', source: null, runner: 'codex', agentProfile: null, model: 'claude-opus-4-8', effort: null, variants: 1,
-      planFirst: false, worktree: null, autonomous: null, generateFollowups: null,
+      planFirst: false, worktree: null, autonomous: null, generateFollowups: null, archiveWhenDone: false, autoMergePr: false,
     })
     serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
     renderNewTask()
@@ -1258,7 +1277,7 @@ describe('submit', () => {
     // lands in its errored state immediately and the test stays deterministic.
     writeDraft({
       text: '', source: { source: 'skill', ref: 'om-fix' }, runner: null, agentProfile: null, model: null, effort: null,
-      variants: 1, planFirst: false, worktree: null, autonomous: null, generateFollowups: null,
+      variants: 1, planFirst: false, worktree: null, autonomous: null, generateFollowups: null, archiveWhenDone: false, autoMergePr: false,
     })
     serve({ createRun: { id: 'run-9' }, uiStateStatus: 404 })
     renderNewTask()
@@ -2175,6 +2194,7 @@ describe('the plan flow', () => {
 
   it('▶ Start posts the EDITED steps inline — the exact wire payload — and navigates', async () => {
     serve({ createRun: { id: 'planned-1' } })
+    writeDraft({ ...readDraft(), archiveWhenDone: true, autoMergePr: true })
     renderNewTask()
     await planTask('Tighten the flaky suite')
 
@@ -2187,6 +2207,8 @@ describe('the plan flow', () => {
     )
     expect(postedBody()).toEqual({
       task: 'Tighten the flaky suite',
+      archiveWhenDone: true,
+      autoMergePr: true,
       steps: [
         { id: 'review', name: 'Review', skill: 'om-fix', prompt: 'Review the changes for {{task}}' },
         { id: 'implement', name: 'Implement', prompt: '{{task}}' },

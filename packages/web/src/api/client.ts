@@ -1669,7 +1669,7 @@ export async function createRunPr(id: string): Promise<CreatePrResponse> {
   )
 }
 
-/** Rename a run (#389): the edit becomes the display title and wins over any auto-summary. */
+/** Edit a run's title or completion settings through the shared PATCH contract. */
 export async function patchRun(id: string, patch: PatchRunInput): Promise<RunRecord> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs[':id'].$patch({

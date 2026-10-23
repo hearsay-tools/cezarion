@@ -37,6 +37,8 @@ export interface NewTaskDraft {
   autonomous: boolean | null
   /** Follow-up generation is default-on. null → remembered value / on. */
   generateFollowups: boolean | null
+  archiveWhenDone: boolean
+  autoMergePr: boolean
 }
 
 export interface ComposerRunModeInput {
@@ -109,6 +111,8 @@ const EMPTY: NewTaskDraft = {
   worktree: null,
   autonomous: null,
   generateFollowups: null,
+  archiveWhenDone: false,
+  autoMergePr: false,
 }
 
 const STORAGE_KEY = 'cez-new-task-draft'
@@ -145,6 +149,8 @@ function normalize(raw: unknown): NewTaskDraft {
     autonomous: typeof obj.autonomous === 'boolean' ? obj.autonomous : null,
     generateFollowups:
       typeof obj.generateFollowups === 'boolean' ? obj.generateFollowups : null,
+    archiveWhenDone: obj.archiveWhenDone === true,
+    autoMergePr: obj.autoMergePr === true,
   }
 }
 

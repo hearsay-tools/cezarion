@@ -32,6 +32,7 @@ import type {
 } from '@open-mercato/cezar-api-client'
 import { TwinkleBackdrop } from '@/components/centered-state'
 import { Composer, type ComposerHandle } from '@/components/composer/composer'
+import { CompletionControls } from '@/components/completion-controls'
 import { PickerPill, PickerPillGroup, RunnerPill, chevron, chipClass } from '@/components/picker-pill'
 import { PromptTemplateMenu } from '@/components/prompt-template-menu'
 import { SkillPreviewDialog } from '@/components/skill-detail'
@@ -489,6 +490,8 @@ export function NewTaskRoute() {
         worktree: worktreeOn,
         autonomous: autonomousOn,
         generateFollowups: generateFollowupsOn,
+        archiveWhenDone: draft.archiveWhenDone,
+        autoMergePr: draft.autoMergePr,
         // #374: when the Inbox's "Run" sent us here, hand the entry's id back so the server
         // records this run on it and it leaves the inbox — the audit trail the old
         // POST /api/todos/:id/start kept, minus the blind launch. Empty otherwise.
@@ -545,6 +548,8 @@ export function NewTaskRoute() {
           variants,
           images: plan.images,
           generateFollowups: generateFollowupsOn,
+          archiveWhenDone: draft.archiveWhenDone,
+          autoMergePr: draft.autoMergePr,
           todoId: deepLink.todo, // #374: planning first must not lose the inbox entry
         }),
         notifyOn,
@@ -808,6 +813,9 @@ export function NewTaskRoute() {
                 <p data-slot="execution-tip" className="hidden rounded-lg bg-background p-3 text-[11px] leading-5 text-muted-foreground xl:block"><GitBranchIcon aria-hidden="true" className="mb-2 size-[18px] text-accent-text" />{worktreeOn && hasGit ? 'Changes stay in their own worktree, separate from your working directory.' : 'Changes are made in the current working directory.'}</p>
               </div>
             </details>
+            <section className="rounded-xl border border-border bg-card p-4">
+              <CompletionControls archiveWhenDone={draft.archiveWhenDone} autoMergePr={draft.autoMergePr} onChange={update} disabled={starting || planning} />
+            </section>
             {followupsToggleShown ? <section data-slot="followups-options" aria-label="Follow-ups preference" className="rounded-xl border border-border bg-card p-4">
               <GenerateFollowupsToggle on={generateFollowupsOn} onChange={(on) => update({ generateFollowups: on })} />
             </section> : null}
