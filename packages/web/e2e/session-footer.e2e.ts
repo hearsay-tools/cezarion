@@ -179,11 +179,11 @@ it('scrolls a keyboard-focused transcript control above the desktop footer', () 
   browser.waitForFunction(`document.activeElement === document.getElementById('footer-focus-start') && window.__footerFocusTarget.isConnected`)
   browser.press('Tab')
   browser.evaluate(`document.getElementById('footer-focus-start').remove()`)
-  expect(waitForSettledSample<{ focused: boolean; clear: boolean; hit: boolean }>(browser, `(() => {
+  expect(waitForSettledSample(browser, `(() => {
     const button = window.__footerFocusTarget, box = button.getBoundingClientRect();
     const header = document.querySelector('[data-slot="run-header"]').getBoundingClientRect();
     const footer = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect();
     return { focused: document.activeElement === button, clear: box.top >= header.bottom && box.bottom <= footer.top,
       hit: button.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)) };
-  })()`, sample => sample.focused && sample.clear && sample.hit)).toEqual({ focused: true, clear: true, hit: true })
+  })()`)).toEqual({ focused: true, clear: true, hit: true })
 })
