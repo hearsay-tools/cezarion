@@ -45,14 +45,16 @@ function flatWaitInputSchema() {
   return {
     type: 'object' as const,
     properties: {
-      kind: { type: 'string', enum: cezarWaitRequestSchema.options.map(option => option.shape.kind.value), description: '"ci" waits for the checks of a GitHub pull request; "worker" waits for workers or request replies; "timer" wakes you after `seconds`.' },
+      kind: { type: 'string', enum: cezarWaitRequestSchema.options.map(option => option.shape.kind.value), description: '"ci" waits for the checks of a GitHub pull request; "worker" waits for workers or request replies; "timer" wakes you after `seconds`; "process" wakes you when a background command you started ends.' },
       pr: field('pr', 'kind "ci": the HTTPS GitHub pull request URL.'),
       worker_ids: field('worker_ids', 'kind "worker": the workers you own to wait for (1–32 unique ids). Give this or request_ids, not both.'),
       request_ids: field('request_ids', 'kind "worker": the requests you sent to wait for a reply to (1–32 unique ids). Give this or worker_ids, not both.'),
       mode: field('mode', 'kind "worker": "any" wakes you when one selected id settles (default), "all" when every one has, "one" takes exactly one id.'),
-      timeout_seconds: field('timeout_seconds', 'The deadline in seconds. kind "ci": 1–7200, default 1800. kind "worker": 1–1800, default 600 (the default shown is the ci one).'),
+      timeout_seconds: field('timeout_seconds', 'The deadline in seconds. kind "ci": 1–7200, default 1800. kind "worker": 1–1800, default 600 (the default shown is the ci one). kind "process": 1–7200, default 1800.'),
       seconds: field('seconds', 'kind "timer": seconds until the wake (60–7200).'),
-      note: field('note', 'kind "timer": what to re-check, handed back to you at the wake.'),
+      pid: field('pid', 'kind "process": the PID of the background command, as `echo $!` printed it.'),
+      exit_file: field('exit_file', 'kind "process": optional file the command writes its exit code to, in $TMPDIR or the worktree; a new name for each command.'),
+      note: field('note', 'kind "timer" or "process": what to re-check, handed back to you at the wake.'),
     },
     required: ['kind'],
     additionalProperties: false,
@@ -61,7 +63,13 @@ function flatWaitInputSchema() {
 
 export const waitToolDefinition = {
   name: 'cezar_wait',
-  description: 'Open a wait on something outside this turn: CI on a GitHub pull request (kind "ci"), workers or the replies to requests you sent (kind "worker"), or a timer (kind "timer"). End your turn after it answers; Cezar wakes you when any open wait resolves, with its result. A human message wakes you too and closes no wait. Several waits can be open at once; the answer lists them. To wait for the user, call cezar_ask. A CI observation is not merge approval.',
+  description: 'Open a wait on something outside this turn: CI on a GitHub pull request (kind "ci"), workers or the replies to requests you sent (kind "worker"), a timer (kind "timer"), or a background command you started (kind "process"). End your turn after it answers; Cezar wakes you when any open wait resolves, with its result. A human message wakes you too and closes no wait. Several waits can be open at once; the answer lists them. To wait for the user, call cezar_ask. A CI observation is not merge approval. ' +
+    // hearsay-tools/cezarion#1446: the `sh -c` wrapper because omp's own shell prints no `$!`.
+    'kind "process" wakes you when a command you started in the background ends. Start it as ' +
+    '`sh -c \'( cmd > "$TMPDIR/build.log" 2>&1; echo $? > "$TMPDIR/build.exit" ) > /dev/null 2>&1 & echo $!\'` ' +
+    'and pass the printed PID as `pid` and the exit file as `exit_file`, so the wake reports the exit code. ' +
+    'Use a new exit file name for each command: a file that already exists resolves the wait at once. ' +
+    'The job outlives this session and Cezar does not stop it.',
   inputSchema: flatWaitInputSchema(),
 };
 /**
