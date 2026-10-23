@@ -17,6 +17,7 @@ const TONE: Record<AutomationLogResult, StatusDotTone> = {
   manual: 'success',
   'catch-up': 'success',
   skipped: 'neutral',
+  missed: 'neutral',
   'no-match': 'neutral',
   preview: 'neutral',
   baseline: 'neutral',
@@ -31,6 +32,7 @@ const RESULT_LABEL: Record<AutomationLogResult, string> = {
   manual: 'Manual',
   'catch-up': 'Catch up',
   skipped: 'Skipped',
+  missed: 'Missed',
   'no-match': 'No match',
   preview: 'Preview',
   baseline: 'Baseline',
@@ -64,7 +66,8 @@ function retryable(record: AutomationLogRecord, all: readonly AutomationLogRecor
   return !all.some((other) => other.receiptId === record.receiptId && (other.runId || other.seq > record.seq))
 }
 
-function LogRows({ records, all, timeZone, onRetried }: { records: readonly AutomationLogRecord[]; all: readonly AutomationLogRecord[]; timeZone: string; onRetried: () => void }) {
+function LogRows({ records, all, timeZone, onRetried, readOnly = false }: { records: readonly AutomationLogRecord[]; all: readonly AutomationLogRecord[]; timeZone: string; onRetried: () => void; readOnly?: boolean }) {
+  const canRetry = (record: AutomationLogRecord) => !readOnly && retryable(record, all)
   const [retrying, setRetrying] = useState<string>()
   const [failure, setFailure] = useState<{ receiptId: string; message: string }>()
   const now = Date.now()
@@ -82,11 +85,11 @@ function LogRows({ records, all, timeZone, onRetried }: { records: readonly Auto
             <time className="text-xs text-muted-foreground" dateTime={record.ts} title={record.ts}>{logTime(record.ts, timeZone, now)}</time>
           </div>
           {record.reason ? <p className="mt-2 text-sm break-words text-muted-foreground">{record.reason}</p> : null}
-          {record.githubUrl || record.runId || retryable(record, all) ? (
+          {record.githubUrl || record.runId || canRetry(record) ? (
             <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm">
               {record.githubUrl ? <a className="inline-flex min-h-11 items-center underline underline-offset-4 break-all" href={record.githubUrl} target="_blank" rel="noreferrer">{record.githubTitle ?? `GitHub #${record.githubNumber ?? ''}`}</a> : null}
               {record.runId ? <Link className="inline-flex min-h-11 items-center underline underline-offset-4" to={`/tasks/${record.runId}`}>Open task</Link> : null}
-              {retryable(record, all) ? <Button variant="outline" disabled={retrying === record.receiptId} onClick={() => void retry(record.receiptId!)}>Retry task</Button> : null}
+              {canRetry(record) ? <Button variant="outline" disabled={retrying === record.receiptId} onClick={() => void retry(record.receiptId!)}>Retry task</Button> : null}
             </div>
           ) : null}
           {failure && failure.receiptId === record.receiptId ? <p role="alert" className="mt-2 text-sm break-words text-destructive">{failure.message}</p> : null}
@@ -110,7 +113,7 @@ function FilterSelect({ label, value, onChange, options }: { label: string; valu
 }
 
 /** `/automations/:id/log` — the whole log with result and event filters. */
-export function AutomationLogScreen({ automationId, automationName, timeZone }: { automationId: string; automationName?: string | undefined; timeZone: string }) {
+export function AutomationLogScreen({ automationId, automationName, timeZone, readOnly = false }: { automationId: string; automationName?: string | undefined; timeZone: string; readOnly?: boolean }) {
   const { records, error, refresh } = useAutomationLog(automationId)
   const [result, setResult] = useState(ALL)
   const [event, setEvent] = useState(ALL)
@@ -131,7 +134,7 @@ export function AutomationLogScreen({ automationId, automationName, timeZone }: 
           </div>
           {visible.length === 0
             ? <PageState text="No rows match these filters." />
-            : <LogRows records={visible} all={records} timeZone={timeZone} onRetried={() => void refresh()} />}
+            : <LogRows records={visible} all={records} timeZone={timeZone} onRetried={() => void refresh()} readOnly={readOnly} />}
         </div>
       )}
     </PageFrame>
@@ -139,7 +142,8 @@ export function AutomationLogScreen({ automationId, automationName, timeZone }: 
 }
 
 /** The five latest rows, for the list card. */
-export function InlineLog({ automationId, automationName, timeZone, showName = false }: { automationId: string; automationName?: string; timeZone: string; showName?: boolean }) {
+/** `readOnly`: an archived schedule's log, which offers no Retry; the server refuses one anyway. */
+export function InlineLog({ automationId, automationName, timeZone, showName = false, readOnly = false }: { automationId: string; automationName?: string; timeZone: string; showName?: boolean; readOnly?: boolean }) {
   const { records, error, refresh } = useAutomationLog(automationId)
   return (
     <section data-slot="automation-inline-log" className="mt-4 min-w-0 border-t pt-4">
@@ -147,7 +151,7 @@ export function InlineLog({ automationId, automationName, timeZone, showName = f
       {error && !records ? (
         <div className="grid justify-items-start gap-2"><PageState text={error} /><Button variant="outline" onClick={() => void refresh()}>Retry</Button></div>
       ) : !records ? <p className="text-sm text-muted-foreground">Loading activity…</p> : records.length === 0 ? <p className="text-sm text-muted-foreground">Nothing has run yet.</p> : (
-        <LogRows records={records.slice(0, 5)} all={records} timeZone={timeZone} onRetried={() => void refresh()} />
+        <LogRows records={records.slice(0, 5)} all={records} timeZone={timeZone} onRetried={() => void refresh()} readOnly={readOnly} />
       )}
     </section>
   )

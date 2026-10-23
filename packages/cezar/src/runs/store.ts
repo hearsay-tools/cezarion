@@ -2705,6 +2705,10 @@ export class RunStore extends EventEmitter {
     variant?: string;
     clientRequestId?: string;
     clientRequestHash?: string;
+    /** Automation provenance, committed with the row that creates the run (hearsay-tools/cezarion#1465):
+     *  a crash before a later write must still let reconciliation find the receipt's task. */
+    automation?: RunRecord['automation'];
+    automationTrigger?: RunRecord['automationTrigger'];
     steps: Array<Pick<StepState, 'id' | 'name' | 'kind'>>;
   }): RunRecord {
     if (this.openFailure) throw this.openFailure;
@@ -2743,6 +2747,8 @@ export class RunStore extends EventEmitter {
       groupId: input.groupId,
       variant: input.variant,
       ...(input.clientRequestId === undefined ? {} : { clientRequestId: input.clientRequestId, clientRequestHash: input.clientRequestHash }),
+      ...(input.automation ? { automation: input.automation } : {}),
+      ...(input.automationTrigger ? { automationTrigger: input.automationTrigger } : {}),
       status: 'queued',
       createdAt: new Date().toISOString(),
       tokensUsed: 0,

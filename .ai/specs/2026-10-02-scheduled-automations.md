@@ -323,3 +323,134 @@ run` injects nothing and composes nothing. Stage 3: built-in and cross-project t
 strip and per-row 7-day tallies (cost following `costMetrics`), owned workers nested in the log.
 Also not done: default-on, `task.dispatch`, PR-review triggers (upstream #1016 / upstream #1056), Jira/Linear
 (upstream #1045), full cron expressions, automations while the server is stopped.
+
+## One-time schedules (hearsay-tools/cezarion#1465)
+
+A fifth schedule shape, `once`, starts one ordinary task at `at` (local `YYYY-MM-DDTHH:MM`) in its own
+`timeZone`, then archives the definition. `latestStartMinutes` (10-43200, optional) bounds a late start
+after downtime; without it a late start always launches. Run now consumes the schedule. The repeating
+shapes are unchanged. The MCP tools `cezar_schedule_task` and `cezar_scheduled_tasks` reach it through
+the session tool socket.
+
+
+### The archive invariant
+
+**A `once` definition that has a `launched` receipt is archived.** The `archived` record caches that
+fact; the receipt log is the truth. Every write path checks it:
+
+- The launch writes the `launched` receipt with its `runId` first, then the archive record. A crash
+  between the two leaves the definition un-archived with a launched receipt.
+- Every later fire, Run now, Retry, edit, enable or cancel of a `once` definition first looks for a
+  `launched` receipt of that automation. When one exists it writes the missing archive record
+  (outcome `launched`, from the receipt), answers as for an archived schedule, and launches nothing.
+- Crash before the launched receipt: the receipt stays `reserved`. The existing
+  `reconcileAutomationReceipts` settles it to `launched` (a run claims it; then the invariant above
+  archives) or `launch-error` (then the schedule is **failed**, retryable). Reconciliation writes the
+  Failed state itself (paused, `onceOutcome: 'failed'`, no `nextRunAt`), so no timer relaunches it
+  unasked.
+- A run carries its receipt from the row that creates it: `startRun` takes the provenance and
+  `createRun` writes it in the same commit, so "a run claims it" holds even after a crash between
+  task creation and any later write.
+- Every one-time write and the timer settle first (`ScheduleRunner.settleOnce`): a `reserved`
+  receipt no launch here is running is reconciled before the write, the cutoff decision or a launch.
+  This covers a reservation another cockpit left after this one booted, which boot never saw.
+- A failed launch writes the Failed stop before its `launch-error` receipt, so a `launch-error`
+  receipt always means a stopped schedule; a crash between the two leaves `reserved`, which the
+  rule above settles. One-time writes hold the lease, so no edit lands between them.
+- The log row is a record, not a gate: the stop (Failed, Missed) or the archive (launched) lands
+  first, and a failed log append changes neither.
+- Retry relaunches a receipt only while its key is the schedule's current key. After an edit of
+  `at` or `timeZone` the old failed row stays in the log, but its Retry answers 409 and launches
+  nothing. An archived schedule's page shows its log without Retry.
+
+Archiving the schedule never archives, approves or otherwise touches the task. The task follows the
+ordinary review gate.
+
+### One receipt key per schedule
+
+Timer, late start, Run now and Retry of a `once` schedule all reserve the same receipt key,
+`<id>:once:<revision-independent occurrence key>`. The key is `once:<at>|<timeZone>`. Two writers
+racing therefore meet on one key, and only one gets the reservation. Editing `at` or `timeZone`
+changes the key; the archive invariant above stops that from producing a second task after a launch.
+
+### Concurrency with writes
+
+Every write to a `once` definition (edit, enable, pause, cancel, delete) takes the project lease,
+like the runner does. While a launch holds it, the write answers 409
+`a launch of this schedule is in progress; try again in a moment`. So **Cancelled always means no
+task was created**, and a launch never meets a definition that changed under it. Recurring and
+GitHub definitions keep today's lease-free writes.
+
+### A fire that meets an existing receipt
+
+The fire looks at the latest receipt on the schedule's key before it reserves:
+
+- `launched`: the archive invariant (archive, launch nothing).
+- `launch-error` (a failed launch, or a crash-left reservation that reconciliation settled): the
+  fire relaunches **that receipt** as a retry, exactly as Retry does. One key still yields at most
+  one launched task.
+- `reserved` and not in flight in this process: run `reconcile` first, as today, then decide again.
+
+### Cutoff and grace
+
+The effective cutoff is `max(latestStartMinutes, SCHEDULE_GRACE_MS)`. The schema floor of
+10 minutes equals the grace window, so timer jitter, a held lease or a store retry never marks a
+schedule Missed while the cockpit was running. Within the grace window the log says `launched`;
+after it, `late`.
+
+### States
+
+| State | `enabled` | `archived` | `onceOutcome` | How it gets here |
+|---|---|---|---|---|
+| Paused | false | absent | absent | Created without `enable`; paused by a human or agent; edited while paused |
+| Waiting | true | absent | absent | Enabled while `at` is in the future |
+| Failed | false | absent | `failed` | The launch threw (timer, late start, Run now or Retry) |
+| Missed | false | absent | `missed` | The fire found `now > at + latestStartMinutes` |
+| Archived | false | present | cleared | A task was created, or the schedule was cancelled |
+
+### Transitions out
+
+| State | Trigger | Who or what fires it | Behavior at shipped defaults |
+|---|---|---|---|
+| Paused | Enable | Human (cockpit, CLI, API) or agent (MCP, CLI) | Allowed only while `at` is in the future; otherwise 400 `the due time has passed; choose a later time or use Run now`. Goes to Waiting |
+| Paused | Run now | Human or agent | Launches; on success Archived (`manual`), on failure Failed |
+| Paused | Edit | Human or agent | Stays Paused. A new `at` must be in the future |
+| Paused, Waiting, Failed, Missed | Any write while a launch holds the lease | Human or agent | 409 `a launch of this schedule is in progress`; nothing changes |
+| Paused | Cancel | Human or agent | Archived (`cancelled`) |
+| Paused | Delete | Human (cockpit, CLI, API) | Definition removed with a tombstone, as today |
+| Paused | — | — | **No automatic exit.** A paused one-time schedule waits for a person or agent, like a paused recurring one. The list shows it as Paused with its due time |
+| Waiting | Due time reached, `now - at <= SCHEDULE_GRACE_MS` | Workspace automation timer (`scheduler.ts`), on by default when `CEZ_AUTOMATIONS=1` | Launches (`schedule`); success Archived, failure Failed |
+| Waiting | Cezarion starts after `at`, before the cutoff (or no cutoff) | The same timer, at boot or wake | Launches late (`late`, log says how late); success Archived, failure Failed |
+| Waiting | Cezarion starts after the cutoff | The same timer | Nothing launches. Log row `missed`; state Missed |
+| Waiting | Lease held by another cockpit | Timer | Logs `skipped`, retries at the workspace floor (existing `ScheduleLeaseHeldError` path). The winner's receipt turns the retry into the archive-invariant path |
+| Waiting | Project store cannot open | Timer | Existing `AutomationProjectUnavailableError` path: nothing reserved, retried at the floor |
+| Waiting | Run now | Human or agent | As from Paused |
+| Waiting | Pause | Human or agent | Paused; `nextRunAt` cleared in the same write |
+| Waiting | Edit | Human or agent | Re-armed from the new definition; a fire captured before the edit sees the new revision under the lease and launches nothing |
+| Waiting | Cancel | Human or agent | Archived (`cancelled`); `nextRunAt` cleared |
+| Waiting | Delete | Human | Removed, as today |
+| Failed | Retry | Human (cockpit log, CLI `run`, API retry) or agent | Relaunches the same receipt; success Archived (`retry`), failure stays Failed |
+| Failed | Run now | Human or agent | The same as Retry: the receipt key is shared |
+| Failed | Edit | Human or agent | Allowed. Clears `onceOutcome`; result is Paused. The failed receipt stays in the log |
+| Failed | Enable | Human or agent | Allowed while `at` is in the future: Waiting. At `at` the timer relaunches the failed receipt (see "A fire that meets an existing receipt"). A past `at` answers the same 400 as from Paused |
+| Failed | Cancel / Delete | Human or agent / Human | Archived (`cancelled`) / removed |
+| Failed | — | — | **No automatic exit.** Nothing retries on its own and the three-strike auto-pause does not apply. The list shows Failed with the error |
+| Missed | Run now | Human or agent | Launches; success Archived (`manual`), failure Failed |
+| Missed | Edit | Human or agent | Clears `onceOutcome`; result is Paused; a new `at` must be in the future |
+| Missed | Enable | Human or agent | `at` is past by definition, so 400 `the due time has passed; choose a later time or use Run now` |
+| Missed | Cancel / Delete | Human or agent / Human | Archived (`cancelled`) / removed |
+| Missed | — | — | **No automatic exit**, by the owner's choice: past the cutoff only a person or agent may start it |
+| Archived | Delete | Human | Removed with a tombstone. The task is untouched |
+| Archived | Edit, enable, pause, Run now, Retry, cancel | Anyone | 409 `this one-time schedule is archived` |
+| Archived | — | — | **Terminal by design.** It never fires again |
+
+The recurring states are unchanged. Every recurring branch of `ScheduleRunner.fire` keeps its
+current behavior; the `once` branch is a separate early return.
+
+### Enablement rule
+
+Unchanged: a definition is created paused unless the request says `enable`. Agents enable only when
+the user's own request asks for the work to run later. The MCP tool description, the CLI help and
+the agent prompt part (`automations/prompts.ts`, the built-in `create-cezarion-automation` skill) say
+so. Unlike recurring automations, "do X in a week" *is* that request.
+

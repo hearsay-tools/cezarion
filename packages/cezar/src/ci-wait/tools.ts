@@ -1,8 +1,9 @@
 import { cezarAskRequestSchema, cezarCancelWaitRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type CezarAskAnswer } from '@open-mercato/cezar-contract/waits';
 import { ASK_LIMITS } from '@open-mercato/cezar-contract/ask-schema';
 import { previewStopRequestSchema, previewServeRequestSchema } from '@open-mercato/cezar-contract/preview';
+import { scheduleTaskRequestSchema, scheduledTasksRequestSchema, type ScheduleTaskAnswer, type ScheduledTasksAnswer } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { z } from 'zod';
-import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait, callPreviewServe, callPreviewStop } from './client.ts';
+import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait, callPreviewServe, callPreviewStop, callScheduleTask, callScheduledTasks } from './client.ts';
 
 /**
  * The one list of cezar tools (#781). The MCP adapter lists it, Pi's extension registers it, and
@@ -21,6 +22,11 @@ export type CezarTool = {
 /** Live preview is on under the exact value `1` only (spec 2026-10-02-live-preview-v1). */
 export function previewToolEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CEZ_PREVIEW === '1';
+}
+
+/** Automations are on under the exact value `1` only (spec 2026-10-02-scheduled-automations). */
+export function automationsToolEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.CEZ_AUTOMATIONS === '1';
 }
 
 /**
@@ -136,6 +142,52 @@ export async function invokePreviewStopTool(input: unknown) {
 }
 const PREVIEW_STOP_TOOL: CezarTool = { definition: previewStopToolDefinition, trigger: 'load when your Cezar-started preview server needs stopping or restarting.', label: 'Stop live preview', invoke: invokePreviewStopTool };
 
+/**
+ * hearsay-tools/cezarion#1465: a one-time schedule starts later as an ordinary task, so the agent
+ * does not keep a session parked on timers for days. `cezar_scheduled_tasks` takes one action per
+ * call; its union is advertised as one flat object for the same reason as `cezar_wait`.
+ */
+export const scheduleTaskToolDefinition = {
+  name: 'cezar_schedule_task',
+  description: 'Schedule a new task to start once, later, in this project: give a name, the full prompt the task starts from, and either `at` (a local wall time YYYY-MM-DDTHH:MM with `time_zone`, an IANA name; the cockpit\'s zone when left out) or `delay` (30m, 6h, 7d of elapsed time from now). `latest_start` (10m to 30d) bounds how late it may still start after Cezarion was down; past it the schedule is marked missed. Pass enable: true only when the user\'s request asks for the work to run later; otherwise it is created paused for the user to enable. The new task does not see this conversation, so put every detail it needs in the prompt. The answer gives the stored time, its zone and the same moment in UTC.',
+  inputSchema: { ...z.toJSONSchema(scheduleTaskRequestSchema, { io: 'input' }), type: 'object' as const },
+};
+
+function flatScheduledTasksInputSchema() {
+  const properties: Record<string, unknown> = {};
+  for (const option of scheduledTasksRequestSchema.options) Object.assign(properties, z.toJSONSchema(option, { io: 'input' }).properties);
+  return {
+    type: 'object' as const,
+    properties: {
+      ...properties,
+      action: { type: 'string', enum: scheduledTasksRequestSchema.options.map(option => option.shape.action.value), description: '"list" lists the one-time schedules of this project; "show", "update", "pause", "enable" and "cancel" take the `id` a list or a create answered.' },
+      archived: { ...(properties.archived as object), description: 'action "list": "include" adds the archived schedules, "only" lists just them.' },
+    },
+    required: ['action'],
+    additionalProperties: false,
+  };
+}
+export const scheduledTasksToolDefinition = {
+  name: 'cezar_scheduled_tasks',
+  description: 'List, show, update, pause, enable or cancel the one-time scheduled tasks of this project, one action per call. Change only the schedules the user asked you to manage. "update" takes the same fields as cezar_schedule_task; a new `at` or `delay` must be in the future. "cancel" archives the schedule so it never starts; an archived schedule cannot change.',
+  inputSchema: flatScheduledTasksInputSchema(),
+};
+
+function scheduleHint(answer: ScheduleTaskAnswer | ScheduledTasksAnswer): string {
+  if (answer.ok) return 'Done. Tell the user the stored time and zone.';
+  return answer.code === 'automations_off' || answer.code === 'unavailable' ? 'Not scheduled. Tell the user, and do not retry.' : 'Not changed. Fix the call from the message, or continue without it.';
+}
+export async function invokeScheduleTaskTool(input: unknown) {
+  const answer = await callScheduleTask(input);
+  return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${scheduleHint(answer)}` }], isError: !answer.ok, details: answer };
+}
+export async function invokeScheduledTasksTool(input: unknown) {
+  const answer = await callScheduledTasks(input);
+  return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${scheduleHint(answer)}` }], isError: !answer.ok, details: answer };
+}
+const SCHEDULE_TASK_TOOL: CezarTool = { definition: scheduleTaskToolDefinition, trigger: 'load when work should start later as a new task (in an hour, tomorrow, next week) instead of keeping this session waiting.', label: 'Schedule a task', invoke: invokeScheduleTaskTool };
+const SCHEDULED_TASKS_TOOL: CezarTool = { definition: scheduledTasksToolDefinition, trigger: 'load when you need to list, change, pause, resume or cancel a one-time scheduled task.', label: 'Scheduled tasks', invoke: invokeScheduledTasksTool };
+
 const WAIT_TOOL: CezarTool = { definition: waitToolDefinition, trigger: 'load when you are waiting on CI for a PR, or want to re-check something later; end your turn after it answers.', label: 'Wait', invoke: invokeWaitTool };
 const ASK_TOOL: CezarTool = { definition: askToolDefinition, trigger: 'load for a user decision or missing input; provide the full draft or findings in its rendered context field.', label: 'Ask the user', invoke: invokeAskTool };
 const CANCEL_WAIT_TOOL: CezarTool = { definition: cancelWaitToolDefinition, trigger: 'load when a wait you registered is no longer needed.', label: 'Cancel wait', invoke: invokeCancelWaitTool };
@@ -143,8 +195,11 @@ const DONE_TOOL: CezarTool = { definition: doneToolDefinition, trigger: 'load wh
 const PREVIEW_TOOL: CezarTool = { definition: previewToolDefinition, trigger: 'load when you have started, or are about to start, a web server the user should click through.', label: 'Live preview', invoke: invokePreviewTool };
 
 export function cezarTools(env: NodeJS.ProcessEnv = process.env): CezarTool[] {
-  const waits = [WAIT_TOOL, ASK_TOOL, CANCEL_WAIT_TOOL, DONE_TOOL];
-  return previewToolEnabled(env) ? [...waits, PREVIEW_TOOL, PREVIEW_STOP_TOOL] : waits;
+  return [
+    WAIT_TOOL, ASK_TOOL, CANCEL_WAIT_TOOL, DONE_TOOL,
+    ...(previewToolEnabled(env) ? [PREVIEW_TOOL, PREVIEW_STOP_TOOL] : []),
+    ...(automationsToolEnabled(env) ? [SCHEDULE_TASK_TOOL, SCHEDULED_TASKS_TOOL] : []),
+  ];
 }
 export function cezarToolNames(env: NodeJS.ProcessEnv = process.env): string[] {
   return cezarTools(env).map(tool => tool.definition.name);
@@ -152,10 +207,10 @@ export function cezarToolNames(env: NodeJS.ProcessEnv = process.env): string[] {
 
 /**
  * Env names a harness must forward to the adapter process. Several harnesses spawn MCP servers
- * from an allowlist, so the preview opt-in rides along explicitly or the adapter never sees it.
+ * from an allowlist, so the preview and automations opt-ins ride along explicitly or the adapter never sees it.
  */
 export function cezarToolEnvNames(env: NodeJS.ProcessEnv = process.env): string[] {
-  return ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET', ...(previewToolEnabled(env) ? ['CEZ_PREVIEW'] : [])];
+  return ['CEZ_TOOL_TOKEN', 'CEZ_TOOL_SOCKET', ...(previewToolEnabled(env) ? ['CEZ_PREVIEW'] : []), ...(automationsToolEnabled(env) ? ['CEZ_AUTOMATIONS'] : [])];
 }
 
 export function cezarServerInstructions(env: NodeJS.ProcessEnv = process.env): string {

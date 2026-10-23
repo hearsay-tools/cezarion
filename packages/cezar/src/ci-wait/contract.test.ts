@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { request } from 'node:http';
 import { ciWaitRequestSchema, ciWaitSchema, ciWaitResultSchema, ciWaitReceiptSchema } from '@open-mercato/cezar-contract/ci-wait';
 import { previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
-import { cezarServerInstructions, cezarTools, doneToolDefinition, waitToolDefinition } from './tools.ts';
+import { cezarServerInstructions, cezarToolEnvNames, cezarTools, doneToolDefinition, waitToolDefinition } from './tools.ts';
 
 describe('CI wait contract', () => {
   it('defaults timeout and rejects model-supplied authority and malformed PR URLs', () => {
@@ -88,9 +88,10 @@ describe('private preview-serve route', () => {
     const notWait = async (): Promise<never> => { throw new Error('not a CI test'); };
     return owner.provision({ registerWait: notWait, ask: notWait, cancelWait: notWait, finishTurn: notWait, registerPreview });
   }
+  // One connection per call, as client.ts does: see raw() in controller.test.ts (hearsay-tools/cezarion#1484).
   function post(env: Record<string, string>, body: string, token = env.CEZ_TOOL_TOKEN!) {
     return new Promise<{ status: number; body: string }>((resolve, reject) => {
-      const req = request({ socketPath: env.CEZ_TOOL_SOCKET, path: '/api/v1/tools/preview-serve', method: 'POST', headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), 'content-type': 'application/json' } }, res => {
+      const req = request({ socketPath: env.CEZ_TOOL_SOCKET, agent: false, path: '/api/v1/tools/preview-serve', method: 'POST', headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), 'content-type': 'application/json' } }, res => {
         let text = ''; res.on('data', chunk => text += chunk); res.on('end', () => resolve({ status: res.statusCode!, body: text }));
       }); req.on('error', reject); req.end(body);
     });
@@ -196,4 +197,26 @@ it('accepts old observations and the new bounded conflict metadata', () => {
  expect(ciWaitResultSchema.safeParse({...old,outcome:'conflicting',mergeable:'CONFLICTING',mergeStateStatus:'DIRTY'}).success).toBe(true);
  expect(ciWaitResultSchema.safeParse({...old,mergeable:'DIRTY'}).success).toBe(false);
  expect(ciWaitResultSchema.safeParse({...old,mergeStateStatus:'x'.repeat(65)}).success).toBe(false);
+});
+
+// hearsay-tools/cezarion#1465: the Anthropic tool API refuses a top-level union in an input schema.
+it('advertises every cezar tool input as one flat object', () => {
+  for (const { definition } of cezarTools({ CEZ_AUTOMATIONS: '1', CEZ_PREVIEW: '1' })) {
+    expect(definition.inputSchema.type, definition.name).toBe('object');
+    for (const key of ['oneOf', 'anyOf', 'allOf']) expect(definition.inputSchema, definition.name).not.toHaveProperty(key);
+  }
+  const scheduled = cezarTools({ CEZ_AUTOMATIONS: '1' }).find(tool => tool.definition.name === 'cezar_scheduled_tasks')!.definition.inputSchema;
+  expect((scheduled.properties as Record<string, { enum?: string[] }>).action!.enum).toEqual(['list', 'show', 'update', 'pause', 'enable', 'cancel']);
+  expect(scheduled.required).toEqual(['action']);
+});
+
+it('forwards CEZ_AUTOMATIONS to the adapter only under the opt-in', () => {
+  expect(cezarToolEnvNames({ CEZ_AUTOMATIONS: '1' })).toContain('CEZ_AUTOMATIONS');
+  expect(cezarToolEnvNames({})).not.toContain('CEZ_AUTOMATIONS');
+});
+
+it('tells the agent when to enable a scheduled task and which ones to change', () => {
+  const tools = cezarTools({ CEZ_AUTOMATIONS: '1' });
+  expect(tools.find(tool => tool.definition.name === 'cezar_schedule_task')!.definition.description).toMatch(/enable: true only when the user/);
+  expect(tools.find(tool => tool.definition.name === 'cezar_scheduled_tasks')!.definition.description).toMatch(/only the schedules the user asked you to manage/);
 });

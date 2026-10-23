@@ -97,6 +97,16 @@ it('filters by result', async () => {
   expect(items[0]!.textContent).toContain('Manual')
 })
 
+// hearsay-tools/cezarion#1465: a one-time schedule past its latest start logs `missed`.
+it('renders a missed one-time row as Missed with a neutral tone', async () => {
+  stub([row(1, { result: 'missed', reason: 'Missed 09:00 on Thu 29 Oct 2026; the latest start passed.' })])
+  mountScreen()
+  const log = await screen.findByRole('list', { name: 'Automation execution log' })
+  const pill = within(log).getAllByRole('listitem')[0]!.querySelector('[data-slot="pill"]') as HTMLElement
+  expect(pill.textContent).toBe('Missed')
+  expect(pill.querySelector('[data-slot="status-dot"]')?.className).toContain('bg-soft-foreground')
+})
+
 it('says so when nothing has run yet', async () => {
   stub([])
   mountScreen()

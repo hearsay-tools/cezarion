@@ -1,6 +1,7 @@
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
-import { askErrorMessage, doneErrorMessage, waitErrorMessage } from '../ci-wait/errors.ts';
+import { askErrorMessage, doneErrorMessage, scheduleRefusal, waitErrorMessage } from '../ci-wait/errors.ts';
+import type { ScheduleTaskAnswer, ScheduleTaskRequest, ScheduledTasksAnswer, ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type DoneErrorCode, type CiWaitEntry, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
@@ -766,6 +767,9 @@ function formatWakeInstant(at: Date): string {
   return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' }).format(at);
 }
 
+/** How long a schedule tool call waits for the server to attach the service after recovery (#1465). */
+const AUTOMATION_TOOLS_READY_MS = 30_000;
+
 export interface StartRunInput {
   task: string;
   model?: string;
@@ -805,6 +809,10 @@ export interface StartRunInput {
    *  and make the task bubble render the stack's images as its own. In-memory
    *  only: rebuilt from the record on every hydration, never persisted. */
   stackedImages?: ContentBlock[];
+  /** Automation provenance (hearsay-tools/cezarion#1465). Written by `createRun` in the row that
+   *  creates the run, so a receipt never points at nothing after a crash. */
+  automation?: RunRecord['automation'];
+  automationTrigger?: RunRecord['automationTrigger'];
 }
 
 /**
@@ -1015,6 +1023,12 @@ function familyOf(run: RunRecord): string {
 function waitNamedInputIds(run: RunRecord): Set<string> {
   return new Set([...run.waits ?? [], ...(run.lastWaits ?? []).filter(wait => wait.phase === 'delivered')].flatMap(wait => [wait.id, waitInputId(wait)]));
 }
+
+/** hearsay-tools/cezarion#1465: what `startServer` hands a manager for the schedule tools. */
+export type AutomationToolService = {
+  scheduleTask(request: ScheduleTaskRequest): Promise<ScheduleTaskAnswer>;
+  scheduledTasks(request: ScheduledTasksRequest): Promise<ScheduledTasksAnswer>;
+};
 
 /**
  * The mini workflow engine: executes a `WorkflowDef` against a repo, one step
@@ -1847,6 +1861,31 @@ export class RunManager {
   cockpitAddress(): { origin: string; projectId: string } | undefined {
     return this.cockpit ? { ...this.cockpit } : undefined;
   }
+  /**
+   * hearsay-tools/cezarion#1465: the project's one-time schedule service behind
+   * `cezar_schedule_task` and `cezar_scheduled_tasks`, set by `startServer` beside the cockpit
+   * address. Headless `cez run` never sets it, so the tools answer `unavailable` there. The
+   * boot manager recovers runs before the server sets it, and a lazy project's manager recovers
+   * before its context is announced: a resumed session can call a tool in that window. With a
+   * cockpit address the call waits for the service, bounded like the CLI's startup retry.
+   */
+  private automationTools?: AutomationToolService;
+  private automationToolsWaiters = new Set<() => void>();
+  setAutomationTools(tools: AutomationToolService | undefined): void {
+    this.automationTools = tools;
+    if (tools) for (const wake of [...this.automationToolsWaiters]) wake();
+  }
+  private async awaitAutomationTools(signal: AbortSignal): Promise<AutomationToolService | undefined> {
+    if (this.automationTools || !this.cockpit) return this.automationTools;
+    await new Promise<void>((resolve) => {
+      const done = () => { clearTimeout(timer); signal.removeEventListener('abort', done); this.automationToolsWaiters.delete(done); resolve(); };
+      // bound: the CLI's 30 s startup retry; the server attaches the service right after recovery.
+      const timer = setTimeout(done, AUTOMATION_TOOLS_READY_MS);
+      signal.addEventListener('abort', done, { once: true });
+      this.automationToolsWaiters.add(done);
+    });
+    return this.automationTools;
+  }
   /** Automations on AND a cockpit attached: the one predicate behind the prompt part and the built-in skill. */
   private automationsReachable(): boolean {
     return !!this.cockpit && resolveCapabilities().automations;
@@ -2042,6 +2081,15 @@ export class RunManager {
       finishTurn: async (request, signal) => this.acceptDone(runId, generation, request, signal),
       registerPreview: (request, signal) => this.registerPreviewServer(runId, request, signal),
       stopPreview: (request, signal) => this.stopPreviewServer(runId, request, signal),
+      // A schedule belongs to the project, not to this run: any session there may manage one.
+      scheduleTask: async (request, signal) => {
+        const tools = await this.awaitAutomationTools(signal);
+        return tools ? tools.scheduleTask(request) : scheduleRefusal('unavailable');
+      },
+      scheduledTasks: async (request, signal) => {
+        const tools = await this.awaitAutomationTools(signal);
+        return tools ? tools.scheduledTasks(request) : scheduleRefusal('unavailable');
+      },
     };
   }
 
@@ -2973,39 +3021,46 @@ export class RunManager {
       variant: group?.variant,
       clientRequestId: clientRequest?.id,
       clientRequestHash: clientRequest?.hash,
+      automation: input.automation,
+      automationTrigger: input.automationTrigger,
       steps: workflow.steps.map((s) => ({ id: s.id, name: s.name ?? s.id, kind: stepKind(s) })),
     });
-    // Persist the full definition so a queued run survives a restart (#367) —
-    // ad-hoc "(planned)" chains exist nowhere else to re-resolve from.
-    this.store.updateRun(run.id, { workflowDef: workflow });
-    // Initial pasted attachments must be visible while the run is still queued (#612),
-    // and must survive a restart before a slot opens. Persist them before the job
-    // enters `pendingJobs`; `hydrateQueuedInput` reconstructs their content blocks
-    // from these URLs when a recovered run eventually starts — and for a file (#950)
-    // this write is the ONLY copy, since it never had a block to be rebuilt from.
-    if (input.images?.length) {
-      const persisted = this.persistPastedAttachments(run.id, input.images);
-      if (persisted.length) {
-        this.store.updateRun(run.id, { taskImages: persisted.map((saved) => saved.url) });
+    // The row exists from here on. A later write that throws still queues the job, so the caller
+    // that sees the throw finds a run that starts now, not one only a restart would start (#1465).
+    try {
+      // Persist the full definition so a queued run survives a restart (#367) —
+      // ad-hoc "(planned)" chains exist nowhere else to re-resolve from.
+      this.store.updateRun(run.id, { workflowDef: workflow });
+      // Initial pasted attachments must be visible while the run is still queued (#612),
+      // and must survive a restart before a slot opens. Persist them before the job
+      // enters `pendingJobs`; `hydrateQueuedInput` reconstructs their content blocks
+      // from these URLs when a recovered run eventually starts — and for a file (#950)
+      // this write is the ONLY copy, since it never had a block to be rebuilt from.
+      if (input.images?.length) {
+        const persisted = this.persistPastedAttachments(run.id, input.images);
+        if (persisted.length) {
+          this.store.updateRun(run.id, { taskImages: persisted.map((saved) => saved.url) });
+        }
       }
+      // Step-0 reference extraction (task auto-naming spec): the regex layer's
+      // numbers persist immediately; the namer may add the kind it verified later.
+      const skillHint = workflow.steps.find((s) => stepKind(s) === 'agent' && s.skill)?.skill?.trim();
+      const refs = refineTaskRefs(extractTaskRefs(input.task), skillHint);
+      if (refs.prNumber !== undefined || refs.issueNumber !== undefined) {
+        this.store.updateRun(run.id, {
+          ...(refs.prNumber !== undefined ? { prNumber: refs.prNumber } : {}),
+          ...(refs.issueNumber !== undefined ? { issueNumber: refs.issueNumber } : {}),
+        });
+      }
+      // Fire-and-forget LLM naming (task auto-naming spec): the heuristic title
+      // above shows instantly; the namer's short title replaces it when (and if)
+      // the model answers. Never awaited, never fails the run.
+      void this.autoNameRun(run.id, skillHint, input.task);
+    } finally {
+      this.pendingJobs.set(run.id, { workflow, input: effectiveInput });
+      this.queue.push(run.id);
+      void this.pump();
     }
-    // Step-0 reference extraction (task auto-naming spec): the regex layer's
-    // numbers persist immediately; the namer may add the kind it verified later.
-    const skillHint = workflow.steps.find((s) => stepKind(s) === 'agent' && s.skill)?.skill?.trim();
-    const refs = refineTaskRefs(extractTaskRefs(input.task), skillHint);
-    if (refs.prNumber !== undefined || refs.issueNumber !== undefined) {
-      this.store.updateRun(run.id, {
-        ...(refs.prNumber !== undefined ? { prNumber: refs.prNumber } : {}),
-        ...(refs.issueNumber !== undefined ? { issueNumber: refs.issueNumber } : {}),
-      });
-    }
-    // Fire-and-forget LLM naming (task auto-naming spec): the heuristic title
-    // above shows instantly; the namer's short title replaces it when (and if)
-    // the model answers. Never awaited, never fails the run.
-    void this.autoNameRun(run.id, skillHint, input.task);
-    this.pendingJobs.set(run.id, { workflow, input: effectiveInput });
-    this.queue.push(run.id);
-    void this.pump();
     return run;
   }
 

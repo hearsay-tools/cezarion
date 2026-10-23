@@ -272,4 +272,76 @@ describe('scheduled automations on an opted-in fixture server', () => {
     await pollFor(async () => ((await listed()).some((item) => item.id === created.id) ? undefined : true),
       () => 'the deleted automation is still listed', { timeoutMs: 15_000, intervalMs: 250 })
   }, 180_000)
+
+  // hearsay-tools/cezarion#1465: a one-time schedule, made and cancelled with keys alone at the
+  // narrowest phone width the issue names. `fill` types the free text; every choice is a key press.
+  it('creates a one-time schedule and cancels it at 360px width with the keyboard', async () => {
+    const browser = fixtureBrowser
+    const onceName = `E2E once ${process.pid}`
+    const focusOn = (text: string) => browser.waitForValue(`document.activeElement?.textContent === ${JSON.stringify(text)} ? true : null`)
+    const cardOf = `[...document.querySelectorAll('[data-slot="automation-card"]')].find((node) => node.textContent.includes(${JSON.stringify(onceName)}))`
+    browser.setViewport(360, 740)
+    browser.goto(`${base}${scoped('/automations/new')}`)
+    browser.waitForValue(`document.querySelector('form.automation-editor') && window.innerWidth === 360 ? true : null`)
+    browser.fill('#automation-name', onceName)
+    browser.fill('#automation-prompt', `${prompt} once`)
+
+    // From the first Repeat chip, Tab reaches Once; Enter chooses it.
+    browser.evaluate(`document.querySelector('[role="group"][aria-label="Repeat"] button').focus()`)
+    for (let step = 0; step < 4; step++) browser.press('Tab')
+    focusOn('Once')
+    browser.press('Enter')
+    const form = browser.waitForValue(`(() => {
+      const date = document.querySelector('#automation-once-date')
+      const zone = document.querySelector('#automation-once-zone')
+      return date && zone ? { date: date.value, zone: zone.value, overflow: document.documentElement.scrollWidth - window.innerWidth } : null
+    })()`) as { date: string; zone: string; overflow: number }
+    expect(form.date).toMatch(/^\d{4}-\d{2}-\d{2}$/)
+    expect(form.zone).not.toBe('')
+    expect(form.overflow).toBeLessThanOrEqual(0)
+
+    // 11:30 by keys: Tab into Minute selects its text, so typing replaces it. Enter saves.
+    browser.evaluate(`(() => { const hour = document.querySelector('input[aria-label="Hour"]'); hour.focus(); hour.select() })()`)
+    browser.press('1'); browser.press('1')
+    browser.press('Tab')
+    browser.press('3'); browser.press('0')
+    browser.waitForValue(`document.body.textContent.includes('Runs once at 11:30') ? true : null`)
+    browser.screenshot(`${shotsDir}/automations-once-editor-360.png`, { viewport: true })
+    browser.press('Enter')
+    browser.waitForFunction(`location.pathname === '${scoped('/automations')}'`)
+    interface OnceEntry { id: string; name: string; enabled: boolean; schedule?: { type: string; at?: string; timeZone?: string }; archived?: { outcome: string } }
+    const onceListed = async (query = '') =>
+      ((await fetch(`${base}/api/v1/automations${query}`).then((response) => response.json())) as { automations: OnceEntry[] }).automations
+    const created = await pollFor(async () => (await onceListed()).find((item) => item.name === onceName),
+      () => `one-time schedule ${onceName} never appeared in the list`, { timeoutMs: 15_000, intervalMs: 250 })
+    expect(created.enabled).toBe(false)
+    expect(created.schedule).toEqual({ type: 'once', at: `${form.date}T11:30`, timeZone: form.zone })
+
+    // The list shows it paused. Enter on Cancel opens the confirm on Keep; Shift+Tab, Enter cancels.
+    const card = browser.waitForValue(`(() => { const card = ${cardOf}; return card ? card.textContent : null })()`) as string
+    expect(card).toContain('Paused')
+    browser.evaluate(`(${cardOf}).querySelector('[data-action="automation-cancel"]').focus()`)
+    browser.press('Enter')
+    focusOn('Keep')
+    browser.press('Shift+Tab')
+    focusOn('Cancel schedule')
+    browser.press('Enter')
+    const archived = await pollFor(async () => (await onceListed('?archived=only')).find((item) => item.id === created.id),
+      () => 'the cancelled schedule never reached the archive', { timeoutMs: 15_000, intervalMs: 250 })
+    expect(archived.archived?.outcome).toBe('cancelled')
+    browser.waitForValue(`${cardOf} ? null : true`)
+
+    // The Archived filter, by keys, shows the row without actions.
+    browser.evaluate(`[...document.querySelectorAll('button[aria-pressed]')].find((button) => button.textContent === 'Archived').focus()`)
+    browser.press('Enter')
+    const archivedCard = browser.waitForValue(`(() => {
+      const card = ${cardOf}
+      return card && window.innerWidth === 360 ? { text: card.textContent, actions: card.querySelectorAll('button').length, overflow: document.documentElement.scrollWidth - window.innerWidth } : null
+    })()`) as { text: string; actions: number; overflow: number }
+    expect(archivedCard.text).toContain('Cancelled — no task was started.')
+    expect(archivedCard.actions).toBe(0)
+    expect(archivedCard.overflow).toBeLessThanOrEqual(0)
+    browser.screenshot(`${shotsDir}/automations-once-archived-360.png`, { viewport: true })
+    browser.setViewport(1440, 900)
+  }, 180_000)
 })

@@ -12,6 +12,15 @@ async function connect(env: NodeJS.ProcessEnv) {
   return { client, close: async () => { await client.close(); await server.close(); } };
 }
 
+// A trigger line names a situation, never the schema. One exception: research task 77dfb5c4
+// tested the cezar_ask trigger that names its context field (hearsay-tools/cezarion#1458).
+function expectNoSchemaKeyIn(instructions: string, env: NodeJS.ProcessEnv) {
+  for (const { definition } of cezarTools(env)) {
+    const keys = Object.keys(definition.inputSchema.properties ?? {}).filter(key => !(definition.name === 'cezar_ask' && key === 'context'));
+    for (const key of keys) expect(instructions).not.toMatch(new RegExp(`\\b${key}\\b`));
+  }
+}
+
 // #497: tools reach a deferred-tool harness as bare names, so the initialize
 // instructions are the only text an agent sees before it spends a ToolSearch.
 describe('cezar-ci MCP server instructions', () => {
@@ -28,12 +37,7 @@ describe('cezar-ci MCP server instructions', () => {
       expect(lines.some(line => line.startsWith('- cezar_wait_for_ci:'))).toBe(false);
       expect(lines.find(line => line.startsWith('- cezar_wait:'))).toMatch(/waiting on CI for a PR/);
       expect(lines.find(line => line.startsWith('- cezar_ask:'))).toMatch(/user decision or missing input; provide the full draft/);
-      // A trigger line names a situation, never the schema. One exception: research task 77dfb5c4
-      // tested the cezar_ask trigger that names its context field (hearsay-tools/cezarion#1458).
-      for (const { definition } of cezarTools({ CEZ_PREVIEW: '1' })) {
-        const keys = Object.keys(definition.inputSchema.properties ?? {}).filter(key => !(definition.name === 'cezar_ask' && key === 'context'));
-        for (const key of keys) expect(instructions).not.toMatch(new RegExp(`\\b${key}\\b`));
-      }
+      expectNoSchemaKeyIn(instructions!, { CEZ_PREVIEW: '1' });
     } finally { await close(); }
   });
 
@@ -70,6 +74,32 @@ describe('cezar-ci MCP server instructions', () => {
       expect(properties.timeout_seconds.description).toMatch(/kind "worker": 1–1800, default 600/);
       expect(wait.description).toMatch(/worker/);
       expect((await client.listTools()).tools.find(tool => tool.name === 'cezar_cancel_wait')!.description).toMatch(/worker/);
+    } finally { await close(); }
+  });
+
+  // hearsay-tools/cezarion#1465: the one-time schedule tools ride the automations opt-in.
+  it('lists the schedule tools only with CEZ_AUTOMATIONS=1', async () => {
+    const on = await connect({ CEZ_AUTOMATIONS: '1' });
+    try {
+      expect((await on.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
+    } finally { await on.close(); }
+    for (const value of [undefined, '0', 'true']) {
+      const off = await connect(value === undefined ? {} : { CEZ_AUTOMATIONS: value });
+      try {
+        expect((await off.client.listTools()).tools.map(tool => tool.name)).not.toContain('cezar_schedule_task');
+        expect(off.client.getInstructions()).not.toContain('cezar_scheduled_tasks');
+      } finally { await off.close(); }
+    }
+  });
+
+  it('server instructions carry one trigger line per schedule tool', async () => {
+    const env = { CEZ_AUTOMATIONS: '1', CEZ_PREVIEW: '1' };
+    const { client, close } = await connect(env);
+    try {
+      const instructions = client.getInstructions()!;
+      expect(instructions).toContain('- cezar_schedule_task: load when work should start later as a new task (in an hour, tomorrow, next week) instead of keeping this session waiting.');
+      expect(instructions).toContain('- cezar_scheduled_tasks: load when you need to list, change, pause, resume or cancel a one-time scheduled task.');
+      expectNoSchemaKeyIn(instructions, env);
     } finally { await close(); }
   });
 
