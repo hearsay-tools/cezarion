@@ -28,12 +28,16 @@ export const MAX_SKILL_CLOSURE = 24;
 /** A skill name that is safe as one directory name (no separators, never `.`/`..`). */
 export const SAFE_SKILL_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
 
-/** True when `body` names `name` as a skill: hyphenated names by word, plain names only as `/name` or `` `name` ``. */
+/**
+ * True when `body` names `name` as a skill: hyphenated names by word, plain names only as `/name`,
+ * `` `name` `` or inside a matched pair of quotes (`"name"`, `'name'`, `“name”`, `‘name’`), which
+ * is how `call the Skill tool with "grilling"` names one (hearsay-tools/cezarion#1480).
+ */
 export function mentionsSkill(body: string, name: string): boolean {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   const pattern = name.includes('-')
     ? `(?<![A-Za-z0-9_.-])${escaped}(?![A-Za-z0-9_-])`
-    : `(?:/${escaped}|\`${escaped}\`)(?![A-Za-z0-9_-])`;
+    : `(?:/${escaped}|\`${escaped}\`|"${escaped}"|'${escaped}'|\u201c${escaped}\u201d|\u2018${escaped}\u2019)(?![A-Za-z0-9_-])`;
   return new RegExp(pattern).test(body);
 }
 
