@@ -288,7 +288,7 @@ describe('chronological worker conversation', () => {
     })()`, value => value.text.includes('final line of the request'))
     expect(body.height).toBeGreaterThan(900)
     expect(body.text).toContain('Paragraph 44')
-    expect(body.reference).toBe('https://example.com')
+    expect(body.reference).toBe('https://example.com/')
     focusWithKeyboard(browser, `${request} ${connector}`)
     browser.press('Enter')
     waitForFocusedCard(replyCard)
