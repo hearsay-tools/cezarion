@@ -1,10 +1,8 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerWaitRequestSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { repointMockImports } from '../core/mock-patch.testkit.ts';
+import { createDeliveryControl } from '../../scripts/mock-delivery-control.mjs';
 import { DelegationService } from '../delegation/service.ts';
 import { CiToolController } from '../ci-wait/controller.ts';
 import { callCezarWait } from '../ci-wait/client.ts';
@@ -12,34 +10,16 @@ import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { manager, store, root, worker, fixtureUpdateRun, lastWaitOf, until, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
-// Delay only native mock output. The runner, lifecycle, IPC and persistence stay real.
+// Hold only native turn content: the mock admits the hold scenario (ACK and turn start where the
+// wire has them) and sends nothing more until release. The runner, lifecycle, IPC and persistence
+// stay real. The fixture root and environment are reset by `useWorkerWaitFixture`.
 function holdNativeTurn(runner: RunnerId) {
   const adapter = HARNESS_ADAPTERS[runner];
-  const release = join(root, 'release-turn'), received = join(root, 'held-turn');
-  let source = readFileSync(adapter.mockBin, 'utf8').replace(/^#!.*\n/, '');
-  const gate = `await ciRefusalGate();`;
-  if (runner === 'codex' || runner === 'opencode') {
-    const pattern = /setTimeout\(\(\) => \{(\s+const held =)/;
-    expect(source.match(pattern)).not.toBeNull();
-    source = source.replace(pattern, `setTimeout(async () => { ${gate}$1`);
-  } else {
-    const anchor = runner === 'claude' ? "const held = 'parity hold: content after the pause';"
-      : runner === 'pi' ? "sendText(['parity hold: content after the pause']);"
-      : runner === 'omp' ? "assistantText(['parity hold: content after the pause']);"
-      : "if (prompt.includes('mock:hold')) await new Promise(resolve => setTimeout(resolve, 500));";
-    expect(source.split(anchor)).toHaveLength(2);
-    source = source.replace(anchor, runner === 'cursor' ? `if (prompt.includes('mock:hold')) { ${gate} }` : `${gate}\n${anchor}`);
-  }
-  source = repointMockImports(adapter.mockBin, source);
-  const mock = join(root, 'gated-native.mjs');
-  writeFileSync(mock, `#!/usr/bin/env node\nimport * as ciGateFs from 'node:fs';
-async function ciRefusalGate() {
-  ciGateFs.writeFileSync(${JSON.stringify(received)}, '');
-  while (!ciGateFs.existsSync(${JSON.stringify(release)})) await new Promise(resolve => setTimeout(resolve, 5));
-}\n${source}`, { mode: 0o755 });
+  const control = createDeliveryControl(root, { kind: 'hold-response', match: adapter.scenarios.hold! });
   process.env.CEZ_DRY_RUN = '0';
-  process.env[adapter.binEnv] = mock;
-  return { received: () => existsSync(received), release: () => writeFileSync(release, '') };
+  process.env[adapter.binEnv] = adapter.mockBin;
+  process.env.CEZ_MOCK_DELIVERY_CONTROL = control.path;
+  return { received: control.held, release: control.release };
 }
 
 const pr = 'https://github.com/acme/repo/pull/12';
