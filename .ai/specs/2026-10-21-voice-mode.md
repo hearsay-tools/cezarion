@@ -93,13 +93,18 @@ From AGENTS.md (research § F):
 1. ⌘K opens the palette with the cursor in its input (unchanged).
 2. The user types, or dictates with their tool, which pastes the sentence.
 3. The palette's normal results stay instant. When the text reads like a sentence, the palette asks
-   the engine and, if the answer is a command, shows a **Will do** row at the top: one line saying
-   what will happen ("Open *Fix flaky e2e shard* — next finished"). This is a preview only:
+   the engine and shows a **Will do** row at the top: one line saying what will happen ("Open *Fix
+   flaky e2e shard* — next finished"). The row appears at once, reading "Reading…" until the answer
+   arrives, and it is the highlighted row. "Not a command" removes it. This is a preview only:
    **nothing runs because text arrived.**
 4. **Return commits the sentence** and runs the Will do row: navigation runs, and every other
    action becomes a proposal (§ Confirmation). The user presses Return, or Superwhisper presses it
    when the user holds Shift at the end. If Return comes before the decision, the palette waits
    for it, bounded, then acts. If the engine says "not a command", Return does what it does today.
+   **Return does the highlighted row** (hearsay-tools/cezarion#1461): it commits the sentence only
+   while the Will do row is highlighted. A result the user moves to with the arrows or the pointer
+   gets Return instead, an answer that arrives later never takes the highlight back, and a commit
+   whose highlight moves away before its answer arrives does nothing.
 5. **The Return that commits a sentence never confirms a proposal**, even when it arrives before
    the decision. So one dictation gesture can create a proposal but never send it.
 
@@ -158,7 +163,7 @@ with no question named, is **ambiguous**: the palette says "Which question? Name
 ambiguous; on a one-question card it is unclear.
 
 The palette then shows the proposal and the card shows it too: chosen chips highlighted, Other text
-filled, and a prompt "Send these answers? Say *yes, confirmed* or press Return". Confirming sends
+filled, and the palette's confirmation panel (§ Confirmation) names the task and lists the answers. Confirming sends
 through the card's existing path: one combined message in the `header: answer` format, through
 `useAskAnswer` (live message or Continue). "Change question two to …" refills one question. "No" or
 Esc drops the voice-filled answers and leaves the card as it was.
@@ -181,9 +186,11 @@ the card when its words answer a card question, and stays a message otherwise (�
 question card). The message is the words the engine labels as
 message, copied as dictated.
 
-Every proposal row names its target task: `Answer “<task>”: <header>: <value>; …` and
+Every Will do row for a reply names its target task: `Answer “<task>”: <header>: <value>; …` and
 `Tell “<task>”: <text>`. When the palette does not know the task's title, it falls back to
-`Answer <header>: …` and `Tell it: <text>`.
+`Answer <header>: …` and `Tell it: <text>`. The confirmation panel names it the same way, as
+`Answer “<task>”` or `Send to “<task>”`, falling back to `Answer the question` and `Send to this
+task`.
 
 **Screen context.** The palette sends the page it is on (`view`) and the question the open thread
 shows (`askRequestId`: its request id, or `null` for none; omitted while the thread history is still
@@ -198,8 +205,13 @@ A pending proposal stays until the user confirms, cancels, replaces it or leaves
 a **separate input made while the proposal is on screen**: a committed sentence the engine judges
 to be a confirmation ("yes, confirmed"), or Return in the emptied input after the proposal is
 shown. **The confirm field must have focus while the highlighted card is visible**, so a dictation
-tool can paste "yes, confirmed" into it. How the palette and the card share the screen during this
-step is a builder decision (see § Left to the builder).
+tool can paste "yes, confirmed" into it. The palette docks away from the card or composer, and
+while its input is empty it shows only a **confirmation panel** in place of its search results
+(hearsay-tools/cezarion#1461): the heading `Answer “<task>”` or `Send to “<task>”`, the full text
+(one `header: value` line per answer), and the hints `↵ Send` and `Esc Cancel`. The panel is the
+highlighted row, and the input's placeholder reads `Say “yes, confirmed” or press Return to send…`.
+The card and composer keep their highlight and carry no prompt of their own. Typing brings the
+search back, for "yes, confirmed", "no" or a new sentence.
 
 ### When the engine is not sure
 
@@ -304,10 +316,12 @@ resource and no `maxParallel` slot.
 | State | Trigger | Who or what fires it | Behavior at shipped defaults |
 | --- | --- | --- | --- |
 | preview | the text changes | the user types or pastes | the open request is aborted; a new one starts; nothing runs |
-| preview | Return | the user, or the dictation tool's Shift finish | the sentence is committed: the next state is deciding, or the result runs at once when the decision is already there |
+| preview | Return with the Will do row highlighted | the user, or the dictation tool's Shift finish | the sentence is committed: the next state is deciding, or the result runs at once when the decision is already there |
+| preview | Return with another row highlighted | the user | that row runs, as without voice; the palette closes and the preview is reported `abandoned` |
 | preview | Esc or the palette closes | the user | preview ends; `abandoned` is reported |
 | deciding | the committed sentence's answer arrives | the `voice/decide` response | navigation runs (`executed`); other actions become a proposal; "none" falls back to today's Return |
 | deciding | engine error or timeout | a bounded client timeout | one error line; the palette works as today |
+| deciding | the highlight moves to another row before the answer | the user | the answer, when it arrives, acts on nothing; the state is preview again |
 | proposal | "yes, confirmed" or Return in the emptied input, with every question answered | the user, after the proposal is shown | sent through the existing path; proposal ends (`confirmed`) |
 | proposal | a confirmation while a question has no answer | the user | refused with one line naming the question; proposal stays |
 | proposal | "no", "cancel" or Esc | the user | voice-filled values are removed; proposal ends (`cancelled`) |
@@ -381,8 +395,6 @@ and live run updates, by design: it waits for the user and holds nothing.
 
 ## Left to the builder
 
-- How the palette and the highlighted card share the screen during confirmation, within the rule
-  that the confirm field has focus while the card is visible.
 - When the palette counts text as a sentence, and the debounce before asking the engine.
 - How the sentence is cut into per-question parts and where the tell-it text starts, as long as it
   survives dictation slips (a stray leading "and" broke the video demo).

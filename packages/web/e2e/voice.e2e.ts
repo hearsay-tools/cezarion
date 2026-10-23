@@ -21,6 +21,7 @@ const ROW = '[data-slot="voice-row"]'
 const INPUT = '[cmdk-input]'
 const CARD_OPEN = '[data-slot="ask-card"][data-resolved="false"]'
 const FILLED = '[data-voice-filled="true"]'
+const CONFIRM = '[data-slot="voice-confirm"]'
 const PALETTE_SENTENCE_ANSWER = 'answer Vitest to question first and the second answer to question second'
 
 let root: string
@@ -212,9 +213,10 @@ describe('voice mode with the dry-run engine', () => {
     sayInPalette(PALETTE_SENTENCE_ANSWER)
     browser.press('Enter')
     browser.waitForFunction(`${sentences(FILLED)} === 2`)
-    browser.waitForFunction(`document.querySelector('[data-slot="ask-voice-prompt"]') !== null`)
+    // The palette shows only the confirmation panel, highlighted, and leaves the card in view.
+    browser.waitForFunction(`document.querySelector('${CONFIRM}')?.getAttribute('data-selected') === 'true'`)
+    browser.waitForValue<number>(`document.querySelectorAll('[cmdk-item]').length`, (count) => count === 1)
     expectTargetUncovered('[data-slot="ask-card"][data-voice-proposal="true"]', { whole: false })
-    expectTargetUncovered('[data-slot="ask-voice-prompt"]', { whole: true })
 
     browser.fill(INPUT, 'yes, confirmed')
     browser.waitForFunction(`document.querySelector('${ROW}') !== null`)
@@ -282,8 +284,8 @@ describe('voice mode with the dry-run engine', () => {
     sayInPalette('tell it: run the tests again')
     browser.press('Enter')
     browser.waitForFunction(`document.querySelector('[data-slot="composer"][data-voice-proposal="true"]') !== null`)
-    browser.waitForFunction(`document.querySelector('[data-slot="composer-voice-prompt"]') !== null`)
-    expectTargetUncovered('[data-slot="composer-voice-prompt"]', { whole: true })
+    browser.waitForFunction(`document.querySelector('${CONFIRM}')?.textContent.includes('run the tests again') === true`)
+    expectTargetUncovered('[data-slot="composer"][data-voice-proposal="true"]', { whole: false })
 
     browser.fill(INPUT, 'yes, confirmed')
     browser.waitForFunction(`document.querySelector('${ROW}') !== null`)
@@ -291,6 +293,25 @@ describe('voice mode with the dry-run engine', () => {
     browser.waitForFunction(
       `[...document.querySelectorAll('[data-role="user"]')].some((message) => message.textContent.includes('run the tests again'))`,
     )
+  }, 90_000)
+
+  it('Enter opens the result selected below the Will do row (hearsay-tools/cezarion#1461)', async () => {
+    // The sentence is a command on the open task ("say …" tells it) and also matches the other
+    // task's title, so the palette lists both the Will do row and that task.
+    const other = await createTask('Say hello to the voice e2e.')
+    const open = await createTask('Reply to the selection check.')
+    browser.goto(`${base}/p/${project}/tasks/${open}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="composer"] textarea') !== null`)
+
+    sayInPalette('say hello to the voice')
+    browser.waitForFunction(`document.querySelector('${ROW}')?.textContent.includes('hello to the voice') === true`)
+    browser.waitForFunction(`document.querySelector('[cmdk-item][data-value*="${other}"]') !== null`)
+    browser.press('ArrowDown')
+    browser.waitForFunction(`document.querySelector('[cmdk-item][data-value*="${other}"]')?.getAttribute('data-selected') === 'true'`)
+    browser.press('Enter')
+
+    // Had Return committed the sentence, it would have proposed a message and stayed on this task.
+    browser.waitForFunction(`location.pathname.includes('${other}')`)
   }, 90_000)
 
   it('the absence check sees voice work when voice is on', () => {
