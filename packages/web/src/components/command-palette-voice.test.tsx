@@ -304,6 +304,46 @@ describe('palette voice mode', () => {
     expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000002', 'cancelled')
   })
 
+  it('the target cannot change under the confirmation panel: the docked palette stays modal', async () => {
+    // The panel shows the stored proposal while confirming sends what the card holds. They agree
+    // because the docked palette stays modal: the card cannot be edited while the panel shows.
+    let applied: VoiceAnswer[] = []
+    voiceStore.registerAskCard({
+      runId: 'r1',
+      requestId: 'ask_1',
+      headers: ['Library'],
+      read: () => ({ selections: {}, otherAnswers: {} }),
+      apply: (answers) => {
+        applied = answers
+      },
+      restore: () => {
+        applied = []
+      },
+      unanswered: () => (applied.length > 0 ? [] : [0]),
+      send: () => true,
+    })
+    mocks.voiceDecide.mockResolvedValue({
+      action: 'answer',
+      decisionId: '00000000-0000-4000-8000-000000000006',
+      runId: 'r1',
+      askRequestId: 'ask_1',
+      answers: [{ question: 0, kind: 'option', labels: ['Vitest'] }],
+      confidence: 0.9,
+    } satisfies VoiceDecision)
+    renderPalette({ voice: true, runs: [run({ id: 'r1', title: 'Pick a library', status: 'waiting' })], entry: '/tasks/r1' })
+    const input = await openPalette()
+    fireEvent.change(input, { target: { value: 'answer vitest to question one' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(document.querySelector('[data-slot="voice-confirm"]')).not.toBeNull())
+
+    // Radix's modal layer: the page outside the palette takes no pointer input, and focus stays in
+    // the palette. A press outside dismisses it, and closing cancels the proposal (Esc, above).
+    expect(document.body.style.pointerEvents).toBe('none')
+    expect(content()?.getAttribute('data-voice-proposal')).toBe('true')
+    expect(document.activeElement).toBe(input)
+    expect(applied).toEqual([{ question: 0, kind: 'option', labels: ['Vitest'] }])
+  })
+
   it('docks a tell at the top, away from the composer at the bottom', async () => {
     let draft = ''
     voiceStore.registerComposer({
