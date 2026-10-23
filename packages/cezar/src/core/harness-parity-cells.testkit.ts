@@ -644,6 +644,11 @@ const CONTROL_CRITERIA = [
   { id: 'R85', scenario: 'baseline' },
   // hearsay-tools/cezarion#1440: query retry through native wake, fresh and recovered.
   { id: 'R92', scenario: 'baseline' },
+  // hearsay-tools/cezarion#1425: workflows/pr-merge-wait-parity.test.ts keeps green checks
+  // open and delivers one committed merge observation, fresh, continued and recovered.
+  { id: 'R97', scenario: 'baseline' },
+  { id: 'R98', scenario: 'baseline' },
+  { id: 'R99', scenario: 'baseline' },
   { id: 'R28', scenario: 'baseline' },
   { id: 'R29', scenario: 'baseline' },
   { id: 'R30', scenario: 'baseline' },
