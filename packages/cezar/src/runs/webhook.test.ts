@@ -198,9 +198,9 @@ describe('TaskWebhook', () => {
     const run = optedIn();
     store.updateRun(run.id, { status: 'running' });
     const now = Date.now();
-    store.commitWait(run.id, { id: '55555555-5555-4555-8555-555555555555', kind: 'ci', source: 'agent', via: 'cezar_wait',
+    store.commitWait(run.id, { id: '55555555-5555-4555-8555-555555555555', kind: 'pr', source: 'agent', via: 'cezar_wait',
       registeredAt: new Date(now).toISOString(), deadline: new Date(now + 1_800_000).toISOString(), phase: 'open', turnId: 'turn-1',
-      prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40), generation: 'gen-1', timeoutSeconds: 1800 });
+      prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40), generation: 'gen-1', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true });
     store.updateRun(run.id, { status: 'waiting' });
     store.updateRun(run.id, { title: 'still on CI' });
     store.updateRun(run.id, { status: 'running' });

@@ -24,8 +24,8 @@ vi.mock('../ci-wait/resources.ts', async importOriginal => {
   } };
 });
 const pr = 'https://github.com/acme/repo/pull/12';
-const open = (id: string) => store.getRun(id)?.waits?.find(wait => wait.kind === 'ci');
-const last = (id: string) => store.getRun(id)?.lastWaits?.find(wait => wait.kind === 'ci');
+const open = (id: string) => store.getRun(id)?.waits?.find(wait => wait.kind === 'pr');
+const last = (id: string) => store.getRun(id)?.lastWaits?.find(wait => wait.kind === 'pr');
 const active = (id: string) => (manager as unknown as { active: Map<string, { session: AgentSession; ciGeneration: string }> }).active.get(id);
 const disk = (id: string) => readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === id);
 
@@ -54,7 +54,7 @@ describe('native conflict observation durability and wake parity', { timeout: 35
         expect(manager.continueRun(run.id, { text: HARNESS_ADAPTERS[runner].scenarios.baseline! }).ok).toBe(true);
         await until(() => store.getRun(run.id)?.status === 'waiting' && !!active(run.id)?.session.open);
       }
-      const wait = await manager.registerWait(run.id, { kind: 'ci', pr, timeout_seconds: 120 }, 'cezar_wait', active(run.id)!.ciGeneration);
+      const wait = await manager.registerWait(run.id, { kind: 'pr', pr, timeout_seconds: 120 }, 'cezar_wait', active(run.id)!.ciGeneration);
       if (mode === 'recovered') {
         resources.toolless = true; // Missing tool controller must not prevent saved-input delivery.
         await restart();
@@ -129,8 +129,8 @@ describe('native conflict observation durability and wake parity', { timeout: 35
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
       await until(() => store.getRun(run.id)?.status === 'waiting');
       const generation = active(run.id)!.ciGeneration;
-      const wait = await manager.registerWait(run.id, { kind: 'ci', pr, timeout_seconds: 120 }, 'cezar_wait', generation);
-      if (wait.kind !== 'ci') throw new Error('Expected a CI wait');
+      const wait = await manager.registerWait(run.id, { kind: 'pr', pr, timeout_seconds: 120 }, 'cezar_wait', generation);
+      if (wait.kind !== 'pr') throw new Error('Expected a CI wait');
       await until(() => existsSync(log) && readFileSync(log, 'utf8').includes('name,state,link,bucket'));
       expect(manager.cancelWait(run.id, wait.id, generation)).toEqual({ cancelled: true });
       // Cancellation has committed before the external check command can complete.

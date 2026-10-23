@@ -65,7 +65,7 @@ const dryRunCommand = String.raw`
 const args = process.argv.slice(1);
 if (args[1] === 'view') {
  const url = args[2].startsWith('https:') ? args[2] : 'https://' + args[args.indexOf('--repo')+1] + '/pull/' + args[2];
- console.log(JSON.stringify({url, number:Number(url.split('/').pop()), headRefOid:'a'.repeat(40),mergeable:'MERGEABLE',mergeStateStatus:'CLEAN'}));
+ console.log(JSON.stringify({url, number:Number(url.split('/').pop()), headRefOid:'a'.repeat(40),mergeable:'MERGEABLE',mergeStateStatus:'CLEAN',state:'MERGED',mergedAt:'2026-01-01T00:00:00Z',mergeCommit:{oid:'b'.repeat(40)}}));
 } else if (args[0] === 'api') console.log(JSON.stringify({total_count:0,workflow_runs:[]}));
 else if (!args.includes('--watch')) console.log(JSON.stringify([{name:'Dry-run checks',state:'SUCCESS',bucket:'pass',link:''}]));
 `;
@@ -109,6 +109,14 @@ const metadataSchema = z.object({
     .replace(/[\x00-\x1f\x7f-\x9f]/g, '').slice(0, 64)),
 });
 export type GithubPrMetadata = Pick<z.infer<typeof metadataSchema>, 'mergeable' | 'mergeStateStatus'> & { headSha: string };
+// hearsay-tools/cezarion#1425: what a merge wait reads. An unknown state reads as still open.
+const mergeStateSchema = z.object({
+  state: z.string().nullish().transform(value => value === 'MERGED' || value === 'CLOSED' ? value : 'OPEN' as const),
+  mergedAt: z.iso.datetime({ offset: true }).nullish(),
+  mergeCommit: z.object({ oid: z.string().regex(/^[0-9a-f]{40}$/i) }).nullish(),
+});
+export type GithubPrMergeState = GithubPrMetadata & { state: 'OPEN' | 'CLOSED' | 'MERGED'; mergedAt?: string; mergeCommitSha?: string };
+const METADATA_FIELDS = 'url,number,headRefOid,mergeable,mergeStateStatus';
 export const githubChecksSchema = z.array(z.object({ name: z.string(), state: z.string(), link: z.string(), bucket: z.enum(['pass', 'fail', 'pending', 'skipping', 'cancel']) }));
 export type GithubCheck = z.infer<typeof githubChecksSchema>[number];
 const workflowPagesSchema = z.array(z.object({
@@ -145,20 +153,21 @@ export class GithubCiClient {
     catch (error) { if (!signal.aborted && bounded.aborted) throw new CiGithubError('query_timeout', 'GitHub query exceeded ten seconds; check connectivity and retry.', true); throw error; }
     finally { release?.(); }
   }
-  private async readMetadata(pr: string, signal: AbortSignal): Promise<CiPrIdentity & GithubPrMetadata> {
+  private async readMetadata(pr: string, signal: AbortSignal, merge = false): Promise<CiPrIdentity & GithubPrMetadata & { raw: unknown }> {
     if (!ciWaitRequestSchema.safeParse({pr}).success) throw new CiGithubError('invalid_request', 'Provide an HTTPS GitHub pull request URL.');
     const supplied = new URL(pr);
     if (supplied.hostname !== 'github.com') throw new CiGithubError('unsupported_host', 'This GitHub Enterprise host is not recognized by the forge configuration; use github.com or configure supported forge authentication.');
-    const response = await this.query(['pr', 'view', pr, '--json', 'url,number,headRefOid,mergeable,mergeStateStatus'], signal);
+    const response = await this.query(['pr', 'view', pr, '--json', merge ? `${METADATA_FIELDS},state,mergedAt,mergeCommit` : METADATA_FIELDS], signal);
     if (response.code !== 0) throw commandError(response);
     const metadata = parseJson(response.stdout, metadataSchema);
+    const raw: unknown = merge ? JSON.parse(response.stdout) : undefined;
     const validUrl = ciWaitRequestSchema.safeParse({pr:metadata.url});
     if (!validUrl.success) throw new CiGithubError('malformed_data', 'GitHub returned an invalid canonical PR URL.');
     const url = new URL(metadata.url);
     const parts = url.pathname.split('/');
     if (url.hostname !== supplied.hostname || Number(parts[4]) !== metadata.number || metadata.number !== Number(supplied.pathname.split('/')[4])) throw new CiGithubError('malformed_data', 'GitHub returned inconsistent PR identity.');
     return { ...ciPrIdentitySchema.parse({ prUrl: metadata.url, repository: `${parts[1]}/${parts[2]}`, prNumber: metadata.number, headSha: metadata.headRefOid }),
-      mergeable: metadata.mergeable, mergeStateStatus: metadata.mergeStateStatus };
+      mergeable: metadata.mergeable, mergeStateStatus: metadata.mergeStateStatus, raw };
   }
   async resolve(pr: string, signal: AbortSignal): Promise<CiPrIdentity> {
     const { prUrl, repository, prNumber, headSha } = await this.readMetadata(pr, signal);
@@ -167,6 +176,14 @@ export class GithubCiClient {
   async metadata(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubPrMetadata> {
     const { headSha, mergeable, mergeStateStatus } = await this.readMetadata(pr.prUrl, signal);
     return { headSha, mergeable, mergeStateStatus };
+  }
+  /** The PR's state for a merge wait, in one bounded query with its head and mergeability. */
+  async mergeState(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubPrMergeState> {
+    const { headSha, mergeable, mergeStateStatus, raw } = await this.readMetadata(pr.prUrl, signal, true);
+    const parsed = mergeStateSchema.safeParse(raw);
+    if (!parsed.success) throw new CiGithubError('malformed_data', 'GitHub returned malformed structured data; update gh and retry.');
+    const { state, mergedAt, mergeCommit } = parsed.data;
+    return { headSha, mergeable, mergeStateStatus, state, ...(mergedAt ? { mergedAt } : {}), ...(mergeCommit ? { mergeCommitSha: mergeCommit.oid.toLowerCase() } : {}) };
   }
   async head(pr: CiPrIdentity, signal: AbortSignal): Promise<string> { return (await this.metadata(pr, signal)).headSha; }
   async hasActiveRuns(pr: CiPrIdentity, signal: AbortSignal): Promise<boolean> {

@@ -370,7 +370,7 @@ function rootRun(rng: Rng, id: string, workerIds: readonly string[], at: number)
   record.delegation = delegation;
   // A schema-3 field, kept so the finished records stay the bytes the first table measured:
   // store schema 4 reads it into `lastWaits` (`upgradeLegacyWaits`).
-  if (rng.chance(0.1)) (record as RunRecord & { lastCiWait?: CiWait }).lastCiWait = ciWait(rng, at);
+  if (rng.chance(0.1)) (record as RunRecord & { lastCiWait?: ReturnType<typeof ciWait> }).lastCiWait = ciWait(rng, at);
   return record;
 }
 
@@ -411,7 +411,8 @@ function agentInputs(rng: Rng, parentRunId: string, sender: string, recipient: s
   return inputs;
 }
 
-function ciWait(rng: Rng, at: number): CiWait {
+// A schema-3 `ciWait` row predates the PR wait target (hearsay-tools/cezarion#1425).
+function ciWait(rng: Rng, at: number): Omit<CiWait, 'until' | 'wakeOnConflict'> {
   const pr = rng.int(1, 999);
   const headSha = rng.hex(40);
   const id = rng.uuid();

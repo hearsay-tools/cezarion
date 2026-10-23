@@ -181,7 +181,7 @@ const ATTENTION_HELP = [
   '  Read those, not the raw status:',
   '  - `waiting` is attention even when no question is pending (a finished turn parks the task);',
   '    a pending question also shows as `question` on status, its context as `questionContext`.',
-  '  - `waiting` on its own open CI or timer wait (attentionLabel "waiting for CI" or "monitoring")',
+  '  - `waiting` on its own open PR or timer wait (attentionLabel "waiting for CI", "waiting for merge" or "monitoring")',
   '    is neither settled nor attention: the agent is still watching what it registered. attention: running.',
   '  - a task parked on its own workers ("waiting on 2 workers") is attention: none; keep waiting.',
   '  - a task held by a provider usage limit ("usage limit, resumes <ISO time>") is attention: none;',

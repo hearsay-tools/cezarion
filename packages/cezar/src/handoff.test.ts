@@ -330,10 +330,10 @@ describe('handoffInstructions', () => {
       const text = handoffInstructions({ tools: true, followups });
       expect(text).toContain('Lifecycle tools (cezar): End every turn with a cezar tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.');
       expect(text).toContain('When a user decision or missing input is needed, call cezar_ask with the complete decision context and short questions. Put the full draft, findings, evidence and option meanings in context. Cezar shows context as Markdown above the card. Reasoning and rejected calls are hidden. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer. Once the call accepts the context and questions, end the turn and wait for the user.');
-      expect(text).toContain('call cezar_wait with kind "ci" for a pull request\'s checks or kind "timer" to re-check later');
+      expect(text).toContain('call cezar_wait with kind "pr" for a pull request\'s checks or its merge, or kind "timer" to re-check later');
       expect(text).not.toContain('kind "human"');
       // A reply settles the question; only CI waits and timers wait for a result or a cancel.
-      expect(text).toContain("A human message or any resolved wait wakes you. The user's reply answers your question; CI waits and timers stay open until they resolve or you cancel them with cezar_cancel_wait.");
+      expect(text).toContain("A human message or any resolved wait wakes you. The user's reply answers your question; PR waits and timers stay open until they resolve or you cancel them with cezar_cancel_wait.");
       expect(text).toContain('Never call cezar_done while anything is unfinished or unverified.');
       for (const marker of ['CEZ:DONE', 'CEZ:MONITORING', 'CEZ:ASK']) expect(text).not.toContain(marker);
       expect(text).toContain('CEZ:PR=');

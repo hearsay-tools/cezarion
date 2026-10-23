@@ -59,7 +59,7 @@ describe('autonomous nudge priority and lifecycle guards', () => {
         workerIds: [randomUUID()], revisions: [], outcomes: [] }); break;
       case 'ci-wait': store.commitCiWait(id, {
         id: randomUUID(), prUrl: 'https://github.com/acme/repo/pull/1', repository: 'acme/repo', prNumber: 1, headSha: 'a'.repeat(40),
-        generation: 'generation', turnId: 'turn', timeoutSeconds: 60, registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 60_000).toISOString(), phase: 'registered',
+        generation: 'generation', turnId: 'turn', timeoutSeconds: 60, until: 'checks' as const, wakeOnConflict: true, registeredAt: new Date().toISOString(), deadline: new Date(Date.now() + 60_000).toISOString(), phase: 'registered',
       }); break;
       case 'root-finish': store.commitDelegation([{ id, delegation: { role: 'root', permissions: [], receipts: [], finishRequestedAt: new Date().toISOString() } }]); break;
     }
