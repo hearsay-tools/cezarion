@@ -12,30 +12,9 @@ export function isLiveStatus(status: string): boolean {
 }
 
 /**
- * Whether this record says the run is still in motion (#779, Amendment 2 item 5): what puts a
- * row in the `live` column, so `RunStore.open` loads and recovers it, and what keeps a record in
- * the store's memory. True when any of these holds:
- * - its status is queued, running or waiting;
- * - a wait is open or resolved and not yet delivered (`waits`: a CI wait, a timer, a human question or a worker wait), or a
- *   usage-limit resume is pending (`autoResumeAt`);
- * - it waits on its delegation family: a parent on its workers, or a worker on its parent;
- * - an owned worker's destroy has not completed (its retry is pending);
- * - a root's Finish has not settled (`finishRequestedAt`). A waiting root is live anyway; a
- *   cancelled one is a snapshot older controllers left, which only the delegation sweep repairs
- *   (`commitRootFinishCancellation`), and until it does, Continue refuses the root and its workers;
- * - an accepted Stop has not settled yet (`stopping`). `reconcileLoadedRun` rewrites it, so open
- *   loads those rows and the next save persists the normalized record and its summary. A stored
- *   monitoring `activity` was read into the wait list on every read since store schema 4
- *   (`upgradeLegacyWaits`), so no decoded record carries one and phase 4b
- *   (hearsay-tools/cezarion#1236) dropped it from this predicate without a live recompute.
- *
- * Only what the record itself says. The store adds what a record cannot know: the runs a
- * RunManager pins, and their delegation families (see `RunStore`'s held set).
- *
- * The `live` column is computed when a row is written and never recomputed on read. Once a
- * release has shipped `runs.db`, changing this predicate needs a migration (`MIGRATIONS` in
- * run-database.ts) that recomputes `live` for every row; without one, a row keeps the old answer
- * until it is next written, and a run the new predicate calls live is never loaded or recovered.
+ * Persisted live predicate used for loading and recovery. The store separately adds pinned runs
+ * and their families. Any change that alters stored answers requires a migration to recompute
+ * the live column.
  */
 export function isLiveRecord(run: RunRecord): boolean {
   if (LIVE_STATUSES.has(run.status)) return true;
@@ -50,18 +29,8 @@ export function isLiveRecord(run: RunRecord): boolean {
 }
 
 /**
- * The one place a run record becomes a database row (#779): the complete record as `data`, its
- * `toRunSummary()` projection as `summary` (the projection every list route reads, so a summary
- * has exactly one owner — Amendment 2 of the #779 plan), and the columns the store queries
- * without decoding either. Every column is computed here, in the same upsert as `data`, so a row
- * never disagrees with its own columns.
- *
- * `summary` carries everything derivable from the record. The live `usage` sample the list routes
- * attach is not: it describes a process, not the run, and is never persisted.
- *
- * `data` defaults to the record itself. The store passes the record merged with what its stored
- * JSON held beyond the schema (`encodeRawRecord`, raw-record.ts), and the import passes the
- * record's original JSON, so a field this cezar does not know is never lost by a write.
+ * Encode a record, its summary and all query columns for one upsert. data may include preserved
+ * raw fields. Live process usage is attached by readers and is never persisted here.
  */
 export function encodeRunRow(run: RunRecord, data: string = JSON.stringify(run)): RunRowInput {
   const worker = run.delegation?.role === 'worker' ? run.delegation : undefined;

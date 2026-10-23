@@ -19,18 +19,9 @@ import { getRepoInfo } from './git.ts';
 import { ownedByAnotherCockpit, CockpitOwnership } from './cockpit-ownership.ts';
 
 /**
- * Per-project server context (spec 2026-07-20-multi-project-workspace,
- * "Project contexts" + "Boot flow"): one `{store, manager, dataDir,
- * launchKey}` bundle per registered project, built lazily on first access.
- *
- * Building a context mirrors what `serveCommand` does for the boot project
- * today — `RunStore.open(dataDir, { keepLive: true })`, `new RunManager`,
- * orphan-worktree prune + count-based retention when the root is a git repo,
- * then `manager.recover()` — so a project opened from the sidebar gets the
- * exact same crash recovery the boot project gets. A registry entry whose
- * root is gone (`status: 'missing'`) is never instantiated; `context()`
- * throws a typed `ProjectContextError` the route layer maps to 409 (and
- * `unknown-project` to 404).
+ * One store/manager/dataDir/launchKey context per project, built on demand or by post-listen
+ * warm-up. Build includes retention and recovery. Missing roots yield a typed 409; unknown
+ * projects yield 404.
  */
 
 /** The per-project bundle the routes operate on. */

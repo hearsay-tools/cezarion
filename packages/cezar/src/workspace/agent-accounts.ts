@@ -9,50 +9,17 @@ import { agentAccountsPath, workspaceConfigPath } from '../paths.ts';
 import { atomicWriteJsonSync } from './config.ts';
 
 /**
- * `~/.cezar/agent-accounts.json` — the agent-accounts store (spec `2026-07-29-agent-profiles.md`).
- *
- * ## Why its own file
- *
- * These keys started life in `config.json`, where their survival across a cezar downgrade rested
- * on a `.passthrough()` modifier in the OTHER version's schema. That held for the versions in
- * this repo's history — measured, not assumed — but it is not a guarantee this repo can make on
- * behalf of a build someone switches to, and it fails completely in the one case that matters
- * most: any version that cannot parse `config.json` degrades to in-memory defaults, and its next
- * merge-write rewrites the file without whatever it did not understand.
- *
- * A version that has never heard of accounts does not open THIS file, so it cannot lose them.
- * That is the entire argument, and it is why the selections live here too rather than on the
- * project registry.
- *
- * ## House rules (the same ones `config.json` follows, for the same reasons)
- *
- * - every field optional/defaulted with `.catch`, so a bad value degrades per key;
- * - `.passthrough()` at every object level, so a NEWER cezar's keys survive an older one;
- * - per-entry salvage for `accounts` — one hand-edited row never evicts the rest;
- * - atomic tmp+rename at `0600` through the shared writer;
- * - a corrupt or unreadable file degrades to empty with ONE warning, never a boot failure.
- *
- * ## Identity
- *
- * Selections are keyed by the project's REALPATH'D ROOT, not its registry slug. The root is what
- * every consumer already has in hand (`resolveProfileEnvForRoot` takes it), it survives the
- * registry being rebuilt, and it means this file needs no cross-reference into `config.json` at
- * all. An orphaned entry — a project the user deregistered — resolves to nothing and is inert.
+ * Optional agent-account store with root-keyed selections. Preserve unknown keys and salvage
+ * entries; write atomically at 0600. Corruption degrades to empty with a warning. Keep account
+ * removal and selection cleanup in one write.
  */
 
 /** `id` slug rule — the project rule, for the same URL/segment-safety reason. */
 export const AGENT_ACCOUNT_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
 
 /**
- * Reserved id meaning "the dir cezar discovers" (`agentHomePaths()`).
- *
- * NEVER stored and never allocated: the default account is the zero-config answer, so an absent
- * file behaves exactly as cezar always has. Materializing it would turn a discovered fact into
- * state a user has to maintain.
- *
- * Re-exported from the contract rather than spelled again here: the cockpit sends this exact string
- * to mean "the discovered account, whatever the repo is set to", so a second definition is a place
- * for the two sides to drift apart silently.
+ * Reserved discovered-default id, never allocated or stored as an account. Re-export the
+ * contract’s value so requests and storage share one spelling.
  */
 export { DEFAULT_AGENT_ACCOUNT_ID };
 

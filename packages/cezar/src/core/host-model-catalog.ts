@@ -8,15 +8,8 @@ import { discoverOmpModels } from './omp-model-catalog.ts';
 import type { RunnerModelCatalogAdapter } from './runner-model-catalog.ts';
 
 /**
- * The host's model-discovery adapters, one per runner the contract advertises as
- * discoverable (`modelDiscoveryRunnerSchema`, `packages/contract/src/workspace.ts`).
- *
- * The return type is a full `Record` over that enum on purpose: `RunnerModelCatalog` itself
- * takes a `Partial` map, so a runner added to the contract without an adapter here would be
- * silent at runtime — the catalog answers `unavailable` and the picker shows presets again.
- * Typing the map over the enum makes that gap a compile error instead, and
- * `model-discovery-guard.test.ts` pins the other direction (a `RUNNER_IDS` member missing
- * from the enum). AGENT_PROTOCOL.md §10, "Host model discovery".
+ * Host model-discovery adapters, exhaustive over modelDiscoveryRunnerSchema. Keep the map and
+ * RUNNER_IDS guard aligned so a missing adapter fails validation.
  */
 export function hostModelCatalogAdapters(cwd: string): Record<ModelDiscoveryRunner, RunnerModelCatalogAdapter> {
   return {

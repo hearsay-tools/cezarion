@@ -11,11 +11,8 @@ import {
 } from './types.ts';
 
 /**
- * Platform-agnostic step helpers. The star is `sudoStep`: the wizard runs as a
- * normal account and never escalates silently. It prints the exact command,
- * lets the operator run it via `sudo` or run it themselves, then proves the box
- * is actually in the expected state with `verify()` before advancing — and
- * offers a redo when verification fails.
+ * Platform-neutral step helpers. Privileged steps show the exact command, let the operator run
+ * it, then verify state before advancing or offering a retry.
  */
 
 /** Real command runner (Node child_process). */

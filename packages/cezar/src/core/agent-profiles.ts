@@ -2,75 +2,15 @@ import { join } from 'node:path';
 import type { ProviderId } from './provider-auth.ts';
 
 /**
- * Agent profiles — a second (third, …) login of the SAME agent CLI.
- *
- * The binary never changes; only the environment does. `CLAUDE_CONFIG_DIR=~/.claude-klaudiusz claude`
- * is the same Claude Code talking to a different account, because that one variable relocates the
- * agent's ENTIRE per-user home: credentials, settings, projects and — the part that bites —
- * `sessions/`, so a session id only means something inside the dir it was created in.
- *
- * This module is the single maintenance surface for that vendor knowledge, and it is deliberately
- * the SIBLING of `src/agent-config/catalog.ts` rather than part of it: the catalog owns config
- * *file* knowledge (paths, formats, verbatim precedence strings), this owns the *home-relocation*
- * variable. Splitting them also keeps the layering honest — `agent-config/` may import `paths.ts`,
- * while this is imported BY the runners, provider auth and the terminal handoff.
- *
- * Pure by construction: no filesystem, no `process.env`, nothing to stub. Resolution against the
- * workspace config lives in `src/workspace/agent-profiles.ts`.
- *
- * Facts verified against the shipped CLIs on 2026-07-29 (Claude, Codex) and 2026-10-19 (pi, omp,
- * OpenCode).
+ * Pure native account-home mappings. Keep file-catalog knowledge separate from account
+ * relocation. Workspace code resolves saved accounts; runners, auth and terminal handoff consume
+ * this mapping.
  */
 
 /**
- * Which env var moves each agent onto another account.
- *
- * For every provider but omp the variable relocates the agent's whole per-user home and takes a
- * folder; omp's takes a profile NAME (see `profileEnv`). `null` means the agent has no such
- * variable and therefore cannot carry profiles.
- *
- * - **claude** → `CLAUDE_CONFIG_DIR`. Documented; moves credentials, settings, projects, sessions.
- * - **codex** → `CODEX_HOME`. Documented; `auth.json` lives inside it, so identity moves too.
- * - **pi** → `PI_CODING_AGENT_DIR` (pi 1.0.4: `pi --help` "Config directory (default:
- *   ~/.pi/agent)"; source `auth-storage.js`, `package-manager.js`). Moves the whole pi home:
- *   `auth.json`, `mcp-auth.json`, models, settings, trust, sessions, packages, skills,
- *   extensions and `AGENTS.md`. It does NOT move `~/.agents/skills`, which every account still
- *   reads — skills are content, not identity, which is the line this feature already draws.
- *   Tested 2026-10-19 (hearsay-tools/cezarion#1283): after one real turn in a fresh dir it held
- *   `auth.json`, `models-store.json` and `sessions/`, and `~/.pi/agent` was untouched; a session
- *   only resumes inside the dir that created it.
- * - **omp** → `OMP_PROFILE` (omp 18.8.0, same as `--profile`). Selects
- *   `~/<PI_CONFIG_DIR or .omp>/profiles/<name>/`, whose `agent/agent.db` is the credential store
- *   (`auth_credentials`), beside sessions, logs, cache and settings. Tested 2026-10-19: the
- *   profile entry may be a symlink to a folder elsewhere; `~/.omp/natives` stays shared, and
- *   `~/.claude/plugins` and `~/.agents/skills` are still read. Under a profile omp ignores
- *   `PI_CODING_AGENT_DIR`.
- * - **opencode** → nothing usable. Provider credentials live in `$XDG_DATA_HOME/opencode/auth.json`
- *   (plus `mcp-auth.json`); `opencode.db` beside it holds sessions. `OPENCODE_CONFIG_DIR` /
- *   `OPENCODE_CONFIG` move config only and `OPENCODE_DB` moves only the database (OpenCode 1.18.35,
- *   `core/src/global.ts`, `database.ts`; tested 2026-10-19). A config-dir-only profile would swap
- *   settings while still billing the other account — the UI would say "Work" and the run would
- *   not be — so OpenCode is unsupported until one variable moves both. `XDG_DATA_HOME` /
- *   `XDG_CONFIG_HOME` are rejected regardless: they are machine-wide and would relocate every
- *   other XDG-aware tool the agent's own Bash calls touch.
- *
- * ## A host that already exports the variable
- *
- * `agent-env.ts` passes `PI_*` to pi and `OMP_*`/`PI_*` to omp, so a value the cezar process
- * carries reaches every session of that agent. The rule is the one Claude and Codex follow:
- *
- * - the host value moves the DEFAULT account. `agentHomePaths()` discovers it, and the default is
- *   spawned with nothing added, so the child inherits it. For omp that means a host `OMP_PROFILE`
- *   (or `PI_PROFILE` when `OMP_PROFILE` is unset) makes that profile the default, and a host
- *   `PI_CODING_AGENT_DIR` moves the default only while no profile is selected;
- * - a named account's variable is applied after the allowlist (`buildChildEnv`'s `extraEnv`), so
- *   it replaces the host value for that session. omp then rewrites `PI_CODING_AGENT_DIR` to the
- *   profile's own agent dir itself, so a host value cannot leak into a named profile;
- * - the default's own folder cannot also be added as a named account (`conflictingProfile`).
- *
- * A host `PI_CONFIG_DIR` moves omp's root, so it also decides where named omp profiles must live
- * (`ompProfilesDir`). omp reads the root at spawn, so a root that moved after an account was added
- * would select another profile under the same name; `namedAccountUnavailable` refuses that spawn.
+ * Account relocation variables used by cezar. null means named accounts are unsupported. omp
+ * takes a profile name; other supported mappings take a folder. Host values define the default;
+ * named overrides apply last. Refuse a named omp folder outside the current profile root.
  */
 export const PROFILE_ENV_VAR: Record<ProviderId, string | null> = {
   claude: 'CLAUDE_CONFIG_DIR',
@@ -92,20 +32,8 @@ export function supportsProfiles(provider: ProviderId): boolean {
 }
 
 /**
- * The env a spawned agent needs to run under `configDir`, or `{}` for the default profile.
- *
- * `{}` is load-bearing, not a convenience: `buildChildEnv` applies `extraEnv` AFTER its allowlist
- * and so bypasses it entirely, which makes this function the only thing standing between a
- * profile and the child environment. Returning nothing for the zero-config case means the
- * overwhelmingly common path adds literally no variable — the same environment cezar has always
- * spawned. It also means this can never emit one provider's variable for another provider's
- * process: the name comes from `PROFILE_ENV_VAR[provider]` and nowhere else.
- *
- * omp is the one provider whose variable takes a name rather than a folder: an omp account IS an
- * omp profile, so its folder is `<omp root>/profiles/<name>` and this emits `OMP_PROFILE=<name>`.
- * A folder that names no profile — the discovered default's agent dir among them — adds nothing;
- * the accounts store refuses such a folder for a NAMED account, so that branch never turns a named
- * account into the default.
+ * Build a provider-specific account override, or an empty object for the discovered default. omp
+ * takes a profile name parsed from its folder. Never emit another provider’s variable.
  */
 export function profileEnv(provider: ProviderId, configDir: string | null | undefined): Record<string, string> {
   const name = PROFILE_ENV_VAR[provider];

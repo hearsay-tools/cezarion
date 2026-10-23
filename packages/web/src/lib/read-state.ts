@@ -2,14 +2,8 @@ import type { RunSummary } from '@open-mercato/cezar-api-client'
 import { isOwnedWorker } from './task-groups'
 
 /**
- * The read/unread grammar for *done items* (#unread-done-items) — the email-style "which
- * finished tasks still need my eyes?" signal.
- *
- * Deliberately UI-free and a SEPARATE channel from `lib/attention.ts`: the status dot keeps
- * saying done/failed, and unread rides its own trailing violet marker + weight (the approved
- * "Option B"), so "what happened" and "have I seen it" never collapse into one dot. Pure and
- * table-tested (`read-state.test.ts`), like the other `lib/*` deciders, so the sidebar row, the
- * Tasks table, the mobile card and the nav badge all read one answer and can never disagree.
+ * Pure done-item read/unread rule, separate from attention status. Keep it aligned with the
+ * store’s mark-read sweep; receipts must not change the status dot.
  */
 
 /** The terminal statuses a *done item* can be — the sidebar's "Finished" set. */

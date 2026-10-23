@@ -1,18 +1,6 @@
 /**
- * The line for a regular slot (spec 2026-10-17-unified-waits § Slots and the line,
- * hearsay-tools/cezarion#1236).
- *
- * Two classes, in this order:
- *  1. wakes of runs already in progress — a queued wait wake, and every queued continuation
- *     (a scheduler continuation that reopens a closed session, a usage-limit resume, a Continue),
- *     and a queued owned worker (its family's work in progress, joined at its creation), first
- *     come first served by when the wake joined the line;
- *  2. runs that have not started, first come first served in queue order.
- *
- * An entry that cannot leave the line now (no capacity, an account on a usage-limit hold, a
- * cleanup or a pending finish) keeps its place, and the next eligible entry is taken.
- *
- * Returns the queue index of the entry to take, or -1 when none can leave.
+ * Select the oldest eligible wake before unstarted work, then preserve queue order. Ineligible
+ * entries retain their place. Return the selected queue index or -1.
  */
 export function nextLineEntry(
   queue: readonly string[],

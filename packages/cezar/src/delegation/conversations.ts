@@ -1,9 +1,10 @@
 import type { ConversationState, RequestOutcome } from '@open-mercato/cezar-contract';
 import type { RunRecord } from '../runs/store.ts';
 
-/** First durable settlement wins (a reply may later amend deadline expiry in send). Review is readiness, never request completion. `lookup` finds a
- *  sender or recipient by id (the store's `getRun`): a message names its runs, so nothing here
- *  needs every run in the project. */
+/**
+ * First durable request settlement wins, with the defined late-reply timeout amendment handled
+ * by send. Review is not completion. Lookup only the named sender/recipient runs.
+ */
 export function reconcileConversationState(root: RunRecord, lookup: (id: string) => RunRecord | undefined, now: string, isSettled: (run: RunRecord) => boolean): ConversationState | undefined {
   if (root.delegation?.role !== 'root' || !root.delegation.conversation) return undefined;
   const state = root.delegation.conversation;

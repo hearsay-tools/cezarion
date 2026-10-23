@@ -3,33 +3,9 @@ import { resolve, sep } from 'node:path';
 import { DEFAULT_MONITORING_WAKE_MINUTES, loadWorkspaceConfig } from './config.ts';
 
 /**
- * Workspace-wide resource governance (spec 2026-07-20-multi-project-workspace,
- * "Resource governance", step 2.5): `maxParallel` and `memoryLimitMb` protect
- * the *host*, not a repo, so they live in `~/.cezar/config.json` `resources`
- * and are enforced by ONE shared object across every `RunManager` — the boot
- * path constructs a single `WorkspaceSemaphore` and threads it through
- * `ProjectContexts` and the boot manager.
- *
- * Two jobs, deliberately fused because they cache the same file:
- *
- * 1. **Parallel cap** — `busy()` sums every registered manager's held slots;
- *    a manager's `pump()` starts queued runs only while `busy() <
- *    maxParallel()`. Slot accounting stays inside each manager (its
- *    `active + starting − waiting` count), which is what carries the #347
- *    exemption verbatim: a `waiting` run holds no slot, and a message into a
- *    waiting run resumes it immediately even when that momentarily exceeds
- *    the cap — a resume must never wait on other projects' runs.
- * 2. **Cached resource config** — `maxParallel()`/`memoryLimitMb()` answer
- *    from an in-memory snapshot, NOT the file: the memory guard ticks ~every
- *    2 s per manager, and N projects re-reading `~/.cezar/config.json` every
- *    tick is exactly what the spec forbids. `refresh()` is the single cache
- *    hook: boot calls it once, and `PUT /api/workspace/config` (step 2.7)
- *    calls it after a write — it re-reads the file and pumps every manager so
- *    a raised cap starts queued runs without a restart.
- *
- * Per-repo legacy `maxParallel`/`memoryLimitMb` keys are ignored by
- * enforcement post-migration (`loadConfig` still parses them for old files;
- * nothing consults them here).
+ * Shared host resource limits and cached workspace settings for every RunManager. Managers own
+ * slot accounting; refresh reloads limits and pumps all managers. Per-project ceilings are
+ * additional limits.
  */
 
 /** The cached `resources` slice run enforcement consults. */
@@ -244,23 +220,9 @@ export class WorkspaceSemaphore {
   }
 
   /**
-   * A slot came free somewhere in the workspace: pump EVERY manager,
-   * longest-waiting-queue first.
-   *
-   * This is the counterpart to `busy()` being workspace-wide. A `RunManager`
-   * only ever pumps itself, so before this existed a freed slot reached
-   * exactly one project's queue: a run queued in project B stayed `queued`
-   * while project A's runs came and went, until B happened to start or finish
-   * a run of its own (or someone saved the workspace config). Every
-   * slot-freeing transition — a run settling, a session parking at `waiting`
-   * — routes here instead.
-   *
-   * Pumps are awaited in turn so the manager that takes the slot has it
-   * counted (`starting`) before the next manager evaluates capacity — two
-   * managers pumping concurrently could both read the same free slot and
-   * overshoot `maxParallel`. Ordering is best-effort fairness, not a global
-   * FIFO gate: a manager whose head-of-queue can't start (non-git root,
-   * spec 006 degradation) must never block the rest of the workspace.
+   * Pump all managers after capacity is released, prioritizing wakes then oldest queued work.
+   * Await pumps sequentially so each claimed slot is counted before the next check. Ineligible
+   * queues do not block other managers.
    */
   async release(): Promise<void> {
     if (this.broadcasting) {

@@ -32,26 +32,9 @@ import type {
 } from '@open-mercato/cezar-api-client'
 
 /**
- * The app's one connection to `GET /api/workspace/events`, and the two halves of the sync
- * doctrine (spec, "Architecture"): the stream is for immediacy, the REST endpoints are
- * authoritative, and on reconnect or a tab-visibility flip we refetch and reconcile.
- *
- * Immediacy is cache patching, not refetching: a live run emits a `run` event per step transition
- * and per token update, and invalidating the list on each would turn one agent into a request
- * flood against a server sharing this laptop's CPU with it. So events are folded into the cache
- * in place (events.ts), and the authoritative refetch happens exactly when we know we may have
- * missed something: at reconnect, and when a tab (or a phone that slept through an hour of the
- * run) comes back.
- *
- * Multi-project (spec, step 3.1): the one stream carries EVERY project's events, each stamped
- * with its owner. Run lists are patched by stamp (boot → `'default'`, else the registry id) so
- * a sidebar group never receives another project's row (#129). Todos, usage and detail stay
- * active-scope-only — the mounted scope's, or the boot project's when unscoped. One
- * connection for the whole workspace, not one per project: same per-origin socket-budget
- * argument as ever, and a project switch changes the filter, not the socket.
- *
- * Provider authentication is host-wide rather than project-owned. Its dedicated unstamped event
- * bypasses that project filter and patches only an already-fetched workspace cache.
+ * Workspace event integration over the shared live coordinator. Patch caches by project stamp;
+ * reconcile authoritative queries after reconnect or visibility restoration. Scope detail, todos
+ * and usage to their owner.
  */
 
 // Route-relative: `apiPath` adds the version (and would add the project scope, though this

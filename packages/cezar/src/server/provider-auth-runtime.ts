@@ -21,24 +21,9 @@ export type RuntimeAuthProfileResolver = (
 ) => Promise<RuntimeAuthVerificationTarget | null>;
 
 /**
- * Watch a run store for the vendor errors that mean "your credentials were rejected", latch the
- * provider, and — because the latch is only ever as good as the pattern match that raised it —
- * immediately ask the provider's own CLI whether it was true.
- *
- * The self-check is aimed at the account the failing step actually ran under (`step.profileId`,
- * falling back to the run's `agentProfile` for step-less errors): a named account can be rejected
- * while the default login is fine, and verifying the default would clear the latch and let every
- * future run on the broken account fail again. When the recorded account cannot be resolved at
- * all, the incident stays latched — an unverifiable rejection is not a recovered one.
- *
- * `onProviderStatus` carries BOTH edges: the invalidation, and the recovery when the self-check
- * finds the credentials were never gone. One callback rather than two on purpose — every caller
- * wires it to the same `provider-status` fan-out, and the cockpit already folds a `connected` row
- * over a latched one (`applyProviderStatusRow` drops the stale incident id), so recovery needs no
- * new wiring at any of the observer's construction sites. The channel speaks DEFAULT rows (the
- * cockpit's parser drops `profileId`), so a DEFAULT recovery publishes its verified row while a
- * NAMED recovery publishes the provider's current cached default row — the account's own answer
- * stays under the account, and a disconnected default is never shown connected.
+ * Watch runtime authentication errors, latch the provider and verify the failing account through
+ * its native CLI. Bind checks to the observed generation; unresolved accounts and inconclusive
+ * results keep the incident.
  */
 export function watchProviderRuntimeAuthFailures(
   store: RunStore,

@@ -9,17 +9,8 @@ import { excludeFromGit, landsInside, materializeSkillDir, TEAM_SKILL_AGENT_DIRS
 const execFileAsync = promisify(execFile);
 
 /**
- * Install a task's selected skill — and every catalog skill it names, transitively — into the
- * run's OWN task worktree, where the agent's native skill lookup finds it (hearsay-tools/cezarion#1408,
- * port of upstream open-mercato/cezar#1429).
- *
- * A task worktree is a fresh checkout: `npx skills` install dirs are gitignored, global skills
- * live outside it, and team skills live only in cezar's bare-clone cache. So an agent answered
- * "Unknown skill" for the selected skill, and a companion it runs verbatim
- * (`om-auto-review-pr` → `om-code-review`) was found nowhere.
- *
- * The companion set is a heuristic: a skill whose body names another catalog skill pulls it in.
- * It does not promise that every enabled skill is present.
+ * Provision selected skills and heuristically discovered catalog companions in the run’s own
+ * worktree. This is not a promise that every enabled skill is installed.
  */
 
 /** Bound on one closure: a skill that names the whole catalog must not install all of it. */
@@ -251,20 +242,9 @@ function planFor(skill: Skill): Plan {
 }
 
 /**
- * Provision `roots` and their companions into the run's OWN task worktree `worktree` (the caller
- * checks that; a run without one keeps the per-commit cache fallback). Never throws: a skill that
- * cannot be installed still reaches the agent as its system prompt.
- *
- * Every destination is `<agent dir>/skills/<name>` for each of `TEAM_SKILL_AGENT_DIRS`, resolved
- * through every link first; one that lands outside the worktree is skipped. A path cezar has no
- * record of (tracked in the repo, or the user's own) is never touched. Each entry is kept out of
- * git by a cezar-owned `.gitignore` in that skills dir, which affects this worktree only; when the
- * repo has its own `.gitignore` there, it is left alone and the shared `info/exclude` is used.
- *
- * The record lives in `<worktree git dir>/cezar-skills.json`, and is saved after every change:
- * the ignore line goes first, so a crash can leave an unrecorded entry (left alone, as anyone's)
- * but never one git would commit. Each pass also provisions the closures of the roots earlier
- * passes recorded, and removes owned entries that left them or whose source changed.
+ * Provision roots and companions only in an owned task worktree. Preserve unowned paths and
+ * reject escaping destinations. Record owned changes after ignore rules are installed. On
+ * failure retain the system-prompt fallback; never throw.
  */
 export function provisionSkills(
   worktree: string,

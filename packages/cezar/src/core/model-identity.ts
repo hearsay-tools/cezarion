@@ -1,23 +1,6 @@
 /**
- * Canonical provider/model identity (#405). One backend-agnostic shape that
- * every runner shares, so a persisted run records WHICH provider + model
- * actually served it — the identity that cost accounting, session attribution
- * and reproducible replay all key off (see the issue's claim table).
- *
- * Backends name models differently on the wire: `claude` takes bare tier
- * aliases / pinned ids on `--model` (`opus`, `claude-opus-4-8`); `codex` takes
- * `gpt-*-codex` ids verbatim; `opencode` takes a `provider/model` string it
- * re-splits into `{ providerID, modelID }`. This module maps each of those to
- * and from ONE canonical `{ provider, model }`, and is the single
- * parser/normaliser they all use — extracted from opencode's private
- * `parseModel` (#405 item 2) so no runner invents a second one.
- *
- * Extensible by design: a new backend (#387's `pi` runner) adds one entry to
- * `BACKEND_MODEL_MAP` and, if it needs a non-default wire form, one branch in
- * `toBackendModel`. Nothing else changes.
- *
- * Deliberately imports no backend-specific wire type: the canonical identity
- * never leaks a runner's request shape past the `AgentRunner` seam.
+ * Canonical provider/model identity and conversion to backend wire forms. Keep backend-specific
+ * wire types behind the AgentRunner seam.
  */
 import type { AgentBackend } from './agent-runner.ts';
 

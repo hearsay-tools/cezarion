@@ -119,9 +119,8 @@ function startRun(manager: RunManager, workflow: WorkflowDef, definition: Automa
 }
 
 /**
- * Starts the receipt's task and answers its run. A throw after the creating commit still left a
- * task carrying the receipt: that launch succeeded, so it answers that run rather than throwing.
- * A `launch-error` receipt then never has a task behind it, and Retry never starts a second one.
+ * Start a receipted task. If creation committed before a throw, return the run carrying that
+ * receipt so Retry cannot duplicate it.
  */
 function startClaimedRun(store: RunStore, receiptId: string, start: () => { id: string }): { runId: string } {
   try {

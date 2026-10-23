@@ -1,17 +1,8 @@
 import { pageIsActive, subscribePageActivity } from './live-visibility'
 /**
- * The preview pane's own WebSocket (#781, spec 2026-10-02-live-preview-v1, "Transport").
- *
- * A named exception to the one-socket-per-cockpit rule in `ws.ts`: that hub carries small shared
- * topics, while this socket carries one viewer's JPEG frames and input, lives only while a pane
- * is open, and speaks per run. It opens in local and remote mode alike: the hub's remote-mode
- * rule (no browser WebSocket) exists because the hub is session-global, and the preview is a
- * deliberate, user-opened feature. A deployment that cannot carry the upgrade lands on `blocked`.
- *
- * Wire: binary messages are JPEG frames; text messages are `previewServerMessageSchema` JSON.
- * Retry policy (design 5.11 and 5.14): an upgrade that never opens is tried twice and then
- * `blocked`, never retried (the #688 failure mode); once a socket has opened, a drop gets 5
- * reconnects with backoff and then `closed`.
+ * Per-preview viewer socket for JPEG frames and input, separate from the shared topic bus.
+ * Available locally and remotely. Two failed initial upgrades become blocked; an opened
+ * connection gets at most five reconnects before closed.
  */
 
 import {

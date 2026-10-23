@@ -20,15 +20,9 @@ import { fetchJson, refuse, TaskCliError, type Cockpit, type HttpResult } from '
 import { AUTOMATION_SCHEMA_REFERENCE } from './prompts.ts';
 
 /**
- * `cez automation …` (#774, port of upstream #985; design `.ai/specs/2026-10-02-scheduled-automations.md`
- * stage 2) — create and manage automations on the cockpit that runs this task. A thin JSON client
- * over the automations family, on `cez task`'s transport and exit codes (#504): one JSON object
- * per invocation, `schema` excepted.
- *
- * Addressed by `CEZ_COCKPIT_URL` + `CEZ_PROJECT_ID`, which the engine puts in an agent's env while
- * the cockpit listens. Only an explicit `--url`, `--repo` or `CEZ_URL` probes for a cockpit, for a
- * human at a shell. Nothing here starts a server or tells the caller to start one: an agent that
- * cannot reach a cockpit with automations on stops and reports, and never substitutes a cron job.
+ * JSON automation client over the cockpit’s shared service. Use supplied task address/project
+ * identity; probe only for explicit human address options. An unavailable cockpit is an error,
+ * never a reason to create a cron fallback.
  */
 
 export interface AutomationIo {

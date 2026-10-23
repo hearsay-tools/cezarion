@@ -53,23 +53,8 @@ export function branchFor(runId: string): string {
 }
 
 /**
- * Resolve the configured base branch to something `git worktree add` can
- * fork from: the local branch, its remote-tracking ref, or null — the caller
- * falls back to the current branch with a note. Never throws.
- *
- * When BOTH the local branch and `origin/<base>` exist, prefer whichever is up
- * to date. A stale LOCAL base (behind origin, because nothing fetched it into
- * this worktree's repo) is the classic inflated-diff trap: the merge-base every
- * diff is measured from collapses onto the stale tip, so all of the history
- * merged into origin since then counts as the task's own changes — the phantom
- * 142k-line diff. `origin/<base>` is the source of truth for a review base, so
- * only keep the local ref when it is equal to or ahead of origin (unpushed base
- * commits); otherwise use origin.
- *
- * This answers the question once, when the worktree is forked. The local ref
- * goes stale AFTERWARDS too — agents fetch, they never pull — so every diff
- * re-applies the same rule at read time through `freshestBaseRef`
- * (`git-diff-base.ts`). Keep the two in agreement.
+ * Resolve a worktree base without throwing. Prefer local only when it contains origin’s base;
+ * otherwise prefer origin. Keep this rule aligned with freshestBaseRef.
  */
 export async function resolveBaseRef(repoRoot: string, base: string): Promise<string | null> {
   if (!isSafeGitRef(base)) return null;
@@ -132,17 +117,8 @@ function canonicalPath(path: string): string {
 }
 
 /**
- * Establish the task worktree idempotently. Besides the fresh
- * `git worktree add -b` path, recover the two normal restart/deletion cases:
- * reuse an already-registered task worktree, or reattach a surviving task
- * branch after its directory/registration was removed. Existing non-empty
- * unregistered paths are never deleted because they may hold recoverable
- * uncommitted work.
- *
- * Both fresh `-b` paths pass `--no-track` (port of open-mercato/cezar#1318): every
- * diff/base decision passes the resolved ref explicitly, so a task branch needs no
- * upstream, and from an `origin/<name>` base git would otherwise write `branch.*`
- * keys to the repository-wide config, making concurrent starts contend on its lock.
+ * Establish the task worktree idempotently. Reuse registered worktrees or surviving task
+ * branches; never delete a non-empty unregistered path. New branches use --no-track.
  */
 export async function createWorktree(
   repoRoot: string,
@@ -412,28 +388,14 @@ async function removeWorktreeLocked(
 }
 
 /**
- * Why an autosave commit happened. Only `periodic` is gated (behind
- * `CEZ_AUTOSAVE=1`, #471) — the three flushes always run so the task branch
- * ends holding the finished state. The turn-end and run-finalize flushes (and
- * the periodic timer) name the task branch, so they commit only while HEAD is
- * that branch (hearsay-tools/cezarion#1004); `pre-PR` commits on whatever HEAD
- * is. Before this was recorded, all four wrote the bare
- * message `cezar autosave`, so a user who had opted out of the periodic timer
- * still saw `cezar autosave` in `git log` and reasonably concluded the opt-out
- * was broken. Only commit *spacing* (~90 s ⇒ timer) told them apart.
+ * Autosave reason. Only periodic saves are opt-in. Turn-end, finalization and timer saves
+ * require the task branch; pre-PR saves follow current HEAD.
  */
 export type AutosaveReason = 'periodic' | 'turn end' | 'run finalize' | 'pre-PR';
 
 /**
- * What an autosave attempt did. `refused` and `failed` are distinct from
- * `nothing-to-do` because one call site must act on them: the pre-PR flush is
- * the *last* one, so anything other than `committed`/`nothing-to-do` there
- * means the branch leaves the box without the run's final state and the user
- * has to be told (see createDraftPr). A bare boolean could not carry that.
- * `skipped` happens only when the caller names a task branch and HEAD is not
- * on it (hearsay-tools/cezarion#1004); the pre-PR flush never names one. A save
- * that names one is also `refused` while a merge, cherry-pick or revert waits
- * for the agent to conclude it.
+ * Structured autosave outcome. Pre-PR must report refused/failed saves. A task-branch mismatch
+ * skips; an unfinished merge, cherry-pick or revert refuses a guarded save.
  */
 export type AutosaveResult = 'committed' | 'nothing-to-do' | 'refused' | 'failed' | 'skipped';
 
@@ -779,22 +741,8 @@ function unquotePath(path: string): string {
 type IndexGit = (args: string[]) => Promise<GitResult>;
 
 /**
- * Run a read-only diff against a PRIVATE copy of the worktree's index
- * (hearsay-tools/cezarion#1080). `git add -N .` makes untracked files show up,
- * and `git diff` refreshes the index it reads; on the worktree's real index both
- * are writes. The turn-end diff stat runs beside the turn-end autosave, so
- * those writes raced the save's `add -A`/commit for `index.lock`, and kept
- * landing after a blocked save had settled the run with a retained holder —
- * the one state in which nothing else may write the worktree. A copy keeps
- * staged membership (force-added ignored files included), so the output is
- * the same diff; only the side effect is gone. Same technique as
- * `collectChanges` on the main tree and `readOwnedDiff` for workers.
- *
- * The scratch copy lives in the OS tmpdir, or, when that is not writable, next
- * to the real index in the worktree's git dir. Only when neither can be
- * written does this read through the real index, rather than reporting no
- * diff (which would settle reviewable work as `done`): git takes `index.lock`
- * in that same directory, so there it cannot write the real index either.
+ * Read through a private index copy. Try OS temp, then the Git directory; if neither is
+ * writable, retain the real-index fallback. Always remove scratch state.
  */
 async function withPrivateIndex<T>(worktreePath: string, read: (git: IndexGit) => Promise<T>): Promise<T> {
   const real = await git(worktreePath, ['rev-parse', '--path-format=absolute', '--git-path', 'index']);
@@ -823,21 +771,8 @@ async function withPrivateIndex<T>(worktreePath: string, read: (git: IndexGit) =
 }
 
 /**
- * "What did this task change": diff of the worktree (committed + uncommitted
- * + untracked, via `add -N`) against the merge-base with its base branch —
- * so the diff stays *this task's* changes even after the base moves on.
- *
- * Deliberately does NOT take the repointed-HEAD guard that `collectChanges`
- * (#591) and `worktreeShortstat` (#751) resolve through
- * `resolveTaskDiffBase` — this is the whole-branch anchor on purpose, for two
- * reasons. Its text output is `GET /api/v1/runs/:id/diff`, a protected surface
- * (BACKWARD_COMPATIBILITY.md §2), so narrowing it would silently change what
- * every existing consumer reads. And its other caller, `settleSuccess`, asks
- * only "is there anything here to review at all" — over-answering that parks a
- * run at the review gate, which is recoverable, while under-answering would
- * settle a run to `done` with work still in the tree. If a future change wants
- * the narrow answer here, take it from `resolveTaskDiffBase` rather than
- * re-deriving the rule a fourth time.
+ * Whole-branch committed, uncommitted and untracked diff against the merge-base. Preserve this
+ * anchor for the protected text endpoint and conservative settlement checks.
  */
 export async function worktreeDiff(
   worktreePath: string,
@@ -857,13 +792,8 @@ export async function worktreeDiff(
 }
 
 /**
- * `git diff --stat` version of `worktreeDiff` (spec 010 — the variant
- * comparison columns). Same merge-base anchoring, and it stays whole-branch
- * for a reason of its own: variants are sibling cezar worktrees, each on its
- * own `cez/*` branch, and the column exists to compare their *committed* work
- * against one another. Narrowing one variant to its uncommitted tree would
- * make the comparison meaningless rather than more honest. Returns '' on any
- * failure. (The task-diff rule the other surfaces follow: `git-diff-base.ts`.)
+ * Whole-branch diff --stat for variant comparisons. Includes committed work; returns an empty
+ * string on failure.
  */
 export async function worktreeDiffStat(
   worktreePath: string,
@@ -910,20 +840,8 @@ export function parseShortstat(s: string): DiffStat {
 }
 
 /**
- * `git diff --shortstat` of the worktree vs its base (#389) — the numbers
- * behind `RunRecord.diffStat`, which is what the sidebar quick list and the
- * Tasks table show. Same intent-to-add as `worktreeDiff`, but the anchor comes
- * from the shared `resolveTaskDiffBase` rule (`git-diff-base.ts`): pass the
- * run's own `taskBranch` and `runStartedAt`, and a worktree whose HEAD was
- * repointed onto another branch reports what this run did to that branch
- * instead of claiming the branch's whole diff as this task's (#751 — the #591
- * guard, on this surface). The same rule re-resolves a stale local base ref,
- * so the number never counts upstream history the task merely forked from.
- *
- * `repointed: true` rides along on the returned stat exactly when that
- * narrowing happened, so the UI can say why the number is what it is. Null on
- * git failure (the caller notes it, never fails the run); an empty diff is a
- * valid all-zero stat.
+ * Aggregate task diff numbers, using resolveTaskDiffBase with the run’s branch and start time.
+ * Set repointed only when narrowed. Return null on git failure; an empty diff is all zeros.
  */
 export async function worktreeShortstat(
   worktreePath: string,

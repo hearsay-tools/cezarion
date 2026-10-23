@@ -1,13 +1,8 @@
 'use strict';
 
-// Issue intake through Jev, TypeSafe's typed-decision model (#1163). The first
-// call ranks every duplicate candidate from a short excerpt and asks the label
-// questions; when a candidate ranks high enough, a second call re-reads the top
-// three with their full bodies and may reject all of them. This script maps the
-// answers to the intake.json schema that apply-issue-intake.cjs applies, so the
-// applicator stays the only code that mutates an issue. Jev has no tools and can
-// only answer with options we offered, so a duplicate pick is always one of the
-// filtered candidates.
+// Jev ranks prefetched candidates and answers bounded label questions without tools.
+// Recheck top candidates with full bodies when needed. Emit intake.json;
+// apply-issue-intake.cjs remains the mutation boundary.
 
 const fs = require('node:fs');
 const path = require('node:path');
