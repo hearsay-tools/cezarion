@@ -1060,7 +1060,7 @@ describe('ThreadView', () => {
     expect(document.querySelector('[data-slot="plan-mirror"]')).toBeNull()
     expect(document.querySelector('[data-slot="run-header"] [data-slot="workflow-steps"]')).toBeNull()
     const dock = document.querySelector('[data-slot="run-activity-dock"]')!
-    expect(dock.textContent).toContain('Session activity')
+    expect(dock.textContent).toContain('Activity')
     // The status is the same line the header pill reads (hearsay-tools/cezarion#1333).
     expect(dock.textContent).toContain('Running')
     // The workflow row names the workflow and the step the run is on.

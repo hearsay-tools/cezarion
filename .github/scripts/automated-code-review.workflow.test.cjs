@@ -1018,7 +1018,7 @@ test('ci.yml starts the review after verify and owns the required Automated Code
   const named = Object.values(ci.jobs).filter(j => typeof j.name === 'string' && j.name.includes('Automated Code Review'));
   assert.equal(named.length, 1, 'exactly one ci.yml job carries the required check name');
   const result = ci.jobs['review-result'];
-  assert.deepEqual(result.needs, ['verify', 'review']);
+  assert.deepEqual(result.needs, ['verify', 'review', 'queue-admission']);
   assert.deepEqual(result.permissions, {});
   for (const [context, expected] of routing) {
     assert.equal(evaluate(result.if, { github: context }), expected, JSON.stringify(context));
@@ -1028,7 +1028,7 @@ test('ci.yml starts the review after verify and owns the required Automated Code
 
   const [step] = result.steps;
   const run = env => spawnSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', step.run], {
-    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', ...env }, encoding: 'utf8',
+    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', EVENT_NAME: 'pull_request_target', ...env }, encoding: 'utf8',
   });
   assert.equal(run({ VERIFY_RESULT: 'success', REVIEW_RESULT: 'success' }).status, 0);
   for (const reviewResult of ['failure', 'cancelled', 'skipped', '']) {
@@ -1064,7 +1064,7 @@ test('review findings never reach the CI failure sweep as an error cause', async
   const { spawnSync } = require('node:child_process');
   const { causesForStep } = require('./failure-diagnostics.cjs');
   const run = (script, env) => spawnSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', script], {
-    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', ...env }, encoding: 'utf8',
+    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', EVENT_NAME: 'pull_request_target', ...env }, encoding: 'utf8',
   });
   // GitHub renders a ::<level>:: workflow command into the job log as ##[<level>].
   const swept = (result, stepName) => causesForStep({

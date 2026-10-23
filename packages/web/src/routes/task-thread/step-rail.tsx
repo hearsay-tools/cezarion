@@ -107,7 +107,9 @@ function RailIcon({ visual }: { visual: RailVisual }) {
 export function activeStepIndex(steps: ReadonlyArray<Pick<StepState, 'status'>>): number {
   const active = steps.findIndex((step) => railVisual(step.status) === 'active')
   if (active >= 0) return active
-  const pending = steps.findIndex((step) => railVisual(step.status) === 'pending')
+  // `pending` itself, not the pending VISUAL: a skipped step shares the empty circle but never
+  // runs, so it is not the next step (hearsay-tools/cezarion#1478 review).
+  const pending = steps.findIndex((step) => step.status === 'pending')
   if (pending >= 0) return pending
   // `steps.length - 1` would hand an empty list back a -1 that indexes nothing; 0 keeps every
   // caller's `steps[index]` honest (undefined for an empty list, never a silent wrong element).

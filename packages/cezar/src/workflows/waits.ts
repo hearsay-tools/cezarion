@@ -1,4 +1,4 @@
-import type { CezarWaitRequestInput, CiWait, OpenWait, PrWaitEntry, RunRecord, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import type { CezarWaitRequestInput, CiWait, OpenWait, PrWaitEntry, ProcessWaitEntry, RunRecord, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 
 /**
  * Pure helpers over a run's wait list (spec `.ai/specs/2026-10-17-unified-waits.md`, phase 1:
@@ -34,6 +34,13 @@ export function isMonitoringTimer(wait: Wait): boolean {
   return wait.kind === 'timer' && (wait.via === 'monitoring-line' || wait.via === 'schedule-wakeup');
 }
 
+/** A wake the agent arranged for itself rather than an external event: a timer, or a process wait,
+ *  which `sleep 61 & cezar_wait(pid)` would otherwise make a timer in disguise
+ *  (hearsay-tools/cezarion#1446). Both count against the automatic-wake budget. */
+export function chargesBudget(wait: Wait): boolean {
+  return wait.kind === 'timer' || wait.kind === 'process';
+}
+
 /** Cezar's own human wait (`no-wait`, `budget`): it stands in for a wait the agent never registered
  *  and is replaced by the agent's own (hearsay-tools/cezarion#1234), so the agent is never told of
  *  it as one of its waits. */
@@ -57,6 +64,7 @@ function summary(wait: Wait): string {
     return first === undefined ? 'human question' : clip(`human: ${first}`);
   }
   if (wait.kind === 'worker') return clip(`worker wait on ${workerTargetPhrase(wait)}`);
+  if (wait.kind === 'process') return clip(wait.note === undefined ? `process ${wait.pid}` : `process ${wait.pid}: ${wait.note}`);
   return clip(wait.note === undefined ? 'timer' : `timer: ${wait.note}`);
 }
 
@@ -72,12 +80,18 @@ export function openWaitList(waits: readonly Wait[]): OpenWait[] {
  * The open wait a registration repeats, if any. PR: the same PR, target and conflict switch, whatever
  * its timeout (hearsay-tools/cezarion#1425). Timer: the
  * same seconds and note, registered in the same turn (a later turn asking again means a new check).
+ * Process: the same PID, start token and resolved exit file in `context`, whatever its timeout or
+ * note (hearsay-tools/cezarion#1446).
  */
-export function identicalWait(waits: readonly Wait[], request: CezarWaitRequestInput, turnId: string): PrWaitEntry | TimerWaitEntry | undefined {
-  return waits.find((wait): wait is PrWaitEntry | TimerWaitEntry => {
+export function identicalWait(waits: readonly Wait[], request: CezarWaitRequestInput, turnId: string,
+  context: { startToken?: string; exitFile?: string } = {}): PrWaitEntry | TimerWaitEntry | ProcessWaitEntry | undefined {
+  return waits.find((wait): wait is PrWaitEntry | TimerWaitEntry | ProcessWaitEntry => {
     if (wait.phase !== 'open' || request.kind === 'worker') return false; // worker waits: `identicalWorkerWait`
     if (request.kind === 'pr') return wait.kind === 'pr' && normalizePrUrl(wait.prUrl) === normalizePrUrl(request.pr)
       && wait.until === (request.until ?? 'checks') && wait.wakeOnConflict === (request.wake_on_conflict ?? true);
+    if (request.kind === 'process') {
+      return wait.kind === 'process' && wait.pid === request.pid && wait.startToken === context.startToken && wait.exitFile === context.exitFile;
+    }
     return wait.kind === 'timer' && wait.seconds === request.seconds && wait.note === request.note && wait.turnId === turnId;
   });
 }
@@ -115,6 +129,7 @@ export function waitResultText(wait: Wait, { tools, workerStatus = () => 'unavai
   // The user's own message is a human wait's result; this text is never its delivery.
   if (wait.kind === 'human') return `Human wait ${wait.id} ended.`;
   if (wait.kind === 'worker') return workerWaitResultText(wait, workerStatus);
+  if (wait.kind === 'process') return processWaitResultText(wait);
   const fired = `Timer ${wait.id} fired${wait.note === undefined ? '' : `: ${wait.note}`}.`;
   // A session without cezar tools cannot register another wait; it was taught the marker.
   return tools
@@ -139,6 +154,18 @@ function workerWaitResultText(wait: WorkerWaitEntry, workerStatus: (workerId: st
     })))}. Outcomes (summaries abbreviated): ${JSON.stringify(outcomes)}`;
 }
 
+/** A process wait's result (hearsay-tools/cezarion#1446). Only the outcome and an integer exit code
+ *  come from Cezar; the agent reads the command's own output with its tools. */
+function processWaitResultText(wait: ProcessWaitEntry): string {
+  const head = `Process wait ${wait.id} for PID ${wait.pid}${wait.note === undefined ? '' : ` (${wait.note})`}`;
+  const read = "Read the command's output with your own tools.";
+  const result = wait.result;
+  if (result?.outcome === 'exit_file') return `${head}: ${result.exitCode === undefined ? 'exit file present, not an exit code' : `exited with code ${result.exitCode}`}. ${read}`;
+  if (result?.outcome === 'exited') return `${head}: exited, code unknown. ${read}`;
+  if (result?.outcome === 'error') return `${head}: could not be checked (${result.diagnostic ?? 'unknown error'}). Check it with your own tools.`;
+  return `${head}: still running at the deadline. Register another wait if you still need it.`;
+}
+
 function workerTargetPhrase(wait: WorkerWaitEntry): string {
   const n = (wait.requestIds ?? wait.workerIds)?.length ?? 0;
   return wait.requestIds ? `${n} request ${n === 1 ? 'reply' : 'replies'}` : `${n} ${n === 1 ? 'worker' : 'workers'}`;
@@ -146,7 +173,7 @@ function workerTargetPhrase(wait: WorkerWaitEntry): string {
 
 /** The footer a delivered turn ends with: every wait still open, or undefined when none is. The
  *  user's reply settles a question and a question the user saw cannot be cancelled, so cancel is
- *  offered only for CI waits, worker waits and timers (hearsay-tools/cezarion#1234), and only
+ *  offered only for CI, worker and process waits and timers (hearsay-tools/cezarion#1234), and only
  *  when the session has cezar tools (hearsay-tools/cezarion#1270). */
 export function openWaitsFooter(waits: readonly Wait[], { tools }: { tools: boolean } = { tools: true }): string | undefined {
   const open = waits.filter((wait) => wait.phase === 'open' && !isCezarHumanWait(wait));
@@ -156,13 +183,14 @@ export function openWaitsFooter(waits: readonly Wait[], { tools }: { tools: bool
     if (wait.kind === 'human') return `your question ${wait.id} to the user`;
     // Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301).
     if (wait.kind === 'worker') return `worker wait ${wait.id} on ${workerTargetPhrase(wait)}, ${wait.deadline === undefined ? 'no deadline' : `deadline ${wait.deadline}`}`;
+    if (wait.kind === 'process') return `process wait ${wait.id} on PID ${wait.pid}${wait.note === undefined ? '' : ` (${wait.note})`}, deadline ${wait.deadline}`;
     return `timer ${wait.id} at ${wait.deadline}${wait.note === undefined ? '' : ` (${wait.note})`}`;
   });
   const asked = open.some((wait) => wait.kind === 'human');
   const cancellable = open.some((wait) => wait.kind !== 'human');
   if (!tools) return `Still open: ${items.join('; ')}.${asked ? " The user's reply answers it." : ''}`;
   const close = !asked ? 'Call cezar_cancel_wait for any you no longer need.'
-    : cancellable ? "The user's reply answers your question; call cezar_cancel_wait for any CI wait, worker wait or timer you no longer need."
+    : cancellable ? "The user's reply answers your question; call cezar_cancel_wait for any CI wait, worker wait, process wait or timer you no longer need."
     : "The user's reply answers it.";
   return `Still open: ${items.join('; ')}. ${close}`;
 }

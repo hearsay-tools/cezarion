@@ -33,6 +33,7 @@ for (const [name, mutate] of Object.entries({
   stale: s => { s.pull.head.sha = 'b'.repeat(40); },
   closed: s => { s.pull.state = 'closed'; },
   legacy: s => { s.run.event = 'pull_request'; },
+  queue: s => { s.run.event = 'merge_group'; },
   push: s => { s.run.event = 'push'; },
   failed: s => { s.jobs[0].conclusion = 'failure'; },
   cancelled: s => { s.run.conclusion = 'cancelled'; },
