@@ -1083,22 +1083,9 @@ export function createApp(deps: ServerDeps) {
     return applyProviderEnablement(discovered, workspace.disabledProviders);
   };
   /**
-   * The gate: why a run cannot start against `required`, or null when it can.
-   *
-   * VERIFY BEFORE YOU REFUSE. Auth state is served stale-while-revalidate (see
-   * `ProviderAuthService.status`), so a cached "disconnected" may predate a login cezar could not
-   * observe — someone running `claude auth login` in a terminal. Refusing on that would lock a user
-   * out of their own cockpit with no way back but waiting. So a believed-unavailable provider is
-   * re-probed, and only a refusal that survives the fresh answer is returned.
-   *
-   * The cost lands where it belongs: the common path (connected, warm) pays nothing at all, and the
-   * probe is only spawned when cezar is about to say no — a rare, interactive moment. This is also
-   * what lets the cache hold a negative for a minute instead of five seconds, which is what made
-   * every reader of `GET /providers/status` periodically pay for a CLI spawn.
-   *
-   * A runtime auth latch is deliberately NOT escaped by this: `withRuntimeFailures` keeps forcing
-   * the row disconnected until the user acknowledges that exact incident, so the re-probe cannot
-   * talk cezar out of a rejection it actually observed.
+   * Verify cached provider unavailability before refusing a start. Settings-disabled providers
+   * need no probe. Runtime incidents remain authoritative until an explicit retry or matching
+   * native verification clears them.
    */
   const providerActionError = async (
     required: readonly ProviderId[],
@@ -1267,38 +1254,10 @@ export function createApp(deps: ServerDeps) {
   // and SSE carry no body, so this only ever gates the mutating routes.
   app.use('*', bodyLimit({ maxSize: GLOBAL_BODY_LIMIT }));
 
-  // ---- request-origin guard (#426) -----------------------------------------
-  // This server executes agents with shell access — "start a task" ≈ run code
-  // as the user — so "bind 127.0.0.1 + same-origin" is not a perimeter on its
-  // own: any page the user visits can still POST to us (CSRF), and DNS
-  // rebinding can point a foreign domain at loopback and read our responses.
-  // Two zero-config checks close both holes on every /api route EXCEPT
-  // /api/v1/health (the intentional cross-origin discovery endpoint, spec 011 —
-  // it exposes nothing sensitive, see #431):
-  //   1. Host allowlist (loopback deployments only) — a request whose Host is
-  //      not a loopback name did not really originate from this machine. A
-  //      rebound `evil.com` still sends `Host: evil.com`, so this kills DNS
-  //      rebinding for reads AND writes. Skipped in hosted mode (CEZ_REMOTE /
-  //      non-loopback bind), where the reverse proxy forwards the real public
-  //      Host and TLS+auth own the perimeter.
-  //      The match runs through `isLoopbackHostHeader`, whose 127.0.0.0/8 test
-  //      is *anchored* and whose missing-Host answer is "untrusted". Both are
-  //      load-bearing: a `startsWith('127.')` prefix would accept the
-  //      attacker-registrable `127.0.0.1.evil.com`, and such a page is really
-  //      same-origin with us, so checks 2 and 3 would wave it through too.
-  //   2. Same-origin write guard — a cross-origin write always carries an
-  //      `Origin` header (browsers attach it to every non-GET), so its full
-  //      authority (host AND port) must match the served Host. A blind CSRF
-  //      POST from evil.tld is rejected; the cockpit's own same-origin fetch
-  //      (Origin === Host, or no Origin at all for non-browser callers) passes
-  //      untouched. Works in both local and hosted mode because it compares
-  //      Origin to the actual Host.
-  // Scope note: check 2 covers writes only. A cross-origin GET from any site
-  // still reaches the read routes — but its Host is ours, so it is a *forced
-  // request*, not a read: the same-origin policy stops the attacker seeing any
-  // response body (we send CORS headers on /api/v1/health alone), and no GET
-  // handler mutates state. Rebinding, which WOULD make those reads legible, is
-  // what check 1 stops.
+  // Local APIs require a loopback Host, including health. Browser writes require
+  // matching full authority or the verified local dev-proxy case. Health alone is
+  // CORS-readable. Hosted mode delegates Host/auth policy to the deployment;
+  // absent Origin remains valid for native clients. Keep WS trust checks separate.
   const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
   const isHostedMode = () => !resolveCapabilities(process.env, bindHost).localHandoff;
   app.use('/api/*', async (c, next) => {
@@ -1370,17 +1329,8 @@ export function createApp(deps: ServerDeps) {
     return next();
   });
 
-  // The mirrored project-route table (spec "API Contracts → Project-scoped").
-  // Every route below registers ONCE on this sub-app; `createApp` mounts it
-  // twice — under `/api/v1/p/:projectId` (scoped) and under `/api/v1` (bound to
-  // the boot project) — so both spellings share one handler and can never
-  // drift. The resolver middleware binds `c.get('project')`:
-  // no `projectId` param (unscoped mount) → the boot context, byte-identical to
-  // the pre-workspace closures; `default` or the boot project's own id → the
-  // boot context too; anything else → the lazy context map, with
-  // `ProjectContextError` mapped to 404 (unknown) / 409 (missing root).
-  // Named rather than inlined because both mounts share it — one function, so
-  // the two spellings can never disagree about what `default` means.
+  // Register project routes once; mount them under scoped and boot-alias prefixes.
+  // Resolve default and boot ids to the boot context; unknown/missing projects map to 404/409.
   if (deps.projectLookup) {
     deps.projectLookup.resolve = async (raw) => {
       if (raw === undefined || raw === 'default' || raw === (await resolveBootProject())) return bootContext;
@@ -2293,13 +2243,8 @@ export function createApp(deps: ServerDeps) {
     )
 
     /**
-     * Who this account is signed in AS — the pane's "Show details".
-     *
-     * A separate, on-demand route rather than a field on the listing, and that is what makes
-     * "hidden by default" real: an email carried by the listing would already be in the response,
-     * the query cache and devtools, whatever the UI chose to render. `provider-auth.ts` keeps
-     * identity out of ITS boundary on purpose; this is the deliberate, local-only, opt-in
-     * exception — not a widening of that rule. Never logged, never persisted.
+     * Local-only account details, fetched separately on request. Keep identity out of normal
+     * listings, logs and run persistence.
      */
     .get(
       '/workspace/agent-profiles/:id/details',
@@ -3699,19 +3644,9 @@ export function createApp(deps: ServerDeps) {
   };
 
   /**
-   * Every control on one run (any `/runs/:id` request that is not a read) first asks who owns it
-   * (#779, plan step 3): a `serve` and a headless `cez run` can share a project's runs.
-   * - Another live cezar process's run answers `409 { error }`, the shape these routes already
-   *   use for a run that exists but cannot be acted on now. Reads are never refused.
-   * - A run whose owner is proven dead is adopted first — claimed, loaded and settled as
-   *   interrupted, never resumed (`settleOrphanedRun`) — and the control then applies. Otherwise
-   *   Stop on a crashed `cez run` would be a dead end until this cockpit restarted. Stop is the one
-   *   control the adoption carries out itself: its run settles as cancelled, and Stop answers that
-   *   it stopped it (`stoppedOnAdoption`).
-   * - A run this process stopped writing after a conflicting write answers 409 too.
-   *
-   * Registered against explicit paths, like `requireAutomations`: `route()` re-registers it under
-   * the mount prefix, and it gates every family's `/runs/:id` routes registered after it.
+   * Gate every run control by family ownership: refuse foreign or quarantined writers with 409;
+   * adopt proven dead owners without resuming agents. Reads remain available. Stop carries its
+   * cancellation through adoption.
    */
   const requireRunControl = async (c: Context<ProjectApiEnv>, next: Next) => {
     const id = c.req.param('id');
@@ -6366,37 +6301,9 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
 }
 
 /**
- * The WebSocket twin of the `/api/*` request-origin guard (#426), applied
- * before the `/api/v1/ws` handshake. WebSocket is NOT subject to CORS — any web
- * page may open `ws://127.0.0.1:<port>/api/v1/ws` and, unlike a forced HTTP GET,
- * would get to READ what comes back — so this guard is load-bearing:
- *
- *   1. Host allowlist (local mode): a non-loopback Host is a DNS-rebound
- *      request; kill it before the handshake. Same anchored
- *      `isLoopbackHostHeader` rules as the HTTP guard.
- *   2. Origin check: browsers always attach `Origin` to a WS handshake. A
- *      same-authority Origin is the cockpit itself. A LOOPBACK origin with a
- *      loopback Host is also admitted — that is the `npm run dev` Vite proxy
- *      (`changeOrigin` rewrites Host, the browser's `localhost:5173` Origin
- *      survives). Unlike the HTTP write guard we cannot REQUIRE `Sec-Fetch-Site`
- *      here — Safari sends no `Sec-Fetch-*` at all and requiring it would lock
- *      the dev proxy out of it — but we do honor it when it is there: Chromium
- *      does send it on a WS handshake, and page JS cannot forge it (forbidden
- *      header name), so a cross-port attacker page announcing `same-site` is
- *      rejected on the browser that ships it while Safari/Firefox still fall
- *      back to the loopback rule. Best available, not fail-open.
- *      No Origin at all is a non-browser client — same stance as the HTTP guard.
- *
- * The loopback-origin fallback still admits, on a browser that sends no
- * `Sec-Fetch-Site`, a page served from ANOTHER loopback port. That is no longer
- * a caveat the caller must remember: the verdict carries a `trusted` flag, and
- * the hub only lets an UNtrusted connection subscribe to topics a publisher
- * marked `loopbackReadable`. `health` is flagged so (the CORS-open discovery
- * payload, #431); every other topic stays trusted-only by default, so a topic
- * carrying run or repo content is mechanically unreachable from a foreign local
- * page without any per-topic vigilance. A connection is `trusted` when it is
- * provably the cockpit itself: a same-authority Origin, a no-Origin native
- * client, or a dev proxy the browser vouches for via `Sec-Fetch-Site`.
+ * Validate topic-bus upgrades before handshake. Local Host must be loopback. Same-authority or
+ * native clients are trusted; verified dev proxies are trusted. Metadata-free foreign loopback
+ * origins are untrusted and may read only loopbackReadable topics.
  */
 export function verifyWsUpgrade(req: IncomingMessage, bindHost?: string): WsUpgradeVerdict {
   const host = req.headers.host;
@@ -6492,20 +6399,8 @@ export function isSafeSessionId(sessionId: string): boolean {
 }
 
 /**
- * The CLI command that reopens a run's session for interactive take-over, per
- * backend. Legacy/undefined records default to Claude. Returns null when the id
- * is not a shape we recognise — callers degrade (no take-over) rather than
- * splice it into a shell.
- *
- * Validate, don't quote (#431): the session id is the only variable spliced
- * into the command string, and `openInTerminal` runs that string through bash
- * on darwin/linux but through `cmd /K` on win32. cmd.exe does not treat `'` as
- * a quote character, so POSIX-quoting the id handed Windows users a literal
- * `claude --resume '9f8e…'` and Claude answered "no conversation found".
- * Constraining the charset to one with no metacharacter in ANY of those shells
- * needs no quoting at all and fails closed on an unexpected id — a stronger
- * guarantee than escaping, and platform-independent. Ids are UUID/CLI-minted
- * today; this keeps a future source safe.
+ * Build native session takeover commands. Legacy/undefined backend defaults to Claude. Refuse
+ * unrecognized session-id shapes rather than embedding unsafe or platform-misquoted values.
  */
 export function resumeCommand(runner: string | undefined, sessionId: string): string | null {
   if (!isSafeSessionId(sessionId)) return null;

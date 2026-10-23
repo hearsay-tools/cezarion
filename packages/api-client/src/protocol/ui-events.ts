@@ -1,18 +1,6 @@
 /**
- * Normalized agent-event protocol v2 — the api-client's mirror of
- * `src/core/ui-events.ts` (Step 2.4 of the R2 plan).
- *
- * Why a mirror and not an import: the server original lives in the NodeNext
- * program next to the runners that emit these events, and the types are the
- * contract, not the module graph. The mirror is *checked*, not trusted:
- * `src/server/api-types.test.ts` asserts type exactness between every
- * declaration here and the server's own, so a drift fails
- * `npm run typecheck` (the gate) instead of the UI at runtime.
- *
- * Shared permission vocabulary is inferred from the Node-free contract schemas.
- * The field-level contract docs (per-backend mappings, ACP rationale) live on
- * the server original — they are about how runners EMIT these events; this
- * side only consumes them.
+ * Browser-side normalized protocol vocabulary. Keep type exactness with the service through
+ * api-types checks; infer shared permission vocabulary from Node-free contract schemas.
  */
 
 import type { PermissionRequest, PermissionResolution } from '@open-mercato/cezar-contract'

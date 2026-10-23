@@ -2,17 +2,8 @@ import type { RunnerId } from '../core/agent-runner.ts';
 import type { RunRecord } from '../runs/store.ts';
 
 /**
- * The agent account a run's next turn runs on (hearsay-tools/cezarion#1236), which is what a
- * usage-limit hold is keyed by (`runAccountKey`).
- *
- * A mixed-runner workflow can run a step on another backend than the task-level `runner`, so the
- * record's runner is only the answer before any session exists. In order:
- *  1. a live session's own step settings;
- *  2. a queued continuation, resolved as `runContinuation` resolves it: the account of the session it
- *     resumes, else (a Continue that switched backend or account starts a new session) the run's
- *     account when it runs on the run's runner;
- *  3. the step that holds the latest session — what a resume reattaches to;
- *  4. the record's `runner` and `agentProfile`.
+ * Resolve the next turn’s account: live step, queued continuation, latest session-owning step,
+ * then run-level fields. Use this result for usage-limit holds in mixed-runner workflows.
  */
 export function executionAccount(
   run: Pick<RunRecord, 'runner' | 'agentProfile' | 'steps'>,

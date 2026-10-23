@@ -3,34 +3,9 @@ import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 import { expandTilde } from '../paths.ts';
 
 /**
- * `GET /api/fs/browse` — the directory picker behind "Add project → open local
- * folder" (spec 2026-07-20-multi-project-workspace, step 4.1).
- *
- * This is the one route that hands the operator's filesystem shape to a
- * browser, so the whole module is written around a single containment rule and
- * nothing else:
- *
- *   **every path this route answers about — the one browsed and every entry
- *   listed — must be the browse root itself or live strictly beneath it, as
- *   judged AFTER `realpath()` resolved the whole symlink chain.**
- *
- * Why realpath and not `resolve()`: `resolve()` only normalizes `..` textually.
- * It cannot see that `~/tmp/escape` is a symlink to `/etc`, so a lexical-only
- * check happily lists `/etc` under a path that spells as being inside home.
- * The lexical check is still done FIRST (it rejects `..` traversal and absolute
- * escapes without touching the disk at all, and it keeps a probe for
- * "does /root exist" from ever reaching the filesystem), and the realpath check
- * is done SECOND as the authoritative one.
- *
- * Two more deliberate choices:
- *
- * - **Directories only.** Files are never listed, never stat-reported, never
- *   read. The picker's job is to name a folder; a file name is already more of
- *   the operator's disk than the caller needs.
- * - **Errors never echo a resolved path.** `{ error }` says what the caller did
- *   wrong, never where they landed — an error string carrying the realpath of
- *   an escape attempt would be the very leak the containment prevents (same
- *   reasoning as the `/api/health` `repoRoot` trim, #431).
+ * Directory browsing confined to the browse root. Check lexical containment before I/O, then
+ * realpath containment for the requested path and every returned entry. Never disclose escaping
+ * targets.
  */
 
 /** One listed subdirectory. `path` is absolute — this route is same-origin and

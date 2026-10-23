@@ -6,40 +6,9 @@ import type { GithubOwner, GithubOwnersResponse } from '@open-mercato/cezar-cont
 import { GH_CREDENTIAL_HELPER_CONFIG, cleanupCheckout, isValidCheckoutName, parseRepoRef, type CheckoutProgressEvent } from './checkout.ts';
 
 /**
- * `POST /api/v1/projects/create` — the "Add project → New project" flow
- * (spec 2026-10-15-create-new-project; a port of open-mercato/cezar#1402).
- *
- * Three shapes, one target rule (`<projectsDir>/<name>`, shared with the clone
- * flow in `checkout.ts`, including its ownership-token `mkdir` and its guarded
- * cleanup):
- *
- * 1. **Local only** — `git init -b main` plus an empty initial commit, so the
- *    new project has a base commit a task worktree can branch from.
- * 2. **GitHub, empty** — the same local repo, then `gh repo create <owner>/<name>
- *    --private`, an HTTPS `origin`, the `gh` credential helper, and a plain push.
- * 3. **GitHub, from a template** — `gh repo create <owner>/<name> --private
- *    --template <tmpl>`, wait for GitHub to generate it, then clone its HTTPS URL.
- *
- * The repository is ALWAYS private: `--private` is a constant here, not a
- * parameter, and nothing in the request can reach it. An accidental public
- * repository is not undoable; a private one is one click on GitHub.
- *
- * Everything that can be checked is checked BEFORE the folder exists — the
- * name, `gh` being signed in, the GitHub name being free, the template being a
- * live template — so an early failure leaves nothing behind. After that, the
- * one irreversible step is `gh repo create`, and the module is built around it:
- *
- * - Before it, any failure (or a client disconnect) removes the local folder.
- * - From it on, the request's abort signal is no longer passed down: the run
- *   finishes rather than stopping somewhere cezar cannot report on.
- * - If it FAILS, that is not proof nothing was created (a timeout or a dropped
- *   connection can land after GitHub acted), so the name is checked again and
- *   the error says whether the repository exists now.
- * - After it, a failed remote/credential/push step KEEPS the local repo and
- *   answers `ok` with a `warning` naming the repository and the commands that
- *   finish the job — the caller registers it. Deleting the folder would leave a
- *   GitHub name a retry can never take again.
- * - cezar never deletes a GitHub repository.
+ * Create a local Git project, optionally with an explicitly requested private GitHub repository
+ * or template. Share checkout target and cleanup rules. After remote creation, preserve useful
+ * local work and return recovery warnings.
  */
 
 const COMMAND_TIMEOUT_MS = 10 * 60_000;

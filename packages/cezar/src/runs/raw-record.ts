@@ -1,19 +1,7 @@
 /**
- * The raw-record codec (#779, plan step 4): a run row keeps what this cezar cannot read.
- *
- * A record goes through the runtime schema on the way in, and zod drops every key it does not
- * declare. Before this codec, the next write serialized the parsed record, so a field an older or
- * newer cezar stored was lost the first time this one touched the run. Now the parse still
- * produces the unchanged runtime record, and `collectRawExtras` notes, beside it, what the stored
- * JSON held that the parse dropped. A write goes through `encodeRawRecord`: every field the
- * runtime record has is written exactly as it is now, so changes and deletions of known fields
- * apply at every depth, and the dropped fields go back in wherever their parent still exists.
- *
- * Plain JSON only: nothing here knows the run schema. Arrays whose elements all carry a distinct
- * string `id` (steps, queued messages) are matched by that id, so an unknown field follows its
- * step through reordering, insertion and removal. Any other array is matched by position, and
- * only while its known content is exactly what was read; once the runtime changes it, the array is
- * written as the runtime has it and whatever unknown fields it carried are dropped with it.
+ * Preserve JSON fields dropped by runtime parsing. Match array extras by distinct string id, or
+ * by position only while known contents remain unchanged. Known parent deletion removes its
+ * extras.
  */
 
 type JsonObject = Record<string, unknown>;

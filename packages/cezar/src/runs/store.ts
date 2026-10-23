@@ -851,25 +851,9 @@ function refUrlRepo(url: string): string | undefined {
 }
 
 /**
- * May the referenced tier ADOPT this URL as the task's subject? (#945)
- *
- * The tier was text-scoped but never repo-scoped: `PR_URL_RE` matches any
- * `github.com/<owner>/<repo>/pull/N`, so a research task that cites one upstream PR handed the
- * resolver exactly one candidate and it became the task's identity — an `oko` task wearing
- * `supabase/cli#6056`. Nothing compared the URL's repository with the project's own.
- *
- * A foreign URL is adoptable only when the TASK PROMPT corroborates it: the prompt names that
- * `owner/repo`, which a pasted URL does inherently. That is the trust boundary this module already
- * uses elsewhere — the prompt and the agent's own turn text are trusted, scraped tool output is
- * not — and it is what keeps the legitimate cross-repo case working (#819:
- * `om-auto-fix-pr https://github.com/open-mercato/open-mercato/pull/1977` started from cezar).
- *
- * Unknown handle → today's behavior exactly (`AGENTS.md` zero config: degrade, never fail). An
- * unparseable URL is left alone for the same reason — the guard only ever removes an association
- * it can PROVE is foreign.
- *
- * Note what this does not touch: `referenced*Candidates` keep recording every URL as evidence.
- * The fix changes what is *promoted*, never what is *collected* (the #526 rule).
+ * A foreign referenced URL needs task-prompt corroboration of its repository. Unknown project
+ * handles preserve the degraded rule. This check vets the resolved winner, not the candidate
+ * list.
  */
 function isRepoScopedRef(url: string, task: string, handle?: RepoHandle | null): boolean {
   if (!handle) return true;
@@ -958,19 +942,8 @@ function eventTextFragments(event: Record<string, unknown>): string[] {
 }
 
 /**
- * Where a CREATION CLAIM may come from — the trust boundary the created tier was missing.
- *
- * `CREATED_PR_RE` used to be matched against everything an event carried, tool OUTPUT included,
- * so a transcript that merely QUOTES a `gh pr create` line handed the run a PR it never opened.
- * Not hypothetical: the task that fixed the reference chips printed another run's stored events
- * while investigating them, and cezar read `"title": "Ran gh pr create --repo …"` out of that
- * dump and adopted a PR from a DIFFERENT repository as its own — permanently, because the first
- * created URL wins and the real `gh pr create` that followed was never looked at.
- *
- * So the claim must come from the agent's own words, or from the tool title cezar itself renders
- * from the command it saw run. Tool output and tool input are the transcript of the world, not a
- * statement about this run. The URL is still read from the whole event — `gh` prints it in the
- * output — because it is the CLAIM that needs a trustworthy source, not the link.
+ * Creation claims come from agent prose or cezar-rendered tool titles, never arbitrary tool
+ * output/input. The claimed URL may still come from the event’s command result.
  */
 function eventCreationClaimFragments(event: Record<string, unknown>): string[] {
   const fragments: string[] = [];
@@ -1016,21 +989,9 @@ function eventAgentTextFragments(event: Record<string, unknown>): string[] {
 }
 
 /**
- * The referenced tier's resolution rule, shared by the PR and issue janitors:
- * a marker-declared number (spec 2026-07-18-task-ref-markers) owns the answer
- * outright — only a candidate URL ending in that number resolves, and a
- * contradiction clears the chip. Without a declaration: one distinct URL is
- * the subject; among several, prefer the exact URL pasted in the prompt, then
- * the one whose number the task prompt names (and
- * only when exactly one matches); otherwise ambiguous — no chip beats a wrong
- * chip.
- *
- * Whatever that produces is then repo-scoped (#945): a winner from another repository that the
- * prompt does not corroborate is vetoed — see `isRepoScopedRef`. The veto is applied to the
- * RESULT rather than to the candidate list on purpose, so the guard stays strictly subtractive:
- * filtering first would let a project-local candidate win a two-candidate race today's rule calls
- * ambiguous, which is a wider behavior change than the defect warrants. As written this function
- * can only ever lose a value, never gain one.
+ * Resolve declarations and prompt-supported candidates without guessing through ambiguity. Apply
+ * repository scope to the winner only; filtering candidates first could promote an otherwise
+ * ambiguous reference.
  */
 function resolveReferencedRef(
   candidates: string[],
@@ -1072,20 +1033,8 @@ function refUrlNumber(url: string | undefined): number | undefined {
 }
 
 /**
- * The PR declaration the REFERENCED tier is allowed to act on.
- *
- * `CEZ:PR=N` means one of two things depending on when the agent writes it: on the way in it
- * names the PR the task is ABOUT, and once the task has opened a PR of its own the marker
- * contract asks it to re-declare with the new number ("Re-emit with the new number if the subject
- * changes (e.g. you open a PR later in the task)"). A declaration naming the PR this run CREATED
- * is therefore a statement about the CREATED tier, which `pullRequestUrl` already carries — and
- * feeding it to the referenced tier ERASES the about-PR, because `resolveReferencedRef` clears
- * the chip when no candidate matches the declared number (a task on #4326 that opened
- * #5366 dropped from two chips to one the moment it declared #5366).
- *
- * Both tiers stay true instead: the created PR is the created PR, and the reference resolves as
- * if that declaration had not been made — which is exactly what it was before the task opened
- * anything.
+ * Ignore a created-PR declaration when resolving the referenced subject, so a task can retain
+ * both its original subject and its new PR.
  */
 function referencedPrDeclaration(run: RunRecord): number | undefined {
   const declared = run.markerRefs?.pr;
@@ -1262,13 +1211,8 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
 }
 
 /**
- * Settle a live run whose owning process died, when a control adopts it (#779, plan step 3), so
- * that adopting never starts agent work: only Continue may, with the user's own input. A run that
- * never started is cancelled before it began, which Continue restarts as it would after a Stop (the
- * same "untouched" test as `isUntouchedCancelledRun`); any other live run is interrupted, exactly as
- * an open that does not recover settles it, and Continue resumes its last session. With `stop`
- * (the control is Stop, and this is its run) a live run is cancelled instead, as an accepted Stop
- * always reads. Mutates `run`.
+ * Settle an adopted dead owner’s live run without starting work. Untouched runs cancel; started
+ * runs become interrupted. Stop explicitly cancels its target. Mutates run.
  */
 export function settleOrphanedRun(run: RunRecord, opts: { stop?: boolean } = {}): RunRecord {
   if (opts.stop && (run.status === 'queued' || run.status === 'running' || run.status === 'waiting')) run.stopping = true;
@@ -1377,28 +1321,9 @@ function legacyIndexRows(bytes: Buffer): { rows: RunRowInput[]; skipped: number;
 }
 
 /**
- * Import `runs.json` into a database that has never completed an import (#779, plan step 4).
- *
- * Nothing is read while a live cockpit other than this process owns the project
- * (`assertNoLegacyCockpit`): an older cezar still writes `runs.json` then, and the import could
- * not commit. Otherwise the file is read once, through one descriptor, and parsed; it is checked
- * again before anything is written, so a file that moved while it was parsed costs no write. Then
- * ONE transaction writes every record and the completion marker, or nothing:
- * - the marker is checked again once the transaction holds the write lock, so of two processes
- *   importing at once exactly one writes; the other finds the marker and writes nothing;
- * - right before COMMIT it refuses (`LegacyWriterError`) when an older cezar may still be writing
- *   `runs.json` (`assertNoLegacyWriter`) — the check that decides;
- * - only then are the exact bytes kept beside it (`backUpLegacyIndex`: synced, never half-written,
- *   an existing backup trusted only when it holds the same bytes), and the marker records what
- *   the import read: size, sha256 and the backup's name. A refused attempt leaves no backup;
- * - a crash or refusal leaves no marker, so the next open imports again from the start.
- * `runs.json` itself is left as it was, and nothing writes it again: an older cezar keeps reading
- * the history as it stood at the upgrade, and what it writes afterwards is never imported.
- *
- * A record that does not parse is skipped and the rest are imported; an index that does not parse
- * at all imports as an empty history. Either way the import that commits says so once, naming the
- * backup: the bytes survive there and in `runs.json`, which used to be overwritten by the next save
- * instead.
+ * Import legacy rows and the completion marker atomically, once. Recheck live-writer evidence
+ * before commit and preserve exact input bytes in a synced backup. Leave runs.json untouched;
+ * invalid entries are skipped and reported.
  */
 function importLegacyIndex(db: RunDatabase, dataDir: string): void {
   assertNoLegacyCockpit(dataDir);
@@ -1683,33 +1608,9 @@ export function isSweepable(
 }
 
 /**
- * File-backed run store: one row per run in `runs.db` (#779, `./run-database.ts`) plus one
- * append-only NDJSON event file per run. Also the in-process event bus the SSE endpoints
- * subscribe to: emits `('run', RunRecord)` and `('event', { runId, event: RunEvent })`.
- *
- * Only the held set lives in memory (#779, Amendment 2): live runs, the runs a RunManager pins,
- * their delegation families, and runs whose latest write has not settled yet (see `isHeld`).
- * `getRun` answers a held run with the held object, so `commitIndex` still installs into the
- * record a caller holds; any other run is read from `runs.db` as a fresh copy every time (frozen
- * under vitest, so an in-place write throws instead of being lost). Writes to a finished run go
- * through the methods here, which load it, change it and persist the row like any other.
- *
- * Two write paths, both through `writeIndex`:
- * - optimistic: a method changes the held record, marks it dirty and schedules the debounced
- *   save, which writes the dirty rows and deletions only;
- * - durable (`commitIndex`): one transaction with the changed rows AND everything a debounced
- *   save still owes. Only once it commits do the records change in memory, and only then do
- *   subscribers hear about it.
- *
- * Several processes may open one project (`serve` and a headless `cez run`), so a store writes
- * only the delegation families it claims in `run_claims` (#779, plan step 3; `run-claims.ts`).
- * Everything it holds is claimed: open claims the live rows nobody alive owns and leaves the rest
- * alone, and a write to a run not in memory claims its family first, or refuses it while another
- * live process owns it. Claims are released once a family leaves memory, and all of them on
- * `close()`; a crashed owner's are taken over only once it is proven dead. Every write is fenced
- * in its transaction: if a row is not as this store last saw it, or its claim is gone, nothing is
- * written, the evidence goes to `run_conflicts` and this store stops writing that row
- * (`handleConflicts`).
+ * Run rows in runs.db plus append-only NDJSON events and an in-process event bus. Hold live,
+ * pinned, related and unsettled records only. Optimistic writes debounce; durable commits
+ * publish after persistence. Family claims fence every write.
  */
 export class RunStore extends EventEmitter {
   /** The held set: every record this store keeps in memory, by id. */
@@ -2062,12 +1963,9 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * Take over the delegation family of an `orphaned` run for a control: claim it from its dead
-   * owner (or from nobody), then load it and settle its live rows (`settleOrphanedRun`) — never
-   * keep them for recovery to resume, since only Continue may start agent work. With `stop` the
-   * control is Stop: `id` itself is settled as cancelled rather than interrupted. Returns the
-   * family's root id, or undefined when a live owner holds it after all or it is gone. The caller
-   * runs recovery for that family next (`RunManager.adoptOrphanedRun`), which then repairs it.
+   * Claim an orphaned family and settle its live rows before a control acts. Stop cancels its
+   * target. Return the root id, or undefined for a live owner or missing run; adoption never
+   * resumes work.
    */
   adoptFamily(id: string, opts: { stop?: boolean } = {}): string | undefined {
     const family = this.db?.familyOf(id);
@@ -2253,20 +2151,8 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * Tell the store which repository this project IS (#945), so the referenced tier stops adopting
-   * another repo's PR/issue as the task's subject. See `isRepoScopedRef` for the rule.
-   *
-   * A setter rather than an `open()` option because `open()` is synchronous and the handle costs a
-   * `gh` spawn: callers arm this in the background so boot never waits on the network. `null` is a
-   * first-class answer meaning "cannot be known" (no `gh`, no remote, a non-git root) and leaves
-   * the store in exactly its pre-#945 behavior.
-   *
-   * Arming also HEALS records already poisoned by the un-scoped rule, on the `reconcileLoadedRun`
-   * precedent: the evidence is all still on the record (`referenced*Candidates`), only the
-   * conclusion drawn from it was wrong, so re-deciding beats asking for a migration. It rewrites
-   * values, never the format, and is one-directional by construction — see `rescopeRun`. Held
-   * runs are re-checked in memory; of the rest, only rows whose stored summary references another
-   * repository are decoded, and the healed ones are written, so their summaries heal too.
+   * Set discovered repository identity without blocking boot. Recompute conclusions from retained
+   * evidence, including cold records; null retains unknown-handle behavior.
    */
   setRepoHandle(handle: RepoHandle | null): void {
     this.repoHandle = handle;
@@ -3307,14 +3193,9 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * The durable write: `staged` holds the records this operation replaces (`null` deletes one),
-   * in the order subscribers hear about them. The transaction is the durability boundary;
-   * flush() is deliberately best-effort.
-   *
-   * One transaction carries the staged rows and every row a debounced save still owes, so the
-   * database never holds a commit without the optimistic writes made before it. If it fails,
-   * nothing changed anywhere: the held records, the database, the pending dirty rows and the
-   * subscribers all see the store as it was.
+   * Durably replace or delete staged rows together with pending dirty rows. Persist before
+   * changing held objects or notifying subscribers. On failure retain all pending state; flush()
+   * remains best-effort.
    */
   private commitIndex(input: ReadonlyMap<string, RunRecord | null>, source?: CommitSource): void {
     const staged = this.prepareCompletionActions(input);
@@ -3918,29 +3799,11 @@ export class RunStore extends EventEmitter {
     return run;
   }
 
-  /** Bulk mark-read: stamp every currently-unread finished run; returns the count.
-   *  "Unread" here is the same rule the cockpit paints (`isUnread` in read-state.ts),
-   *  clause for clause:
-   *   - a `done` or `failed` run that finished and has not been seen since;
-   *   - cancelled runs are never unread — you stopped them yourself;
-   *   - archived ones never are either, since archiving is a stronger "done with this"
-   *     than reading;
-   *   - and a run waiting out a usage limit is not a done item AT ALL: it is `waiting` with
-   *     its appointment (hearsay-tools/cezarion#1236), so there is no outcome to have missed.
-   *
-   *  Keeping the two rules identical is what makes the returned count the number the
-   *  cockpit's unread badge was showing. The `autoResumeAt` clause is the one that drifted
-   *  (#803): `isUnread` gained it with auto-resume and this sweep did not, so a task waiting
-   *  out a usage limit was uncounted by the badge but stamped read by the sweep — and this
-   *  comment asserted an invariant the code no longer held.
-   *
-   *  This rule lives in two languages of the same repo, which is why it has now drifted
-   *  once. The cockpit cannot import it (`packages/web` does not depend on the service, and
-   *  should not), so a single definition would have to move to `packages/contract` — the one
-   *  package both sides already import. Worth doing; deliberately not done here, because
-   *  widening the contract package's remit from "shapes" to "behavior" is a design change
-   *  that deserves its own review rather than riding along in a bug fix. Until then: EDIT
-   *  BOTH, and the case-table tests on either side are what catch you if you don't. */
+  /**
+   * Stamp unread finished runs in bulk and return the count. Keep the rule aligned with cockpit
+   * isUnread: done/failed, finished since seen, not archived; cancelled and usage-limit waiting
+   * runs are excluded.
+   */
   markAllRead(): number {
     const now = new Date().toISOString();
     let count = 0;
@@ -4913,23 +4776,9 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * A fenced write found rows that changed under this store (#779, plan step 3); the write itself
-   * has already failed with nothing changed, and its caller sees that error.
-   *
-   * A conflict is UNEXPECTED when this store owned the row's family when it last read or wrote it:
-   * a held or pending row, or one read inside a family it claimed. Another writer then broke the
-   * claim. For each such row the original (what this store last saw), local (what it meant to
-   * write, or that it meant to delete it) and current versions go to `run_conflicts` first. Only
-   * once that evidence is stored does the row leave the pending set, so no retry rewrites it; this
-   * store then refuses to write it again, and its held copy is replaced by the current row (or
-   * dropped when deleted) and announced. That refusal lasts as long as this store: the explicit
-   * recovery is a restart, which reads the row as it now stands, and the evidence row stays for a
-   * person to compare. Other pending rows stay pending and the next save writes them.
-   *
-   * If the evidence cannot be stored, nothing changes: the rows stay pending, and the next write
-   * meets the same conflict and tries again. A row read before its family was claimed may simply
-   * have been finished by its previous owner in between: a stale read, not a conflict, so only the
-   * write fails.
+   * Handle a fenced-write conflict. Save unexpected conflict evidence before clearing pending
+   * state or quarantining the row. If evidence persistence fails, retain pending writes. Other
+   * rows remain writable; stale unclaimed reads only fail their write.
    */
   private handleConflicts(error: RunConflictError, staged: ReadonlyMap<string, RunRecord | null>): void {
     const unexpected = error.conflicts.filter((conflict) =>

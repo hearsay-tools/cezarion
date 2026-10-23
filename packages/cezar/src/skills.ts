@@ -53,15 +53,8 @@ export const SKILL_DIRS: Array<{ dir: string; source: Skill['source'] }> = [
   { dir: '.opencode/skills', source: 'agents' },
 ];
 
-/* Deliberately `homedir()` and not `agentHomePaths().claude`: these do NOT follow an
-   agent profile (`src/core/agent-profiles.ts`). A skill is CONTENT — a playbook — not
-   identity, and a second Claude login is not a second skill library. `npx skills`, which
-   writes the `~/.claude/skills` mirror, is profile-unaware for the same reason.
-
-   Resolved at catalog-read time (not module load) so a test can plant fixtures under a
-   temp `$HOME`. #366: empty under vitest — the same `process.env.VITEST` seam #365 uses
-   for the vendor team source — so the unit suite does not merge the developer's real
-   `~/.agents/skills` / `~/.claude/skills`. Production is unchanged. */
+/* Global skill libraries follow the user home, not an agent account. Resolve at read time;
+   under vitest omit real global sources so tests cannot read the developer’s library. */
 function globalSkillDirs(): Array<{ dir: string; source: Skill['source'] }> {
   if (process.env.VITEST) return [];
   return [
@@ -71,13 +64,8 @@ function globalSkillDirs(): Array<{ dir: string; source: Skill['source'] }> {
 }
 
 /**
- * Discover the merged skill catalog for a repo. Name collisions resolve
- * local-first: `.ai/cezar/skills` → `.ai/skills` → `.agents/skills` + agent
- * mirrors → global (`~/.agents/skills`, `~/.claude/skills`) → team repo
- * ("the user's repo is the source of truth"). Missing directories are fine —
- * an empty catalog is fully supported (steps fall back to their plain
- * prompt). Team skills come from the in-process cache; the first call starts
- * a background load so nothing here ever waits on the network.
+ * Discover skills local-first, then global and cached team sources. Missing sources and an
+ * empty catalog are valid; network loading stays in the background.
  *
  * Off-list: `disabledTeamSkills` in this project's `.ai/cezar/ui-state.json` names team skills
  * by source repo and name. They are dropped from the team list before de-duplication, so the
@@ -86,9 +74,7 @@ function globalSkillDirs(): Array<{ dir: string; source: Skill['source'] }> {
  * identical for every consumer — catalog, composer picker, planner, runner — and companion
  * provisioning applies it too.
  *
- * `builtin` skills (#774) come from the caller, which alone knows whether they may be offered
- * (`RunManager.builtinSkills`). They are appended AFTER the sort, lowest precedence: any
- * discovered skill of the same name hides them.
+ * Caller-supplied builtin skills come last; discovered skills of the same name take precedence.
  */
 export async function discoverSkills(repoRoot: string, options: { builtin?: readonly Skill[] } = {}): Promise<Skill[]> {
   const [lists, uiState] = await Promise.all([

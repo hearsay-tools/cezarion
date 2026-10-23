@@ -25,28 +25,9 @@ import {
 } from '@open-mercato/cezar-api-client/contract/preview'
 
 /**
- * The thread reducer: folds one run's ordered event list (`useRunEvents` — v1 lines and
- * protocol-v2 events over one `seq` clock) into renderable turns. Pure and total: called with
- * the full list on every render, it must never throw on a malformed line — one bad event costs
- * one event.
- *
- * Protocol v2 (`item.*`, `turn.*`, `plan.updated`) is primary. v1 lines fill two roles:
- *
- *  - Lines with NO v2 counterpart always render: `user-message` (the engine writes user turns
- *    as v1 only), `note`/`lifecycle` (dim lines), `error` (danger), `image` (persisted URL —
- *    the v2 `image` twin carries raw base64 and never reaches the file), `check-output`
- *    (check steps spawn no agent session, so v1 is all there is).
- *  - Item-ish lines (`text`, `tool-call`, `tool-result`) are a FALLBACK for old runs recorded
- *    before the v2 emitters existed. THE MIXED-FILE DEDUP RULE: within a turn, v2 wins — once
- *    any `item.*` event has been seen in the current turn, v1 item-ish lines are skipped, and
- *    any already-synthesized v1 items in that turn are dropped. This is grounded in the real
- *    wire order: the RunManager persists the mapper's v2 events *before* the v1 twin of the
- *    same content (observed in R2 dry-run transcripts: `item.completed` at seq N, its `text`
- *    twin at seq N+1), so the drop path also covers live streams, and the buffer-then-drop
- *    handles any interleaving the other way.
- *
- * v1-synthesized tool items are honest about what v1 knows: `running` on `tool-call`,
- * `completed` on `tool-result` — v1 has no failure/declined signal, so none is invented.
+ * Pure, total fold of ordered v1 and v2 events into turns. Prefer v2 tools; preserve v1-only
+ * content. Deduplicate message twins by normalized text only when matching v2 prose exists.
+ * Malformed events must not break the transcript.
  */
 
 /** A dim/danger transcript line (v1 note/lifecycle/error, v2 non-fatal session.error). */
@@ -1056,13 +1037,8 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
     }
   }
 
-  // The message half of the mixed-file dedup, resolved once the whole turn is known: a v1
-  // `text` line is a duplicate exactly when some v2 message item in the same turn carries the
-  // same prose — which is the normal claude/codex/opencode path, where the v2 item lands first
-  // and its v1 twin one line later. Comparison is on marker-stripped, trimmed text because the
-  // two arrive differently normalized: the server strips `CEZ:` markers from v1 `text` before
-  // persisting, while v2 items carry the raw text and are stripped below at render time.
-  // Anything left unmatched is prose that exists ONLY in v1 — it renders rather than vanishing.
+  // Deduplicate v1 prose only when this turn contains a matching v2 message.
+  // Compare marker-stripped, trimmed text; unmatched v1-only prose must remain visible.
   for (const draft of turns) {
     if (!draft.v2Items) continue
     const v2Texts = new Set<string>()

@@ -312,11 +312,7 @@ export function parseOwnerName(nameWithOwner: string): { owner: string; name: st
   return owner && name && rest.length === 0 ? { owner, name } : null;
 }
 
-// ---- the paged open list (hearsay-tools/cezarion#1183) ----------------------
-// One GraphQL request per connection per page, both connections and the viewer in parallel.
-// Comment counts are deliberately absent: they were about 0.4 s of a 50-row page on a real repo,
-// so rows ship `comments: 0` with `commentsDeferred` and the counts route hydrates them after
-// paint. `body` stays (deprecated, still sent) — it measured no cost at all.
+// Paged open lists defer comment counts; hydrate them through the counts route after paint.
 
 /** GitHub GraphQL rejects `first` above 100 (EXCESSIVE_PAGINATION); larger limits walk pages. */
 export const GH_GRAPHQL_PAGE_MAX = 100;
@@ -654,14 +650,7 @@ function firstLine(s: string): string {
   return s.split('\n').find((l) => l.trim().length > 0)?.trim() ?? 'gh failed';
 }
 
-// ---- search across states (#730) -------------------------------------------
-// `fetchGithub` above lists the OPEN set only (`gh issue/pr list` defaults to `--state open`),
-// and the tab's search is an in-memory filter over exactly that payload — so a closed or merged
-// item is not "past the window", it was never fetched at all and no amount of scrolling reaches
-// it. This tier asks GitHub instead of re-filtering what we already hold. It is deliberately a
-// SECOND, on-demand path rather than widening the list to `--state all`: the list is the tab's
-// hot path, and making every load pay for hundreds of closed rows to serve an occasional lookup
-// would trade a search bug for a performance one.
+// On-demand cross-state search stays separate from the hot open list.
 
 /** Hits per search. `gh search`'s own default is 30; 50 matches the page size the incremental-
  *  loading spec settled on and keeps one search to a single `gh` round-trip. */
@@ -803,22 +792,8 @@ export async function viewGithubItem(
 }
 
 /**
- * Find issues/PRs in ANY state (#730).
- *
- * Two query shapes, because they want different GitHub calls:
- *  - **A bare number** (`4507`, `#4507`) is a lookup, not a search: `gh {pr,issue} view <n>` is
- *    one cheap, state-agnostic call that finds a PR merged two years ago as readily as one opened
- *    today. GitHub's search index cannot be relied on to surface an exact number at all.
- *  - **Anything else** is a text search: `gh search {prs,issues} <query> --repo owner/name`, with
- *    `--state` deliberately OMITTED — the flag only accepts `open|closed`, and leaving it off is
- *    what searches every state.
- *
- * A numeric query that resolves to nothing (wrong repo, deleted, or simply a number the user meant
- * as text) falls through to the text path rather than reporting "not found" — `4507` should still
- * find a PR whose title contains it.
- *
- * Never throws: every failure lands on `{available: false, reason}`, the same quiet degrade the
- * rest of the tab uses. Exported for unit tests.
+ * Search any state: exact numbers try a direct lookup, then text fallback; text search omits
+ * state restriction. Return availability and a reason on failure instead of throwing.
  */
 export async function searchGithubItems(
   repoRoot: string,
@@ -1606,12 +1581,7 @@ export async function fetchCommitChecks(
   return out;
 }
 
-// ---- lazy PR checks hydration (#664) ---------------------------------------
-// The list call (`fetchGithub`) no longer fetches `statusCheckRollup` — the dominant cost on
-// repos with many open PRs — so the tab paints fast even at a high limit. Each PR row's checks
-// glyph is hydrated afterwards, on demand, for the on-screen rows only, through this batched
-// query. Mirrors `fetchCommentCounts` / `fetchCommitChecks`: aliased so N PRs cost one
-// subprocess, and any failure degrades to absent glyphs rather than failing the tab.
+// Hydrate checks on demand in a batched query; failure leaves absent glyphs without failing the list.
 
 /** The single enum a PR row's checks glyph renders (never `undefined` on the wire). */
 export type ChecksGlyph = 'passing' | 'failing' | 'pending' | null;
@@ -2014,30 +1984,8 @@ const ghRefStatusIssueSchema = z.object({ state: z.string(), stateReason: z.stri
 const ghRefStatusSchema = z.record(z.string(), z.unknown());
 
 /**
- * One alias per NUMBER, asking `issueOrPullRequest` rather than `pullRequest`/`issue`.
- *
- * Issues and pull requests share one numbering space in a repository, so a number is exactly one
- * of the two and asking which is a question the forge can answer — where asking `issue(number:)`
- * about a pull request is a question with no answer, and GitHub says so with a NOT_FOUND *error*
- * rather than a null. That mattered far more than it looks: `gh api graphql` exits non-zero the
- * moment a response carries an `errors` array, so one mis-guessed kind used to fail the whole
- * batch and report every reference in it as "not found" (see `refStatusGraphql`).
- *
- * It also fixes the reference whose kind the cockpit guessed wrong — `taskReferences` infers it
- * from which field carried the number, and a bare `#774` can land in either — because the answer
- * carries `__typename` and is filed under what the number REALLY is.
- *
- * `committedDate`, the head commit's `parents.totalCount` (`first: 0` — the COUNT is the whole
- * question, so no parent is fetched) and the last CHANGES_REQUESTED review's `submittedAt` cost
- * nothing extra, riding the same node, and are what let the precedence tell a review the author has
- * already responded to from one still about the code on screen. The last `ReviewRequestedEvent` is
- * asked for the same reason: `reviewRequests` says only THAT someone is on the hook, never since
- * when, and the difference between a request made before the review and one made after it is the
- * difference between a reviewer who has not looked yet and an author who has answered.
- *
- * `mergeable` rides it too, and is the reason the batch can answer "this one conflicts" without
- * the per-PR probe `prMergeState` runs for the merge box. It is NOT folded into the status: see
- * `conflicts` in the contract for why the two stay separate axes.
+ * Query issueOrPullRequest once per number and use __typename for the actual kind. Include
+ * branch-work and review timestamps for freshness decisions.
  */
 function refStatusQuery(numbers: number[]): string {
   const aliases = numbers
@@ -2050,53 +1998,9 @@ function refStatusQuery(numbers: number[]): string {
 }
 
 /**
- * The one place a PR's signals collapse into a single word.
- *
- * The question the chip answers is "what is this waiting on RIGHT NOW", so the ranking is by
- * freshness of the signal, not by how heavy a blocker it is:
- *
- * Read the ranking as **whose move is it**, which is the question a table is scanned for:
- *
- *  1. `merged` / `closed` — nobody's. Terminal, whatever checks or reviews say.
- *  2. `draft` — the author's, and they have said so themselves.
- *  3. `checks-pending` — the machine's. CI running means a commit was JUST pushed, the newest
- *     thing that has happened to this PR, so it outranks a requested change unconditionally.
- *  4. `changes-requested` — the AUTHOR's, and only while that is still true: the review must be
- *     about the code that is there now, with no re-review already asked for.
- *  5. `checks-failing` — the author's again. A reviewer cannot approve a red PR anyway.
- *  6. `review-required` — the REVIEWER's: they have been asked, or the author has answered and
- *     the merge is now blocked on someone coming back to look.
- *  7. `ready` — open, not a draft, nothing failing, nothing running, nobody waited on.
- *
- * The subtle one is (4) → (6), and it is not a preference but a data finding. `reviewDecision`
- * stays `CHANGES_REQUESTED` after the author has responded — GitHub does not clear it until a
- * reviewer submits again — so on its own it points at the author forever. Two signals say the ball
- * has moved back:
- *
- *  - **a review request made AFTER the review**, which is the author clicking re-request.
- *    Authoritative, and observed live alongside a stale `CHANGES_REQUESTED` and an EMPTY
- *    `latestReviews` — the case that has no other tell.
- *  - **a non-merge commit newer than the review**, the fallback for an author who pushed without
- *    clicking anything. Merges are excluded because GitHub's "Update branch" button writes one,
- *    dated now, that answers nothing — the reflexive click on a stale PR must not clear a
- *    rejection.
- *
- * The "after" in the first one is load-bearing, and its absence was a reported bug. A request that
- * PREDATES the review is a reviewer who has not looked yet, and on a PR where several people were
- * asked and one of them rejected it the others stay listed forever — so a bare
- * `reviewRequests.totalCount > 0` reads a live "changes requested" as answered and hides it behind
- * "waiting for review" (observed live: three reviewers asked at 10:28, changes requested
- * the next day, one reviewer still pending).
- *
- * Either way the words change from "you owe edits" to "they owe a look", and so does the colour:
- * danger is the author's move, info is the reviewer's.
- *
- * Both timestamps are optional and their ABSENCE is conservative: with no dates to compare and no
- * re-request, a review counts as current, and the chip keeps pointing at the author.
- *
- * `reviewDecision` is null on a repo with no review policy, which is exactly why `ready` is not
- * spelled "approved": on such a repo a green PR IS ready, and no approval will ever arrive — but a
- * requested reviewer still moves it to `review-required`, because someone was explicitly asked.
+ * Derive whose action is pending: terminal, draft, pending checks, current requested changes,
+ * failing checks, review, then ready. Use dated review/work evidence; mergeability remains a
+ * separate axis.
  */
 export function derivePrReferenceStatus(pr: {
   state: string;
@@ -2367,19 +2271,8 @@ export function __seedRefStatusCacheForTests(
 }
 
 /**
- * Forget what we knew about one reference, so the next read asks GitHub again.
- *
- * Called where cezar itself CHANGES a pull request — it merges one, it opens one — because those
- * are the only forge changes this process can know about without asking. Everything else has to
- * be polled (GitHub cannot push to a cockpit with no public endpoint), but waiting out a TTL to
- * notice our own merge is a self-inflicted staleness: for up to a minute every chip would keep
- * showing the pre-merge status of a pull request the user watched this server merge.
- *
- * Deleting rather than overwriting with a guessed `merged`: the forge is the authority on what a
- * reference is, and a mutation that reports success is still not the same as having read the
- * result. The next reader pays one query and gets the truth — after which the answer is `merged`,
- * `recheckAfterMs` goes null, and the cockpit stops polling that batch entirely. Invalidating here
- * therefore REDUCES long-run traffic rather than adding to it.
+ * Invalidate one reference after a known mutation. Let the next forge read establish status
+ * rather than caching a guessed result.
  */
 export function forgetRefStatus(repoRoot: string, number: number): void {
   refStatusCache.delete(refStatusKey(repoRoot, number));
@@ -2501,22 +2394,8 @@ const MERGEABILITY_UNKNOWN_WINDOW_MS = 60_000;
 const REF_STATUS_RETRY_MS = 5 * 60_000;
 
 /**
- * GraphQL through `gh`, tolerating a PARTIALLY failed response.
- *
- * `gh api graphql` exits non-zero whenever the reply carries an `errors` array — even when `data`
- * is fully populated for every alias that DID resolve. With one alias per reference that is not an
- * edge case, it is the normal case: a single number that no longer exists (or never did, having
- * been scraped from a transcript that named another repository) makes GitHub answer
- * `{data: {...everything else...}, errors: [NOT_FOUND]}` and `gh` exit 1.
- *
- * `execFile` rejects on a non-zero exit, so that used to throw away a whole batch's worth of
- * perfectly good statuses and report every reference in it as "not found" — including, in the bug
- * that produced this function, an open pull request in the project's own repository.
- *
- * So: a non-zero exit whose stdout still carries a usable `data.repository` is a partial success
- * and is used as-is. Anything else — no stdout, unparseable stdout, or a null `repository`, which
- * means the repo handle itself did not resolve — rethrows, so a real failure still degrades to
- * `{available: false}` instead of masquerading as "none of these exist".
+ * Use failed gh GraphQL stdout only when it contains usable data.repository. Preserve successful
+ * aliases in partial responses; rethrow malformed or unresolved-repository failures.
  */
 function refStatusGraphql(repoRoot: string, context = githubContext(repoRoot)): GraphqlRunner {
   return async (query, variables) => {

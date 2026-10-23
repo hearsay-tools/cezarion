@@ -4,10 +4,8 @@ import { FakeVoiceEngine } from './fake-engine.ts';
 import { JevVoiceEngine } from './jev-engine.ts';
 
 /**
- * The decision engine seam (spec 2026-10-21-voice-mode, "How it decides"): one request per
- * sentence carries every question; the engine answers each with a typed answer, and code reads
- * only the answers that apply. Jev (TypeSafe) is the first implementation; the dry-run fake is the
- * other. Nothing outside this folder knows which one answered.
+ * Typed decision-engine seam: one request carries the sentence’s questions. Consume applicable
+ * answers only; keep Jev and dry-run implementations inside this folder.
  */
 
 export type EngineQuestion =

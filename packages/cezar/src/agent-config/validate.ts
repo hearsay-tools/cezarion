@@ -3,10 +3,7 @@ import { parse as parseYaml } from 'yaml';
 import type { ConfigFormat } from './catalog.ts';
 
 /**
- * On save, cezar proves a config file PARSES in its own format — refusing to
- * write bytes that would break the user's agent — but it never checks the
- * vendor's *schema* (that is the drift a raw editor exists to avoid) and it
- * never re-serializes: a valid file is written back byte-for-byte as typed.
+ * Validate format syntax only. Do not validate a vendor schema or reserialize the user’s text.
  */
 
 export interface ValidationResult {

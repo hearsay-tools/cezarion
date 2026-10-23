@@ -3,21 +3,8 @@ import { dirname } from 'node:path';
 import { DatabaseSync, type StatementSync } from 'node:sqlite';
 
 /**
- * The transactional run store underneath `RunStore` (#779, plan step 2).
- *
- * One SQLite file per project, `<dataDir>/runs.db`, holding every run as a complete JSON record
- * plus the handful of columns the store has to query without decoding that record. The module is
- * deliberately schema-agnostic: it never imports `RunRecord`, never parses `data` or `summary`,
- * and never decides what a column's value should be. The caller (RunStore's codec) computes them
- * and hands over strings, so the record schema can change without this file noticing.
- *
- * Everything is synchronous, like the store it serves. Writes go through ONE entry point,
- * `transaction()`, which commits a whole change set or nothing — the property `runs.json`'s
- * debounced whole-file rewrite only approximated.
- *
- * Failure policy: every SQLite error leaves as a typed `RunDatabaseError` (`toRunDatabaseError`),
- * and nothing here ever deletes, truncates or "repairs" a file. A corrupt database, WAL or SHM
- * stays exactly where it is for the user (or a later recovery step) to inspect.
+ * Synchronous SQLite storage for opaque run JSON, summaries and query columns. All writes use
+ * transaction(); failures leave database files intact and return typed errors.
  */
 
 export const RUNS_DB_FILE = 'runs.db';
@@ -710,17 +697,9 @@ export class RunDatabase {
   }
 
   /**
-   * Open an existing database for reading only: never creates the file, never migrates it, never
-   * changes journal mode. Answers `null` when there is nothing this build can read yet — no file,
-   * or a file below `RUN_DATABASE_READABLE_FROM` (schema 0 is what a failed first open leaves) —
-   * so the caller can fall back to whatever it read before the database existed. A database from
-   * `RUN_DATABASE_READABLE_FROM` up to this build's schema is read as it stands. A newer schema is
-   * still refused.
-   *
-   * SQLite may create the `-wal`/`-shm` coordination files beside the database; that is the price
-   * of seeing a live writer's commits. In a read-only directory with neither file present it
-   * cannot, and the open fails as permission denied — deliberately not worked around with
-   * `immutable=1`, which would read a stale snapshot without saying so.
+   * Open an existing readable database without creating it, migrating it or changing journal mode.
+   * Return null before a readable schema exists; refuse newer schemas. WAL/SHM coordination may
+   * need writes; do not bypass it with immutable mode.
    */
   static openReadOnly(path: string, supported: number = RUN_DATABASE_SCHEMA_VERSION): RunDatabase | null {
     if (!existsSync(path)) return null;

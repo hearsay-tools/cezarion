@@ -1,46 +1,8 @@
 #!/usr/bin/env node
-// Stable-release orchestrator (`node scripts/release.mjs <bump>`) — the
-// side-effect half of src/release/stable.ts, invoked by the manually-triggered
-// `Release` workflow (.github/workflows/release.yml) after `npm run build`
-// (spec .ai/specs/2026-07-18-npm-preview-publish.md, #482).
-//
-// Unlike the snapshot pipeline, this is the ONLY thing that ever moves the
-// `latest` dist-tag, and it never runs from a push — a human dispatches it and
-// picks the bump (patch/minor/major, or `existing` to publish the version
-// already committed). It stamps every manifest in the release set (intra-release
-// dependencies kept as caret ranges so a stable cezarion follows compatible impl
-// releases), then publishes them in DEPENDENCY ORDER — api-client, then the
-// service, then the alias — always with `--tag latest`. Publishing a dependent
-// before its dependency would briefly advertise a version that is not on the
-// registry yet.
-//
-// A manifest marked `private` is stamped but NOT published: it is part of the
-// release — its version moves in lockstep and the pins against it are rewritten
-// — without being on the registry. That is how a package can be consumed inside
-// the workspace long before it is offered to anyone else.
-//
-// Publishes with --ignore-scripts: the workflow ran `npm run build` (whose last
-// leg, check:pack, is the tarball-integrity gate) immediately before this, and
-// dist/ must exist for this script to even import. Stamping only rewrites the
-// version field, so no rebuild is needed.
-//
-// Degrades loudly, never red: no npm token AND no OIDC → forces --dry-run so a
-// misconfigured repo produces a visible dry run instead of a failed release.
-// `release.yml` publishes through npm trusted publishing (#33): the job has
-// `id-token: write` and no NODE_AUTH_TOKEN, and the CLI exchanges the OIDC
-// token itself. Snapshots, nightlies, and dist-tag cleanup keep NPM_TOKEN —
-// one trusted publisher per package, and `npm dist-tag rm` is not an OIDC
-// command. The workflow reads `version`/`published` from $GITHUB_OUTPUT to
-// tag the commit and cut the GitHub Release only on a real publish.
-//
-// A mid-set failure (one name on the registry, the next not) is recoverable:
-// re-dispatch the same bump. An already-published name@version is treated as
-// success only when its registry gitHead matches this checkout, so the remaining
-// names, the GitHub Release, and the bump PR can finish (#42). A missing trusted publisher still fails — npm reports that as
-// E404, not ENEEDAUTH, and the version is not on the registry.
-//
-// Usage: node scripts/release.mjs <patch|minor|major|existing> [--dry-run]
-// Env override for tests: CEZ_RELEASE_ROOT (defaults to the repo root).
+// Publish stable releases from explicit workflow dispatch and pure version decisions.
+// Stamp private manifests without publishing them; publish dependencies first with --tag latest.
+// The build and pack gate run beforehand; publishing uses --ignore-scripts.
+// Without supported credentials, preserve the visible dry-run behavior.
 
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';

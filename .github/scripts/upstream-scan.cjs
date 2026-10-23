@@ -7,12 +7,9 @@
 //   node .github/scripts/upstream-scan.cjs render      # regenerate LEDGER.md after editing the YAML
 //   node .github/scripts/upstream-scan.cjs targets <sha>… [--no-fetch]   # re-check a port's files before planning it
 //
-// Any other first argument is an error (exit 2) raised before git or the filesystem is touched:
-// a mistyped subcommand must never fall through to the scan, which fetches and rewrites the ledger.
+// Reject an unknown subcommand with exit 2 before Git or filesystem effects.
 //
-// Upstream main is fetched into `refs/cez-upstream/main`, NEVER a remote: `gh`
-// prefers a remote named `upstream` over `origin`, so adding one repoints
-// cezar's own GitHub tab at the upstream repository (observed 2026-09-16).
+// Fetch upstream into refs/cez-upstream/main without adding a discovery-visible remote.
 // `--date` defaults to the current UTC date for scans and target reports.
 // `--head` scans up to a given upstream commit instead of the fetched tip,
 // which is how a backfill records an older scan honestly. For targets, --head selects
@@ -90,13 +87,11 @@ function resolveHead(cwd = root, ref = 'HEAD') {
   return git(['rev-parse', '--verify', '--end-of-options', `${ref}^{commit}`], { cwd }).trim();
 }
 
-/** Git for one run against `head`, a resolved commit sha: every call starts with
- *  `--attr-source=<head>`, so attributes come from `head`'s tree and an uncommitted `.gitattributes`
- *  can pick no merge driver, smudge filter, textconv or binary flag. Committed attributes and the
- *  repository's config still apply. Every git child of `targets` and of the scan's hints goes
- *  through it; only resolving HEAD, which the pin needs first, does not.
- *  The global option, not `GIT_ATTR_SOURCE`: a git without it (before 2.41) rejects the option
- *  instead of silently ignoring an unknown env var, and `attrSourceRejection` asks once up front. */
+/**
+ * Run Git against one resolved head with --attr-source=<head>. Require option support so
+ * working-tree attributes cannot silently affect analysis. Committed attributes and repository
+ * config still apply.
+ */
 function pinnedGit(cwd, head) {
   const pin = (args) => [`--attr-source=${head}`, ...args];
   return {
@@ -302,14 +297,11 @@ function targetFile(file, { g, baseline, reach, dryRun }) {
  *  manifests and pages, and the repo scripts whose `dist/` imports are roots. */
 const SNAPSHOT_PATH_RE = /^(?:packages\/[^/]+\/(?:src\/|scripts\/|package\.json$|index\.html$)|scripts\/)/;
 
-/** Runs `fn` on a copy of `g.head` outside the repository: `index`, a private index holding its
- *  tree (`headIndex`), for the dry run; and `tree`, the files reachability reads, checked out of
- *  that index with `g.head`'s attributes. Uncommitted changes, staged or not, reach neither, and
- *  the real index and work tree are never written. A part that could not be built is null and
- *  `error` says why.
- *  `checkout-index` rather than `git archive`: it reuses the one index, filters paths here (a
- *  pathspec that matches nothing fails the archive), needs no `tar`, and ignores
- *  `export-ignore`. The temp dir is removed whether `fn` resolves or throws. */
+/**
+ * Run on a private index and checkout-index tree of the pinned head. Exclude staged/uncommitted
+ * work without writing the real index. Missing scratch parts are null with an error; always
+ * clean up.
+ */
 async function withHeadSnapshot(g, fn) {
   const snapshot = { index: null, tree: null, error: null };
   let built = null;

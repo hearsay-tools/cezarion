@@ -1,28 +1,14 @@
 /**
- * The backend-agnostic seam for running one agent task. Adapted from
- * @cezar/core's `agents/agent-runner.ts`, trimmed for single-user local use:
- * no token-budget circuit breaker, no zod response schemas — one run is one
- * agent-CLI session streaming normalized events.
- *
- * Interchangeable backends implement this seam as logical sessions. Most keep
- * one process across turns; Cursor print replaces its owned process at each
- * turn while preserving the native session ID. Both forms support follow-ups,
- * `waiting`, interrupt and resume:
- *  - `claude`   — Claude Code CLI, stream-json over stdin/stdout;
- *  - `codex`    — `codex app-server`, JSON-RPC 2.0 (JSONL) over stdin/stdout;
- *  - `opencode` — `opencode serve`, HTTP + SSE;
- *  - `pi`       — pi coding CLI, RPC over JSONL stdin/stdout, selecting its
- *                 model with `provider/model`.
+ * Backend-neutral logical sessions for task execution, follow-ups, waiting, interrupt and
+ * resume. Adapters own native process lifetimes and emit normalized events behind this seam.
  */
 
 import type { UiEvent } from './ui-events.ts';
 import type { SessionTransport } from '@open-mercato/cezar-contract';
 
 /**
- * The user-selectable runners (what config/GUI expose), in display order — the SINGLE source of
- * truth for the set. Every runtime enumeration derives from this tuple (zod schemas, the
- * server-install "at least one agent CLI" gate, the CLI-handoff registry) rather than repeating
- * the literals, so adding runner #5 is a one-line change here and typecheck finds the rest.
+ * Canonical user-selectable runner tuple in display order. Derive runtime enumerations and
+ * schemas from this set; keep legacy backend ids separate for persisted records.
  */
 export const RUNNER_IDS = ['claude', 'codex', 'opencode', 'pi', 'cursor', 'omp'] as const;
 
