@@ -55,14 +55,15 @@ const allNavLinks = (root = sidebar()) => Array.from(root.querySelectorAll<HTMLA
 
 describe('AppShell', () => {
   it('keeps optional views in an overflow menu and marks the current overflow view', async () => {
-    renderShell('/inbox', { })
+    renderShell('/automations', { })
     expect(within(nav()).queryByRole('link', { name: 'Inbox' })).toBeNull()
     const more = within(nav()).getByRole('button', { name: 'More views' })
     expect(more.getAttribute('data-active')).toBe('true')
     fireEvent.keyDown(more, { key: 'Enter' })
-    expect((await screen.findByRole('menuitem', { name: /Inbox/ })).getAttribute('aria-current')).toBe('page')
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Automations' }))
-    expect(screen.getByTestId('location').textContent).toBe('/automations')
+    expect((await screen.findByRole('menuitem', { name: 'Automations' })).getAttribute('aria-current')).toBe('page')
+    expect(screen.queryByRole('menuitem', { name: /Inbox/ })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Workflows' }))
+    expect(screen.getByTestId('location').textContent).toBe('/workflows')
   })
 
   it('moves Workflows into More when six views would crowd the overflow button', async () => {
@@ -359,8 +360,7 @@ describe('AppShell', () => {
     renderShell('/', { automationsAvailable: false })
     const links = allNavLinks()
     expect(links.map((a) => a.getAttribute('href'))).not.toContain('/automations')
-    // Inbox still needs More, which takes Workflows along (see the crowding test above).
-    expect(links).toHaveLength(5)
+    expect(links).toHaveLength(6)
   })
 
   it('shows Automations in overflow once the capability is on', async () => {

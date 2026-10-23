@@ -29,7 +29,6 @@ let restoreHome: () => void
 let singleProject = false
 
 let forgeAvailable = false
-let followupsAvailable = false
 let automationsAvailable = false
 
 const scoped = (projectId: string, path: string) => `/p/${projectId}${path}`
@@ -37,12 +36,11 @@ const scoped = (projectId: string, path: string) => `/p/${projectId}${path}`
 /** Only the boot project has a forge; its seeded siblings are bare repos. */
 const hasForge = (projectId: string) => projectId === bootProject && forgeAvailable
 
-/** More views, in nav order. Inbox and Automations are opt-in; with them present, a project that
+/** More views, in nav order. Automations is opt-in; with it present, a project that
  *  shows six other views (the forge one) also moves Workflows into More — sidebar-view-tabs.tsx
  *  allows five primary tabs beside the button. A forge-less sibling has five and keeps Workflows. */
 function expectedOverflowHrefs(projectId: string): string[] {
   const optional = [
-    ...(followupsAvailable ? ['/inbox'] : []),
     // Schedules need no GitHub remote; the capability alone gates Automations (#766).
     ...(automationsAvailable ? ['/automations'] : []),
   ]
@@ -76,10 +74,9 @@ beforeAll(async () => {
   bootProject = await bootProjectId(baseUrl)
   const health = (await fetch(`${baseUrl}/api/v1/health`).then((r) => r.json())) as {
     forge: { available: boolean } | null
-    capabilities: { followups: boolean; singleProject: boolean; automations: boolean }
+    capabilities: { singleProject: boolean; automations: boolean }
   }
   forgeAvailable = health.forge?.available === true
-  followupsAvailable = health.capabilities.followups
   automationsAvailable = health.capabilities.automations
   singleProject = health.capabilities.singleProject
 

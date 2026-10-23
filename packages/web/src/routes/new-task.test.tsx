@@ -1598,10 +1598,7 @@ describe('drafts and prefill', () => {
     expect(requests.some((r) => r.method === 'POST' && r.url === '/api/v1/runs')).toBe(false)
   })
 
-  // #374: the composer is the middle of the inbox round trip — the Run link carries `todo=`,
-  // and the started run must carry it back so the entry is marked started and leaves the inbox.
-
-  it('a plain launch (no ?todo=) sends no todoId — the inbox is left alone', async () => {
+  it('launches omit retired Inbox fields', async () => {
     serve()
     renderNewTask()
     await pillReady()
@@ -1609,10 +1606,8 @@ describe('drafts and prefill', () => {
     await startTask()
 
     expect((postedBody() as Record<string, unknown>).todoId).toBeUndefined()
+    expect((postedBody() as Record<string, unknown>).generateFollowups).toBeUndefined()
   })
-
-  // The two are orthogonal concerns (#374 vs #444): turning follow-up generation OFF for the
-  // NEW task must never stop the entry it was launched FROM being marked started.
 
   it('submit spends the draft text', async () => {
     serve()
@@ -2290,7 +2285,7 @@ describe('prompt templates on the new-task composer', () => {
     renderNewTask()
     await pillReady()
 
-    // No "templates" word next to the icon, unlike the roomier GitHub/Inbox composers.
+    // No "templates" word next to the icon, unlike the roomier GitHub composer.
     expect(templateTrigger().textContent).toContain('Template')
     expect(templateTrigger().querySelector('svg')).not.toBeNull()
   })

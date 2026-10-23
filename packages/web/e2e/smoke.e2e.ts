@@ -70,7 +70,7 @@ function expectedPrimaryCount(): number {
 }
 
 /** The main row's tab links, in order. Workflows sits between Skills and Settings until it moves
- *  into More; Inbox and Automations never appear here. */
+ *  into More; Automations never appears here. */
 function expectedNavLabels(): string[] {
   return [
     'Tasks',
@@ -82,7 +82,7 @@ function expectedNavLabels(): string[] {
   ]
 }
 
-const OVERFLOW_PATHS: Record<string, string> = { Inbox: '/inbox', Automations: '/automations', Workflows: '/workflows' }
+const OVERFLOW_PATHS: Record<string, string> = { Automations: '/automations', Workflows: '/workflows' }
 
 afterAll(() => {
   browser?.close()

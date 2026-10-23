@@ -40,8 +40,8 @@ function rememberLocation(lastLocation: unknown): void {
 const BOOT = 'boot'
 
 /** A full-enough `/api/v1/health` answer: the redirect gate reads `bootProject`, and the routes
- *  behind it (inbox, /new) read `capabilities` — a partial seed would crash what a real health
- *  payload never crashes. `` keeps the Inbox route's real heading. */
+ *  behind it (/new) read `capabilities` — a partial seed would crash what a real health
+ *  payload never crashes. */
 const HEALTH = {
   version: '0.0.0-test',
   repoRoot: '/home/u/cezar',

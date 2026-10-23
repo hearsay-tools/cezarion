@@ -28,11 +28,10 @@ describe('parseNewTaskParams', () => {
     ['auto present but empty is not auto-start', '?auto=', empty],
     ['whitespace around skill/ref is trimmed', '?skill=%20om-fix%20&ref=%20x%20', { ...empty, skill: 'om-fix', ref: 'x' }],
     ['unknown params are ignored', '?skill=om-fix&nope=1', { ...empty, skill: 'om-fix' }],
-    // #374: the Inbox's Run adds `todo` so the composer can report the launch back.
-    ['the inbox prefill link', '?skill=om-fix&ref=fix+it&todo=t1', { ...empty, skill: 'om-fix', ref: 'fix it' }],
-    ['whitespace around todo is trimmed', '?todo=%20t1%20', { ...empty }],
-    // A saved bookmarklet has no `todo` — that must stay an absence, not an empty-string id.
-    ['no todo is the empty string, not undefined', '?skill=om-fix&auto=1&key=k', { ...empty, skill: 'om-fix', auto: true, key: 'k' }],
+    // Retired Inbox parameters are ignored on saved links.
+    ['ignores the retired todo parameter', '?skill=om-fix&ref=fix+it&todo=t1', { ...empty, skill: 'om-fix', ref: 'fix it' }],
+    ['ignores a whitespace-wrapped retired todo parameter', '?todo=%20t1%20', { ...empty }],
+    ['preserves bookmarklet fields', '?skill=om-fix&auto=1&key=k', { ...empty, skill: 'om-fix', auto: true, key: 'k' }],
   ]
 
   for (const [name, search, expected] of cases) {
@@ -61,7 +60,7 @@ describe('newTaskPrefillHref', () => {
     expect(newTaskPrefillHref({})).toBe('/new')
   })
 
-  it('NEVER emits auto/key — not even alongside a todo id (#355: no blind launch)', () => {
+  it('NEVER emits auto/key (#355: no blind launch)', () => {
     const params = new URLSearchParams(
       newTaskPrefillHref({ skill: 'om-fix', ref: 'fix it' }).split('?')[1],
     )

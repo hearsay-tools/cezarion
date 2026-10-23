@@ -87,8 +87,7 @@ describe('NAV_ITEMS', () => {
 })
 
 /** The gates: the GitHub item exists exactly while health reports the forge driver (R6 Step 1.1),
- *  the Inbox item exactly while it reports the opt-in `capabilities.followups` (#471), and the
- *  Automations item exactly while it reports the opt-in `capabilities.automations` (#801; no forge
+ *  and the Automations item exactly while it reports the opt-in `capabilities.automations` (#801; no forge
  *  needed since schedules, #766). Each gate owns ONLY its own item, and all default to absent while health is unknown. */
 describe('visibleNavItems', () => {
   const labelsOf = (opts?: Parameters<typeof visibleNavItems>[0]) =>
@@ -110,7 +109,7 @@ describe('visibleNavItems', () => {
     ])
   })
 
-  it('without the inbox, exactly the Inbox item drops out (#471)', () => {
+  it('keeps Inbox out of the full navigation', () => {
     expect(labelsOf({ forge: true, automations: true })).toEqual([
       'Tasks',
       'Git',
@@ -139,7 +138,7 @@ describe('visibleNavItems', () => {
     expect(labelsOf({ forge: true, })).not.toContain('Automations')
   })
 
-  it('drops all three when nothing is available', () => {
+  it('drops gated items when nothing is available', () => {
     expect(labelsOf({ forge: false, automations: false })).toEqual([
       'Tasks',
       'Git',
@@ -155,11 +154,9 @@ describe('visibleNavItems', () => {
 
   it('never invents an item — the result is always a subset of NAV_ITEMS, in order', () => {
     for (const forge of [true, false]) {
-      for (const inbox of [true, false]) {
-        for (const automations of [true, false]) {
-          const items = visibleNavItems({ forge, automations })
-          expect(NAV_ITEMS.filter((i) => items.includes(i))).toEqual(items)
-        }
+      for (const automations of [true, false]) {
+        const items = visibleNavItems({ forge, automations })
+        expect(NAV_ITEMS.filter((i) => items.includes(i))).toEqual(items)
       }
     }
   })

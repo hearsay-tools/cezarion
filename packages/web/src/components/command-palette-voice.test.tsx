@@ -109,11 +109,12 @@ function renderPalette({ voice, runs = [], entry = '/' }: { voice: boolean; runs
   )
 }
 
-/** Opens the palette and waits until health has loaded (the Inbox view row follows it). */
+/** Opens the palette and waits until health has loaded (the voice availability follows it). */
 async function openPalette() {
   fireEvent.keyDown(window, { key: 'k', metaKey: true })
   const input = await screen.findByPlaceholderText(/Search projects, tasks/)
-  await screen.findByText('Inbox')
+  await waitFor(() => expect(fetchMock.mock.calls.some(([input]) => String(input) === '/api/v1/health')).toBe(true))
+  await screen.findByText('Skills')
   return input as HTMLInputElement
 }
 
