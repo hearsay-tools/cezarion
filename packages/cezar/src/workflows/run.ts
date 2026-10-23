@@ -81,7 +81,8 @@ import {
 import { askRequestSchema } from '@open-mercato/cezar-contract/ask-schema';
 import type { AgentEvent, ContentBlock, InputDelivery } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
-import { discoverSkills, type Skill } from '../skills.ts';
+import { readProjectUiState } from '../ui-state.ts';
+import { discoverSkills, filterDisabledTeamSkills, readDisabledTeamSkills, type Skill } from '../skills.ts';
 import { resolveCapabilities } from '../server/capabilities.ts';
 import { automationCliCommand, automationsPrompt } from '../automations/prompts.ts';
 import { createAutomationSkill } from '../automations/builtin-skill.ts';
@@ -1943,8 +1944,9 @@ export class RunManager {
    * (`provisionSkills`): links to local and global skills, generated `SKILL.md` files, and marked
    * team copies, in `.claude/skills`, `.agents/skills` and `.cursor/skills`, recorded in the
    * worktree's git dir and kept out of git by a worktree-local `.gitignore`. Companions resolve
-   * against the ungated team list too, so a default team skill switched off in the picker still
-   * serves a skill that runs it: the selection curates the picker, it is no loading boundary.
+   * against the team list minus the project's off-list (`disabledTeamSkills`, #1494), read fresh
+   * on every pass: a team skill switched off for the project is never installed, not even for a
+   * skill that runs it, and a switch-off made after the run started holds on Continue.
    *
    * Any other cwd — worktree off, a non-git project, a Continue whose worktree is gone — is the
    * main checkout or unknown, where those directories are LOCAL skills to `discoverSkills` that
@@ -1979,7 +1981,9 @@ export class RunManager {
       for (const skill of teamRoots) await cacheCopy(skill);
       return { notes, filesDir, installed: [] };
     }
-    const result = await provisionSkills(state.cwd, roots, [...registry, ...getTeamSkillsCached(this.repoRoot)], { cancelled: stopped });
+    const disabled = readDisabledTeamSkills(await readProjectUiState(this.repoRoot));
+    const teamSkills = filterDisabledTeamSkills(getTeamSkillsCached(this.repoRoot), disabled);
+    const result = await provisionSkills(state.cwd, roots, [...registry, ...teamSkills], { cancelled: stopped });
     if (stopped()) return { notes, filesDir, installed: [] };
     for (const skill of teamRoots) {
       const written = result.teamCopies[skill.name] ?? [];

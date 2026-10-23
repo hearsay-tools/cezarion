@@ -303,6 +303,50 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     await run.finish();
   });
 
+  const lead1494 = () => plannedWorkflow([...skillTaskSteps('lead-1494'), { id: 'verify', command: 'true' }]);
+  const switchOff = (repo: string) => {
+    mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
+    writeFileSync(join(repoRoot, '.ai/cezar/ui-state.json'), JSON.stringify({ disabledTeamSkills: [{ repo, name: TEAM_SKILL }] }));
+  };
+
+  it('a switched-off team skill is not installed as a companion (#1494)', async () => {
+    const { repo } = await seedTeamSource();
+    writeLocalSkill('lead-1494', `then run ${TEAM_SKILL}`);
+    switchOff(repo);
+    const run = await launch(lead1494(), 'go');
+    for (const agentDir of AGENT_SKILL_DIRS) {
+      expect(existsSync(join(run.spec.cwd, agentDir, 'skills', TEAM_SKILL)), agentDir).toBe(false);
+    }
+    expect(notesOf(run.id)).toContain("skills installed in the task's workspace: lead-1494");
+    await run.finish();
+  });
+
+  it('the same companion is installed while its team skill is switched on (#1494 guard)', async () => {
+    await seedTeamSource();
+    writeLocalSkill('lead-1494', `then run ${TEAM_SKILL}`);
+    const run = await launch(lead1494(), 'go');
+    for (const agentDir of AGENT_SKILL_DIRS) {
+      expect(existsSync(join(run.spec.cwd, agentDir, 'skills', TEAM_SKILL, 'SKILL.md')), agentDir).toBe(true);
+    }
+    await run.finish();
+  });
+
+  it('a companion switched off after the run started is not installed on Continue (#1494)', async () => {
+    const { repo } = await seedTeamSource();
+    writeLocalSkill('lead-1494', `then run ${TEAM_SKILL}`);
+    const run = await launch(lead1494(), 'go');
+    await run.finish();
+    for (const agentDir of AGENT_SKILL_DIRS) rmSync(join(run.spec.cwd, agentDir, 'skills', TEAM_SKILL), { recursive: true, force: true });
+    switchOff(repo);
+    const before = launches.length;
+    expect(manager.continueRun(run.id, { text: 'keep going' })).toEqual({ ok: true });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(before), { timeout: LAUNCH_WAIT_MS });
+    for (const agentDir of AGENT_SKILL_DIRS) {
+      expect(existsSync(join(run.spec.cwd, agentDir, 'skills', TEAM_SKILL)), agentDir).toBe(false);
+    }
+    sessions[before]!();
+  });
+
   describe('guards', () => {
     it('an in-place run writes no skill entry in the checkout', async () => {
       writeLocalSkill('lead-1408', 'then run helper-1408');
