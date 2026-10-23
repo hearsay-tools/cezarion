@@ -11,8 +11,9 @@ import { runActionFlags } from './run-actions'
 /** Completion work remains visible after Done, including after a page reload. */
 export function CompletionStatus({ run }: { run: ApiRun }) {
   const patch = usePatchRun(run.id)
-  const action = run.completionAction
-  const blocker = run.archiveBlocker
+  const flags = runActionFlags(run)
+  const action = run.status === 'done' ? run.completionAction : undefined
+  const blocker = flags.archive ? run.archiveBlocker : undefined
   const showAction = action && action.phase !== 'complete'
   if (!showAction && !blocker) return null
   const prUrl = run.pullRequestUrl ?? run.pullRequests?.find(pr => pr.url)?.url
@@ -37,7 +38,7 @@ export function CompletionStatus({ run }: { run: ApiRun }) {
         <div className="flex flex-wrap gap-2">
           {blocker.runId ? <Button variant="outline" asChild><Link to={`/tasks/${blocker.runId}`}>Open blocking task</Link></Button> : null}
           {blocker.pullRequestUrl && isHttpUrl(blocker.pullRequestUrl) ? <Button variant="outline" asChild><a href={blocker.pullRequestUrl} target="_blank" rel="noopener noreferrer">Open blocking PR</a></Button> : null}
-          {runActionFlags(run).archive ? <ArchiveButton run={run} /> : null}
+          {flags.archive ? <ArchiveButton run={run} /> : null}
         </div>
       </> : null}
     </section>

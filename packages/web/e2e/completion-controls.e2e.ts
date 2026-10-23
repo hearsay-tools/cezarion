@@ -196,6 +196,12 @@ it.each(['light', 'dark'])('updates completion status and keeps archive blockers
   expect(browser.text('[data-slot="completion-status"]')).toContain('Completion pending')
   expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="completion-status"] a')].map(el => el.getAttribute('href'))`)).toEqual(['/tasks/worker', 'https://github.com/owner/repo/pull/43'])
   expect(browser.count('[data-slot="archive-action"]')).toBe(1)
+  for (const status of ['queued', 'running', 'waiting']) {
+    browser.evaluate(`window.setRun(current => ({ ...current, status: ${JSON.stringify(status)} }))`)
+    browser.waitForFunction(`document.querySelector('[data-slot="completion-status"]') === null`)
+  }
+  browser.evaluate(`window.setRun(current => ({ ...current, status: 'done' }))`)
+  browser.waitForFunction(`document.querySelector('[data-slot="completion-status"]') !== null`)
   assertLayout()
   focusWithKeyboard(browser, '[data-slot="archive-action"]')
   expect(waitForSettledSample(browser, `document.activeElement === document.querySelector('[data-slot="archive-action"]')`)).toBe(true)

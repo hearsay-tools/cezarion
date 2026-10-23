@@ -48,6 +48,23 @@ it.each([undefined, { ...run.completionAction!, phase: 'complete' as const }])('
   expect(screen.queryByRole('status')).toBeNull()
 })
 
+it.each(['queued', 'running', 'waiting'] as const)('hides previous completion and archive blockers after resuming into %s', status => {
+  const record: ApiRun = { ...run, completionAction: { ...run.completionAction!, phase: 'blocked' },
+    archiveBlocker: { message: 'A worker still has an open PR.' } }
+  const { rerender } = mount(record)
+  expect(screen.getAllByRole('status')).toHaveLength(2)
+  rerender(<QueryClientProvider client={createQueryClient()}><MemoryRouter><CompletionStatus run={{ ...record, status }} /></MemoryRouter></QueryClientProvider>)
+  expect(screen.queryByRole('region', { name: 'Completion action' })).toBeNull()
+  expect(screen.queryByRole('status')).toBeNull()
+})
+
+it.each(['review', 'failed', 'cancelled'] as const)('keeps archive blockers without previous completion work for %s tasks', status => {
+  mount({ ...run, status, archiveBlocker: { message: 'A worker still has an open PR.' } })
+  expect(screen.getAllByRole('status')).toHaveLength(1)
+  expect(screen.getByRole('status').textContent).toContain('Archive blocked')
+  expect(screen.queryByRole('button', { name: 'Disable auto-merge' })).toBeNull()
+})
+
 it('shows the shared archive blocker with scoped task, PR and manual Archive actions', () => {
   const record = { ...run, completionAction: undefined, archiveBlocker: {
     message: 'A worker still has an open PR.', runId: 'worker', pullRequestUrl: 'https://github.com/owner/repo/pull/43',
