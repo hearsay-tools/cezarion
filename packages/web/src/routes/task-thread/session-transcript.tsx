@@ -114,8 +114,29 @@ function overlayAgentInputNotes(run: ApiRun, entries: readonly ThreadEntry[]): r
   return changed ? next : entries
 }
 
+/** The section holding the pending ask's answerable copy; its row key is `pending-ask:<askId>`. */
+export const PENDING_ASK_SECTION_ID = 'pending-ask'
+
+/** The pending question (hearsay-tools/cezarion#1495): its answerable copy goes after the newest
+ *  entry, from the compact context, so it exists even when its turn is not loaded. Its original
+ *  entry becomes a marker. Only one ask is pending, so any other unresolved ask on screen was
+ *  answered in a page the view no longer holds, and renders as answered. */
+function placeAsk(entry: ThreadEntry, pendingAskId: string): ThreadEntry {
+  if (entry.kind !== 'ask') return entry
+  if (entry.id === pendingAskId) return { ...entry, placement: 'origin' }
+  return entry.resolved ? entry : { ...entry, resolved: true }
+}
+
 /** The main run record plus reduced turns, without rendering or backend inspection. */
-export function mainTranscriptSections(run: ApiRun, thread: ThreadState, currentThread: ThreadState = thread): TranscriptSection[] {
+export function mainTranscriptSections(
+  run: ApiRun,
+  thread: ThreadState,
+  currentThread: ThreadState = thread,
+  pendingAskId?: string,
+): TranscriptSection[] {
+  const pinnedAsk = pendingAskId === undefined ? undefined : currentThread.turns
+    .flatMap(turn => turn.items)
+    .find((entry): entry is ThreadAsk => entry.kind === 'ask' && entry.id === pendingAskId && !entry.resolved)
   const currentPermissions = new Map(currentThread.turns.flatMap(turn => turn.items).filter((entry): entry is ThreadPermission => entry.kind === 'permission').map(entry => [entry.requestId, entry]))
   const visiblePermissions = new Set<string>()
   const sections: TranscriptSection[] = []
@@ -159,6 +180,7 @@ export function mainTranscriptSections(run: ApiRun, thread: ThreadState, current
       ...(turn.startedAt !== undefined ? { startedAt: turn.startedAt } : {}),
       ...(turn.completed?.ts !== undefined ? { completedAt: turn.completed.ts } : {}),
       entries: overlayAgentInputNotes(run, turn.items.map(entry => {
+        if (pinnedAsk !== undefined && entry.kind === 'ask') return placeAsk(entry, pinnedAsk.id)
         if (entry.kind !== 'permission') return entry
         visiblePermissions.add(entry.requestId)
         return currentPermissions.get(entry.requestId) ?? (entry.status === 'pending' ? { ...entry, status: 'expired' as const } : entry)
@@ -169,7 +191,22 @@ export function mainTranscriptSections(run: ApiRun, thread: ThreadState, current
   // the live edge until loading older history supplies their original transcript position.
   const missing = [...currentPermissions.values()].filter(entry => entry.status === 'pending' && !visiblePermissions.has(entry.requestId))
   if (missing.length > 0) sections.push({ id: 'pending-permissions', entries: missing, inDaySequence: false })
+  if (pinnedAsk !== undefined) {
+    sections.push({ id: PENDING_ASK_SECTION_ID, entries: [{ ...pinnedAsk, placement: 'pinned' }], inDaySequence: false })
+  }
   return sections
+}
+
+/** The row holding one copy of an ask, for navigation between the marker and the pinned card. */
+export function askRow(
+  rows: readonly TranscriptRowModel[],
+  askId: string,
+  placement: 'origin' | 'pinned',
+): { key: string; index: number } | undefined {
+  const index = rows.findIndex(({ content }) =>
+    content.kind === 'block' && content.block.kind === 'entry' && content.block.entry.kind === 'ask' &&
+    content.block.entry.id === askId && content.block.entry.placement === placement)
+  return index < 0 ? undefined : { key: rows[index]!.key, index }
 }
 
 /** One attributed agent stream becomes one ordinary transcript section. */
