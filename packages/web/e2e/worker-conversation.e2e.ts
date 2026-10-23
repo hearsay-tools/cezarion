@@ -281,14 +281,14 @@ describe('chronological worker conversation', () => {
     expect(top).toBeLessThan(500)
     focusWithKeyboard(browser, `${request} [data-slot="conversation-body-toggle"]`)
     browser.press('Enter')
-    const body = browser.waitForValue<{ height: number; text: string; hasReference: boolean }>(`(() => {
+    const body = browser.waitForValue<{ height: number; text: string; reference: string | null }>(`(() => {
       const body = document.querySelector('${request} [data-slot="conversation-body"]');
       return { height: body.getBoundingClientRect().height, text: body.textContent,
-        hasReference: [...body.querySelectorAll('button')].some(el => el.textContent === 'Reference') };
+        reference: body.querySelector('a')?.getAttribute('href') ?? null };
     })()`, value => value.text.includes('final line of the request'))
     expect(body.height).toBeGreaterThan(900)
     expect(body.text).toContain('Paragraph 44')
-    expect(body.hasReference).toBe(true)
+    expect(body.reference).toBe('https://example.com')
     focusWithKeyboard(browser, `${request} ${connector}`)
     browser.press('Enter')
     waitForFocusedCard(replyCard)
