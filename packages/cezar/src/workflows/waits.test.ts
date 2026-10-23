@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
-import type { CiWaitEntry, HumanWaitEntry, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
-import { ciWatchRequest, identicalWait, isCezarHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
+import type { CiWaitEntry, HumanWaitEntry, ProcessWaitEntry, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import { chargesBudget, ciWatchRequest, identicalWait, isCezarHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's pure helpers. RunManager behaviour lives in
 // the ci-wait*.test.ts files and the U-cells in waits-parity-cells.testkit.ts.
@@ -109,7 +109,7 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     // Beside a question, the cancel guidance covers worker waits too.
     const human: HumanWaitEntry = { id: '55555555-5555-4555-8555-555555555555', kind: 'human', source: 'agent', via: 'cezar_ask',
       registeredAt: '2026-10-17T10:00:00.000Z', phase: 'open', turnId: 'turn-1', askSeq: 4 };
-    expect(openWaitsFooter([human, byWorker])).toContain('call cezar_cancel_wait for any CI wait, worker wait or timer you no longer need.');
+    expect(openWaitsFooter([human, byWorker])).toContain('call cezar_cancel_wait for any CI wait, worker wait, process wait or timer you no longer need.');
     // Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301).
     const { deadline: _deadline, timeoutSeconds: _timeout, ...undated } = byWorker;
     const completion: WorkerWaitEntry = { ...undated, source: 'cezar', via: 'completion', mode: 'all' };
@@ -124,7 +124,7 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     expect(openWaitsFooter([human])).toBe(`Still open: your question ${human.id} to the user. The user's reply answers it.`);
     expect(openWaitsFooter([human, ci()])).toBe(
       `Still open: your question ${human.id} to the user; CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}. ` +
-      `The user's reply answers your question; call cezar_cancel_wait for any CI wait, worker wait or timer you no longer need.`);
+      `The user's reply answers your question; call cezar_cancel_wait for any CI wait, worker wait, process wait or timer you no longer need.`);
   });
 
   // Cezar's own wait stands in for a wait the agent never registered (hearsay-tools/cezarion#1234):
@@ -142,5 +142,50 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
 
   it('hands the CI watcher a valid schema-3 wait', () => {
     expect(ciWaitSchema.safeParse(ciWatchRequest(ci())).success).toBe(true);
+  });
+});
+
+// hearsay-tools/cezarion#1446: a background command the agent started, watched by its PID.
+describe('process waits', () => {
+  const proc = (over: Partial<ProcessWaitEntry> = {}): ProcessWaitEntry => ({
+    id: '77777777-7777-4777-8777-777777777777', kind: 'process', source: 'agent', via: 'cezar_wait', turnId: 'turn-1', timeoutSeconds: 1800,
+    pid: 4242, startToken: 'boot:1', registeredAt: '2026-10-17T10:00:00.000Z', deadline: '2026-10-17T10:30:00.000Z', phase: 'open', ...over,
+  });
+  const observedAt = '2026-10-17T10:05:00.000Z';
+  const settled = (result: ProcessWaitEntry['result'], over: Partial<ProcessWaitEntry> = {}) => proc({ phase: 'resolved', resolvedAt: observedAt, result, ...over });
+
+  it('lists an open process wait with its deadline and PID', () => {
+    expect(openWaitList([proc(), proc({ id: '88888888-8888-4888-8888-888888888888', note: 'build' })])).toEqual([
+      { wait_id: proc().id, kind: 'process', deadline: proc().deadline, summary: 'process 4242' },
+      { wait_id: '88888888-8888-4888-8888-888888888888', kind: 'process', deadline: proc().deadline, summary: 'process 4242: build' },
+    ]);
+  });
+
+  it('a repeat matches the same PID, start token and exit file, whatever the timeout or note', () => {
+    const open = proc({ exitFile: '/t/build.exit' });
+    expect(identicalWait([open], { kind: 'process', pid: 4242, exit_file: 'build.exit', timeout_seconds: 60, note: 'x' }, 'turn-2', { startToken: 'boot:1', exitFile: '/t/build.exit' })).toBe(open);
+    expect(identicalWait([open], { kind: 'process', pid: 4242, timeout_seconds: 60 }, 'turn-2', { startToken: 'boot:2', exitFile: '/t/build.exit' })).toBeUndefined();
+    expect(identicalWait([open], { kind: 'process', pid: 4242, timeout_seconds: 60 }, 'turn-2', { startToken: 'boot:1' })).toBeUndefined();
+    expect(identicalWait([{ ...open, phase: 'resolved' }], { kind: 'process', pid: 4242, timeout_seconds: 60 }, 'turn-2', { startToken: 'boot:1', exitFile: '/t/build.exit' })).toBeUndefined();
+  });
+
+  it('wakes with the outcome, the PID and the note, and nothing read from the command', () => {
+    const id = proc().id;
+    expect(waitResultText(settled({ outcome: 'exit_file', observedAt, exitCode: 0 }, { note: 'build' }))).toBe(`Process wait ${id} for PID 4242 (build): exited with code 0. Read the command's output with your own tools.`);
+    expect(waitResultText(settled({ outcome: 'exit_file', observedAt, exitFileNote: 'not-an-exit-code' }))).toBe(`Process wait ${id} for PID 4242: exit file present, not an exit code. Read the command's output with your own tools.`);
+    expect(waitResultText(settled({ outcome: 'exited', observedAt }))).toBe(`Process wait ${id} for PID 4242: exited, code unknown. Read the command's output with your own tools.`);
+    expect(waitResultText(settled({ outcome: 'deadline', observedAt }))).toBe(`Process wait ${id} for PID 4242: still running at the deadline. Register another wait if you still need it.`);
+    expect(waitResultText(settled({ outcome: 'error', observedAt, diagnostic: 'EACCES' }))).toBe(`Process wait ${id} for PID 4242: could not be checked (EACCES). Check it with your own tools.`);
+  });
+
+  it('the footer names the PID, the note and the deadline, and offers cancel', () => {
+    const open = proc({ note: 'build' });
+    expect(openWaitsFooter([open])).toBe(`Still open: process wait ${open.id} on PID 4242 (build), deadline ${open.deadline}. Call cezar_cancel_wait for any you no longer need.`);
+  });
+
+  it('a process wake is automatic, as a timer wake is; CI and worker wakes are not', () => {
+    expect(chargesBudget(proc())).toBe(true);
+    expect(chargesBudget(timer())).toBe(true);
+    expect(chargesBudget(ci())).toBe(false);
   });
 });
