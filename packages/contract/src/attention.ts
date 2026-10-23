@@ -178,6 +178,7 @@ export function deriveAttention(run: AttentionInput): Attention {
     // A CI or timer park is `waiting` on its own downstream work, not on you: it keeps the
     // running bucket and ring the monitoring activity gave it before the wait list.
     if (waitingOn?.kind === 'ci') return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for CI' };
+    if (waitingOn?.kind === 'process') return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for a command' };
     if (waitingOn?.kind === 'timer') return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' };
     // A resolved CI or timer wait owes the agent a wake that has not started: the same scheduler
     // wait as the worker wake above, never a human gate (rung 10).

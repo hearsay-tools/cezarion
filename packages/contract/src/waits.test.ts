@@ -12,6 +12,8 @@ import {
   cezarWaitAnswerSchema,
   cezarWaitRequestSchema,
   computeWaitingOn,
+  PROCESS_TIMEOUT_DEFAULT_SECONDS,
+  processWaitEntrySchema,
   hasWorkerDeadline,
   LAST_WAITS_LIMIT,
   resolveWaitingOn,
@@ -30,6 +32,7 @@ import {
   type CiWaitEntry,
   type DeadlinedWorkerWaitEntry,
   type HumanWaitEntry,
+  type ProcessWaitEntry,
   type TimerWaitEntry,
   type WorkerWaitEntry,
 } from './waits.ts';
@@ -76,6 +79,24 @@ function openTimer(over: Partial<TimerWaitEntry> = {}): TimerWaitEntry {
     phase: 'open',
     turnId: 'turn-1',
     seconds: 300,
+    ...over,
+  };
+}
+
+const PROCESS_ID = '77777777-7777-4777-8777-777777777777';
+
+function openProcess(over: Partial<ProcessWaitEntry> = {}): ProcessWaitEntry {
+  return {
+    kind: 'process',
+    id: PROCESS_ID,
+    source: 'agent',
+    via: 'cezar_wait',
+    registeredAt: '2026-10-17T15:00:00.000Z',
+    deadline: '2026-10-17T15:30:00.000Z',
+    phase: 'open',
+    turnId: 'turn-1',
+    timeoutSeconds: 1800,
+    pid: 4242,
     ...over,
   };
 }
@@ -617,5 +638,45 @@ describe('asksQuestion', () => {
     expect(asksQuestion({ waits: [human({ source: 'cezar', via: 'budget' })] })).toBe(false);
     expect(asksQuestion({ waits: [human({ phase: 'resolved' })] })).toBe(false);
     expect(asksQuestion({})).toBe(false);
+  });
+});
+
+// hearsay-tools/cezarion#1446: a background command the agent started, watched by its PID.
+describe('process waits', () => {
+  it('parses a full entry and refuses a PID below 2 or a stray key', () => {
+    const full = openProcess({ startToken: 'boot:123', exitFile: '/tmp/x/build.exit', note: 'build',
+      phase: 'resolved', resolvedAt: '2026-10-17T15:10:00.000Z', result: { outcome: 'exit_file', observedAt: '2026-10-17T15:10:00.000Z', exitCode: 0 } });
+    expect(processWaitEntrySchema.parse(full)).toEqual(full);
+    expect(waitSchema.parse(openProcess())).toEqual(openProcess());
+    expect(processWaitEntrySchema.safeParse(openProcess({ pid: 1 })).success).toBe(false);
+    expect(processWaitEntrySchema.safeParse({ ...openProcess(), extra: 1 }).success).toBe(false);
+    expect(processWaitEntrySchema.safeParse(openProcess({ result: { outcome: 'exited', observedAt: '2026-10-17T15:10:00.000Z', exitCode: 2 ** 31 } })).success).toBe(false);
+  });
+
+  it('defaults the timeout to 1800 and bounds it to 7200', () => {
+    expect(PROCESS_TIMEOUT_DEFAULT_SECONDS).toBe(1800);
+    expect(cezarWaitRequestSchema.parse({ kind: 'process', pid: 42 })).toEqual({ kind: 'process', pid: 42, timeout_seconds: 1800 });
+    expect(cezarWaitRequestSchema.parse({ kind: 'process', pid: 42, exit_file: 'x.exit', note: 'n', timeout_seconds: 7200 }))
+      .toEqual({ kind: 'process', pid: 42, exit_file: 'x.exit', note: 'n', timeout_seconds: 7200 });
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'process', pid: 42, timeout_seconds: 7201 }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'process', pid: 1 }).success).toBe(false);
+    expect(cezarWaitRequestSchema.safeParse({ kind: 'process', pid: 42, exit_file: 'x'.repeat(4097) }).success).toBe(false);
+  });
+
+  it('ranks after CI and before a timer in waitingOn', () => {
+    const ci = openCi();
+    const timer = openTimer();
+    const process = openProcess({ note: 'build' });
+    expect(computeWaitingOn({ waits: [timer, process, ci] })?.kind).toBe('ci');
+    expect(computeWaitingOn({ waits: [timer, process] })).toEqual({ kind: 'process', waitId: PROCESS_ID, pid: 4242, deadline: process.deadline, note: 'build' });
+    expect(waitingOnSchema.parse(computeWaitingOn({ waits: [openProcess()] }))).toEqual({ kind: 'process', waitId: PROCESS_ID, pid: 4242, deadline: process.deadline });
+  });
+
+  it('answers with the process kind, its deadline and its refusals', () => {
+    expect(cezarWaitAnswerSchema.safeParse({ ok: true, wait_id: PROCESS_ID, kind: 'process', deadline: '2026-10-17T15:30:00.000Z', open_waits: [
+      { wait_id: PROCESS_ID, kind: 'process', deadline: '2026-10-17T15:30:00.000Z', summary: 'process 4242' }] }).success).toBe(true);
+    for (const code of ['exit_file_outside', 'process_not_allowed', 'process_not_owned']) {
+      expect(cezarWaitAnswerSchema.safeParse({ ok: false, code, message: 'no' }).success).toBe(true);
+    }
   });
 });

@@ -222,6 +222,11 @@ describe('open waits', () => {
     seconds: 300,
   });
 
+  it('reads a waiting record parked on a process wait as running, waiting for a command (hearsay-tools/cezarion#1446)', () => {
+    const waitingOn = { kind: 'process' as const, waitId: '77777777-7777-4777-8777-777777777777', pid: 4242, deadline: '2026-10-17T15:30:00.000Z' };
+    expect(deriveAttention({ status: 'waiting', waitingOn })).toEqual({ bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for a command' });
+  });
+
   it('reads a waiting record with an open CI or timer wait as running, not Needs you', () => {
     expect(deriveAttention({ status: 'waiting', waits: [openCi()] })).toMatchObject({ bucket: 'running', shape: 'ring', label: 'waiting for CI' });
     expect(deriveAttention({ status: 'waiting', waits: [openTimer()] })).toMatchObject({ bucket: 'running', shape: 'ring', label: 'monitoring' });
@@ -403,6 +408,8 @@ describe('deriveWebhookState', () => {
     ['a worker on its parent\'s reply', { status: 'waiting', delegation: { role: 'worker' }, waitingOn: { kind: 'workers', count: 1, replies: true } } as AttentionInput, 'waiting-workers'],
     ['a CI wait', { status: 'waiting', waitingOn: ci }, 'waiting-ci'],
     ['a timer wait', { status: 'waiting', waitingOn: timer }, 'waiting-timer'],
+    // hearsay-tools/cezarion#1446: no option of its own, so the catch-all.
+    ['a process wait', { status: 'waiting', waitingOn: { kind: 'process', waitId: '77777777-7777-4777-8777-777777777777', pid: 4242, deadline: '2026-10-17T15:30:00.000Z' } }, 'waiting-other'],
     // A usage-limit park is parked on a clock, as the scheduled resume it replaces was: no state.
     ['a usage-limit wait', { status: 'waiting', waitingOn: { kind: 'usage-limit', at: '2026-10-17T16:00:00.000Z' } }, undefined],
     ['a resolved wait owed a wake', { status: 'waiting', waitWakePending: true }, undefined],
