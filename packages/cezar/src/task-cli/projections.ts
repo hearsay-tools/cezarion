@@ -43,14 +43,22 @@ export function attentionFields(run: Parameters<typeof deriveAttention>[0]): Att
   return { attention: attention.bucket, attentionLabel: label };
 }
 
-export function projectStatus(run: ApiRun, url: string, question?: unknown) {
+/** The pending question as its `ask.requested` event holds it: the questions and, since
+ *  hearsay-tools/cezarion#1458, the Markdown context shown above them. */
+export interface PendingQuestion {
+  questions: unknown;
+  context?: unknown;
+}
+
+export function projectStatus(run: ApiRun, url: string, pending?: PendingQuestion) {
   return defined({
     id: run.id,
     title: runTitle(run),
     status: run.status,
     ...attentionFields(run),
     currentStepId: run.currentStepId,
-    question,
+    question: pending?.questions,
+    questionContext: pending?.context,
     branch: run.branch,
     diffStat: run.diffStat,
     pullRequestUrl: run.pullRequestUrl,

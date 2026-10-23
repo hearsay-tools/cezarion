@@ -29,6 +29,7 @@ export const WAIT_CRITERIA = [
   { id: 'U9c', scenario: 'baseline', name: 'with a delivery-failure count on the record and the store refusing writes, Finish still stops the run' },
   // hearsay-tools/cezarion#1234: human waits.
   { id: 'U7h', scenario: 'ask', name: 'the ask line, cezar_ask (an open question included) and a native ask land in the same wait list' },
+  { id: 'U7k', scenario: 'ask', name: 'cezar_ask delivers its context to the human wait and the card' },
   { id: 'U9h', scenario: 'provider-error', name: 'provider failure and clean close with a human wait open leave the run recoverable' },
   { id: 'U6', scenario: 'baseline', name: 'cezar_done is refused with live workers and with settled but uncollected workers, accepted once collected, and open waits are cancelled' },
   { id: 'U7d', scenario: 'baseline', name: 'the done line and cezar_done finish through the same path' },

@@ -8,6 +8,7 @@ import { voiceStore, useVoiceProposal } from '@/lib/voice/proposal-store'
 import { cn } from '@/lib/utils'
 
 import { useAskAnswer } from './ask-answer'
+import { Markdown } from './markdown'
 import type { ThreadAsk } from './thread-state'
 import type { UiAskQuestion } from '@open-mercato/cezar-api-client'
 
@@ -57,6 +58,25 @@ export function AskCard({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
   return <PendingAsk ask={ask} run={run} />
 }
 
+/**
+ * The draft, findings or evidence the agent sent with its question (hearsay-tools/cezarion#1458),
+ * as Markdown above the questions. A long one scrolls inside the card, so the questions and
+ * their chips stay in reach; the region takes focus so a keyboard can scroll it.
+ */
+function AskContext({ text }: { text: string }) {
+  return (
+    <div
+      data-slot="ask-context"
+      role="region"
+      aria-label="Context"
+      tabIndex={0}
+      className="mbe-3 [max-block-size:min(45dvh,28rem)] overflow-y-auto overscroll-contain rounded-md border border-border bg-background/60 px-3 py-2 text-sm break-words text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+    >
+      <Markdown breaks>{text}</Markdown>
+    </div>
+  )
+}
+
 /** A worker's question sent to its parent task (#505): read-only here, answered there. If the
  *  parent can no longer answer, the question falls back and this becomes the ordinary card. */
 function RoutedAsk({ ask }: { ask: ThreadAsk }) {
@@ -70,6 +90,7 @@ function RoutedAsk({ ask }: { ask: ThreadAsk }) {
       <div className="mb-2.5 flex items-center gap-2">
         <span className="text-xs font-medium text-link-foreground">The agent is asking its parent</span>
       </div>
+      {ask.context ? <AskContext text={ask.context} /> : null}
       <div className="flex flex-col gap-3">
         {ask.questions.map((question, index) => (
           <div key={question.id ?? index} role="group" aria-label={question.question}>
@@ -226,6 +247,7 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
       <div className="mb-2.5 flex items-center gap-2">
         <span className="text-xs font-medium text-link-foreground">The agent is asking</span>
       </div>
+      {ask.context ? <AskContext text={ask.context} /> : null}
       <div className="flex flex-col gap-4">
         {questions.map((question, index) => (
           <AskQuestionBlock

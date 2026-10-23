@@ -116,6 +116,8 @@ async function answerQuestion(id: string, askSeq: number) {
 
 // hearsay-tools/cezarion#1234: one human wait per run, shown as one card.
 const questions = [{ header: 'Choice', question: 'Which module?', options: [{ label: 'Parser' }, { label: 'Runner' }] }];
+/** hearsay-tools/cezarion#1458: cezar_ask requires the Markdown the user reads above the card. */
+const ASK_CONTEXT = '## Draft\n\n- first finding\n- second finding';
 const humanOpen = (id: string) => store.getRun(id)?.waits?.filter((wait): wait is HumanWaitEntry => wait.kind === 'human') ?? [];
 /** The run waits on an open human wait it has shown: as a card, or as the gate a wait without one raises. */
 const gated = (id: string) => store.getRun(id)?.status === 'waiting' && humanOpen(id)[0]?.askSeq !== undefined;
@@ -242,7 +244,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
     }
@@ -1028,10 +1030,20 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         nativeWire(runner);
         // The open question has no options: the card crosses this runner's wire without them.
         const card = [...questions, { header: 'Name', question: 'What should the command be called?' }];
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { questions: card }), runner });
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions: card }), runner });
         const wait = await expectHumanWaitAnswered(run.id, 'cezar_ask');
         expect(wait).toMatchObject({ source: 'agent', questions: card });
         expect(wait.questions?.[1]).not.toHaveProperty('options');
+      });
+
+      // hearsay-tools/cezarion#1458: on Claude, prose between tool calls can reach Cezar only as a
+      // summary, so the content rides in the call. Every runner's wire must deliver it whole.
+      it(`${runner} U7k cezar_ask delivers its context to the human wait and the card`, async () => {
+        nativeWire(runner);
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
+        const wait = await expectHumanWaitAnswered(run.id, 'cezar_ask');
+        expect(wait).toMatchObject({ context: ASK_CONTEXT, questions });
+        expect(asks(run.id).at(-1)).toMatchObject({ context: ASK_CONTEXT, questions });
       });
 
       it(`${runner} U7h a native ask opens a human wait in the same wait list`, async () => {
@@ -1051,22 +1063,25 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       it(`${runner} U7h a later ask line in the same turn replaces the cezar_ask card`, async () => {
         nativeWire(runner);
         const first = [{ header: 'Parser', question: 'Which parser?', options: [{ label: 'Peg' }, { label: 'Lalr' }] }];
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: `${toolCall('cezar_ask', { questions: first })} ${thenSay(ASK_TEXT)}`, runner });
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: `${toolCall('cezar_ask', { context: ASK_CONTEXT, questions: first })} ${thenSay(ASK_TEXT)}`, runner });
         const wait = await expectHumanWaitAnswered(run.id, 'cezar_ask');
         expect(wait.questions).toMatchObject(questions);
         expect(asks(run.id)[0]).toMatchObject({ questions });
+        // The ask line carries no context, so the replaced card's context goes with it (#1458).
+        expect(wait).not.toHaveProperty('context');
+        expect(asks(run.id)[0]).not.toHaveProperty('context');
       });
 
       // The Continue's answer settles the question it answers, never one its own turn asks.
       it(`${runner} U7h a Continue that answers one question and asks the next keeps the next one open`, async () => {
         nativeWire(runner);
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { questions }), runner });
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
         await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
         const [first] = humanOpen(run.id);
         engine().active.get(run.id)!.session.end();
         await until(() => !manager.isActive(run.id));
         const next = [{ header: 'Runner', question: 'Which runner next?', options: [{ label: 'Codex' }, { label: 'Pi' }] }];
-        expect(manager.continueRun(run.id, { text: toolCall('cezar_ask', { questions: next }) }).ok).toBe(true);
+        expect(manager.continueRun(run.id, { text: toolCall('cezar_ask', { context: ASK_CONTEXT, questions: next }) }).ok).toBe(true);
         await until(() => settled(run.id, first!.id)?.phase === 'delivered' && turnEnds(run.id) > 1 && store.getRun(run.id)?.status === 'waiting');
         const [second, ...more] = humanOpen(run.id);
         expect(more).toEqual([]);
@@ -1082,7 +1097,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
         await until(wire.held);
         const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
-        const registered = await tools.ask({ questions }, new AbortController().signal);
+        const registered = await tools.ask({ context: ASK_CONTEXT, questions }, new AbortController().signal);
         if (!registered.ok) throw Error('registration refused');
         // Registered mid-turn, so nothing is shown before the turn ends.
         expect(asks(run.id)).toEqual([]);
@@ -1102,7 +1117,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
         await until(() => store.getRun(run.id)?.status === 'waiting');
         const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
-        const registered = await tools.ask({ questions }, new AbortController().signal);
+        const registered = await tools.ask({ context: ASK_CONTEXT, questions }, new AbortController().signal);
         if (!registered.ok) throw Error('registration refused');
         // Registered at a boundary: the card is shown at once.
         await until(() => pendingQuestion(run.id) && asks(run.id).length === 1);
@@ -1208,7 +1223,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         nativeWire(runner);
         const answers = join(root, 'done-answers');
         process.env.CEZ_MOCK_CI_RESULT = answers;
-        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { questions }), runner });
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
         await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined);
         const [wait] = humanOpen(run.id);
         engine().active.get(run.id)!.session.end();

@@ -2864,7 +2864,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
                   await waitFor(() => manager.isActive(runId) && store.getRun(runId)?.status === 'waiting');
                 }
                 assertRules(systemPrompt(backend, dir), promptRules);
-                expect(systemPrompt(backend, dir)).toContain('When you need the user — a decision only they can make, or missing input — call cezar_ask');
+                expect(systemPrompt(backend, dir)).toContain('When a user decision or missing input is needed, call cezar_ask');
               });
           });
         }, 60_000);

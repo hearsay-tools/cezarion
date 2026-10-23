@@ -81,6 +81,9 @@ function hasOwn(record: Record<string, unknown>, key: string): boolean {
 function normalizeAskRequest(value: unknown): unknown {
   if (!isRecord(value)) return value;
   const request: Record<string, unknown> = {};
+  // hearsay-tools/cezarion#1458: context can hold the warning a decision depends on, so it is kept
+  // exactly as written; the schema refuses a bad one and the raw marker text stays visible.
+  if (hasOwn(value, 'context')) request.context = value.context;
   if (!hasOwn(value, 'questions')) return request;
   request.questions = Array.isArray(value.questions)
     ? value.questions.map((question) => {

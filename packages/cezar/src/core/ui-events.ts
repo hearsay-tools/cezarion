@@ -382,6 +382,9 @@ export interface UiAskRequestedEvent {
   type: 'ask.requested';
   requestId: string;
   questions: UiAskQuestion[];
+  /** Markdown shown above the questions (hearsay-tools/cezarion#1458); absent on older asks,
+   *  native asks and an ask line without one. */
+  context?: string;
 }
 
 /**

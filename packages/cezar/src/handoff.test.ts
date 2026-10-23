@@ -329,7 +329,7 @@ describe('handoffInstructions', () => {
     for (const followups of [false, true]) {
       const text = handoffInstructions({ tools: true, followups });
       expect(text).toContain('Lifecycle tools (cezar): End every turn with a cezar tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.');
-      expect(text).toContain('When you need the user — a decision only they can make, or missing input — call cezar_ask with up to four questions, then end your turn. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer.');
+      expect(text).toContain('When a user decision or missing input is needed, call cezar_ask with the complete decision context and short questions. Put the full draft, findings, evidence and option meanings in context. Cezar shows context as Markdown above the card. Reasoning and rejected calls are hidden. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer. Once the call accepts the context and questions, end the turn and wait for the user.');
       expect(text).toContain('call cezar_wait with kind "ci" for a pull request\'s checks or kind "timer" to re-check later');
       expect(text).not.toContain('kind "human"');
       // A reply settles the question; only CI waits and timers wait for a result or a cancel.
@@ -350,14 +350,17 @@ describe('handoffInstructions', () => {
 
   // hearsay-tools/cezarion#1428: agents asked about drafts and findings they never sent, once
   // after a plain ask and once after the content lived only in rejected tool-call arguments.
-  it('both variants require the full decision context as assistant text before the question', () => {
+  // hearsay-tools/cezarion#1458: on Claude, assistant text between tool calls may never arrive, so
+  // the tool variant puts the content in context; the marker's own message text still arrives.
+  it('the tool variant puts the decision context in the call, the marker variant in the message', () => {
     for (const followups of [false, true]) {
       const tools = handoffInstructions({ tools: true, followups });
-      expect(tools).toContain('Before you call cezar_ask, send everything the decision depends on (the full draft, every finding, what each option means) as assistant text in this turn.');
-      expect(tools).toContain('The user sees only your assistant text and the question card. Your reasoning and the arguments of a tool call, a rejected call included, never reach them, so never call content "above" unless you sent it as assistant text.');
+      expect(tools).not.toContain('as assistant text');
+      expect(tools).toContain('Put the full draft, findings, evidence and option meanings in context.');
       const markers = handoffInstructions({ tools: false, followups });
       expect(markers).toContain('Before the CEZ:ASK line, send everything the decision depends on (the full draft, every finding, what each option means) as ordinary text in the same message.');
       expect(markers).toContain('The user sees only your message text and the chips. Your reasoning never reaches them, so never call content "above" unless you sent it as message text.');
+      expect(markers).toContain('plus an optional "context" of up to 20000 characters of Markdown shown above the chips');
     }
   });
 });

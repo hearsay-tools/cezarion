@@ -17,9 +17,11 @@ export function questionMessage(input: {
     createdAt: input.now, requestHash, state: 'accepted', question: input.request };
 }
 
-/** What the parent reads: the questions, their options, and the exact reply command. */
+/** What the parent reads: the context, the questions, their options, and the exact reply command. */
 export function formatQuestionText(workerRunId: string, messageId: string, request: AskRequest): string {
   const lines = [`Your worker ${workerRunId} is waiting for your answer:`];
+  // hearsay-tools/cezarion#1458: the draft or findings the question depends on come first.
+  if (request.context !== undefined) lines.push('Context:', request.context, '');
   request.questions.forEach((question, index) => {
     // hearsay-tools/cezarion#1234: a question without options is open; multiSelect needs options.
     const hint = !question.options ? ' (open question: answer in your own words)' : question.multiSelect ? ' (choose one or more)' : '';

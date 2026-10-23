@@ -3,7 +3,11 @@
 import { z } from 'zod';
 
 /** The card's limits, shared with the agent-facing tool text and rejections (hearsay-tools/cezarion#1428). */
-export const ASK_LIMITS = { questions: 4, id: 64, header: 12, question: 400, minOptions: 2, maxOptions: 4, label: 60, description: 280 } as const;
+export const ASK_LIMITS = { questions: 4, id: 64, header: 12, question: 400, minOptions: 2, maxOptions: 4, label: 60, description: 280, context: 20_000 } as const;
+
+/** hearsay-tools/cezarion#1458: the Markdown the user reads above the questions. On Claude, prose
+ *  between tool calls can reach Cezar only as a short summary; a field inside the call arrives whole. */
+export const askContextSchema = z.string().min(1).max(ASK_LIMITS.context);
 
 export const askOptionSchema = z
   .object({
@@ -34,8 +38,11 @@ export const askQuestionSchema = z
   })
   .strict();
 
+/** The stored shape: asks recorded before hearsay-tools/cezarion#1458, the ask line and a routed
+ *  question may carry no context. `cezar_ask` requires it (`cezarAskRequestSchema`). */
 export const askRequestSchema = z
   .object({
+    context: askContextSchema.optional(),
     questions: z
       .array(askQuestionSchema)
       .min(1)
