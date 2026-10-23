@@ -124,3 +124,11 @@ replay, interrupted writes, lost responses, complete manifests and closed-summar
 replay. The workflow test pins the trigger, permissions, trusted checkout and shared
 lock. Release, Nightly and sweep reporting retain their existing coverage. The
 prompt helper test validates that its CLI output updates only the prompt.
+
+Merge-group failures do not enter this push-only repair path. They remain visible
+in the queue and leave the PR unmerged. Main push failures still enter it,
+including full verification after missing queue proof and snapshot failures.
+A failed metadata probe alone does not prevent successful full fallback or its
+snapshot. See [queue CI and recovery](ci.md#merge-queue-and-exact-commit-reuse).
+For fresh verification, use Re-run all jobs or bare workflow dispatch; partial
+retries can retain historical successful proof for the same immutable commit.

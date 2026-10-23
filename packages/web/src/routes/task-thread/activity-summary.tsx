@@ -18,7 +18,9 @@ export function ActivitySummary({ items }: { items: SummaryItem[] }) {
     if (!element) return
     const measure = () => {
       const width = element.getBoundingClientRect().width
-      if (!width) return
+      // No layout box means no measurement yet. A laid-out zero width is real: the folded
+      // Activity header leaves the summary no room on a phone, and then every value hides.
+      if (!width && element.getClientRects().length === 0) return
       const style = getComputedStyle(element)
       // Rectangles include ancestor zoom and transforms; computed gaps use CSS pixels.
       const cssWidth = Number.parseFloat(style.width)

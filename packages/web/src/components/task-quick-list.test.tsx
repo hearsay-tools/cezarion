@@ -1706,6 +1706,17 @@ it('says when a timer park checks next, in the meta line', () => {
   expect(row('m')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe(`monitoring, next check ${text}`)
 })
 
+// hearsay-tools/cezarion#1446: a process wait says when it gives up, in the meta line.
+it('says until when a process wait waits, in the meta line', () => {
+  const at = new Date(NOW + 30 * 60_000).toISOString()
+  renderList({ runs: [run({ id: 'p', status: 'waiting', waits: [{ kind: 'process', id: '00000000-0000-4000-8000-0000000000d2', source: 'agent', via: 'cezar_wait',
+    registeredAt: new Date(NOW).toISOString(), deadline: at, phase: 'open', turnId: 'turn-1', timeoutSeconds: 1800, pid: 4242 }] })] })
+  const time = new Intl.DateTimeFormat(undefined, { timeStyle: 'short' }).format(new Date(at))
+  const sameDay = new Date(at).toDateString() === new Date(NOW).toDateString()
+  const text = sameDay ? time : new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(at))
+  expect(row('p')?.querySelector('[data-slot="task-row-state"]')?.textContent).toBe(`waiting for a command, until ${text}`)
+})
+
 describe('variant line 1 under width pressure (#617 fix round)', () => {
   const pair = () => [
     run({ id: 'oa', groupId: 'g2', variant: 'A', title: 'Ledger (A)', status: 'running', runner: 'opencode', costUsd: 0.4, inputTokens: 1, outputTokens: 1 }),

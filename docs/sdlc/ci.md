@@ -319,3 +319,85 @@ names, push/manual routing, classification, cancellation and snapshot
 eligibility. There was no remote `develop` at migration time; live validation
 there is deferred. Create any future `develop` from a revision containing the
 target workflow before opening PRs against it.
+
+## Merge queue and exact-commit reuse
+
+CI accepts `merge_group: checks_requested` for `main`. It tests the immutable
+combined commit with all ten verification jobs, including Node floor and browser
+E2E. Queue runs never use docs/infra or release-bump exemptions. They have no
+model keys, npm credentials, publishing jobs or OIDC permission.
+
+The required `Automated Code Review` check verifies existing PR-head review
+admission. It does not call a model to review combined code. The helper comes
+from the group's immutable base SHA. It requires the first live queue entry to
+match both group SHAs, effective serial queue rules, an unchanged open non-draft
+main PR, successful current native `pull_request_target` CI/review from this
+repository's `ci.yml`, and no unresolved review threads. Dispatches and unrelated
+same-name checks cannot supply review admission. Missing or changing evidence
+fails closed. GitHub owns queue persistence; no cockpit session is required.
+
+A main push probes official Actions metadata for at most 60 seconds (each request
+at most 10 seconds; at most seven pending reads; complete lists limited to 200
+records). It reuses only the newest same-repository queue run's latest successful
+attempt for the **exact pushed SHA**, after every classifier, verification leaf,
+aggregate and review admission job succeeds. A final reread checks for races.
+Equal trees, ancestors, PR runs, dispatches, artifacts and an older success behind
+a newer failure are not proof. Unknown evidence or probe infrastructure failure
+runs full main CI. The aggregate records the source run and attempt when it reuses
+verification. Snapshot publishing still builds after successful verification and
+checks out the immutable pushed SHA, even if the branch has moved.
+
+A full rerun refreshes proof. Re-run failed jobs can retain a prior successful
+proof job, just as it retains successful test jobs. That is historical evidence
+for the same immutable commit, not a fresh read of a later queue attempt. Use
+Re-run all jobs or a bare diagnostic dispatch to demand current verification.
+Deleted Actions history loses the optimization and causes full fallback.
+
+### Maintainer activation and rollback
+
+This implementation does not enable the queue or change repository protections.
+Until a maintainer activates it, the existing behind-main merge policy remains.
+Before activation, verify in a controlled GitHub repository or equivalent safe
+exercise that first-entry head/base semantics match this helper, a failing
+combined guard blocks merge, no model calls occur, squash lands the exact tested
+SHA, reuse succeeds, and absent proof forces full fallback. Fixture tests and a
+branch dispatch do not prove live queue semantics or equal cost.
+
+After the implementation lands and that evidence is accepted, proposed settings
+are squash, build concurrency 1, minimum/maximum merge count 1, only passing
+entries (`ALLGREEN`), and a 45-minute check timeout. Keep both required checks
+(`Unit, build, E2E, and package` and `Automated Code Review`) bound to GitHub Actions,
+review-thread resolution, strict checks false, all other protections, and no
+bypass actors. The admission helper rejects other queue settings. Enable the
+queue requirement only after required checks can run. Do not auto-enqueue a
+backlog or jump the queue. Confirm external merge tools distinguish enqueueing
+from actual merging before adoption; documentation here does not update them.
+
+Normal eligible merges replace main's full matrix with the same full matrix
+before merge plus a metadata probe. This is a cost goal, not a guarantee. Rebuilds,
+failed groups, retries, docs-only entries and fallback add work. Measure queue
+wait, verification job-seconds, source attempts, reuse hits and fallback reasons.
+If squash does not preserve the SHA, keep full fallback and return to design
+review. Do not accept tree equivalence to make the metric pass.
+
+Queue failure, timeout, changed head or removal leaves the PR open. Fix the PR
+and pass native checks before re-entry, or explicitly requeue a transient failure.
+There is no automatic requeue or paid-review loop. Recovery works without a local
+session because GitHub owns both the queue and Actions records.
+
+| State | Trigger | Who fires it | Behavior with proposed defaults |
+| --- | --- | --- | --- |
+| Queued/building | Combined gate and admission succeed | GitHub | Merge tested entry |
+| Queued/building | Failure, timeout, conflict or changed head | GitHub | Remove/rebuild; PR stays open |
+| Queued/building | Removal/reorder | Authorized human | Stale group cannot authorize current entry |
+| Removed | Fix and enqueue, or explicit transient retry | Human | No automatic retry |
+| Main proof pending | Exact complete evidence arrives | Actions API probe | Reuse recorded source attempt |
+| Main proof pending | Error, missing history, timeout or mismatch | Probe/job deadline | Full main verification, without a session |
+| Main verification | Successful proof or full gate | Actions | Permit snapshot of pushed SHA |
+| Main verification | Failure/cancellation | Actions | No publication; normal push reporting |
+
+For an incident, bare workflow dispatch forces full CI without publication.
+Reverting reuse restores full verification on future pushes. Queue rollback is
+maintainer-owned: inspect active entries, remove only the queue requirement and
+restore the behind-main policy. Retain full main CI, both required checks,
+review-thread resolution and no-bypass protection.

@@ -23,8 +23,8 @@ describe('wait tool definitions', () => {
     // The Anthropic tool API refuses a top-level union; the kinds validate on the server.
     for (const key of ['oneOf', 'anyOf', 'allOf']) expect(schema).not.toHaveProperty(key);
     // hearsay-tools/cezarion#1425: kind "pr" replaced kind "ci" and takes a target and a conflict switch.
-    expect(schema.properties).toMatchObject({ kind: { enum: ['pr', 'worker', 'timer'] }, until: { enum: ['checks', 'merge'], default: 'checks' }, wake_on_conflict: { type: 'boolean', default: true } });
-    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['kind', 'mode', 'note', 'pr', 'request_ids', 'seconds', 'timeout_seconds', 'until', 'wake_on_conflict', 'worker_ids']);
+    expect(schema.properties).toMatchObject({ kind: { enum: ['pr', 'worker', 'timer', 'process'] }, until: { enum: ['checks', 'merge'], default: 'checks' }, wake_on_conflict: { type: 'boolean', default: true } });
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['exit_file', 'kind', 'mode', 'note', 'pid', 'pr', 'request_ids', 'seconds', 'timeout_seconds', 'until', 'wake_on_conflict', 'worker_ids']);
     expect(JSON.stringify(schema)).not.toContain('"ci"');
     expect((schema.properties as Record<string, { description: string }>).wake_on_conflict!.description).toContain('a PR you do not own');
     expect((schema.properties as Record<string, { description: string }>).until!.description).toContain('"merge"');
@@ -70,7 +70,7 @@ describe('wait tool definitions', () => {
       expect(cezarTools(env).map(tool => tool.definition.name)).not.toContain('cezar_wait_for_ci');
       const instructions = cezarServerInstructions(env);
       expect(instructions).not.toContain('- cezar_wait_for_ci:');
-      expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR, or want to re-check something later; end your turn after it answers.');
+      expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR or on a background job you started, or want to re-check something later; end your turn after it answers.');
       expect(instructions).toContain('- cezar_ask: load for a user decision or missing input; provide the full draft or findings in its rendered context field.');
       expect(instructions).toContain('- cezar_cancel_wait: load when a wait you registered is no longer needed.');
     }

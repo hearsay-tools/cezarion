@@ -1,13 +1,15 @@
+import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
-import type { AgentInput, CiWaitResult, HumanWaitEntry, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import type { AgentInput, CiWaitResult, HumanWaitEntry, ProcessWaitResult, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
+import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { checkpoint, collect, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
@@ -40,6 +42,26 @@ function github() {
   vi.spyOn(CiWatcherSupervisor.prototype, 'watch').mockImplementation((_wait, abort) => { signal = abort; return result; });
   return { settle: () => settle(passed()), aborted: () => signal?.aborted };
 }
+
+// hearsay-tools/cezarion#1446: only the process watch is controlled; registration, the park and the
+// delivery cross the runner's own wire.
+function processes() {
+  const watches: Array<{ signal: AbortSignal; settle: (result: ProcessWaitResult) => void }> = [];
+  vi.spyOn(ProcessWaitSupervisor.prototype, 'watch').mockImplementation((_request, signal) =>
+    new Promise<ProcessWaitResult>(resolve => { watches.push({ signal, settle: resolve }); }));
+  return {
+    watches: () => watches.length,
+    settle: (result: Omit<ProcessWaitResult, 'observedAt'>) => watches.at(-1)!.settle({ observedAt: new Date().toISOString(), ...result }),
+    aborted: () => watches.at(-1)?.signal.aborted,
+  };
+}
+/** A live process of this test's own to wait on, killed when the test ends. */
+function sleeper(): number {
+  const child = spawn('sleep', ['120'], { stdio: 'ignore' });
+  onTestFinished(() => { child.kill('SIGKILL'); });
+  return child.pid!;
+}
+const processText = (wait: Wait, rest: string) => `Process wait ${wait.id} for PID ${(wait as { pid: number }).pid}${rest}`;
 
 function nativeWire(runner: RunnerId) {
   process.env.CEZ_DRY_RUN = '0';
@@ -222,13 +244,15 @@ const timerText = (wait: Wait, note: string) => `Timer ${wait.id} fired: ${note}
 // one file outgrew a CI shard's time limit (hearsay-tools/cezarion#1301). One runner's cells in one
 // file then outgrew Squeal's 600 s per-file cap on a loaded host, so each runner has two files:
 // `waits-<runner>-parity.test.ts` runs the `base` rows and `waits-<runner>-workers-parity.test.ts`
-// the `workers` rows (hearsay-tools/cezarion#1288). `waits-<runner>-entries-parity.test.ts` runs
-// the U27 turn-end entry axis (hearsay-tools/cezarion#1525), so those rows grow neither file.
-// `waits-parity.test.ts` runs the criteria guard and the single-runner cells.
-export type WaitParityPart = 'base' | 'workers' | 'entries';
+// the `workers` rows (hearsay-tools/cezarion#1288). `waits-<runner>-process-parity.test.ts` runs the
+// process-wait rows, and `waits-<runner>-entries-parity.test.ts` the U27 turn-end entry axis
+// (hearsay-tools/cezarion#1525), so those rows grow neither file. `waits-parity.test.ts` runs the
+// criteria guard and the single-runner cells.
+export type WaitParityPart = 'base' | 'workers' | 'process' | 'entries';
 export const WAIT_PARITY_FILES: Readonly<Record<WaitParityPart, (runner: RunnerId) => string>> = {
   base: runner => `waits-${runner}-parity.test.ts`,
   workers: runner => `waits-${runner}-workers-parity.test.ts`,
+  process: runner => `waits-${runner}-process-parity.test.ts`,
   entries: runner => `waits-${runner}-entries-parity.test.ts`,
 };
 
@@ -246,7 +270,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25', 'U27']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
     }
@@ -2476,6 +2500,128 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           });
         });
       }
+    }
+
+    for (const runner of runnersFor('process')) {
+      it(`${runner} U1p a process wait registers through cezar_wait on the native wire, parks keeping its slot, and wakes with its exit code`, async () => {
+        const external = processes();
+        nativeWire(runner);
+        const pid = sleeper();
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'process', pid, exit_file: 'u1p.exit', note: 'u1p' }), runner });
+        await until(() => parkedOn(run.id, waitOfKind(run.id, 'process')));
+        const wait = waitOfKind(run.id, 'process')!;
+        expect(wait).toMatchObject({ via: 'cezar_wait', source: 'agent', pid, note: 'u1p', startToken: expect.any(String),
+          exitFile: join(store.getRun(run.id)!.worktreePath!, 'u1p.exit') });
+        expect(engine().monitoring.has(run.id)).toBe(true);
+        expect(deriveAttention(store.getRun(run.id)!).label).toBe('waiting for a command');
+        external.settle({ outcome: 'exit_file', exitCode: 0 });
+        await until(() => settled(run.id, wait.id)?.phase === 'delivered' && prompted(runner, processText(wait, ' (u1p): exited with code 0')).length > 0);
+        expect(inputsFor(run.id, wait.id)).toHaveLength(1);
+        await until(() => store.getRun(run.id)?.status === 'waiting');
+
+        const other = sleeper();
+        expect(manager.sendMessage(run.id, [{ type: 'text', text: toolCall('cezar_wait', { kind: 'process', pid: other }) }])).toBe(true);
+        await until(() => parkedOn(run.id, waitOfKind(run.id, 'process')));
+        const second = waitOfKind(run.id, 'process')!;
+        expect(second).toMatchObject({ pid: other });
+        external.settle({ outcome: 'exited' });
+        await until(() => settled(run.id, second.id)?.phase === 'delivered' && prompted(runner, processText(second, ': exited, code unknown')).length > 0);
+        await until(() => store.getRun(run.id)?.status === 'waiting');
+        expect(agentWaits(run.id)).toEqual([]);
+      });
+
+      it(`${runner} U2p process and timer open: the timer wakes, the process wait stays open and is in the footer, the later process result is delivered`, async () => {
+        const external = processes();
+        nativeWire(runner);
+        const pid = sleeper();
+        const opened = `${toolCall('cezar_wait', { kind: 'process', pid })} ${toolCall('cezar_wait', { kind: 'timer', seconds: 60, note: 'u2p' })}`;
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: opened, runner });
+        await until(() => parkedOn(run.id, waitOfKind(run.id, 'process')) && waitOfKind(run.id, 'timer')?.phase === 'open');
+        const wait = waitOfKind(run.id, 'process')!, timer = waitOfKind(run.id, 'timer')!;
+        const turns = turnEnds(run.id);
+        fireTimer(timer.id);
+        await until(() => settled(run.id, timer.id)?.phase === 'delivered' && prompted(runner, timerText(timer, 'u2p')).length > 0);
+        expect(prompted(runner, timerText(timer, 'u2p')).at(-1)).toContain(`\n\nStill open: process wait ${wait.id} on PID ${pid}`);
+        await until(() => turnEnds(run.id) > turns && parkedOn(run.id, waitOfKind(run.id, 'process')));
+        expect(store.getRun(run.id)?.waits).toEqual([expect.objectContaining({ id: wait.id, phase: 'open' })]);
+        expect(external.watches()).toBe(1);
+        external.settle({ outcome: 'exited' });
+        await until(() => settled(run.id, wait.id)?.phase === 'delivered' && prompted(runner, processText(wait, ': exited, code unknown')).length > 0);
+        expect(prompted(runner, processText(wait, ': exited, code unknown')).at(-1)).not.toContain('Still open');
+        await until(() => store.getRun(run.id)?.status === 'waiting' && !agentWaits(run.id).length);
+      });
+
+      it(`${runner} U4p cezar_cancel_wait cancels a process wait, aborts its watch, and no result is delivered`, async () => {
+        const external = processes();
+        nativeWire(runner);
+        const pid = sleeper();
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: `${toolCall('cezar_wait', { kind: 'process', pid })} ${toolCall('cezar_cancel_wait', { wait_id: 'last' })}`, runner });
+        await until(() => store.getRun(run.id)?.lastWaits?.some(wait => wait.kind === 'process') === true && store.getRun(run.id)?.status === 'waiting');
+        const wait = store.getRun(run.id)!.lastWaits!.find(entry => entry.kind === 'process')!;
+        expect(wait).toMatchObject({ phase: 'cancelled', via: 'cezar_wait' });
+        expect(external.aborted()).toBe(true);
+        external.settle({ outcome: 'exited' });
+        await flushMicrotasks();
+        expect(inputsFor(run.id, wait.id)).toEqual([]);
+        // Cancelling stops the watch; the process itself is the agent's.
+        expect(() => process.kill(pid, 0)).not.toThrow();
+      });
+
+      it(`${runner} U9p provider failure with a process wait open leaves the run recoverable and the next result delivers`, async () => {
+        const external = processes();
+        const wire = gatedProviderFailure(root, runner);
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
+        await until(wire.held);
+        const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+        const registered = await tools.registerWait({ kind: 'process', pid: sleeper(), timeout_seconds: 60 }, 'cezar_wait', new AbortController().signal);
+        expect(registered.answer).toMatchObject({ ok: true, kind: 'process' });
+        if (!('wait' in registered)) throw Error('registration refused');
+        const wait = registered.wait;
+        const failedState = engine().active.get(run.id);
+        wire.release();
+        await until(() => store.readEvents(run.id).some(event => event.type === 'error'));
+        await until(() => engine().active.get(run.id) !== failedState);
+        expect(store.getRun(run.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe('open');
+        expect(store.getRun(run.id)?.status).not.toBe('failed');
+        external.settle({ outcome: 'exit_file', exitCode: 2 });
+        await until(() => settled(run.id, wait.id)?.phase === 'delivered');
+        expect(inputsFor(run.id, wait.id).map(input => input.text)).toEqual([expect.stringContaining('exited with code 2')]);
+        await until(() => store.getRun(run.id)?.status === 'waiting');
+      });
+
+      it(`${runner} U9p clean close with a process wait open leaves the run recoverable and the next result delivers`, async () => {
+        const external = processes();
+        nativeWire(runner);
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
+        await until(() => store.getRun(run.id)?.status === 'waiting');
+        const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
+        const registered = await tools.registerWait({ kind: 'process', pid: sleeper(), timeout_seconds: 60 }, 'cezar_wait', new AbortController().signal);
+        if (!('wait' in registered)) throw Error('registration refused');
+        const wait = registered.wait;
+        engine().active.get(run.id)!.session.end();
+        await until(() => !manager.isActive(run.id));
+        expect(store.getRun(run.id)?.status).toBe('waiting');
+        expect(store.getRun(run.id)?.waits?.find(entry => entry.id === wait.id)?.phase).toBe('open');
+        external.settle({ outcome: 'deadline' });
+        await until(() => settled(run.id, wait.id)?.phase === 'delivered' && prompted(runner, processText(wait, ': still running at the deadline')).length > 0);
+        await until(() => store.getRun(run.id)?.status === 'waiting');
+      });
+
+      it(`${runner} U9pr after a restart with no live session a process wait is watched again and its result delivers through the continuation`, async () => {
+        const external = processes();
+        nativeWire(runner);
+        const pid = sleeper();
+        const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'process', pid, note: 'u9pr' }), runner });
+        await until(() => parkedOn(run.id, waitOfKind(run.id, 'process')));
+        const wait = waitOfKind(run.id, 'process')!;
+        await restart();
+        expect(manager.isActive(run.id)).toBe(false);
+        await until(() => external.watches() === 2);
+        expect(waitOfKind(run.id, 'process')).toMatchObject({ id: wait.id, phase: 'open' });
+        external.settle({ outcome: 'exited' });
+        await until(() => settled(run.id, wait.id)?.phase === 'delivered' && prompted(runner, processText(wait, ' (u9pr): exited, code unknown')).length > 0);
+        await until(() => store.getRun(run.id)?.status === 'waiting');
+      });
     }
 
     if (scope !== 'once') return;

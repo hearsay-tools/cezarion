@@ -84,3 +84,28 @@ it('counts scaled gaps at 200% zoom before keeping a value', () => {
   resize(180)
   expect(visible()).toEqual(['opus', '$26'])
 })
+
+// hearsay-tools/cezarion#1478: the folded Activity header gives the summary only the space its
+// status and step leave, which is none on a 320px phone. A laid-out summary with zero width must
+// hide every value; only a summary with no layout box at all keeps the CSS fallback.
+it('hides every value when its laid-out width reaches zero', () => {
+  const resize = layout()
+  vi.spyOn(Element.prototype, 'getClientRects').mockImplementation(() => [{}] as unknown as DOMRectList)
+  render(<ActivitySummary items={[
+    { id: 'model', priority: 4, content: 'opus' },
+    { id: 'chips', priority: 0, content: 'PR #1422' },
+  ]} />)
+  expect(visible()).toEqual(['opus', 'PR #1422'])
+  resize(0)
+  expect(visible()).toEqual([])
+  expect(document.querySelector('[data-summary-item="chips"]')?.hasAttribute('inert')).toBe(true)
+  resize(400)
+  expect(visible()).toEqual(['opus', 'PR #1422'])
+})
+
+it('keeps every value while the summary has no layout box', () => {
+  const resize = layout()
+  render(<ActivitySummary items={[{ id: 'model', priority: 4, content: 'opus' }]} />)
+  resize(0)
+  expect(visible()).toEqual(['opus'])
+})

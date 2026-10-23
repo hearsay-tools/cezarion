@@ -427,6 +427,21 @@ Squeal, so they exercise the current built output. This selection supplements
 the dry-run park-fixture and runner-parity requirements above
 (hearsay-tools/cezarion#1300).
 
+Before pushing a change that renames an enum or discriminant value — a wait
+kind, outcome, status or attention label — search test files for the quoted old
+value. From the repo root, replace `ci` below with that value:
+
+```bash
+rg -n -F -e "'ci'" -e '"ci"' packages --glob '*.test.*' --glob '*.e2e.ts'
+```
+
+Inspect every match. Update assertions and fixtures that should use the new
+value. Preserve intentional refusal tests, legacy-row conversion tests and
+unrelated uses. A rejection test that passes only because the old value is now
+unknown must be updated to test its intended constraint. In
+hearsay-tools/cezarion#1504, a deadline test still used `ci` after the kind became
+`pr`, so it could pass without checking the deadline requirement.
+
 In an unbuilt worktree, only a `Cannot find module` error naming a missing
 `dist/` module is the known Squeal limitation. An assertion failure in
 `test:package` is a real failure that needs investigation; do not dismiss it
