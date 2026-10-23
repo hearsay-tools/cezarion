@@ -134,14 +134,14 @@ describe('toRunSummary', () => {
 
   it('names the top open wait as waitingOn and leaves the wait list on the record', () => {
     const waits = [{
-      kind: 'ci', id: '33333333-3333-4333-8333-333333333333', source: 'agent', via: 'cezar_wait',
+      kind: 'pr', id: '33333333-3333-4333-8333-333333333333', source: 'agent', via: 'cezar_wait',
       registeredAt: '2026-10-04T10:00:00.000Z', deadline: '2026-10-04T10:30:00.000Z', phase: 'open', turnId: 'turn-1',
       prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40),
-      generation: 'gen-1', timeoutSeconds: 1800,
+      generation: 'gen-1', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
     }] as RunRecord['waits'];
     const summary = toRunSummary(record({ status: 'waiting', waits, lastWaits: waits }));
     expect(summary.waitingOn).toEqual({
-      kind: 'ci', waitId: '33333333-3333-4333-8333-333333333333', prUrl: 'https://github.com/o/r/pull/12',
+      kind: 'pr', until: 'checks', waitId: '33333333-3333-4333-8333-333333333333', prUrl: 'https://github.com/o/r/pull/12',
       repository: 'o/r', prNumber: 12, deadline: '2026-10-04T10:30:00.000Z',
     });
     expect(Object.keys(summary)).not.toContain('waits');

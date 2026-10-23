@@ -33,7 +33,7 @@ export type RunContext = {
 
 export type PreviewTarget = { port: number } | { url: string };
 
-export type BrowserExit = { signal?: string; stderrTail: string };
+export type BrowserExit = { signal?: string; exitCode?: number; stderrTail: string };
 /** A launched Chromium with its page's CDP connection. `exited` settles when the process is gone. */
 export type BrowserHandle = { cdp: Cdp; exited: Promise<BrowserExit>; close(): void };
 
@@ -118,7 +118,7 @@ async function launchBrowser(profileDir: string, env: NodeJS.ProcessEnv): Promis
     tail = (tail + chunk.toString('utf8')).slice(-STDERR_TAIL_CHARS);
   });
   const exited = new Promise<BrowserExit>(resolve =>
-    proc.once('exit', (_code, signal) => resolve({ ...(signal ? { signal } : {}), stderrTail: tail })),
+    proc.once('exit', (code, signal) => resolve({ ...(signal ? { signal } : code !== null ? { exitCode: code } : {}), stderrTail: tail })),
   );
   try {
     const targets = targetsSchema.parse(await (await fetch(`http://127.0.0.1:${port}/json/list`)).json());
@@ -591,7 +591,15 @@ export class PreviewHost implements PreviewHostLike {
     const stderrTail = error instanceof ChromiumError
       ? [error.message, error.stderrTail].filter(Boolean).join('\n')
       : error instanceof Error ? error.message : String(error);
-    entry.browserFailure = { t: 'state', stage: 'browser-exited', stderrTail, serverUp: this.serverUp(entry) };
+    entry.browserFailure = {
+      t: 'state',
+      stage: 'browser-exited',
+      reason: error instanceof ChromiumError && error.kind === 'timeout' ? 'timeout' : 'exited',
+      ...(error instanceof ChromiumError && error.signal ? { signal: error.signal } : {}),
+      ...(error instanceof ChromiumError && error.exitCode !== undefined ? { exitCode: error.exitCode } : {}),
+      stderrTail,
+      serverUp: this.serverUp(entry),
+    };
     this.tell(entry, entry.browserFailure);
   }
 
@@ -603,7 +611,9 @@ export class PreviewHost implements PreviewHostLike {
     entry.browserFailure = {
       t: 'state',
       stage: 'browser-exited',
+      reason: 'exited',
       ...(exit.signal ? { signal: exit.signal } : {}),
+      ...(exit.exitCode !== undefined ? { exitCode: exit.exitCode } : {}),
       stderrTail: exit.stderrTail,
       serverUp: this.serverUp(entry),
     };

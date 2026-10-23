@@ -166,6 +166,28 @@ The push-only `.github/workflows/ci-benchmark.yml` workflow runs controlled expe
 
 Automated code review runs inside the `ci.yml` pull-request run, as the `review` job that calls `automated-code-review.yml` with `needs: verify`. GitHub starts it only when the **Unit, build, E2E, and package** job succeeds, so no runner sits polling for CI. Failed, cancelled or skipped verification leaves the review skipped. The model jobs still run on the trusted base's scripts, and their context fetch rechecks that verification succeeded for the exact head SHA immediately before model work. Standalone CI context collection still reports verification's actual conclusion and failed verification jobs; individual completed-job logs avoid waiting for the whole workflow archive. Ambiguous jobs or job-query errors fail the recheck.
 
+Codex reviews keep a 12-minute action limit for smaller PRs. At 3,000 added plus
+deleted lines or 50 changed files, the action gets 24 minutes. Unavailable or
+invalid sizing also gets the bounded 24-minute budget. The Codex job has a
+30-minute limit, leaving time for setup and artifact publication. Model, effort,
+round limits and full-PR review scope do not change. Large or stuck reviews can
+therefore spend twice the previous maximum action time; ordinary reviews return
+earlier.
+
+The action retains `continue-on-error`: it can finish writing its review and
+then hang (openai/codex-action#150). A complete output object is still uploaded
+after the action times out, then passes through the existing trusted schema and
+head-SHA validator. Missing or malformed output never counts as a review. When
+Codex fails without output, **Review verdict** reads the current run attempt's
+Codex check annotations. A confirmed action timeout names the timeout and prints
+`gh run rerun <run-id> --failed --repo <owner>/<repo>` in the log and step summary.
+Other failures are not called timeouts. Unavailable annotation evidence keeps
+the verdict failed and identifies the diagnostic gap. These reads use only
+`actions: read` and `checks: read`; the diagnostic job has no write permissions.
+The budget and diagnostic helper comes from the trusted workflow revision, so a
+manual branch dispatch exercises that branch's policy without running PR code
+with diagnostic permissions.
+
 The required **Automated Code Review** check is the `review-result` job in `ci.yml`, because a called workflow's jobs show as `Review / <job>`. It succeeds only when the called review succeeds. The called workflow's **Review verdict** job carries the reasons: new finding threads, still-open threads, or a failed provider or poster. Findings and open threads are logged as notices, not error annotations, because the CI failure sweep groups identical error lines across PRs and open findings are not CI failures. A broken review (a failed provider or poster, or missing thread counts) still logs an error. Outside a pull request into `main` the job is skipped under another name, since a skipped job reports success and must never satisfy the required check. Open findings therefore fail the whole CI run. Snapshot publication still proceeds, because it reads the verification and preparation jobs, not the run's conclusion; it does start only after the review finishes.
 
 Every job in this run can upload artifacts, including jobs that build PR code, such as `prepare-pr-snapshot`, which runs alongside the review. The poster therefore downloads the review output by the artifact ID the provider job reported, never by name, and fails when that ID is missing. Model keys reach only this call: `ci.yml` passes `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` explicitly, never `secrets: inherit`, and only the matching provider job references each key.

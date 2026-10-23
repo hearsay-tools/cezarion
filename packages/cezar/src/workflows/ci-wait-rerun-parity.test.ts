@@ -25,8 +25,8 @@ vi.mock('node:timers/promises', async importOriginal => {
  }};
 });
 const fixture=fileURLToPath(new URL('../ci-wait/fixtures/gh.mjs',import.meta.url));
-const ciWaitOf=(id:string)=>store.getRun(id)?.waits?.find(wait=>wait.kind==='ci');
-const lastWaitOf=(id:string)=>store.getRun(id)?.lastWaits?.find(wait=>wait.kind==='ci');
+const ciWaitOf=(id:string)=>store.getRun(id)?.waits?.find(wait=>wait.kind==='pr');
+const lastWaitOf=(id:string)=>store.getRun(id)?.lastWaits?.find(wait=>wait.kind==='pr');
 
 describe('hidden CI reruns across native harnesses', {timeout:30_000},()=>{
  useWorkerWaitFixture();

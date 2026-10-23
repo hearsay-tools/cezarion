@@ -9,7 +9,7 @@ import type { TaskReference } from '@/lib/tasks-table'
  * of it starts a browser watcher. Lived in the run header until hearsay-tools/cezarion#1333 moved
  * it into the Session activity card's first row.
  */
-type CiWait = Extract<Wait, { kind: 'ci' }>
+type CiWait = Extract<Wait, { kind: 'pr' }>
 type TimerWait = Extract<Wait, { kind: 'timer' }>
 type WorkerWait = Extract<Wait, { kind: 'worker' }>
 type ListedWait = CiWait | TimerWait | WorkerWait
@@ -22,7 +22,7 @@ const IN_FLIGHT_STATUSES: readonly ApiRun['status'][] = ['running', 'queued', 'w
  *  this list. A worker wait shows only while open: its result is not owed in a line of its own. */
 function renderableWaits(value: unknown): ListedWait[] {
   return Array.isArray(value)
-    ? value.filter((wait): wait is ListedWait => wait?.kind === 'ci' || wait?.kind === 'timer' || wait?.kind === 'worker')
+    ? value.filter((wait): wait is ListedWait => wait?.kind === 'pr' || wait?.kind === 'timer' || wait?.kind === 'worker')
     : []
 }
 
@@ -47,10 +47,10 @@ function waitView(run: ApiRun) {
   const open = IN_FLIGHT_STATUSES.includes(run.status)
     ? listed.filter(wait => wait.kind === 'worker' ? wait.phase === 'open' : wait.phase === 'open' || wait.phase === 'resolved')
     : []
-  const ciOpen = open.some(wait => wait.kind === 'ci')
+  const ciOpen = open.some(wait => wait.kind === 'pr')
   // `lastWaits` is newest last; a settled entry still in `waits` is newer than all of them.
   const settled = [...renderableWaits(run.lastWaits), ...listed.filter(wait => !open.includes(wait) && wait.phase !== 'open')]
-  const lastCi = ciOpen ? undefined : settled.filter((wait): wait is CiWait => wait.kind === 'ci').at(-1)
+  const lastCi = ciOpen ? undefined : settled.filter((wait): wait is CiWait => wait.kind === 'pr').at(-1)
   const error = ciOpen ? undefined : run.lastWaitsError
   return open.length || lastCi || error ? { open, lastCi, error } : undefined
 }
@@ -62,7 +62,7 @@ export function hasWaitDetails(run: ApiRun): boolean {
 
 /** Only current CI waits belong beside the live status; settled observations stay in details. */
 export function ciWaitReferences(run: ApiRun): TaskReference[] {
-  return (waitView(run)?.open ?? []).filter((wait): wait is CiWait => wait.kind === 'ci')
+  return (waitView(run)?.open ?? []).filter((wait): wait is CiWait => wait.kind === 'pr')
     .map(wait => ({ kind: 'PR', number: wait.prNumber, url: wait.prUrl }))
 }
 
@@ -72,7 +72,7 @@ export function RunWaitDetails({ run }: { run: ApiRun }) {
   const { open, lastCi, error } = view
   return (
     <div data-slot="open-waits" className="flex min-w-0 flex-col gap-1">
-      {open.map(wait => wait.kind === 'ci'
+      {open.map(wait => wait.kind === 'pr'
         ? <CiWaitStatus key={wait.id} run={run} wait={wait} />
         : wait.kind === 'worker'
           ? <WorkerWaitStatus key={wait.id} wait={wait} />
@@ -89,21 +89,26 @@ export function RunWaitDetails({ run }: { run: ApiRun }) {
 
 function CiWaitStatus({ run, wait, settled = false }: { run: ApiRun; wait: CiWait; settled?: boolean }) {
   const result = wait.result
-  const outcomes = {
+  // A merge wait (hearsay-tools/cezarion#1425) waits for GitHub's merge, never for checks.
+  const merge = wait.until === 'merge'
+  const outcomes: Record<NonNullable<typeof result>['outcome'], string> = {
     passed: 'CI checks passed — observed checks only; not merge approval',
     failed: 'CI checks failed — inspect the PR checks',
-    conflicting: 'PR has merge conflicts — inspect the PR; not merge approval',
-    cancelled: 'CI wait cancelled',
+    conflicting: merge ? 'PR has merge conflicts — inspect the PR; not merged' : 'PR has merge conflicts — inspect the PR; not merge approval',
+    cancelled: merge ? 'Merge wait cancelled' : 'CI wait cancelled',
     skipped: 'CI checks skipped — inspect the PR checks',
     no_checks: 'No CI checks found — inspect the PR workflows',
-    deadline: 'CI wait timed out — inspect the PR checks',
-    error: 'CI wait unavailable — inspect access and the PR checks',
+    deadline: merge ? 'Merge wait timed out — merge not confirmed' : 'CI wait timed out — inspect the PR checks',
+    error: merge ? 'Merge wait unavailable — inspect access and the PR' : 'CI wait unavailable — inspect access and the PR checks',
     head_changed: `CI head changed — ${result?.headSha.slice(0, 7)} → ${result?.observedHeadSha?.slice(0, 7) ?? 'unknown'}`,
+    merged: 'PR merged',
+    closed: 'PR closed without merge — inspect the PR',
   }
+  const noun = merge ? 'Merge' : 'CI'
   const cancelled = settled && wait.phase === 'cancelled'
   const label = !settled
-    ? wait.phase === 'resolved' ? owedLabel('CI result ready', run) : 'Waiting for CI'
-    : cancelled ? 'CI wait cancelled' : result ? outcomes[result.outcome] : 'CI wait unavailable'
+    ? wait.phase === 'resolved' ? owedLabel(`${noun} result ready`, run) : merge ? 'Waiting for merge' : 'Waiting for CI'
+    : cancelled ? `${noun} wait cancelled` : result ? outcomes[result.outcome] : `${noun} wait unavailable`
   const timestamp = !settled ? wait.deadline : cancelled ? wait.cancelledAt : result?.observedAt
   const dateLabel = formatInstant(timestamp)
   const prLabel = `${wait.repository}#${wait.prNumber}`
@@ -123,7 +128,7 @@ function CiWaitStatus({ run, wait, settled = false }: { run: ApiRun; wait: CiWai
         {dateLabel ? <>
           <dt className="font-medium text-foreground">{!settled ? 'Deadline' : cancelled ? 'Cancelled' : 'Observed'}</dt>
           <dd><time dateTime={timestamp}>{dateLabel}</time></dd>
-        </> : !settled ? <><dt className="font-medium text-foreground">Deadline</dt><dd>CI deadline unavailable</dd></> : null}
+        </> : !settled ? <><dt className="font-medium text-foreground">Deadline</dt><dd>{noun} deadline unavailable</dd></> : null}
       </dl>
     </div>
   )

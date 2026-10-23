@@ -2,7 +2,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
-import type { CezarWaitRequest, CiWait, CiWaitResult, Wait } from '@open-mercato/cezar-contract';
+import type { CezarWaitRequestInput, CiWait, CiWaitResult, Wait } from '@open-mercato/cezar-contract';
 import type { AgentSession, RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -50,7 +50,7 @@ const engine = () => manager as unknown as {
   wakeBackoffs: Map<string, NodeJS.Timeout & { _onTimeout(): void; _idleTimeout: number }>;
   autoResumeTimers: Map<string, NodeJS.Timeout>;
 };
-async function openWait(id: string, request: CezarWaitRequest): Promise<TimedWait> {
+async function openWait(id: string, request: CezarWaitRequestInput): Promise<TimedWait> {
   const tools = manager.cezarToolHandlers(id, engine().active.get(id)!.ciGeneration);
   const registered = await tools.registerWait(request, 'cezar_wait', new AbortController().signal);
   if (!('wait' in registered)) throw Error('registration refused');
@@ -85,7 +85,7 @@ async function questionBesideCi(runner: RunnerId) {
   process.env.CEZ_MOCK_RELEASE_FILE = release;
   const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS[runner].scenarios['hold-ask']!, runner });
   await until(() => turnStarted(run.id));
-  const ci = await openWait(run.id, { kind: 'ci', pr, timeout_seconds: 600 });
+  const ci = await openWait(run.id, { kind: 'pr', pr, timeout_seconds: 600 });
   writeFileSync(release, '');
   await until(() => asks(run.id).length === 1 && store.getRun(run.id)?.status === 'waiting');
   expect(waitById(run.id, ci.id)?.phase).toBe('open');
@@ -122,7 +122,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     nativeWire('codex');
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:native-codex-ask', runner: 'codex' });
     await until(() => asks(run.id).length === 1 && store.getRun(run.id)?.status === 'waiting');
-    const ci = await openWait(run.id, { kind: 'ci', pr, timeout_seconds: 600 });
+    const ci = await openWait(run.id, { kind: 'pr', pr, timeout_seconds: 600 });
     external.settle();
     await until(() => waitById(run.id, ci.id)?.phase === 'resolved');
     // The question holds its turn open: nothing may reach the wire, however often the line is pumped.
@@ -218,7 +218,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: HARNESS_ADAPTERS.claude.scenarios['hold-gated']!, runner: 'claude' });
     await until(() => turnStarted(run.id));
     const timer = await openWait(run.id, { kind: 'timer', seconds: 60, note: 'owed' });
-    const ci = await openWait(run.id, { kind: 'ci', pr, timeout_seconds: 600 });
+    const ci = await openWait(run.id, { kind: 'pr', pr, timeout_seconds: 600 });
     fireTimer(timer.id); external.settle();
     await until(() => waitById(run.id, timer.id)?.phase === 'resolved' && waitById(run.id, ci.id)?.phase === 'resolved');
     // The budget runs out between the timer's resolution and the boundary that would send it.
@@ -264,7 +264,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     await until(() => prompted('claude', 'first message').length > 0);
     expect(prompted('claude', 'first message')[0]).not.toContain('Still open');
     await until(() => store.getRun(run.id)?.status === 'waiting' && turnEnds(run.id) >= 2);
-    const ci = await openWait(run.id, { kind: 'ci', pr, timeout_seconds: 600 });
+    const ci = await openWait(run.id, { kind: 'pr', pr, timeout_seconds: 600 });
     const footer = `Still open: CI wait ${ci.id} for acme/repo#12, deadline ${ci.deadline}. ${FOOTER_END}`;
     expect(manager.sendMessage(run.id, [{ type: 'text', text: 'second message' }])).toBe(true);
     await until(() => prompted('claude', 'second message').length > 0);
@@ -285,7 +285,7 @@ describe('wakes beside questions, footers and slots (hearsay-tools/cezarion#1233
     vi.spyOn(semaphore, 'maxMonitoringSessions').mockReturnValue(1);
     expect(semaphore.maxParallel()).toBe(1);
     const parkOn = async (n: number) => {
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'ci', pr: prUrl(n) }), runner: 'claude' });
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'pr', pr: prUrl(n) }), runner: 'claude' });
       await until(() => store.getRun(run.id)?.waits?.[0]?.phase === 'open' && store.getRun(run.id)?.status === 'waiting');
       return run;
     };

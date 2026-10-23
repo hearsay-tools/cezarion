@@ -384,7 +384,7 @@ describe('loading normalizes and saves exactly the rows it changed', () => {
       id: '55555555-5555-4555-8555-555555555555', generation: 'g', turnId: 't', prUrl: 'https://github.com/o/r/pull/9', repository: 'o/r', prNumber: 9,
       headSha: 'a'.repeat(40), timeoutSeconds: 1800, registeredAt: '2026-10-05T00:00:00.000Z', deadline: '2026-10-05T00:30:00.000Z', phase: 'parked',
     } } as Partial<RunRecord>), true, (run) => {
-      expect(run).toMatchObject({ status: 'waiting', steps: [{ status: 'waiting' }], waits: [{ id: '55555555-5555-4555-8555-555555555555', kind: 'ci', phase: 'open' }] });
+      expect(run).toMatchObject({ status: 'waiting', steps: [{ status: 'waiting' }], waits: [{ id: '55555555-5555-4555-8555-555555555555', kind: 'pr', phase: 'open' }] });
       expect(run).not.toHaveProperty('ciWait');
       expect(run).not.toHaveProperty('activity');
     }],

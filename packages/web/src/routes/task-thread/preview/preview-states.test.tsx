@@ -94,6 +94,27 @@ describe('PreviewStates (design 5.1 to 5.18)', () => {
     expect(primary().map(b => b.textContent)).toEqual(['Retry'])
   })
 
+  it('5.5 says the browser did not start when the launch timed out, not that it exited (#1474)', () => {
+    const a = show({ t: 'state', stage: 'browser-exited', reason: 'timeout', stderrTail: 'Chromium did not open its DevTools port within 30 s, twice', serverUp: true })
+    expect(screen.getByRole('heading', { name: 'The browser did not start' })).toBeTruthy()
+    expect(screen.getByText(/did not open its DevTools port in time/)).toBeTruthy()
+    expect(screen.queryByText(/exited unexpectedly/)).toBeNull()
+    expect(primary().map(b => b.textContent)).toEqual(['Retry'])
+    fireEvent.click(screen.getByRole('button', { name: 'Copy diagnostics' }))
+    expect(a.copy).toHaveBeenCalledWith(expect.stringMatching(/^Chromium did not start in time\n/))
+  })
+
+  it('5.5 names the exit code of a browser that exited, and an older server\'s state still reads as an exit (#1474)', () => {
+    const a = show({ t: 'state', stage: 'browser-exited', reason: 'exited', exitCode: 21, stderrTail: 'oom', serverUp: false })
+    expect(screen.getByRole('heading', { name: 'The browser stopped' })).toBeTruthy()
+    expect(screen.getByText(/Chromium exited unexpectedly \(code 21\)\. The browser needs a restart\./)).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Copy diagnostics' }))
+    expect(a.copy).toHaveBeenCalledWith(expect.stringMatching(/^Chromium exited \(code 21\)\n/))
+    cleanup()
+    show({ t: 'state', stage: 'browser-exited', stderrTail: '', serverUp: true })
+    expect(screen.getByRole('heading', { name: 'The browser stopped' })).toBeTruthy()
+  })
+
   it('5.6 shows the attempt and stops the server', () => {
     const a = show({ t: 'state', stage: 'server-starting', server, attempt: 3, startedAt: new Date().toISOString(), logTail: [] })
     expect(screen.getByRole('heading', { name: 'Starting web' })).toBeTruthy()
