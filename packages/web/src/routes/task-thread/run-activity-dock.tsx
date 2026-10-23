@@ -244,9 +244,10 @@ function SessionActivityCard({
             ) : null}
             {/* Grow 1 against the step's 1000: the step takes the free space first, up to its whole
                 name, and the summary then takes all that is left. Factors summing below 1 would
-                hand out only that fraction of it. While the summary shows nothing, a negative
-                margin returns its gap to the status and step. */}
-            <span className="-ms-2 flex min-w-0 flex-[1_1_0] has-[[data-hidden=false]]:ms-0"><ActivitySummary items={foldedSummary} /></span>
+                hand out only that fraction of it. A negative margin returns the row's 8px gap to the
+                status and step; the summary puts it back before its first shown value, so its own
+                width never depends on what it shows (hearsay-tools/cezarion#1537). */}
+            <span className="-ms-2 flex min-w-0 flex-[1_1_0]"><ActivitySummary items={foldedSummary} lead={8} /></span>
           </>
         )}
         {open && cost ? <span data-slot="run-activity-cost" className="ms-auto shrink-0 text-[13px] text-muted-foreground tabular-nums">{cost}</span> : null}
