@@ -162,8 +162,12 @@ it('scrolls a keyboard-focused transcript control above the desktop footer', () 
     start.id = 'footer-focus-start'; start.tabIndex = -1;
     button.before(start); start.focus({ preventScroll: true });
     // The upward wheel above can load an older page after the Tab. That page prepends earlier
-    // execute cards, so a fresh query would name another card. Keep this one (hearsay-tools/cezarion#1495:
-    // with a probe between Tab and the sample, main 08c436d4 also read another card, retainedPages 1 → 2).
+    // execute cards, so a fresh query would name another card. Keep this one. Evidence
+    // (hearsay-tools/cezarion#1495): the test failed with focused: false, clear: false (local bundle
+    // session-footer/scrolls-a-keyboard-focused-transcript-control-above-the-desktop-footer-1,
+    // recorded in the PR body, where a probe read retainedPages 1 → 2). Reproduce with
+    // 'npm run test:e2e -- session-footer.e2e.ts -t keyboard-focused': 4 of 4 runs failed
+    // without this change on the #1495 branch, 2 of 2 passed with it.
     window.__footerFocusTarget = button;
   })()`)
   browser.press('Tab')
