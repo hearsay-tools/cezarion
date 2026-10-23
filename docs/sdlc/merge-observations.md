@@ -53,7 +53,9 @@ after the initial read. The later merge must revalidate independently.
 
 `ForgeMergeInput.requirePassingChecks` requires at least one normalized check
 and every normalized check passing in the fresh preflight. Missing, pending,
-failing and unknown checks block completion merging. `NEUTRAL` and `SKIPPED`
+failing and unknown checks block completion merging. A complete, paginated workflow-run
+query also blocks a rerun before its checks appear; query errors or incomplete pages
+never authorize a merge. `NEUTRAL` and `SKIPPED`
 use the driver's existing passing normalization. `expectedHeadRef`, when set,
 must match the current PR branch. The normal GitHub eligibility and permitted
 method checks still apply. Completion merging cannot override rules, even when

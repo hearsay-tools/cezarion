@@ -16,6 +16,7 @@ let pr: Record<string, unknown>;
 let calls: string[][];
 let onCall: (args: string[]) => void;
 let failure: string | undefined;
+let workflowPage: unknown;
 const mutations = () => calls.filter(args => args[1] === 'ready' || args.includes('PUT'));
 
 beforeEach(() => {
@@ -27,7 +28,7 @@ beforeEach(() => {
     headRefName: 'cez/task', baseRefName: 'main', headRefOid: sha, mergeable: 'MERGEABLE',
     mergeStateStatus: 'CLEAN', reviewDecision: '', statusCheckRollup: [{ name: 'test', conclusion: 'SUCCESS' }],
   };
-  calls = []; onCall = () => {}; failure = undefined;
+  calls = []; onCall = () => {}; failure = undefined; workflowPage = { total_count: 1, workflow_runs: [[1, "completed", true]] };
   execFileMock.mockReset().mockImplementation((_file, args: string[], opts, reply) => {
     calls.push(args);
     expect(opts.timeout).toBeLessThanOrEqual(15_000);
@@ -36,6 +37,7 @@ beforeEach(() => {
     let output: unknown;
     if (args[0] === 'pr' && args[1] === 'view') output = pr;
     else if (args[0] === 'pr' && args[1] === 'ready') { pr.isDraft = false; output = {}; }
+    else if (args.some(arg => arg.includes('/actions/runs?'))) output = workflowPage;
     else if (args.includes('PUT')) output = { merged: true, sha: 'b'.repeat(40) };
     else if (args[1] === 'repos/org/repo') output = { allow_squash_merge: true };
     else if (args[1]?.includes('/rules/branches/')) output = [[]];
@@ -57,6 +59,25 @@ describe('strict completion merge preflight through gh', () => {
   ])('refuses %s current-head checks even with an override', async (_label, checks) => {
     pr.statusCheckRollup = checks;
     expect(await driver.mergePR!(42, { ...input, overrideRules: true })).toMatchObject({ merged: false, code: 'checks-not-passing' });
+    expect(mutations()).toEqual([]);
+  });
+
+  it.each([
+    { total_count: 1, workflow_runs: [[1, 'in_progress', true]] },
+    { total_count: 2, workflow_runs: [[1, 'completed', true]] },
+    { total_count: 1, workflow_runs: [[1, 'completed', null]] },
+  ])('blocks hidden reruns or incomplete workflow data %j', async page => {
+    workflowPage = page;
+    expect(await driver.mergePR!(42, input)).toMatchObject({ merged: false });
+    expect(mutations()).toEqual([]);
+  });
+  it('blocks a workflow query error and cancellation during its read', async () => {
+    failure = '--paginate';
+    expect(await driver.mergePR!(42, input)).toMatchObject({ merged: false });
+    failure = undefined;
+    let proceed = true;
+    onCall = args => { if (args.some(arg => arg.includes('/actions/runs?'))) proceed = false; };
+    expect(await driver.mergePR!(42, { ...input, canProceed: () => proceed })).toMatchObject({ merged: false, code: 'cancelled' });
     expect(mutations()).toEqual([]);
   });
 

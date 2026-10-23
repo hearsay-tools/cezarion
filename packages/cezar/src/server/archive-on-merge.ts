@@ -70,6 +70,7 @@ export class ArchiveOnMergeCoordinator {
     }
   }
   private async tickProject(project: ArchiveProject, signal: AbortSignal, current: () => boolean): Promise<void> {
+    let roots: string[] = [];
     try {
       if ((this.failures.get(project.id)?.nextAt ?? 0) > Date.now() || !await this.deps.enabled(project) || !current()) return;
       const repoBase = await this.deps.repository(project);
@@ -101,6 +102,7 @@ export class ArchiveOnMergeCoordinator {
         return out;
       });
       if (!snapshots?.length || !current()) return;
+      roots = snapshots.map(snapshot => snapshot.rootId);
       const requests = new Map<string, ArchivePullRequestIdentity>();
       for (const snapshot of snapshots) {
         const key = `${project.id}:${snapshot.rootId}`;
@@ -147,6 +149,9 @@ export class ArchiveOnMergeCoordinator {
       this.failures.delete(project.id);
     } catch {
       if (current()) {
+        await this.deps.withStore(project, async (store, _active, valid) => {
+          if (current() && valid()) for (const id of roots) store.setArchiveBlocker(id, { message: 'Could not confirm PR merge status. Check GitHub or archive manually.' });
+        }).catch(() => undefined);
         const count = Math.min(5, (this.failures.get(project.id)?.count ?? 0) + 1);
         this.failures.set(project.id, { count, nextAt: Date.now() + Math.min(900_000, this.interval * 2 ** (count - 1)) });
       }

@@ -57,12 +57,12 @@ export class CompletionActionCoordinator {
             const current = () => {
               if (this.stopped || !valid()) return false;
               const latest = store.getRun(item.id);
-              return latest?.status === 'done' && !latest.archived &&
-                Boolean(latest.autoMergePr || latest.archiveWhenDone) && latest.branch === run.branch &&
-                latest.completionAction?.id === token && latest.completionAction.phase !== 'complete';
+              return store.canCompleteAction(item.id, token) && latest?.branch === run.branch;
             };
             try {
               if (!current()) continue;
+              store.pin(run.id, 'maintenance');
+              if (!store.claimCompletionAction(run.id, token)) continue;
               await store.prepareArchiveOnMerge(run.id);
               if (!current()) continue;
               const result = await this.process(project, run, current);
@@ -74,7 +74,7 @@ export class CompletionActionCoordinator {
                 store.completeAction(run.id, token, 'blocked', 'PR auto-merge is unavailable. Check GitHub, retry later, or turn it off.');
                 this.backoff(key);
               }
-            }
+            } finally { store.unpin(run.id, 'maintenance'); }
             if (++admitted === 4) { this.cursors.set(project.id, item.seq); break; }
           }
         }).catch(() => undefined); // An unavailable project cannot stop the other projects.
@@ -107,8 +107,9 @@ export class CompletionActionCoordinator {
     if (created.length > 16) return 'Too many created PRs to merge automatically. Review and merge them manually.';
     const resolved = await this.deps.forge(project);
     if (!current()) return;
-    if (!resolved?.driver.prMergeState || !resolved.driver.mergePR) return 'PR auto-merge is unavailable for this repository. Merge manually or turn it off.';
+    if (!resolved) return 'PR auto-merge is unavailable for this repository. Merge manually or turn it off.';
     const { driver, repository } = resolved;
+    if (!driver.prMergeState || !driver.mergePR) return 'PR auto-merge is unavailable for this repository. Merge manually or turn it off.';
     const local = archivePullRequests([{ pullRequests: created.map(pr => ({ ...pr, url: pr.url ?? '' })) }], repository);
     const own = archivePullRequests([{ pullRequestUrl: `${repository}/pull/1` }], repository)?.[0];
     if (!local || !own || local.some(pr => pr.owner !== own.owner || pr.repo !== own.repo))

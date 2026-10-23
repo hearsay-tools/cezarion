@@ -136,6 +136,7 @@ describe('guarded automatic archive', () => {
     expect(store.archiveOnMergeSnapshot(id, repo)).toBeUndefined();
     store.commitWorkerCancellation(worker.id);
     expect(store.archiveOnMergeSnapshot(id, repo)).toBeUndefined();
+    expect(store.getRun(id)?.archiveBlocker?.runId).toBe(worker.id);
     const proof = store.readWorkerExecution(worker.id)!;
     expect(store.commitWorkerExecutionComplete(worker.id, proof.generation)).toBe(true);
     store.flush();
@@ -145,6 +146,8 @@ describe('guarded automatic archive', () => {
     processProbes.scan.mockClear(); processProbes.unshared.mockClear();
     const snapshot = store.archiveOnMergeSnapshot(id, repo)!;
     expect(snapshot?.pullRequests).toEqual([{ owner: 'o', repo: 'r', number: 42 }]);
+    store.archiveMergeBlocker(snapshot, snapshot.pullRequests[0]!, repo);
+    expect(store.getRun(id)?.archiveBlocker).toMatchObject({ runId: worker.id, pullRequestUrl: `${repo}/pull/42` });
     expect(processProbes.scan).not.toHaveBeenCalled();
     const seen: boolean[][] = [];
     store.on('run', () => seen.push([store.getRun(id)!.archived, store.getRun(worker.id)!.archived]));

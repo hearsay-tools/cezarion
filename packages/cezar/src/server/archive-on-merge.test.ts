@@ -79,3 +79,11 @@ it.each([0, 32])('eventually checks complete large PR sets across more than 32 f
   expect(f.ids.slice(0, openSets).every(id => !f.store.getRun(id)?.archived)).toBe(true);
   expect(f.lookup.mock.calls.every(([, requests]) => requests.length <= 256)).toBe(true);
 });
+
+it('shows the unresolved PR as a blocker instead of silently hiding the reason', async () => {
+  const f = fixture(); f.lookup.mockResolvedValueOnce([]);
+  await f.coordinator.tick();
+  expect(f.store.getRun(f.id)?.archiveBlocker).toMatchObject({ runId: f.id, pullRequestUrl: 'https://github.com/o/r/pull/42', message: expect.stringContaining('not confirmed merged') });
+  await f.coordinator.tick(); expect(f.store.getRun(f.id)?.archived).toBe(true);
+  expect(f.store.getRun(f.id)?.archiveBlocker).toBeUndefined();
+});

@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it, vi } from 'vitest';
 import { RunStore, type RunRecord } from '../runs/store.ts';
-import { seedRuns, readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { seedRuns, readPersistedRuns, blockRunWrites } from '../runs/run-store.testkit.ts';
 import type { ForgeDriver, ForgeMergeInput, ForgePrMergeState, ForgePrMergeStateResult } from './forge/types.ts';
 import { type CompletionActionDeps, CompletionActionCoordinator } from './completion-actions.ts';
 
@@ -119,4 +119,28 @@ it('leaves failed GitHub mutations visible with an actionable blocker', async ()
   const f = fixture(); f.read.mockResolvedValueOnce({ available: false, reason: 'GitHub unavailable. Retry later.' });
   await f.coordinator().tick(); expect(f.store().getRun(f.id)?.completionAction).toMatchObject({ phase: 'blocked', message: 'GitHub unavailable. Retry later.' });
   expect(f.store().getRun(f.id)?.archived).toBe(false);
+});
+
+it('holds a committed family claim through remote reads and mutations', async () => {
+  const f = fixture(), other = RunStore.open(f.dir, { keepLive: true, maintenance: true });
+  try {
+    f.read.mockImplementationOnce(async () => {
+      f.store().flush(); // A store sweep must retain the in-flight family claim.
+      expect(other.runOwnership(f.id)).toBe('foreign');
+      expect(other.updateRun(f.id, { autoMergePr: false })).toBeUndefined();
+      return { available: true, mergeState: { number: 12, url: 'https://github.com/o/r/pull/12',
+        headRef: 'cez/task', headSha: 'a'.repeat(40), state: 'merged' } as ForgePrMergeState };
+    });
+    await f.coordinator().tick();
+    expect(f.read).toHaveBeenCalledOnce();
+    expect(readPersistedRuns(f.dir)[0]).toMatchObject({ archived: true, autoMergePr: true });
+  } finally { other.close(); }
+});
+
+it('does not contact GitHub while its family claim cannot commit', async () => {
+  const f = fixture(), release = blockRunWrites(f.dir);
+  try { await f.coordinator().tick(); } finally { release(); }
+  expect(f.forge).not.toHaveBeenCalled();
+  expect(f.merge).not.toHaveBeenCalled();
+  expect(readPersistedRuns(f.dir)[0]).toMatchObject({ archived: false, completionAction: { phase: 'pending' } });
 });

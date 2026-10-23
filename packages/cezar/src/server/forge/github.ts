@@ -1,3 +1,4 @@
+import { activeWorkflowRunsArgs, parseActiveWorkflowRuns } from '../../ci-wait/github.ts';
 import type { ArchivePullRequestIdentity, MergedPullRequest } from '@open-mercato/cezar-contract/runs';
 import { pullRequestKey } from '../../runs/pull-requests.ts';
 import { matchesGithubPullRequest, mergedPullRequestObservations } from '../../merge-observations.ts';
@@ -3443,6 +3444,14 @@ async function mergePullRequest(
     if (!mergePreflightAllowed(current, !input.requirePassingChecks && input.overrideRules)) {
       return { merged: false, status: 409, error: current.blockers[0]?.message ?? 'The pull request is not eligible to merge.', code: current.eligibility, current };
     }
+    if (input.requirePassingChecks && process.env.CEZ_DRY_RUN !== '1') {
+      if (!repoRef) return { merged: false, status: 404, error: 'GitHub repository not found.' };
+      const active = parseActiveWorkflowRuns(await gh(repoRoot, activeWorkflowRunsArgs({
+        repository: `${repoRef.owner}/${repoRef.repo}`, headSha: current.headSha,
+      })));
+      if (input.canProceed?.() === false) return { merged: false, status: 409, error: 'Automatic merging was cancelled.', code: 'cancelled' };
+      if (active) return { merged: false, status: 409, error: 'Waiting for active CI workflows on the current PR head.', code: 'checks-active', current };
+    }
     if (process.env.CEZ_DRY_RUN === '1') {
       evictGithubProjectCaches(repoRoot);
       return { merged: true, number, url: current.url, method: input.method, mergeCommitSha: 'abcdef0123456789abcdef0123456789abcdef01' };
@@ -3454,7 +3463,6 @@ async function mergePullRequest(
       '-f', `merge_method=${input.method}`, '-f', `sha=${input.expectedHeadSha}`,
     ]);
     // Once GitHub accepted the mutation, report its real outcome even if intent changed in flight.
-    input.canProceed?.();
     const result = ghMergeResultSchema.parse(JSON.parse(out));
     if (!result.merged) return { merged: false, status: 409, error: result.message ?? 'GitHub refused the merge.', code: 'github-blocked', current };
     evictGithubProjectCaches(repoRoot);

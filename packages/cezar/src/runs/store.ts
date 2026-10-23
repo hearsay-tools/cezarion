@@ -3379,8 +3379,9 @@ export class RunStore extends EventEmitter {
   private completionArchiveBlocker(root: RunRecord): string | undefined {
     const family = [root, ...this.listWorkersOf(root.id)];
     for (const run of family) {
-      if (!['done', 'review', 'failed', 'cancelled'].includes(run.status) || run.waits?.some(wait => wait.phase === 'open') ||
-        run.hasPendingPermission || this.facts.peek(run.id)?.pendingAsk !== undefined)
+      const facts = this.facts.peek(run.id);
+      if (!facts || !['done', 'review', 'failed', 'cancelled'].includes(run.status) || run.waits?.some(wait => wait.phase === 'open') ||
+        run.hasPendingPermission || facts.pendingAsk !== undefined)
         return 'Task or worker work still needs attention. Open the task or archive manually.';
       if (run.delegation?.role === 'invalid' || (run.delegation?.role === 'worker' && this.readWorkerExecution(run.id)?.phase !== 'complete'))
         return 'Worker execution has not settled. Open the worker or archive manually.';
@@ -3409,11 +3410,28 @@ export class RunStore extends EventEmitter {
     return this.db?.listCompletionCandidates(afterSeq, limit) ?? [];
   }
 
+  canCompleteAction(id: string, token: string): boolean {
+    const run = this.record(id);
+    return Boolean(run && run.status === 'done' && !run.archived && (run.autoMergePr || run.archiveWhenDone) &&
+      run.completionAction?.id === token && run.completionAction.phase !== 'complete' && !this.writeRefusal(id));
+  }
+
+  claimCompletionAction(id: string, token: string): boolean {
+    if (!this.canCompleteAction(id, token)) return false;
+    const run = this.record(id)!;
+    this.assertWritable(new Map([[id, run]]));
+    // A normal write may defer its claim until the transaction. A remote mutation
+    // needs the committed claim now, and must not act on a stale row read before it.
+    const claim = this.db?.getClaim(familyKey(run));
+    return Boolean(claim && claim.session === this.owner?.session &&
+      claim.generation === this.claimed.get(familyKey(run)) &&
+      this.db?.get(id)?.revision === this.base.get(id)?.revision);
+  }
+
   completeAction(id: string, token: string, phase: 'blocked' | 'complete', message?: string): boolean {
     const run = this.record(id);
-    if (!run || run.status !== 'done' || run.archived || run.completionAction?.id !== token ||
-      run.completionAction.phase === 'complete') return false;
-    if (run.completionAction.phase === phase && run.completionAction.message === message) return true;
+    if (!run || !this.canCompleteAction(id, token)) return false;
+    if (run.completionAction?.phase === phase && run.completionAction.message === message) return true;
     const next: RunRecord = { ...run, completionAction: { id: token, phase, ...(message ? { message } : {}) } };
     const staged = new Map<string, RunRecord | null>([[id, next]]);
     if (phase === 'complete' && next.archiveWhenDone) {
