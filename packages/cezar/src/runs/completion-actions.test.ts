@@ -80,6 +80,18 @@ it('publishes neither Done nor archive if their transaction fails', () => {
   expect(store.getRun(id)).toMatchObject({ status: 'queued', archived: false });
   expect(readPersistedRuns(dir)[0]).toMatchObject({ status: 'queued', archived: false });
 });
+it('keeps default-off Finish usable while the database refuses writes', () => {
+  const { store, id, dir } = setup();
+  const release = blockRunWrites(dir);
+  try {
+    expect(() => store.updateRun(id, { status: 'done' })).not.toThrow();
+    expect(store.getRun(id)).toMatchObject({ status: 'done', archived: false });
+    expect(store.getRun(id)?.completionAction).toBeUndefined();
+    expect(readPersistedRuns(dir)[0].status).toBe('queued');
+  } finally { release(); }
+  store.flush();
+  expect(readPersistedRuns(dir)[0]).toMatchObject({ status: 'done', archived: false });
+});
 it('retires pending merge work on explicit unarchive and creates new intent after a later completion', () => {
   const { store, id } = setup({ archiveWhenDone: true, autoMergePr: true });
   store.updateRun(id, { status: 'done' });

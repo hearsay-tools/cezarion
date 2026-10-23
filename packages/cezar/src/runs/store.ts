@@ -3511,7 +3511,10 @@ export class RunStore extends EventEmitter {
     }
     // Restore before mutating so a throw leaves status and archived unchanged (#818 S3).
     if (archived === false) restoreHistory(this.dataDir, id);
-    if (normalized.status === 'done' || normalized.archiveWhenDone !== undefined || normalized.autoMergePr !== undefined) {
+    // Only opted-in completion needs this transaction. Default-off Finish must
+    // retain its best-effort write path so a locked database cannot stop cleanup.
+    if ((normalized.status === 'done' && (run.archiveWhenDone || run.autoMergePr)) ||
+      normalized.archiveWhenDone !== undefined || normalized.autoMergePr !== undefined) {
       const next = { ...run, ...this.redactPatch(normalized) };
       if (archived !== undefined) archiveFields(next, archived, new Date().toISOString());
       this.commitIndex(new Map([[id, next]]));
