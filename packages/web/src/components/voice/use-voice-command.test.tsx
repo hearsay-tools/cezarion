@@ -277,6 +277,23 @@ describe('useVoiceCommand', () => {
     expect(click).not.toHaveBeenCalled()
   })
 
+  it('moving away and back while Return waits still drops the commit', async () => {
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' })]
+    const harness = setup()
+    type(harness, 'open the next failed task')
+
+    expect(enter(harness).handled).toBe(true)
+    select(harness, 'view Inbox')
+    select(harness, VOICE_ROW_VALUE)
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    // A fresh Return on the Will do row commits again, and acts on the decision it already has.
+    expect(enter(harness).handled).toBe(true)
+    await advance(0)
+    expect(mocks.navigate).toHaveBeenCalledWith('/tasks/a')
+  })
+
   it('opens a variant group at its compare page', async () => {
     mocks.runs = [failed({ id: 'g1', groupId: 'grp', title: 'Shared · A' }), failed({ id: 'g2', groupId: 'grp', title: 'Shared · B' })]
     const harness = setup({ text: 'open the first failed task' })

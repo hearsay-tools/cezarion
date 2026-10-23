@@ -409,11 +409,13 @@ export function useVoiceCommand(args: {
     })
     const result = await Promise.race([made.result, bound])
     clearTimeout(timer)
-    if (committing.current === made) committing.current = undefined
+    // A move off the Will do row while Return waited ended this commit, even after a move back:
+    // the row the user moved to was the choice then (the selection effect below clears it).
+    const stillCommitted = committing.current === made
+    if (stillCommitted) committing.current = undefined
+    if (!stillCommitted || !mounted.current) return
     // The text, the open task or the shown proposal moved on: this decision is for something else.
-    if (!mounted.current || !sameKey(latest.current.key, committedKey)) return
-    // The user moved to another row while Return waited: that row is the choice now.
-    if (latest.current.selected !== VOICE_ROW_VALUE) return
+    if (!sameKey(latest.current.key, committedKey)) return
     if (result === 'timeout') {
       // The late decision, if it ever comes, is aborted and so never acts.
       made.controller.abort()
@@ -451,6 +453,13 @@ export function useVoiceCommand(args: {
     },
     [openTarget],
   )
+
+  // Leaving the Will do row ends a commit that is waiting for its decision; coming back does not
+  // revive it, so only a fresh Return on the row commits again.
+  const { selected } = args
+  React.useEffect(() => {
+    if (selected !== VOICE_ROW_VALUE) committing.current = undefined
+  }, [selected])
 
   // Preview: ask a beat after the text settles. A change aborts the request for the old text.
   React.useEffect(() => {
