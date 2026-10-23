@@ -5,6 +5,7 @@ import type { Hono } from 'hono';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { workspaceUiStatePath } from '../paths.ts';
 import { RunStore } from '../runs/store.ts';
+import * as remote from '../skills-remote.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -37,6 +38,7 @@ describe('the ui-state API — skillUsage (#408)', () => {
   });
 
   afterEach(() => {
+    vi.restoreAllMocks();
     store.flush();
     rmSync(repoRoot, { recursive: true, force: true });
     vi.unstubAllEnvs();
@@ -60,44 +62,38 @@ describe('the ui-state API — skillUsage (#408)', () => {
     expect(await res.json()).toEqual({});
   });
 
-  // hearsay-tools/cezarion#1408 (port of upstream open-mercato/cezar#1082): the default-skill
-  // selection is per project; the old workspace value seeds a project that never chose.
-  it('keeps a legacy workspace skill selection until this project saves its own', async () => {
-    mkdirSync(dirname(legacyWorkspaceStatePath), { recursive: true });
-    writeFileSync(legacyWorkspaceStatePath, JSON.stringify({ importedSkills: ['om-fix'] }));
-
-    const res = await get();
+  it('PUT disabledTeamSkills persists and round-trips through GET', async () => {
+    const res = await put({ disabledTeamSkills: [{ repo: 'acme/skills', name: 'x' }] });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ importedSkills: ['om-fix'] });
-    expect(() => readFileSync(uiStatePath(), 'utf8')).toThrow();
+    expect(await (await get()).json()).toEqual({ disabledTeamSkills: [{ repo: 'acme/skills', name: 'x' }] });
+    expect(rawFile().disabledTeamSkills).toEqual([{ repo: 'acme/skills', name: 'x' }]);
   });
 
-  it('uses this project selection, including an empty one, over the legacy workspace value', async () => {
-    mkdirSync(dirname(legacyWorkspaceStatePath), { recursive: true });
-    writeFileSync(legacyWorkspaceStatePath, JSON.stringify({ importedSkills: ['om-fix'] }));
-    await put({ importedSkills: [] });
-
-    expect(await (await get()).json()).toMatchObject({ importedSkills: [] });
-    expect(rawFile().importedSkills).toEqual([]);
+  it('refuses a disabledTeamSkills entry without a name', async () => {
+    expect((await put({ disabledTeamSkills: [{ repo: 'acme/skills' }] })).status).toBe(400);
   });
 
-  it('an unrelated preference save keeps following the legacy workspace selection', async () => {
-    mkdirSync(dirname(legacyWorkspaceStatePath), { recursive: true });
-    writeFileSync(legacyWorkspaceStatePath, JSON.stringify({ importedSkills: ['om-fix'] }));
-    const res = await put({ lastRunner: 'codex' });
-    // The answer is the effective state, so the cockpit cache keeps the inherited selection.
-    expect(await res.json()).toEqual({ lastRunner: 'codex', importedSkills: ['om-fix'] });
-    expect(rawFile()).toEqual({ lastRunner: 'codex' });
-
-    writeFileSync(legacyWorkspaceStatePath, JSON.stringify({ importedSkills: ['om-review'] }));
-    expect(await (await get()).json()).toEqual({ lastRunner: 'codex', importedSkills: ['om-review'] });
+  it('refuses a disabledTeamSkills entry with an extra key (strict)', async () => {
+    expect((await put({ disabledTeamSkills: [{ repo: 'a', name: 'x', ref: 'main' }] })).status).toBe(400);
   });
 
-  it('persists the default-skill selection in this project ui-state', async () => {
-    const res = await put({ importedSkills: ['om-fix'] });
+  it('GET /skills/importable returns every team skill, switched-off ones included', async () => {
+    const skills = ['x', 'y'].map((name) => ({
+      name,
+      body: name,
+      path: `acme/skills@main:${name}.md`,
+      source: 'team' as const,
+      team: { repo: 'acme/skills', ref: 'main', path: `${name}.md`, dir: false },
+    }));
+    vi.spyOn(remote, 'getTeamSkillsCached').mockReturnValue(skills);
+    await put({ disabledTeamSkills: [{ repo: 'acme/skills', name: 'x' }] });
+    const res = await apiRequest(app, '/api/v1/skills/importable');
     expect(res.status).toBe(200);
-    expect(await res.json()).toMatchObject({ importedSkills: ['om-fix'] });
-    expect(rawFile().importedSkills).toEqual(['om-fix']);
+    expect(await res.json()).toEqual(skills);
+  });
+
+  it('GET /skills/importable is empty without skillsRepos', async () => {
+    expect(await (await apiRequest(app, '/api/v1/skills/importable')).json()).toEqual([]);
   });
 
   it('PUT skillUsage persists and round-trips through GET', async () => {

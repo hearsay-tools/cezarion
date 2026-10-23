@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { effortLevelSchema } from './effort.ts';
 import { type Runner, runnerSchema } from './health.ts';
+import { teamSkillRefSchema } from './team-skill-ref.ts';
 
 /**
  * The workspace + settings families: `~/.cezar/config.json`'s settings slice, both GUI-pref bags
@@ -195,9 +196,10 @@ export const uiStateSchema = z.looseObject({
   lastAutonomous: z.boolean().optional(),
   /** Whether new runs should ask agents to append follow-up work. Absent → on. */
   lastGenerateFollowups: z.boolean().optional(),
-  /** The selected default team skills for this project. Absent: the legacy workspace selection
-   *  applies when it exists, else every default skill shows. Present (even `[]`): only these names. */
-  importedSkills: z.array(z.string().min(1).max(200)).max(200).optional(),
+  /** Team skills this project switched off, by source repo and name. Absent or `[]`: every team
+   *  skill shows. Legacy `importedSkills` / `dismissedSkillsBanner` keys still round-trip through
+   *  the loose object but nothing reads them. */
+  disabledTeamSkills: z.array(teamSkillRefSchema).max(200).optional(),
   /** Skill selection frequency (#408): name → times chosen, across BOTH composers. */
   skillUsage: z.record(z.string(), z.number()).optional(),
   runsView: z.enum(['list', 'table']).optional(),
@@ -218,9 +220,6 @@ export const uiStateSchema = z.looseObject({
       }),
     )
     .optional(),
-  /** The open-mercato/skills promo banner (#391), dismissed for good. Legacy — retained so old
-   *  files round-trip. */
-  dismissedSkillsBanner: z.boolean().optional(),
 });
 export type UiState = z.infer<typeof uiStateSchema>;
 
@@ -289,10 +288,6 @@ export const workspaceUiStateSchema = z.looseObject({
    *  cockpit keeps it in localStorage (`packages/web/src/lib/last-location.ts`): stored here, the
    *  last client to navigate decided where every OTHER client's next launch landed. */
   lastLocation: workspaceLastLocationSchema.optional(),
-  /** LEGACY source of the default-skill selection. New choices are per project
-   *  (`UiState.importedSkills`); this stays typed so a project without its own choice keeps the
-   *  selection an older cockpit saved here (hearsay-tools/cezarion#1408). */
-  importedSkills: z.array(z.string()).optional(),
 });
 export type WorkspaceUiState = z.infer<typeof workspaceUiStateSchema>;
 
@@ -333,10 +328,6 @@ export const setWorkspaceUiStateInputSchema = z
         cursor: z.string().min(1).max(128).optional(),
         omp: z.string().min(1).max(128).optional(),
       })
-      .optional(),
-    importedSkills: z
-      .array(z.string().min(1).max(200))
-      .max(WORKSPACE_UI_STATE_MAX_KEYS)
       .optional(),
     taskTable: taskTableUiStateSchema
       .extend({

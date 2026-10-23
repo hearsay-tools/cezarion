@@ -10,6 +10,7 @@ import { CheckoutProgressCache } from './checkout-progress.ts';
 import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract/projects';
 import { createLiveRoutes } from './live-routes.ts';
 import { subscribeRunFeed } from './run-event-feed.ts';
+import { teamSkillRefSchema } from '@open-mercato/cezar-contract/skills';
 import { sidebarLimitsSchema } from '@open-mercato/cezar-contract/workspace';
 import { worktreeSetupConfigSchema } from '@open-mercato/cezar-contract/workspace';
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
@@ -174,7 +175,7 @@ import {
   pushCurrentBranch,
   readWorktreePath,
 } from './git-changes.ts';
-import { gatedSkillsRepos, loadConfig, resolveWorktreeRetention, type CezConfig } from '../config.ts';
+import { loadConfig, resolveWorktreeRetention, type CezConfig } from '../config.ts';
 import { resolveWorktreeSetup } from '../worktree-setup.ts';
 import { findConfigFile } from '../agent-config/catalog.ts';
 import { readConfigFile, statConfigPath, writeConfigFile } from '../agent-config/files.ts';
@@ -235,7 +236,7 @@ import { checkoutRepo, type CloneRunner } from './checkout.ts';
 import { createProject, listGithubOwners, type CommandRunner } from './create-project.ts';
 import { armPreview, ProjectContextError, ProjectContexts, projectWarmupEnabled, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
-import { readProjectUiState, readUiState, uiStatePath, withLegacySkillSelection } from '../ui-state.ts';
+import { readProjectUiState, readUiState, uiStatePath } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
 import { isLoopbackHostHeader, normalizeHostname, resolveCapabilities } from './capabilities.ts';
 import { applicationUpdateInputSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract/application-update';
@@ -775,9 +776,8 @@ const uiStateSchema = z
     lastWorktree: z.boolean().optional(),
     lastAutonomous: z.boolean().optional(),
     lastGenerateFollowups: z.boolean().optional(),
-    // The default team-skill selection belongs to this project's ui-state, never the workspace
-    // state (hearsay-tools/cezarion#1408).
-    importedSkills: z.array(z.string().min(1).max(200)).max(UI_STATE_MAX_KEYS).optional(),
+    // Team skills this project switched off. Per project, never workspace state.
+    disabledTeamSkills: z.array(teamSkillRefSchema).max(UI_STATE_MAX_KEYS).optional(),
     // Skill selection frequency (#408): name → times chosen, incremented on a successful run
     // start from EITHER composer (`/new`'s SourcePill and the follow-up `SkillsPicker`). Drives
     // the shared `orderSkillsByUsage` sort (web/app/src/lib/skills.ts) so both pickers float the
@@ -3389,19 +3389,13 @@ export function createApp(deps: ServerDeps) {
       return c.json(await discoverSkills(repoRoot, { builtin: builtinSkillsOf(c.get('project').manager) }));
     })
 
-    // The opt-in catalog for the "Import skills" panel: every skill a default
-    // (vendor) repo offers — `open-mercato/skills` — regardless of import state,
-    // so the panel can present them all with a per-skill toggle. Empty once a repo
-    // configures its own `skillsRepos` (nothing is gated then). `wait=1` lets the
-    // panel wait out a cold team-skill cache, same as `GET /skills` (spec 005).
+    // Every team skill the configured sources offer, including those this project switched
+    // off, so the Skills catalog can show each with its toggle. Empty without `skillsRepos`.
+    // `wait=1` lets the panel wait out a cold team-skill cache, same as `GET /skills` (spec 005).
     .get('/skills/importable', queryZodValidator(waitQuery), async (c) => {
       const repoRoot = c.get('project').root;
-      const gated = await gatedSkillsRepos(repoRoot);
-      if (gated.size === 0) return c.json([]);
       if (c.req.valid('query').wait === '1') await waitForTeamSkills(repoRoot);
-      // The full skill, so the Skills catalog can preview one before it is enabled.
-      const importable = getTeamSkillsCached(repoRoot).filter((skill) => skill.team && gated.has(skill.team.repo));
-      return c.json(importable);
+      return c.json(getTeamSkillsCached(repoRoot));
     })
 
     // Refresh team skills (spec 005): clone/fetch the configured skills repos,
@@ -3426,7 +3420,6 @@ export function createApp(deps: ServerDeps) {
       // single request may not stuff an unbounded key set (#429) — the shared
       // schema+cap half of both ui-state routes lives in `uiStateBody`.
       const parsed = { data: c.req.valid('json') };
-      // Merge into the project's own file: the legacy skill fallback is read-only (#1408).
       const merged = { ...(await readProjectUiState(repoRoot)), ...parsed.data };
       try {
         await mkdir(dataDir, { recursive: true });
@@ -3434,7 +3427,7 @@ export function createApp(deps: ServerDeps) {
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
       }
-      return c.json(await withLegacySkillSelection(merged));
+      return c.json(merged);
     });
 
   // ---- chained family: workflows (project-scoped) --------------------------

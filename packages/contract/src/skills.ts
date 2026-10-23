@@ -37,8 +37,12 @@ export const skillSchema = z.object({
 });
 export type Skill = z.infer<typeof skillSchema>;
 
+// Defined in a leaf module so `workspace.ts` can use it without importing `runs.ts` (an import cycle).
+export { teamSkillRefSchema, type TeamSkillRef } from './team-skill-ref.ts';
+
 /**
- * A skill offered by the default (vendor) repo, from `GET /skills/importable`, independent of
+ * A team skill from `GET /skills/importable`, whether or not the project switched it off. The
+ * full definition lets the Skills catalog preview it.  from `GET /skills/importable`, independent of
  * whether it is enabled. The full definition lets the Skills catalog preview it before enabling.
  */
 export const importableSkillSchema = skillSchema;
