@@ -6,7 +6,7 @@ import type { PreviewServer } from '@open-mercato/cezar-contract';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DevServerState, DevServerStopReason } from './dev-server.ts';
 import { ChromiumError, installCommand } from './chromium.ts';
-import { ChromiumMissingError, PREVIEW_BROWSER_IDLE_MS, PREVIEW_SERVER_IDLE_MS, PreviewHost, type BrowserHandle, type RunContext } from './host.ts';
+import { ChromiumMissingError, PREVIEW_BROWSER_IDLE_MS, PREVIEW_SERVER_IDLE_MS, PreviewHost, type BrowserExit, type BrowserHandle, type RunContext } from './host.ts';
 import { fakeCdp, fakeViewer } from './preview.testkit.ts';
 
 class FakeDevServer extends EventEmitter {
@@ -50,7 +50,7 @@ function setup(servers: PreviewServer[] = [server(5173)], launchError?: () => Er
   const answering = new Set<number>();
   const devServers: FakeDevServer[] = [];
   const probe = vi.fn(async (port: number) => answering.has(port));
-  const browsers: Array<BrowserHandle & { cdpFake: ReturnType<typeof fakeCdp>; exit(info: { signal?: string; stderrTail: string }): void; profileDir: string }> = [];
+  const browsers: Array<BrowserHandle & { cdpFake: ReturnType<typeof fakeCdp>; exit(info: BrowserExit): void; profileDir: string }> = [];
   const host = new PreviewHost({
     probe,
     createServer: opts => {
@@ -63,8 +63,8 @@ function setup(servers: PreviewServer[] = [server(5173)], launchError?: () => Er
       const error = launchError?.();
       if (error) throw error;
       const cdpFake = fakeCdp();
-      let exit!: (info: { signal?: string; stderrTail: string }) => void;
-      const exited = new Promise<{ signal?: string; stderrTail: string }>(resolve => (exit = resolve));
+      let exit!: (info: BrowserExit) => void;
+      const exited = new Promise<BrowserExit>(resolve => (exit = resolve));
       const handle = { cdp: cdpFake.cdp, exited, close: vi.fn(), cdpFake, exit, profileDir };
       browsers.push(handle);
       return handle;
@@ -507,7 +507,7 @@ describe('PreviewHost', () => {
 
     browsers[0]!.exit({ signal: 'SIGSEGV', stderrTail: 'Aw, snap' });
     await flush();
-    expect(viewer.messages.at(-1)).toEqual({ t: 'state', stage: 'browser-exited', signal: 'SIGSEGV', stderrTail: 'Aw, snap', serverUp: true });
+    expect(viewer.messages.at(-1)).toEqual({ t: 'state', stage: 'browser-exited', reason: 'exited', signal: 'SIGSEGV', stderrTail: 'Aw, snap', serverUp: true });
 
     // Neither a server transition nor a new open brings Chromium back.
     devServers[0]!.set('stalled');
@@ -606,7 +606,40 @@ describe('PreviewHost', () => {
     answering.add(5173);
     const viewer = fakeViewer();
     await host.open(ctx, viewer, { port: 5173 });
-    expect(viewer.messages.at(-1)).toEqual({ t: 'state', stage: 'browser-exited', stderrTail: 'Chromium did not open its DevTools port in time\ndbus noise', serverUp: true });
+    expect(viewer.messages.at(-1)).toEqual({
+      t: 'state',
+      stage: 'browser-exited',
+      reason: 'timeout',
+      stderrTail: 'Chromium did not open its DevTools port in time\ndbus noise',
+      serverUp: true,
+    });
+  });
+
+  it('a launch that exits early reports its exit code (#1474)', async () => {
+    const { host, ctx, answering } = make(undefined, () => new ChromiumError('exited', 'boom', 'Chromium exited (3)', { exitCode: 3 }));
+    answering.add(5173);
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    expect(viewer.messages.at(-1)).toEqual({
+      t: 'state',
+      stage: 'browser-exited',
+      reason: 'exited',
+      exitCode: 3,
+      stderrTail: 'Chromium exited (3)\nboom',
+      serverUp: true,
+    });
+  });
+
+  it('a running Chromium that exits with a code reports the code, not a signal (#1474)', async () => {
+    const { host, ctx, devServers, browsers } = make();
+    const viewer = fakeViewer();
+    await host.open(ctx, viewer, { port: 5173 });
+    await host.run('run-1', 5173);
+    devServers[0]!.set('up');
+    await flush();
+    browsers[0]!.exit({ exitCode: 21, stderrTail: 'out of memory' });
+    await flush();
+    expect(viewer.messages.at(-1)).toEqual({ t: 'state', stage: 'browser-exited', reason: 'exited', exitCode: 21, stderrTail: 'out of memory', serverUp: true });
   });
 
   it('a sandbox failure stays on screen until retryBrowser', async () => {

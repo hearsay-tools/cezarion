@@ -158,6 +158,15 @@ describe('previewServerMessageSchema', () => {
     expect(previewServerMessageSchema.safeParse(message).success).toBe(true);
   });
 
+  it('keeps why the browser stopped: a missed launch deadline, or an exit with its code (#1474)', () => {
+    const timedOut = { t: 'state', stage: 'browser-exited', reason: 'timeout', stderrTail: 'dbus noise', serverUp: true } as const;
+    const exited = { t: 'state', stage: 'browser-exited', reason: 'exited', exitCode: 3, stderrTail: '', serverUp: false } as const;
+    expect(previewServerMessageSchema.parse(timedOut)).toEqual(timedOut);
+    expect(previewServerMessageSchema.parse(exited)).toEqual(exited);
+    expect(previewServerMessageSchema.safeParse({ ...exited, reason: 'crashed' }).success).toBe(false);
+    expect(previewServerMessageSchema.safeParse({ ...exited, exitCode: 1.5 }).success).toBe(false);
+  });
+
   it.each([
     ['an unknown state stage', { t: 'state', stage: 'connection-lost' }],
     ['an unknown loading step', { t: 'state', stage: 'loading', step: 'dns' }],
