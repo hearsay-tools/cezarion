@@ -75,9 +75,7 @@ afterAll(async () => {
   if (root) rmSync(root, { recursive: true, force: true })
 })
 
-// Relationships live in the Session activity dock above the composer (#751).
-// The dock is collapsed by default on a phone, so reaching the region requires a click
-// there and is already open on desktop.
+// Roots list workers in Session activity. Workers link to their parent in the header.
 function reveal(expectedHeading?: string) {
   // After in-app navigation, wait for the destination heading before using its dock.
   // Keep checking the disclosure state until the relationship region appears.
@@ -86,6 +84,7 @@ function reveal(expectedHeading?: string) {
     : `document.querySelector('h1')?.textContent?.trim() === ${JSON.stringify(expectedHeading)}`
   browser.waitForValue(`(() => {
     if (!(${headingReady})) return null
+    if (document.querySelector('[data-slot="parent-task-link"]')) return true
     if (document.querySelector(${JSON.stringify(region)})) return true
     document.querySelector('[data-slot="run-activity-dock"] > button[aria-expanded="false"]')?.click()
     document.querySelector('[data-slot="run-activity-workers"] > button[aria-expanded="false"]')?.click()
@@ -165,23 +164,37 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     expect(facts.theme).toBe(true); expect(facts.reducedMotion).toBe(true); expect(facts.focusRing).not.toBe('none')
     browser.screenshot(join(artifacts, `workers-${width}-${theme}.png`), { viewport: true })
     browser.press('Enter')
-    // In-app navigation, so the worker task arrives with its own dock state: collapsed at
-    // phone width until `reveal` opens it.
+    // Parent navigation is available without opening either activity disclosure.
     browser.waitForFunction(`location.pathname === '${route(ids[0]!)}'`)
     reveal(`Owned worker 1`)
-    browser.waitForFunction(`document.querySelector('${region} a[aria-label="Parent task ${parentId}"]') !== null`)
-    expect(browser.evaluate(`document.querySelector('${region} a[aria-label="Parent task ${parentId}"]').getAttribute('href')`)).toBe(route(parentId))
+    const parentLink = '[data-slot="parent-task-link"]'
+    browser.waitForFunction(`document.querySelector('${parentLink}')?.textContent.includes('Relationship parent')`)
+    expect(browser.evaluate(`document.querySelector('${parentLink}').getAttribute('href')`)).toBe(route(parentId))
+    expect(browser.count('[data-slot="run-activity-workers"]')).toBe(0)
+    const parentFacts = waitForSettledSample(browser, `(() => {
+      const link = document.querySelector('${parentLink}'), rect = link.getBoundingClientRect();
+      return { height: rect.height, overflow: document.documentElement.scrollWidth > innerWidth,
+        visible: rect.top >= 0 && rect.bottom <= innerHeight };
+    })()`) as { height: number; overflow: boolean; visible: boolean }
+    expect(parentFacts.height).toBeGreaterThanOrEqual(44)
+    expect(parentFacts.overflow).toBe(false)
+    expect(parentFacts.visible).toBe(true)
+    browser.screenshot(join(artifacts, `worker-parent-${width}-${theme}.png`), { viewport: true })
+    browser.click(parentLink)
+    browser.waitForFunction(`location.pathname === '${route(parentId)}' && document.querySelector('[data-slot="run-activity-workers"]') !== null`)
   }, 120_000)
 }
 
 it('shows unavailable parent with retry, successful empty state, worker wait and preserved human ask attribution', () => {
   browser.setViewport(1440, 900)
   open(orphanId)
-  browser.waitForFunction(`document.querySelector('${region}').textContent.includes('Parent record unavailable')`)
-  expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
+  const parentRegion = '[data-slot="parent-task"]'
+  browser.waitForFunction(`document.querySelector('${parentRegion}').textContent.includes('Parent record unavailable')`)
+  expect(browser.evaluate(`[...document.querySelectorAll('${parentRegion} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
   expect(browser.snapshot()).toContain('Retry parent task')
-  browser.evaluate(`(() => { const buttons = [...document.querySelectorAll('${region} button')]; buttons.find(button => button.textContent.includes('Retry')).click(); })()`)
-  expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
+  browser.evaluate(`(() => { const buttons = [...document.querySelectorAll('${parentRegion} button')]; buttons.find(button => button.textContent.includes('Retry')).click(); })()`)
+  browser.waitForFunction(`document.querySelector('${parentRegion}').textContent.includes('Parent record unavailable')`)
+  expect(browser.evaluate(`[...document.querySelectorAll('${parentRegion} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
   open(emptyId); browser.waitForFunction(`document.querySelector('${region}').textContent.includes('No workers')`)
   // A full record carries its worker ids, so the count is said (#617).
   open(waitingId); expect(browser.text(region)).toContain('Waiting on 1 worker')
@@ -286,7 +299,11 @@ it('keeps request waits consistent in threads, global tasks and the palette at p
       open(id)
       browser.waitForFunction(`document.querySelector('[data-slot="paused-hint"]') !== null`)
       expect(browser.text('[data-slot="paused-hint"]')).toContain(label)
-      expect(browser.text(region)).toContain(label)
+      if (id === requestWorkerId) {
+        browser.waitForFunction(`document.querySelector('[data-slot="parent-task"]')?.textContent.includes('Parent awaiting worker reply')`)
+        expect(browser.count('[data-slot="run-activity-workers"]')).toBe(0)
+        expect(browser.text('[data-slot="parent-task"]')).toContain('Parent awaiting worker reply')
+      } else expect(browser.text(region)).toContain(label)
       expect(browser.count('[data-slot="ask-card"]')).toBe(0)
       expect(waitForSettledSample(browser, 'document.documentElement.scrollWidth > innerWidth')).toBe(false)
       browser.screenshot(join(artifacts, `request-wait-${id === requestWorkerId ? 'worker' : 'parent'}-${width}-${theme}.png`), { viewport: true })

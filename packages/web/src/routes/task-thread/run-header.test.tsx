@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
+import { ProjectScopeProvider } from '@/api/project-scope-context'
 import type { ApiRun, RunStatus, StepState } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 
@@ -88,22 +89,60 @@ function renderHeader(
   record: ApiRun,
   onMarkedUnread?: () => void,
   tab: RunTab = 'session',
+  projectId: string | null = null,
 ) {
+  const prefix = projectId ? `/p/${projectId}` : ''
   return render(
     <QueryClientProvider client={createQueryClient()}>
-      <MemoryRouter initialEntries={[`/tasks/${record.id}`]}>
+      <ProjectScopeProvider projectId={projectId}>
+      <MemoryRouter initialEntries={[`${prefix}/tasks/${record.id}`]}>
         <Routes>
           <Route
-            path="/tasks/:id"
+            path={`${prefix}/tasks/:id`}
             element={<RunHeader run={record} tab={tab} onMarkedUnread={onMarkedUnread} />}
           />
           <Route path="/" element={<div data-slot="home-probe" />} />
         </Routes>
         <Toaster />
       </MemoryRouter>
+      </ProjectScopeProvider>
     </QueryClientProvider>,
   )
 }
+
+const parentId = '10000000-0000-4000-8000-000000000001'
+const workerRun = () => run('done', {
+  delegation: {
+    role: 'worker', permissions: [], parentRunId: parentId,
+    workspace: { ownerRunId: 'r1', resourceId: 'r1', kind: 'owned-isolated', path: '/worker', branch: 'cez/worker', baselineSha: 'a'.repeat(40) },
+  },
+})
+
+it.each(['session', 'changes', 'commits', 'files'] as const)('keeps parent navigation above the worker title on %s without opening activity', async tab => {
+  const sent = stubFetch({ [`/api/v1/p/sample/runs/${parentId}`]: () => jsonResponse(run('running', { id: parentId, title: 'Parent task title', titleSummary: 'Parent task title' })) })
+  renderHeader(workerRun(), undefined, tab, 'sample')
+  const link = screen.getByRole('link', { name: `Parent task ${parentId}` })
+  expect(link.getAttribute('href')).toBe(`/p/sample/tasks/${parentId}`)
+  expect(link.textContent).toContain(parentId) // usable before the parent lookup completes
+  expect(link.closest('[data-slot="run-header"]')).toBeTruthy()
+  expect(link.compareDocumentPosition(screen.getByRole('heading', { level: 1 })) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  await waitFor(() => expect(link.textContent).toContain('Parent task title'))
+  expect(sent.some(request => request.path.endsWith('/relationships'))).toBe(false)
+})
+
+it('retains the parent link after lookup failure and retries the parent record', async () => {
+  let attempts = 0
+  stubFetch({ [`/api/v1/runs/${parentId}`]: () => ++attempts === 1
+    ? jsonResponse({ error: 'not found' }, 404)
+    : jsonResponse(run('done', { id: parentId, titleSummary: 'Recovered parent' })) })
+  renderHeader(workerRun())
+  expect(await screen.findByText('Parent record unavailable or deleted')).toBeTruthy()
+  const link = screen.getByRole('link', { name: `Parent task ${parentId}` })
+  expect(link.getAttribute('href')).toBe(`/tasks/${parentId}`)
+  fireEvent.click(screen.getByRole('button', { name: 'Retry parent task' }))
+  await waitFor(() => expect(link.textContent).toContain('Recovered parent'))
+  expect(screen.queryByText('Parent record unavailable or deleted')).toBeNull()
+})
 
 const actionBar = () => {
   if (!document.querySelector('[data-slot="run-actions-menu"]')) {

@@ -29,7 +29,7 @@ import { AgentList } from './agents-dock'
 import { PlanList, planCounts } from './plan-dock'
 import { collectSubagents, subagentCounts } from './subagent-dock'
 import { StepRail, activeStepIndex, railVisual } from './step-rail'
-import { WorkerActivitySection, useWorkersVerdict } from './run-relationships'
+import { Cleanup, WorkerActivitySection, WorkerWaitDetails, hasCleanupDetails, hasWorkerWaitDetails, useWorkersVerdict } from './run-relationships'
 import { ActivityRow, meterText } from './run-activity-row'
 import { ActivitySummary, type SummaryItem } from './activity-summary'
 import { ActivityReferences } from './activity-references'
@@ -121,10 +121,11 @@ function SessionActivityCard({
   const workflow = run.steps
   const agents = useMemo(() => collectSubagents(currentThread.turns, runIsTerminal), [currentThread.turns, runIsTerminal])
   const planEntries = latestPlanEntries(currentThread) ?? []
-  // `invalid` is the contract's parking spot for unreadable delegation metadata, and
-  // carries no usable worker links, so it is not a section to count or frame.
-  const hasWorkers = run.delegation !== undefined && run.delegation.role !== 'invalid'
-  // Mounted for every run so the hook order never changes; it only fetches for a delegated one.
+  // Only roots own workers. A worker's parent link is always visible in the task header.
+  const hasWorkers = run.delegation?.role === 'root'
+  const cleanup = run.delegation?.role === 'worker' ? run.delegation.destroy : undefined
+  const workerWait = hasWorkerWaitDetails(run)
+  // Mounted for every run so the hook order never changes; it only fetches for a root.
   const workers = useWorkersVerdict(run)
   // Complete means SUCCEEDED, not merely settled: a failed or cancelled step keeps the green
   // summary away, matching `subagentCounts` (which counts only `completed`) and the danger X
@@ -136,7 +137,7 @@ function SessionActivityCard({
   const workflowName = workflowLabel(run)
   const flags = runActionFlags(run)
   const resume = useResumeInTerminal(run)
-  const hasWorkspace = Boolean(run.branch || run.worktreePath || hasReferences || resumeHint(run))
+  const hasWorkspace = Boolean(run.branch || run.worktreePath || hasReferences || resumeHint(run) || hasCleanupDetails(cleanup))
 
   const isOpen = (key: SectionKey) => sections[key] ?? openSections.get(`${run.id}:${key}`) ?? key === 'workers'
   const toggle = (key: SectionKey) => {
@@ -250,9 +251,10 @@ function SessionActivityCard({
               { id: 'chips', priority: 0, content: <ActivityReferences run={run} references={waitReferences} /> },
             ]} /> : undefined}
             open={isOpen('status')}
-            onToggle={hasWaitDetails(run) ? () => toggle('status') : undefined}
+            onToggle={hasWaitDetails(run) || workerWait ? () => toggle('status') : undefined}
           >
             <RunWaitDetails run={run} />
+            {workerWait ? <WorkerWaitDetails run={run} /> : null}
           </ActivityRow>
           {workflowName || workflow.length > 0 ? (
             <ActivityRow
@@ -323,6 +325,7 @@ function SessionActivityCard({
               onToggle={() => toggle('workspace')}
             >
               <div className="flex min-w-0 flex-col gap-3 text-[13px] text-muted-foreground">
+                {cleanup ? <Cleanup state={cleanup} /> : null}
                 <LinkedReferences run={run} />
                 {run.branch ? <DetailLine label="Branch"><BranchCopy branch={run.branch} /></DetailLine> : null}
                 {run.worktreePath ? (

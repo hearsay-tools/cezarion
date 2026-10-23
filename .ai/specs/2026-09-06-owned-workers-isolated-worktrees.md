@@ -389,10 +389,13 @@ retention remains unchanged aside from counting finished workers in keep-N.
 
 ## Cockpit
 
-Add a small relationship component to the shared RunHeader, present on Session,
-Changes, Commits, and Files tabs. A worker links to its parent. A parent lists
-workers with status and links. Existing task lists identify worker rows without
-changing normal grouping or requiring a separate dashboard.
+A worker links to its parent above the title in the shared RunHeader, present on
+Session, Changes, Commits, and Files tabs, on desktop and phones. This link stays
+outside the Session activity disclosures. Roots list workers with status and
+links in the Session activity Workers section; workers omit that section. Worker
+wait details live under status, and cleanup notices live in Workspace. Existing
+task lists identify worker rows without changing normal grouping or requiring a
+separate dashboard.
 
 Use project-scoped links and current run cache/SSE. Relationship lookup must not
 assume the first page or currently filtered run list contains every worker.
