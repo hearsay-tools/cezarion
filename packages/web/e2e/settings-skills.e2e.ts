@@ -37,8 +37,12 @@ const skillsDir = resolve(servedRoot(), '.ai/skills')
 const ALPHA = 'e2e-alpha-skill'
 const BETA = 'e2e-beta-skill'
 // The #384 case scrolls the list, so it must overflow. CI's runner has no global skills, and the
-// default team catalog that used to fill the list there is gone (#1494): the case read scrollTop 0
-// (CI run 39983148239, shard 4/4). The fillers sort after ALPHA and BETA.
+// default team catalog that used to fill the list there is gone (#1494). Evidence: the case read
+// scrollTop 0, bundle .ai/qa/failures/settings-skills/
+// refresh-keeps-the-selection-and-the-list-scroll-position-384-1/ (CI run 39983148239, artifact
+// cockpit-failures-shard-4). 1 of 1 CI run failed before the fillers, 1 of 1 passed after (run
+// 39986919084). Reproduce with `npm run test:e2e -- settings-skills.e2e.ts` on a host with no
+// global skills. The fillers sort after ALPHA and BETA.
 const FILLERS = Array.from({ length: 40 }, (_, i) => `e2e-zz-filler-${String(i).padStart(2, '0')}`)
 
 let browser: AgentBrowser
