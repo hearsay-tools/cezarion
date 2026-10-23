@@ -14,19 +14,17 @@ import { useSearchParams } from 'react-router'
 import { Link } from '@/lib/project-router'
 
 import { refreshSkills } from '@/api/client'
-import { queryKeys, useImportableSkills, useProjects, useSkills, useWorkflows } from '@/api/queries'
-import { useProjectScope } from '@/api/project-scope-context'
+import { queryKeys, useImportableSkills, useSkills, useWorkflows } from '@/api/queries'
 import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import type { Skill } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { SkillDetailBody, SkillSourceTag, SkillSwitch, type SkillActivation } from '@/components/skill-detail'
 import { SkillEmptyHint } from '@/components/skill-empty-hint'
-import { SkillsUpdateCard } from '@/components/skills-update-card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { toast } from '@/components/ui/toaster'
 import { filterSkills, isProjectSkill, orderSkills, skillUsedBy } from '@/lib/skills'
-import { useSkillSelection } from '@/lib/use-skill-selection'
+import { teamSkillRef, teamSkillRows, useTeamSkillSwitches } from '@/lib/use-skill-selection'
 import { cn } from '@/lib/utils'
 import { BookmarkletPanel } from './settings/bookmarklets-section'
 
@@ -49,14 +47,24 @@ import { BookmarkletPanel } from './settings/bookmarklets-section'
  * opens the bookmarklet panel via the legacy `__bm` sentinel in the same query param.
  *
  * One catalog for every skill (hearsay-tools/cezarion#1408, port of upstream open-mercato/cezar#1082):
- * **Enabled** lists what agents can pick, **Available** the default (vendor) team skills switched
- * off for this project. Any row previews in the detail pane, and a default skill's switch changes
- * this project's selection (`useSkillSelection`). The legacy `__import` sentinel now selects the
- * first Available skill.
+ * **Enabled** lists what agents can pick, **Available** the team skills switched off for this
+ * project. Any row previews in the detail pane. Every team skill has a switch that changes this
+ * project's off-list (`useTeamSkillSwitches`, hearsay-tools/cezarion#1494); local, global and
+ * built-in skills stay locked on. Team rows are keyed by source repo AND name, so the same name
+ * from two sources shows twice; the copy that loses de-duplication says what hides it. The legacy
+ * `__import` sentinel now selects the first Available skill.
  */
 
 const BOOKMARKLETS = '__bm'
 const IMPORT = '__import'
+
+/** A team row's identity: the same name can come from two sources. */
+const rowKey = (skill: Skill) => (skill.team ? `${skill.team.repo}\u0000${skill.name}` : skill.path)
+
+/** Sources that always beat a team skill of the same name (`builtin` loses to it). */
+const shadowsTeam = (skill: Skill) => skill.source !== 'team' && skill.source !== 'builtin'
+
+type Entry = { skill: Skill; key: string; hiddenBy?: string }
 
 export function SkillsRoute() {
   return (
@@ -76,21 +84,17 @@ function SkillsCatalog() {
   const [searchParams] = useSearchParams()
   const [query, setQuery] = useState('')
   const queryClient = useQueryClient()
-  const projects = useProjects()
-  const scope = useProjectScope()
-  const updateProjectId = scope.projectId ?? projects.data?.bootProject ?? ''
   // The same scope `queryKeys.skills` reads, so a save invalidates the catalog this page shows.
-  const selectionProject = queryScope()
-  const importable = useMemo(() => importableQuery.data ?? [], [importableQuery.data])
-  const importableNames = useMemo(() => importable.map((skill) => skill.name), [importable])
-  const selection = useSkillSelection(selectionProject, importableNames)
+  const switchesProject = queryScope()
+  const team = useMemo(() => importableQuery.data ?? [], [importableQuery.data])
+  const switches = useTeamSkillSwitches(switchesProject)
 
   const refresh = useMutation({
     mutationFn: () => refreshSkills(),
     onSuccess: (catalog) => {
       // The POST answers the merged catalog — seed the shared query instead of refetching.
       queryClient.setQueryData(queryKeys.skills, catalog)
-      // The fetch can change which team skills are defaults too; the switches read that list.
+      // The fetch can change which team skills exist too; the switches read that list.
       void queryClient.invalidateQueries({ queryKey: queryKeys.importableSkills })
       toast('Team skills refreshed.')
     },
@@ -110,37 +114,52 @@ function SkillsCatalog() {
   }
 
   const catalog = skillsQuery.data ?? []
-  // Until the default list is known (loading or failed), no team skill can be switched: its
-  // switch shows on and disabled, and nothing is listed as Available.
-  const defaultsKnown = importableQuery.isSuccess
-  const defaults = new Set(importableNames)
-  const isDefault = (skill: Skill) => skill.source === 'team' && defaults.has(skill.name)
-  const catalogNames = new Set(catalog.map((skill) => skill.name))
-  // The catalog is the server's answer; the selection is the optimistic one. A default skill
-  // follows the selection at once, so a switch moves its row before the catalog re-reads.
-  // Both groups sort like the server's catalog (by name), then project-first (`orderSkills`).
-  const byName = (list: Skill[]) => orderSkills([...list].sort((a, b) => a.name.localeCompare(b.name)))
-  const enabled = byName([
-    ...catalog.filter((skill) => !defaultsKnown || !isDefault(skill) || selection.enabled.has(skill.name)),
-    ...(defaultsKnown
-      ? importable.filter((skill) => selection.enabled.has(skill.name) && !catalogNames.has(skill.name))
-      : []),
-  ])
-  const enabledNames = new Set(enabled.map((skill) => skill.name))
-  const available = defaultsKnown
-    ? byName(importable.filter((skill) => !selection.enabled.has(skill.name) && !enabledNames.has(skill.name)))
+  // Until the team list is known (loading or failed), no team skill can be switched: the
+  // catalog's team skills show on with a disabled switch, and nothing is listed as Available.
+  const teamKnown = importableQuery.isSuccess
+  // A local or global skill hides every team copy of its name, so that copy is not listed.
+  const shadowed = new Set(catalog.filter(shadowsTeam).map((skill) => skill.name))
+  // The catalog is the server's answer; the switches are the optimistic one. A team row
+  // follows its switch at once, so a toggle moves the row before the catalog re-reads.
+  const rows = teamKnown
+    ? teamSkillRows(team.filter((skill) => !shadowed.has(skill.name)), catalog, switches.isOn)
     : []
+  const entry = (skill: Skill, hiddenBy?: string): Entry => ({
+    skill,
+    key: rowKey(skill),
+    ...(hiddenBy ? { hiddenBy } : {}),
+  })
+  // Both groups sort like the server's catalog (by name), then project-first (`orderSkills`). The
+  // sort is stable, so two copies of one name keep the `skillsRepos` order.
+  const byName = (list: Entry[]) => {
+    const sorted = [...list].sort((a, b) => a.skill.name.localeCompare(b.skill.name))
+    const bySkill = new Map(sorted.map((item) => [item.skill, item]))
+    return orderSkills(sorted.map((item) => item.skill)).map((skill) => bySkill.get(skill)!)
+  }
+  // A catalog team skill the team list does not hold yet (a Refresh landed first) stays listed.
+  const teamKeys = new Set(team.map(rowKey))
+  const enabled = byName([
+    ...catalog
+      .filter((skill) => !teamKnown || skill.source !== 'team' || !teamKeys.has(rowKey(skill)))
+      .map((skill) => entry(skill)),
+    ...rows.filter((row) => row.on).map((row) => entry(row.skill, row.hiddenBy)),
+  ])
+  const available = byName(rows.filter((row) => !row.on).map((row) => entry(row.skill)))
   const listed = [...enabled, ...available]
+  // Two team copies of one name need the repo in the URL and in the switch's name.
+  const nameCount = new Map<string, number>()
+  for (const item of listed) nameCount.set(item.skill.name, (nameCount.get(item.skill.name) ?? 0) + 1)
+  const twin = (skill: Skill) => (nameCount.get(skill.name) ?? 0) > 1 && skill.team !== undefined
 
   const activationFor = (skill: Skill): SkillActivation => {
-    if (skill.source === 'team' && (!defaultsKnown || defaults.has(skill.name))) {
-      const checked = defaultsKnown ? selection.enabled.has(skill.name) : true
+    const ref = teamSkillRef(skill)
+    if (skill.source === 'team' && ref) {
       return {
-        ariaLabel: `Enable ${skill.name}`,
-        checked,
-        disabled: !defaultsKnown || !selection.ready,
+        ariaLabel: twin(skill) ? `Enable ${skill.name} from ${ref.repo}` : `Enable ${skill.name}`,
+        checked: teamKnown ? switches.isOn(ref) : true,
+        disabled: !teamKnown || !switches.ready,
         locked: false,
-        onCheckedChange: () => selection.toggle(skill.name),
+        onCheckedChange: () => switches.toggle(ref),
       }
     }
     return {
@@ -151,23 +170,32 @@ function SkillsCatalog() {
       onCheckedChange: () => {},
     }
   }
+  const hrefFor = (skill: Skill) =>
+    `/skills?skill=${encodeURIComponent(skill.name)}${twin(skill) ? `&repo=${encodeURIComponent(skill.team!.repo)}` : ''}`
 
   const param = searchParams.get('skill')
+  const repoParam = searchParams.get('repo')
   // Explicit choice if it is still listed, else the first enabled skill, else the first
   // available one, else the bookmarklet panel. A vanished selection degrades, it never crashes.
   // `__import` (the retired "Manage skills" panel) selects the first Available skill.
-  const fallback = enabled[0]?.name ?? available[0]?.name ?? BOOKMARKLETS
-  const current =
-    param === BOOKMARKLETS
-      ? param
-      : param === IMPORT
-        ? (available[0]?.name ?? fallback)
-        : param !== null && listed.some((skill) => skill.name === param)
-          ? param
-          : fallback
-  const selected = listed.find((skill) => skill.name === current) ?? null
-  const shownEnabled = filterSkills(enabled, query)
-  const shownAvailable = filterSkills(available, query)
+  const fallback = enabled[0] ?? available[0] ?? null
+  const chosen =
+    param === null || param === BOOKMARKLETS || param === IMPORT
+      ? undefined
+      : (listed.find((item) => item.skill.name === param && (repoParam === null || item.skill.team?.repo === repoParam)) ??
+        listed.find((item) => item.skill.name === param))
+  const selectedEntry =
+    param === BOOKMARKLETS ? null : param === IMPORT ? (available[0] ?? fallback) : (chosen ?? fallback)
+  const current = selectedEntry ? selectedEntry.key : BOOKMARKLETS
+  const selected = selectedEntry?.skill ?? null
+  const filterEntries = (list: Entry[]) => {
+    const kept = new Set(filterSkills(list.map((item) => item.skill), query))
+    return list.filter((item) => kept.has(item.skill))
+  }
+  const shownEnabled = filterEntries(enabled)
+  const shownAvailable = filterEntries(available)
+  // The page names how to add a source, and no vendor (hearsay-tools/cezarion#1494).
+  const noTeamSkills = teamKnown && team.length === 0 && !skillsQuery.isPending
 
   return (
     <div data-slot="skills-section" className="@container flex min-w-0 flex-col gap-[22px]">
@@ -227,7 +255,6 @@ function SkillsCatalog() {
             param === null ? 'flex' : 'hidden',
           )}
         >
-          {updateProjectId ? <SkillsUpdateCard projectId={updateProjectId} /> : null}
           {importableQuery.isError ? (
             <div
               role="alert"
@@ -235,7 +262,7 @@ function SkillsCatalog() {
               className="flex flex-col items-start gap-2 rounded-lg border border-border bg-background p-3 text-xs text-muted-foreground"
             >
               <span>
-                Could not load the default skills, so they cannot be switched right now. Your saved choice is kept.
+                Could not load the team skills, so they cannot be switched right now. Your saved choice is kept.
                 {' '}
                 {importableQuery.error.message}
               </span>
@@ -263,24 +290,28 @@ function SkillsCatalog() {
               <>
                 {shownEnabled.length > 0 ? (
                   <SkillGroup slot="skills-group-enabled" title={`Enabled · ${shownEnabled.length}`}>
-                    {shownEnabled.map((skill) => (
+                    {shownEnabled.map((item) => (
                       <SkillRow
-                        key={skill.path}
-                        skill={skill}
-                        active={current === skill.name}
-                        activation={activationFor(skill)}
+                        key={item.key}
+                        skill={item.skill}
+                        href={hrefFor(item.skill)}
+                        hiddenBy={item.hiddenBy}
+                        active={current === item.key}
+                        activation={activationFor(item.skill)}
                       />
                     ))}
                   </SkillGroup>
                 ) : null}
                 {shownAvailable.length > 0 ? (
                   <SkillGroup slot="skills-group-available" title={`Available · ${shownAvailable.length}`}>
-                    {shownAvailable.map((skill) => (
+                    {shownAvailable.map((item) => (
                       <SkillRow
-                        key={skill.path}
-                        skill={skill}
-                        active={current === skill.name}
-                        activation={activationFor(skill)}
+                        key={item.key}
+                        skill={item.skill}
+                        href={hrefFor(item.skill)}
+                        hiddenBy={item.hiddenBy}
+                        active={current === item.key}
+                        activation={activationFor(item.skill)}
                       />
                     ))}
                   </SkillGroup>
@@ -292,6 +323,12 @@ function SkillsCatalog() {
               </p>
             )}
           </div>
+          {noTeamSkills ? (
+            <p data-slot="skills-team-empty" className="px-2.5 py-2 text-xs leading-relaxed text-soft-foreground">
+              No team skills. To add a source, list it under <span className="font-mono">skillsRepos</span> in{' '}
+              <span className="font-mono">.ai/cezar/config.json</span>, then Refresh.
+            </p>
+          ) : null}
         </section>
 
         {/* Detail pane. On narrow containers, the URL switches between catalog and reader. */}
@@ -313,7 +350,7 @@ function SkillsCatalog() {
             </Link>
 
             {current === BOOKMARKLETS ? (
-              <BookmarkletPanel skills={enabled} />
+              <BookmarkletPanel skills={enabled.filter((item) => !item.hiddenBy).map((item) => item.skill)} />
             ) : selected ? (
               <SkillDetailBody
                 skill={selected}
@@ -349,14 +386,28 @@ function SkillGroup({ slot, title, children }: { slot: string; title: string; ch
   )
 }
 
-function SkillRow({ skill, active, activation }: { skill: Skill; active: boolean; activation: SkillActivation }) {
+function SkillRow({
+  skill,
+  href,
+  hiddenBy,
+  active,
+  activation,
+}: {
+  skill: Skill
+  href: string
+  /** What the catalog shows for this name instead of this ON copy. */
+  hiddenBy?: string
+  active: boolean
+  activation: SkillActivation
+}) {
   const project = isProjectSkill(skill)
   return (
     <li className="flex min-w-0 items-start gap-1">
       <Link
-        to={`/skills?skill=${encodeURIComponent(skill.name)}`}
+        to={href}
         data-slot="skill-row"
         data-skill={skill.name}
+        data-repo={skill.team?.repo}
         data-project={project ? 'true' : undefined}
         data-enabled={activation.checked ? 'true' : undefined}
         aria-current={active ? 'page' : undefined}
@@ -385,6 +436,11 @@ function SkillRow({ skill, active, activation }: { skill: Skill; active: boolean
           source={skill.source}
           className="self-start border-0 bg-transparent p-0 text-link-foreground"
         />
+        {hiddenBy ? (
+          <span data-slot="skill-hidden-by" className="min-w-0 text-xs text-supporting-foreground [overflow-wrap:anywhere]">
+            hidden by {hiddenBy}
+          </span>
+        ) : null}
       </Link>
       <span className="pt-2">
         <SkillSwitch skill={skill} activation={activation} />

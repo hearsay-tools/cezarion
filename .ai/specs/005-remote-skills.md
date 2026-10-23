@@ -17,6 +17,10 @@ lokalnych z `.ai/skills/`.
   lokalne działają. Zero błędów blokujących.
 - W kroku chaina skill wybiera się tak samo, niezależnie skąd pochodzi.
 
+> Uwaga (2026-10-23, hearsay-tools/cezarion#1494): domyślne źródło zostało usunięte.
+> `skillsRepos` domyślnie wynosi `[]`, a skille zespołu można wyłączać osobno dla projektu.
+> Opis „Brak pliku = dokładnie ta wartość" poniżej jest historyczny.
+
 ## Zakres
 
 1. **Konfiguracja z defaultem** (opcjonalny `config.json`):

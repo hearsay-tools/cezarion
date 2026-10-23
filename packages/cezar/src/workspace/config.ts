@@ -218,9 +218,6 @@ const workspaceConfigSchema = z
      *  `~` is expanded by the checkout flow, not here); validated writable
      *  when *changed*, never at load. */
     projectsDir: workspacePathSchema('CEZ_PROJECTS_DIR', '~/cezar/projects'),
-    /** Optional auto-update override. Absence inherits the environment/default
-     *  and must stay absent on unrelated merge-writes. */
-    skillsAutoUpdate: z.boolean().optional().catch(undefined),
     archiveOnMerge: z.boolean().optional().catch(undefined),
     /** Global opt-in model policy. The native coding-agent model becomes
      * authoritative while runner choice remains available. */
@@ -251,17 +248,6 @@ const workspaceConfigSchema = z
   .passthrough();
 
 export type WorkspaceConfig = z.infer<typeof workspaceConfigSchema>;
-
-/** Resolve the auto-update preference without mutating or materializing it. */
-export function effectiveSkillsAutoUpdate(
-  config: Pick<WorkspaceConfig, 'skillsAutoUpdate'>,
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  if (config.skillsAutoUpdate !== undefined) return config.skillsAutoUpdate;
-  if (env.CEZ_SKILLS_AUTO_UPDATE === '0') return false;
-  if (env.CEZ_SKILLS_AUTO_UPDATE === '1') return true;
-  return true;
-}
 
 export function effectiveComposerDefault(
   stored: boolean | undefined,

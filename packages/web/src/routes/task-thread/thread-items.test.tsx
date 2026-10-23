@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
@@ -18,7 +18,8 @@ import subagentTask from '../../../../cezar/src/core/__fixtures__/claude/subagen
 import thinkingEditWriteTodo from '../../../../cezar/src/core/__fixtures__/claude/thinking-edit-write-todo.expected.json'
 import opencodeToolLifecycle from '../../../../cezar/src/core/__fixtures__/opencode/tool-lifecycle.expected.json'
 import { TaskFileContext } from './file-links'
-import { groupThreadItems } from './thread-groups'
+import { groupThreadItems, groupWorkerConversation } from './thread-groups'
+import { clearOpenCardCache } from './thread-open-cards'
 import {
   ContextGroup,
   HookCard,
@@ -31,11 +32,15 @@ import {
   ToolCard,
   ToolStreak,
   UserBubble,
+  WorkerConversationGroup,
 } from './thread-items'
 import { reduceThread } from './thread-state'
 import { SessionTranscript } from './session-transcript'
 
-afterEach(cleanup)
+afterEach(() => {
+  cleanup()
+  clearOpenCardCache()
+})
 
 describe('ProviderAuthRequiredCard', () => {
   it.each([
@@ -997,6 +1002,62 @@ describe('UserBubble attachments', () => {
 
 
 describe('parent/worker conversation transcript', () => {
+  const parent = '11111111-1111-4111-8111-111111111111'
+  const worker = '22222222-2222-4222-8222-222222222222'
+  const body = '**Complete message**\n\n[Reference](https://example.com)\n\n```text\nlast line of code\n```'
+  const message = (kind: string) => ({ id: kind === 'request' ? 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' : 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', senderRunId: parent, recipientRunId: worker,
+    kind, text: body, createdAt: '2026-09-08T12:00:00.000Z', requestHash: 'a'.repeat(64), state: 'accepted' })
+
+  it.each(['request', 'reply'])('starts a standalone %s body collapsed with its summary visible', kind => {
+    const entries = reduceThread(asRunEvents([{ type: 'conversation-message', message: message(kind), delivery: 'delivered' }]))
+      .turns.flatMap(turn => turn.items).filter(entry => entry.kind === 'conversation')
+    render(<MemoryRouter><WorkerConversationGroup block={groupWorkerConversation(entries)} runId={parent}
+      taskTitles={{ [worker]: 'Worker' }} /></MemoryRouter>)
+    expect(screen.queryByText('Complete message')).toBeNull()
+    expect(screen.getByRole('link', { name: 'SENT to Worker' })).toBeTruthy()
+    expect(screen.getByText(kind === 'request' ? 'Request' : 'Reply')).toBeTruthy()
+    expect(screen.getByText('Delivered')).toBeTruthy()
+    expect(document.querySelector('time')?.getAttribute('datetime')).toBe(message(kind).createdAt)
+    const toggle = screen.getByRole('button', { name: 'Show message' })
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(toggle)
+    expect(screen.getByRole('button', { name: 'Hide message' }).getAttribute('aria-expanded')).toBe('true')
+    expect(document.getElementById(toggle.getAttribute('aria-controls')!)?.textContent).toContain('Complete message')
+    expect(screen.getByText('Complete message')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: 'Reference' }))
+    expect(screen.getByRole('alertdialog').textContent).toContain('https://example.com')
+    fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+    expect(document.querySelector('pre')?.textContent).toContain('last line of code')
+    fireEvent.click(screen.getByRole('button', { name: 'Hide message' }))
+    expect(screen.queryByText('Complete message')).toBeNull()
+  })
+
+  it('toggles each body and its metadata independently', () => {
+    const entries = reduceThread(asRunEvents(['request', 'reply'].map(kind =>
+      ({ type: 'conversation-message', message: message(kind), delivery: 'delivered' }))))
+      .turns.flatMap(turn => turn.items)
+    render(<MemoryRouter><SessionTranscript runId={parent} viewId="main"
+      sections={[{ id: 'turn', entries }]} mode="document" /></MemoryRouter>)
+    const [request, reply] = [...document.querySelectorAll<HTMLElement>('[data-slot="worker-conversation-card"]')]
+    fireEvent.click(within(request!).getByRole('button', { name: 'Show message' }))
+    expect(within(request!).getByText('Complete message')).toBeTruthy()
+    expect(within(reply!).queryByText('Complete message')).toBeNull()
+    fireEvent.click(within(reply!).getByRole('button', { name: 'Details' }))
+    expect(within(reply!).getByText('Message:', { exact: false })).toBeTruthy()
+    expect(within(reply!).queryByText('Complete message')).toBeNull()
+    fireEvent.click(within(request!).getByRole('button', { name: 'Hide message' }))
+    expect(within(reply!).getByText('Message:', { exact: false })).toBeTruthy()
+  })
+
+  it.each(['progress', 'follow-up'])('keeps %s bodies visible by default', kind => {
+    const entries = reduceThread(asRunEvents([{ type: 'conversation-message', message: message(kind), delivery: 'delivered' }]))
+      .turns.flatMap(turn => turn.items)
+    render(<MemoryRouter><SessionTranscript runId={parent} viewId="main"
+      sections={[{ id: 'turn', entries }]} mode="document" /></MemoryRouter>)
+    expect(screen.getByText('Complete message')).toBeTruthy()
+    expect(screen.queryByRole('button', { name: 'Show message' })).toBeNull()
+  })
+
   it('deduplicates replay, links both participants and preserves a human ask', () => {
     const senderRunId = '11111111-1111-4111-8111-111111111111', recipientRunId = '22222222-2222-4222-8222-222222222222', id = '33333333-3333-4333-8333-333333333333';
     const message = { id, senderRunId, recipientRunId, kind: 'request', text: 'Please inspect the parser', createdAt: '2026-09-08T12:00:00.000Z', requestHash: 'a'.repeat(64), state: 'accepted' };
@@ -1009,6 +1070,8 @@ describe('parent/worker conversation transcript', () => {
     expect(entries.find(entry => entry.kind === 'ask')).toMatchObject({ resolved: false });
     render(<MemoryRouter initialEntries={['/p/acme/tasks/current']}><SessionTranscript runId={senderRunId} viewId="main" sections={[{ id: 'conversation', entries }]} mode="document" taskTitles={{ [senderRunId]: 'Parent', [recipientRunId]: 'Alpha' }} /></MemoryRouter>);
     expect(screen.getByRole('link', { name: 'SENT to Alpha' }).getAttribute('href')).toBe(`/p/acme/tasks/${recipientRunId}`);
+    expect(screen.queryByText(/Please inspect the parser/)).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Show message' }));
     expect(screen.getByText(/Please inspect the parser/)).toBeTruthy();
     expect(screen.getByText('Replied')).toBeTruthy();
     expect(screen.getByText('Request')).toBeTruthy();
@@ -1017,7 +1080,7 @@ describe('parent/worker conversation transcript', () => {
     expect(document.body.textContent).not.toContain(recipientRunId);
     fireEvent.click(screen.getByRole('button', { name: /Details/ }));
     expect(screen.getByText(id, { exact: false })).toBeTruthy();
-    expect(screen.getByText('Queued', { exact: true })).toBeTruthy();
+    expect(within(document.querySelector<HTMLElement>('[data-slot="conversation-details"]')!).getByText('Queued', { exact: true })).toBeTruthy();
   });
 
   it('batches adjacent sends but preserves delayed replies as independent inbound cards', () => {
@@ -1050,6 +1113,7 @@ describe('parent/worker conversation transcript', () => {
     expect(screen.getByRole('link', { name: 'Alpha — Replied' })).toBeTruthy()
     expect(screen.getByRole('link', { name: 'SENT to Bravo' })).toBeTruthy()
     expect(screen.getByRole('link', { name: 'Bravo — Pending' })).toBeTruthy()
+    for (const toggle of screen.getAllByRole('button', { name: 'Show message' })) fireEvent.click(toggle)
     expect(screen.getByText('Got it — Alpha pong')).toBeTruthy()
     expect(document.querySelector('[data-direction="inbound"]')?.textContent).toContain('Got it — Alpha pong')
     expect(document.querySelector('[data-direction="outbound"]')?.textContent).not.toContain('Got it — Alpha pong')
@@ -1121,6 +1185,8 @@ describe('parent/worker conversation transcript', () => {
       sections={[{ id: 'tail', entries }]} mode="document" /></MemoryRouter>)
     expect(screen.getByText('Linked request is outside loaded history.')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /View request/ })).toBeNull()
+    expect(screen.queryByText('Delayed response')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Show message' }))
     expect(screen.getByText('Delayed response')).toBeTruthy()
   })
 
