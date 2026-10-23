@@ -100,7 +100,7 @@ describe('project header actions', () => {
     expect(tabs.every(size => size.width >= 44 && size.height >= 44)).toBe(true)
     browser.click('[data-slot="mobile-tab-bar"] [data-tab="more"]')
     // Automations arrives with health capabilities, after the permanent rows render.
-    const expectedRows = ['/skills', '/workflows', '/settings', '/inbox', '/automations']
+    const expectedRows = ['/skills', '/workflows', '/settings', '/automations']
     const rows = browser.waitForValue(`Array.from(document.querySelectorAll('[data-slot="more-sheet"] [data-slot="more-row"]')).map(el => el.getAttribute('data-more-row'))`, value => Array.isArray(value) && value.length === expectedRows.length) as string[]
     expect(rows).toEqual(expectedRows)
     browser.press('Escape')
