@@ -304,12 +304,6 @@
     {
       "file": "core/harness-autosave-settlement.test.ts",
       "rule": "short-bound",
-      "site": "await waitFor(() => !manager.isActive(runId), 5000);",
-      "count": 1
-    },
-    {
-      "file": "core/harness-autosave-settlement.test.ts",
-      "rule": "short-bound",
       "site": "await waitFor(() => store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('termination not confirmed') &&",
       "count": 1
     },
@@ -563,12 +557,6 @@
       "file": "core/workflow-followup-parity.test.ts",
       "rule": "sleep",
       "site": "await new Promise(resolve => setTimeout(resolve, DEFERRED_TURN_START_MS + 700));",
-      "count": 1
-    },
-    {
-      "file": "core/workflow-no-progress-parity.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(1_600);",
       "count": 1
     },
     {

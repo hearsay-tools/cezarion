@@ -534,6 +534,11 @@ function WorkerConversationBatchCard({
               {soleStatus}
             </span>
           ) : null}
+          {batch.messages.length === 1 && soleMessage && (batch.kind === 'request' || batch.kind === 'reply') && conversationDeliveryLabel(soleMessage.delivery) !== soleStatus ? (
+            <span data-slot="conversation-delivery" className="text-xs text-muted-foreground">
+              {conversationDeliveryLabel(soleMessage.delivery)}
+            </span>
+          ) : null}
         </div>
         {sentAt !== undefined && clockLabel(sentAt) !== undefined ? (
           <span className="flex shrink-0 items-center justify-self-end gap-1 whitespace-nowrap text-[11px] text-soft-foreground">
@@ -542,9 +547,7 @@ function WorkerConversationBatchCard({
           </span>
         ) : null}
       </div>
-      <div className="min-w-0 break-words text-[14px] leading-[1.6] text-foreground select-text [overflow-wrap:anywhere]">
-        <Markdown breaks>{batch.text}</Markdown>
-      </div>
+      <ConversationBody key={`${runId}:${soleMessage?.messageId ?? batch.id}`} batch={batch} />
       {[...new Set(batch.messages.map(message =>
         message.instruction ?? (message.delivery === 'queued'
           ? `${recipientBackends?.[message.recipientRunId] === 'cursor'
@@ -571,6 +574,9 @@ function WorkerConversationBatchCard({
                   {taskTitleFor(message.recipientRunId, taskTitles)}
                 </Link>
                 {status ? <span data-slot="conversation-outcome">{status}</span> : null}
+                {conversationDeliveryLabel(message.delivery) !== status ? (
+                  <span data-slot="conversation-delivery">{conversationDeliveryLabel(message.delivery)}</span>
+                ) : null}
                 <ConversationReference message={message} runId={runId} taskTitles={taskTitles} />
                 {sentAt !== undefined && clockLabel(sentAt) !== undefined ? (
                   <span className="ml-auto whitespace-nowrap"><MessageTime ts={sentAt} /></span>
@@ -585,6 +591,33 @@ function WorkerConversationBatchCard({
       ) : null}
       <ConversationInspectDetails batch={batch} heading={heading} />
     </article>
+  )
+}
+
+/** Body state belongs to the message, so receipt updates, batching and virtual row
+ * remounts keep the reader's choice. Details and navigation remain independent. */
+function ConversationBody({ batch }: { batch: WorkerConversationBatch }) {
+  const cache = useThreadCardCache()
+  const cacheKey = `conversation-body:${batch.messages[0]?.messageId ?? batch.id}`
+  const [open, setOpen] = useState(() => cache?.get(cacheKey) ?? false)
+  const body = (
+    <div className="min-w-0 break-words text-[14px] leading-[1.6] text-foreground select-text [overflow-wrap:anywhere]">
+      <Markdown breaks>{batch.text}</Markdown>
+    </div>
+  )
+  if (batch.kind !== 'request' && batch.kind !== 'reply') return body
+  return (
+    <Collapsible data-slot="conversation-body" open={open} onOpenChange={next => {
+      cache?.set(cacheKey, next)
+      setOpen(next)
+    }} className="min-w-0">
+      <CollapsibleTrigger type="button" data-slot="conversation-body-toggle"
+        className="group/body inline-flex min-h-11 min-w-11 items-center gap-1.5 rounded-md px-2 text-start text-xs font-medium text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-background/40 [@media(hover:hover)_and_(pointer:fine)]:hover:text-foreground active:bg-background/60 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring">
+        <ChevronRightIcon aria-hidden className="size-3.5 shrink-0 group-data-[state=open]/body:rotate-90" />
+        {open ? 'Hide message' : 'Show message'}
+      </CollapsibleTrigger>
+      <CollapsibleContent>{body}</CollapsibleContent>
+    </Collapsible>
   )
 }
 
