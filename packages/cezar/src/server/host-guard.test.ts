@@ -1,10 +1,17 @@
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { createApp, type ServerDeps } from './server.ts';
+
+// Health starts availability probes without awaiting them. These guard tests do
+// not need host CLIs writing caches into HOME after their requests have returned.
+vi.mock('../core/backend-detect.ts', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../core/backend-detect.ts')>(),
+  detectEnvironment: async () => [],
+}));
 
 /**
  * DNS-rebinding guard: in local mode (loopback bind, no `CEZ_REMOTE`) every
