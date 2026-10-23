@@ -14,7 +14,7 @@ import type {
   deleteWorkflowResponseSchema,
   groupResponseSchema,
   parsedWorkflowSchema,
-  pickVariantResponseSchema,
+  variantRetirementResponseSchema,
   planResponseSchema,
   saveWorkflowResponseSchema,
   workflowsResponseSchema,
@@ -47,7 +47,7 @@ describe('src/contract workflows/skills/agent-config schemas match the routes ex
 
   // ---- parallel variants -----------------------------------------------------------------
   type Group200 = InferResponseType<(typeof client.api.v1.groups)[':groupId']['$get'], 200>;
-  type Pick200 = InferResponseType<(typeof client.api.v1.groups)[':groupId']['pick']['$post'], 200>;
+  type Pick410 = InferResponseType<(typeof client.api.v1.groups)[':groupId']['pick']['$post'], 410>;
 
   // ---- skills / todos --------------------------------------------------------------------
   type Skills200 = InferResponseType<typeof client.api.v1.skills.$get, 200>;
@@ -66,7 +66,7 @@ describe('src/contract workflows/skills/agent-config schemas match the routes ex
     Assert<Exact<z.infer<typeof parsedWorkflowSchema>, ParseWorkflow200>>,
     Assert<Exact<z.infer<typeof planResponseSchema>, Plan200>>,
     Assert<Exact<z.infer<typeof groupResponseSchema>, Group200>>,
-    Assert<Exact<z.infer<typeof pickVariantResponseSchema>, Pick200>>,
+    Assert<Exact<z.infer<typeof variantRetirementResponseSchema>, Pick410>>,
     Assert<Exact<z.infer<typeof skillSchema>[], Skills200>>,
     Assert<Exact<z.infer<typeof skillSchema>[], SkillsRefresh200>>,
     Assert<Exact<z.infer<typeof importableSkillSchema>[], Importable200>>,

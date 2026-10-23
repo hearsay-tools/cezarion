@@ -51,7 +51,7 @@ it('renders assigned task flows at 1440 Wide, 402 and 360 in both themes without
   const pages: Array<[string, string, string]> = [
     ['project', scoped('/'), '[data-slot="tasks-table"]'], ['global', '/tasks?group=project', '[data-slot="global-task-row"]'],
     ['inbox', scoped('/inbox'), '[data-route="inbox"]'], ['automations', scoped('/automations'), '[data-route="automations"] [data-slot="automation-card"]'],
-    ['editor', scoped(`/automations/${automationId}`), '#automation-name'], ['compare', scoped('/compare/fixture-group'), '[data-slot="variant-column"]'],
+    ['editor', scoped(`/automations/${automationId}`), '#automation-name'], ['compare', scoped('/compare/fixture-group'), '[data-slot="retained-variant"]'],
   ]
   for (const width of [1440, 402, 360]) for (const theme of ['light', 'dark']) for (const [name, path, selector] of pages) {
     browser.goto(base + path)
@@ -84,13 +84,11 @@ it('persists column choices, filters projects, and expands mobile resources thro
   browser.click('[data-action="clear-filters"]')
   browser.waitForFunction(`document.querySelectorAll('[data-slot="global-task-row"]').length === 2`)
 }, 60_000)
-it('keeps comparison selection behind confirmation', () => {
+it('keeps retained comparisons read-only', () => {
   browser.goto(base + scoped('/compare/fixture-group')); prepare(402, 'light')
-  browser.waitForFunction(`document.querySelector('[data-slot="variant-pick"]') !== null`)
-  browser.click('[data-slot="variant-column"]:first-child [data-slot="variant-pick"]')
-  browser.waitForFunction(`document.querySelector('[data-slot="confirm-pick"]') !== null`)
-  expect(browser.text('[role="alertdialog"]')).toContain('no undo')
-  browser.click('[data-slot="alert-dialog-cancel"]')
+  browser.waitForFunction(`document.querySelectorAll('[data-slot="retained-variant"]').length === 2`)
+  expect(browser.count('[data-slot="variant-pick"]')).toBe(0)
+  expect(browser.text('[data-route="compare"]')).toContain('owned workers')
 }, 60_000)
 
 it('renders loading, retryable error, and filtered-empty states in both themes and phone widths', async () => {

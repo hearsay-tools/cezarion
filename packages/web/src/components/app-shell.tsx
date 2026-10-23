@@ -862,7 +862,7 @@ function PushedTopBar({ compare, onSlot }: { compare: boolean; onSlot: (slot: HT
         >
           <ChevronLeftIcon className="size-[22px]" aria-hidden="true" />
         </Button>
-        {compare ? <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">Compare variants</span> : null}
+        {compare ? <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">Retained results</span> : null}
         {/* The routed view's portal target; empty while the run loads. */}
         <div data-slot="mobile-run-bar" ref={onSlot} className={cn('flex min-w-0 items-center gap-[4px]', compare ? 'shrink-0' : 'flex-1')} />
       </div>

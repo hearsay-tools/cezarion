@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { automationKindSchema, type AutomationKind, type AutomationListQuery, type OnceStatus } from '@open-mercato/cezar-contract/automations';
 import { automationScheduleSchema, nextOccurrence, ONCE_PAST_DUE_MESSAGE, onceInstant } from '@open-mercato/cezar-contract/automation-schedule';
+import { singleRunVariantsSchema } from '@open-mercato/cezar-contract/runs';
 import { SCHEDULED_TASK_NOTE } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { MODEL_DISCOVERY_RUNNERS, type ModelDiscoveryRunner } from '@open-mercato/cezar-contract/workspace';
 import { loadConfig } from '../config.ts';
@@ -55,7 +56,7 @@ export const automationEditableSchema = z
     intervalSeconds: z.number().int().min(60).max(86_400).optional(),
     filters: automationFiltersSchema.optional(),
     schedule: automationScheduleSchema.optional(),
-    task: automationTaskSchema,
+    task: automationTaskSchema.safeExtend({ variants: singleRunVariantsSchema }),
   })
   .strict();
 export type AutomationEditable = z.infer<typeof automationEditableSchema>;
@@ -487,4 +488,3 @@ export function onceCreateAnswer(automation: AutomationDefinition): { dueAt: str
   if (instant === null) return undefined;
   return { dueAt: automation.schedule.at, timeZone: automation.schedule.timeZone, resolvedInstant: new Date(instant).toISOString(), note: SCHEDULED_TASK_NOTE };
 }
-

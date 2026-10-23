@@ -41,7 +41,6 @@ import {
   getWorkflows,
   openRunInCli,
   patchRun,
-  pickVariant,
   putUiState,
   refreshSkills,
   runFileRawUrl,
@@ -166,13 +165,7 @@ describe('request shapes', () => {
     { name: 'refreshSkills', call: () => refreshSkills(), path: '/api/v1/skills/refresh', method: 'POST' },
     { name: 'getRepo', call: () => getRepo(), path: '/api/v1/repo', method: 'GET' },
     { name: 'getGroup', call: () => getGroup('grp-1'), path: '/api/v1/groups/grp-1', method: 'GET' },
-    {
-      name: 'pickVariant',
-      call: () => pickVariant('grp-1', 'run-a'),
-      path: '/api/v1/groups/grp-1/pick',
-      method: 'POST',
-      body: { runId: 'run-a' },
-    },
+
     { name: 'getGithub (no params)', call: () => getGithub(), path: '/api/v1/github', method: 'GET' },
     {
       name: 'getGithub (limit + refresh)',
@@ -232,10 +225,10 @@ describe('request shapes', () => {
     },
     {
       name: 'createRun',
-      call: () => createRun({ task: 'do it', workflow: 'quick-task', variants: 2 }),
+      call: () => createRun({ task: 'do it', workflow: 'quick-task', variants: 1 }),
       path: '/api/v1/runs',
       method: 'POST',
-      body: { task: 'do it', workflow: 'quick-task', variants: 2 },
+      body: { task: 'do it', workflow: 'quick-task', variants: 1 },
     },
     { name: 'cancelRun', call: () => cancelRun('run-1'), path: '/api/v1/runs/run-1/cancel', method: 'POST' },
     {

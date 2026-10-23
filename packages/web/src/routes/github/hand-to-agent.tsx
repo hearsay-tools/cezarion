@@ -184,8 +184,7 @@ export function HandToAgent({
     },
     onSuccess: (created) => {
       if (created === null) return
-      // The GitHub tab never starts variants, so the answer is a single record.
-      const run = 'runs' in created ? created.runs[0] : created
+      const run = created
       if (run) onQueued(item.url, run.id)
       // The "✓ queued / View task →" affordance sits BELOW the button, which on a phone is
       // typically off-screen or behind the keyboard right after the tap — so the hand-off also

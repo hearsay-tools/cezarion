@@ -111,7 +111,7 @@ describe('POST /api/v1/runs clientRequestId', () => {
   it('rejects a request id combined with variants > 1', async () => {
     const res = await post({ ...body, variants: 2 });
     expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toContain('clientRequestId');
+    expect(((await res.json()) as { error: string }).error).toContain('Parallel variants are removed');
     expect(store.listRuns()).toHaveLength(0);
   });
 

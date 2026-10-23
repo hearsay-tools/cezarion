@@ -52,10 +52,9 @@ const TaskThreadRoute = lazy(() =>
   import('./routes/task-thread/task-thread').then((m) => ({ default: m.TaskThreadRoute })),
 )
 
-/** Lazy for the same reason: the compare view renders Progress excerpts through Streamdown and
- *  full diffs through the Shiki singleton — thread-chunk weight the home screen must not pay. */
-const CompareVariantsRoute = lazy(() =>
-  import('./routes/compare-variants').then((m) => ({ default: m.CompareVariantsRoute })),
+/** Old comparison URLs load a small read-only view of retained task history. */
+const RetainedVariantsRoute = lazy(() =>
+  import('./routes/compare-variants').then((m) => ({ default: m.RetainedVariantsRoute })),
 )
 
 /** Lazy because both tabs render the shared run header, which lives in the thread chunk
@@ -322,7 +321,7 @@ const PAGE_TITLE_ROUTES = [
   { pattern: '/tasks', pageLabel: 'All tasks' },
   { pattern: '/tools', pageLabel: 'Workspace tools' },
   { pattern: '/new', pageLabel: 'New task' },
-  { pattern: '/compare/:groupId', pageLabel: 'Compare' },
+  { pattern: '/compare/:groupId', pageLabel: 'Retained results' },
   { pattern: '/git/*', pageLabel: 'Git' },
   { pattern: '/github/*', pageLabel: 'GitHub' },
   { pattern: '/automations/*', pageLabel: 'Automations' },
@@ -415,7 +414,7 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
         path="compare/:groupId"
         element={
           <Suspense fallback={<CompareLoading />}>
-            <CompareVariantsRoute />
+            <RetainedVariantsRoute />
           </Suspense>
         }
       />

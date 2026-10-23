@@ -112,30 +112,6 @@
     {
       "file": "new-task-hierarchy.e2e.ts",
       "rule": "one-shot-read",
-      "site": "expect(browser.evaluate(`document.querySelector('[data-slot=\"variants-pill\"]')?.checkVisibility()`)).toBe(false)",
-      "count": 1
-    },
-    {
-      "file": "new-task-hierarchy.e2e.ts",
-      "rule": "one-shot-read",
-      "site": "expect(browser.evaluate(`document.querySelector('[data-slot=\"variants-pill\"]').checkVisibility()`)).toBe(true)",
-      "count": 1
-    },
-    {
-      "file": "new-task-hierarchy.e2e.ts",
-      "rule": "one-shot-read",
-      "site": "expect(browser.evaluate(`document.querySelector('${disclosure}').open`)).toBe(false)",
-      "count": 1
-    },
-    {
-      "file": "new-task-hierarchy.e2e.ts",
-      "rule": "one-shot-read",
-      "site": "expect(browser.evaluate(`document.querySelector('${disclosure}').open`)).toBe(true)",
-      "count": 1
-    },
-    {
-      "file": "new-task-hierarchy.e2e.ts",
-      "rule": "one-shot-read",
       "site": "expect(browser.evaluate(`document.querySelector('${prompt}') === window.hierarchyPrompt && document.querySelector('[data-slot=\"model-pill\"]') === window.hierarchyModel`)).toBe(true)",
       "count": 1
     },
@@ -143,12 +119,6 @@
       "file": "new-task-hierarchy.e2e.ts",
       "rule": "one-shot-read",
       "site": "expect(browser.evaluate(`document.querySelector('${prompt}').value`)).toBe('Keep this task and its attachment')",
-      "count": 1
-    },
-    {
-      "file": "new-task-hierarchy.e2e.ts",
-      "rule": "one-shot-read",
-      "site": "expect(browser.text('[data-slot=\"variants-pill\"]')).toContain('×2')",
       "count": 1
     },
     {

@@ -349,7 +349,7 @@ export const runRecordSchema = z.object({
   worktreeReclaimedAt: z.string().optional(),
   /** The worktree setup this run's isolated worktree got (#917). Absent when none ran. */
   worktreeSetup: runWorktreeSetupSchema.optional(),
-  /** Parallel variants (spec 010): runs sharing a groupId are one group. */
+  /** Historical parallel variants (retired): runs sharing a groupId are one group. */
   groupId: z.string().optional(),
   /** Variant letter within the group — 'A' | 'B' | 'C'. */
   variant: z.string().optional(),
@@ -701,16 +701,8 @@ export type RunsSearchResponse = z.infer<typeof runsSearchResponseSchema>;
 
 // ---- mutation responses ------------------------------------------------------------------
 
-/**
- * `POST /runs` (201) — one record for ×1, a group for ×2/×3.
- *
- * The ×1 branch is the STORED record, not `ApiRun`: `startRun` answers before any `ps` sample
- * exists, so the create route never runs a record through `withUsage`.
- */
-export const createRunResponseSchema = z.union([
-  runRecordSchema,
-  z.object({ runs: z.array(runRecordSchema) }),
-]);
+/** `POST /runs` (201) — the stored record, before any process usage sample exists. */
+export const createRunResponseSchema = runRecordSchema;
 export type CreateRunResponse = z.infer<typeof createRunResponseSchema>;
 
 /** `POST /runs/:id/cancel` — genuinely a boolean: an already-settled run answers 200 + `false`. */
@@ -851,7 +843,7 @@ export type RunCommit = z.infer<typeof runCommitSchema>;
 export const runCommitsResponseSchema = z.object({ commits: z.array(runCommitSchema) });
 export type RunCommitsResponse = z.infer<typeof runCommitsResponseSchema>;
 
-// ---- parallel variants (spec 010) ----------------------------------------------------------
+// ---- retained variant groups (spec 010) ----------------------------------------------------------
 //
 // `/groups/:groupId/*` is the RUN family seen sideways: a group is the runs sharing a `groupId`,
 // and the pick answers a whole run record. So these live here rather than with the workflows,
@@ -888,19 +880,8 @@ export const groupResponseSchema = z.object({
 });
 export type GroupResponse = z.infer<typeof groupResponseSchema>;
 
-/**
- * `POST /groups/:groupId/pick` — the winner (parked at `review` when it has a diff); the losers
- * were cancelled if alive, archived, and their worktrees + branches removed.
- *
- * `winner` is OPTIONAL because that is what the wire says: `store.getRun(id)` can miss, and
- * `JSON.stringify` drops a key whose value is `undefined`. The handler spreads the key in
- * conditionally (`server.ts`, the `/groups/:groupId/pick` route) so its own type says the same
- * thing — the two-way check in `contract-parity.workflows.test.ts` is what pins that.
- */
-export const pickVariantResponseSchema = z.object({
-  winner: runRecordSchema.optional(),
-});
-export type PickVariantResponse = z.infer<typeof pickVariantResponseSchema>;
+/** `POST /groups/:groupId/pick` (410) — the retired action changes no history. */
+export const variantRetirementResponseSchema = z.object({ error: z.string() });
 
 // ---- request bodies ----------------------------------------------------------------------
 //
@@ -935,8 +916,9 @@ export type AttachmentInput = z.input<typeof attachmentInputSchema>;
 export const imageInputSchema = attachmentInputSchema;
 export type ImageInput = AttachmentInput;
 
-/** A request id names one run, so it cannot ask for ×2/×3. */
-export const CLIENT_REQUEST_VARIANTS_ERROR = 'clientRequestId names one run; it cannot be combined with variants > 1';
+export const PARALLEL_VARIANTS_REMOVED = 'Parallel variants are removed. Use owned workers to compare approaches; collect their results and integrate the chosen commits explicitly.';
+/** A refusal fence for older callers: never strip a candidate count and launch one run. */
+export const singleRunVariantsSchema = z.literal(1, { error: PARALLEL_VARIANTS_REMOVED }).optional();
 
 /**
  * The KEYS of `POST /runs`' body, before the XOR refinement that `createRunInputSchema` adds.
@@ -960,10 +942,10 @@ export const createRunInputBaseSchema = z
     /** Agent account for this task (spec 2026-07-29-agent-profiles). Omit to follow the
      *  project's own selection; an id that no longer exists is a 400, not a silent default. */
     agentProfile: z.string().max(64).optional(),
-    /** 1–3. Above 1 the response is `{ runs }` rather than a single record. */
-    variants: z.number().int().min(1).max(3).optional(),
+    /** Retired input. Only the old single-run spelling is accepted. */
+    variants: singleRunVariantsSchema,
     /** false → run in the repo working tree instead of an isolated worktree (read-only skills).
-     *  Omit for the default. Ignored server-side when variants > 1. */
+     *  Omit for the default. */
     worktree: z.boolean().optional(),
     /** true → autonomous run: never parks at "waiting"; auto-continues until done. */
     autonomous: z.boolean().optional(),
@@ -999,10 +981,7 @@ export const createRunInputSchema = createRunInputBaseSchema
   .refine(
     (b) => Boolean(b.workflow) !== Boolean(b.steps),
     { message: 'provide either "workflow" or "steps", not both' },
-  )
-  .refine((b) => !(b.clientRequestId && (b.variants ?? 1) > 1), {
-    message: CLIENT_REQUEST_VARIANTS_ERROR,
-  });
+  );
 export type CreateRunInput = z.input<typeof createRunInputSchema>;
 
 /**

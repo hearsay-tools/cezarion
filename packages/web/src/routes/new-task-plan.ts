@@ -79,7 +79,7 @@ export function planTaskLine(task: string, max = 120): string {
 /**
  * The exact `POST /api/runs` body for an approved plan: the edited steps INLINE (never a
  * workflow name — the chain may be unsaved), plus the composer's current picker choices under
- * the same rules as `buildCreateRunBody`: `model`/`variants`/`images` only when they say
+ * the same rules as `buildCreateRunBody`: `model`/`images` only when they say
  * something, explicit/sticky `runner` choices always sent (untouched defaults may be omitted),
  */
 export function buildPlannedRunBody(opts: {
@@ -93,10 +93,9 @@ export function buildPlannedRunBody(opts: {
   /** True when the draft contains a sticky/user runner choice rather than an untouched default. */
   runnerExplicit?: boolean
   defaultRunner?: Runner
-  variants: number
   images: readonly AttachmentInput[]
 }): CreateRunInput {
-  const { task, steps, model, modelsLocked, effort, runner, runnerExplicit, defaultRunner, variants, images } =
+  const { task, steps, model, modelsLocked, effort, runner, runnerExplicit, defaultRunner, images } =
     opts
   return {
     task,
@@ -104,7 +103,6 @@ export function buildPlannedRunBody(opts: {
     model: modelsLocked ? undefined : model || undefined,
     effort: modelsLocked ? undefined : effort || undefined,
     runner: runnerOverride(runner, defaultRunner, runnerExplicit),
-    variants: variants > 1 ? variants : undefined,
     images: images.length > 0 ? [...images] : undefined,
   }
 }

@@ -15,6 +15,8 @@ import type { TaskSource } from './new-task-form'
  */
 export interface NewTaskDraft {
   text: string
+  /** An old multi-candidate draft needs an explicit choice before starting one task. */
+  retiredVariants: boolean
   source: TaskSource | null
   runner: Runner | null
   /** Per-task agent account (spec 2026-07-29-agent-profiles). `null` = follow the project's own
@@ -24,7 +26,6 @@ export interface NewTaskDraft {
   model: string | null
   /** Reasoning-effort pin (#45). `null` = never chosen (auto / harness default). Sticky like model. */
   effort: string | null
-  variants: number
   /** The `Start | Plan first` toggle (#383). Sticky like the pickers: plan-first is a way of
    *  working, not a per-task whim — it survives navigation with the rest of the draft. */
   planFirst: boolean
@@ -39,7 +40,6 @@ export interface NewTaskDraft {
 
 export interface ComposerRunModeInput {
   hasGit: boolean
-  variants: number
   planFirst: boolean
   explicitAutonomous: boolean | null
   explicitWorktree: boolean | null
@@ -51,8 +51,7 @@ export interface ComposerRunModeInput {
 
 /** Resolve run-mode values once, in precedence order: hard constraints, explicit draft
  * choices, an interactive-skill recommendation, then the configured (or source-dependent)
- * default. Parallel variants are the only hard Worktree constraint; ordinary workflows can
- * run in place when the user or workspace policy opts out. `configuredAutonomous`/
+ * default. Workflows can run in place when the user or workspace policy opts out. `configuredAutonomous`/
  * `configuredWorktree` carry the workspace run defaults; `'source-dependent'` autonomy means
  * skills default on and everything else off. */
 export function resolveComposerRunMode(input: ComposerRunModeInput): {
@@ -68,9 +67,7 @@ export function resolveComposerRunMode(input: ComposerRunModeInput): {
     : (input.explicitAutonomous ?? recommended ?? autonomousFallback)
   const worktree = !input.hasGit
     ? false
-    : input.variants > 1
-      ? true
-      : (input.explicitWorktree ?? recommended ?? input.configuredWorktree)
+    : (input.explicitWorktree ?? recommended ?? input.configuredWorktree)
   return { autonomous, worktree }
 }
 
@@ -84,7 +81,7 @@ export function resolveComposerRunMode(input: ComposerRunModeInput): {
  * to find their changes.
  *
  * Takes the resolved `worktree` rather than the draft so it cannot disagree with the chip:
- * `resolveComposerRunMode` already folds in the variants constraint, the explicit opt-out, the
+ * `resolveComposerRunMode` already folds in the explicit opt-out, the
  * interactive-skill recommendation and the workspace default. `hasGit` only distinguishes
  * "opted out" from "there is no repository here", which is the difference between a warning
  * and an explanation.
@@ -102,7 +99,7 @@ const EMPTY: NewTaskDraft = {
   agentProfile: null,
   model: null,
   effort: null,
-  variants: 1,
+  retiredVariants: false,
   planFirst: false,
   worktree: null,
   autonomous: null,
@@ -136,7 +133,7 @@ function normalize(raw: unknown): NewTaskDraft {
     agentProfile: typeof obj.agentProfile === 'string' ? obj.agentProfile : null,
     model: typeof obj.model === 'string' ? obj.model : null,
     effort: typeof obj.effort === 'string' ? obj.effort : null,
-    variants: obj.variants === 2 || obj.variants === 3 ? obj.variants : 1,
+    retiredVariants: obj.retiredVariants === true || (obj.variants !== undefined && obj.variants !== 1),
     planFirst: obj.planFirst === true,
     worktree: typeof obj.worktree === 'boolean' ? obj.worktree : null,
     autonomous: typeof obj.autonomous === 'boolean' ? obj.autonomous : null,
@@ -191,7 +188,7 @@ export function writeDraft(next: NewTaskDraft, projectId: string | null = null):
 
 /** After a successful submit: the text is spent AND the source resets to nothing.
  *
- *  The runner/model/variants/plan-first pills stay — those are a way of working, and the next
+ *  The runner/model/plan-first pills stay — those are a way of working, and the next
  *  task usually runs the same way (legacy keeps its pills too). A SKILL is not: it is a
  *  decision about the task that just started, and carrying it into the next one is how a skill
  *  picked once ended up silently running every task after it. A fresh `/new` starts with no

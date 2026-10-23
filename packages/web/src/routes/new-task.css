@@ -25,7 +25,7 @@
 .new-task-run-settings { display: flex; flex-direction: column; gap: 0; }
 .new-task-run-settings > * { min-height: 48px; }
 .new-task-run-settings > button { width: 100%; border: 0; border-block-start: 1px solid var(--border); border-radius: 0; background: transparent; }
-.new-task-run-settings [data-slot='variants-pill'], .new-task-run-settings [data-slot='base-pill'] { border: 0; color: var(--accent-text); }
+.new-task-run-settings [data-slot='base-pill'] { border: 0; color: var(--accent-text); }
 .new-task-editor [data-slot='composer-footer-start'] { gap: 8px; padding-block: 8px 12px; padding-inline: 12px; }
 .new-task-editor [data-slot='composer-footer-start'] button { min-height: 44px; }
 @container new-task-layout (min-width: 60rem) {

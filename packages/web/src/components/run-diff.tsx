@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 
 /**
  * A run's worktree diff (`GET /api/runs/:id/diff`) as collapsible per-file sections — shared by
- * the review gate (R3 2.2) and the variants compare view (R3 2.3), extracted from review-panel
+ * the review gate (R3 2.2), extracted from review-panel
  * so "the same diff rendering" is one component rather than a convention.
  *
  * Rendering is the honest R3 interim: unified text parsed by `parseUnifiedDiff`, lines

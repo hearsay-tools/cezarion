@@ -28,7 +28,7 @@ describe('bookmarkletRunBody', () => {
         steps: [{ id: 'task', name: 'om-fix', skill: 'om-fix', prompt: '{{task}}' }],
         model: undefined,
         runner: undefined,
-        variants: undefined,
+
         images: undefined,
       },
     ],
@@ -40,7 +40,7 @@ describe('bookmarkletRunBody', () => {
         workflow: 'quick-task',
         model: undefined,
         runner: undefined,
-        variants: undefined,
+
         images: undefined,
       },
     ],

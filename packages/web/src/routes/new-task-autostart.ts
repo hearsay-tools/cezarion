@@ -40,7 +40,6 @@ export function bookmarkletRunBody(
     model: '',
     runner,
     defaultRunner,
-    variants: 1,
     images: [],
   })
 }
