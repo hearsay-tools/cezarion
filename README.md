@@ -1618,6 +1618,21 @@ inherited refactors as `code-quality-improvement` issues. The scan report define
 the limits: CRAP 30 and complexity 20. Scores equal to a limit pass. Copy the
 whole skill directory to use the tool in another repository.
 
+Run the complete pre-PR measurement with the bundled command:
+
+```bash
+node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
+  --runner node --test scripts/metrics.test.mjs --test scripts/changed-functions.test.mjs \
+  --test scripts/quality-check.test.mjs --node-import scripts/test-git-env.mjs \
+  --output .ai/analysis/code-quality.md
+```
+
+Select relevant tests for the changes. For Vitest, use `--runner vitest` and
+`--project` where needed. The command collects coverage once for all changed
+functions and writes Markdown plus JSON. Exit codes distinguish a pass (0),
+exceeded limits (1), and incomplete measurement (2). See the skill for how to
+resolve findings before opening a PR.
+
 For iteration, run affected test files or `npm run test:changed` (inspect with
 `-- --plan`; override the local main comparison with `-- --base=<ref>`).
 The changed-test command includes staged, unstaged and untracked changes and

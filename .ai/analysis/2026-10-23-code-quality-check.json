@@ -1,0 +1,4148 @@
+{
+  "schemaVersion": 1,
+  "status": "pass",
+  "base": "2dd06d8375e17f78375f5a40b8ccc1a29b3034a3",
+  "target": "2dd06d8375e17f78375f5a40b8ccc1a29b3034a3",
+  "head": "1a287dba9caa2284ac29a8a39f209c6d0dd575a7",
+  "thresholds": {
+    "crap": 30,
+    "complexity": 20
+  },
+  "complexityVariant": "classic",
+  "coverageMetric": "function-body-lines",
+  "summary": {
+    "files": 9,
+    "functions": 211,
+    "expectedFunctions": 211,
+    "exceeded": 0,
+    "unavailable": 0,
+    "maxComplexity": 20,
+    "maxCrap": 20.0328758116216
+  },
+  "measurement": {
+    "runner": "node",
+    "command": [
+      "/home/agent/.nvm/versions/node/v24.21.0/bin/node",
+      "--import",
+      "/home/agent/projects/cezar/.ai/cezar/worktrees/9cb752d0-e654-4d7b-8a9d-9712c960f76c/scripts/test-git-env.mjs",
+      "--test",
+      "/home/agent/projects/cezar/.ai/cezar/worktrees/9cb752d0-e654-4d7b-8a9d-9712c960f76c/scripts/metrics.test.mjs",
+      "/home/agent/projects/cezar/.ai/cezar/worktrees/9cb752d0-e654-4d7b-8a9d-9712c960f76c/scripts/changed-functions.test.mjs",
+      "/home/agent/projects/cezar/.ai/cezar/worktrees/9cb752d0-e654-4d7b-8a9d-9712c960f76c/scripts/quality-check.test.mjs"
+    ],
+    "environment": {
+      "NODE_V8_COVERAGE": "<temporary-directory>/raw"
+    }
+  },
+  "files": [
+    {
+      "file": ".ai/skills/check-code-quality/scripts/changed-functions.mjs",
+      "sourceHash": "ea6a9daab76c85b4e5b498b848bda3cc06a9ab06f82be6fd0e5c3fa621a06364",
+      "functions": [
+        {
+          "name": "exceededMetrics",
+          "line": 12,
+          "column": 8,
+          "endLine": 16,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 15,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@13:44",
+          "line": 13,
+          "column": 44,
+          "endLine": 14,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 30,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@15:9",
+          "line": 15,
+          "column": 9,
+          "endLine": 15,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 5,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "normalizeName",
+          "line": 18,
+          "column": 23,
+          "endLine": 18,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 199,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "identity",
+          "line": 19,
+          "column": 1,
+          "endLine": 22,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 193,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@20:27",
+          "line": 20,
+          "column": 27,
+          "endLine": 20,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 360,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@21:21",
+          "line": 21,
+          "column": 21,
+          "endLine": 21,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 199,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "ownSource",
+          "line": 26,
+          "column": 1,
+          "endLine": 34,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 6,
+            "executableLines": 6,
+            "calls": 224,
+            "uncoveredLines": []
+          },
+          "crap": 3,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@28:40",
+          "line": 28,
+          "column": 40,
+          "endLine": 28,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 419,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "compareFunctions",
+          "line": 36,
+          "column": 8,
+          "endLine": 56,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 4,
+            "executableLines": 4,
+            "calls": 55,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@40:28",
+          "line": 40,
+          "column": 28,
+          "endLine": 55,
+          "complexity": 11,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 8,
+            "executableLines": 8,
+            "calls": 83,
+            "uncoveredLines": []
+          },
+          "crap": 11,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@42:44",
+          "line": 42,
+          "column": 44,
+          "endLine": 42,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 139,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@44:37",
+          "line": 44,
+          "column": 37,
+          "endLine": 44,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 72,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "scanChanges",
+          "line": 58,
+          "column": 8,
+          "endLine": 85,
+          "complexity": 7,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 19,
+            "executableLines": 19,
+            "calls": 43,
+            "uncoveredLines": []
+          },
+          "crap": 7,
+          "exceeded": []
+        },
+        {
+          "name": "git",
+          "line": 59,
+          "column": 15,
+          "endLine": 61,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 341,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "pinnedGit",
+          "line": 66,
+          "column": 21,
+          "endLine": 66,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 171,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@70:12",
+          "line": 70,
+          "column": 12,
+          "endLine": 70,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 140,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "runChangedFunctions",
+          "line": 87,
+          "column": 8,
+          "endLine": 101,
+          "complexity": 10,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 80,
+            "coveredLines": 8,
+            "executableLines": 10,
+            "calls": 5,
+            "uncoveredLines": [
+              91,
+              92
+            ]
+          },
+          "crap": 10.799999999999999,
+          "exceeded": []
+        }
+      ]
+    },
+    {
+      "file": ".ai/skills/check-code-quality/scripts/check.mjs",
+      "sourceHash": "98929b3ac1d6ed59e3367033e351f11b3fc9356146a8af918418049dc42d4e2c",
+      "functions": [
+        {
+          "name": "localFile",
+          "line": 28,
+          "column": 1,
+          "endLine": 32,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 3,
+            "executableLines": 3,
+            "calls": 16,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "validateRunner",
+          "line": 34,
+          "column": 1,
+          "endLine": 40,
+          "complexity": 12,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 5,
+            "executableLines": 5,
+            "calls": 22,
+            "uncoveredLines": []
+          },
+          "crap": 12,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@39:28",
+          "line": 39,
+          "column": 28,
+          "endLine": 39,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "parseInput",
+          "line": 42,
+          "column": 1,
+          "endLine": 59,
+          "complexity": 14,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 11,
+            "executableLines": 11,
+            "calls": 23,
+            "uncoveredLines": []
+          },
+          "crap": 14,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@55:41",
+          "line": 55,
+          "column": 41,
+          "endLine": 55,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 9,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@56:18",
+          "line": 56,
+          "column": 18,
+          "endLine": 56,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 9,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@57:53",
+          "line": 57,
+          "column": 53,
+          "endLine": 57,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "verifySnapshot",
+          "line": 61,
+          "column": 1,
+          "endLine": 67,
+          "complexity": 4,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 3,
+            "executableLines": 3,
+            "calls": 20,
+            "uncoveredLines": []
+          },
+          "crap": 4,
+          "exceeded": []
+        },
+        {
+          "name": "saveReport",
+          "line": 69,
+          "column": 1,
+          "endLine": 79,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 8,
+            "executableLines": 8,
+            "calls": 23,
+            "uncoveredLines": []
+          },
+          "crap": 3,
+          "exceeded": []
+        },
+        {
+          "name": "runCheck",
+          "line": 81,
+          "column": 8,
+          "endLine": 119,
+          "complexity": 19,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 93.33333333333333,
+            "coveredLines": 28,
+            "executableLines": 30,
+            "calls": 23,
+            "uncoveredLines": [
+              111,
+              117
+            ]
+          },
+          "crap": 19.106962962962964,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@96:87",
+          "line": 96,
+          "column": 87,
+          "endLine": 96,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 10,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        }
+      ]
+    },
+    {
+      "file": ".ai/skills/check-code-quality/scripts/code-metrics.mjs",
+      "sourceHash": "986a1209019baca426486cbc844639d40518d23f7c3ca7b4dab63d1852b067c3",
+      "functions": [
+        {
+          "name": "childNodes",
+          "line": 14,
+          "column": 1,
+          "endLine": 20,
+          "complexity": 8,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 4,
+            "executableLines": 4,
+            "calls": 3304,
+            "uncoveredLines": []
+          },
+          "crap": 8,
+          "exceeded": []
+        },
+        {
+          "name": "functionName",
+          "line": 22,
+          "column": 1,
+          "endLine": 36,
+          "complexity": 20,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 11,
+            "executableLines": 11,
+            "calls": 246,
+            "uncoveredLines": []
+          },
+          "crap": 20,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@28:40",
+          "line": 28,
+          "column": 40,
+          "endLine": 28,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 25,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "analyzeSource",
+          "line": 39,
+          "column": 8,
+          "endLine": 77,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 6,
+            "executableLines": 6,
+            "calls": 170,
+            "uncoveredLines": []
+          },
+          "crap": 3,
+          "exceeded": []
+        },
+        {
+          "name": "visit",
+          "line": 47,
+          "column": 3,
+          "endLine": 74,
+          "complexity": 18,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 12,
+            "executableLines": 12,
+            "calls": 3304,
+            "uncoveredLines": []
+          },
+          "crap": 18,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@76:25",
+          "line": 76,
+          "column": 25,
+          "endLine": 76,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 92,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "selectFunctions",
+          "line": 79,
+          "column": 8,
+          "endLine": 95,
+          "complexity": 11,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 10,
+            "executableLines": 10,
+            "calls": 29,
+            "uncoveredLines": []
+          },
+          "crap": 11,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@82:32",
+          "line": 82,
+          "column": 32,
+          "endLine": 82,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 15,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@85:32",
+          "line": 85,
+          "column": 32,
+          "endLine": 85,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 9,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@86:13",
+          "line": 86,
+          "column": 13,
+          "endLine": 86,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@92:92",
+          "line": 92,
+          "column": 92,
+          "endLine": 92,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "unavailable",
+          "line": 97,
+          "column": 21,
+          "endLine": 97,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 12,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "isRecord",
+          "line": 98,
+          "column": 18,
+          "endLine": 98,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 122,
+            "uncoveredLines": []
+          },
+          "crap": 3,
+          "exceeded": []
+        },
+        {
+          "name": "measureCoverage",
+          "line": 101,
+          "column": 8,
+          "endLine": 148,
+          "complexity": 13,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 16,
+            "executableLines": 16,
+            "calls": 25,
+            "uncoveredLines": []
+          },
+          "crap": 13,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@102:70",
+          "line": 102,
+          "column": 70,
+          "endLine": 102,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 97,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "offset",
+          "line": 107,
+          "column": 3,
+          "endLine": 114,
+          "complexity": 9,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 6,
+            "executableLines": 6,
+            "calls": 54,
+            "uncoveredLines": []
+          },
+          "crap": 9,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@115:38",
+          "line": 115,
+          "column": 38,
+          "endLine": 115,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 32,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@116:41",
+          "line": 116,
+          "column": 41,
+          "endLine": 116,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 10,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@121:34",
+          "line": 121,
+          "column": 34,
+          "endLine": 121,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 75,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@122:36",
+          "line": 122,
+          "column": 36,
+          "endLine": 122,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 3,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@128:32",
+          "line": 128,
+          "column": 32,
+          "endLine": 147,
+          "complexity": 7,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 9,
+            "executableLines": 9,
+            "calls": 29,
+            "uncoveredLines": []
+          },
+          "crap": 7,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@129:56",
+          "line": 129,
+          "column": 56,
+          "endLine": 130,
+          "complexity": 7,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 48,
+            "uncoveredLines": []
+          },
+          "crap": 7,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@135:48",
+          "line": 135,
+          "column": 48,
+          "endLine": 135,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 34,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@143:43",
+          "line": 143,
+          "column": 43,
+          "endLine": 143,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 33,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@143:75",
+          "line": 143,
+          "column": 75,
+          "endLine": 143,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 10,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@143:98",
+          "line": 143,
+          "column": 98,
+          "endLine": 143,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 0,
+            "coveredLines": 0,
+            "executableLines": 1,
+            "calls": 0,
+            "uncoveredLines": [
+              143
+            ]
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "functionResults",
+          "line": 150,
+          "column": 8,
+          "endLine": 155,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 26,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@151:24",
+          "line": 151,
+          "column": 24,
+          "endLine": 154,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 2,
+            "executableLines": 2,
+            "calls": 36,
+            "uncoveredLines": []
+          },
+          "crap": 3,
+          "exceeded": []
+        }
+      ]
+    },
+    {
+      "file": ".ai/skills/check-code-quality/scripts/coverage.mjs",
+      "sourceHash": "0f8161e169bd76300ecb484b030cc5e0fba6ae0102b11523a160ee3327ae40d0",
+      "functions": [
+        {
+          "name": "vitestArguments",
+          "line": 10,
+          "column": 1,
+          "endLine": 18,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 3,
+            "executableLines": 3,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@13:43",
+          "line": 13,
+          "column": 43,
+          "endLine": 13,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@16:22",
+          "line": 16,
+          "column": 22,
+          "endLine": 16,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "execute",
+          "line": 20,
+          "column": 1,
+          "endLine": 32,
+          "complexity": 6,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 7,
+            "executableLines": 7,
+            "calls": 3,
+            "uncoveredLines": []
+          },
+          "crap": 6,
+          "exceeded": []
+        },
+        {
+          "name": "convertNodeCoverage",
+          "line": 34,
+          "column": 8,
+          "endLine": 48,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 9,
+            "executableLines": 9,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 3,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@35:38",
+          "line": 35,
+          "column": 38,
+          "endLine": 35,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@36:42",
+          "line": 36,
+          "column": 42,
+          "endLine": 36,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@36:78",
+          "line": 36,
+          "column": 78,
+          "endLine": 39,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 2,
+            "executableLines": 2,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@38:41",
+          "line": 38,
+          "column": 41,
+          "endLine": 38,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 295,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "collectCoverage",
+          "line": 51,
+          "column": 8,
+          "endLine": 68,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 14,
+            "executableLines": 14,
+            "calls": 4,
+            "uncoveredLines": []
+          },
+          "crap": 3,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@59:18",
+          "line": 59,
+          "column": 18,
+          "endLine": 59,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 4,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@64:36",
+          "line": 64,
+          "column": 36,
+          "endLine": 64,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        }
+      ]
+    },
+    {
+      "file": ".ai/skills/check-code-quality/scripts/metrics.mjs",
+      "sourceHash": "5494299e856ff10c756f9910106396f784d1f96f2461a27202687a13ffb748bc",
+      "functions": [
+        {
+          "name": "hash",
+          "line": 12,
+          "column": 14,
+          "endLine": 12,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 26,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "collectCoverage",
+          "line": 32,
+          "column": 1,
+          "endLine": 51,
+          "complexity": 6,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 9,
+            "executableLines": 9,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 6,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@36:40",
+          "line": 36,
+          "column": 40,
+          "endLine": 36,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "findCoverage",
+          "line": 53,
+          "column": 1,
+          "endLine": 63,
+          "complexity": 6,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 8,
+            "executableLines": 8,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 6,
+          "exceeded": []
+        },
+        {
+          "name": "coverageEntry",
+          "line": 65,
+          "column": 1,
+          "endLine": 76,
+          "complexity": 6,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 4,
+            "executableLines": 4,
+            "calls": 17,
+            "uncoveredLines": []
+          },
+          "crap": 6,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@67:49",
+          "line": 67,
+          "column": 49,
+          "endLine": 73,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 2,
+            "executableLines": 2,
+            "calls": 19,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@68:45",
+          "line": 68,
+          "column": 45,
+          "endLine": 68,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 38,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@69:23",
+          "line": 69,
+          "column": 23,
+          "endLine": 72,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 2,
+            "executableLines": 2,
+            "calls": 23,
+            "uncoveredLines": []
+          },
+          "crap": 3,
+          "exceeded": []
+        },
+        {
+          "name": "textReport",
+          "line": 78,
+          "column": 1,
+          "endLine": 90,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 6,
+            "executableLines": 6,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@79:37",
+          "line": 79,
+          "column": 37,
+          "endLine": 83,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 3,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@85:30",
+          "line": 85,
+          "column": 30,
+          "endLine": 85,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 5,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@85:81",
+          "line": 85,
+          "column": 81,
+          "endLine": 85,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 5,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@86:40",
+          "line": 86,
+          "column": 40,
+          "endLine": 86,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@86:55",
+          "line": 86,
+          "column": 55,
+          "endLine": 86,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 10,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@87:55",
+          "line": 87,
+          "column": 55,
+          "endLine": 87,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@87:101",
+          "line": 87,
+          "column": 101,
+          "endLine": 87,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 0,
+            "coveredLines": 0,
+            "executableLines": 1,
+            "calls": 0,
+            "uncoveredLines": [
+              87
+            ]
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "parseInput",
+          "line": 92,
+          "column": 1,
+          "endLine": 109,
+          "complexity": 16,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 12,
+            "executableLines": 12,
+            "calls": 32,
+            "uncoveredLines": []
+          },
+          "crap": 16,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@102:28",
+          "line": 102,
+          "column": 28,
+          "endLine": 102,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 4,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "testPaths",
+          "line": 111,
+          "column": 1,
+          "endLine": 119,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 7,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@112:20",
+          "line": 112,
+          "column": 20,
+          "endLine": 118,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 4,
+            "executableLines": 4,
+            "calls": 8,
+            "uncoveredLines": []
+          },
+          "crap": 3,
+          "exceeded": []
+        },
+        {
+          "name": "readMeasurements",
+          "line": 121,
+          "column": 1,
+          "endLine": 130,
+          "complexity": 5,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 7,
+            "executableLines": 7,
+            "calls": 18,
+            "uncoveredLines": []
+          },
+          "crap": 5,
+          "exceeded": []
+        },
+        {
+          "name": "removeTemporary",
+          "line": 132,
+          "column": 1,
+          "endLine": 136,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 66.66666666666666,
+            "coveredLines": 2,
+            "executableLines": 3,
+            "calls": 32,
+            "uncoveredLines": [
+              135
+            ]
+          },
+          "crap": 3.3333333333333335,
+          "exceeded": []
+        },
+        {
+          "name": "runMetrics",
+          "line": 138,
+          "column": 8,
+          "endLine": 174,
+          "complexity": 20,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 95.65217391304348,
+            "coveredLines": 22,
+            "executableLines": 23,
+            "calls": 32,
+            "uncoveredLines": [
+              169
+            ]
+          },
+          "crap": 20.0328758116216,
+          "exceeded": []
+        }
+      ]
+    },
+    {
+      "file": ".ai/skills/check-code-quality/scripts/quality-report.mjs",
+      "sourceHash": "e4b2a018c42b50258011c735fd453c1845a0a1f887387516680c5a0d34d99bc1",
+      "functions": [
+        {
+          "name": "identity",
+          "line": 4,
+          "column": 18,
+          "endLine": 4,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 26,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "measureFile",
+          "line": 6,
+          "column": 8,
+          "endLine": 21,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 8,
+            "executableLines": 8,
+            "calls": 10,
+            "uncoveredLines": []
+          },
+          "crap": 3,
+          "exceeded": []
+        },
+        {
+          "name": "write",
+          "line": 9,
+          "column": 27,
+          "endLine": 9,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 10,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@14:50",
+          "line": 14,
+          "column": 50,
+          "endLine": 14,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 16,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@15:40",
+          "line": 15,
+          "column": 40,
+          "endLine": 19,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 3,
+            "executableLines": 3,
+            "calls": 10,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "finishReport",
+          "line": 23,
+          "column": 8,
+          "endLine": 39,
+          "complexity": 6,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 6,
+            "executableLines": 6,
+            "calls": 26,
+            "uncoveredLines": []
+          },
+          "crap": 6,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@24:35",
+          "line": 24,
+          "column": 35,
+          "endLine": 24,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 14,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@25:36",
+          "line": 25,
+          "column": 36,
+          "endLine": 25,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 13,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@26:37",
+          "line": 26,
+          "column": 37,
+          "endLine": 26,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 13,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@27:38",
+          "line": 27,
+          "column": 38,
+          "endLine": 27,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 20,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@35:44",
+          "line": 35,
+          "column": 44,
+          "endLine": 35,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 13,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@36:38",
+          "line": 36,
+          "column": 38,
+          "endLine": 36,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 13,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "maximum",
+          "line": 41,
+          "column": 1,
+          "endLine": 41,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 52,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "cell",
+          "line": 42,
+          "column": 14,
+          "endLine": 42,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 91,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "functionRow",
+          "line": 44,
+          "column": 1,
+          "endLine": 49,
+          "complexity": 5,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 4,
+            "executableLines": 4,
+            "calls": 11,
+            "uncoveredLines": []
+          },
+          "crap": 5,
+          "exceeded": []
+        },
+        {
+          "name": "markdownReport",
+          "line": 51,
+          "column": 8,
+          "endLine": 71,
+          "complexity": 8,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 6,
+            "executableLines": 6,
+            "calls": 24,
+            "uncoveredLines": []
+          },
+          "crap": 8,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@63:80",
+          "line": 63,
+          "column": 80,
+          "endLine": 63,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 13,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@68:29",
+          "line": 68,
+          "column": 29,
+          "endLine": 68,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 11,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        }
+      ]
+    },
+    {
+      "file": "scripts/changed-functions.test.mjs",
+      "sourceHash": "2149ed185dd495d8cff57ea466002a14a7c3c725793bd2b9625084ed3d25fd50",
+      "functions": [
+        {
+          "name": "anonymous@9:89",
+          "line": 9,
+          "column": 89,
+          "endLine": 15,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 5,
+            "executableLines": 5,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@17:81",
+          "line": 17,
+          "column": 81,
+          "endLine": 26,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 8,
+            "executableLines": 8,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@28:85",
+          "line": 28,
+          "column": 85,
+          "endLine": 33,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 4,
+            "executableLines": 4,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@31:67",
+          "line": 31,
+          "column": 67,
+          "endLine": 31,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@32:99",
+          "line": 32,
+          "column": 99,
+          "endLine": 32,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@35:85",
+          "line": 35,
+          "column": 85,
+          "endLine": 45,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 9,
+            "executableLines": 9,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "repo",
+          "line": 47,
+          "column": 1,
+          "endLine": 60,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 12,
+            "executableLines": 12,
+            "calls": 6,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@49:11",
+          "line": 49,
+          "column": 11,
+          "endLine": 49,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 6,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "git",
+          "line": 50,
+          "column": 15,
+          "endLine": 50,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 42,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "write",
+          "line": 54,
+          "column": 17,
+          "endLine": 54,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 17,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@62:85",
+          "line": 62,
+          "column": 85,
+          "endLine": 80,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 17,
+            "executableLines": 17,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@75:37",
+          "line": 75,
+          "column": 37,
+          "endLine": 75,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@79:31",
+          "line": 79,
+          "column": 31,
+          "endLine": 79,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@82:76",
+          "line": 82,
+          "column": 76,
+          "endLine": 94,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 11,
+            "executableLines": 11,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@96:87",
+          "line": 96,
+          "column": 87,
+          "endLine": 102,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 5,
+            "executableLines": 5,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@101:17",
+          "line": 101,
+          "column": 17,
+          "endLine": 101,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@104:87",
+          "line": 104,
+          "column": 87,
+          "endLine": 116,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 9,
+            "executableLines": 9,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "invoke",
+          "line": 107,
+          "column": 18,
+          "endLine": 109,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 3,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "write",
+          "line": 108,
+          "column": 34,
+          "endLine": 108,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 0,
+            "coveredLines": 0,
+            "executableLines": 1,
+            "calls": 0,
+            "uncoveredLines": [
+              108
+            ]
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "write",
+          "line": 108,
+          "column": 82,
+          "endLine": 108,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 3,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@118:93",
+          "line": 118,
+          "column": 93,
+          "endLine": 126,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 7,
+            "executableLines": 7,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@128:83",
+          "line": 128,
+          "column": 83,
+          "endLine": 157,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 19,
+            "executableLines": 19,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@150:66",
+          "line": 150,
+          "column": 66,
+          "endLine": 150,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 8,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@151:36",
+          "line": 151,
+          "column": 36,
+          "endLine": 151,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 4,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@154:24",
+          "line": 154,
+          "column": 24,
+          "endLine": 154,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 4,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@156:24",
+          "line": 156,
+          "column": 24,
+          "endLine": 156,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        }
+      ]
+    },
+    {
+      "file": "scripts/metrics.test.mjs",
+      "sourceHash": "1c4f877fdfa6b57a1c9f9c32f4f724c988c3bbd79ce78db91b7e5fcea9dbed5f",
+      "functions": [
+        {
+          "name": "anonymous@11:91",
+          "line": 11,
+          "column": 91,
+          "endLine": 23,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 4,
+            "executableLines": 4,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@25:92",
+          "line": 25,
+          "column": 92,
+          "endLine": 34,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 2,
+            "executableLines": 2,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@33:59",
+          "line": 33,
+          "column": 59,
+          "endLine": 33,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 3,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@36:94",
+          "line": 36,
+          "column": 94,
+          "endLine": 42,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 5,
+            "executableLines": 5,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@41:17",
+          "line": 41,
+          "column": 17,
+          "endLine": 41,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@44:84",
+          "line": 44,
+          "column": 84,
+          "endLine": 58,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 2,
+            "executableLines": 2,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@55:56",
+          "line": 55,
+          "column": 56,
+          "endLine": 55,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 4,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@60:85",
+          "line": 60,
+          "column": 85,
+          "endLine": 63,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 2,
+            "executableLines": 2,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@62:34",
+          "line": 62,
+          "column": 34,
+          "endLine": 62,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@65:100",
+          "line": 65,
+          "column": 100,
+          "endLine": 76,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 7,
+            "executableLines": 7,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@73:17",
+          "line": 73,
+          "column": 17,
+          "endLine": 73,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@74:17",
+          "line": 74,
+          "column": 17,
+          "endLine": 74,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@75:17",
+          "line": 75,
+          "column": 17,
+          "endLine": 75,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "coverageFor",
+          "line": 78,
+          "column": 1,
+          "endLine": 91,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 2,
+            "executableLines": 2,
+            "calls": 18,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "point",
+          "line": 79,
+          "column": 17,
+          "endLine": 84,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 4,
+            "executableLines": 4,
+            "calls": 49,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@86:45",
+          "line": 86,
+          "column": 45,
+          "endLine": 86,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 21,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@87:41",
+          "line": 87,
+          "column": 41,
+          "endLine": 87,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 21,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@88:53",
+          "line": 88,
+          "column": 53,
+          "endLine": 88,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 49,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@89:42",
+          "line": 89,
+          "column": 42,
+          "endLine": 89,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 49,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@93:94",
+          "line": 93,
+          "column": 94,
+          "endLine": 109,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 5,
+            "executableLines": 5,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@106:31",
+          "line": 106,
+          "column": 31,
+          "endLine": 106,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 3,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@111:93",
+          "line": 111,
+          "column": 93,
+          "endLine": 122,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 10,
+            "executableLines": 10,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@124:83",
+          "line": 124,
+          "column": 83,
+          "endLine": 131,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 6,
+            "executableLines": 6,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@133:80",
+          "line": 133,
+          "column": 80,
+          "endLine": 148,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 14,
+            "executableLines": 14,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@150:76",
+          "line": 150,
+          "column": 76,
+          "endLine": 164,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 7,
+            "executableLines": 7,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@153:17",
+          "line": 153,
+          "column": 17,
+          "endLine": 153,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@155:5",
+          "line": 155,
+          "column": 5,
+          "endLine": 155,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@156:5",
+          "line": 156,
+          "column": 5,
+          "endLine": 156,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@157:5",
+          "line": 157,
+          "column": 5,
+          "endLine": 157,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@158:5",
+          "line": 158,
+          "column": 5,
+          "endLine": 158,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@162:19",
+          "line": 162,
+          "column": 19,
+          "endLine": 162,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 4,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "fixture",
+          "line": 166,
+          "column": 1,
+          "endLine": 175,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 8,
+            "executableLines": 8,
+            "calls": 10,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@168:11",
+          "line": 168,
+          "column": 11,
+          "endLine": 168,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 10,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "invoke",
+          "line": 177,
+          "column": 1,
+          "endLine": 183,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 3,
+            "executableLines": 3,
+            "calls": 21,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "write",
+          "line": 180,
+          "column": 22,
+          "endLine": 180,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 21,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "write",
+          "line": 180,
+          "column": 70,
+          "endLine": 180,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@185:92",
+          "line": 185,
+          "column": 92,
+          "endLine": 200,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 14,
+            "executableLines": 14,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@202:68",
+          "line": 202,
+          "column": 68,
+          "endLine": 211,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 8,
+            "executableLines": 8,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@213:68",
+          "line": 213,
+          "column": 68,
+          "endLine": 224,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 5,
+            "executableLines": 5,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "runTests",
+          "line": 220,
+          "column": 78,
+          "endLine": 220,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 0,
+            "coveredLines": 0,
+            "executableLines": 1,
+            "calls": 0,
+            "uncoveredLines": [
+              220
+            ]
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@226:89",
+          "line": 226,
+          "column": 89,
+          "endLine": 243,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 6,
+            "executableLines": 6,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "runTests",
+          "line": 234,
+          "column": 5,
+          "endLine": 240,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 5,
+            "executableLines": 5,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@245:95",
+          "line": 245,
+          "column": 95,
+          "endLine": 268,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 10,
+            "executableLines": 10,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@270:84",
+          "line": 270,
+          "column": 84,
+          "endLine": 278,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 6,
+            "executableLines": 6,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@280:88",
+          "line": 280,
+          "column": 88,
+          "endLine": 302,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 9,
+            "executableLines": 9,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "runTests",
+          "line": 287,
+          "column": 5,
+          "endLine": 295,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 7,
+            "executableLines": 7,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@304:91",
+          "line": 304,
+          "column": 91,
+          "endLine": 323,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 8,
+            "executableLines": 8,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 3,
+          "exceeded": []
+        },
+        {
+          "name": "runTests",
+          "line": 312,
+          "column": 7,
+          "endLine": 317,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 4,
+            "executableLines": 4,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@325:72",
+          "line": 325,
+          "column": 72,
+          "endLine": 335,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 9,
+            "executableLines": 9,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        }
+      ]
+    },
+    {
+      "file": "scripts/quality-check.test.mjs",
+      "sourceHash": "ff79847e9821ecb357f8a3c41e3719a840cbdcc290e18c7a89d1dd94371b1410",
+      "functions": [
+        {
+          "name": "fixture",
+          "line": 14,
+          "column": 1,
+          "endLine": 33,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 16,
+            "executableLines": 16,
+            "calls": 13,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@16:11",
+          "line": 16,
+          "column": 11,
+          "endLine": 16,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 13,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "git",
+          "line": 17,
+          "column": 15,
+          "endLine": 17,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 79,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "write",
+          "line": 18,
+          "column": 17,
+          "endLine": 18,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 82,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "coverage",
+          "line": 35,
+          "column": 1,
+          "endLine": 46,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 9,
+            "executableLines": 9,
+            "calls": 11,
+            "uncoveredLines": []
+          },
+          "crap": 3,
+          "exceeded": []
+        },
+        {
+          "name": "invoke",
+          "line": 48,
+          "column": 1,
+          "endLine": 55,
+          "complexity": 3,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 3,
+            "executableLines": 3,
+            "calls": 20,
+            "uncoveredLines": []
+          },
+          "crap": 3,
+          "exceeded": []
+        },
+        {
+          "name": "write",
+          "line": 51,
+          "column": 34,
+          "endLine": 51,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 20,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "write",
+          "line": 51,
+          "column": 82,
+          "endLine": 51,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 3,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@57:100",
+          "line": 57,
+          "column": 100,
+          "endLine": 78,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 17,
+            "executableLines": 17,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@80:71",
+          "line": 80,
+          "column": 71,
+          "endLine": 94,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 12,
+            "executableLines": 12,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@96:65",
+          "line": 96,
+          "column": 65,
+          "endLine": 111,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 14,
+            "executableLines": 14,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@113:93",
+          "line": 113,
+          "column": 93,
+          "endLine": 131,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 8,
+            "executableLines": 8,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "collect",
+          "line": 118,
+          "column": 5,
+          "endLine": 125,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 6,
+            "executableLines": 6,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@133:77",
+          "line": 133,
+          "column": 77,
+          "endLine": 151,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 6,
+            "executableLines": 6,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "collect",
+          "line": 138,
+          "column": 7,
+          "endLine": 145,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 6,
+            "executableLines": 6,
+            "calls": 2,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@153:71",
+          "line": 153,
+          "column": 71,
+          "endLine": 162,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 6,
+            "executableLines": 6,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "measure",
+          "line": 157,
+          "column": 14,
+          "endLine": 157,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 1,
+            "executableLines": 1,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@164:85",
+          "line": 164,
+          "column": 85,
+          "endLine": 172,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 7,
+            "executableLines": 7,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@174:95",
+          "line": 174,
+          "column": 95,
+          "endLine": 196,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 10,
+            "executableLines": 10,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@198:61",
+          "line": 198,
+          "column": 61,
+          "endLine": 210,
+          "complexity": 2,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 5,
+            "executableLines": 5,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "collect",
+          "line": 206,
+          "column": 53,
+          "endLine": 206,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 0,
+            "coveredLines": 0,
+            "executableLines": 1,
+            "calls": 0,
+            "uncoveredLines": [
+              206
+            ]
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@212:65",
+          "line": 212,
+          "column": 65,
+          "endLine": 219,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 6,
+            "executableLines": 6,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "collect",
+          "line": 215,
+          "column": 49,
+          "endLine": 215,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 0,
+            "coveredLines": 0,
+            "executableLines": 1,
+            "calls": 0,
+            "uncoveredLines": [
+              215
+            ]
+          },
+          "crap": 2,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@221:93",
+          "line": 221,
+          "column": 93,
+          "endLine": 230,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 8,
+            "executableLines": 8,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@232:85",
+          "line": 232,
+          "column": 85,
+          "endLine": 246,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 12,
+            "executableLines": 12,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        },
+        {
+          "name": "anonymous@248:82",
+          "line": 248,
+          "column": 82,
+          "endLine": 258,
+          "complexity": 1,
+          "change": "added",
+          "baseline": null,
+          "coverage": {
+            "status": "available",
+            "percent": 100,
+            "coveredLines": 8,
+            "executableLines": 8,
+            "calls": 1,
+            "uncoveredLines": []
+          },
+          "crap": 1,
+          "exceeded": []
+        }
+      ]
+    }
+  ],
+  "deletedFiles": [],
+  "errors": [],
+  "command": {
+    "cwd": "/home/agent/projects/cezar/.ai/cezar/worktrees/9cb752d0-e654-4d7b-8a9d-9712c960f76c",
+    "argv": [
+      "/home/agent/.nvm/versions/node/v24.21.0/bin/node",
+      "/home/agent/projects/cezar/.ai/cezar/worktrees/9cb752d0-e654-4d7b-8a9d-9712c960f76c/.ai/skills/check-code-quality/scripts/check.mjs",
+      "--base",
+      "origin/main",
+      "--runner",
+      "node",
+      "--test",
+      "scripts/metrics.test.mjs",
+      "--test",
+      "scripts/changed-functions.test.mjs",
+      "--test",
+      "scripts/quality-check.test.mjs",
+      "--node-import",
+      "scripts/test-git-env.mjs",
+      "--output",
+      ".ai/analysis/2026-10-23-code-quality-check.md",
+      "--json"
+    ]
+  }
+}

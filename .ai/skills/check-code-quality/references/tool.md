@@ -3,18 +3,49 @@
 The skill owns the parser, CLI and change scanner in `scripts/`. Copy the whole
 skill directory to reuse them. They require Node 24.15 or newer and Git.
 
-The parser resolves from the skill's dependencies or an ancestor's `node_modules`.
-If `@babel/parser` is absent, install the bundled manifest:
+Dependencies resolve from the skill or an ancestor's `node_modules`.
+If a bundled dependency is absent, install the bundled manifest:
 
 ```sh
 npm install --prefix <skill> --ignore-scripts --no-audit --no-fund
 ```
 
-For fresh coverage, the target project needs Vitest and its matching
-`@vitest/coverage-v8` version installed through that project's package manager.
-Use its existing test configuration. The tool downloads no test dependencies.
-For another test runner, collect an Istanbul `coverage-final.json` through that
-runner and pass `--coverage`.
+## Complete check
+
+`scripts/check.mjs --help` lists the command's flags and exit codes. The command
+collects coverage for all changed files in one bounded test run, merges Node
+process coverage when needed, measures changed functions, checks hashes and emits
+the verdict. `--output report.md` saves Markdown plus `report.json`. JSON stdout
+is available with `--json`; test output goes to stderr. Temporary coverage is
+removed on success and failure. Reports preserve source hashes and commands.
+
+For Vitest, the target project needs Vitest and its matching
+`@vitest/coverage-v8` installed through its package manager. Use the existing test
+configuration and select unit projects in a multi-project repository. For Node,
+the skill bundles the V8 merger and Istanbul converter; no Vitest dependency is
+needed. Node collection supports untransformed JavaScript. For transformed
+TypeScript/JSX or another runner, collect Istanbul coverage through that runner
+and supply `--coverage`. The tool downloads no test dependencies.
+
+```sh
+node <skill>/scripts/check.mjs --base origin/main --runner vitest \
+  --test src/example.test.ts --project unit --output quality.md
+node <skill>/scripts/check.mjs --base origin/main --runner node \
+  --test scripts/example.test.mjs --node-import scripts/test-setup.mjs --output quality.md
+node <skill>/scripts/check.mjs --base origin/main \
+  --coverage coverage/coverage-final.json --output quality.md
+```
+
+Collection has a ten-minute bound. Failed tests produce exit 2 and no accepted
+verdict. Missing, stale or unmatched function coverage remains incomplete. A
+source edit, new changed function or HEAD change during measurement also produces
+exit 2. The tool checks source hashes and rescans against the pinned baseline.
+Changed test functions stay in scope. A runner report that excludes them produces
+exit 2; passing source scores alone cannot complete that check.
+An external Istanbul report has an mtime check but no source-provenance proof;
+collect fresh coverage when its provenance is uncertain.
+
+## Individual measurements
 
 Run commands from the target repository root. The standalone CLI selects the
 project's default Vitest projects unless `--project` selects specific ones.
@@ -30,8 +61,7 @@ Complexity uses ESLint's classic convention. The CRAP formula is
 `C² × (1 − coverage)³ + C`, using executable function body line coverage. This is
 a line-coverage variant of the original basis-path metric. Missing coverage
 produces `crap: null`. Reports must describe the exact current source; an mtime
-check rejects older reports but cannot prove their provenance. Collect fresh
-coverage when provenance is uncertain.
+check rejects older reports but cannot prove their provenance.
 
 The change scanner compares function source, excluding nested bodies from the
 parent. Comments and whitespace inside a function count as edits. Renamed or

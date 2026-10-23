@@ -169,9 +169,15 @@ importers:
       '@babel/parser':
         specifier: ^8.0.7
         version: 8.0.7
+      '@bcoe/v8-coverage':
+        specifier: 1.0.2
+        version: 1.0.2
       '@vitest/coverage-v8':
         specifier: 4.1.10
         version: 4.1.10(vitest@4.1.10)
+      ast-v8-to-istanbul:
+        specifier: 1.0.7
+        version: 1.0.7
       esbuild:
         specifier: ^0.28.1
         version: 0.28.1

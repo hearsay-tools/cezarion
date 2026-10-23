@@ -9,52 +9,45 @@ Run this check after implementation and before opening a PR. Repeat it after a
 source or test change that can affect the result. Use the scripts bundled beside
 this file; resolve `<skill>` to this directory's absolute path.
 
-## 1. Select changed functions
+## 1. Run the bundled check
 
 Resolve the PR's target branch from the task or repository bindings. Fetch its
-remote ref, then run from the target repository root:
+remote ref. Select the relevant tests and their runner from the repository's
+test instructions. Run from the target repository root:
 
 ```sh
-node <skill>/scripts/changed-functions.mjs --base <target-ref>
+node <skill>/scripts/check.mjs --base <target-ref> \
+  --runner <vitest|node> --test <test-file> --output <report.md>
 ```
 
-The report pins a merge-base and includes committed, staged, unstaged and
-untracked JS/TS changes. It lists changed functions and their baseline complexity.
-Use its `base` SHA for every baseline comparison. Keep tests and bundled scripts
-in scope. Deleted functions need no current score. Record unsupported changed
-languages as outside this tool's scope.
+Repeat `--test` for multiple files. With Vitest, select needed unit projects
+using repeatable `--project`. With Node, pass repository setup modules through
+repeatable `--node-import`. For an existing current Istanbul report, replace
+runner and test options with `--coverage <coverage-final.json>`.
 
-Done when every changed function has a file and source position. A failed scan
-is an incomplete check. An empty list completes the check for supported code.
+The command pins a merge-base, scans committed, staged, unstaged and untracked
+JS/TS changes, collects coverage once, matches changed functions and checks source
+hashes. It writes Markdown and JSON reports with scores, baseline complexity,
+source hashes and the reproduction command. Tests and bundled scripts stay in
+scope. Use its `base` SHA for every baseline comparison. Record unsupported
+changed languages as outside this tool's scope.
 
-## 2. Measure current code
+| Exit | Meaning | Next action |
+| --- | --- | --- |
+| 0 | Every changed function passes, or there are no supported changed functions | Report the result |
+| 1 | At least one function exceeds a limit | Resolve every finding below |
+| 2 | Measurement is incomplete, including failed tests or missing coverage | Fix setup or coverage; rerun |
 
-Run once per listed file, then use the listed function names and source positions
-to select its results:
+A coverage run is a distinct measurement even when background validation passed.
+For dependencies, runner limits or a collection failure, read
+[tool.md](references/tool.md). Use the bundled command for collection, matching,
+verdicts and reports; keep that work in the tool instead of temporary scripts.
 
-```sh
-node <skill>/scripts/metrics.mjs <file> --json
-```
+Done when the command produced a complete report, or a stated measurement blocker.
 
-Use a current Istanbul report with `--coverage <coverage-final.json>`. When
-coverage is missing, stale or unmatched, collect fresh coverage for the relevant
-tests. Passing tests alone supply no coverage. With Vitest, use repeatable
-`--test <test-file>` and, for a multi-project config, `--project <unit-project>`.
-Select only the needed unit projects. A coverage run has a ten-minute bound and
-uses the target project's installed Vitest and coverage provider. Follow the
-repository's test instructions; a coverage run is a distinct measurement even
-when background validation already passed.
+## 2. Resolve scores above the limits
 
-If setup or coverage fails, read [tool.md](references/tool.md). Report any
-unavailable CRAP score as incomplete. Complexity can still be assessed.
-
-Done when every selected function has current complexity and CRAP, or a stated
-measurement blocker. CRAP uses function body line coverage, as identified in the
-report. Check the source hashes against the scan; rescan after a source change.
-
-## 3. Resolve scores above the limits
-
-Use `thresholds` from the scan report. Flag a function when either score is
+Use `thresholds` from the generated report. Flag a function when either score is
 **strictly greater** than its limit. Equality passes. For each flagged function,
 read its diff and baseline source, then choose an action:
 
@@ -79,15 +72,16 @@ For each inherited larger refactor, read [issues.md](references/issues.md).
 Filing that issue, including creating its label, is part of this check. A filing
 failure remains a blocker with its prepared issue text and exact error.
 
-Done when every flagged function has verified scores within the limits, a
-linked inherited-refactor issue, or a stated blocker. Any blocker means the
+Rerun the same command after source or test changes. Done when every flagged
+function has verified scores within the limits, a linked inherited-refactor
+issue, or a stated blocker. Any blocker means the
 pre-PR check is incomplete.
 
-## 4. Report before opening the PR
+## 3. Report before opening the PR
 
-Include the pinned baseline, checked file/function count, and a compact table:
-`file:function | complexity | body line coverage | CRAP | action/issue`.
-Include coverage commands and any measurement limits. Open the PR only when the
-check is complete. Keep the report in the PR's validation section, with issue
-links for deferred refactors. These issues are follow-up work; use `Refs`, rather
-than a closing keyword, when linking them from the current PR.
+Link the generated report from the PR's validation section. State its verdict,
+checked function count and any measurement limits. For exit 1, add an action and
+issue link for every deferred finding; open the PR only when all findings qualify
+for the inherited-refactor exception above. Exit 2 blocks opening the PR.
+These issues are follow-up work; use `Refs`, rather than a closing keyword,
+when linking them from the current PR.

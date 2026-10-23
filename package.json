@@ -43,7 +43,9 @@
   },
   "devDependencies": {
     "@babel/parser": "^8.0.7",
+    "@bcoe/v8-coverage": "1.0.2",
     "@vitest/coverage-v8": "4.1.10",
+    "ast-v8-to-istanbul": "1.0.7",
     "esbuild": "^0.28.1",
     "tsx": "^4.19.0",
     "typescript": "^7.0.2",

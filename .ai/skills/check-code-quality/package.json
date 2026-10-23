@@ -3,5 +3,9 @@
   "private": true,
   "type": "module",
   "engines": { "node": ">=24.15.0" },
-  "dependencies": { "@babel/parser": "8.0.7" }
+  "dependencies": {
+    "@babel/parser": "8.0.7",
+    "@bcoe/v8-coverage": "1.0.2",
+    "ast-v8-to-istanbul": "1.0.7"
+  }
 }
