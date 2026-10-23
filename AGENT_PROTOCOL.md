@@ -1252,7 +1252,7 @@ the checks return and finish. Recovery covers the same wait without a live sessi
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
-`workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from two files per runner: `waits-<runner>-parity.test.ts` for the base rows and `waits-<runner>-workers-parity.test.ts` for the worker rows (U2w onward), with the criteria guard in `waits-parity.test.ts` (hearsay-tools/cezarion#1288). U1
+`workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from three files per runner: `waits-<runner>-parity.test.ts` for the base rows, `waits-<runner>-workers-parity.test.ts` for the worker rows (U2w onward) and `waits-<runner>-entries-parity.test.ts` for U27, the turn-end entry axis, with the criteria guard in `waits-parity.test.ts` (hearsay-tools/cezarion#1288, hearsay-tools/cezarion#1525). U27 settles U5, U6, U11, U20 and U20u from a fresh step, a Continue and an acknowledgement that lands after its turn ended, and checks each heartbeat word; the late-acknowledgement cells are exempt where no turn can end before its input is acknowledged. U1
 registers a CI wait and a timer through `cezar_wait`, parks, and wakes with each result.
 U2 opens both: the timer wakes, the CI wait stays open and is in that turn's footer,
 the turn end re-parks without a new registration, and the later CI result is
@@ -1338,8 +1338,12 @@ question is shown, then Continues with a message that answers it and calls `ceza
 answer in flight is not a pending question, so the done is accepted and the run finishes.
 
 Phase 2b (hearsay-tools/cezarion#1234) adds the turn-end rule. `decideTurnEnd`
-(`workflows/turn-end.ts`) is one pure function that both turn-end handlers, and the boundary an
-acknowledgement settles late, apply through `applyTurnEnd`. Input already owed defers the decision;
+(`workflows/turn-end.ts`) is one pure function. Every turn end applies it through one
+`RunManager` method, `settleTurn` (hearsay-tools/cezarion#1525): the fresh step's and the
+Continue's turn-end handlers, the boundary an acknowledgement settles late, and input readiness for
+a refused autonomous nudge. Since then it also decides a done the completion gate refused, so both
+nudge causes (no wait and completion) have one table test, and one function of the outcome gives
+the heartbeat word (`turnEndHeartbeat`). Input already owed defers the decision;
 then done finishes; any open wait or question parks; a workflow step that is not the last
 completes; a spent budget opens a `budget` human wait; an autonomous run gets the autonomous nudge;
 and any other turn end gets the no-wait nudge once, charged to the automatic-wake budget, before

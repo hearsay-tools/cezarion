@@ -341,6 +341,8 @@ const server = createServer((req, res) => {
   req.on('data', (chunk) => (body += chunk));
   req.on('end', async () => {
     if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify({ method: req.method, url, body: body ? JSON.parse(body) : undefined })}\n`);
+    // The delivery control reads the prompt Cezar sent, before a nudge's scripted answer replaces it.
+    const received = body;
     if (req.method === 'POST' && /\/(prompt_async|message)$/.test(url)) body = answerNudgeBody(body);
     if (req.method === 'POST' && /^\/question\/[^/]+\/(reply|reject)$/.test(url)) {
       // Native question reply resumes the held turn, then its own session.idle
@@ -442,7 +444,7 @@ const server = createServer((req, res) => {
       }
       // A configured control matches the prompt's text parts, never their JSON encoding.
       let deliveryText = body;
-      if (delivery) try { deliveryText = JSON.parse(body).parts.map(part => part.text ?? '').join('\n'); } catch { /* not a prompt body */ }
+      if (delivery) try { deliveryText = JSON.parse(received).parts.map(part => part.text ?? '').join('\n'); } catch { /* not a prompt body */ }
       // A configured rejection decides alone: it adds "once" and "until lifted" to the native token.
       if (delivery?.kind === 'reject' ? delivery.rejects(deliveryText) : body.includes('mock:reject-agent-post')) {
         res.writeHead(503, { 'content-type': 'application/json' });

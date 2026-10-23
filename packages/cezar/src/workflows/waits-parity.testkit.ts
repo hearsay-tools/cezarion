@@ -75,6 +75,8 @@ export const WAIT_CRITERIA = [
   { id: 'U24', scenario: 'baseline', name: 'a worker\'s second no-wait turn end asks its parent, and the reply resumes it' },
   { id: 'U26', scenario: 'baseline', name: 'footer capability follows provisioning on opening, live delivery, Continue and no-session recovery' },
   { id: 'U25', scenario: 'baseline', name: 'an automatic message supersedes a worker\'s fallback question' },
+  // hearsay-tools/cezarion#1525: one turn-settlement method for every entry.
+  { id: 'U27', scenario: 'baseline', name: 'U5, U6, U11, U20 and U20u settle alike from a fresh step, a Continue and a late acknowledgement, each with its heartbeat word' },
 ] as const;
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.
