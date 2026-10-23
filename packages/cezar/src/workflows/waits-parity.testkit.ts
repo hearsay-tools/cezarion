@@ -81,6 +81,8 @@ export const WAIT_CRITERIA = [
   { id: 'U4p', scenario: 'baseline', name: 'cezar_cancel_wait cancels a process wait, aborts its watch, and no result is delivered' },
   { id: 'U9p', scenario: 'provider-error', name: 'provider failure and clean close with a process wait open leave the run recoverable and the next result delivers' },
   { id: 'U9pr', scenario: 'baseline', name: 'after a restart with no live session a process wait is watched again and its result delivers through the continuation' },
+  // hearsay-tools/cezarion#1525: one turn-settlement method for every entry.
+  { id: 'U27', scenario: 'baseline', name: 'U5, U6, U11, U20 and U20u settle alike from a fresh step, a Continue and a late acknowledgement, each with its heartbeat word' },
 ] as const;
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.

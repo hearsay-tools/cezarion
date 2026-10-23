@@ -349,20 +349,21 @@ async function handle(command) {
       return;
     case 'prompt':
       record({ userText: command.message, imageCount: (command.images ?? []).length });
-      command.message = answerNudge(command.message);
-      return prompt(command);
+      // The delivery control reads both the prompt Cezar sent and a nudge's scripted answer.
+      { const answered = answerNudge(command.message);
+        return prompt({ ...command, message: answered }, answered === command.message ? answered : `${command.message}\n${answered}`); }
     default:
       write({ ...(command.id ? { id: command.id } : {}), type: 'response', command: command.type, success: false, error: `Unknown command: ${command.type}` });
   }
 }
 
-async function prompt(command) {
+async function prompt(command, sent = command.message) {
   const message = command.message;
   // Rejected before admission: OMP's error response only, no prompt_result (rpc-mode.ts).
-  if (delivery?.rejects(message)) { fail(command, 'owned turn rejected'); return; }
+  if (delivery?.rejects(sent)) { fail(command, 'owned turn rejected'); return; }
   // Every successful admission acknowledges through here, so a configured hold-ack holds it
   // whichever scenario branch answers the prompt.
-  const ack = (extra) => { if (delivery) delivery.ack(message, () => respond(command, extra)); else respond(command, extra); };
+  const ack = (extra) => { if (delivery) delivery.ack(sent, () => respond(command, extra)); else respond(command, extra); };
   // `mock:ack-only` → the prompt is accepted and no agent run starts (hearsay-tools/cezarion#1301).
   if (message.includes('mock:ack-only')) { ack(); return; }
   const gated = message.includes('mock:gate-prompt-ack');
