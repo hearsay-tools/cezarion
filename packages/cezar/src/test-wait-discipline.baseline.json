@@ -566,12 +566,6 @@
       "count": 1
     },
     {
-      "file": "core/workflow-no-progress-parity.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(1_600);",
-      "count": 1
-    },
-    {
       "file": "delegation/destruction-results.test.ts",
       "rule": "short-bound",
       "site": "await vi.waitFor(() => expect(attempts.length).toBeGreaterThan(0), { timeout: 3_000 });",
