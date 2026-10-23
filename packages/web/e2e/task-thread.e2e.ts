@@ -1036,6 +1036,40 @@ describe('task thread', () => {
     browser.setViewport(1440, 900)
   })
 
+  // hearsay-tools/cezarion#1537: the summary's 8px gap used to appear only with its first shown
+  // value. Where a value fitted only without that gap, it showed, lost the room, hid and showed
+  // again on every frame, so main CI's touch-targets 360px cell never settled (failure bundle
+  // .ai/qa/failures/touch-targets/comfortable-dark-360-edge-taps-keyboard-drafts-pins-and-pending-controls-1
+  // in run 39970537530 attempt 1, artifact cockpit-failures-shard-1). Locally it failed 1 of 4
+  // runs: `npm run test:e2e -- touch-targets.e2e.ts -t 'comfortable/dark/360'`. Every card width
+  // exercises the boundary, so the sweep finds it without the fixture's exact font widths. The
+  // flip period is one or two frames: three settle frames, then three sampled frames per width.
+  it('folded Activity settles at every card width', () => {
+    browser.setViewport(1280, 900)
+    browser.goto(`${baseUrl}${scoped(`/tasks/${TYPO_RUNS[1]!.id}`)}`)
+    browser.waitForFunction(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}') !== null`)
+    browser.evaluate(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}[aria-expanded="true"]')?.click()`)
+    browser.waitForFunction(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}')?.getAttribute('aria-expanded') === 'false'`)
+    const flipping = browser.evaluate(`(async () => {
+      const card = document.querySelector('[data-slot="run-activity-dock"]')
+      const frame = () => new Promise(resolve => requestAnimationFrame(resolve))
+      const shown = () => [...card.querySelectorAll(':scope > button [data-slot="activity-summary"] > [data-hidden="false"]')]
+        .map(item => item.dataset.summaryItem).join()
+      const flipping = []
+      for (let width = 200; width <= 640; width += 4) {
+        card.style.width = width + 'px'
+        for (let i = 0; i < 3; i++) await frame()
+        const seen = new Set()
+        for (let i = 0; i < 3; i++) { seen.add(shown()); await frame() }
+        if (seen.size > 1) flipping.push(width)
+      }
+      card.style.width = ''
+      return flipping
+    })()`)
+    expect(flipping).toEqual([])
+    browser.setViewport(1440, 900)
+  })
+
   // hearsay-tools/cezarion#1478: the folded header names the step in flight. A long name ends in an
   // ellipsis on a phone while its spinner stays whole; the disclosure keeps working from the
   // keyboard and names the step; reduced motion stops the spin but keeps the loader glyph.

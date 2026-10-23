@@ -802,5 +802,6 @@ row's value when the thing it names changes, rather than its label.
 | Commit convention | Conventional Commits |
 | Specs and plans | unknown |
 | Board | **Cezarion**, org `hearsay-tools`, project #1. For same-repository PRs targeting `main`, `.github/workflows/pr-readiness.yml` owns draft state and syncs existing PR and closing-linked issue cards: draft → In progress, ready → In review. Each new head returns the PR to draft; the workflow marks it ready when the head's required checks pass and no review thread is unresolved. Open a draft PR, fix its checks and review threads, and let the workflow move it to ready and In review; do not move the card to In review or run `gh pr ready` by hand. Board sync skips without project access and never moves Done cards back. The initial claim still moves the issue to In progress. |
+| Auto-merge | Read `.ai/skills/auto-merge/SKILL.md` before you open a pull request into `main`, and after each push, CI result, review round or draft/ready change on one you opened with the `auto-merge` label. It decides whether the PR merges without owner review; every merge it makes is a squash. |
 | Task orchestrator | Cezar |
 | SDLC feedback | `apptension/toolkit-dev` |
