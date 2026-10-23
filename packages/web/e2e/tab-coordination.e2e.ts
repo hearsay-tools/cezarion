@@ -26,9 +26,9 @@ const read = async (request: Request, session: string, expression: string) => {
   if (exceptionDetails) throw new Error(`CDP evaluation failed: ${JSON.stringify(exceptionDetails)}; expression: ${expression}`)
   return result.value
 }
-const waitText = (request: Request, session: string, text: string) => pollFor(async () =>
+const waitText = (request: Request, session: string, text: string, deadline = Infinity) => pollFor(async () =>
   await read(request, session, `document.body.innerText.includes(${JSON.stringify(text)})`) ? true : undefined,
-  async () => `transcript never contained ${text}: ${await read(request, session, 'document.body.innerText')}`, { timeoutMs: 22_000, tries: 100 })
+  async () => `transcript never contained ${text}: ${await read(request, session, 'document.body.innerText')}`, { timeoutMs: 22_000, tries: 100, deadline })
 
 it.each([false, true])('ten mixed tabs (separate visible windows: %s) share worker transport and preserve project transcripts', async windows => {
   await browser.withCdp(async (request, subscribe) => {
@@ -122,6 +122,12 @@ it.each([false, true])('ten mixed tabs (separate visible windows: %s) share work
 })
 
 it('blocked SharedWorker uses finite HTTP in ten visible windows and aborts on pagehide', async () => {
+  // bound: share 50 s across this row's polling phases, reserving 10 s of its
+  // 60 s timeout for probe abort/drain, lifecycle commands and target cleanup.
+  // Budget proof: https://github.com/hearsay-tools/cezarion/pull/1569#discussion_r4364129346
+  // Ten 9 s page predicates: 1/1 old probes ran 90 s; 1/1 fixed probes rejected
+  // within the shared 50 s deadline instead of accumulating ten fresh budgets.
+  const deadline = Date.now() + 50_000
   await browser.withCdp(async (request, subscribe) => {
     const pages: Array<{ targetId: string; sessionId: string }> = []
     const persistent: string[] = []
@@ -156,18 +162,19 @@ it('blocked SharedWorker uses finite HTTP in ten visible windows and aborts on p
       // ran under load; fixed global setup preceded burners, with fresh tab fixtures
       // under load in both. Sequential startup took 2852–5620 ms per document with
       // the same predicate and 22 s guard, increasing aggregate setup allowance.
-      // The 60 s row bound and later concurrent checks in all ten windows remain.
+      // The shared 50 s deadline caps polling across the unchanged 60 s row;
+      // later concurrent checks still use all ten windows.
       for (const page of pages) {
         await request('Page.navigate', { url: `${fixture.origin}/p/${run.projectId}/tasks/${run.runId}` }, page.sessionId)
-        await waitText(request, page.sessionId, `Tab fixture transcript ${run.runId}`)
+        await waitText(request, page.sessionId, `Tab fixture transcript ${run.runId}`, deadline)
       }
       const text = `finite-${Date.now()}`
       await fixture.control({ publish: text, runs: [run] })
-      await Promise.all(pages.map(page => waitText(request, page.sessionId, text)))
+      await Promise.all(pages.map(page => waitText(request, page.sessionId, text, deadline)))
       for (const snapshot of [false, true]) {
         const typing = `unfinished-${snapshot}-${Date.now()}`
         await fixture.control({ ephemeral: typing, snapshot, runs: [run] })
-        await Promise.all(pages.map(page => waitText(request, page.sessionId, typing)))
+        await Promise.all(pages.map(page => waitText(request, page.sessionId, typing, deadline)))
       }
       expect(persistent).toEqual([])
       const session = pages[0]!.sessionId
@@ -198,7 +205,7 @@ it('blocked SharedWorker uses finite HTTP in ten visible windows and aborts on p
         const response = await pollFor(
           async () => await read(request, session, 'window.__finiteHttpProbe.result'),
           () => 'the finite projects request never completed',
-          { timeoutMs: 20_000, tries: 100 },
+          { timeoutMs: 20_000, tries: 100, deadline },
         )
         expect(response).toMatchObject({ ok: true, url: `${fixture.origin}/api/v1/projects`, status: 200 })
       } finally {
@@ -214,7 +221,7 @@ it('blocked SharedWorker uses finite HTTP in ten visible windows and aborts on p
       await request('Runtime.evaluate', { expression: 'window.dispatchEvent(new PageTransitionEvent("pageshow",{persisted:true}))' }, pages[0]!.sessionId)
       const restored = `${text}-restored`
       await fixture.control({ publish: restored, runs: [run] })
-      await waitText(request, pages[0]!.sessionId, restored)
+      await waitText(request, pages[0]!.sessionId, restored, deadline)
     } catch (error) {
       throw new Error(`${String(error)}; projects network: ${JSON.stringify([...projects])}`, { cause: error })
     } finally { off(); await Promise.all(pages.map(page => request('Target.closeTarget', { targetId: page.targetId }))) }
