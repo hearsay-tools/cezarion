@@ -302,12 +302,6 @@
       "count": 1
     },
     {
-      "file": "core/harness-autosave-settlement.test.ts",
-      "rule": "short-bound",
-      "site": "await waitFor(() => !manager.isActive(runId), 5000);",
-      "count": 1
-    },
-    {
       "file": "core/harness-parity-cells.testkit.ts",
       "rule": "short-bound",
       "site": "await waitFor(() => consumed.includes(id) || reported(), 6_000).catch(() => undefined);",
