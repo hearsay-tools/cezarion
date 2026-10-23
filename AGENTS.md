@@ -370,6 +370,12 @@ Do not duplicate those background runs with `npm test`,
 `npm run test:unit`, `npm run test:package`, `npm run test:e2e`, or `npm run test:changed`.
 Use `squeal why <check>` for failure details and, when a result is needed,
 `squeal status --wait 60000`.
+Lease messages show executable and interpreter script names, with other arguments
+omitted to avoid logging credentials. The timeout reuses the initial diagnostic
+snapshot; it does not start more command probes after the acquisition deadline.
+For a test-env lease held by a Squeal daemon, use this guidance:
+“If Squeal covers this spec, read its result with `squeal status --wait 60000`;
+do not start a duplicate run.”
 If test-first work intentionally makes a previously passing check fail, Squeal denies the next edit once; resend the same edit unchanged (a newly added test’s first observed failure does not trigger this denial).
 Under Codex, use the absolute Squeal command printed in its messages when
 `squeal` is not on PATH. Fix regressions and report known failures, pending,
