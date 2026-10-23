@@ -35,6 +35,20 @@ function commandPath(command: string): string {
 
 const hasSetsid = spawnSync('/bin/sh', ['-c', 'command -v setsid'], { stdio: 'ignore' }).status === 0;
 
+function fixtureGit(root: string, ...args: string[]): void {
+  // These calls bypass the sandbox global config. Keep maintenance off on the fixture's
+  // commits, before the launcher clones it (hearsay-tools/cezarion#1389).
+  const result = spawnSync('git', ['-C', root,
+    '-c', 'user.name=Fixture', '-c', 'user.email=fixture@cezar.invalid',
+    '-c', 'gc.auto=0', '-c', 'maintenance.auto=false', ...args], {
+    encoding: 'utf8',
+    env: { ...fixtureEnv, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TRACE: '1' },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stderr, /\bbuilt-in: git\b/, 'fixture Git trace must be enabled');
+  assert.doesNotMatch(result.stderr, /\b(?:maintenance run|gc) --auto\b/);
+}
+
 function makeFixture(withSetsid: boolean): { root: string; path: string } {
   const root = mkdtempSync(join(tmpdir(), 'cez-test-env-launcher-'));
   fixtures.push(root);
@@ -148,9 +162,7 @@ done
   // The served project is a clone of this checkout, so the fixture is a repository whose
   // generated state is ignored the way the real one's is.
   writeFileSync(join(root, '.gitignore'), '/.ai/qa/\n/bin/\nnode_modules/\n/packages/cezar/dist/\n/packages/cezar/web/\n/.ai/build-invocations\n/.ai/build-node-env\n/.ai/inline-contract-dist\n/.ai/app-argv\n/.ai/app-cez-env\n/app.pid\n');
-  const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@cezar.invalid', ...args], {
-    env: { ...fixtureEnv, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, stdio: 'ignore',
-  });
+  const git = (...args: string[]) => fixtureGit(root, ...args);
   git('init', '-q', '-b', 'main');
   git('add', '-A');
   git('commit', '-q', '-m', 'fixture');
@@ -427,9 +439,7 @@ test('a cold boot serves an isolated clone of the checkout, never the checkout i
   assert.equal(existsSync(join(served, 'later.md')), false);
 
   // A commit moves HEAD past the clone's base: that takes a fresh clone, so a cold boot.
-  execFileSync('git', ['-C', fixture.root, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@cezar.invalid', 'commit', '-q', '--allow-empty', '-m', 'later'], {
-    env: { ...fixtureEnv, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
-  });
+  fixtureGit(fixture.root, 'commit', '-q', '--allow-empty', '-m', 'later');
   const moved = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
   assert.equal(moved.status, 0, moved.stderr);
   assert.match(moved.stdout, /TEST_ENV_REUSED=0/);
