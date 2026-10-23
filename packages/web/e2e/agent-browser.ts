@@ -468,13 +468,6 @@ export function fixtureServeEnv(
     // two together, and a CEZ_DRY_RUN without CEZ_HOME beside it is exactly the mistake it
     // exists to catch.
     CEZ_DRY_RUN: '1', CEZ_HOME: resolve(fixtureRoot, '.cez-home'),
-    // A fixture repo must hold exactly the skills the fixture wrote. Open Mercato skill updates
-    // are default-on (AGENTS.md § Zero config), so a boot inside the six-hour window installs the
-    // whole `om-*` collection INTO the fixture and every "these are the project skills"
-    // assertion starts depending on the machine's cache and network. The shared test env
-    // (`skills-update.e2e.ts` attaches to it) is where that behaviour is exercised on purpose;
-    // `extra` can still turn it back on for a spec that wants it.
-    CEZ_SKILLS_AUTO_UPDATE: extra.CEZ_SKILLS_AUTO_UPDATE ?? '0',
     // Local by default (#358). A hosted parent exports CEZ_REMOTE=1 into process.env; spreading
     // it would hide the account catalog and trip phone-layout assertions. Specs that exercise
     // hosted security pass CEZ_REMOTE: '1' in extra.

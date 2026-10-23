@@ -14,11 +14,8 @@ import {
 } from './types.ts';
 
 /**
- * The engine — pure control flow over a strategy's ordered steps. It never
- * knows what a step *does*, only `check`/`run`/`undo`. `runInstall` resumes
- * from `~/.cezar/server.json` (skips resolved steps unless `--reconfigure`
- * names them); `runUninstall` walks completed steps in reverse. Both hold the
- * single-writer lock for their whole run.
+ * Ordered strategy engine over check/run/undo. Resume recorded outcomes and undo in reverse
+ * under a whole-run single-writer lock; step implementations own platform effects.
  */
 
 export interface RunOptions {
@@ -77,15 +74,8 @@ function needsUndo(outcome: StepOutcome | undefined): outcome is StepOutcome {
 }
 
 /**
- * A `CEZ_DRY_RUN` preview persists a full ledger with no real side effects
- * (the packaged e2e round-trip depends on that). Two invariants keep previews
- * from destroying real state:
- *
- *  1. A dry-run NEVER persists over a REAL record — the preview mutates its
- *     in-memory copy only, so a preview on an installed host can't stamp
- *     `dryRun: true` onto (or delete steps from) the genuine ledger.
- *  2. A REAL run never resumes from a preview record — steps would all report
- *     "already done" while nothing is installed. It self-heals by resetting.
+ * Keep preview state separate: a dry-run never overwrites a real ledger, and a real run resets
+ * preview outcomes before executing.
  */
 function reconcileDryRun(state: ServerState, opts: RunOptions, ui: Ui): { persist: boolean } {
   const realRecord = !state.dryRun && (state.installed || Object.keys(state.steps).length > 0);

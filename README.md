@@ -121,7 +121,8 @@ and an orchestrator keeps a whole queue of them moving.
   automation: hand off "fix this", "upgrade that", "triage these" and walk away.
 - ✅ **The agent finishes and you have to trust it.** Every task's diff stays on
   its own branch: inspect it, send notes back into the same session, or push a
-  **draft PR** — never an auto-merge. Turn on the optional **review gate**
+  **draft PR**. Auto merge is off by default; each task can opt in to merge after Done.
+  Turn on the optional **review gate**
   (`CEZ_REVIEW_GATE=1` or Settings → Agents) and a finished run with changes
   waits in `review` for you.
 - ♻️ **Losing a session when it fails.** Every run records its `claude` session id.
@@ -228,7 +229,7 @@ most of the features here got their final shape.
 packaged-CLI e2e — the same gate a release runs) but it is *not* a release: it
 can be rough, a flag or a screen may change under you, and something occasionally
 breaks in a way no test caught. Nothing is at risk beyond your patience — every
-task runs in its own git worktree and Cezarion never auto-merges — but if you need a
+task runs in its own git worktree and auto merge is off by default — but if you need a
 boring day, stay on the stable release. Pin a nightly you liked with its exact
 version (`npx cezarion@<nightly-version>` — the cockpit prints the
 version it booted, and the date in it tells you how old the build is), and drop
@@ -289,8 +290,9 @@ you to inspect.
 ```
 
 When a check fails, the workflow can loop back to an earlier step (bounded by
-`max`) with the failing output appended to the retried agent's prompt. Nothing
-auto-merges: a finished run's changes stay on its branch until you act on them.
+`max`) with the failing output appended to the retried agent's prompt. By default,
+a finished run's changes stay on its branch until you act on them. A task can opt
+into merging its PR after Done, subject to current-head CI and GitHub rules.
 With the optional review gate on, a run with changes rests in `review` instead
 of `done`.
 
@@ -307,8 +309,9 @@ Three words, no jargon — **task**, **skill**, **chain**:
   the agent gets each one as a real file on disk), or send follow-up messages into
   the live session while it works.
 - 📖 **Skills** are Markdown playbooks. Drop them in `.ai/skills/` or
-  `.ai/cezar/skills/`, or pull them from a shared **team skills repo** (a bare
-  git clone cached globally in `~/.cache/cez/`). A workflow step references one by
+  `.ai/cezar/skills/`, or pull them from a shared **team skills repo** you name
+  in `skillsRepos` (a bare git clone cached globally in `~/.cache/cez/`). There is no
+  default team repo, and each team skill has its own on/off switch per project. A workflow step references one by
   `skill: <name>` and its body becomes the agent's extra system prompt — so you
   shape *how* the agent reasons without touching code.
 - 🔗 **Chains (workflows)** stitch steps into a pipeline: agent steps plus shell
@@ -338,9 +341,9 @@ The moves that make the cockpit worth the browser tab:
   unlimited) and reclaims the rest — directory only, the `cez/<id8>` branch is
   always kept, so the work stays recoverable. Settings → Resources shows every
   worktree's disk use with per-row delete and a **Reclaim now** button.
-- 🛡️ **You stay the merge button.** Read a finished run's diff, type notes that go
+- 🛡️ **You control merging.** Read a finished run's diff, type notes that go
   straight back into the agent's session, or push a `gh pr create --draft`.
-  Nothing auto-merges. The **review gate** is optional (`CEZ_REVIEW_GATE=1`, or
+  Auto merge is off by default and requires a task to opt in. The **review gate** is optional (`CEZ_REVIEW_GATE=1`, or
   Settings → Agents): with it on, a successful run with changes parks in `review`
   until you accept it. Autonomous runs always skip it.
 - 🗂️ **Every project in one cockpit.** One `cez serve` hosts every repo you
@@ -370,7 +373,7 @@ Eight views, one browser window, all live over Server-Sent Events (seven until y
 | **Inbox** | **Opt-in** (`CEZ_FOLLOWUPS=1`; hidden by default). Follow-ups an agent left behind (`todos.json`) — one click turns a suggestion into the next task, pre-wired to its suggested skill. Off, agents are never asked to leave follow-ups; each task's own **Notes** handoff journal is unaffected. |
 | **Git** | Branch, working-tree status, diff vs HEAD, recent commits (click one for its inline patch + GitHub link), and the configurable base branch that worktrees fork from and PRs target. |
 | **GitHub** | Open issues and PRs of the repo's origin, read through your logged-in `gh`. Hand an issue straight to the agent — pick a workflow and skills, one click runs it. |
-| **Skills** | Local skills plus the team skills repo, with a rendered body + prompt preview. Refresh pulls the latest from the remote. |
+| **Skills** | Local skills plus any team skills repos you configured, each team skill with a per-project switch, and a rendered body + prompt preview. Refresh pulls the latest from the remote. |
 | **Workflows** | Build a chain by drag-ordering skills, save it as portable YAML, import/export, or delete. Built-ins always come back. |
 | **Settings** | Appearance (dark/light theme, accent, density), agent backends, notifications, and the skills catalog. |
 
@@ -848,9 +851,19 @@ Without either flag, `start` still runs `quick-task`.
 `cez discover --runner`; `--model` and `--effort` pin the rest. `--backend` is a permanent
 alias of `--runner` with no warning. Giving both with different values exits 64.
 
+`--archive-when-done` archives the task after **Done**. `--auto-merge-pr` merges its
+PR after **Done** only when current-head CI and GitHub rules pass. It can mark a
+draft PR ready. Both controls are off by default. They also appear as switches in
+the task composer and task details. With both on, Cezarion merges before it archives;
+without a PR, it archives on Done. Pending or blocked completion actions show their
+reason in task details. Use `status <id> --full` to read the saved `archiveWhenDone`,
+`autoMergePr` and `completionAction` fields. Existing task choices can be changed
+through `PATCH /api/v1/p/:projectId/runs/:id` with the matching boolean fields.
+
 `start` is retry-safe: it sends a request id (`--request-id <UUID>` to pick your own), and a
-retry with the same id and task answers with the run the first one created (`created: false`)
-instead of starting a second. Also: `list`, `stop`, `finish`, `diff [--stat]`, `open`.
+retry with the same id and start options answers with the run the first one created
+(`created: false`) instead of starting a second. Changing a completion control on that
+retry is a payload conflict. Also: `list`, `stop`, `finish`, `diff [--stat]`, `open`.
 Use `archive <id>` to hide a task from `list`, `unarchive <id>` to restore it, and
 `list --all` to include archived tasks. `list` never shows owned workers, with or without
 `--all`: they are steer targets of their parent task. Id-addressed commands (`status`, `wait`,
@@ -948,6 +961,13 @@ hours) and anything else is a usage error pointing to the JSON form. `update` re
 it is given, except `task`, which merges key by key (`null` removes one); it restates `enabled`
 and echoes the revision it read, so a concurrent edit in the cockpit is refused (exit 2), never
 overwritten. Mutating commands print the automation's cockpit page as `url`.
+
+`add` accepts `--archive-when-done` and `--auto-merge-pr` with the same behavior as
+`cez task start`. The JSON keys are `task.archiveWhenDone` and `task.autoMergePr`.
+Both are optional booleans and default to off. The automation editor has the same
+switches. Editing these choices affects future tasks only; it does not change tasks
+the automation already launched. Enabling an automation or making its tasks autonomous
+does not enable either completion control.
 
 GitHub automations exclude events before enablement by default. Turn on **Include existing items**
 in the editor, pass `--include-existing` to `add`, or set `"filters": {"includeExisting": true,
@@ -1089,7 +1109,6 @@ Useful environment variables:
 | `CLAUDE_CONFIG_DIR`, `CODEX_HOME`, `PI_CODING_AGENT_DIR`, `OMP_PROFILE` | The agents' **own** variables, honoured where the vendor documents one. Setting one moves that agent's **default account** — the config folder (for omp, the profile) Cezarion discovers. A *second* login of the same CLI is deliberately not an environment setting, since one process-wide value cannot differ per project: add it under **Settings → Agent accounts** and pick it per project. |
 | `CEZ_BROWSE_ROOT=~/` | Default root for **Add project → Open local folder…**. The picker cannot navigate above it; a saved workspace value overrides the environment default and must name an existing folder. |
 | `CEZ_PROJECTS_DIR=~/cezar/projects` | Default destination for **Clone from GitHub** and **New project**. Saved workspace settings override it, and missing directories are created recursively. |
-| `CEZ_SKILLS_AUTO_UPDATE=0` | Disable automatic checks and updates for upstream-CLI-tracked Open Mercato skill installations. On by default; a saved global Skills setting overrides this environment default. Checks are delayed, bounded, cached, and non-blocking. |
 | `CEZ_PROJECT_WARMUP=0` | Prepare each registered project only when it is first opened. By default the cockpit prepares every other registered project in the background once it listens, one at a time, most recently opened first: the run store opens and interrupted runs resume, so the first click on a project does not wait. A project another live cockpit serves is skipped. |
 | `CEZ_AUTONOMOUS_DEFAULT=0` | Seed the New Task Autonomous default (`0` or `1`). Without a seed, skills default on and workflows off; a saved global Resources setting overrides it. |
 | `CEZ_WORKTREE_DEFAULT=1` | Seed the New Task Worktree default (`0` or `1`). Without a seed, eligible runs default on; a saved global Resources setting overrides it. |
@@ -1106,7 +1125,6 @@ Useful environment variables:
 | `CEZ_TITLE_UPDATES=0` | Turn off the live task-title refresh (namer re-runs on each turn end). The Settings → Agents toggle overrides this default. |
 | `CEZ_AUTONAME=0` | Disable ALL LLM task naming (creation + live) — titles stay heuristic (`437: /om-auto-review-pr`). Under `CEZ_DRY_RUN=1` naming is already off unless forced with `CEZ_AUTONAME=1`. |
 | `CEZ_REVIEW_GATE=1` | Turn ON the optional diff-first review gate (open-mercato/cezar#489): a successful, non-autonomous run with changes parks at `review` (Accept / Send back / Draft PR) instead of finishing. Off by default — changed runs settle to `done` with the diff left in the worktree. Only `1` enables. The Settings → Agents toggle overrides this; autonomous runs always skip it. |
-| `CEZ_NO_BANNER=1` | Skip the `open-mercato/skills` banner on `cez serve` startup. (The cockpit no longer shows a banner — its skills now live on the Skills page's Manage panel — so this env var is the terminal banner's only switch.) |
 | `VITE_CEZ_API_BASE=http://localhost:4321` | **Build time only**, and only when the cockpit bundle is deployed apart from the service it talks to. Empty (the default) means "the origin that served this page", which is right for both normal cases: the CLI serves the bundle itself, and `npm run dev` proxies `/api` to the local service. A deployment that must be configured without a rebuild can put `<meta name="cez-api-base" content="…">` in the served HTML instead, which wins over this. |
 | `VITE_CEZ_E2E=1` | **Build time only.** The cockpit e2e suite sets this when it builds the bundle it drives. It pins `useNow` and every `refetchInterval` so a wait cannot span a 30s tick or a 4s poll. Leave unset for production. |
 
@@ -1366,7 +1384,7 @@ never blocks startup):
 
 ```jsonc
 {
-  "skillsRepos": [{ "repo": "open-mercato/skills", "ref": "main" }], // team skills; [] disables
+  "skillsRepos": [], // team skills; none by default. Example: [{ "repo": "open-mercato/skills", "ref": "main" }]
   // Team-skill repos are code-trusted: a skill body becomes an agent system prompt.
   // Only owner/name, https/ssh URLs, or local paths (`/abs`, `./rel`, `~/dir`,
   // `C:\dir`) are accepted — no ext::/fd:: transport helpers. Write a relative

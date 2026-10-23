@@ -649,6 +649,9 @@ const CONTROL_CRITERIA = [
   { id: 'R97', scenario: 'baseline' },
   { id: 'R98', scenario: 'baseline' },
   { id: 'R99', scenario: 'baseline' },
+  // hearsay-tools/cezarion#1540: completion-options-parity.test.ts, fresh and Continue.
+  { id: 'R100', scenario: 'baseline' },
+  { id: 'R101', scenario: 'done' },
   { id: 'R28', scenario: 'baseline' },
   { id: 'R29', scenario: 'baseline' },
   { id: 'R30', scenario: 'baseline' },

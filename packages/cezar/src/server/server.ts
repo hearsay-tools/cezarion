@@ -1,4 +1,5 @@
 import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
+import { CompletionActionCoordinator } from './completion-actions.ts';
 import { discoverRepoHandle, lookupMergedPullRequests } from './forge/github.ts';
 import { resolveArchiveOnMerge, resolveGlobalArchiveOnMerge } from '../archive-on-merge-setting.ts';
 import type { WorkspaceConfigResponse, TestProjectWebhookResponse } from '@open-mercato/cezar-contract';
@@ -10,6 +11,7 @@ import { CheckoutProgressCache } from './checkout-progress.ts';
 import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract/projects';
 import { createLiveRoutes } from './live-routes.ts';
 import { subscribeRunFeed } from './run-event-feed.ts';
+import { teamSkillRefSchema } from '@open-mercato/cezar-contract/skills';
 import { sidebarLimitsSchema } from '@open-mercato/cezar-contract/workspace';
 import { worktreeSetupConfigSchema } from '@open-mercato/cezar-contract/workspace';
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
@@ -128,7 +130,6 @@ import {
 } from '../workflows/types.ts';
 import { planChain, slugify } from '../planner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
-import { SkillsUpdateConflictError, SkillsUpdateCoordinator, SkillsUpdateService, type SkillsUpdateState } from '../skills-update.ts';
 import { getTeamSkillsCached, refreshTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { appendHandoffHeartbeat, handoffProgressExcerpt, readHandoff } from '../handoff.ts';
 import { markStarted, onTodosChanged, readTodos, removeTodo, todoTaskText, type TodoItem } from '../todos.ts';
@@ -159,7 +160,7 @@ import { isUntouchedCancelledRun, toPastedContent, type PastedContent, type RunM
 import { worktreeDiff, worktreeDiffStat, worktreeSizeBytes } from '../git-worktree.ts';
 import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
 import { isReclaimable, reclaimWorktree, reclaimWorktrees, rematerializeReclaimedWorktree, selectReclaimableWorktrees } from '../runs/retention.ts';
-import { getBranches, getCommit, getDiff, getLogWithParents, getRepoInfo, getStatus, getTracking } from './git.ts';
+import { getBranches, getCommit, getDiff, getLogWithParents, getBranchHead, getRepoInfo, getStatus, getTracking } from './git.ts';
 import { attributeLog, deleteBranches, forgetRepoBranches, githubBranchForge, readRepoBranches, type BranchForge, type ClassifyInput } from './repo-branches.ts';
 import { claimRepoGitMutation, localPullBranches, pullRepoCheckout } from './repo-pull.ts';
 import {
@@ -173,7 +174,7 @@ import {
   pushCurrentBranch,
   readWorktreePath,
 } from './git-changes.ts';
-import { gatedSkillsRepos, loadConfig, resolveWorktreeRetention, type CezConfig } from '../config.ts';
+import { loadConfig, resolveWorktreeRetention, type CezConfig } from '../config.ts';
 import { resolveWorktreeSetup } from '../worktree-setup.ts';
 import { findConfigFile } from '../agent-config/catalog.ts';
 import { readConfigFile, statConfigPath, writeConfigFile } from '../agent-config/files.ts';
@@ -184,7 +185,6 @@ import { readAccountIdentity } from '../agent-config/account-identity.ts';
 import {
   PROJECT_ID_RE,
   defaultWorkspaceConfig,
-  effectiveSkillsAutoUpdate,
   loadWorkspaceConfig,
   mergeWriteWorkspaceConfig,
   effectiveComposerDefault,
@@ -234,7 +234,7 @@ import { checkoutRepo, type CloneRunner } from './checkout.ts';
 import { createProject, listGithubOwners, type CommandRunner } from './create-project.ts';
 import { armPreview, ProjectContextError, ProjectContexts, projectWarmupEnabled, sweepRegisteredPreviewLeftovers, type ProjectContext } from './project-context.ts';
 import { reviewGateEnabled } from '../runs/review-gate.ts';
-import { readProjectUiState, readUiState, uiStatePath, withLegacySkillSelection } from '../ui-state.ts';
+import { readProjectUiState, readUiState, writeProjectUiState } from '../ui-state.ts';
 import { agentHomePaths, expandTilde } from '../paths.ts';
 import { isLoopbackHostHeader, normalizeHostname, resolveCapabilities } from './capabilities.ts';
 import { applicationUpdateInputSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract/application-update';
@@ -244,7 +244,7 @@ import { attachUpgradeRouter } from './upgrade-router.ts';
 import { createPreviewSocket } from './preview-socket.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
-import { parseRemote, resolveForge, type ForgeAvailability } from './forge/index.ts';
+import { parseRemote, resolveForge, forgeWebRoot, type ForgeAvailability } from './forge/index.ts';
 import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubCommentCounts, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
 import { ensureLaunchKey } from './launch-key.ts';
 import { CockpitAlreadyRunningError, type CockpitOwnership } from './cockpit-ownership.ts';
@@ -354,9 +354,6 @@ export interface ServerDeps {
    *  reaches `openInTerminal`. Injected for the same reason as the two above: a test that reaches
    *  this for real opens a window on the developer's machine (#820). */
   openApp?: typeof openInApp;
-  /** Process-wide Open Mercato skills update detector. Injected in tests and
-   * shared by every workspace route/project; createApp owns the default. */
-  skillsUpdate?: SkillsUpdateService;
   /** WebSocket subscription hub (`/api/v1/ws`, src/server/ws.ts). `createApp`
    *  only registers topics on it — `startServer` builds one and attaches it
    *  to the HTTP server it binds. Optional so legacy callers/tests change
@@ -644,6 +641,8 @@ const startRunSchema = z
     // Autonomous mode (#autonomous): the run never parks at `waiting` — it
     // auto-continues until the agent signals done. No "needs you" is raised.
     autonomous: z.boolean().optional(),
+    archiveWhenDone: z.boolean().optional(),
+    autoMergePr: z.boolean().optional(),
     // Generate follow-up inbox entries (spec 007, #444). Honoured only while
     // the `followups` capability is on (#471) — off, the server pins it to
     // false whatever the client asked for. Omitted still means "enabled" for
@@ -765,9 +764,8 @@ const uiStateSchema = z
     lastWorktree: z.boolean().optional(),
     lastAutonomous: z.boolean().optional(),
     lastGenerateFollowups: z.boolean().optional(),
-    // The default team-skill selection belongs to this project's ui-state, never the workspace
-    // state (hearsay-tools/cezarion#1408).
-    importedSkills: z.array(z.string().min(1).max(200)).max(UI_STATE_MAX_KEYS).optional(),
+    // Team skills this project switched off. Per project, never workspace state.
+    disabledTeamSkills: z.array(teamSkillRefSchema).max(UI_STATE_MAX_KEYS).optional(),
     // Skill selection frequency (#408): name → times chosen, incremented on a successful run
     // start from EITHER composer (`/new`'s SourcePill and the follow-up `SkillsPicker`). Drives
     // the shared `orderSkillsByUsage` sort (web/app/src/lib/skills.ts) so both pickers float the
@@ -813,11 +811,6 @@ const uiStateSchema = z
       )
       .max(50)
       .optional(),
-    // Skills promo banner (#391): set once the cockpit banner is dismissed, never unset.
-    // Server-persisted (not a cookie) so the "shown once" promise holds across browsers.
-    // Retained for backward compatibility — the banner is gone; `.passthrough()` would preserve
-    // the key regardless, but keep it typed.
-    dismissedSkillsBanner: z.boolean().optional(),
   })
   .passthrough();
 
@@ -826,6 +819,8 @@ const uiStateSchema = z
 const patchRunSchema = z.object({
   title: z.string().trim().min(1).max(300).optional(),
   task: z.string().trim().min(1).max(100_000).optional(),
+  archiveWhenDone: z.boolean().optional(),
+  autoMergePr: z.boolean().optional(),
 });
 
 // Session commit (redesign R5 — §"Git/session API additions").
@@ -1130,22 +1125,9 @@ export function createApp(deps: ServerDeps) {
     return applyProviderEnablement(discovered, workspace.disabledProviders);
   };
   /**
-   * The gate: why a run cannot start against `required`, or null when it can.
-   *
-   * VERIFY BEFORE YOU REFUSE. Auth state is served stale-while-revalidate (see
-   * `ProviderAuthService.status`), so a cached "disconnected" may predate a login cezar could not
-   * observe — someone running `claude auth login` in a terminal. Refusing on that would lock a user
-   * out of their own cockpit with no way back but waiting. So a believed-unavailable provider is
-   * re-probed, and only a refusal that survives the fresh answer is returned.
-   *
-   * The cost lands where it belongs: the common path (connected, warm) pays nothing at all, and the
-   * probe is only spawned when cezar is about to say no — a rare, interactive moment. This is also
-   * what lets the cache hold a negative for a minute instead of five seconds, which is what made
-   * every reader of `GET /providers/status` periodically pay for a CLI spawn.
-   *
-   * A runtime auth latch is deliberately NOT escaped by this: `withRuntimeFailures` keeps forcing
-   * the row disconnected until the user acknowledges that exact incident, so the re-probe cannot
-   * talk cezar out of a rejection it actually observed.
+   * Verify cached provider unavailability before refusing a start. Settings-disabled providers
+   * need no probe. Runtime incidents remain authoritative until an explicit retry or matching
+   * native verification clears them.
    */
   const providerActionError = async (
     required: readonly ProviderId[],
@@ -1163,7 +1145,6 @@ export function createApp(deps: ServerDeps) {
   const openTerminal = deps.openTerminal ?? openInTerminal;
   const openFile = deps.openFile ?? openFileInDefaultApp;
   const openApp = deps.openApp ?? openInApp;
-  const skillsUpdate = deps.skillsUpdate ?? new SkillsUpdateService();
 
   // ---- workspace boot-project identity (multi-project spec) ----------------
   // The boot flow (`initWorkspace` in src/index.ts) registers the boot repo
@@ -1315,38 +1296,10 @@ export function createApp(deps: ServerDeps) {
   // and SSE carry no body, so this only ever gates the mutating routes.
   app.use('*', bodyLimit({ maxSize: GLOBAL_BODY_LIMIT }));
 
-  // ---- request-origin guard (#426) -----------------------------------------
-  // This server executes agents with shell access — "start a task" ≈ run code
-  // as the user — so "bind 127.0.0.1 + same-origin" is not a perimeter on its
-  // own: any page the user visits can still POST to us (CSRF), and DNS
-  // rebinding can point a foreign domain at loopback and read our responses.
-  // Two zero-config checks close both holes on every /api route EXCEPT
-  // /api/v1/health (the intentional cross-origin discovery endpoint, spec 011 —
-  // it exposes nothing sensitive, see #431):
-  //   1. Host allowlist (loopback deployments only) — a request whose Host is
-  //      not a loopback name did not really originate from this machine. A
-  //      rebound `evil.com` still sends `Host: evil.com`, so this kills DNS
-  //      rebinding for reads AND writes. Skipped in hosted mode (CEZ_REMOTE /
-  //      non-loopback bind), where the reverse proxy forwards the real public
-  //      Host and TLS+auth own the perimeter.
-  //      The match runs through `isLoopbackHostHeader`, whose 127.0.0.0/8 test
-  //      is *anchored* and whose missing-Host answer is "untrusted". Both are
-  //      load-bearing: a `startsWith('127.')` prefix would accept the
-  //      attacker-registrable `127.0.0.1.evil.com`, and such a page is really
-  //      same-origin with us, so checks 2 and 3 would wave it through too.
-  //   2. Same-origin write guard — a cross-origin write always carries an
-  //      `Origin` header (browsers attach it to every non-GET), so its full
-  //      authority (host AND port) must match the served Host. A blind CSRF
-  //      POST from evil.tld is rejected; the cockpit's own same-origin fetch
-  //      (Origin === Host, or no Origin at all for non-browser callers) passes
-  //      untouched. Works in both local and hosted mode because it compares
-  //      Origin to the actual Host.
-  // Scope note: check 2 covers writes only. A cross-origin GET from any site
-  // still reaches the read routes — but its Host is ours, so it is a *forced
-  // request*, not a read: the same-origin policy stops the attacker seeing any
-  // response body (we send CORS headers on /api/v1/health alone), and no GET
-  // handler mutates state. Rebinding, which WOULD make those reads legible, is
-  // what check 1 stops.
+  // Local APIs require a loopback Host, including health. Browser writes require
+  // matching full authority or the verified local dev-proxy case. Health alone is
+  // CORS-readable. Hosted mode delegates Host/auth policy to the deployment;
+  // absent Origin remains valid for native clients. Keep WS trust checks separate.
   const MUTATING_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
   const isHostedMode = () => !resolveCapabilities(process.env, bindHost).localHandoff;
   app.use('/api/*', async (c, next) => {
@@ -1418,17 +1371,8 @@ export function createApp(deps: ServerDeps) {
     return next();
   });
 
-  // The mirrored project-route table (spec "API Contracts → Project-scoped").
-  // Every route below registers ONCE on this sub-app; `createApp` mounts it
-  // twice — under `/api/v1/p/:projectId` (scoped) and under `/api/v1` (bound to
-  // the boot project) — so both spellings share one handler and can never
-  // drift. The resolver middleware binds `c.get('project')`:
-  // no `projectId` param (unscoped mount) → the boot context, byte-identical to
-  // the pre-workspace closures; `default` or the boot project's own id → the
-  // boot context too; anything else → the lazy context map, with
-  // `ProjectContextError` mapped to 404 (unknown) / 409 (missing root).
-  // Named rather than inlined because both mounts share it — one function, so
-  // the two spellings can never disagree about what `default` means.
+  // Register project routes once; mount them under scoped and boot-alias prefixes.
+  // Resolve default and boot ids to the boot context; unknown/missing projects map to 404/409.
   if (deps.projectLookup) {
     deps.projectLookup.resolve = async (raw) => {
       if (raw === undefined || raw === 'default' || raw === (await resolveBootProject())) return bootContext;
@@ -2341,13 +2285,8 @@ export function createApp(deps: ServerDeps) {
     )
 
     /**
-     * Who this account is signed in AS — the pane's "Show details".
-     *
-     * A separate, on-demand route rather than a field on the listing, and that is what makes
-     * "hidden by default" real: an email carried by the listing would already be in the response,
-     * the query cache and devtools, whatever the UI chose to render. `provider-auth.ts` keeps
-     * identity out of ITS boundary on purpose; this is the deliberate, local-only, opt-in
-     * exception — not a widening of that rule. Never logged, never persisted.
+     * Local-only account details, fetched separately on request. Keep identity out of normal
+     * listings, logs and run persistence.
      */
     .get(
       '/workspace/agent-profiles/:id/details',
@@ -3052,60 +2991,6 @@ export function createApp(deps: ServerDeps) {
     return ctx.store.listRuns().filter((run) => ACTIVE_RUN_STATUSES.has(run.status)).length;
   };
 
-  // Workspace-level by design: update state spans project and global installs,
-  // but the selected registered project supplies the safe, server-owned cwd.
-  const skillsUpdateInputSchema = z.object({ projectId: projectIdSchema }).strict();
-  const resolveSkillsUpdateRoot = async (raw: string): Promise<
-    { root: string } | { status: 404 | 409; error: string }
-  > => {
-    if (!projectIdSchema.safeParse(raw).success) return { status: 404, error: `unknown project: ${raw}` };
-    const bootId = await resolveBootProject();
-    if (raw === 'default' || raw === bootId) return { root: bootRoot };
-    const project = (await loadWorkspaceConfig()).projects.find((entry) => entry.id === raw);
-    if (!project) return { status: 404, error: `unknown project: ${raw}` };
-    if ((await probeProjectStatus(project.root)).status === 'missing') {
-      return { status: 409, error: `project folder not found: ${raw}` };
-    }
-    return { root: project.root };
-  };
-
-  const skillsUpdateResponse = async (state: SkillsUpdateState): Promise<SkillsUpdateState> => {
-    const config = await loadWorkspaceConfig();
-    return { ...state, autoUpdateEnabled: effectiveSkillsAutoUpdate(config), inherited: config.skillsAutoUpdate === undefined };
-  };
-
-  // ---- chained family: skills updates (workspace-level) ----
-  const skillsUpdateRoutes = new Hono<ProjectApiEnv>()
-    .get('/workspace/skills-update', queryZodValidator(skillsUpdateInputSchema, { message: 'projectId is required' }), async (c) => {
-      const parsed = { data: c.req.valid('query') };
-      const resolved = await resolveSkillsUpdateRoot(parsed.data.projectId);
-      if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
-      const state: SkillsUpdateState = skillsUpdate.snapshot(resolved.root);
-      void skillsUpdate.check(resolved.root).catch(() => {});
-      return c.json(await skillsUpdateResponse(state));
-    })
-
-    .post('/workspace/skills-update/check', jsonZodValidator(skillsUpdateInputSchema, { message: 'body must contain only projectId' }), async (c) => {
-      const parsed = { data: c.req.valid('json') };
-      const resolved = await resolveSkillsUpdateRoot(parsed.data.projectId);
-      if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
-      return c.json(await skillsUpdateResponse(await skillsUpdate.check(resolved.root, true)));
-    })
-
-    .post('/workspace/skills-update/apply', jsonZodValidator(skillsUpdateInputSchema, { message: 'body must contain only projectId' }), async (c) => {
-      const parsed = { data: c.req.valid('json') };
-      const resolved = await resolveSkillsUpdateRoot(parsed.data.projectId);
-      if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
-      try {
-        return c.json(await skillsUpdateResponse(await skillsUpdate.update(resolved.root, true)));
-      } catch (error) {
-        if (error instanceof SkillsUpdateConflictError) {
-          return c.json({ error: 'another skills update operation is running', state: await skillsUpdateResponse(skillsUpdate.snapshot(resolved.root)) }, 409);
-        }
-        throw error;
-      }
-    });
-
   // Workspace-level, server-selected target and executable. The empty JSON body is strict.
   const applicationUpdateRoutes = new Hono()
     .post('/workspace/application-update/apply', jsonZodValidator(applicationUpdateInputSchema), async (c) => {
@@ -3146,8 +3031,6 @@ export function createApp(deps: ServerDeps) {
   const workspaceConfigBody = (config: WorkspaceConfig): WorkspaceConfigResponse => ({
     browseRoot: config.browseRoot,
     projectsDir: config.projectsDir,
-    skillsAutoUpdate: config.skillsAutoUpdate ?? null,
-    effectiveSkillsAutoUpdate: effectiveSkillsAutoUpdate(config),
     archiveOnMerge: config.archiveOnMerge ?? null,
     effectiveArchiveOnMerge: resolveGlobalArchiveOnMerge(config).enabled,
     archiveOnMergeSource: resolveGlobalArchiveOnMerge(config).source,
@@ -3188,7 +3071,7 @@ export function createApp(deps: ServerDeps) {
 
     .put('/workspace/config', jsonZodValidator(() => workspaceConfigUpdateSchema), async (c) => {
       const parsed = { data: c.req.valid('json') };
-      const { browseRoot, projectsDir, skillsAutoUpdate, archiveOnMerge, composerDefaults, resources, agentDefaults } = parsed.data;
+      const { browseRoot, projectsDir, archiveOnMerge, composerDefaults, resources, agentDefaults } = parsed.data;
       for (const [configuredRoot, create] of [
         [browseRoot, false],
         [projectsDir, true],
@@ -3224,8 +3107,6 @@ export function createApp(deps: ServerDeps) {
           if (projectsDir !== undefined) config.projectsDir = projectsDir;
           if (archiveOnMerge === null) delete config.archiveOnMerge;
           else if (archiveOnMerge !== undefined) config.archiveOnMerge = archiveOnMerge;
-          if (skillsAutoUpdate === null) delete config.skillsAutoUpdate;
-          else if (skillsAutoUpdate !== undefined) config.skillsAutoUpdate = skillsAutoUpdate;
           if (composerDefaults?.autonomous === null) delete config.composerDefaults.autonomous;
           else if (composerDefaults?.autonomous !== undefined) {
             config.composerDefaults.autonomous = composerDefaults.autonomous;
@@ -3307,7 +3188,6 @@ export function createApp(deps: ServerDeps) {
   const workspaceConfigUpdateSchema = z.object({
     browseRoot: z.string().trim().min(1).max(4096).optional(),
     projectsDir: z.string().trim().min(1).max(4096).optional(),
-    skillsAutoUpdate: z.boolean().nullable().optional(),
     archiveOnMerge: z.boolean().nullable().optional(),
     composerDefaults: z
       .object({
@@ -3379,19 +3259,14 @@ export function createApp(deps: ServerDeps) {
       return c.json(await discoverSkills(repoRoot, { builtin: builtinSkillsOf(c.get('project').manager) }));
     })
 
-    // The opt-in catalog for the "Import skills" panel: every skill a default
-    // (vendor) repo offers — `open-mercato/skills` — regardless of import state,
-    // so the panel can present them all with a per-skill toggle. Empty once a repo
-    // configures its own `skillsRepos` (nothing is gated then). `wait=1` lets the
-    // panel wait out a cold team-skill cache, same as `GET /skills` (spec 005).
+    // Every team skill the configured sources offer, including those this project switched
+    // off, so the Skills catalog can show each with its toggle: one entry per source copy, so a
+    // name two sources offer comes twice (#1494). Empty without `skillsRepos`.
+    // `wait=1` lets the panel wait out a cold team-skill cache, same as `GET /skills` (spec 005).
     .get('/skills/importable', queryZodValidator(waitQuery), async (c) => {
       const repoRoot = c.get('project').root;
-      const gated = await gatedSkillsRepos(repoRoot);
-      if (gated.size === 0) return c.json([]);
       if (c.req.valid('query').wait === '1') await waitForTeamSkills(repoRoot);
-      // The full skill, so the Skills catalog can preview one before it is enabled.
-      const importable = getTeamSkillsCached(repoRoot).filter((skill) => skill.team && gated.has(skill.team.repo));
-      return c.json(importable);
+      return c.json(getTeamSkillsCached(repoRoot));
     })
 
     // Refresh team skills (spec 005): clone/fetch the configured skills repos,
@@ -3416,15 +3291,14 @@ export function createApp(deps: ServerDeps) {
       // single request may not stuff an unbounded key set (#429) — the shared
       // schema+cap half of both ui-state routes lives in `uiStateBody`.
       const parsed = { data: c.req.valid('json') };
-      // Merge into the project's own file: the legacy skill fallback is read-only (#1408).
       const merged = { ...(await readProjectUiState(repoRoot)), ...parsed.data };
       try {
         await mkdir(dataDir, { recursive: true });
-        await writeFile(uiStatePath(repoRoot), `${JSON.stringify(merged, null, 2)}\n`, 'utf8');
+        await writeProjectUiState(repoRoot, merged);
       } catch (err) {
         return c.json({ error: err instanceof Error ? err.message : String(err) }, 500);
       }
-      return c.json(await withLegacySkillSelection(merged));
+      return c.json(merged);
     });
 
   // ---- chained family: workflows (project-scoped) --------------------------
@@ -3832,19 +3706,9 @@ export function createApp(deps: ServerDeps) {
   };
 
   /**
-   * Every control on one run (any `/runs/:id` request that is not a read) first asks who owns it
-   * (#779, plan step 3): a `serve` and a headless `cez run` can share a project's runs.
-   * - Another live cezar process's run answers `409 { error }`, the shape these routes already
-   *   use for a run that exists but cannot be acted on now. Reads are never refused.
-   * - A run whose owner is proven dead is adopted first — claimed, loaded and settled as
-   *   interrupted, never resumed (`settleOrphanedRun`) — and the control then applies. Otherwise
-   *   Stop on a crashed `cez run` would be a dead end until this cockpit restarted. Stop is the one
-   *   control the adoption carries out itself: its run settles as cancelled, and Stop answers that
-   *   it stopped it (`stoppedOnAdoption`).
-   * - A run this process stopped writing after a conflicting write answers 409 too.
-   *
-   * Registered against explicit paths, like `requireAutomations`: `route()` re-registers it under
-   * the mount prefix, and it gates every family's `/runs/:id` routes registered after it.
+   * Gate every run control by family ownership: refuse foreign or quarantined writers with 409;
+   * adopt proven dead owners without resuming agents. Reads remain available. Stop carries its
+   * cancellation through adoption.
    */
   const requireRunControl = async (c: Context<ProjectApiEnv>, next: Next) => {
     const id = c.req.param('id');
@@ -4076,6 +3940,8 @@ export function createApp(deps: ServerDeps) {
         systemPrompt: parsed.data.systemPrompt,
         worktree: parsed.data.worktree,
         autonomous: parsed.data.autonomous,
+        archiveWhenDone: parsed.data.archiveWhenDone,
+        autoMergePr: parsed.data.autoMergePr,
         // Opt-in inbox (#471): the capability is the ceiling, so a client asking
         // for follow-ups on a server that has them off gets a plain `false`
         // rather than an error — the run is still perfectly valid without them.
@@ -4171,6 +4037,12 @@ export function createApp(deps: ServerDeps) {
           title: parsed.data.title,
           titleSummary: parsed.data.title,
           titleOrigin: 'user',
+        });
+      }
+      if (parsed.data.archiveWhenDone !== undefined || parsed.data.autoMergePr !== undefined) {
+        store.updateRun(id, {
+          ...(parsed.data.archiveWhenDone === undefined ? {} : { archiveWhenDone: parsed.data.archiveWhenDone }),
+          ...(parsed.data.autoMergePr === undefined ? {} : { autoMergePr: parsed.data.autoMergePr }),
         });
       }
       return c.json(store.getRun(id));
@@ -6255,7 +6127,6 @@ export function createApp(deps: ServerDeps) {
     .route('/', providersRoutes)
     .route('/', projectsRoutes)
     .route('/', agentProfilesRoutes)
-    .route('/', skillsUpdateRoutes)
     .route('/', applicationUpdateRoutes)
     .route('/', workspaceConfigRoutes)
     .route('/', fsBrowseRoutes)
@@ -6312,7 +6183,6 @@ const NO_WEBHOOK_ERROR =
 
 export function startServer(deps: ServerDeps, port: number, listener?: Server): ServerType & { shutdownForRestart: () => Promise<void> } {
   const workspaceEvents = deps.workspaceEvents ?? new WorkspaceEventBus();
-  const skillsUpdate = deps.skillsUpdate ?? new SkillsUpdateService({ invalidateCatalog: refreshTeamSkills });
   // The subscription hub rides the same HTTP server (one port, zero config):
   // createApp registers the topics, the `upgrade` hook below owns the socket.
   const socketHub = deps.socketHub ?? createSocketHub();
@@ -6345,7 +6215,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     },
     afterRecover: (project) => deps.delegation?.service.armDestroyRetries(project.id),
   });
-  const archiveOnMerge = new ArchiveOnMergeCoordinator({
+  const archiveDeps: import('./archive-on-merge.ts').ArchiveOnMergeDeps = {
     projects: async () => {
       const boot = { id: bootProjectId, root: deps.repoRoot, status: 'ok' as const };
       if (resolveCapabilities(process.env, deps.bindHost).singleProject) return [boot];
@@ -6362,6 +6232,18 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
         work(store, id => sharedContexts.peek(project.id)?.manager.isActive(id) ?? false, valid));
     },
     lookup: lookupMergedPullRequests,
+  };
+  const archiveOnMerge = new ArchiveOnMergeCoordinator(archiveDeps);
+  const completionActions = new CompletionActionCoordinator({
+    projects: archiveDeps.projects,
+    withStore: (project, work) => archiveDeps.withStore(project, (store, _active, valid) => work(store, valid)),
+    forge: async project => {
+      const info = await getRepoInfo(project.root);
+      const driver = resolveForge(info);
+      const repository = info?.remote ? forgeWebRoot(info.remote) : null;
+      return driver && repository ? { driver, repository } : undefined;
+    },
+    head: (project, branch) => getBranchHead(project.root, branch),
   });
   // Injected contexts (tests) skip `prepareManager`.
   sharedContexts.onContextBuilt(addressManager);
@@ -6377,7 +6259,6 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     contexts: sharedContexts,
     automationStore: bootAutomationStore,
     workspaceEvents,
-    skillsUpdate,
     socketHub,
     cezarPort,
     projectLookup,
@@ -6421,8 +6302,6 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     listener.on('request', getRequestListener(serverOptions.fetch, { hostname: serverOptions.hostname }));
   }
   const server = listener ?? serve(serverOptions);
-  const coordinator = new SkillsUpdateCoordinator(skillsUpdate, async () =>
-    effectiveSkillsAutoUpdate(await loadWorkspaceConfig()));
   // EVERY registered project, remote or not: a schedule needs none. `github` is present only for
   // a github.com remote, and only then does the project's handle poll.
   const automationProjects = new Map<string, { root: string; github?: { owner: string; repo: string } }>();
@@ -6512,7 +6391,6 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     if (event === 'project-added') {
       const project = (data as { project?: { id?: unknown; root?: unknown; status?: unknown } }).project;
       if (project && typeof project.id === 'string' && typeof project.root === 'string' && project.status !== 'missing') {
-        coordinator.add(project.id, project.root);
         const { id, root } = project as { id: string; root: string };
         void rememberAutomationProject(id, root).then(() => {
           if (!automationsEnabled()) return;
@@ -6522,7 +6400,6 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
       }
     } else if (event === 'project-removed') {
       const id = (data as { id?: unknown }).id;
-      if (typeof id === 'string') coordinator.remove(id);
       if (typeof id === 'string') {
         automationCoordinator.remove(id);
         automationProjects.delete(id);
@@ -6532,10 +6409,10 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   });
   const startBackgroundServices = () => {
     archiveOnMerge.start();
+    completionActions.start();
     void listProjects().then((projects) => {
       const all = projects.some((project) => project.root === deps.repoRoot)
         ? projects : [{ id: deps.bootProjectId ?? 'default', root: deps.repoRoot, status: 'ok' as const }, ...projects];
-      coordinator.start(all);
       // #781: every registered project's preview leftovers, not only the boot project's.
       void sweepRegisteredPreviewLeftovers(all, deps.previewHost).catch(() => 0);
       // #667: build every other project's context now, so the first click on one does not pay
@@ -6550,8 +6427,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
           .catch(() => undefined);
       }
       // #801: with automations off there is nothing to warm — no remote to resolve, no receipts
-      // to reconcile, and above all no scheduler to start. The skills-update coordinator above is
-      // a separate feature and starts either way.
+      // to reconcile, and above all no scheduler to start.
       if (!automationsEnabled()) return;
       void Promise.all(all.map(async (project) => {
         await rememberAutomationProject(project.id, project.root);
@@ -6576,7 +6452,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     resolveProject: async (projectId) => projectLookup.resolve?.(projectId),
   });
   server.once('close', () => {
-    unsubscribe(); archiveOnMerge.stop(); coordinator.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close();
+    unsubscribe(); archiveOnMerge.stop(); completionActions.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close();
     socketHub.close();
     previewSocket.close();
     void deps.previewHost?.close().catch(() => undefined);
@@ -6584,7 +6460,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   // The one `upgrade` listener: the subscription bus and the preview pane's socket (#781).
   attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), previewSocket.route]);
   const shutdownForRestart = async (): Promise<void> => {
-    archiveOnMerge.stop();
+    archiveOnMerge.stop(); completionActions.stop();
     sharedContexts.disposeAll(); // close every built secondary project before old process exits
     deps.store.flush();
     socketHub.close();
@@ -6622,37 +6498,9 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
 }
 
 /**
- * The WebSocket twin of the `/api/*` request-origin guard (#426), applied
- * before the `/api/v1/ws` handshake. WebSocket is NOT subject to CORS — any web
- * page may open `ws://127.0.0.1:<port>/api/v1/ws` and, unlike a forced HTTP GET,
- * would get to READ what comes back — so this guard is load-bearing:
- *
- *   1. Host allowlist (local mode): a non-loopback Host is a DNS-rebound
- *      request; kill it before the handshake. Same anchored
- *      `isLoopbackHostHeader` rules as the HTTP guard.
- *   2. Origin check: browsers always attach `Origin` to a WS handshake. A
- *      same-authority Origin is the cockpit itself. A LOOPBACK origin with a
- *      loopback Host is also admitted — that is the `npm run dev` Vite proxy
- *      (`changeOrigin` rewrites Host, the browser's `localhost:5173` Origin
- *      survives). Unlike the HTTP write guard we cannot REQUIRE `Sec-Fetch-Site`
- *      here — Safari sends no `Sec-Fetch-*` at all and requiring it would lock
- *      the dev proxy out of it — but we do honor it when it is there: Chromium
- *      does send it on a WS handshake, and page JS cannot forge it (forbidden
- *      header name), so a cross-port attacker page announcing `same-site` is
- *      rejected on the browser that ships it while Safari/Firefox still fall
- *      back to the loopback rule. Best available, not fail-open.
- *      No Origin at all is a non-browser client — same stance as the HTTP guard.
- *
- * The loopback-origin fallback still admits, on a browser that sends no
- * `Sec-Fetch-Site`, a page served from ANOTHER loopback port. That is no longer
- * a caveat the caller must remember: the verdict carries a `trusted` flag, and
- * the hub only lets an UNtrusted connection subscribe to topics a publisher
- * marked `loopbackReadable`. `health` is flagged so (the CORS-open discovery
- * payload, #431); every other topic stays trusted-only by default, so a topic
- * carrying run or repo content is mechanically unreachable from a foreign local
- * page without any per-topic vigilance. A connection is `trusted` when it is
- * provably the cockpit itself: a same-authority Origin, a no-Origin native
- * client, or a dev proxy the browser vouches for via `Sec-Fetch-Site`.
+ * Validate topic-bus upgrades before handshake. Local Host must be loopback. Same-authority or
+ * native clients are trusted; verified dev proxies are trusted. Metadata-free foreign loopback
+ * origins are untrusted and may read only loopbackReadable topics.
  */
 export function verifyWsUpgrade(req: IncomingMessage, bindHost?: string): WsUpgradeVerdict {
   const host = req.headers.host;
@@ -6748,20 +6596,8 @@ export function isSafeSessionId(sessionId: string): boolean {
 }
 
 /**
- * The CLI command that reopens a run's session for interactive take-over, per
- * backend. Legacy/undefined records default to Claude. Returns null when the id
- * is not a shape we recognise — callers degrade (no take-over) rather than
- * splice it into a shell.
- *
- * Validate, don't quote (#431): the session id is the only variable spliced
- * into the command string, and `openInTerminal` runs that string through bash
- * on darwin/linux but through `cmd /K` on win32. cmd.exe does not treat `'` as
- * a quote character, so POSIX-quoting the id handed Windows users a literal
- * `claude --resume '9f8e…'` and Claude answered "no conversation found".
- * Constraining the charset to one with no metacharacter in ANY of those shells
- * needs no quoting at all and fails closed on an unexpected id — a stronger
- * guarantee than escaping, and platform-independent. Ids are UUID/CLI-minted
- * today; this keeps a future source safe.
+ * Build native session takeover commands. Legacy/undefined backend defaults to Claude. Refuse
+ * unrecognized session-id shapes rather than embedding unsafe or platform-misquoted values.
  */
 export function resumeCommand(runner: string | undefined, sessionId: string): string | null {
   if (!isSafeSessionId(sessionId)) return null;

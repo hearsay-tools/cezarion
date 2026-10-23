@@ -8,14 +8,9 @@ import { loadConfig, type SkillsRepoSource } from './config.ts';
 import { parseFrontmatter, type Skill } from './skills.ts';
 
 /**
- * Team skills from remote git repos (spec 005), janitor-style: a bare clone
- * without a checkout, listed with `git ls-tree` and read with `git show`.
- * The cache lives in `~/.cache/cez/skills/<owner>__<name>/` — global, so one
- * fetch serves every project. A directory skill's files reach a run through its
- * task worktree, or `~/.cache/cez/skill-files/` without one (#1024) — never the
- * main checkout. Everything degrades: no network / no access to
- * the skills repo means the team skills quietly disappear from the list while
- * local skills keep working. Nothing here ever blocks startup.
+ * Global bare-clone skill cache, read through ls-tree/show. List and companion files use pinned
+ * commit identity. Owned worktrees or the file cache receive materialized files; never the main
+ * checkout. Network failure preserves local discovery.
  */
 
 const LIST_TIMEOUT_MS = 10_000; // ls-tree / show / rev-parse
@@ -30,18 +25,9 @@ interface GitResult {
 }
 
 /**
- * Hardening applied to *every* git invocation here (#428). The `repo`/`ref`
- * strings ultimately come from a file — `.ai/cezar/config.json` — that an
- * attacker might influence (a prompt-injected Write-only agent, a synced
- * config), so git must never be able to pick a remote-helper transport:
- *  - `protocol.ext.allow=never` / `fd.allow=never` kill the `ext::`/`fd::`
- *    helpers — the arbitrary-command-execution vector (`ext::sh -c …`).
- *  - `GIT_ALLOW_PROTOCOL` allowlists only real transports; anything else
- *    (including `ext`) is refused even if a value slips past validation.
- *  - `protocol.file.allow=user` keeps direct local-path clones (a documented
- *    source shape) working while blocking submodule/recursive file abuse.
- *  - `GIT_TERMINAL_PROMPT=0` stops git blocking on a credential prompt — this
- *    runs on cockpit open and must never hang the boot.
+ * Restrict every remote-skill Git invocation to accepted transports. Disable ext/fd helpers and
+ * interactive prompts; permit documented direct local sources without enabling recursive file
+ * transport.
  */
 const GIT_HARDENING_ARGS = [
   '-c',
@@ -77,22 +63,8 @@ function git(args: string[], timeoutMs: number, cwd?: string): Promise<GitResult
 const ALLOWED_URL_SCHEMES = new Set(['https', 'http', 'ssh', 'git', 'file']);
 
 /**
- * The git remote for a configured source, or null when the value is unsafe to
- * hand to `git` (#428). Team-skill repos are code-trusted — their skill bodies
- * become agent system prompts — but the *string* is attacker-influenceable, so
- * it must never be able to select a transport helper or pose as a git option.
- * We accept exactly:
- *  - `owner/name`         GitHub shorthand → canonical https
- *  - `https://` `http://` web URLs
- *  - `ssh://…` or scp-like `git@host:path`
- *  - a local path (`/abs`, `./`, `../`, `~/…`, `C:\…`) or `file://…`
- * and reject the RCE/argument-injection surface: a leading `-`, the `::`
- * remote-helper syntax (`ext::sh -c …`, `fd::…`), and any other URL scheme.
- *
- * Every reject here maps to a real vector. Shapes that are merely *unusual* —
- * a Windows drive path, `~/…` — stay accepted: `BACKWARD_COMPATIBILITY.md` §5
- * protects the `skillsRepos` source shape, so narrowing it is a breaking change
- * and needs a migration path, not a silent refusal.
+ * Normalize accepted shorthand, web, SSH and local skill sources. Reject option-like values,
+ * remote-helper syntax and unsupported schemes before invoking Git; return null on refusal.
  */
 export function safeRemoteFor(repo: string): string | null {
   const value = repo.trim();
@@ -220,15 +192,8 @@ export async function fetchAll(bareDir: string): Promise<void> {
 }
 
 /**
- * Resolve a source ref to the immutable commit SHA it names, or null (#428).
- * An unsafe ref is refused outright. A ref pinned to a full commit SHA is
- * verified to name exactly that commit and is *never* replaced by a moving
- * `HEAD` fallback — that is the whole point of pinning against a force-push /
- * supply-chain swap. A branch/tag falls back through the usual candidates.
- *
- * Always returning a SHA (never the mutable name) means one listing reads every
- * skill at a single commit: a concurrent `refreshTeamSkills` can move the branch
- * head mid-read without the list and the bodies drifting apart.
+ * Resolve a safe source ref to an immutable commit. A full SHA must name that exact commit and
+ * never falls back to a moving ref. Branch/tag resolution may use the normal candidates.
  */
 async function resolveRef(bareDir: string, ref: string): Promise<string | null> {
   if (!isSafeRef(ref)) return null;
@@ -364,11 +329,8 @@ interface SkillDirSource {
 }
 
 /**
- * Where a directory team skill's files live in its bare clone, or null. They are
- * read at `skill.team.commit`, the commit its body was listed at (#428), so the
- * files match the prompt even when another project has since fetched the ref
- * further. Only a skill without that commit, or one the clone no longer holds,
- * resolves `skill.team.ref` instead.
+ * Locate directory skill files at the body’s recorded commit. Resolve the source ref only for a
+ * legacy missing commit or a clone that no longer holds it.
  */
 async function resolveSkillDirSource(skill: Skill): Promise<SkillDirSource | null> {
   if (!skill.team?.dir || !skill.team.path.endsWith('SKILL.md')) return null;
@@ -469,38 +431,9 @@ async function removeUnlisted(dir: string, keep: Set<string>, prefix = ''): Prom
 export const TEAM_SKILL_AGENT_DIRS = ['.claude', '.agents', '.cursor'] as const;
 
 /**
- * Copy a directory skill (SKILL.md + references/…) out of the bare clone into
- * `<worktree>/.claude/skills/<name>/` (claude),
- * `<worktree>/.agents/skills/<name>/` (codex/pi — the canonical dir SKILL_DIRS
- * scans first), and `<worktree>/.cursor/skills/<name>/` (Cursor), and keep all
- * destinations out of the user's git via `.git/info/exclude`.
- * Returns the absolute directories it wrote, in `TEAM_SKILL_AGENT_DIRS` order;
- * empty when none was (not a directory skill, no clone, every destination
- * outside the worktree…). A destination skipped while others were written is
- * missing from the list, so the caller can name a copy that did land. (#286 —
- * writing only the claude dir left codex/pi without the companion files on disk.)
- *
- * Only ever for a run's OWN task worktree (#1024): those three directories in
- * the main checkout are local skills to `discoverSkills`, so a copy left there
- * outranks the team source for every later run and never refreshes. A run
- * without a task worktree uses `materializeSkillToCache` instead.
- *
- * Nothing is written or pruned outside `realpath(repoRoot)`. Before touching a
- * destination its real location is resolved (the realpath of its nearest
- * existing ancestor, or of itself, plus the rest); one a symlink leads out of
- * the worktree — a `.claude` linked to the main checkout's, a symlinked `<name>`
- * dir — is skipped whole: no directory, marker, file, exclude line or prune. A
- * link that stays inside, such as a tracked `.claude -> .agents`, is followed.
- * Inside a marked copy a symlink is unlinked, never followed; inside an
- * unmarked one a file whose path leads out is skipped.
- *
- * A destination this function created carries `TEAM_SKILL_MARKER` and is
- * replaced on the next call, so files a newer commit dropped do not linger. The
- * marker is written first, then paths whose file/directory type changed
- * upstream are cleared, the files written, and stale files removed after them,
- * so a crash leaves a marked, complete-or-mixed copy the next run replaces —
- * never a half-empty one. An existing directory without the marker may be the
- * user's own: it is overlaid as before, never pruned, and never marked.
+ * Copy a directory skill and its companion files into TEAM_SKILL_AGENT_DIRS in an owned task
+ * worktree, excluding destinations from Git. Return only written directories; preserve
+ * containment and use the cache fallback for other runs.
  */
 export async function materializeSkillDir(
   repoRoot: string,
@@ -545,17 +478,9 @@ export async function materializeSkillDir(
 const SKILL_FILES_TTL_MS = 7 * 24 * 60 * 60 * 1_000;
 
 /**
- * Materialize a directory skill for a run WITHOUT its own task worktree (#1024):
- * worktree off, a non-git project, a Continue whose worktree is gone. Writes
- * `<skillFilesCacheDirFor(repo)>/<commit>/<name>/` and returns that absolute
- * directory for the skill prompt to name; nothing is written to the project
- * and nothing to `info/exclude`.
- *
- * Content-addressed by commit: the copy is staged in a sibling and renamed into
- * place, so an existing one is complete and is reused as-is, its commit dir
- * touched. That source's other commit dirs untouched for `SKILL_FILES_TTL_MS`
- * are pruned. Never throws — any cache error degrades to null (no files on disk,
- * only the body in the prompt).
+ * Materialize directory skill files in the commit-keyed cache for runs without an owned
+ * worktree. Stage then rename complete copies, prune unused old commits and return null on
+ * failure. Never write project files or info/exclude.
  */
 export async function materializeSkillToCache(skill: Skill): Promise<string | null> {
   try {
@@ -638,15 +563,8 @@ const cloneAttempted = new Set<string>();
 // skills repo cannot both start a fetch and have the loser mark the source
 // failed after the winner already stamped it.
 const fetchInFlight = new Map<string, Promise<void>>();
-// Isolated review worktrees have no local `.agents/skills` (gitignored, absent
-// in a fresh checkout), so codex reads skills straight from this global bare
-// cache. The last successful fetch is stamped inside the bare clone so every
-// process sharing `~/.cache/cez/skills` observes the same six-hour TTL — a
-// new `cez run` or a second cockpit does not fetch again on first touch.
-// `refresh` (the explicit button / #613's post-update invalidateCatalog) still
-// fetches unconditionally. The stamp is written with the workspace-config
-// discipline: a unique per-writer tmp + rename, so two processes cannot
-// truncate each other's staging file (#367).
+// Share the passive-fetch TTL stamp across processes using unique-temp atomic writes.
+// Explicit refresh still fetches unconditionally; fresh worktrees can read the bare cache.
 const PASSIVE_FETCH_TTL_MS = 6 * 60 * 60 * 1_000;
 const LAST_FETCH_STAMP = 'cez-last-fetch';
 
@@ -762,7 +680,8 @@ function initialTeamSkillsLoad(repoRoot: string): Promise<Skill[]> {
 }
 
 /**
- * The current team-skill list for this project, straight from memory. The
+ * The current team-skill list for this project, straight from memory: one entry per source and
+ * name, in source order, so one name can appear once per source (see `mergeSourceLists`). The
  * first call per `repoRoot` kicks off an async background load (clone + list)
  * and returns immediately — the GUI refetches, so remote skills appear moments
  * later instead of blocking the first `GET /api/skills`.
@@ -837,13 +756,19 @@ function fetchBareSource(repo: string): Promise<void> {
   return work;
 }
 
-/** First source wins a name, in configured source order. */
+/**
+ * Every source's copy of a name, in configured source order (#1494). Only an exact source and
+ * name repeat (one `repo` listed at two refs) collapses, to the first. Name precedence is
+ * `discoverSkills`'s, which applies the project's off-list first: switching one source's copy
+ * off must leave the next source's copy to win.
+ */
 function mergeSourceLists(lists: Array<Skill[] | undefined>): Skill[] {
   const out: Skill[] = [];
   const seen = new Set<string>();
   for (const skill of lists.flatMap((list) => list ?? [])) {
-    if (seen.has(skill.name)) continue;
-    seen.add(skill.name);
+    const key = JSON.stringify([skill.team?.repo, skill.name]);
+    if (seen.has(key)) continue;
+    seen.add(key);
     out.push(skill);
   }
   return out;

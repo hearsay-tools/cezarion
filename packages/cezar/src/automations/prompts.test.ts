@@ -42,6 +42,15 @@ describe('AUTOMATION_SCHEMA_REFERENCE', () => {
     for (const bound of ['60-86400', '1-90', '1-100', '1-200', '1-4']) expect(AUTOMATION_SCHEMA_REFERENCE).toContain(bound);
   });
 
+  it('states the opt-in completion behavior and its scope', () => {
+    expect(AUTOMATION_SCHEMA_REFERENCE).toContain('"archiveWhenDone": boolean (default false)');
+    expect(AUTOMATION_SCHEMA_REFERENCE).toContain('"autoMergePr": boolean (default false)');
+    expect(AUTOMATION_SCHEMA_REFERENCE).toContain('current-head CI and GitHub rules pass');
+    expect(AUTOMATION_SCHEMA_REFERENCE).toContain('may mark a draft ready');
+    expect(AUTOMATION_SCHEMA_REFERENCE).toContain('merge before archive');
+    expect(AUTOMATION_SCHEMA_REFERENCE).toContain('editing the automation does not change tasks it already launched');
+  });
+
   it('lists exactly the placeholders the template renderer accepts', () => {
     const named = new Set([...AUTOMATION_SCHEMA_REFERENCE.matchAll(/\{\{([^{}]+)\}\}/g)].map((match) => match[1]!));
     named.delete('task'); // the workflow step token in the inline-steps example, not an automation placeholder
@@ -112,6 +121,16 @@ describe('automationsPrompt and the skill body', () => {
   it('embeds the full reference in the skill body', () => {
     expect(createAutomationSkillBody(command)).toContain(AUTOMATION_SCHEMA_REFERENCE);
     expect(CREATE_AUTOMATION_SKILL_NAME).toBe('create-cezarion-automation');
+  });
+
+  it('does not infer completion consent from autonomy or enabling an automation', () => {
+    expect(automationsPrompt(command)).toContain('[--archive-when-done] [--auto-merge-pr]');
+    for (const text of [automationsPrompt(command), createAutomationSkillBody(command)]) {
+      expect(text).toMatch(/only when the user asks|unless the user asks/);
+      expect(text).toContain('current-head CI and GitHub rules');
+      expect(text).toContain('future tasks only');
+    }
+    expect(createAutomationSkillBody(command)).toContain('Autonomy and enabling an automation do not enable either control.');
   });
 
   it('builds the CLI command from this process, quoted for a POSIX shell', () => {

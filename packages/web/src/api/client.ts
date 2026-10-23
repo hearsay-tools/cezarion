@@ -131,7 +131,6 @@ import type {
   WorkflowsResponse,
   WorkspaceConfigResponse,
   WorkspaceUiState,
-  SkillsUpdateState,
   WorkerDestroyResult,
   VoiceDecideRequest,
   VoiceDecision,
@@ -392,18 +391,9 @@ async function unwrapValidated<R extends ClientResponse<unknown, number, Respons
 }
 
 /**
- * The one `fetch` both request paths go through — hand-written and typed alike.
- *
- * Shared rather than duplicated because the two behaviours below are the contract, and a
- * migrated route that quietly lost either of them would be a regression nobody sees until a
- * server is down:
- *
- * - **Credentials.** Remote installations are commonly behind reverse-proxy Basic Auth, and
- *   every background query/mutation must reuse that authenticated browser session just like
- *   navigation does. `include` is harmless for the root-relative, same-origin paths used here.
- * - **Unreachable is an `ApiError`, not a `TypeError`.** The request never got an answer — not
- *   an HTTP failure, hence status 0 — but callers get one error type either way instead of two.
- *   An abort is re-thrown untouched: that is the caller cancelling, not the server failing.
+ * Shared fetch boundary for typed and hand-written requests. Include browser credentials,
+ * convert unreachable transport failures to status-0 ApiError, and rethrow caller aborts
+ * unchanged.
  */
 async function fetchOrThrow(url: string, init?: RequestInit): Promise<Response> {
   try {
@@ -698,8 +688,8 @@ export async function refreshSkills(): Promise<Skill[]> {
   )
 }
 
-/** The default (vendor) repo's full skill list — every skill the "Import skills" panel can
- *  offer, regardless of import state. Empty once a repo configures its own `skillsRepos`. */
+/** Every team skill the configured `skillsRepos` offer, including those this project switched
+ *  off. Empty without `skillsRepos`. */
 export async function getImportableSkills(opts?: ReadOptions): Promise<ImportableSkill[]> {
   return unwrap(
     await cez.api.v1.p[':projectId'].skills.importable.$get(
@@ -1668,7 +1658,7 @@ export async function createRunPr(id: string): Promise<CreatePrResponse> {
   )
 }
 
-/** Rename a run (#389): the edit becomes the display title and wins over any auto-summary. */
+/** Edit a run's title or completion settings through the shared PATCH contract. */
 export async function patchRun(id: string, patch: PatchRunInput): Promise<RunRecord> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs[':id'].$patch({
@@ -2271,34 +2261,6 @@ export async function removeAgentProfile(id: string): Promise<RemoveAgentProfile
       param: { id: encodeURIComponent(id) },
     }),
     `/workspace/agent-profiles/${encodeURIComponent(id)}`,
-  )
-}
-
-/** Cached Open Mercato update state for one registered project. The GET is immediate; the
- * server may start a stale detection-only refresh after taking its snapshot. */
-export async function getSkillsUpdate(
-  projectId: string,
-  opts?: ReadOptions,
-): Promise<SkillsUpdateState> {
-  return unwrap(
-    await cez.api.v1.workspace['skills-update'].$get({ query: { projectId } }, init(opts)),
-    `/workspace/skills-update?projectId=${encodeURIComponent(projectId)}`,
-  )
-}
-
-/** Force a bounded detection pass. The browser supplies identity only, never executable input. */
-export async function checkSkillsUpdate(projectId: string): Promise<SkillsUpdateState> {
-  return unwrap(
-    await cez.api.v1.workspace['skills-update'].check.$post({ json: { projectId } }),
-    '/workspace/skills-update/check',
-  )
-}
-
-/** Apply the server-owned, lock-authorized update set. Identity is the only browser input. */
-export async function applySkillsUpdate(projectId: string): Promise<SkillsUpdateState> {
-  return unwrap(
-    await cez.api.v1.workspace['skills-update'].apply.$post({ json: { projectId } }),
-    '/workspace/skills-update/apply',
   )
 }
 

@@ -12,10 +12,8 @@ export class WorktreeMutationLockTimeout extends Error {
 }
 
 /**
- * Serialize worktree mutations by canonical Git common directory, across processes.
- * A short-lived keeper owns both the claim and Git children: losing the caller's
- * IPC channel releases the claim only AFTER its Git command exits. No heartbeat
- * expiry can admit a prune beside a slow/stopped add. No daemon or dependency.
+ * Serialize mutations by canonical Git common directory. The keeper retains its claim until its
+ * Git children exit, including after caller IPC closes.
  */
 export async function withWorktreeMutation<T>(repoRoot: string, operation: (git: WorktreeGit) => Promise<T>, options: { waitMs?: number } = {}): Promise<T> {
   const waitMs = options.waitMs ?? 120_000;

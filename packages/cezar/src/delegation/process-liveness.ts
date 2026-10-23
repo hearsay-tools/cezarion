@@ -3,10 +3,8 @@ import { readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 
 /**
- * Synchronous, dependency-free proof that a crashed worker generation's processes are gone
- * (#469, spec 2026-09-26-worker-orphan-finalization). Sync so `continueRun` stays sync.
- * An unreadable cwd is no evidence (hearsay-tools/cezarion#889); every other uncertainty answers
- * "alive" or "unknown", never "gone".
+ * Synchronous process evidence for worker recovery and resource cleanup. Unreadable cwd is no
+ * evidence; other uncertainty stays alive or unknown, never proven gone.
  */
 /** `pgid`: the session leader leads its own process group (hearsay-tools/cezarion#890). */
 export type RecordedProcess = { pid: number; startToken?: string; pgid?: number };

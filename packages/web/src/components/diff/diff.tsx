@@ -8,23 +8,9 @@ import { ImagePreview, shouldPreviewImage } from './image-preview'
 import type { DiffFileChange, DiffProps } from './types'
 
 /**
- * `<Diff>` — the ONE diff surface of the cockpit (spec §"Session git view" #390; R5 1.4).
- * Props are ours (`./types.ts`); consumers never import a diff library.
- *
- * Engine decision (Step 1.4): `@pierre/diffs` v1.2.12 was evaluated and REJECTED — it
- * imports `createHighlighter` from the full `shiki` bundle entry and keeps its own
- * module-level highlighter singleton + theme pipeline (`@pierre/theming`), with no API to
- * feed it our `shiki/core` singleton or pre-tokenized lines. Adopting it would instantiate
- * Shiki twice and pull the full-bundle entry into `web/dist` — both explicitly forbidden by
- * `lib/highlighter.ts`'s contract — and its Shadow-DOM/own-theme styling bypasses our
- * `--diff-*`/`--syn-*` tokens (7.1 MB dist besides). So the facade renders on our own
- * `./diff-view` implementation. If an engine swap ever happens, it happens HERE, behind the
- * same props.
- *
- * The renderer loads as a lazy chunk (parser + word-diff + Shiki wiring stay off the main
- * bundle). If that chunk fails to load — stale deploy, partial `web/dist`, offline cache —
- * the inline `DiffFallback` below renders the same props as plain marked-up patch text:
- * degraded, never blank.
+ * Diff facade with local props and a lazy renderer. Keep parser, word diff and Shiki off the
+ * main chunk. DiffFallback renders plain patch text with the same props when loading fails;
+ * engine swaps stay behind this facade.
  */
 export function Diff(props: DiffProps) {
   const [engine, setEngine] = useState<{ View: ComponentType<DiffProps> } | 'failed' | null>(null)

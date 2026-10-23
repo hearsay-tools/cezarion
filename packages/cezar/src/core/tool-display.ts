@@ -1,12 +1,6 @@
 /**
- * Tool display model — turns a backend tool name + raw input into the
- * `{toolKind, title, subtitle?}` a tool card renders. Computed ONCE here in
- * the protocol layer (paseo's pattern), never in components, so the thread,
- * activity groups and notifications all say the same thing.
- *
- * Pure function over untrusted input: tool inputs come off the wire and may
- * be null, partial (streamed incrementally) or arbitrarily malformed —
- * `toolDisplay` must never throw.
+ * Tool display model for backend names and raw input. Pure and total over malformed or partial
+ * wire values.
  *
  * Known names covered (matched case-insensitively so claude's `Bash` and
  * opencode's `bash` share one row):

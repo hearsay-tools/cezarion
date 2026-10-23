@@ -242,14 +242,8 @@ function statusWord(letter: string): ChangedFile['status'] {
 }
 
 /**
- * Structured "what changed here" for a directory vs its base branch:
- * committed + uncommitted + untracked (via `add -N`), anchored by the shared
- * `resolveTaskDiffBase` rule (`src/git-diff-base.ts`) — the merge-base against
- * the freshest base ref, so the diff stays *this task's* changes even after the
- * base moves on, and the branch's state at `runStartedAt` when the agent
- * repointed the worktree onto another branch (#591, #751).
- * `worktreeShortstat` resolves through the same helper; the text-blob `/diff`
- * endpoint (`worktreeDiff`) deliberately does not — see its own note.
+ * Structured committed, uncommitted and untracked changes, anchored by resolveTaskDiffBase.
+ * worktreeShortstat shares this rule; worktreeDiff retains its whole-branch anchor.
  */
 export async function collectChanges(
   dir: string,
@@ -491,18 +485,8 @@ export function imageMimeType(path: string): string | null {
 }
 
 /**
- * Extensions the "open in the OS default app" route (#365) will hand to the OS launcher —
- * deliberately NOT `imageMimeType`'s list, even though it is otherwise the same set minus one.
- *
- * `IMAGE_MIME` earns its SVG entry from two mitigations that belong to the HTTP response:
- * the bytes land inside an `<img>` (inert), and the raw route attaches a no-script CSP. The OS
- * launcher has neither — it just asks the OS to open the file, and the default handler for
- * `.svg` is usually a browser, which runs `<script>` inside it from a `file://` origin. A repo
- * can force an SVG down the preview branch on demand (`*.svg binary` in its own `.gitattributes`
- * makes numstat report it binary ⇒ `shouldPreviewImage`), so this is reachable, not theoretical.
- *
- * Raster only: pixels, no document. Sharing the list with the raw route would silently inherit
- * a decision that was justified by a CSP this path never applies.
+ * Raster extensions allowed for OS default-app opening. Do not inherit SVG from the HTTP image
+ * list: its browser response protections do not apply to an OS handoff.
  */
 const OS_OPENABLE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']);
 

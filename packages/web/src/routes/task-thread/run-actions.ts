@@ -176,7 +176,8 @@ export function runActionFlags(run: RunRecord): RunActionFlags {
  *  on a failed run holding wait results, and the header carries Archive on the Session tab then. */
 export function archiveInComposer(run: RunRecord): boolean {
   const flags = runActionFlags(run)
-  return flags.archive && !flags.cancel
+  // A blocker puts the same manual Archive control beside its reason in the header.
+  return flags.archive && !flags.cancel && !run.archiveBlocker
 }
 
 /** Promote only an authoritative clear verdict on a Needs-you task. Unknown eligibility

@@ -9,7 +9,7 @@ export const RENEW_MS = 5_000
 /** Only periodic public cockpit GET families; never arbitrary URLs or mutation execution. */
 export function allowedLiveRead(path: string): boolean {
   if (!path.startsWith('/api/v1/') || path.includes('#') || /[\\\r\n]/.test(path)) return false
-  return /^\/api\/v1\/(?:workspace\/(?:runs-index|skills-update)|p\/[a-zA-Z0-9_-]+\/(?:runs\/[a-zA-Z0-9._-]+\/(?:changes|commits)|github(?:\/(?:checks|ref-status))?))(?:\?[^#]*)?$/.test(path)
+  return /^\/api\/v1\/(?:workspace\/runs-index|p\/[a-zA-Z0-9_-]+\/(?:runs\/[a-zA-Z0-9._-]+\/(?:changes|commits)|github(?:\/(?:checks|ref-status))?))(?:\?[^#]*)?$/.test(path)
 }
 export const liveDemandSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('workspace') }),

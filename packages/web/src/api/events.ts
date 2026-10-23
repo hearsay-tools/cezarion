@@ -2,16 +2,8 @@ import { toRunSummary, type ApiRun, type ProcessUsage, type RunRecord, type RunS
 import type { TodoItem } from '@open-mercato/cezar-api-client'
 
 /**
- * The global stream's data layer: parse one SSE message, and fold it into cached state.
- *
- * Everything here is pure (plus one tiny store) and React-free on purpose — this is the part that
- * has to be right, and a reducer you can call with an array and an event is a reducer you can
- * table-test. `global-events.tsx` owns the connection and does nothing but call into this.
- *
- * The doctrine (spec, "Architecture"): the stream is for immediacy, `GET /api/runs` and
- * `GET /api/runs/:id` are authoritative. So these reducers only ever *patch* what a query already
- * fetched. They never invent a cache out of a stream message — a list built from whatever events
- * happened to arrive after connect is not the run list, it is a subset that looks like one.
+ * Parse workspace frames and patch existing query caches. HTTP snapshots remain authoritative;
+ * never synthesize an unfetched run list from a partial stream.
  */
 
 // ---- wire → typed event ------------------------------------------------------------------
@@ -185,16 +177,8 @@ export function mergeSummary(previous: RunSummary | undefined, run: RunRecord): 
 // ---- live usage --------------------------------------------------------------------------
 
 /**
- * The live `{runId → {cpuPct, rssBytes, procCount}}` map, kept outside the query cache.
- *
- * It ticks about every 2 s while any run is alive, and it is *never persisted* — no NDJSON line,
- * no run record. Putting it in the query cache would mean either invalidating runs every 2 s (a
- * refetch storm aimed at a server on the same laptop) or writing it into the durable run objects
- * (a new identity for every row, so every list re-renders for a CPU percentage most views don't
- * show). An external store keeps the blast radius at exactly the components that subscribe.
- *
- * The snapshot is the whole map by reference, so `useSyncExternalStore` stays stable between ticks
- * and a per-run selector only re-renders when that run's own sample was replaced.
+ * Ephemeral run-resource samples outside durable records and query caches. Keep stable snapshots
+ * between ticks and notify only subscribed selectors.
  */
 export interface UsageStore {
   subscribe(listener: () => void): () => void

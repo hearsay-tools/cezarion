@@ -22,19 +22,9 @@ import {
 } from './voice-copy'
 
 /**
- * Voice mode in the ⌘K palette (spec 2026-10-21-voice-mode, § User experience): a sentence in the
- * input gets a Will do row, Return commits it, and every action other than opening a task becomes
- * a proposal that a SECOND input confirms. The server decides what a sentence means; this hook
- * owns the timing (debounce, abort, the bounded wait on Return), the execution and the outcome
- * reports.
- *
- * The Return that commits a sentence acts only on the decision for exactly that sentence, so it
- * can create a proposal but never confirm one (§ Input 5). Return confirms only in an empty input
- * while a proposal is shown.
- *
- * Return follows cmdk's selection (hearsay-tools/cezarion#1461): a sentence shows its Will do row
- * at once, first and so selected, and Return commits only while that row is still selected. A row
- * the user moved to keeps Return, and a decision that arrives later never takes it back.
+ * Resolve a sentence, then require a separate input to confirm any proposal. The submitting
+ * Return cannot confirm it. Bind decisions to exact input and cmdk selection; late answers must
+ * not steal the selected action.
  */
 
 /** The Will do row's cmdk value: the palette compares its selection against it. */

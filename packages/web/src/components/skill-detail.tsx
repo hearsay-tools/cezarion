@@ -39,8 +39,8 @@ export function SkillSourceTag({ source, className }: { source: Skill['source'];
 
 /**
  * Whether a skill is enabled for this project, and how to change it (hearsay-tools/cezarion#1408).
- * A `locked` switch is on for good: local and global skills, and team skills from a repo the
- * project configured itself. Only default (vendor) team skills have a live switch.
+ * A `locked` switch is on for good: local, global and built-in skills. Every team skill has a
+ * live switch (hearsay-tools/cezarion#1494).
  */
 export interface SkillActivation {
   ariaLabel: string
@@ -52,12 +52,13 @@ export interface SkillActivation {
 
 /** The activation switch: a real `role="switch"`, its own tab stop. The track is 24×40 px; a
  *  transparent `before:` layer on the button itself widens the hit area to 44×48 px. */
-export function SkillSwitch({ skill, activation }: { skill: Pick<Skill, 'name'>; activation: SkillActivation }) {
+export function SkillSwitch({ skill, activation }: { skill: Pick<Skill, 'name' | 'team'>; activation: SkillActivation }) {
   return (
     <span className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center">
       <Switch
         data-slot="skill-switch"
         data-skill={skill.name}
+        data-repo={skill.team?.repo}
         data-locked={activation.locked || undefined}
         aria-label={activation.ariaLabel}
         checked={activation.checked}

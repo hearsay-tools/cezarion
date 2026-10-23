@@ -61,7 +61,7 @@ await once(server,'listening');
 process.send?.({event:'listening',port:server.address().port});
 `)
   const child = spawn(process.execPath, ['--import', 'tsx', script], {
-    cwd: packageRoot, env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_REMOTE: '0', CEZ_SKILLS_AUTO_UPDATE: '0' },
+    cwd: packageRoot, env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_REMOTE: '0' },
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
   })
   const events: Array<{ event: string; port?: number; count?: number }> = []

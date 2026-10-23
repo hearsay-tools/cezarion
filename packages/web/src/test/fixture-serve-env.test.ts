@@ -120,7 +120,7 @@ it('drops ambient CEZ_* opt-in flags and cockpit plumbing from the fixture envir
   vi.stubEnv('CEZ_TASK_ID', 'ambient-task')
   const env = fixtureServeEnv(root())
   expect(Object.keys(env).filter(key => key.startsWith('CEZ_')).sort())
-    .toEqual(['CEZ_DRY_RUN', 'CEZ_HOME', 'CEZ_REMOTE', 'CEZ_SKILLS_AUTO_UPDATE'])
+    .toEqual(['CEZ_DRY_RUN', 'CEZ_HOME', 'CEZ_REMOTE'])
 })
 it('keeps the CEZ_* flags a spec passes explicitly', () => {
   vi.stubEnv('CEZ_PREVIEW', '1')

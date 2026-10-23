@@ -4,6 +4,7 @@ import type { AutomationDefinition, AutomationKind, Runner } from '@open-mercato
 import { ApiError, createAutomation, deleteAutomation, setAutomationEnabled, updateAutomation } from '@/api/client'
 import { useConfig, useProviderStatus, useRunnerModels, useWorkflows } from '@/api/queries'
 import { CpuIcon, TerminalIcon, WorkflowIcon } from '@/components/design-icons'
+import { CompletionControls } from '@/components/completion-controls'
 import { SegmentedControl } from '@/components/facet-filter'
 import { PickerPill, PickerPillGroup } from '@/components/picker-pill'
 import { Button } from '@/components/ui/button'
@@ -177,7 +178,9 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
               <Switch aria-label="Autonomous" checked={draft.autonomous} onCheckedChange={(autonomous) => patch({ autonomous })} />
               <span>Autonomous <span className="text-muted-foreground">· runs without waiting for answers</span></span>
             </label>
-            <p className="text-xs break-words text-muted-foreground">Each run is an ordinary task in its own worktree, queued behind the parallel cap, never auto-merged.</p>
+            <p className="text-xs break-words text-muted-foreground">Each run is an ordinary task in its own worktree, queued behind the parallel cap.</p>
+            <CompletionControls archiveWhenDone={draft.archiveWhenDone} autoMergePr={draft.autoMergePr} onChange={patch} disabled={saving} />
+            {automation ? <p className="text-xs text-muted-foreground">These settings apply to future tasks. Existing tasks keep their settings.</p> : null}
           </Section>
 
           <Section title="Enable" section="enable" failure={failure}>

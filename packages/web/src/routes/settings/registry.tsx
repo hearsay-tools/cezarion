@@ -1,5 +1,5 @@
 import { TasksSection } from './archive-on-merge-field'
-import { BellIcon, BotIcon, FoldersIcon, GaugeIcon, KeyRoundIcon, PaletteIcon, SparklesIcon } from '@/components/design-icons'
+import { BellIcon, BotIcon, FoldersIcon, GaugeIcon, KeyRoundIcon, PaletteIcon } from '@/components/design-icons'
 import { BookmarkIcon, FileCogIcon, FileTextIcon, FolderGit2Icon, KeyboardIcon } from 'lucide-react'
 import type { ComponentType, SVGProps } from 'react'
 
@@ -14,7 +14,6 @@ import { NotificationsSection } from './notifications-section'
 import { ProjectsSection } from './projects-section'
 import { PromptTemplatesSection } from './prompt-templates-section'
 import { ResourcesSection } from './resources-section'
-import { SkillsSection } from './skills-section'
 import { SidebarSection } from './sidebar-section'
 import { WorktreesSection } from './worktrees-section'
 
@@ -47,7 +46,6 @@ export type SettingsSectionId =
   | 'notifications'
   | 'prompt-templates'
   | 'keyboard'
-  | 'skills'
   | 'tasks'
 
 /** Which settings area a section belongs to — and therefore which store it writes. */
@@ -157,14 +155,6 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
     scope: 'global',
   },
   { id: 'tasks', title: 'Tasks', description: 'Automatic task archiving after pull requests merge.', icon: FolderGit2Icon, component: TasksSection, scope: 'global' },
-  {
-    id: 'skills',
-    title: 'Skills',
-    description: 'Updates for skills installed on this machine.',
-    icon: SparklesIcon,
-    component: SkillsSection,
-    scope: 'global',
-  },
   {
     id: 'accounts',
     title: 'Agent accounts',

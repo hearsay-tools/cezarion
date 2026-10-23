@@ -2,6 +2,8 @@
 
 cezar is a **parallel coding-agents orchestrator**: a local cockpit (CLI + browser GUI) for running and tracking AI coding-agent tasks in a repo. You type a task, pick a workflow and a backend — Claude Code, Codex or OpenCode (experimental), or a mix per step — and watch it work live: steps, tool calls, tokens, diffs. Each task runs in its own git worktree, ends at a review gate (never auto-merges), and can be pushed as a draft PR through `gh`. Everything is local: no accounts, no database server, no cloud — state lives under `.ai/cezar/`: the run store is one embedded SQLite file (`runs.db`, `node:sqlite`, built into Node), the rest is plain JSON, NDJSON and Markdown. The server stack stays deliberately small: strict TypeScript (ESM, Node 24.15+), Hono + SSE, Zod at every boundary, and YAML workflows. The cockpit is React 19 + Vite + Tailwind v4 + shadcn/ui, compiled to static assets (the legacy vanilla UI was retired in R7). Every module is meant to be read in one sitting.
 
+Architecture decisions live in [docs/adr/](docs/adr/). Consult the relevant records before changing a mechanism.
+
 ## Issue and PR citations
 
 This fork is `hearsay-tools/cezarion`; upstream is `open-mercato/cezar`.
@@ -29,7 +31,6 @@ Practical rules:
 
 - When a feature seems to need configuration, the design is wrong. Discover it, or default it.
 - Features that widen exposure or cost (network, other processes) are opt-in behind a `CEZ_*` flag, off by default — the zero-config default is also the safe default.
-- Owner-approved exception: Open Mercato skill updates are default-on. They start only after the server listens, run at most once per six-hour cache window, use explicit lock-authorized names and fixed bounded `npx` argument arrays under a cross-process lock, and never block boot. `CEZ_SKILLS_AUTO_UPDATE=0` or the global Settings override disables automatic application (background detection remains read-only).
 - Owner-approved exception: project warm-up is default-on (hearsay-tools/cezarion#667). After the server listens it builds every other registered project's context one at a time, which runs recovery and so may resume interrupted runs and spend tokens in projects not yet opened; it skips projects another live cockpit owns and single-project mode, claims each warmed project's `cockpit.lock` for the process lifetime, and `CEZ_PROJECT_WARMUP=0` restores purely lazy builds.
 - A missing dependency, an absent peer, a read-only home: degrade to a smaller working cockpit, never fail the boot.
 - Prefer a proxy-free, daemon-free mechanism when one exists — and when it doesn't, keep the mechanism invisible: no process to manage, no port to remember, no file to edit.

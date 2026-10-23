@@ -28,7 +28,7 @@ let dataDir: string;
 let server: ChildProcess | undefined;
 
 const env = () => {
-  const vars: NodeJS.ProcessEnv = { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: join(root, 'home'), CEZ_NO_BANNER: '1' };
+  const vars: NodeJS.ProcessEnv = { ...process.env, CEZ_DRY_RUN: '1', CEZ_HOME: join(root, 'home') };
   delete vars.CEZ_AUTOMATIONS;
   return vars;
 };

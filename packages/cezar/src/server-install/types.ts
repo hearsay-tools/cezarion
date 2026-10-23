@@ -17,11 +17,8 @@ export const STEP_STATUSES = ['pending', 'done', 'skipped', 'failed'] as const;
 export type StepStatus = (typeof STEP_STATUSES)[number];
 
 /**
- * One thing a step created, tagged by who owns its removal:
- *  - `owned`  — cezar authored it and nothing else uses it → uninstall removes it.
- *  - `shared` — a system tool the operator may now depend on (gh, agent CLIs,
- *    certbot + its renewal timer, the cert itself) → uninstall lists it with a
- *    manual removal hint instead of yanking it.
+ * Artifact removal ownership: owned resources may be removed; shared resources get manual
+ * removal guidance.
  */
 export const stepArtifactSchema = z.object({
   kind: z.enum(['owned', 'shared']),

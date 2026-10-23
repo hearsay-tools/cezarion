@@ -61,8 +61,6 @@ export type AppShellProps = {
   repo?: RepoChip | null
   /** Inbox badge count. Null/0 renders no badge. Step 3.2 feeds it from the SSE stream. */
   inboxCount?: number | null
-  /** A quiet, accessible marker on Skills when a checked update remains actionable. */
-  skillsUpdateAvailable?: boolean
   /** Running cezar version beside the wordmark. Null while health is unknown. */
   version?: string | null
   /** The npm registry's newer version, when the server's update check found one (#368). */
@@ -160,7 +158,6 @@ export function AppShell({
   breadcrumb,
   repo = null,
   inboxCount = null,
-  skillsUpdateAvailable = false,
   version = null,
   latestVersion = null,
   applicationUpdate,
@@ -281,7 +278,6 @@ export function AppShell({
     repo,
     // The badge belongs to the Inbox item — with the item gone there is nothing to badge.
     inboxCount: inboxAvailable ? inboxCount : null,
-    skillsUpdateAvailable,
     version,
     latestVersion,
     applicationUpdate,
@@ -369,7 +365,6 @@ export function AppShell({
                   signal={tabBarSignal}
                   projectName={mobileProjects?.projects.find((project) => project.id === currentProjectId)?.name ?? repo?.name ?? null}
                   inboxCount={nav.inboxCount}
-                  skillsUpdateAvailable={skillsUpdateAvailable}
                   showNewTask={areaPathname !== '/new'}
                 />
               </div>
@@ -386,7 +381,6 @@ type NavProps = {
   items: NavItem[]
   repo: RepoChip | null
   inboxCount: number | null
-  skillsUpdateAvailable: boolean
   version: string | null
   latestVersion: string | null
   applicationUpdate?: ApplicationUpdateState
@@ -624,7 +618,6 @@ function SidebarContent({
   items,
   repo,
   inboxCount,
-  skillsUpdateAvailable,
   version,
   latestVersion,
   applicationUpdate,
@@ -688,7 +681,7 @@ function SidebarContent({
       </div>
 
       {sessionScope ? <div className="shrink-0 px-3 pt-2">{sessionScope}</div> : null}
-      <SidebarViewTabs items={items} activeTo={activeTo} needsYou={needsYou} inboxCount={inboxCount} skillsUpdateAvailable={skillsUpdateAvailable} onNavigate={onNavigate} />
+      <SidebarViewTabs items={items} activeTo={activeTo} needsYou={needsYou} inboxCount={inboxCount} onNavigate={onNavigate} />
       <div data-slot="project-task-navigation" className={'min-h-0 flex-1 overflow-y-auto overscroll-contain p-3'}>
         <SidebarNavigateContext.Provider value={onNavigate}>
           {sidebarList ?? <div data-slot="task-quick-list">{taskQuickList}</div>}

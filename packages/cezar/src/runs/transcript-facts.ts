@@ -1,7 +1,6 @@
 /**
- * The few transcript facts the delegation reconcile and message delivery ask about, folded as
- * events are appended so those paths never re-read a whole transcript (hearsay-tools/cezarion#880).
- * Spec: docs/superpowers/specs/2026-10-07-transcript-facts-index-design.md.
+ * Incremental transcript facts for delivery and delegation reconciliation. Keep history
+ * authoritative and sidecars rebuildable; avoid whole-transcript reads on hot paths.
  */
 import { randomBytes } from 'node:crypto';
 import { renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -17,9 +16,8 @@ import { REFRESH_FACTS, TranscriptFactsQueue } from './transcript-facts-queue.ts
 interface Entry { facts: TranscriptFacts; written: number }
 
 /**
- * Per-run `runs/<id>.facts.json`, kept current by `append` and checked against the transcript on
- * first use in a process: its byte length while it is plain, its stat once it is archived.
- * A cache: anything unreadable or stale is rebuilt from the transcript.
+ * Per-run facts sidecar, updated on append and validated by plain byte length or archive
+ * identity. Rebuild unreadable or stale cache state from history.
  */
 export class TranscriptFactsIndex {
   private readonly entries = new Map<string, Entry>();

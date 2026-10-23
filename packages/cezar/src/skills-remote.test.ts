@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -21,6 +21,7 @@ import {
   waitForTeamSkills,
   writeLastFetchAt,
 } from './skills-remote.ts';
+import { discoverSkills, type Skill } from './skills.ts';
 import { seedTeamDirSkillClone, seedTeamSkillsClone, writeSkillsReposConfig } from './skills-remote.testkit.ts';
 
 const TTL = 6 * 60 * 60 * 1_000;
@@ -330,5 +331,61 @@ describe('materializeSkillToCache — the per-commit copy for runs without a tas
     const { home, greeter } = await greeterSource();
     writeFileSync(join(home, '.cache', 'cez', 'skill-files'), 'not a directory\n');
     await expect(materializeSkillToCache(greeter)).resolves.toBeNull();
+  });
+});
+
+describe('team skills from several sources (#1494)', () => {
+  const dirs: string[] = [];
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function scratch(prefix: string): string {
+    const dir = mkdtempSync(join(tmpdir(), prefix));
+    dirs.push(dir);
+    return dir;
+  }
+
+  /** Two real sources both offering `shared`; A is listed twice (two refs), so its copies repeat. */
+  async function twoSourceProject(uiState?: Record<string, unknown>): Promise<{ repoRoot: string; a: string; b: string }> {
+    vi.stubEnv('HOME', scratch('cez-team-home-'));
+    vi.stubEnv('CEZ_HOME', scratch('cez-team-cezhome-'));
+    const repoRoot = scratch('cez-team-root-');
+    const a = `org-${randomUUID().slice(0, 8)}/skills`;
+    const b = `org-${randomUUID().slice(0, 8)}/skills`;
+    for (const [repo, skills] of [[a, { shared: 'A-SHARED', onlya: 'A-ONLY' }], [b, { shared: 'B-SHARED' }]] as const) {
+      const clone = await seedTeamSkillsClone(repo, skills);
+      dirs.push(clone.sourceDir);
+      // A fresh stamp: the load lists the on-disk clone and never fetches.
+      await writeLastFetchAt(clone.bareDir, Date.now());
+    }
+    mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
+    writeFileSync(join(repoRoot, '.ai/cezar/config.json'), JSON.stringify({
+      skillsRepos: [{ repo: a, ref: 'main' }, { repo: b, ref: 'main' }, { repo: a, ref: 'main' }],
+    }));
+    if (uiState) writeFileSync(join(repoRoot, '.ai/cezar/ui-state.json'), JSON.stringify(uiState));
+    return { repoRoot, a, b };
+  }
+
+  const refs = (skills: Skill[]) => skills.map((skill) => `${skill.team?.repo}:${skill.name}`).sort();
+
+  it('keeps one copy per source and name in the team list', async () => {
+    const { repoRoot, a, b } = await twoSourceProject();
+    expect(refs(await waitForTeamSkills(repoRoot))).toEqual([`${a}:onlya`, `${a}:shared`, `${b}:shared`].sort());
+    expect(refs(getTeamSkillsCached(repoRoot))).toEqual([`${a}:onlya`, `${a}:shared`, `${b}:shared`].sort());
+  });
+
+  it('the first source wins a name until its copy is switched off, then the next source shows', async () => {
+    const on = await twoSourceProject();
+    await waitForTeamSkills(on.repoRoot);
+    expect((await discoverSkills(on.repoRoot)).find((skill) => skill.name === 'shared')).toMatchObject({ body: 'A-SHARED', team: { repo: on.a } });
+
+    const off = await twoSourceProject();
+    writeFileSync(join(off.repoRoot, '.ai/cezar/ui-state.json'), JSON.stringify({ disabledTeamSkills: [{ repo: off.a, name: 'shared' }] }));
+    await waitForTeamSkills(off.repoRoot);
+    const shared = (await discoverSkills(off.repoRoot)).filter((skill) => skill.name === 'shared');
+    expect(shared).toHaveLength(1);
+    expect(shared[0]).toMatchObject({ body: 'B-SHARED', team: { repo: off.b } });
   });
 });

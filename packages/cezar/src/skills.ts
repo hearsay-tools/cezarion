@@ -1,9 +1,9 @@
 import { readdir, readFile, realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join, resolve, basename, dirname, extname } from 'node:path';
-import { gatedSkillsRepos } from './config.ts';
+import { teamSkillRefSchema, type TeamSkillRef } from '@open-mercato/cezar-contract/skills';
 import { getTeamSkillsCached } from './skills-remote.ts';
-import { readUiState } from './ui-state.ts';
+import { readProjectUiState } from './ui-state.ts';
 
 /**
  * A skill is a Markdown file with optional YAML-ish frontmatter (`name`,
@@ -53,15 +53,8 @@ export const SKILL_DIRS: Array<{ dir: string; source: Skill['source'] }> = [
   { dir: '.opencode/skills', source: 'agents' },
 ];
 
-/* Deliberately `homedir()` and not `agentHomePaths().claude`: these do NOT follow an
-   agent profile (`src/core/agent-profiles.ts`). A skill is CONTENT — a playbook — not
-   identity, and a second Claude login is not a second skill library. `npx skills`, which
-   writes the `~/.claude/skills` mirror, is profile-unaware for the same reason.
-
-   Resolved at catalog-read time (not module load) so a test can plant fixtures under a
-   temp `$HOME`. #366: empty under vitest — the same `process.env.VITEST` seam #365 uses
-   for the vendor team source — so the unit suite does not merge the developer's real
-   `~/.agents/skills` / `~/.claude/skills`. Production is unchanged. */
+/* Global skill libraries follow the user home, not an agent account. Resolve at read time;
+   under vitest omit real global sources so tests cannot read the developer’s library. */
 function globalSkillDirs(): Array<{ dir: string; source: Skill['source'] }> {
   if (process.env.VITEST) return [];
   return [
@@ -71,43 +64,27 @@ function globalSkillDirs(): Array<{ dir: string; source: Skill['source'] }> {
 }
 
 /**
- * Discover the merged skill catalog for a repo. Name collisions resolve
- * local-first: `.ai/cezar/skills` → `.ai/skills` → `.agents/skills` + agent
- * mirrors → global (`~/.agents/skills`, `~/.claude/skills`) → team repo
- * ("the user's repo is the source of truth"). Missing directories are fine —
- * an empty catalog is fully supported (steps fall back to their plain
- * prompt). Team skills come from the in-process cache; the first call starts
- * a background load so nothing here ever waits on the network.
+ * Discover skills local-first, then global and cached team sources. Missing sources and an
+ * empty catalog are valid; network loading stays in the background.
  *
- * Opt-out gate: skills from a *default* (vendor) skills repo — `open-mercato/skills`
- * for the zero-config majority, see `gatedSkillsRepos` — appear unless the user has
- * curated them away. `importedSkills` in this project's `.ai/cezar/ui-state.json` is a
- * tri-state: ABSENT means "not curated" and every default skill shows, unless an older cockpit
- * saved a workspace-level selection (`readUiState` supplies that as a fallback); a PRESENT
- * array (even `[]`) means the project has taken control and only those names show
- * (hearsay-tools/cezarion#1408). Companion provisioning reads the registry before this gate,
- * so a hidden default skill can still be installed as a companion. A repo that sets its own `skillsRepos` gates nothing regardless. This is the
- * single chokepoint, so the decision is identical for every consumer — catalog, composer
- * picker, planner, runner.
+ * Off-list: `disabledTeamSkills` in this project's `.ai/cezar/ui-state.json` names team skills
+ * by source repo and name. They are dropped from the team list before de-duplication, so the
+ * same name from another source still shows. Only the project's own file is read, and an absent
+ * or malformed list switches nothing off. This is the single chokepoint, so the decision is
+ * identical for every consumer — catalog, composer picker, planner, runner — and companion
+ * provisioning applies it too.
  *
- * `builtin` skills (#774) come from the caller, which alone knows whether they may be offered
- * (`RunManager.builtinSkills`). They are appended AFTER the sort, lowest precedence: any
- * discovered skill of the same name hides them.
+ * Caller-supplied builtin skills come last; discovered skills of the same name take precedence.
  */
 export async function discoverSkills(repoRoot: string, options: { builtin?: readonly Skill[] } = {}): Promise<Skill[]> {
-  const [lists, gatedRepos, uiState] = await Promise.all([
+  const [lists, uiState] = await Promise.all([
     Promise.all([
       ...SKILL_DIRS.map(({ dir, source }) => readMarkdownSkills(resolve(repoRoot, dir), source)),
       ...globalSkillDirs().map(({ dir, source }) => readMarkdownSkills(dir, source)),
     ]),
-    gatedSkillsRepos(repoRoot),
-    readUiState(repoRoot),
+    readProjectUiState(repoRoot),
   ]);
-  const teamSkills = filterImportedTeamSkills(
-    getTeamSkillsCached(repoRoot),
-    gatedRepos,
-    readImportedSkills(uiState),
-  );
+  const teamSkills = filterDisabledTeamSkills(getTeamSkillsCached(repoRoot), readDisabledTeamSkills(uiState));
   const merged: Skill[] = [];
   const seen = new Set<string>();
   for (const skills of [...lists, teamSkills]) {
@@ -127,38 +104,29 @@ export async function discoverSkills(repoRoot: string, options: { builtin?: read
 }
 
 /**
- * The imported team-skill names from a raw `ui-state.json` object, as a tri-state:
- * `undefined` means the key is absent — "not curated", so every default skill shows
- * (the opt-out default that keeps existing installs whole); an array (even empty) is
- * the user's explicit selection. Defensive because the file is user-editable: a value
- * that is not an array degrades to `undefined` (keep all — the safe, backward-compatible
- * reading), and non-string / empty entries inside an array are dropped rather than thrown on.
+ * The switched-off team skills from a raw `ui-state.json` object. Defensive because the file is
+ * user-editable: a value that is not an array reads as `[]`, and entries that do not parse as a
+ * `{ repo, name }` ref are dropped rather than thrown on.
  */
-export function readImportedSkills(uiState: Record<string, unknown>): string[] | undefined {
-  const value = uiState.importedSkills;
-  if (!Array.isArray(value)) return undefined;
-  return value.filter((name): name is string => typeof name === 'string' && name.length > 0);
+export function readDisabledTeamSkills(uiState: Record<string, unknown>): TeamSkillRef[] {
+  const value = uiState.disabledTeamSkills;
+  if (!Array.isArray(value)) return [];
+  const refs: TeamSkillRef[] = [];
+  for (const entry of value) {
+    const parsed = teamSkillRefSchema.safeParse(entry);
+    if (parsed.success) refs.push(parsed.data);
+  }
+  return refs;
 }
 
 /**
- * The opt-out gate: keep every team skill whose repo is NOT gated (a repo with its own
- * configured `skillsRepos` — auto-loads everything). For skills from a gated default
- * (vendor) repo, `importedSkills === undefined` keeps them ALL (not curated — the
- * historical behavior), while a present array keeps only the named ones. Local skills
- * carry no `team` and are always kept. Pure so the gate is unit-testable without a
- * network clone (the gated set is a const default otherwise).
+ * Drop every team skill the project switched off, matched on source repo AND name. Local skills
+ * carry no `team` and are always kept. Pure, so it is testable without a network clone.
  */
-export function filterImportedTeamSkills(
-  teamSkills: readonly Skill[],
-  gatedRepos: ReadonlySet<string>,
-  importedSkills: readonly string[] | undefined,
-): Skill[] {
-  // Not curated → the full default catalog still appears (no upgrade break).
-  if (importedSkills === undefined) return [...teamSkills];
-  const imported = new Set(importedSkills);
-  return teamSkills.filter(
-    (skill) => !skill.team || !gatedRepos.has(skill.team.repo) || imported.has(skill.name),
-  );
+export function filterDisabledTeamSkills(teamSkills: readonly Skill[], disabled: readonly TeamSkillRef[]): Skill[] {
+  if (disabled.length === 0) return [...teamSkills];
+  const off = new Set(disabled.map((ref) => JSON.stringify([ref.repo, ref.name])));
+  return teamSkills.filter((skill) => !skill.team || !off.has(JSON.stringify([skill.team.repo, skill.name])));
 }
 
 /**

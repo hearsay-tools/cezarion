@@ -58,6 +58,22 @@ describe('resolveComposerRunMode', () => {
 })
 
 describe('the new-task draft store', () => {
+  it('retains completion choices across navigation, reload and successful starts', () => {
+    writeDraft({ ...readDraft('other'), text: 'Ship it', archiveWhenDone: true, autoMergePr: true }, 'other')
+    expect(readDraft()).toMatchObject({ archiveWhenDone: false, autoMergePr: false })
+    clearStartedDraft('other')
+    expect(readDraft('other')).toMatchObject({ text: '', archiveWhenDone: true, autoMergePr: true })
+    const stored = localStorage.getItem('cez-new-task-draft:other')!
+    resetDraft()
+    localStorage.setItem('cez-new-task-draft:other', stored)
+    expect(readDraft('other')).toMatchObject({ archiveWhenDone: true, autoMergePr: true })
+  })
+
+  it('defaults absent and malformed completion choices to off', () => {
+    localStorage.setItem('cez-new-task-draft', JSON.stringify({ archiveWhenDone: 'true', autoMergePr: 1 }))
+    expect(readDraft()).toMatchObject({ archiveWhenDone: false, autoMergePr: false })
+  })
+
   it('starts empty with the never-chosen sentinels', () => {
     expect(readDraft()).toEqual({
       text: '',
@@ -71,6 +87,8 @@ describe('the new-task draft store', () => {
       worktree: null,
       autonomous: null,
       generateFollowups: null,
+      archiveWhenDone: false,
+      autoMergePr: false,
     })
   })
 
@@ -87,6 +105,8 @@ describe('the new-task draft store', () => {
       worktree: false,
       autonomous: null,
       generateFollowups: false,
+      archiveWhenDone: false,
+      autoMergePr: false,
     })
     const first = readDraft()
     expect(first.text).toBe('fix it')
@@ -109,6 +129,8 @@ describe('the new-task draft store', () => {
       worktree: null,
       autonomous: null,
       generateFollowups: true,
+      archiveWhenDone: false,
+      autoMergePr: false,
     })
     clearStartedDraft()
     expect(readDraft()).toEqual({
@@ -125,6 +147,8 @@ describe('the new-task draft store', () => {
       worktree: null,
       autonomous: null,
       generateFollowups: true,
+      archiveWhenDone: false,
+      autoMergePr: false,
     })
   })
 
@@ -141,6 +165,8 @@ describe('the new-task draft store', () => {
       worktree: false,
       autonomous: null,
       generateFollowups: false,
+      archiveWhenDone: false,
+      autoMergePr: false,
     })
     // A fresh page has no in-memory cache but keeps localStorage: resetDraft removes storage, so
     // instead drop only the cache by round-tripping through a raw storage read.
@@ -151,6 +177,8 @@ describe('the new-task draft store', () => {
       worktree: false,
       autonomous: null,
       generateFollowups: false,
+      archiveWhenDone: false,
+      autoMergePr: false,
       planFirst: true,
     })
   })
@@ -171,6 +199,8 @@ describe('the new-task draft store', () => {
       worktree: null,
       autonomous: null,
       generateFollowups: null,
+      archiveWhenDone: false,
+      autoMergePr: false,
     })
 
     resetDraft()
@@ -187,6 +217,8 @@ describe('the new-task draft store', () => {
       worktree: null,
       autonomous: null,
       generateFollowups: null,
+      archiveWhenDone: false,
+      autoMergePr: false,
     })
   })
 })

@@ -20,17 +20,8 @@ import {
 export const webhookTriggerSchema = z.enum(WEBHOOK_TRIGGERS);
 
 /**
- * One `GET /api/v1/projects` registry entry (multi-project spec, step 1.6).
- *
- * Unlike health's id+name pairs this carries the absolute `root`: the registry routes are
- * same-origin, the CORS-open health route is not, and that difference is the reason the two
- * project shapes are deliberately NOT the same type.
- *
- * Deliberately a CLOSED object even though the server's persistence schema
- * (`src/workspace/config.ts`, `workspaceProjectSchema.passthrough()`) keeps unknown keys in the
- * file: passthrough is a durability promise about `~/.cezar/config.json`, not a promise that the
- * API answers arbitrary keys. Modelling it as a loose object here would also be unprovable — see
- * the note on the index signature in `src/server/contract-parity.workspace.test.ts`.
+ * Closed registry response including absolute root. Keep it distinct from CORS-open health’s
+ * id/name pairs. Storage passthrough does not widen the wire contract.
  */
 export const projectListEntrySchema = z.object({
   id: z.string(),

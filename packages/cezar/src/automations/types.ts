@@ -42,6 +42,8 @@ export const automationTaskSchema = z
     worktree: z.boolean().optional(),
     generateFollowups: z.boolean().optional(),
     autonomous: z.boolean().optional(),
+    archiveWhenDone: z.boolean().optional(),
+    autoMergePr: z.boolean().optional(),
     systemPrompt: z.string().max(100_000).optional(),
   })
   .passthrough()

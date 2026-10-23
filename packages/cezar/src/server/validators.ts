@@ -3,29 +3,8 @@ import { validator } from 'hono/validator';
 import type { z } from 'zod';
 
 /**
- * Request validation as ROUTE MIDDLEWARE — the `json` / `param` / `query` trio every mutating
- * route reaches for.
- *
- * The point is not that handlers stop restating six lines of `safeParse`, though they do. It is
- * that Hono only records a validated shape in the ROUTE TYPE when validation happens as
- * middleware. Parsing inside a handler is invisible to it, which is why `POST /runs` used to
- * accept `{ totalNonsense: 12345 }` from `hc` without a murmur. Everything typed-client-side
- * flows from validating here instead of there.
- *
- * ## Why not `@hono/zod-validator`
- *
- * It is a thin wrapper over the same `hono/validator` used below, so it inherits Hono's two
- * behaviours at the JSON boundary — and both are wrong for this server:
- *
- *   - a malformed body answers Hono's PLAIN-TEXT `400 Malformed JSON in request body`, and the
- *     error hook never runs, so the `{error}` shape BACKWARD_COMPATIBILITY.md §2 protects (and
- *     the cockpit renders verbatim in a toast) is bypassed entirely;
- *   - a body sent WITHOUT a JSON content-type is silently discarded and the handler runs against
- *     `{}` — a 200 that applied an empty update, which is worse than a rejection.
- *
- * Both were verified against `@hono/zod-validator@0.9.0`, not inferred. `jsonZodValidator` settles
- * those cases itself and only delegates to Hono on the well-formed path, so the wire matches what
- * these handlers did when they parsed inline (`await c.req.json().catch(() => absent)`).
+ * Route-middleware validators for JSON, params and queries. Preserve typed input/output and the
+ * API’s JSON error boundary, including absent and malformed body policy.
  */
 
 type ErrorOptions = {

@@ -78,8 +78,6 @@ function serve({
   const state: WorkspaceConfigResponse = {
     browseRoot: '~/',
     projectsDir: '~/cezar/projects',
-    skillsAutoUpdate: null,
-    effectiveSkillsAutoUpdate: true,
     archiveOnMerge: null,
     effectiveArchiveOnMerge: false,
     archiveOnMergeSource: 'default',
@@ -194,8 +192,6 @@ describe('Agent accounts → Defaults for new projects', () => {
           return json({
             browseRoot: '~/',
             projectsDir: '~/cezar/projects',
-            skillsAutoUpdate: null,
-            effectiveSkillsAutoUpdate: true,
             composerDefaults: {
               autonomous: null,
               worktree: null,

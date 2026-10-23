@@ -72,9 +72,6 @@ import {
   getWorkflows,
   getWorkspaceConfig,
   getWorkspaceUiState,
-  getSkillsUpdate,
-  checkSkillsUpdate,
-  applySkillsUpdate,
   getWorktrees,
   editQueuedMessage,
   markRunSeen,
@@ -126,7 +123,6 @@ import type {
   RunSummary,
   SelectAgentProfileInput,
   SetAgentConfigInput,
-  SkillsUpdateState,
   UpdateAgentProfileInput,
   UpdateProjectInput,
   NotifyRunInput,
@@ -143,20 +139,8 @@ import type { InfiniteData } from '@tanstack/react-query'
 import { subscribeTopic } from './ws'
 
 /**
- * Query keys, in one place and exported, because they are a contract rather than an
- * implementation detail: Step 3.2's stream handlers invalidate and reconcile *these* keys when
- * an event says the data behind them moved. A key spelled inline at a call site is a key
- * nothing can invalidate.
- *
- * Hierarchical on purpose — `queryKeys.runs.all` invalidates the list and every single-run
- * query under it in one call.
- *
- * Every key leads with the ACTIVE project scope (multi-project spec, step 3.1): the registered
- * project id, or the stable `'default'` sentinel when unscoped — read at access time via
- * `queryScope()`, which is why the constant keys are getters. One cache, never bleeding across
- * projects: project A's `['a','runs','list']` and project B's `['b','runs','list']` are simply
- * different entries, and a scoped invalidation (`queryKeys.runs.all` under scope A) can only
- * ever reach A's data. Call sites are unchanged — they keep writing `queryKeys.runs.list()`.
+ * Shared hierarchical query keys, prefixed by the current project scope at access time. Stream
+ * handlers and consumers must use these keys for matching invalidation.
  */
 export const queryKeys = {
   get health() {
@@ -193,7 +177,7 @@ export const queryKeys = {
   get skillsReady() {
     return [queryScope(), 'skills', 'ready'] as const
   },
-  /** Children of `skills`: the default skills the catalog can enable. Sharing the `skills`
+  /** Children of `skills`: every team skill, on or off, each with a switch. Sharing the `skills`
    *  prefix means a refresh that invalidates the catalog re-reads the importable list too. */
   get importableSkills() {
     return [queryScope(), 'skills', 'importable'] as const
@@ -311,7 +295,6 @@ export const workspaceQueryKeys = {
   /** One account's auth state — a child of `agentProfiles`, so removing an account drops it too. */
   agentAccountStatus: (routeId: string) =>
     ['workspace', 'agent-profiles', 'status', routeId] as const,
-  skillsUpdate: (projectId: string) => ['workspace', 'skills-update', projectId] as const,
   /** One directory listing from `GET /api/fs/browse` (step 4.2's folder picker). Keyed by the
    *  browsed path — `null` is the browse root, whose absolute location only the server knows.
    *  Not scope-led: there is one filesystem behind the workspace, not one per project. */
@@ -1230,8 +1213,8 @@ export function useSkills(enabled = true) {
   return skills
 }
 
-/** Every skill the default (vendor) repo offers, enabled or not, as full definitions so the Skills
- *  catalog can preview one before it is enabled. Same fast-then-`wait=1` convergence as
+/** Every team skill the configured sources offer, on or off, as full definitions so the Skills
+ *  catalog can preview one before it is switched on. Same fast-then-`wait=1` convergence as
  *  `useSkills`: the catalog renders whatever the cache holds, then the cold-clone wait fills it in. */
 export function useImportableSkills(enabled = true) {
   const queryClient = useQueryClient()
@@ -1443,32 +1426,6 @@ export function useAgentProfiles() {
     queryKey: workspaceQueryKeys.agentProfiles,
     queryFn: ({ signal }) => getAgentProfiles({ signal }),
   })
-}
-
-export function useSkillsUpdate(projectId: string, enabled = true) {
-  const query = useQuery({
-    queryKey: workspaceQueryKeys.skillsUpdate(projectId),
-    queryFn: ({ signal }) => getSkillsUpdate(projectId, { signal }),
-    enabled,
-  })
-  const transient = query.data?.status === undefined || ['idle', 'checking', 'updating'].includes(query.data.status)
-  useLiveRead(`/api/v1/workspace/skills-update?projectId=${encodeURIComponent(projectId)}`, workspaceQueryKeys.skillsUpdate(projectId), liveRefetchInterval(enabled && transient ? 60_000 : false))
-  return query
-}
-
-export function useCheckSkillsUpdate(projectId: string) {
-  const queryClient = useQueryClient()
-  const key = workspaceQueryKeys.skillsUpdate(projectId)
-  return useMutation({
-    mutationFn: () => checkSkillsUpdate(projectId),
-    onSuccess: (state) => queryClient.setQueryData(key, state),
-  })
-}
-
-export function useApplySkillsUpdate(projectId: string) {
-  const queryClient = useQueryClient()
-  const key = workspaceQueryKeys.skillsUpdate(projectId)
-  return useMutation({ mutationFn: () => applySkillsUpdate(projectId), onSuccess: (state) => queryClient.setQueryData(key, state) })
 }
 
 /** Rename a run (#389): `PATCH /api/runs/:id`. Invalidates `runs.*` so the list and the detail
@@ -2050,25 +2007,8 @@ export interface ReferenceStatusEntry {
 export type ReferenceStatusLookup = (ref: ReferenceStatusRequest) => ReferenceStatusEntry
 
 /**
- * Every status this tab has ever learned, by reference — the memory that stops the chips
- * flickering.
- *
- * The queries are keyed by the WHOLE batch (`…/ref-status/40,42/12`), because a batch is what one
- * request covers. That makes the query cache exactly the wrong shape for DISPLAY: type one letter
- * into the search box and the visible set changes, which is a different key, which is a cold cache
- * entry — so every chip on screen blanked until the round trip finished, even though nothing about
- * those pull requests had changed. The same fires on the global page's 15 s index poll the moment
- * any task gains or loses a reference, and on every tab switch.
- *
- * So what is REMEMBERED is per reference, and outlives any one batch, surface or failure. Nothing
- * here is ever invented: an entry appears only when the forge answered with a status for that
- * exact number, and any later answer overwrites it. The cost is bounded staleness — a chip can
- * show the last successful answer while a new one is in flight — which is the same 60 s staleness
- * the cache already accepts, and is strictly better than blanking to a neutral chip that reads as
- * "nothing to see here".
- *
- * Module-level rather than per-hook so the sidebar, the table and the run header share one memory:
- * they routinely paint the same PR, and learning it three times would mean three flickers.
+ * Remember last-known status per reference across changing batch keys. Only forge answers
+ * populate it; failures retain the prior value and its stale indication.
  */
 const rememberedStatuses = new Map<string, ReferenceStatus>(restoreRememberedStatuses())
 /** Bounded like the server's own caches. Insertion-ordered, so the least recently learned goes. */
@@ -2089,13 +2029,8 @@ function rememberStatus(key: string, status: ReferenceStatus): void {
 }
 
 /**
- * The same memory, for the conflict axis — the numbers last seen as CONFLICTING.
- *
- * A set of keys rather than a second map, because only `true` is worth carrying: the interesting
- * population is tiny (a conflicting PR is the exception), and a key's absence already means the
- * one thing `undefined` has to mean everywhere else here — nothing is known. `rememberConflict`
- * deletes on a `false` answer, so a resolved conflict stops painting on the very next response
- * rather than lingering the way an un-cleared flag would.
+ * Remember only known conflicts. Remove resolved conflicts on false answers; absence means
+ * unknown.
  */
 const rememberedConflicts = new Set<string>(restoreRememberedConflicts())
 
@@ -2116,20 +2051,8 @@ function rememberConflict(key: string, conflicting: boolean): void {
 }
 
 /**
- * …and the same memory across a RELOAD, in `sessionStorage`.
- *
- * Without it a refresh repaints every chip neutral and then colours them in a beat later, which is
- * the "first we see the fallback, then it changes" flicker one level up from the one the in-memory
- * map fixed. The statuses are already on this machine; making the user watch them arrive again is
- * a choice, not a constraint.
- *
- * `sessionStorage`, not `localStorage`, and that is the safety bound: it dies with the tab, so the
- * oldest thing this can paint is from earlier in the same sitting — never a status from last week
- * shown with confidence on a cold morning. A live answer replaces it within one round trip either
- * way, and the tooltip labels a value as `last known` whenever the forge cannot be reached.
- *
- * Everything here is best-effort: private-mode quota errors, a disabled storage, a payload from a
- * future version — all degrade to the pre-persistence behaviour rather than breaking the cockpit.
+ * Persist last-known reference values in best-effort sessionStorage, scoped to this tab’s
+ * lifetime. A live answer replaces them; unavailable forge data remains labelled last known.
  */
 const REMEMBERED_STORAGE_KEY = 'cez.reference-statuses.v1'
 /** The conflict axis, under its own key rather than inside the payload above: the status file's
@@ -2255,17 +2178,8 @@ export function __clearRememberedStatusesForTests(): void {
 }
 
 /**
- * When to ask about a batch again — the server's answer, obeyed.
- *
- * The cockpit deliberately has no opinion here. Whether a status can still move is forge
- * semantics, and those live server-side next to the cache that decides whether asking would even
- * reach GitHub; a second copy in the cockpit was two tables of constants that had to agree with
- * nothing enforcing it. `null` means "nothing in this answer can change" — a table of merged pull
- * requests schedules nothing at all.
- *
- * The fallback covers only the shapes where there is no answer to obey yet: still loading, or a
- * transport error, where react-query's `retry` owns the immediate attempt and this is just the
- * backstop that keeps the query from going silent forever.
+ * Use the server’s recheck delay; null schedules nothing. Before a usable answer exists, retain
+ * a bounded retry/backstop cadence.
  */
 const REF_STATUS_FALLBACK_MS = 5 * 60_000
 

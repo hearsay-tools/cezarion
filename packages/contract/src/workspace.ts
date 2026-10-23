@@ -1,11 +1,12 @@
 import { z } from 'zod';
 import { effortLevelSchema } from './effort.ts';
 import { type Runner, runnerSchema } from './health.ts';
+import { teamSkillRefSchema } from './team-skill-ref.ts';
 
 /**
  * The workspace + settings families: `~/.cezar/config.json`'s settings slice, both GUI-pref bags
  * (per-repo and workspace), the per-repo agent knobs, provider auth status, the host model
- * catalog, the skills-update state, and the "Open in…" targets.
+ * catalog, and the "Open in…" targets.
  *
  * Node-free by construction (see README rule 1) — `zod` and the sibling contract modules only.
  */
@@ -31,9 +32,6 @@ export const workspaceConfigResponseSchema = z.object({
   browseRoot: z.string(),
   /** Checkout root for GUI-cloned projects — stored as written (`~` kept). */
   projectsDir: z.string(),
-  /** Stored override; `null` means inherit `CEZ_SKILLS_AUTO_UPDATE`, then true. */
-  skillsAutoUpdate: z.boolean().nullable(),
-  effectiveSkillsAutoUpdate: z.boolean(),
   archiveOnMerge: z.boolean().nullable(),
   effectiveArchiveOnMerge: z.boolean(),
   archiveOnMergeSource: z.enum(['global', 'environment', 'default']),
@@ -85,7 +83,6 @@ export type WorkspaceConfigResponse = z.infer<typeof workspaceConfigResponseSche
 export const setWorkspaceConfigInputSchema = z.object({
   browseRoot: z.string().trim().min(1).max(4096).optional(),
   projectsDir: z.string().trim().min(1).max(4096).optional(),
-  skillsAutoUpdate: z.boolean().nullable().optional(),
   archiveOnMerge: z.boolean().nullable().optional(),
   composerDefaults: z
     .object({
@@ -195,9 +192,10 @@ export const uiStateSchema = z.looseObject({
   lastAutonomous: z.boolean().optional(),
   /** Whether new runs should ask agents to append follow-up work. Absent → on. */
   lastGenerateFollowups: z.boolean().optional(),
-  /** The selected default team skills for this project. Absent: the legacy workspace selection
-   *  applies when it exists, else every default skill shows. Present (even `[]`): only these names. */
-  importedSkills: z.array(z.string().min(1).max(200)).max(200).optional(),
+  /** Team skills this project switched off, by source repo and name. Absent or `[]`: every team
+   *  skill shows. Legacy `importedSkills` keys still round-trip through
+   *  the loose object but nothing reads them. */
+  disabledTeamSkills: z.array(teamSkillRefSchema).max(200).optional(),
   /** Skill selection frequency (#408): name → times chosen, across BOTH composers. */
   skillUsage: z.record(z.string(), z.number()).optional(),
   runsView: z.enum(['list', 'table']).optional(),
@@ -218,9 +216,6 @@ export const uiStateSchema = z.looseObject({
       }),
     )
     .optional(),
-  /** The open-mercato/skills promo banner (#391), dismissed for good. Legacy — retained so old
-   *  files round-trip. */
-  dismissedSkillsBanner: z.boolean().optional(),
 });
 export type UiState = z.infer<typeof uiStateSchema>;
 
@@ -289,10 +284,6 @@ export const workspaceUiStateSchema = z.looseObject({
    *  cockpit keeps it in localStorage (`packages/web/src/lib/last-location.ts`): stored here, the
    *  last client to navigate decided where every OTHER client's next launch landed. */
   lastLocation: workspaceLastLocationSchema.optional(),
-  /** LEGACY source of the default-skill selection. New choices are per project
-   *  (`UiState.importedSkills`); this stays typed so a project without its own choice keeps the
-   *  selection an older cockpit saved here (hearsay-tools/cezarion#1408). */
-  importedSkills: z.array(z.string()).optional(),
 });
 export type WorkspaceUiState = z.infer<typeof workspaceUiStateSchema>;
 
@@ -333,10 +324,6 @@ export const setWorkspaceUiStateInputSchema = z
         cursor: z.string().min(1).max(128).optional(),
         omp: z.string().min(1).max(128).optional(),
       })
-      .optional(),
-    importedSkills: z
-      .array(z.string().min(1).max(200))
-      .max(WORKSPACE_UI_STATE_MAX_KEYS)
       .optional(),
     taskTable: taskTableUiStateSchema
       .extend({
@@ -467,45 +454,6 @@ export const setConfigInputSchema = z.object({
   worktreeSetup: worktreeSetupConfigSchema.nullable().optional(),
 });
 export type SetConfigInput = z.infer<typeof setConfigInputSchema>;
-
-// ---- skills updates (`/api/v1/workspace/skills-update`) --------------------------------------
-
-export const skillsUpdateStatusSchema = z.enum([
-  'idle',
-  'checking',
-  'available',
-  'updating',
-  'current',
-  'unavailable',
-  'error',
-]);
-export type SkillsUpdateStatus = z.infer<typeof skillsUpdateStatusSchema>;
-
-export const skillsUpdateScopeStateSchema = z.object({
-  scope: z.enum(['project', 'global']),
-  status: skillsUpdateStatusSchema,
-  available: z.boolean(),
-  skills: z.array(z.string()),
-  checkedAt: z.string().nullable(),
-  updatedAt: z.string().nullable(),
-  reason: z.string().optional(),
-});
-export type SkillsUpdateScopeState = z.infer<typeof skillsUpdateScopeStateSchema>;
-
-/** `GET /api/v1/workspace/skills-update` (and the check/apply POSTs) — the merged project+global
- *  skills-update state. `autoUpdateEnabled`/`inherited` are re-stamped from the workspace config
- *  on the way out (`skillsUpdateResponse`, src/server/server.ts:1818). */
-export const skillsUpdateStateSchema = z.object({
-  status: skillsUpdateStatusSchema,
-  available: z.boolean(),
-  autoUpdateEnabled: z.boolean(),
-  inherited: z.boolean(),
-  checkedAt: z.string().nullable(),
-  updatedAt: z.string().nullable(),
-  scopes: z.array(skillsUpdateScopeStateSchema),
-  needsUpgradeNotes: z.boolean(),
-});
-export type SkillsUpdateState = z.infer<typeof skillsUpdateStateSchema>;
 
 // ---- provider auth (`/api/v1/providers/*`) ---------------------------------------------------
 

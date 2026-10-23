@@ -1,53 +1,7 @@
 /**
- * Task-scoped temp directory for spawned agents (#785, length-capped by #387).
- *
- * Every agent used to inherit the host's `TMPDIR`/`TEMP`/`TMP` verbatim — they
- * ride in on `buildChildEnv`'s base allowlist — so every run on the machine
- * shared one directory. On a box that runs agents continuously and never
- * reboots, that directory is a tmpfs nobody reaps, and once it hits its quota
- * the failure is *silent*: the Claude Code CLI roots its scratch tree at
- * `os.tmpdir()` and round-trips each `Bash` command's stdout/stderr through a
- * file there. Under `EDQUOT` the inode is still allocated, so the file is
- * created and the write fails — the command runs, its side effects land, and
- * the agent reads back an empty result with a bogus exit status. Nothing in the
- * cockpit says anything is wrong.
- *
- * Three properties fix that, and this module owns all of them:
- *
- *   1. **Isolation** — each run gets its own directory under `<dataDir>`
- *      (`t/<first 8 chars of the run id>` since hearsay-tools/cezarion#1022,
- *      `tmp/<runId>` before it — see `agentShortTmpDir`), on the same disk as
- *      the run's own state rather than a shared tmpfs, reaped when the run
- *      ends. `buildChildEnv` applies the per-run env last, so these values win
- *      over the host's without any allowlist change.
- *   2. **Fail loud** — the directory is write-probed before the backend spawns.
- *      A run that cannot get a working temp directory fails immediately with a
- *      named, actionable error instead of spawning an agent that will run blind.
- *   3. **Short enough to bind** (#387) — tools bind *named* unix sockets under
- *      `TMPDIR` (tsx's IPC server lays down `<tmpdir>/tsx-<uid>/<pid>.pipe`,
- *      Chromium `<tmpdir>/org.chromium.Chromium.XXXXXX/SingletonSocket`), and
- *      the kernel caps a socket path at
- *      `sun_path` — 108 bytes on Linux, 104 on macOS, NUL included. A checkout
- *      deep enough (Cezar's own nested task worktrees land past 100 chars)
- *      pushed every such bind past the cap and broke `npm install` and
- *      typechecking inside the run. A directory that would land too deep
- *      resolves instead to a short digest-named directory under the OS temp
- *      root — still per-run, still probed, still reaped. A repo whose own path
- *      fits keeps its scratch repo-local; the budget leaves room for Chromium's
- *      nested `SingletonSocket` (hearsay-tools/cezarion#1022), and the short
- *      `t/<id8>` name is what keeps ordinary checkouts inside it. When the ambient
- *      `TMPDIR` itself is too deep for that root's candidate (#440 — routine
- *      inside a cezar task session, whose `TMPDIR` is the checkout's own
- *      scratch tree per #785), the next root is the platform's own temp root
- *      (`/tmp`), which `TMPDIR` cannot deepen; only when no root fits does the
- *      spawn refuse.
- *
- * `CEZ_AGENT_TMPDIR=0` opts out of ALL THREE — cezar keeps its hands off the
- * temp directory entirely and the pre-#785 behaviour is back, byte for byte.
- * That is deliberate: an escape hatch that still imposed the preflight would be
- * a hatch you cannot actually escape through, and this repo's
- * graceful-degradation rule says a new check must never become the only way to
- * run.
+ * Task-owned temp directories with real-byte write probes and a Unix socket path budget. Prefer
+ * short repo-local paths; fall back to marked digest directories. CEZ_AGENT_TMPDIR=0 bypasses
+ * the mechanism.
  */
 import { createHash, randomUUID } from 'node:crypto';
 import { checkpointFallbackRemoval, fallbackIdentity, readFallbackRemovals, type FallbackRemoval } from './agent-tmpdir-removal.ts';
@@ -91,26 +45,8 @@ const SHORT_TMP_NAME_LENGTH = 8;
 const RUN_FILE = '.cez-run';
 
 /**
- * The repo-local TMPDIR handed to the run's agent (hearsay-tools/cezarion#1022):
- * `<dataDir>/t/<first 8 chars of the run id>`.
- *
- * Why a short name rather than a lower cap alone: the socket budget below
- * leaves 58 bytes for the whole directory, and `<dataDir>/tmp/<36-char uuid>`
- * spends 41 of them on its own suffix — on an ordinary checkout
- * (`/home/<user>/projects/<repo>/.ai/cezar/tmp/<uuid>`, ~77 bytes) every run
- * would leave the repo for the `/tmp/cez-agent-*` fallback, giving up #785's
- * "same disk as the run's state". `t/<id8>` costs 11 bytes, which keeps any
- * checkout whose `.ai/cezar` is at most 47 bytes repo-local — that is
- * `/home/<user>/projects/<repo>` and `/Users/<user>/projects/<repo>` for
- * ordinary user and repo names. Deeper checkouts still fall back, as before.
- *
- * Eight characters are the run id's leading hex group — the same `<id8>` the
- * task's `cez/<id8>` branch carries, so a human can map the directory to its
- * task. Eight characters are not unique by construction (non-uuid ids, or a
- * 32-bit collision), so the directory carries a `.cez-run` marker naming the
- * full run id: a run finding the name claimed by another run resolves to the
- * OS-root fallback instead, and reap and sweep never remove a directory whose
- * marker names a run other than the one being reaped.
+ * Repo-local scratch: <dataDir>/t/<id8>. The .cez-run marker names the full run; a foreign
+ * marker forces the OS-root fallback. Reap and sweep must respect that marker.
  */
 export function agentShortTmpDir(dataDir: string, runId: string): string {
   return join(dataDir, SHORT_TMP_ROOT, runId.slice(0, SHORT_TMP_NAME_LENGTH));
@@ -122,14 +58,10 @@ export function agentShortTmpDir(dataDir: string, runId: string): string {
  *  and it keeps the directory in holder scans. */
 type ShortClaim = 'free' | 'ours' | 'other' | 'unknown';
 
-/** The marker's run id; `null` when there is none, `undefined` when unreadable
- *  or malformed. A marker that is not a run id this directory's name could
- *  belong to (a stray file, or a write cut short before
- *  hearsay-tools/cezarion#1037 made it atomic) is unknown ownership, never a
- *  foreign run, so the sweep keeps the directory.
- *  `ENOTDIR` (a file where `t/` or the directory should be) is "none": the
- *  spawn then tries to mint the directory and fails loudly with
- *  `AgentTempDirError`, rather than quietly leaving the repo. */
+/**
+ * Marker run id: null when absent, undefined when unreadable or malformed. Unknown ownership is
+ * retained. ENOTDIR is absent so spawn fails with AgentTempDirError when creation fails.
+ */
 function readRunMarker(dir: string): string | null | undefined {
   try {
     const owner = readFileSync(join(dir, RUN_FILE), 'utf8');
@@ -529,7 +461,7 @@ export class AgentTempDirError extends Error {
 }
 
 /** Opt-out spelling matches the house style for default-on behaviour
- *  (`CEZ_AUTONAME=0`, `CEZ_SKILLS_AUTO_UPDATE=0`): only an exact `0` disables. */
+ *  (`CEZ_AUTONAME=0`): only an exact `0` disables. */
 export function agentTmpDirEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CEZ_AGENT_TMPDIR !== '0';
 }
@@ -539,10 +471,8 @@ export function agentTmpDirEnabled(env: NodeJS.ProcessEnv = process.env): boolea
 let probeSeq = 0;
 
 /**
- * Write-probe `dir`. Creating the file is not enough to prove the directory
- * works — a quota-exhausted tmpfs still allocates the inode and only fails the
- * `write(2)` — so the probe writes real bytes and removes them again. A
- * directory that is merely *full but writable* passes, by design.
+ * Probe with a real data write, then remove the probe. File creation alone does not prove writes
+ * work.
  */
 function probeWritable(dir: string): void {
   const probe = join(dir, `.cez-tmp-probe-${process.pid}-${(probeSeq += 1)}`);
@@ -682,17 +612,8 @@ export function agentTmpDirMayExist(dataDir: string, runId: string): boolean {
 }
 
 /**
- * Reap one task's directory after terminal completion or history deletion.
- * Session close alone is not completion: a live task's Continue must retain
- * its files. Never throws — reaping must not break a terminal transition.
- *
- * The repo-local directories (the short one unless its marker names another
- * run, and the control directory) and the digest name under EVERY root are
- * tried,
- * because the resolution depends on the lengths of `dataDir` and the ambient
- * `TMPDIR`, either of which a Continue, a re-base or a changed env can move
- * between mint and reap; removing a name that was never minted is a no-op, so
- * trying them all is pure safety.
+ * Reap scratch after terminal completion or history deletion, never session close alone. Try
+ * repo-local paths and every digest root, subject to ownership checks. Never throw from cleanup.
  */
 export function removeAgentTmpDir(dataDir: string, runId: string): void {
   reapAgentTmpDir(dataDir, runId, false);
@@ -730,24 +651,8 @@ function reapAgentTmpDir(dataDir: string, runId: string, spareUnclaimedShort: bo
 }
 
 /**
- * Remove every per-run directory that is not in `keepRunIds` — the startup
- * sweep, so a crash (which never reaches the terminal-transition reap) cannot
- * accumulate them forever. Four confined sets are swept and nothing else:
- *
- *   - `<dataDir>/tmp`, where entries ARE the run ids (reports the ids reaped);
- *   - `<dataDir>/t` (hearsay-tools/cezarion#1022), where an entry is removed
- *     when its `.cez-run` marker names a run that is not kept, or when it has
- *     no marker and no kept run's `agentShortTmpDir` lands on it (reports the
- *     marker's run id, else the name); an unreadable marker is never ours to
- *     remove;
- *   - the `cez-agent-<12 hex>` directories under EVERY OS temp root — the
- *     env-honouring root and the platform default (#440) — where the name
- *     digests the dataDir and is not reversible to a run id (reports the
- *     directory names reaped). The pattern is exact — prefix, lowercase hex,
- *     fixed length, directories only — and a directory is removed only when
- *     its `.cez-owner` marker names THIS dataDir and none of this dataDir's
- *     kept runs claims it, so another project's scratch in a shared root is
- *     never touched.
+ * Startup sweep of confined repo-local and digest directories not claimed by keepRunIds. Respect
+ * full-run and dataDir ownership markers; retain unreadable or uncertain ownership.
  */
 export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>): string[] {
   // Private worker evidence outlives corrupt/missing/quarantined index rows. Both local
