@@ -9,6 +9,8 @@ import { monitoringWakeOf } from './waits.testkit.ts';
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 
 const GATE = 'Please review the changes before I continue.';
+/** A turn-messages input with the mock's channel-wire token, when the direction has one. */
+const tokened = (prompt: string, token: string) => token ? `${prompt} ${token}` : prompt;
 it('enumerates every native channel-divergence capability', () => {
   expect(Object.keys(CHANNEL_WIRES).sort()).toEqual([...RUNNER_IDS].sort());
 });
@@ -16,8 +18,8 @@ for (const backend of RUNNER_IDS) describe(`${backend} channel order`, { timeout
   useWorkerWaitFixture();
   for (const direction of ['missing', 'refresh'] as const) {
     const gap = CHANNEL_WIRES[backend][direction] ? '' : `wire exemption: ${CHANNEL_WIRES[backend].reason}`;
-    it(`${direction} observes actual v1/v2 native text ${gap}`, async () => withChannelWire(backend, direction, async () => {
-      const seam = await driveSeam(backend, 'turn-messages', { spec: { userPrompt: messagesPrompt(backend, [GATE, 'CEZ:MONITORING', ACK_TEXT]) } });
+    it(`${direction} observes actual v1/v2 native text ${gap}`, async () => withChannelWire(backend, direction, async token => {
+      const seam = await driveSeam(backend, 'turn-messages', { spec: { userPrompt: tokened(messagesPrompt(backend, [GATE, 'CEZ:MONITORING', ACK_TEXT]), token) } });
       const v1 = seam.v1.flatMap(event => event.type === 'text' ? [event.text] : []).join('\n');
       const v2 = seam.v2.flatMap(event => event.type === 'item.completed' && event.item.kind === 'message' && event.item.role === 'assistant' ? [event.item.text] : []).filter(Boolean).join('\n');
       expect(v1).toContain(GATE); expect(v2).toContain(GATE);
@@ -28,7 +30,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} channel order`, { timeout
       }
     }));
     for (const mode of ['fresh', 'continuation'] as const) for (const done of [false, true]) {
-      it(`${mode} ${done ? 'M30' : 'M29'} ${direction} later declaration precedes a stale channel gate ${gap}`, async () => withChannelWire(backend, direction, async () => {
+      it(`${mode} ${done ? 'M30' : 'M29'} ${direction} later declaration precedes a stale channel gate ${gap}`, async () => withChannelWire(backend, direction, async token => {
         process.env.CEZ_DRY_RUN = '0';
         process.env.CEZ_REVIEW_GATE = '0';
         process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
@@ -42,7 +44,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} channel order`, { timeout
             await until(() => store.getRun(p.id)?.status === 'waiting');
           }
           const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
-          expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt(backend, [earlier, done ? 'CEZ:DONE' : 'CEZ:MONITORING', ACK_TEXT]) }])).toBe(true);
+          expect(manager.sendMessage(p.id, [{ type: 'text', text: tokened(messagesPrompt(backend, [earlier, done ? 'CEZ:DONE' : 'CEZ:MONITORING', ACK_TEXT]), token) }])).toBe(true);
           await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && semaphore.busy() === 0);
           const run = () => store.getRun(p.id)!;
           if (done) { await until(() => !manager.isActive(p.id)); expect(run().status).toBe('done'); }

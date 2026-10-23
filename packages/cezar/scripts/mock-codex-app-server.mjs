@@ -393,7 +393,25 @@ rl.on('line', async (line) => {
     }
     if (turnText.includes('mock:turn-messages:')) {
       const { turnMessages } = await import('./mock-turn-messages.mjs');
-      for (const text of turnMessages(turnText)) emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: `item_multi_${++echoSerial}`, text } } });
+      // `mock:channel-missing` / `mock:channel-refresh` → the second message's completion frame
+      // diverges between channels: no snapshot text (delta only), or a refresh of the first
+      // message's id with both texts (monitoring-channel-order.test.ts).
+      const missing = turnText.includes('mock:channel-missing'), refresh = turnText.includes('mock:channel-refresh');
+      if (missing || refresh) {
+        const messages = turnMessages(turnText);
+        let firstId;
+        for (let n = 0; n < messages.length; n++) {
+          const text = messages[n], id = n === 1 && refresh ? firstId : `channel_${++echoSerial}`;
+          if (n === 0) firstId = id;
+          if (n === 1 && missing) {
+            emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id } } });
+            emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: id, delta: text } });
+            emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id } } });
+          } else emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id, text: n === 1 && refresh ? `${messages[0]}\n${text}` : text } } });
+        }
+      } else {
+        for (const text of turnMessages(turnText)) emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: `item_multi_${++echoSerial}`, text } } });
+      }
       emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
       return;
     }
