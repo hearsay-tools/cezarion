@@ -19,7 +19,7 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 import {
   bookkeeping, captureState, checkpoint, collect, controlledWire, executions, fixtureUpdateRun,
   manager, parent, queuedWake, register, reopenRuntime, restart, root, semaphore, setFailureState,
-  store, terminal, track, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
+  store, terminal, timeline, track, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText } from '../runs/run-store.testkit.ts';
 
@@ -582,13 +582,20 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
 
   it('recovery admits an older queued child before an expired parent wake', async () => {
     const p = await parent(); const w = await worker(p.id, 'mock:slow');
-    register(p.id, [w.id], 1);
-    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    const explain = (stage: string) => {
+      const engine = manager as unknown as { queue: string[]; starting: Set<string>; active: Map<string, unknown>; executions: Map<string, unknown> };
+      return `${stage}\n${JSON.stringify({ ...captureState(), queue: engine.queue, starting: [...engine.starting],
+        active: [...engine.active.keys()], executions: [...engine.executions.keys()], workerExecution: store.readWorkerExecution(w.id) })}\n${timeline(p.id)}\n${timeline(w.id)}`;
+    };
+    // Expire the deadline only after the parent parks; mock startup must not race a 1 s budget.
+    register(p.id, [w.id]);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked', () => explain('parent wait parks before restart'));
     const entry = workerEntryOf(store.getRun(p.id));
     if (!entry) throw Error('fixture');
     store.commitWait(p.id, { ...entry, deadline: new Date().toISOString() });
     await restart();
-    await until(() => store.getRun(w.id)?.status === 'running' || store.getRun(p.id)?.status === 'running');
+    await until(() => store.getRun(w.id)?.status === 'running' || store.getRun(p.id)?.status === 'running',
+      () => explain('recovery admits the queued child or parent wake'));
     expect(store.getRun(w.id)?.status).toBe('running');
     expect(store.getRun(p.id)?.status).toBe('queued');
     expect(store.getRun(p.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
