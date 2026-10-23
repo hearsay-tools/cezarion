@@ -71,12 +71,9 @@ describe('sidebar nav selection (#619)', () => {
     expect(classes(sidebar().querySelector('[data-slot="nav-needs-you-dot"]'))).toEqual(expect.arrayContaining(['size-[7px]', 'bg-pending-strong']))
   })
 
-  it('shows Inbox count in overflow and a Skills update dot', async () => {
-    renderShell('/git', { inboxCount: 4, skillsUpdateAvailable: true })
-    expect(sidebar().querySelector('[data-slot="overflow-inbox-dot"]')).not.toBeNull()
+  it('shows a Skills update dot without a generated inbox', async () => {
+    renderShell('/git', { skillsUpdateAvailable: true })
     expect(classes(sidebar().querySelector('[data-slot="nav-update-marker"]'))).toEqual(expect.arrayContaining(['size-[7px]', 'bg-info']))
-    fireEvent.keyDown(within(nav()).getByRole('button', { name: 'More views' }), { key: 'Enter' })
-    expect((await screen.findByRole('menuitem', { name: /Inbox/ })).textContent).toBe('Inbox4')
   })
 
   it('moves keyboard focus across the view row without changing routes', () => {

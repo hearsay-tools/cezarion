@@ -25,7 +25,7 @@ beforeAll(async () => {
       createdAt: '2026-09-01T00:00:00Z', finishedAt: '2026-09-01T01:00:00Z', tokensUsed: 0, archived: false, steps: [],
     }))))
     const server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
-      env: fixtureServeEnv(root, { CEZ_REMOTE: remote ? '1' : '0', CEZ_FOLLOWUPS: '1', CEZ_AUTOMATIONS: '1' }), stdio: 'ignore',
+      env: fixtureServeEnv(root, { CEZ_REMOTE: remote ? '1' : '0', CEZ_AUTOMATIONS: '1' }), stdio: 'ignore',
     })
     fixtures.push({ root, server, url: '', project: '', remote })
     const url = await waitForFixtureServer(server)

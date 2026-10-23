@@ -35,8 +35,6 @@ export interface NewTaskDraft {
    *  null → interactive-skill hint, then workspace/env policy (skills default on).
    *  Plan-first overrides every choice. See resolveComposerRunMode. */
   autonomous: boolean | null
-  /** Follow-up generation is default-on. null → remembered value / on. */
-  generateFollowups: boolean | null
 }
 
 export interface ComposerRunModeInput {
@@ -108,7 +106,6 @@ const EMPTY: NewTaskDraft = {
   planFirst: false,
   worktree: null,
   autonomous: null,
-  generateFollowups: null,
 }
 
 const STORAGE_KEY = 'cez-new-task-draft'
@@ -143,8 +140,6 @@ function normalize(raw: unknown): NewTaskDraft {
     planFirst: obj.planFirst === true,
     worktree: typeof obj.worktree === 'boolean' ? obj.worktree : null,
     autonomous: typeof obj.autonomous === 'boolean' ? obj.autonomous : null,
-    generateFollowups:
-      typeof obj.generateFollowups === 'boolean' ? obj.generateFollowups : null,
   }
 }
 

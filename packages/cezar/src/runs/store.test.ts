@@ -467,28 +467,6 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
     expect(RunStore.open(dataDir).getRun(LEGACY_RUN.id)?.effort).toBeUndefined();
   });
 
-  it('persists an explicit follow-up opt-out while omission stays compatible', () => {
-    const store = RunStore.open(dataDir);
-    const disabled = store.createRun({
-      title: 'quiet task',
-      workflow: 'quick-task',
-      task: 'quiet task',
-      generateFollowups: false,
-      steps: [],
-    });
-    const defaulted = store.createRun({
-      title: 'default task',
-      workflow: 'quick-task',
-      task: 'default task',
-      steps: [],
-    });
-    store.flush();
-
-    const reopened = RunStore.open(dataDir);
-    expect(reopened.getRun(disabled.id)?.generateFollowups).toBe(false);
-    expect(reopened.getRun(defaulted.id)?.generateFollowups).toBeUndefined();
-  });
-
   it('round-trips the autonomous flag while omission stays compatible (#489)', () => {
     const store = RunStore.open(dataDir);
     const autonomous = store.createRun({

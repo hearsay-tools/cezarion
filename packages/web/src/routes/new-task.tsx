@@ -212,7 +212,7 @@ export function NewTaskRoute() {
     : undefined
 
   // ---- prompt templates (#413 follow-up) ----------------------------------------------------
-  // The same list the GitHub hand-over and Inbox composers read. Two ways in here: the footer's
+  // The same list the GitHub hand-over composer reads. Two ways in here: the footer's
   // icon trigger inserts one by hand at the caret, and a skill whose templates are assigned to it
   // applies them on selection — but only into a box the user has not typed in (`resolveAutoApply`).
   const composerRef = useRef<ComposerHandle>(null)
@@ -320,18 +320,6 @@ export function NewTaskRoute() {
   })
   const worktreeOn = runMode.worktree
   const autonomousOn = runMode.autonomous
-
-  // Follow-up generation (#444) is offered only while the server has the global inbox on
-  // (#471, `CEZ_FOLLOWUPS=1`) — there is no inbox for the follow-ups to land in otherwise, and
-  // the server pins the flag to false regardless, so a toggle would be a lie. Hidden, the value
-  // is false, matching what the server will do. Health unknown → assume offered, the `hasGit`
-  // rule above: the composer must not flicker its controls while health is in flight.
-  const followupsToggleShown = health.data === undefined || health.data.capabilities.followups
-  // Within an enabled server it stays opt-out: a draft choice wins, then the remembered UI
-  // preference; absent state from older installs keeps the historical enabled behavior.
-  const generateFollowupsOn = followupsToggleShown
-    ? (draft.generateFollowups ?? uiState.data?.lastGenerateFollowups ?? true)
-    : false
 
   // ---- plan mode (#383 + spec 008) ----------------------------------------------------------
   const [plan, setPlan] = useState<PendingPlan | null>(null)
@@ -488,13 +476,6 @@ export function NewTaskRoute() {
         images,
         worktree: worktreeOn,
         autonomous: autonomousOn,
-        generateFollowups: generateFollowupsOn,
-        // #374: when the Inbox's "Run" sent us here, hand the entry's id back so the server
-        // records this run on it and it leaves the inbox — the audit trail the old
-        // POST /api/todos/:id/start kept, minus the blind launch. Empty otherwise.
-        // Deliberately not gated on generateFollowupsOn (#444): turning off follow-up
-        // generation for THIS task must not stop the entry it came from being marked started.
-        todoId: deepLink.todo,
       }),
       notifyOn,
     ))
@@ -508,7 +489,6 @@ export function NewTaskRoute() {
       // Recency is a list of PICKS: a task that chose nothing did not pick quick-task, and
       // filling the list with the default would push real choices out of it.
       ...(source ? { recentSources: pushRecentSource(recentSources, source) } : {}),
-      ...(followupsToggleShown ? { lastGenerateFollowups: generateFollowupsOn } : {}),
       // Frequency sort (#408): only a SKILL pick counts — the map is keyed by skill name, and a
       // workflow choice here doesn't select one directly. Gated on the CURRENT map being known:
       // the PUT merge is shallow, so bumping off an errored ui-state query (`sourcesReady` only
@@ -544,19 +524,9 @@ export function NewTaskRoute() {
           defaultRunner,
           variants,
           images: plan.images,
-          generateFollowups: generateFollowupsOn,
-          todoId: deepLink.todo, // #374: planning first must not lose the inbox entry
         }),
         notifyOn,
       ))
-      // Run-mode choices live in the current draft; stable defaults come from workspace policy.
-      // persisting the forced `false` would overwrite their real preference, so turning
-      // CEZ_FOLLOWUPS back on later would silently come up off.
-      if (followupsToggleShown) {
-        void putUiState({ lastGenerateFollowups: generateFollowupsOn })
-          .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.uiState }))
-          .catch(() => {})
-      }
       clearStartedDraft(draftProjectId, submittedRevision)
       setPlan(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
@@ -667,8 +637,6 @@ export function NewTaskRoute() {
       data-plan-review={plan !== null ? 'true' : undefined}
       className="relative isolate flex min-h-full flex-col overflow-x-clip pb-16"
     >
-
-
 
       <div data-slot="new-task-layout" ref={draftPanelRef} style={plan !== null ? { display: 'none' } : undefined} className="relative z-[1] mx-auto w-full max-w-none px-11 pt-12 max-md:px-[18px] max-md:pt-[22px]">
         <header className="mb-7 max-md:mb-5">
@@ -808,9 +776,6 @@ export function NewTaskRoute() {
                 <p data-slot="execution-tip" className="hidden rounded-lg bg-background p-3 text-[11px] leading-5 text-muted-foreground xl:block"><GitBranchIcon aria-hidden="true" className="mb-2 size-[18px] text-accent-text" />{worktreeOn && hasGit ? 'Changes stay in their own worktree, separate from your working directory.' : 'Changes are made in the current working directory.'}</p>
               </div>
             </details>
-            {followupsToggleShown ? <section data-slot="followups-options" aria-label="Follow-ups preference" className="rounded-xl border border-border bg-card p-4">
-              <GenerateFollowupsToggle on={generateFollowupsOn} onChange={(on) => update({ generateFollowups: on })} />
-            </section> : null}
                 </div>
           }
           footerEnd={
@@ -967,36 +932,6 @@ function NotifyWebhookToggle({
       className="flex min-h-11 items-center justify-between gap-3 px-0 py-3 text-left"
     >
       <span className="min-w-0"><span className="block text-[13px] font-medium">Notify webhook</span><span data-slot="notify-webhook-subtitle" className="block truncate text-[12px] text-muted-foreground">Send status changes</span></span>
-      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
-    </button>
-  )
-}
-
-/** Follow-up toggle: checked lets agents append newly discovered work to the task inbox.
- *  Handoff journaling remains active either way. */
-function GenerateFollowupsToggle({
-  on,
-  onChange,
-}: {
-  on: boolean
-  onChange: (on: boolean) => void
-}) {
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={on}
-      data-slot="generate-followups-toggle"
-      onClick={() => onChange(!on)}
-      title={
-        on
-          ? 'Agents can add newly discovered follow-up work to the task inbox'
-          : 'Follow-up generation is off; agents still maintain the handoff journal'
-      }
-      aria-label="Follow-ups"
-      className="flex min-h-11 w-full items-center justify-between gap-4 text-left text-foreground"
-    >
-      <span><span className="block text-[16px]">Follow-ups</span><span className="mt-1 block text-xs leading-[1.5] text-muted-foreground">Generate suggestions in Inbox after this task. Enabled by default; your choice is remembered.</span></span>
       <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
     </button>
   )

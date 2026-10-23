@@ -194,7 +194,6 @@ export const uiStateSchema = z.looseObject({
   /** The last autonomous choice — remembered like `lastWorktree`. Absent → off. */
   lastAutonomous: z.boolean().optional(),
   /** Whether new runs should ask agents to append follow-up work. Absent → on. */
-  lastGenerateFollowups: z.boolean().optional(),
   /** The selected default team skills for this project. Absent: the legacy workspace selection
    *  applies when it exists, else every default skill shows. Present (even `[]`): only these names. */
   importedSkills: z.array(z.string().min(1).max(200)).max(200).optional(),

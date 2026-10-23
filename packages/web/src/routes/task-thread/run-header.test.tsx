@@ -875,7 +875,6 @@ describe('header layout, tabs, pill and resume hint', () => {
   })
 })
 
-
 it('uses one actions menu and omits the legacy action and resume rows', () => {
   stubFetch()
   renderHeader(run('done'))
@@ -883,7 +882,6 @@ it('uses one actions menu and omits the legacy action and resume rows', () => {
   expect(document.querySelector('[data-slot="resume-hint"]')).toBeNull()
   expect(screen.getByRole('button', { name: 'Run actions' }).className).not.toContain('md:hidden')
 })
-
 
 it('confirms archive before retiring an active-list task', async () => {
   const sent = stubFetch()
@@ -893,7 +891,6 @@ it('confirms archive before retiring an active-list task', async () => {
   fireEvent.click(screen.getByRole('button', { name: 'Archive task' }))
   await waitFor(() => expect(sent.find(r => r.path.endsWith('/archive'))?.body).toEqual({ archived: true }))
 })
-
 
 it('copies the resumable command directly from the task actions menu', async () => {
   stubFetch()
@@ -1110,7 +1107,7 @@ describe('Preview header toggle (#781)', () => {
   })
   const health = (preview: boolean) => () =>
     jsonResponse({
-      capabilities: { localHandoff: true, followups: false, singleProject: false, tokenMetrics: true, preview },
+      capabilities: { localHandoff: true, singleProject: false, tokenMetrics: true, preview },
     })
   const withWorktree = (servers: number[] = []) =>
     run('done', { worktreePath: '/tmp/wt', previewServers: servers.map(server) })

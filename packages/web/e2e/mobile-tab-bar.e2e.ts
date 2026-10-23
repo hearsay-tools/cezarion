@@ -40,7 +40,6 @@ let project: string
 let server: ChildProcess
 let browser: AgentBrowser
 let forge = false
-let followups = false
 let automations = false
 
 const scoped = (path: string) => `/p/${project}${path}`
@@ -75,10 +74,9 @@ beforeAll(async () => {
   // Inbox needs the follow-ups flag, Automations the flag alone (a schedule needs no forge), GitHub the forge.
   const health = (await fetch(`${base}/api/v1/health`).then((response) => response.json())) as {
     forge: { available: boolean } | null
-    capabilities: { followups: boolean; automations: boolean }
+    capabilities: { automations: boolean }
   }
   forge = health.forge?.available === true
-  followups = health.capabilities.followups
   automations = health.capabilities.automations
   mkdirSync(SHOTS, { recursive: true })
   browser = AgentBrowser.open(`mobile-tab-bar-${process.pid}`)
@@ -144,7 +142,6 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
       { to: '/skills', route: 'skills' },
       { to: '/workflows', route: 'workflows' },
       { to: '/settings', route: 'settings' },
-      ...(followups ? [{ to: '/inbox', route: 'inbox' }] : []),
       ...(automations ? [{ to: '/automations', route: 'automations' }] : []),
     ]
     openMore()
@@ -302,7 +299,7 @@ describe('mobile tab bar, More sheet and pushed task screen', () => {
       // The bar's icons are graphics: 3:1.
       check(`${TAB_BAR} a[data-tab="/git"] svg`, 'inactive tab icon', 3)
       openMore()
-      for (const to of ['/skills', '/workflows', '/settings', ...(followups ? ['/inbox'] : [])]) {
+      for (const to of ['/skills', '/workflows', '/settings']) {
         check(`${SHEET} [data-more-row="${to}"] span`, `More row ${to}`)
       }
       check(`${SHEET} [data-slot="more-project"]`, 'More project name')

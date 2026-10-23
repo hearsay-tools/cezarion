@@ -45,7 +45,7 @@ const HEALTH: HealthResponse = {
   checks: [],
   defaultRunner: 'claude',
   forge: null,
-  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: true, singleProject: false, automations: false, preview: false, voice: false },
+  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
 }
 
 /** One registered project — the degenerate workspace every existing install upgrades into. */
@@ -179,44 +179,7 @@ describe('sidebar wiring', () => {
     expect(versionChip()?.textContent).toBe('v0.1.3')
   })
 
-  it('renders the inbox badge from /api/v1/todos', async () => {
-    serve({ '/api/v1/health': HEALTH, '/api/v1/todos': TODOS })
-    renderShell()
-
-    await waitFor(() => expect(navBadge()).not.toBeNull())
-    fireEvent.keyDown(screen.getByRole('button', { name: 'More views' }), { key: 'Enter' })
-    expect((await screen.findByRole('menuitem', { name: /Inbox/ })).textContent).toBe('Inbox2')
-  })
-
   // #471 — the global inbox is opt-in; the shell must not offer what the server cannot fill.
-  it('drops the Inbox nav item and its badge when the server has follow-ups off', async () => {
-    serve({
-      '/api/v1/health': { ...HEALTH, capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: false } },
-      '/api/v1/todos': TODOS,
-    })
-    renderShell()
-
-    await waitFor(() => expect(versionChip()).not.toBeNull())
-    expect(screen.queryByRole('link', { name: /Inbox/ })).toBeNull()
-    expect(navBadge()).toBeNull()
-    // Every other view is untouched — the gate owns exactly one item.
-    expect(inSidebar().getByRole('link', { name: /Tasks/ })).toBeTruthy()
-    expect(inSidebar().getByRole('link', { name: /Settings/ })).toBeTruthy()
-  })
-
-  it('never asks for todos on a server with the inbox off', async () => {
-    serve({
-      '/api/v1/health': { ...HEALTH, capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: false } },
-      '/api/v1/todos': TODOS,
-    })
-    renderShell()
-
-    await waitFor(() => expect(versionChip()).not.toBeNull())
-    // The badge query is keyed on the capability, so it never runs — unlike the /inbox route,
-    // nothing here needs the list before health has spoken.
-    const asked = fetchMock.mock.calls.map((call) => String(call[0]))
-    expect(asked).not.toContain('/api/v1/todos')
-  })
 
   // #801 — the same honesty rule for the opt-in automations capability. Both cases carry a
   // reachable forge, so the ONLY thing deciding the Automations item here is the capability:
@@ -243,16 +206,6 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(versionChip()).not.toBeNull())
     fireEvent.keyDown(screen.getByRole('button', { name: 'More views' }), { key: 'Enter' })
     expect(await screen.findByRole('menuitem', { name: 'Automations' })).toBeTruthy()
-  })
-
-  it('renders no badge for an empty inbox', async () => {
-    serve({ '/api/v1/health': HEALTH, '/api/v1/todos': [] })
-    renderShell()
-
-    await waitFor(() => expect(versionChip()).not.toBeNull())
-    // Zero follow-ups is not "0 follow-ups" — a badge reading 0 is noise the spec's chrome
-    // rules do not want.
-    expect(navBadge()).toBeNull()
   })
 
   it('shows no chips at all while health has not answered', () => {
@@ -343,7 +296,7 @@ describe('sidebar wiring', () => {
     serve({
       '/api/v1/health': {
         ...HEALTH,
-        capabilities: { ...HEALTH.capabilities, followups: true, automations: true },
+        capabilities: { ...HEALTH.capabilities, automations: true },
       },
       '/api/v1/todos': TODOS,
       '/api/v1/projects': { projects: [{ ...PROJECT, forge: 'github' }], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
@@ -361,7 +314,7 @@ describe('sidebar wiring', () => {
     serve({
       '/api/v1/health': {
         ...HEALTH,
-        capabilities: { ...HEALTH.capabilities, followups: true, automations: true },
+        capabilities: { ...HEALTH.capabilities, automations: true },
       },
       '/api/v1/todos': TODOS,
       '/api/v1/projects': {
@@ -430,7 +383,7 @@ describe('sidebar wiring', () => {
     // A new authoritative response still wins, including explicit capability removal.
     await act(async () => {
       releaseHealth(new Response(JSON.stringify({ ...health, capabilities: {
-        ...health.capabilities, followups: false, automations: false,
+        ...health.capabilities, automations: false,
       } })))
     })
     await waitFor(() => expect(inSidebar().queryByRole('button', { name: 'More views' })).toBeNull())

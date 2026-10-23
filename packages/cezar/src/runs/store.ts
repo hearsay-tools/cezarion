@@ -240,8 +240,7 @@ export const runRecordSchema = z.object({
    *  contract are derivable from the persisted workflow and would bloat the
    *  index. Resolved at execute time (a queued run picks up config edits). */
   systemPrompt: z.string().optional(),
-  /** Per-task follow-up inbox contract (spec 007, #444). Missing on old runs
-   *  means enabled — the historical behavior. */
+  /** Legacy generated-inbox preference. Read for old records only; never enables generation. */
   generateFollowups: z.boolean().optional(),
   /** Effective autonomous mode (#489), set at creation from StartRunInput.autonomous.
    *  This records the resolved launch mode, not whether a user clicked a checkbox:
@@ -2710,7 +2709,6 @@ export class RunStore extends EventEmitter {
     runner?: RunnerId;
     /** Composer's per-task agent account (spec 2026-07-29-agent-profiles). */
     agentProfile?: string;
-    generateFollowups?: boolean;
     autonomous?: boolean;
     /** Task webhook opt-in (#589), set at creation so the first transition is already covered. */
     notify?: boolean;
@@ -2754,7 +2752,6 @@ export class RunStore extends EventEmitter {
       effort: input.effort,
       runner: input.runner,
       agentProfile: input.agentProfile,
-      generateFollowups: input.generateFollowups,
       autonomous: input.autonomous,
       ...(input.notify ? { notify: true } : {}),
       worktree: input.worktree,
@@ -4197,7 +4194,6 @@ export class RunStore extends EventEmitter {
       return [];
     }
   }
-
 
   readEvents(runId: string): RunEvent[] {
     try {

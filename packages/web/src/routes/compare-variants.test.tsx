@@ -160,7 +160,6 @@ describe('the compare columns', () => {
         jsonResponse({
           capabilities: {
             localHandoff: true,
-            followups: false,
             singleProject: false,
             tokenMetrics: false,
           },

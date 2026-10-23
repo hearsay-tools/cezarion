@@ -28,7 +28,6 @@ let browser: AgentBrowser
 let baseUrl: string
 
 let forgeAvailable = false
-let followupsAvailable = false
 let automationsAvailable = false
 let bootProject: string
 
@@ -41,20 +40,18 @@ beforeAll(async () => {
   browser = AgentBrowser.open(runId)
   const health = (await fetch(`${baseUrl}/api/v1/health`).then((r) => r.json())) as {
     forge: { available: boolean } | null
-    capabilities: { followups: boolean; automations: boolean }
+    capabilities: { automations: boolean }
   }
   forgeAvailable = health.forge?.available === true
-  followupsAvailable = health.capabilities.followups
   automationsAvailable = health.capabilities.automations
   bootProject = await bootProjectId(baseUrl)
   writeSharedProjects(readSharedProjects().filter((project) => project.id === bootProject))
 })
 
-/** More views in nav order (sidebar-view-tabs.tsx keeps NAV_ITEMS order): the opt-in Inbox and
+/** More views in nav order (sidebar-view-tabs.tsx keeps NAV_ITEMS order): the opt-in
  *  Automations, plus Workflows once they crowd the row (see `isCrowded`). */
 function expectedOverflowLabels(): string[] {
   return [
-    ...(followupsAvailable ? ['Inbox'] : []),
     ...(forgeAvailable && automationsAvailable ? ['Automations'] : []),
     ...(isCrowded() ? ['Workflows'] : []),
   ]
@@ -64,7 +61,7 @@ function expectedOverflowLabels(): string[] {
  *  view present Workflows moves into More (MAX_PRIMARY_WITH_MORE = 5, sidebar-view-tabs.tsx).
  *  Without GitHub there are only five, so nothing moves. */
 function isCrowded(): boolean {
-  const optional = (followupsAvailable ? 1 : 0) + (forgeAvailable && automationsAvailable ? 1 : 0)
+  const optional = (forgeAvailable && automationsAvailable ? 1 : 0)
   return optional > 0 && expectedPrimaryCount() > 5
 }
 
@@ -658,141 +655,5 @@ describe('mobile shell', () => {
       ) as [number, number]
       expect(overflow[0]).toBeLessThanOrEqual(overflow[1])
     })
-  })
-})
-
-/**
- * The global SSE stream, end to end: a real `/api/v1/events`, a real EventSource, a real reducer.
- *
- * The interesting half is not that a socket opens — it is that a server-side change reaches the
- * rendered UI with nobody reloading anything. The inbox is the one path this suite can drive for
- * free: `.ai/cezar/todos.json` is a documented external contract (agents append to it via
- * `CEZ_TODOS_FILE`), the server watches the file and re-broadcasts the whole array on `todos`, and
- * the nav badge renders whatever the todos query holds. So writing that file *is* a live event —
- * no fixture invented, nothing mocked.
- *
- * The `run` path is deliberately not asserted here: proving a live run's `run` events land would
- * need a run that actually executes, and CEZ_DRY_RUN's mock agent is not a fixture this step has.
- * The jsdom tests cover those reducers against the exact payloads the server sends.
- */
-describe('global SSE stream', () => {
-  // Where `src/index.ts` puts the data dir, for the server booted from this worktree.
-  const dataDir = resolve(servedRoot(), '.ai/cezar')
-  const todosFile = resolve(dataDir, 'todos.json')
-  const BADGE = '[data-slot="inbox-count"]'
-  let previousTodos: string | null = null
-
-  beforeAll(() => {
-    browser.setViewport(DESKTOP.width, DESKTOP.height)
-    previousTodos = existsSync(todosFile) ? readFileSync(todosFile, 'utf8') : null
-  })
-
-  afterAll(() => {
-    // Never leave a developer's inbox holding this test's entries.
-    if (previousTodos === null) rmSync(todosFile, { force: true })
-    else writeFileSync(todosFile, previousTodos, 'utf8')
-  })
-
-  function writeTodos(items: Array<Record<string, string>>): void {
-    mkdirSync(dataDir, { recursive: true })
-    writeFileSync(todosFile, JSON.stringify(items, null, 2), 'utf8')
-  }
-
-  it('holds an open stream the server accepts', () => {
-    browser.goto(baseUrl + scoped('/'))
-
-    // A second stream, opened from the page, against the same endpoint the app uses: it proves
-    // `/api/v1/events` really speaks SSE to this origin (readyState 1 = OPEN) and keeps the socket up
-    // rather than answering and closing. That the *app's* own stream is open is what the badge test
-    // below proves — an EventSource is not reachable from outside the bundle, and a test-only
-    // handle hung off `window` to reach it would be scaffolding, not evidence.
-    browser.evaluate(`window.__cezProbe = new EventSource('/api/v1/events'), true`)
-    browser.waitForFunction(`window.__cezProbe.readyState === 1`)
-    expect(browser.evaluate('window.__cezProbe.readyState')).toBe(1)
-    browser.evaluate(`window.__cezProbe.close(), delete window.__cezProbe, true`)
-  })
-
-  it('live-updates the inbox badge from a server-side change, with no reload', ({ skip }) => {
-    skip(
-      !followupsAvailable,
-      'the shared environment has the opt-in inbox disabled; run npm run test:e2e -- --server-env=CEZ_FOLLOWUPS=1',
-    )
-    writeTodos([])
-    browser.goto(baseUrl + scoped('/'))
-    // The shell is up and its queries have answered — so the app's stream effect has run too.
-    browser.waitForFunction(`document.querySelector('[data-slot="project-header"]') !== null`)
-    browser.click('[data-slot="sidebar"] [aria-label="More views"]')
-    browser.waitForFunction(`document.querySelector('[role="menu"]') !== null`)
-    expect(browser.count(BADGE)).toBe(0)
-
-    // An agent files two follow-ups while the page just sits there.
-    writeTodos([
-      { id: 'e2e-1', summary: 'Review the PR' },
-      { id: 'e2e-2', summary: 'Rerun the checks' },
-    ])
-
-    // No goto: if this ever passes, it passed because file watch → SSE → reducer → badge worked.
-    // (Debounced ~300ms server-side, so this waits rather than samples.)
-    browser.waitForFunction(`document.querySelector('${BADGE}')?.textContent === '2'`)
-    expect(browser.text(BADGE)).toBe('2')
-
-    browser.screenshot(`${artifactsDir}/inbox-badge-live.png`)
-
-    // And the reverse: the payload is the whole inbox, so emptying it empties the badge.
-    writeTodos([])
-    browser.waitForFunction(`document.querySelector('${BADGE}') === null`)
-    expect(browser.count(BADGE)).toBe(0)
-
-    // The stream outliving several seconds of this is the "stays alive" assertion: the shell is
-    // still the shell, not a blank root left by a handler that threw.
-    expect(browser.isVisible('[data-slot="sidebar"]')).toBe(true)
-    expect(browser.text('[role="menu"]')).toContain('Inbox')
-  })
-})
-
-describe('legacy cockpit retirement (R7)', () => {
-  it('the React shell New task CTA stays in the SPA — the React composer, not legacy (R4 1.1)', () => {
-    browser.goto(baseUrl + scoped('/'))
-    browser.click(`[data-slot="sidebar"] a[href="${scoped('/new')}"]`)
-    // Client-side navigation: the React /new hero renders and no legacy markup ever loads.
-    browser.waitForFunction(`document.querySelector('[data-route="new"]') !== null`)
-
-    expect(browser.url()).toBe(baseUrl + scoped('/new'))
-    expect(browser.evaluate('document.getElementById("brand") === null')).toBe(true)
-    expect(browser.evaluate('document.getElementById("root") !== null')).toBe(true)
-  })
-
-  it('/?legacy=1 serves the React shell — the escape hatch retired with the page (R7 1.1)', () => {
-    browser.goto(baseUrl + '/?legacy=1')
-
-    // #brand was legacy-only markup from the deleted web/index.html — it exists
-    // in no React template, so its absence proves the old page cannot come back.
-    expect(browser.evaluate('document.getElementById("root") !== null')).toBe(true)
-    expect(browser.evaluate('document.getElementById("brand") === null')).toBe(true)
-    browser.waitForFunction(`document.querySelector('[data-slot="sidebar"]') !== null`)
-  })
-
-  it('serves the React shell for a full load of /new — the R1 legacy pin is gone (R4 1.3)', () => {
-    // The React composer now carries the bookmarklet contract (/new?skill=&ref=&auto=1&key=),
-    // so a full document load of /new gets the shell like every other route. Without a valid
-    // key nothing starts — this link only prefills (the full auto-start matrix runs against
-    // the dry-run server in new-task.e2e.ts).
-    browser.goto(baseUrl + '/new?skill=om-code-review&ref=hello&auto=1')
-
-    expect(browser.evaluate('document.getElementById("root") !== null')).toBe(true)
-    expect(browser.evaluate('document.getElementById("brand") === null')).toBe(true)
-    browser.waitForFunction(`document.querySelector('[data-route="new"]') !== null`)
-    // The sensitive params are stripped from the address bar (legacy replaceState parity).
-    browser.waitForFunction(`location.search === ''`)
-    // The legacy flat `/new?…` bookmarklet grammar still lands, now on its scoped twin.
-    expect(browser.url()).toBe(baseUrl + scoped('/new'))
-  })
-
-  it('/new?legacy=1 serves the React shell too — no route treats the query specially', () => {
-    browser.goto(baseUrl + '/new?legacy=1')
-
-    expect(browser.evaluate('document.getElementById("root") !== null')).toBe(true)
-    expect(browser.evaluate('document.getElementById("brand") === null')).toBe(true)
-    browser.waitForFunction(`document.querySelector('[data-route="new"]') !== null`)
   })
 })

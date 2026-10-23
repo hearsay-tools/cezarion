@@ -110,7 +110,6 @@ function startRuns(manager: RunManager, workflow: WorkflowDef, definition: Autom
     systemPrompt: definition.task.systemPrompt,
     worktree: definition.task.worktree,
     autonomous: definition.task.autonomous,
-    generateFollowups: definition.task.generateFollowups,
   };
   return (definition.task.variants ?? 1) > 1
     ? manager.startVariants(workflow, input, definition.task.variants ?? 1)

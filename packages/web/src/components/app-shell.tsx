@@ -59,8 +59,6 @@ export type AppShellProps = {
   /** Repo + branch for the brand chip. Null until Step 3.1/3.2 wires `/api/health` — the chip
    *  is simply absent rather than showing an invented repo name. */
   repo?: RepoChip | null
-  /** Inbox badge count. Null/0 renders no badge. Step 3.2 feeds it from the SSE stream. */
-  inboxCount?: number | null
   /** A quiet, accessible marker on Skills when a checked update remains actionable. */
   skillsUpdateAvailable?: boolean
   /** Running cezar version beside the wordmark. Null while health is unknown. */
@@ -84,9 +82,6 @@ export type AppShellProps = {
    *  Defaults to shown so the presentational shell stays renderable alone; the container
    *  passes the health payload's truth. */
   forgeAvailable?: boolean
-  /** Inbox gating (#471): `false` drops the Inbox nav item and its badge — the global inbox is
-   *  opt-in via `CEZ_FOLLOWUPS=1`. Defaults to shown for the same reason as `forgeAvailable`. */
-  inboxAvailable?: boolean
   /** Automations gating (#801): `false` drops the Automations nav item — GitHub automations are
    *  opt-in via `CEZ_AUTOMATIONS=1`. Defaults to shown for the same reason as `forgeAvailable`;
    *  the container passes the health payload's truth. */
@@ -159,7 +154,6 @@ export function AppShell({
   children,
   breadcrumb,
   repo = null,
-  inboxCount = null,
   skillsUpdateAvailable = false,
   version = null,
   latestVersion = null,
@@ -174,7 +168,6 @@ export function AppShell({
   sessionScope,
   toolsMenu,
   forgeAvailable = true,
-  inboxAvailable = true,
   automationsAvailable = true,
   banner,
   mobileProjects,
@@ -277,10 +270,8 @@ export function AppShell({
 
   const nav = {
     activeTo,
-    items: visibleNavItems({ forge: forgeAvailable, inbox: inboxAvailable, automations: automationsAvailable }),
+    items: visibleNavItems({ forge: forgeAvailable, automations: automationsAvailable }),
     repo,
-    // The badge belongs to the Inbox item — with the item gone there is nothing to badge.
-    inboxCount: inboxAvailable ? inboxCount : null,
     skillsUpdateAvailable,
     version,
     latestVersion,
@@ -368,7 +359,6 @@ export function AppShell({
                   activeTo={activeTo}
                   signal={tabBarSignal}
                   projectName={mobileProjects?.projects.find((project) => project.id === currentProjectId)?.name ?? repo?.name ?? null}
-                  inboxCount={nav.inboxCount}
                   skillsUpdateAvailable={skillsUpdateAvailable}
                   showNewTask={areaPathname !== '/new'}
                 />
@@ -385,7 +375,6 @@ type NavProps = {
   activeTo: string | null
   items: NavItem[]
   repo: RepoChip | null
-  inboxCount: number | null
   skillsUpdateAvailable: boolean
   version: string | null
   latestVersion: string | null
@@ -623,7 +612,6 @@ function SidebarContent({
   activeTo,
   items,
   repo,
-  inboxCount,
   skillsUpdateAvailable,
   version,
   latestVersion,
@@ -688,7 +676,7 @@ function SidebarContent({
       </div>
 
       {sessionScope ? <div className="shrink-0 px-3 pt-2">{sessionScope}</div> : null}
-      <SidebarViewTabs items={items} activeTo={activeTo} needsYou={needsYou} inboxCount={inboxCount} skillsUpdateAvailable={skillsUpdateAvailable} onNavigate={onNavigate} />
+      <SidebarViewTabs items={items} activeTo={activeTo} needsYou={needsYou} skillsUpdateAvailable={skillsUpdateAvailable} onNavigate={onNavigate} />
       <div data-slot="project-task-navigation" className={'min-h-0 flex-1 overflow-y-auto overscroll-contain p-3'}>
         <SidebarNavigateContext.Provider value={onNavigate}>
           {sidebarList ?? <div data-slot="task-quick-list">{taskQuickList}</div>}

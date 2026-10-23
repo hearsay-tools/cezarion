@@ -29,7 +29,6 @@ export function MobileTabBar({
   activeTo,
   signal,
   projectName,
-  inboxCount,
   skillsUpdateAvailable,
   showNewTask = true,
 }: {
@@ -38,7 +37,6 @@ export function MobileTabBar({
   /** The current project's signal; undefined while unknown or outside a project. */
   signal?: ProjectSignal
   projectName?: string | null
-  inboxCount?: number | null
   skillsUpdateAvailable?: boolean
   /** The floating New task button. Off on `/new`, where it would point at the page it is on. */
   showNewTask?: boolean
@@ -138,7 +136,6 @@ export function MobileTabBar({
         projectName={projectName}
         items={items}
         activeTo={activeTo}
-        inboxCount={inboxCount}
         skillsUpdateAvailable={skillsUpdateAvailable}
       />
     </>

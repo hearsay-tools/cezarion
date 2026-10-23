@@ -1022,24 +1022,6 @@
       "count": 1
     },
     {
-      "file": "todos.test.ts",
-      "rule": "short-bound",
-      "site": "async function waitFor(assertion: () => void, timeoutMs = 4000, intervalMs = 25): Promise<void> {",
-      "count": 1
-    },
-    {
-      "file": "todos.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise((r) => setTimeout(r, 400));",
-      "count": 1
-    },
-    {
-      "file": "todos.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise((resolve) => setTimeout(resolve, 400));",
-      "count": 1
-    },
-    {
       "file": "workflows/agent-tmpdir.test.ts",
       "rule": "short-bound",
       "site": "await vi.waitFor(() => expect(store.getRun(run.id)?.status).toBe('done'));",

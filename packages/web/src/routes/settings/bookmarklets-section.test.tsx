@@ -28,7 +28,7 @@ const HEALTH: HealthResponse = {
   checks: [],
   defaultRunner: 'claude',
   forge: null,
-  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: false, singleProject: false, automations: false, preview: false, voice: false },
+  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
 }
 
 const SKILLS: Skill[] = [
@@ -193,7 +193,6 @@ describe('BookmarkletPanel project scoping (multi-project spec, step 3.6)', () =
     expect(hrefOf('bm-generic')).not.toContain('/p/')
   })
 })
-
 
 describe('BookmarkletPanel launcher interactions', () => {
   it('keeps the generic launcher manual when auto-submit is enabled and filters only skill launchers', async () => {

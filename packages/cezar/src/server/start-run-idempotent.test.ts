@@ -63,7 +63,6 @@ describe('POST /api/v1/runs clientRequestId', () => {
 
   it.each([
     [{ images: [{ mediaType: 'image/png', data: 'YQ==' }] }, { images: [{ mediaType: 'image/png', data: 'Yg==' }] }],
-    [{ generateFollowups: false }, { generateFollowups: true }],
   ])('rejects changed behavior inputs on a retry: %j', async (original, changed) => {
     const payload = { ...body, ...original };
     expect((await post(payload)).status).toBe(201);

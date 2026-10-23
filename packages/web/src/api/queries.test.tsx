@@ -93,7 +93,7 @@ const HEALTH = {
   repo: { root: '/home/me/cezar', branch: 'main' },
   checks: [],
   defaultRunner: 'claude',
-  capabilities: { localHandoff: true, followups: false, singleProject: false, automations: false },
+  capabilities: { localHandoff: true, singleProject: false, automations: false },
 }
 
 /** Just enough WebSocket for useHealth's topic subscription (api/ws.ts): records the frames the
@@ -621,7 +621,6 @@ describe('queryKeys', () => {
     try {
       expect(queryKeys.runs.list()).toEqual(['proj-a', 'runs', 'list'])
       expect(queryKeys.health).toEqual(['proj-a', 'health'])
-      expect(queryKeys.todos).toEqual(['proj-a', 'todos'])
       expect(queryKeys.skills).toEqual(['proj-a', 'skills'])
       expect(queryKeys.skillsReady).toEqual(['proj-a', 'skills', 'ready'])
       expect(queryKeys.agentConfig).toEqual(['proj-a', 'agent-config'])
@@ -1322,7 +1321,6 @@ describe('refStatusRecheckAfter', () => {
     expect(refStatusRecheckAfter(undefined)).toBeGreaterThan(0)
   })
 })
-
 
 describe('usePinRun scope ownership', () => {
   it('invalidates the originating cache after navigation while preserving newer SSE fields', async () => {

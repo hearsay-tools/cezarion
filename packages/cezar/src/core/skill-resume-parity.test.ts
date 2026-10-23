@@ -345,9 +345,50 @@ function assertContinuationSkill(
 }
 
 describe('harness parity — skill system prompt on Continue (#790)', () => {
-  expect(SKILL_RESUME_CRITERIA.map((row) => row.id)).toEqual(['R53', 'R54', 'R55', 'R56', 'R57', 'R59']);
+  expect(SKILL_RESUME_CRITERIA.map((row) => row.id)).toEqual(['R100', 'R53', 'R54', 'R55', 'R56', 'R57', 'R59']);
 
   for (const backend of RUNNER_IDS) {
+    it(`${backend} R100 retires inbox generation across Start, Continue and recovery`, async () => {
+      const savedFollowups = process.env.CEZ_FOLLOWUPS;
+      process.env.CEZ_FOLLOWUPS = '1';
+      try {
+        for (const preference of [true, false, undefined]) {
+          await withSkillResumeRun(backend, async (fixture) => {
+            const dataDir = join(fixture.repoRoot, '.ai/cezar');
+            const todos = join(dataDir, 'todos.json');
+            const bytes = '[{ "summary": "retained", "unknown": true }]\n';
+            writeFileSync(todos, bytes);
+            const journal = join(dataDir, 'runs', `${fixture.runId}.handoff.md`);
+            const note = '\n## Continuity sentinel\nKeep this task context.\n';
+            writeFileSync(journal, readFileSync(journal, 'utf8') + note);
+            const assertContinuity = () => {
+              const wire = fixture.snapshotWire();
+              expect(wire).toContain('CEZ_HANDOFF_FILE');
+              expect(wire).not.toContain('## Follow-ups (cezar)');
+              expect(wire).not.toContain('CEZ_TODOS_FILE');
+              expect(readFileSync(todos, 'utf8')).toBe(bytes);
+              expect(readFileSync(journal, 'utf8')).toContain(note);
+            };
+            assertContinuity();
+            // Old records remain readable. Their preference cannot enable the retired producer.
+            fixture.store.updateRun(fixture.runId, { generateFollowups: preference });
+            await idleClose(fixture.manager, fixture.runId);
+            expect(fixture.manager.isActive(fixture.runId)).toBe(false);
+            await continueAndPark(fixture, { text: promptFor(backend, 'baseline') }, fixture.markWire());
+            assertContinuity();
+            await idleClose(fixture.manager, fixture.runId);
+            expect(fixture.manager.continueRun(fixture.runId, { text: promptFor(backend, 'baseline') }).ok).toBe(true);
+            await fixture.restart();
+            await waitFor(() => fixture.store.getRun(fixture.runId)?.status === 'waiting' && fixture.manager.isActive(fixture.runId));
+            assertContinuity();
+            expect(fixture.store.getRun(fixture.runId)?.generateFollowups).toBe(preference);
+          });
+        }
+      } finally {
+        if (savedFollowups === undefined) delete process.env.CEZ_FOLLOWUPS;
+        else process.env.CEZ_FOLLOWUPS = savedFollowups;
+      }
+    }, 90_000);
     it(`${backend} R53 keeps the skill system prompt on a live Continue`, async () => {
       await withSkillResumeRun(backend, async (fixture) => {
         const launchPrompt = assertLaunchKeepsSkill(backend, fixture.repoRoot, fixture.snapshotWire());

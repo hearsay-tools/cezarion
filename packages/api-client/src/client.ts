@@ -80,7 +80,7 @@ export function createCezarClient<
  * hand-written DTO it retires.
  *
  * EVERY 2xx, not just 200: a handler answering `c.json(x, 201)` — `POST /runs`, `/workflows`,
- * `/runs/:id/pr`, `/todos/:id/start` — has no 200 branch at all, so keying on 200 inferred
+ * `/runs/:id/pr` — has no 200 branch at all, so keying on 200 inferred
  * `never`. That stayed invisible while a hand-written DTO still annotated the call site (`never`
  * is assignable to anything) and would have surfaced as a broken caller at the exact moment
  * those DTOs were deleted.

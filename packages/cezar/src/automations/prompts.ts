@@ -47,8 +47,7 @@ A GitHub poll:
     "workflow": "quick-task",
     "variants": 1,
     "worktree": true,
-    "autonomous": true,
-    "generateFollowups": false
+    "autonomous": true
   }
 }
 
@@ -95,7 +94,7 @@ Top-level keys:
 - "variants": 1 | 2 | 3 competing runs per match.
 - "worktree": isolate each run in its own git worktree (recommended: true).
 - "autonomous": never park to ask; an automation has no one watching (recommended: true).
-- "generateFollowups": true or false. "systemPrompt": extra guidance for every launched run.
+- "systemPrompt": extra guidance for every launched run.
 
 For a GitHub poll, name, events and task are required; for a schedule, name, kind, schedule and task.
 

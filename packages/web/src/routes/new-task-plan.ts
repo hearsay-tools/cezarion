@@ -81,9 +81,6 @@ export function planTaskLine(task: string, max = 120): string {
  * workflow name — the chain may be unsaved), plus the composer's current picker choices under
  * the same rules as `buildCreateRunBody`: `model`/`variants`/`images` only when they say
  * something, explicit/sticky `runner` choices always sent (untouched defaults may be omitted),
- * `generateFollowups`
- * only when off (#444), and `todoId` only when the composer was prefilled from an inbox entry (#374 —
- * planning the follow-up first still starts it, so the entry must still be marked started).
  */
 export function buildPlannedRunBody(opts: {
   task: string
@@ -98,10 +95,8 @@ export function buildPlannedRunBody(opts: {
   defaultRunner?: Runner
   variants: number
   images: readonly AttachmentInput[]
-  generateFollowups?: boolean
-  todoId?: string
 }): CreateRunInput {
-  const { task, steps, model, modelsLocked, effort, runner, runnerExplicit, defaultRunner, variants, images, generateFollowups, todoId } =
+  const { task, steps, model, modelsLocked, effort, runner, runnerExplicit, defaultRunner, variants, images } =
     opts
   return {
     task,
@@ -111,7 +106,5 @@ export function buildPlannedRunBody(opts: {
     runner: runnerOverride(runner, defaultRunner, runnerExplicit),
     variants: variants > 1 ? variants : undefined,
     images: images.length > 0 ? [...images] : undefined,
-    generateFollowups: generateFollowups === false ? false : undefined,
-    todoId: todoId || undefined,
   }
 }

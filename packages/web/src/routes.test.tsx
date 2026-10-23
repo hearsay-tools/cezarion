@@ -41,7 +41,7 @@ const BOOT = 'boot'
 
 /** A full-enough `/api/v1/health` answer: the redirect gate reads `bootProject`, and the routes
  *  behind it (inbox, /new) read `capabilities` — a partial seed would crash what a real health
- *  payload never crashes. `followups: true` keeps the Inbox route's real heading. */
+ *  payload never crashes. `` keeps the Inbox route's real heading. */
 const HEALTH = {
   version: '0.0.0-test',
   repoRoot: '/home/u/cezar',
@@ -49,7 +49,7 @@ const HEALTH = {
   checks: [],
   defaultRunner: 'claude',
   forge: null,
-  capabilities: { localHandoff: true, followups: true, singleProject: false, automations: false },
+  capabilities: { localHandoff: true, singleProject: false, automations: false },
   projects: [{ id: BOOT, name: 'cezar' }],
   bootProject: BOOT,
 }

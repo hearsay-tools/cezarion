@@ -67,8 +67,8 @@ export const automationKindSchema = z.enum(['github', 'schedule']);
 export type AutomationKind = z.infer<typeof automationKindSchema>;
 
 /**
- * The task a match launches: `POST /runs`' own body minus the three keys an automation owns
- * itself — `task` (the rendered prompt), `images` and `todoId` — plus the prompt TEMPLATE.
+ * The task a match launches: `POST /runs`' own body minus the two keys an automation owns
+ * itself — `task` (the rendered prompt) and `images` — plus the prompt TEMPLATE.
  *
  * Two keys are re-spelled rather than inherited, because the automation schema really does differ
  * from the composer's and the contract has to describe the automation route:
@@ -81,7 +81,7 @@ export type AutomationKind = z.infer<typeof automationKindSchema>;
  *    stores and answers it plainly, so it stays optional.
  */
 export const automationTaskSchema = createRunInputBaseSchema
-  .omit({ task: true, images: true, todoId: true, systemPrompt: true })
+  .omit({ task: true, images: true, systemPrompt: true })
   .extend({
     /** The prompt template. `{{github.number}}`, `{{github.title}}`, `{{github.url}}` and
      *  `{{github.labels}}` are substituted per match; GitHub content is appended as untrusted

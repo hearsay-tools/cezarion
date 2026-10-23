@@ -49,14 +49,12 @@ import {
 import {
   appendHandoffAutosaveReport,
   appendHandoffHeartbeat,
-  followupsEnabled,
   handoffInstructions,
   handoffPath,
   recordHandoffPeriodicAutosave,
   seedHandoffFile,
 } from '../handoff.ts';
 import { attachmentDirectory, resolveAttachmentPath } from './attachment-path.ts';
-import { todosPath } from '../todos.ts';
 // Contract VALUES, like `workspaceUiStateSchema` in workspace/migrations.ts: the attachment
 // vocabulary the routes validate with is the same one the engine stores and re-reads by, so the
 // wire and the disk can never disagree about what counts as an image (#950).
@@ -155,7 +153,7 @@ async function configuredModelProvider(
 /** An interactive session that hears nothing from the user closes itself. */
 export const IDLE_TIMEOUT_MS = 15 * 60_000;
 /**
- * Task-completion marker from the agent contract (HANDOFF_INSTRUCTIONS):
+ * Task-completion marker from the agent contract (HANDOFF_ONLY_INSTRUCTIONS):
  * an active `CEZ:DONE` declaration means "goal achieved, nothing to ask" —
  * the session is closed right away instead of parking at `waiting` (#347).
  * Detection runs on the accumulated turn text so delta-streaming backends
@@ -803,9 +801,6 @@ export interface StartRunInput {
   autonomous?: boolean;
   /** Task webhook opt-in (#589). Persisted on the record at creation; read from there after. */
   notify?: boolean;
-  /** Follow-up inbox generation (spec 007, #444). Omitted means enabled for
-   *  compatibility; the handoff journal runs either way. */
-  generateFollowups?: boolean;
   /** Attachments from the queued prompt stack (#472), re-encoded from disk by
    *  `hydrateQueuedInput` at dequeue. Kept separate from `images` because those
    *  are persisted into `taskImages` by `startRun()` — folding
@@ -1542,7 +1537,7 @@ export class RunManager {
    */
   private repoRootTail: Promise<void> = Promise.resolve();
 
-  /** `.ai/cezar` — where the per-task handoff files and todos.json live. */
+  /** `.ai/cezar` — where the per-task handoff files live. */
   private readonly dataDir: string;
 
   /** Runs currently being paused by the memory guard — dedupes the ~2 s samples so one breach
@@ -1710,27 +1705,20 @@ export class RunManager {
     }
   }
 
-  /** Env the spawned claude gets so the agent can find its handoff file and
-   *  the global inbox (spec 007; the inbox only when the run opted in).
-   *
-   *  `CEZ_TODOS_FILE` is set to `''` rather than omitted when follow-ups are
-   *  off: runners spawn with `{ ...process.env, ...spec.env }`, so omitting the
-   *  key would let a value inherited from *this* process through — a nested
-   *  cezar (an agent running `cez serve`/`cez run`/the test suite) would then
-   *  write follow-ups into the parent's inbox despite the opt-out. Empty is the
-   *  established "absent" spelling — consumers guard with `if (todosFile)`.
+  /** Env for the rolling handoff and artifacts.
    *
    *  `TMPDIR`/`TEMP`/`TMP` (#785) point at this run's own scratch directory
    *  instead of the machine-wide one every agent used to share. Created and
    *  write-probed here, on the last common path before a spawn, so an unusable
    *  temp directory throws `AgentTempDirError` at the caller rather than
    *  turning into empty command output inside a running agent. */
-  private agentEnv(runId: string, generateFollowups = true): Record<string, string> {
+  private agentEnv(runId: string): Record<string, string> {
     return {
       CEZ_ARTIFACTS_DIR: provisionArtifactDirectory(this.dataDir, runId),
       CEZ_HANDOFF_FILE: handoffPath(this.dataDir, runId),
       CEZ_TASK_ID: runId,
-      CEZ_TODOS_FILE: generateFollowups ? todosPath(this.dataDir) : '',
+      // Shadow a path inherited from an older parent process.
+      CEZ_TODOS_FILE: '',
       ...agentTmpEnv(this.dataDir, runId),
       ...(this.cockpit ? { CEZ_COCKPIT_URL: this.cockpit.origin, CEZ_PROJECT_ID: this.cockpit.projectId } : {}),
     };
@@ -1833,14 +1821,14 @@ export class RunManager {
   private async agentEnvForStep(
     runId: string,
     backend: RunnerId,
-    options: { generateFollowups?: boolean; recordedProfileId?: string; stepId?: string } = {},
+    options: { recordedProfileId?: string; stepId?: string } = {},
   ): Promise<{ env: Record<string, string>; profileId: string; accountBinding?: WorkerAccountBinding }> {
     // An owned worker binds the account its identity pinned for THIS step (#452); a legacy identity
     // answers every step with its single run-level account, so the one-provider rule still holds there.
     const step = this.workerStep(runId, options.stepId);
     if (step) {
       if (backend !== step.account.provider) throw new WorkerIdentityError('Accepted worker provider identity cannot change');
-      const env = this.agentEnv(runId, options.generateFollowups);
+      const env = this.agentEnv(runId);
       return { env: { ...env, ...boundWorkerAccountEnv(step.account, buildChildEnv({ backend, extraEnv: env })) },
         profileId: step.account.profileId, accountBinding: step.account };
     }
@@ -1848,7 +1836,7 @@ export class RunManager {
     const profileId = options.recordedProfileId
       ?? (backend === (run?.runner ?? 'claude') ? run?.agentProfile : undefined);
     const resolved = await resolveProfileEnvForRoot(this.repoRoot, backend, profileId);
-    const env = { ...this.agentEnv(runId, options.generateFollowups), ...resolved.env };
+    const env = { ...this.agentEnv(runId), ...resolved.env };
     return {
       env,
       profileId: resolved.profile.id,
@@ -3087,10 +3075,6 @@ export class RunManager {
       // The composer's per-task account (spec 2026-07-29-agent-profiles). Persisted at creation
       // so a queued run picks it up at dequeue and every later resume reads the same answer.
       agentProfile: input.agentProfile,
-      // The global inbox is the ceiling on the per-run flag (#471). Enforced here rather than
-      // at the HTTP route because `cezar run`, the inbox's own "▶ Run" and variants all reach
-      // startRun directly — a route-level gate would leave those writing todos.json.
-      generateFollowups: followupsEnabled() ? input.generateFollowups : false,
       // Persist autonomy on the record (#489) so the terminal review gate
       // (`settleSuccess`) and the group-pick winner-park can honor it — mid-run
       // auto-nudge reads `input.autonomous` (`execute`), but the record is the
@@ -3176,7 +3160,7 @@ export class RunManager {
       input: {
         task: run.task, runner: run.runner, model: run.model, effort: run.effort,
         agentProfile: run.agentProfile, systemPrompt: run.systemPrompt,
-        autonomous: run.autonomous, generateFollowups: run.generateFollowups, worktree: true,
+        autonomous: run.autonomous, worktree: true,
       },
     };
   }
@@ -3579,14 +3563,6 @@ export class RunManager {
       });
       return;
     }
-    // Re-apply the inbox ceiling (#471). `execute()` gates again at spawn time, so the agent is
-    // safe either way — but a run queued while the inbox was on and recovered after it was
-    // switched off would otherwise keep echoing `generateFollowups: true` on a run that
-    // demonstrably produced none. Normalize the record, the way startRun does.
-    const generateFollowups = followupsEnabled() ? run.generateFollowups : false;
-    if (generateFollowups !== run.generateFollowups) {
-      this.store.updateRun(run.id, { generateFollowups });
-    }
     this.pendingJobs.set(run.id, {
       workflow,
       // A continuation can durably queue the untouched remainder before the
@@ -3604,7 +3580,6 @@ export class RunManager {
         model: run.model,
         effort: run.effort,
         runner: run.runner,
-        generateFollowups,
         // Re-thread autonomy (#489): the rebuilt input feeds `execute`, whose mid-run auto-nudge
         // reads `input.autonomous`. Without this a recovered autonomous run would run
         // non-autonomously and later wrongly park at `review`.
@@ -3831,7 +3806,7 @@ export class RunManager {
       const interruptedDef = interruptedIndex >= 0 ? run.workflowDef?.steps[interruptedIndex] : undefined;
       const requeueInput = () => ({ task: run.task, runner: run.runner, model: run.model, effort: run.effort,
         agentProfile: run.agentProfile, systemPrompt: run.systemPrompt, autonomous: run.autonomous,
-        generateFollowups: run.generateFollowups, worktree: run.worktree });
+        worktree: run.worktree });
       // Worktree setup (#917) interrupted before any agent session: there is no session to
       // continue, so start the workflow over. `execute` sees setup still `running` and reruns it.
       if (run.workflowDef && run.worktreeSetup?.status === 'running' && !run.steps.some(step => step.sessionId)) {
@@ -4333,7 +4308,6 @@ export class RunManager {
     }
     return { deadline, inFlight };
   }
-
 
   /**
    * The PER-TASK off switch (`DELETE /api/v1/runs/:id/auto-resume`, and the archive route):
@@ -6871,7 +6845,7 @@ export class RunManager {
           : { workflow: current.workflowDef!, input: {
             task: current.task, runner: current.runner, model: current.model, effort: current.effort,
             agentProfile: current.agentProfile, systemPrompt: current.systemPrompt,
-            autonomous: current.autonomous, generateFollowups: current.generateFollowups, worktree: current.worktree,
+            autonomous: current.autonomous, worktree: current.worktree,
           } };
         this.beginWorkerExecution(runId, false);
       } catch (error) { return { ok: false, error: admissionError(error, 'original execution checkpoint unavailable') }; }
@@ -7066,9 +7040,6 @@ export class RunManager {
       this.dropActive(runId);
       return;
     }
-    // The env is a live ceiling: a run created while the inbox was on must not keep writing
-    // follow-ups after it is switched off.
-    const generateFollowups = followupsEnabled() && record?.generateFollowups !== false;
     // Continue/recovery constructs a second ActiveRun: hydrate the durable mode here too.
     const state: ActiveRun = {
       delegationSettings: undefined, revokeDelegation: undefined,
@@ -7428,7 +7399,6 @@ export class RunManager {
     let continueProfile: Awaited<ReturnType<RunManager['agentEnvForStep']>>;
     try {
       continueProfile = await this.agentEnvForStep(runId, continueBackend, {
-        generateFollowups,
         recordedProfileId: resumedProfileId,
         stepId: toolsStep?.id,
       });
@@ -7551,7 +7521,7 @@ export class RunManager {
       delegation?.instructions,
       this.automationsPart(),
       artifactInstructions(continueProfile.env.CEZ_ARTIFACTS_DIR),
-      handoffInstructions({ tools: !!ciTools, followups: generateFollowups }),
+      handoffInstructions({ tools: !!ciTools }),
     );
     session = startManagedSession(runner,
       {
@@ -7667,7 +7637,6 @@ export class RunManager {
                 agentProfile: completed.agentProfile,
                 systemPrompt: completed.systemPrompt,
                 autonomous: completed.autonomous,
-                generateFollowups: completed.generateFollowups,
                 worktree: completed.worktree,
               },
             };
@@ -8419,7 +8388,6 @@ export class RunManager {
     let stepProfile: Awaited<ReturnType<RunManager['agentEnvForStep']>>;
     try {
       stepProfile = await this.agentEnvForStep(runId, stepBackend, {
-        generateFollowups: followupsEnabled() && input.generateFollowups !== false,
         stepId: step.id,
       });
     } catch (err) {
@@ -8470,14 +8438,14 @@ export class RunManager {
       session = startManagedSession(runner,
         {
           // Skill body, then the run's extra prompt (POST override or config
-          // default), then the handoff/todos contract — every agent step.
+          // default), then the handoff contract — every agent step.
           systemPrompt: composeSystemPrompt(
             systemPrompt,
             extraSystemPrompt,
             delegation?.instructions,
             this.automationsPart(),
             artifactInstructions(stepProfile.env.CEZ_ARTIFACTS_DIR),
-            handoffInstructions({ tools: !!ciTools, followups: followupsEnabled() && input.generateFollowups !== false }),
+            handoffInstructions({ tools: !!ciTools }),
           ),
           userPrompt,
           images,

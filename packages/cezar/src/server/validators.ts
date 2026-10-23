@@ -46,12 +46,7 @@ type JsonOptions = ErrorOptions & {
    * What a body that is PRESENT but not parseable as JSON becomes. Defaults to `absent`, which is
    * what every route wants when both cases are rejected anyway.
    *
-   * `POST /todos/:id/start` is the one route that must tell them apart: no body at all is the
-   * pre-#401 bodyless POST and has to succeed (`absent: undefined`, which its optional schema
-   * accepts), while a truncated payload must 400 rather than pass as "no body" and silently 201
-   * (`malformed: null`, which it does not). That distinction lived in the handler's own
-   * `JSON.parse` before the route moved its body onto a validator; it is expressed here so the
-   * behaviour moved with it rather than being lost in the move.
+   * Use distinct values when an optional body accepts absence but must reject malformed JSON.
    */
   malformed?: unknown;
   /**
@@ -106,8 +101,7 @@ export function jsonZodValidator<
   options: JsonOptions = {},
 ): JsonValidator<S, E, P> {
   // Key presence, not a destructuring default: `undefined` IS a meaningful value for both of
-  // these (it is what `POST /todos/:id/start` wants a bodyless request to parse as), and a
-  // `= null` default would silently overwrite exactly that case.
+  // these; a `= null` default would silently overwrite an explicitly absent value.
   const absent = 'absent' in options ? options.absent : null;
   const malformed = 'malformed' in options ? options.malformed : absent;
   const { message, code, invalid } = options;

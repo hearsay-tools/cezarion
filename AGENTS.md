@@ -151,15 +151,19 @@ proof_dir=$(mktemp -d "${TMPDIR:-/tmp}/cezar-red-proof.XXXXXX")
 git worktree add --detach "$proof_dir/tree" "$proof_base"
 (cd "$proof_dir/tree" && pnpm install --frozen-lockfile)
 # Copy the current regression test, plus any new test helpers/fixtures it needs.
+
 cp packages/cezar/src/path/to/regression.test.ts \
   "$proof_dir/tree/packages/cezar/src/path/to/regression.test.ts"
 (cd "$proof_dir/tree" && npm test -- --passWithNoTests=false packages/cezar/src/path/to/regression.test.ts)
 # Inspect the failure: it must show the reported defect, not a broken import/setup.
+
 # Copy only the fixed source files into the scratch tree; keep the same test.
+
 cp packages/cezar/src/path/to/source.ts \
   "$proof_dir/tree/packages/cezar/src/path/to/source.ts"
 (cd "$proof_dir/tree" && npm test -- --passWithNoTests=false packages/cezar/src/path/to/regression.test.ts)
 # After saving the evidence, clean up even if setup or a test failed.
+
 git -C "$proof_repo" worktree remove --force "$proof_dir/tree"
 rmdir "$proof_dir"
 ```
@@ -254,6 +258,17 @@ at its per-file cap, or was never queued) does not become pending if you wait
 again. Run it with `npm test -- <file>`, and record that command and its result
 next to the Squeal verdict for the other files. Without Squeal, run
 `npm test -- packages/cezar/src/core/*-parity.test.ts packages/cezar/src/workflows/*-parity.test.ts`.
+
+### Generated inbox retirement
+
+The owner waived the compatibility window for hearsay-tools/cezarion#1543. The generated
+follow-up inbox is removed outright in 0.17.0: do not restore `CEZ_FOLLOWUPS`, suggestion
+prompts, todo routes, watchers, synchronization or launch controls. Existing `todos.json`
+files stay untouched; old Inbox URLs show plain-file export guidance. Historical run
+`generateFollowups` fields are read-only legacy data and never enable generation.
+Keep the handoff journal, Notes, Continue, live conversation follow-ups, worker messaging,
+ordinary task creation and issue-authoring skills independent. Native runner plan/todo
+wire events are unrelated to the removed generated inbox.
 
 ## The HTTP API
 
@@ -501,6 +516,7 @@ controlled-load result is needed and unknown, not to duplicate background checks
 
 ```bash
 # Select the first CPU allowed to this shell, including inside a cpuset.
+
 cpu=$(awk '/^Cpus_allowed_list:/ { split($2, cpus, /[,-]/); print cpus[1] }' /proc/self/status)
 LOOPS=2 timeout --kill-after=5s 120s taskset -c "$cpu" bash <<'BASH'
 set -eu
@@ -619,6 +635,7 @@ Count a test file's observed CI failure annotations across rerun attempts with:
 ```bash
 node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/cezarion --runs 20
 # Or select runs by creation time (inclusive UTC timestamps):
+
 node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/cezarion --since 2026-10-22T00:00:00Z --until 2026-10-23T00:00:00Z
 ```
 

@@ -50,10 +50,8 @@ beforeAll(async () => {
     { id: 'fin', title: 'Finished task', task: 'Check the work', workflow: 'default', status: 'done', tokensUsed: 0,
       createdAt: new Date(Date.now() - 7_200_000).toISOString(), finishedAt: new Date(Date.now() - 7_200_000).toISOString(), archived: false, steps: [] },
   ]))
-  // Two follow-ups for the Inbox nav count (#617 01c); the inbox itself is opt-in (CEZ_FOLLOWUPS).
-  writeFileSync(join(root, '.ai/cezar/todos.json'), JSON.stringify([{ id: 'sel-1', summary: 'Review the PR' }, { id: 'sel-2', summary: 'Rerun the checks' }]))
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
-    env: fixtureServeEnv(root, { CEZ_FOLLOWUPS: '1' }), stdio: 'ignore',
+    env: fixtureServeEnv(root), stdio: 'ignore',
   })
   baseUrl = await waitForFixtureServer(server)
   expect((await (await fetch(`${baseUrl}/api/v1/runs`)).json()).map((run: { id: string }) => run.id).sort()).toEqual(['fin', 'ga', 'gb', 'one', 'two'])
@@ -236,24 +234,6 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
   expect(onSelected.row).toBe(fill.selected)
   expect({ width: onSelected.width, height: onSelected.height, bg: onSelected.bg }).toEqual({ width: 7, height: 7, bg: onSelected.info })
   record(dot, 'update marker on the selected row', 3, 'background-color', 'parent')
-
-  open('/inbox', '[aria-label="More views"]')
-  const more = `${nav} [aria-label="More views"]`
-  const selectedMore = waitForSettledSample(browser, ink(more)) as Ink
-  expect(selectedMore.bg).toBe(fill.selected)
-  expect(selectedMore.icon).toBe(selectedMore.ink)
-  expect(browser.count(`${nav} a[aria-current="page"]`)).toBe(0)
-  expect(browser.count(`${more} [data-slot="overflow-inbox-dot"]`)).toBe(1)
-  browser.click(more)
-  const badge = '[role="menu"] [data-slot="inbox-count"]'
-  const inbox = browser.waitForValue(`(() => {
-    const el = document.querySelector('${badge}'); if (!el) return null
-    return { text: el.textContent, bg: getComputedStyle(el).backgroundColor, color: getComputedStyle(el).color }
-  })()`, (v: { text: string } | null) => v?.text === '2')
-  expect(normalizeColorSample(browser, inbox)).toEqual({ text: '2', bg: amber.fill, color: amber.ink })
-  record(badge, 'inbox-count number', 4.5)
-  browser.press('Escape')
-  browser.waitForFunction(`document.querySelector('[role="menu"]') === null && document.activeElement === document.querySelector(${JSON.stringify(more)})`)
 
   // New task on /new: the same fill as the selected nav item and the selected task row.
   const newTask = `${container}[data-sidebar-item="new-task"]`

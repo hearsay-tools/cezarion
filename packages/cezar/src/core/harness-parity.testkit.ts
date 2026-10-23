@@ -196,7 +196,6 @@ export const WORKFLOW_TIMEOUT_CRITERIA = [
   { id: 'T6', scenario: 'hold', name: 'default tasks remain unlimited' },
 ] as const;
 
-
 export const NO_PROGRESS_CRITERIA = [
   { id: 'N1', scenario: 'no-progress', name: 'stalled nonfinal turns fail and release capacity' },
   { id: 'N2', scenario: 'busy-progress', name: 'native progress keeps a long turn alive' },
@@ -258,6 +257,7 @@ export const WORKER_PROGRESS_WAIT_CRITERIA = [
 
 /** #790: skill system prompt on Continue and restart recovery, every native wire. */
 export const SKILL_RESUME_CRITERIA = [
+  { id: 'R100', scenario: 'baseline', name: 'retires generated inbox instructions while retaining handoff on Start, Continue and recovery' },
   { id: 'R53', scenario: 'baseline', name: 'keeps the skill system prompt on Continue' },
   { id: 'R54', scenario: 'baseline', name: 'keeps the skill system prompt when recover() resumes a persisted continuation' },
   { id: 'R55', scenario: 'baseline', name: 'warns once when a resent continued skill is gone' },

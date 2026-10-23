@@ -1,5 +1,4 @@
 import { toRunSummary, type ApiRun, type ProcessUsage, type RunRecord, type RunSummary } from '@open-mercato/cezar-api-client/contract/runs'
-import type { TodoItem } from '@open-mercato/cezar-api-client'
 
 /**
  * The global stream's data layer: parse one SSE message, and fold it into cached state.
@@ -20,7 +19,6 @@ import type { TodoItem } from '@open-mercato/cezar-api-client'
 export type GlobalEvent =
   | { type: 'run'; run: RunRecord }
   | { type: 'run-deleted'; id: string }
-  | { type: 'todos'; items: TodoItem[] }
   | { type: 'usage'; usage: Record<string, ProcessUsage> }
   | { type: 'ping' }
 
@@ -49,8 +47,6 @@ export function parseGlobalEvent(name: string, data: string): GlobalEvent | null
       const id = (payload as { id?: unknown } | null)?.id
       return typeof id === 'string' && id ? { type: 'run-deleted', id } : null
     }
-    case 'todos':
-      return Array.isArray(payload) ? { type: 'todos', items: payload as TodoItem[] } : null
     case 'usage':
       return isRecord(payload) ? { type: 'usage', usage: payload as Record<string, ProcessUsage> } : null
     default:
@@ -62,7 +58,7 @@ export function parseGlobalEvent(name: string, data: string): GlobalEvent | null
  * One message from `GET /api/workspace/events` (multi-project spec, step 2.8): the same events
  * as the legacy stream, each stamped with the owning project — additively where the legacy
  * payload is an object (`run` grows a `project` key, `run-deleted` is `{id, project}`), wrapped
- * where it is not (`todos` → `{project, items}`, `usage` → `{project, usage}`). This parser
+ * where it is not (`usage` → `{project, usage}`). This parser
  * unwraps the envelope back to today's `GlobalEvent` so the reducers below never learn the wire
  * changed; the caller dispatches or drops on `project` (null only for the unstamped `ping`).
  *
@@ -97,10 +93,6 @@ export function parseWorkspaceEvent(
       const id = payload.id
       return typeof id === 'string' && id ? { project, event: { type: 'run-deleted', id } } : null
     }
-    case 'todos':
-      return Array.isArray(payload.items)
-        ? { project, event: { type: 'todos', items: payload.items as TodoItem[] } }
-        : null
     case 'usage':
       return isRecord(payload.usage)
         ? { project, event: { type: 'usage', usage: payload.usage as Record<string, ProcessUsage> } }

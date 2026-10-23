@@ -1,5 +1,5 @@
 import { stripProjectPrefix } from '@/lib/project-router'
-import { GitBranchIcon, InboxIcon, SettingsIcon, SparklesIcon, WorkflowIcon, ZapIcon } from '@/components/design-icons'
+import { GitBranchIcon, SettingsIcon, SparklesIcon, WorkflowIcon, ZapIcon } from '@/components/design-icons'
 import { ListTodoIcon } from '@/components/design-icons'
 import type { ComponentType, SVGProps } from 'react'
 
@@ -13,14 +13,10 @@ export type NavItem = {
   /** Path prefixes that light this item up. See `activeNavPath` for the longest-prefix rule. */
   match: string[]
   /** Optional trailing status affordance. Rendering/data stay with the shell. */
-  badge?: 'inbox-count' | 'skills-update' | 'tasks-unread'
+  badge?: 'skills-update' | 'tasks-unread'
   /** Forge-gated (R6 Step 1.1): the item exists only while `/api/health` reports the forge
    *  driver available — see `visibleNavItems`. */
   forge?: boolean
-  /** Inbox-gated (#471): the item exists only while `/api/health` reports
-   *  `capabilities.followups` — the global inbox is opt-in via `CEZ_FOLLOWUPS=1`.
-   *  See `visibleNavItems`. */
-  inbox?: boolean
   /** Automations-gated (#801): the item exists only while `/api/health` reports
    *  `capabilities.automations` — automations are opt-in via `CEZ_AUTOMATIONS=1`. Independent of
    *  `forge`: a schedule needs no GitHub remote (#766), so the item carries this gate ALONE; the
@@ -36,7 +32,6 @@ export type NavItem = {
  */
 export const NAV_ITEMS: NavItem[] = [
   { to: '/', label: 'Tasks', icon: ListTodoIcon, match: ['/', '/tasks', '/compare'], badge: 'tasks-unread' },
-  { to: '/inbox', label: 'Inbox', icon: InboxIcon, match: ['/inbox'], badge: 'inbox-count', inbox: true },
   { to: '/git', label: 'Git', icon: GitBranchIcon, match: ['/git'] },
   { to: '/github', label: 'GitHub', icon: GithubIcon, match: ['/github'], forge: true },
   { to: '/automations', label: 'Automations', icon: ZapIcon, match: ['/automations'], automations: true },
@@ -49,8 +44,6 @@ export const NAV_ITEMS: NavItem[] = [
 export type NavAvailability = {
   /** `forge.available` (spec §"GitHub tab (forge tab)"). */
   forge?: boolean
-  /** `capabilities.followups` — the opt-in global inbox (#471). */
-  inbox?: boolean
   /** `capabilities.automations` — the opt-in automations (#801). */
   automations?: boolean
 }
@@ -58,8 +51,7 @@ export type NavAvailability = {
 /**
  * The nav items a surface should actually render: a gated item drops out — nav item AND tab —
  * unless the health payload says its feature is there. The forge-gated GitHub item needs the
- * forge driver (spec §"GitHub tab (forge tab)"); the Inbox item needs `capabilities.followups`,
- * which is off unless `CEZ_FOLLOWUPS=1` (#471); the Automations item needs
+ * forge driver (spec §"GitHub tab (forge tab)"); the Automations item needs
  * `capabilities.automations`, which is off unless `CEZ_AUTOMATIONS=1` (#801), and no forge.
  *
  * Gates are ANDed per item, never ORed, so an item may carry more than one of them.
@@ -71,12 +63,10 @@ export type NavAvailability = {
  */
 export function visibleNavItems({
   forge = false,
-  inbox = false,
   automations = false,
 }: NavAvailability = {}): NavItem[] {
   return NAV_ITEMS.filter((item) =>
     (item.forge ? forge : true)
-    && (item.inbox ? inbox : true)
     && (item.automations ? automations : true))
 }
 
@@ -144,5 +134,5 @@ export function isPushedGitScreen(pathname: string, search: string): boolean {
 export const TAB_BAR_PATHS: readonly string[] = ['/', '/git', '/github']
 
 /** The `to` of every nav item the More sheet lists (Skills, Workflows, Settings, and the flagged
- *  Inbox and Automations) — used to light the More tab when the current route belongs to one. */
-export const MORE_SHEET_PATHS: readonly string[] = ['/skills', '/workflows', '/settings', '/inbox', '/automations']
+ *  Automations) — used to light the More tab when the current route belongs to one. */
+export const MORE_SHEET_PATHS: readonly string[] = ['/skills', '/workflows', '/settings', '/automations']

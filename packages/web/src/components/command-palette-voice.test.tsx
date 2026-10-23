@@ -72,7 +72,7 @@ function health(voice: boolean): HealthResponse {
     checks: [],
     defaultRunner: 'claude',
     forge: null,
-    capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: true, singleProject: false, automations: false, preview: false, voice },
+    capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice },
   }
 }
 

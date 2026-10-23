@@ -249,7 +249,7 @@ export const runRecordSchema = z.object({
   agentProfile: z.string().optional(),
   /** Echo of the extra system prompt the run used (POST override or config default). */
   systemPrompt: z.string().optional(),
-  /** false when the run deliberately disabled follow-up todo generation. Absent means enabled. */
+  /** Legacy generated-inbox preference, retained only to read historical run records. */
   generateFollowups: z.boolean().optional(),
   /** Autonomous mode (#autonomous): the run never parks at `waiting` or the terminal `review`
    *  gate. Absent = falsy = not autonomous. */
@@ -967,11 +967,7 @@ export const createRunInputBaseSchema = z
     worktree: z.boolean().optional(),
     /** true → autonomous run: never parks at "waiting"; auto-continues until done. */
     autonomous: z.boolean().optional(),
-    /** false → keep the handoff journal but do not expose or request a follow-up todos file.
-     *  Omit for the default (enabled); a server with the capability off pins it to false. */
-    generateFollowups: z.boolean().optional(),
-    /** Per-run system-prompt override (R2 2.3) — programmatic callers only. Wins over the
-     *  config.json default; whitespace-only degrades to absent. */
+    /** Per-run system-prompt override. Wins over the config default; whitespace-only is absent. */
     systemPrompt: z
       .string()
       .trim()
@@ -982,9 +978,6 @@ export const createRunInputBaseSchema = z
      *  too; delivered with the first agent step. The key keeps its name: the wire contract widened
      *  in place rather than growing a second list. */
     images: z.array(attachmentInputSchema).max(4).optional(),
-    /** The inbox entry this task came from (#374). Best-effort bookkeeping: an unknown or
-     *  already-started id never fails the run. For ×2/×3 the FIRST variant is recorded. */
-    todoId: z.string().min(1).max(200, 'must be at most 200 characters').optional(),
   });
 
 /**

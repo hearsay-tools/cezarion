@@ -8,10 +8,7 @@ import type {
 } from '@open-mercato/cezar-contract';
 import type {
   importableSkillSchema,
-  removeTodoResponseSchema,
   skillSchema,
-  startTodoResponseSchema,
-  todoItemSchema,
 } from '@open-mercato/cezar-contract';
 import type {
   deleteWorkflowResponseSchema,
@@ -27,7 +24,7 @@ import type { AppType } from './app-type.ts';
 import { workflowStepSchema } from '../workflows/types.ts';
 
 /**
- * Same guard as `contract-parity.test.ts`, for the workflows / groups / skills / todos /
+ * Same guard as `contract-parity.test.ts`, for the workflows / groups / skills /
  * agent-config families. See that file for why every assertion is MUTUAL: one-way
  * assignability passes on genuine drift, in both directions, and did so historically.
  *
@@ -56,9 +53,6 @@ describe('src/contract workflows/skills/agent-config schemas match the routes ex
   type Skills200 = InferResponseType<typeof client.api.v1.skills.$get, 200>;
   type SkillsRefresh200 = InferResponseType<typeof client.api.v1.skills.refresh.$post, 200>;
   type Importable200 = InferResponseType<typeof client.api.v1.skills.importable.$get, 200>;
-  type Todos200 = InferResponseType<typeof client.api.v1.todos.$get, 200>;
-  type RemoveTodo200 = InferResponseType<(typeof client.api.v1.todos)[':id']['$delete'], 200>;
-  type StartTodo201 = InferResponseType<(typeof client.api.v1.todos)[':id']['start']['$post'], 201>;
 
   // ---- agent config ----------------------------------------------------------------------
   type AgentConfig200 = InferResponseType<(typeof client.api.v1)['agent-config']['$get'], 200>;
@@ -76,9 +70,6 @@ describe('src/contract workflows/skills/agent-config schemas match the routes ex
     Assert<Exact<z.infer<typeof skillSchema>[], Skills200>>,
     Assert<Exact<z.infer<typeof skillSchema>[], SkillsRefresh200>>,
     Assert<Exact<z.infer<typeof importableSkillSchema>[], Importable200>>,
-    Assert<Exact<z.infer<typeof todoItemSchema>[], Todos200>>,
-    Assert<Exact<z.infer<typeof removeTodoResponseSchema>, RemoveTodo200>>,
-    Assert<Exact<z.infer<typeof startTodoResponseSchema>, StartTodo201>>,
     Assert<Exact<z.infer<typeof agentConfigListingSchema>, AgentConfig200>>,
     Assert<Exact<z.infer<typeof agentConfigFileContentSchema>, AgentConfigFile200>>,
     Assert<Exact<z.infer<typeof agentConfigFileContentSchema>, AgentConfigPut200>>,

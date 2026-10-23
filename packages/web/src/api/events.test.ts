@@ -42,7 +42,7 @@ describe('parseGlobalEvent', () => {
     ['ping', 'anything', { type: 'ping' }],
     ['run', JSON.stringify(run('r1')), { type: 'run', run: run('r1') }],
     ['run-deleted', '{"id":"r1"}', { type: 'run-deleted', id: 'r1' }],
-    ['todos', '[]', { type: 'todos', items: [] }],
+    ['todos', '[]', null],
     ['usage', JSON.stringify({ r1: SAMPLE }), { type: 'usage', usage: { r1: SAMPLE } }],
     ['usage', '{}', { type: 'usage', usage: {} }],
     // Garbage costs one frame, never the stream.
@@ -73,7 +73,7 @@ describe('parseWorkspaceEvent', () => {
     ['run', JSON.stringify({ ...run('r1'), project: 'a' }), { project: 'a', event: { type: 'run', run: run('r1') } }],
     ['run-deleted', '{"id":"r1","project":"a"}', { project: 'a', event: { type: 'run-deleted', id: 'r1' } }],
     // Array/record payloads have nowhere to carry a stamp, so they arrive wrapped.
-    ['todos', '{"project":"a","items":[]}', { project: 'a', event: { type: 'todos', items: [] } }],
+    ['todos', '{"project":"a","items":[]}', null],
     [
       'usage',
       JSON.stringify({ project: 'a', usage: { r1: SAMPLE } }),

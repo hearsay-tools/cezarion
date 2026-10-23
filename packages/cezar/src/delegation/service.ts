@@ -579,7 +579,7 @@ export class DelegationService {
           title: request.task.slice(0, 200), task: context ? workerContextTask(request.task, context) : request.task, workflow: workflowDef.name,
           runner: settings.runner, model: settings.model, effort: settings.effort, agentProfile: identity.account.profileId,
           systemPrompt: settings.systemPrompt, workflowDef,
-          autonomous: parent.autonomous, generateFollowups: parent.generateFollowups,
+          autonomous: parent.autonomous,
           steps: workflowDef.steps.map(step => ({ id: step.id, name: step.name ?? step.id, kind: stepKind(step) })),
         }, parent.id, request.requestId, { role: 'worker', permissions: [], parentRunId: parent.id, workspace, ...(context ? { context } : {}) }, requestHash, {
           ...identity, ...(context ? { contextHash: workerContextHash(context) } : {}),
