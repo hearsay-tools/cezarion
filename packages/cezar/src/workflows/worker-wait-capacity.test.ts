@@ -14,7 +14,7 @@ import { RunManager } from './run.ts';
 import { currentUsage } from '../core/process-usage.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { withDelayedCommand } from '../core/owned-input-delivery.testkit.ts';
+import { withHeldAck } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 import {
@@ -64,7 +64,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
 
   it.each(['codex', 'opencode', 'pi', 'omp'].flatMap(backend => ['agent', 'check'].map(next => ({ backend: backend as 'codex' | 'opencode' | 'pi' | 'omp', next }))))(
     '$backend keeps a completed wake and following $next held until its real transport ACK at cap one', async ({ backend, next }) => {
-      await withDelayedCommand(backend, async release => {
+      await withHeldAck(backend, async release => {
         process.env.CEZ_DRY_RUN = '0';
         process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
         process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
@@ -83,8 +83,11 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         try {
           await until(() => parkedOnWorkers(run.id) && !!engine.active.get(w.id)?.sessionEverOpened);
           expect(semaphore.busy()).toBe(1);
+          const boundaries = store.readEvents(run.id).filter(event => event.type === 'turn-end').length;
           manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
-          await until(() => store.readEvents(run.id).some(event => event.type === 'text' && String(event.text).includes('Worker wait')));
+          // The wake turn's own frames reach the runner while its acknowledgement is held. The wake is
+          // cezar's text, so the mock answers it with its ordinary turn rather than an echo.
+          await until(() => store.readEvents(run.id).filter(event => event.type === 'turn-end').length > boundaries);
           await new Promise(resolve => setTimeout(resolve, 400));
           const wake = store.getRun(run.id)?.agentInputs?.find(input => input.source === 'lifecycle');
           expect(wake).toBeDefined(); expect(wake?.deliveredAt).toBeUndefined();
@@ -116,7 +119,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   // The wake turn ends with no wait or done, so its boundary sends the no-wait nudge
   // (hearsay-tools/cezarion#1234) where it parked before; the nudge's charge is the decision on disk.
   it('interactive markerless wake persists its turn-end decision immediately after its held HTTP ACK', async () => {
-    await withDelayedCommand('opencode', async release => {
+    await withHeldAck('opencode', async release => {
       process.env.CEZ_DRY_RUN = '0';
       process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
       process.env.CEZ_OPENCODE_BIN = HARNESS_ADAPTERS.opencode.mockBin;
@@ -130,8 +133,11 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       }> };
       try {
         await until(() => !!engine.active.get(w.id)?.sessionEverOpened);
+        const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
         manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
-        await until(() => store.readEvents(p.id).some(event => event.type === 'text' && String(event.text).includes('Worker wait')));
+        // The wake turn's own frames reach the runner while its acknowledgement is held. The wake is
+        // cezar's text, so the mock answers it with its ordinary turn rather than an echo.
+        await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries);
         await Promise.all(bookkeeping);
         store.flush(); // Earlier turn bookkeeping/debounce cannot satisfy the measured ACK checkpoint.
         const settled = engine.active.get(p.id)?.agentInputFlight?.settled;
