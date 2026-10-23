@@ -765,6 +765,54 @@ describe('searching', () => {
     )
   })
 
+  /** The headings of the groups a search left visible, top to bottom. */
+  const visibleHeadings = () =>
+    [...document.querySelectorAll('[cmdk-group]:not([hidden]) > [cmdk-group-heading]')].map((h) => h.textContent)
+
+  it('ranks a later group above an earlier one when its best row scores higher (#1476)', async () => {
+    // Tasks renders before Skills. "deploy" hits the task mid-title and the skill at its name,
+    // so the skill scores higher and its group has to come first.
+    renderPalette({
+      runs: [run({ id: 'r-plan', title: 'Plan the deploy rollout' })],
+      skills: [skill({ name: 'deploy', source: 'ai' })],
+    })
+    openWith({ metaKey: true })
+    await screen.findByText('Plan the deploy rollout')
+    await screen.findByText('deploy')
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'deploy' } })
+
+    await waitFor(() => expect(visibleHeadings()).toEqual(['Skills', 'Tasks']))
+    expect(document.querySelector('[cmdk-item][aria-selected="true"]')?.getAttribute('data-skill')).toBe('deploy')
+  })
+
+  it('keeps the source order of the groups with an empty query', async () => {
+    renderPalette({
+      runs: [run({ id: 'r-plan', title: 'Plan the deploy rollout' })],
+      skills: [skill({ name: 'deploy', source: 'ai' })],
+    })
+    openWith({ metaKey: true })
+    await screen.findByText('deploy')
+
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'deploy' } })
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: '' } })
+
+    await waitFor(() => expect(visibleHeadings()).toEqual(['Views', 'Tasks', 'Actions', 'Skills']))
+  })
+
+  it('keeps New task above every ranked group while it matches', async () => {
+    renderPalette({ runs: [run({ id: 'r-plan', title: 'Plan the deploy rollout' })] })
+    openWith({ metaKey: true })
+    await screen.findByText('Plan the deploy rollout')
+
+    // "task" starts every task row's value but sits mid-value in "new task", so the Tasks group
+    // outscores the New task row. The row stays first anyway: it is pinned, not ranked.
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'task' } })
+
+    await waitFor(() => expect(document.querySelector('[data-run-id="r-plan"]')).not.toBeNull())
+    expect(document.querySelector('[cmdk-item]')?.getAttribute('data-nav-to')).toBe('/new')
+  })
+
   it('still lists a task once when its section is folded away', async () => {
     renderPalette({ runs: [finished('r-767', 'Fix 767 the flaky test')] })
     openWith({ metaKey: true })
