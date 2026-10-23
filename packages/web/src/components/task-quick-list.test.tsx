@@ -103,7 +103,12 @@ const rowsIn = (label: string): string[] =>
     metadataText(el).trim()
   )
 
-afterEach(cleanup)
+afterEach(async () => {
+  cleanup()
+  // Radix restores focus on a zero-delay timer after an overflow popover
+  // unmounts. Let it finish before jsdom restores Node's Event globals.
+  await act(() => new Promise<void>(resolve => setTimeout(resolve, 0)))
+})
 
 describe('status section folding (#811)', () => {
   beforeEach(() => localStorage.clear())
