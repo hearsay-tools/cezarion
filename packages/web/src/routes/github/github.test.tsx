@@ -1666,7 +1666,7 @@ const health = (backends: readonly Runner[]): HealthResponse => ({
   checks: backends.map((name) => ({ name, available: true })),
   defaultRunner: backends[0] ?? 'claude',
   forge: null,
-  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: true, singleProject: false, automations: false, preview: false, voice: false },
+  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
 })
 
 /** More than one installed backend — the only state that shows the runner pill. */
@@ -3562,7 +3562,6 @@ describe('cross-state search fallback (#730)', () => {
     )
   })
 
-
   it('stops rendering hits once the local filter matches the query again (#856)', async () => {
     // A second open PR carrying a label PR_137 does not, so the label filter can empty the local
     // narrow for a query that otherwise matches — the only way to reach the forge fallback while
@@ -3732,7 +3731,6 @@ describe('cross-state search fallback (#730)', () => {
   })
 })
 
-
 describe('cross-state search preserves fork filters', () => {
   const boards = [{ id: 'P1', title: 'First', url: 'https://github.com/users/acme/projects/1' },
     { id: 'P2', title: 'Delivery', url: 'https://github.com/users/acme/projects/2' }]
@@ -3832,7 +3830,6 @@ describe('cross-state search preserves fork filters', () => {
   })
 })
 
-
 it('debounces to the settled query and never searches after clearing to a label-only narrow', async () => {
   const sent = stubFetch()
   renderAt('/github')
@@ -3850,7 +3847,6 @@ it('debounces to the settled query and never searches after clearing to a label-
   expect(sent.filter(r => r.path.includes('/github/search'))).toHaveLength(1)
 })
 
-
 it('places the editable handoff prompt before template and execution settings', async () => {
   stubFetch()
   await openDetail()
@@ -3859,7 +3855,6 @@ it('places the editable handoff prompt before template and execution settings', 
   expect(prompt.compareDocumentPosition(workflow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   expect(screen.getByText('Instructions for the agent')).toBeTruthy()
 })
-
 
 it('keeps passing checks with unknown requirements blocked', async () => {
   stubFetch({ 'GET /api/v1/github/prs/137/merge-state': () => jsonResponse({ available: true, mergeState: {
@@ -3874,7 +3869,6 @@ it('keeps passing checks with unknown requirements blocked', async () => {
   expect((screen.getByRole('checkbox', { name: /Merge without waiting/ }) as HTMLInputElement).checked).toBe(false)
   expect(screen.getByText(/fixture-check · passing · requiredness unknown/)).toBeTruthy()
 })
-
 
 const compactHiddenFlags = () =>
   rows().map((row) => row.closest('[data-slot="gh-row-item"]')?.hasAttribute('data-compact-hidden') ?? false)
@@ -4057,7 +4051,6 @@ describe('deep links to items outside the open list (#692)', () => {
     expect(itemRequests(sent)).toEqual([])
   })
 })
-
 
 describe('issue linked tasks (#750)', () => {
   const task = (id: string, over: Partial<RunRecord> = {}): RunRecord => ({

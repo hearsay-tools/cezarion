@@ -231,23 +231,6 @@ export function deleteHandoff(dataDir: string, runId: string): void {
   }
 }
 
-/**
- * Is the global follow-up inbox on? (#471)
- *
- * Opt-in, off by default: agents kept hanging on stale, pre-saved follow-ups,
- * which made skill behavior unpredictable. This is the single source of truth —
- * `resolveCapabilities` reports it to the UI and `RunManager` enforces it on
- * every run, so the HTTP route, the `cezar run` CLI and the inbox's own "▶ Run"
- * cannot drift apart. The per-task handoff journal is a separate feature and is
- * never gated by this.
- *
- * An exact `'1'` opts in — the house spelling (`AGENTS.md`: "opt-in behind a
- * `CEZ_*` flag, off by default").
- */
-export function followupsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  return env.CEZ_FOLLOWUPS === '1';
-}
-
 const HANDOFF_JOURNAL = `## Handoff (cezar)
 
 CEZ_HANDOFF_FILE (env) is the absolute path to this task's rolling handoff file. Treat it like a HANDOFF.md:
@@ -270,33 +253,16 @@ const REFERENCES_AND_ATTACHMENTS = `Task reference markers: as soon as you know 
 ## Pasted attachments
 User-attached screenshots and files (PDF, TXT, MD) are saved as real files; their absolute paths are listed in the message that carries them. Read a file from its path when you need its contents, and use the path when a task needs the file itself (saving, uploading, attaching to issues/PRs). An image also rides along inline, but that copy is for viewing only; a non-image attachment exists ONLY as the file at that path.`;
 
-/**
- * Appended to every agent step's `--append-system-prompt` (spec 007). The
- * matching handoff/task env vars are set on every agent process;
- * CEZ_TODOS_FILE carries a usable path only when follow-up generation is
- * enabled (#444, #471) — opted-out runs get it empty, never absent, so an
- * inherited value from a parent cezar cannot shine through
- * (`RunManager.agentEnv`).
- */
+/** The rolling handoff journal and lifecycle guidance for sessions without cezar tools. */
 export const HANDOFF_ONLY_INSTRUCTIONS = `${HANDOFF_JOURNAL}\n\n${LIFECYCLE_MARKERS}\n\n${REFERENCES_AND_ATTACHMENTS}`;
-
-export const FOLLOWUP_INSTRUCTIONS = `## Follow-ups (cezar)
-
-CEZ_TODOS_FILE (env) is the absolute path to the user's follow-up inbox — a JSON array. Only append an entry when a genuinely actionable follow-up remains: something concrete a human or the next agent still needs to decide or do (a review nit worth a dedicated pass, a manual step you cannot take yourself, a decision blocked on the user, a known next task). Do NOT append filler — a restated summary of what you just finished, a congratulatory note, or "no further action needed" is not a follow-up; when the task is simply done, skip this file entirely. When (and only when) a real follow-up exists, read the file (treat a missing file as []), append ONE object and write the whole array back:
-{ "ts": "<ISO 8601>", "taskId": "<value of CEZ_TASK_ID>", "summary": "<one sentence: the concrete next action, not a status report>", "action": "<imperative user action, optional>", "prUrl": "<optional>", "suggestedSkill": "<optional skill name for the follow-up>", "suggestedArgs": "<optional>", "suggestedPrompt": "<optional freeform prompt for the follow-up task>", "runnable": <true when an agent can execute this follow-up, false when it is a note> }
-Set "runnable": false for anything a human must do or merely read — manual QA, "remember to…", informational notes — and leave out suggestedSkill/suggestedPrompt for those; the inbox then offers "Acknowledge" instead of "Run". Set "runnable": true only when suggestedSkill or suggestedPrompt says what to actually execute.
-Never modify or remove existing entries — append only.`;
-
-/** Default-on combined contract retained for old callers and runs. */
-export const HANDOFF_INSTRUCTIONS = `${HANDOFF_ONLY_INSTRUCTIONS}\n\n${FOLLOWUP_INSTRUCTIONS}`;
 
 /**
  * The handoff contract for one agent session. With `tools` (the session has cezar's tools) the
  * lifecycle is taught as cezar_done, cezar_ask and cezar_wait calls; without them it is today's marker
- * variant, `HANDOFF_ONLY_INSTRUCTIONS` or `HANDOFF_INSTRUCTIONS`. The marker lines are parsed in
+ * variant, `HANDOFF_ONLY_INSTRUCTIONS`. The marker lines are parsed in
  * both cases.
  */
-export function handoffInstructions(opts: { tools: boolean; followups: boolean }): string {
+export function handoffInstructions(opts: { tools: boolean }): string {
   const handoff = opts.tools ? `${HANDOFF_JOURNAL}\n\n${LIFECYCLE_TOOLS}\n\n${REFERENCES_AND_ATTACHMENTS}` : HANDOFF_ONLY_INSTRUCTIONS;
-  return opts.followups ? `${handoff}\n\n${FOLLOWUP_INSTRUCTIONS}` : handoff;
+  return handoff;
 }

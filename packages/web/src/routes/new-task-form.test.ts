@@ -464,16 +464,6 @@ describe('buildCreateRunBody — the exact POST /api/v1/runs payloads legacy sen
 
   })
 
-  it('generateFollowups=false is sent only when follow-up generation is disabled', () => {
-    const base = {
-      task: 't', source: { source: 'skill' as const, ref: 'om-review' }, model: '',
-      runner: 'claude' as const, defaultRunner: 'claude' as const, images: [],
-    }
-    expect(buildCreateRunBody({ ...base, generateFollowups: false }).generateFollowups).toBe(false)
-    expect(buildCreateRunBody({ ...base, generateFollowups: true }).generateFollowups).toBeUndefined()
-    expect(buildCreateRunBody(base).generateFollowups).toBeUndefined()
-  })
-
   it('images ride along without a variant launch field', () => {
     const body = buildCreateRunBody({
       task: 't', source: { source: 'workflow', ref: 'quick-task' }, model: '',
@@ -529,7 +519,6 @@ describe('buildAutomationTask', () => {
       defaultRunner: 'claude',
       images: [{ mediaType: 'image/png', data: 'ignored' }],
       autonomous: true,
-      todoId: 'ignored',
     })).toEqual({
       prompt: 'Review {{github.url}}',
       steps: [{ id: 'task', name: 'om-code-review', skill: 'om-code-review', prompt: '{{task}}' }],
@@ -556,7 +545,6 @@ it('reports discovery in progress without masking cached feedback', () => {
   expect(modelCatalogStatus('claude', { runner: 'claude', models: [], source: 'cache', stale: true }, false, true)).toBe('Using cached Claude model list')
   expect(modelCatalogStatus('claude', undefined, false, false)).toBeUndefined()
 })
-
 
 describe('Cursor advertised effort options', () => {
   const catalog: RunnerModelCatalogResponse = {

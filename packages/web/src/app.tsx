@@ -20,7 +20,7 @@ import { AppRoutes } from './routes'
  *  `/tasks/:id/changes` cold-loads and survives a refresh.
  *
  *  The shell is inside BrowserRouter because its nav reads the current location, and inside
- *  QueryClientProvider because its chips read `/api/health` and `/api/todos`. Each chip renders
+ *  QueryClientProvider because its status indicators read `/api/v1/health`. Each chip renders
  *  nothing until its query answers — no placeholder that would read as real data.
  *
  *  GlobalEventsProvider sits here, at the root, because the app gets exactly one `/api/events`

@@ -146,7 +146,7 @@ export interface ComposerProps {
 
 /** The imperative seam a host needs when it wants to write INTO the draft the composer owns —
  *  today only the /new prompt-template menu (#413 follow-up), which must land a snippet at the
- *  caret the same way the GitHub/Inbox composers do with their own textarea refs. */
+ *  caret the same way the GitHub composer do with their own textarea refs. */
 export interface ComposerHandle {
   /** Insert `snippet` at the caret, blank-line separated (`insertTemplate`), then refocus with
    *  the caret parked end after it. */

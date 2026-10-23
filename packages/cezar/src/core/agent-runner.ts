@@ -50,7 +50,7 @@ export interface AgentRunSpec {
   /** Extra directories the agent may read/write besides `cwd`. */
   additionalDirectories?: string[];
   /** Extra env vars for the agent process (merged over `process.env`) —
-   *  e.g. CEZ_HANDOFF_FILE / CEZ_TODOS_FILE / CEZ_TASK_ID (spec 007). */
+   *  e.g. CEZ_HANDOFF_FILE / CEZ_ARTIFACTS_DIR / CEZ_TASK_ID (spec 007). */
   env?: Record<string, string>;
   model?: string;
   /** Reasoning-effort pin (#45). Canonical `low`/`medium`/`high`/`xhigh`/`max`;

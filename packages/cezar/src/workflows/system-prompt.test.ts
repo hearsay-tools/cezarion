@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { HANDOFF_INSTRUCTIONS as BASE_HANDOFF, HANDOFF_ONLY_INSTRUCTIONS as BASE_HANDOFF_ONLY, handoffInstructions } from '../handoff.ts';
+import { HANDOFF_ONLY_INSTRUCTIONS as BASE_HANDOFF, handoffInstructions } from '../handoff.ts';
 import { artifactInstructions } from '../artifacts/lifecycle.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -21,10 +21,8 @@ import {
 // Publication guidance is additive for both fresh sessions and Continue; the
 // full prompt assertions below must still pin the unchanged handoff contract.
 const HANDOFF_INSTRUCTIONS = composeSystemPrompt(artifactInstructions('available'), BASE_HANDOFF);
-const HANDOFF_ONLY_INSTRUCTIONS = composeSystemPrompt(artifactInstructions('available'), BASE_HANDOFF_ONLY);
 // hearsay-tools/cezarion#1234: the sessions below have cezar's tools, so they are taught the tools.
-const SESSION_HANDOFF = composeSystemPrompt(artifactInstructions('available'), handoffInstructions({ tools: true, followups: true }));
-const SESSION_HANDOFF_ONLY = composeSystemPrompt(artifactInstructions('available'), handoffInstructions({ tools: true, followups: false }));
+const SESSION_HANDOFF = composeSystemPrompt(artifactInstructions('available'), handoffInstructions({ tools: true }));
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 const TERMINAL = new Set(['done', 'review', 'failed', 'cancelled']);
@@ -86,9 +84,9 @@ describe('composeSystemPrompt', () => {
 
 describe('handoff contract markers', () => {
   it('teaches the CEZ:ASK structured-question marker with its schema (#473)', () => {
-    expect(HANDOFF_ONLY_INSTRUCTIONS).toContain('CEZ:ASK');
-    expect(HANDOFF_ONLY_INSTRUCTIONS).toContain('"questions"');
-    expect(HANDOFF_ONLY_INSTRUCTIONS).toContain('"multiSelect"');
+    expect(HANDOFF_INSTRUCTIONS).toContain('CEZ:ASK');
+    expect(HANDOFF_INSTRUCTIONS).toContain('"questions"');
+    expect(HANDOFF_INSTRUCTIONS).toContain('"multiSelect"');
     // It rides in the combined contract every agent step receives.
     expect(HANDOFF_INSTRUCTIONS).toContain('CEZ:ASK');
   });
@@ -180,9 +178,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
     savedEnv.CEZ_FOLLOWUPS = process.env.CEZ_FOLLOWUPS;
     savedEnv.CEZ_AUTONAME = process.env.CEZ_AUTONAME;
     process.env.CEZ_DRY_RUN = '1';
-    // The global inbox is opt-in (#471). These assertions are about prompt composition and the
-    // per-run opt-out, so they run on an inbox-enabled server; the gate itself is covered by
-    // the suite below.
+    // The retired opt-in flag must have no effect on prompt composition.
     process.env.CEZ_FOLLOWUPS = '1';
     // Dry-run skips naming by default (canned titles would clobber honest
     // heuristics in demos/e2e); '1' forces the mock path for these tests.
@@ -191,8 +187,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
     // Simulate a nested cezar (an agent running `cez serve` / the test suite):
     // the parent process already carries CEZ_TODOS_FILE. Runners spawn with
     // `{ ...process.env, ...spec.env }`, so `agentEnv` must *shadow* this for
-    // every run — never merely omit the key — or an opted-out agent writes
-    // follow-ups into the parent's inbox. Asserted per test below.
+    // every run, so an older parent cannot pass a writable inbox into a child.
     process.env.CEZ_TODOS_FILE = inheritedTodos;
     store = RunStore.open(join(repoRoot, '.ai/cezar'));
     // Cap 1 (workspace-level since step 2.5) serializes the suite's runs.
@@ -241,7 +236,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
   /** Returns once the run is terminal and the bookkeeping it started (turn-end markers, the
    *  namer) has landed. */
   async function runToEnd(
-    input: { task: string; systemPrompt?: string; generateFollowups?: boolean },
+    input: { task: string; systemPrompt?: string },
     selectedWorkflow: WorkflowDef = workflow,
   ): Promise<string> {
     expectNoLiveRun();
@@ -473,62 +468,10 @@ describe('systemPrompt end-to-end (dry run)', () => {
     expect(readFileSync(join(worktreePath, 'notes.md'), 'utf8')).toContain(': 432\n');
   }, 30_000);
 
-  // The positive control for the opt-out test below: without this, mistyping the `!== false`
-  // guard would stop every run from producing inbox entries with the whole suite still green.
-  // This suite explicitly enables the global inbox in beforeAll (#471).
-  it('on an inbox-enabled server the agent gets the run own inbox, never an inherited one', async () => {
-    const todosFile = join(repoRoot, '.ai/cezar/todos.json');
-    rmSync(todosFile, { force: true });
-    rmSync(inheritedTodos, { force: true });
-    await runToEnd({ task: 'do the thing with follow-ups' });
-    expect(capturedSystemPrompt()).toContain('CEZ_TODOS_FILE');
-    expect(existsSync(todosFile)).toBe(true);
-    expect(existsSync(inheritedTodos)).toBe(false);
-  }, 30_000);
-
-  it('explicit opt-out keeps handoff behavior but removes inbox prompt and environment', async () => {
-    const todosFile = join(repoRoot, '.ai/cezar/todos.json');
-    rmSync(todosFile, { force: true });
-    rmSync(inheritedTodos, { force: true });
-    const id = await runToEnd({ task: 'do the thing quietly', generateFollowups: false });
-    const record = store.getRun(id);
-    expect(record?.generateFollowups).toBe(false);
-    expect(capturedSystemPrompt()).toBe(composeSystemPrompt(CONFIG_PROMPT, SESSION_HANDOFF_ONLY));
-    expect(capturedSystemPrompt()).not.toContain('CEZ_TODOS_FILE');
-    expect(existsSync(todosFile)).toBe(false);
-    // The opt-out must survive an inherited CEZ_TODOS_FILE (nested cezar):
-    // omitting the key instead of shadowing it leaks into the parent's inbox.
-    expect(existsSync(inheritedTodos)).toBe(false);
-    expect(readFileSync(join(repoRoot, '.ai/cezar/runs', `${id}.handoff.md`), 'utf8')).toContain(
-      'mock: implemented the change',
-    );
-
-    expect(manager.continueRun(id, { text: 'continue without generating follow-ups' })).toEqual({
-      ok: true,
-    });
-    const deadline = Date.now() + 20_000;
-    while (readFileSync(argsFile, 'utf8').trim().split('\n').length < 2) {
-      if (Date.now() > deadline) throw new Error('continuation did not start in time');
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    expect(capturedSystemPrompt(1)).toBe(
-      composeSystemPrompt(CONFIG_PROMPT, SESSION_HANDOFF_ONLY),
-    );
-    expect(capturedSystemPrompt(1)).not.toContain('CEZ_TODOS_FILE');
-    expect(existsSync(todosFile)).toBe(false);
-    expect(existsSync(inheritedTodos)).toBe(false);
-  }, 30_000);
 });
 
-/**
- * The global inbox gate, end-to-end through the real engine (#471).
- *
- * This drives `RunManager` directly — the same door `cezar run` and the inbox's own "▶ Run" use,
- * and the reason the ceiling lives in the manager rather than in the HTTP route. A route-level
- * gate would leave every one of those callers writing todos.json on a server that has the inbox
- * off.
- */
-describe('the global follow-up gate (dry run)', () => {
+/** Retired inbox generation stays absent while the handoff journal remains active. */
+describe('generated inbox retirement (dry run)', () => {
   const CONFIG_PROMPT = 'CONFIG-DEFAULT: always write tests first.';
   let repoRoot: string;
   let argsFile: string;
@@ -547,7 +490,7 @@ describe('the global follow-up gate (dry run)', () => {
     savedEnv.CEZ_FOLLOWUPS = process.env.CEZ_FOLLOWUPS;
     process.env.CEZ_DRY_RUN = '1';
     process.env.CEZ_MOCK_ARGS_FILE = argsFile;
-    // A parent cezar's inbox, as in the suite above: the gate must not leak into it either.
+    // A path inherited from an older parent process must not become an output.
     process.env.CEZ_TODOS_FILE = inheritedTodos;
     delete process.env.CEZ_FOLLOWUPS;
     await run('git', ['init', '-q', '-b', 'main'], { cwd: repoRoot });
@@ -586,7 +529,7 @@ describe('the global follow-up gate (dry run)', () => {
     steps: [{ id: 'work', name: 'Work', prompt: '{{task}}' }],
   };
 
-  async function runToEnd(input: { task: string; generateFollowups?: boolean }): Promise<string> {
+  async function runToEnd(input: { task: string }): Promise<string> {
     writeFileSync(argsFile, '', 'utf8');
     const record = manager.startRun(workflow, input);
     const terminal = new Set(['done', 'review', 'failed', 'cancelled']);
@@ -604,23 +547,23 @@ describe('the global follow-up gate (dry run)', () => {
     return argv[argv.indexOf('--append-system-prompt') + 1] as string;
   };
 
-  it('without CEZ_FOLLOWUPS the agent is never told about the inbox', async () => {
+  it('omits inbox instructions and new run preferences', async () => {
     const todosFile = join(repoRoot, '.ai/cezar/todos.json');
     rmSync(todosFile, { force: true });
     rmSync(inheritedTodos, { force: true });
 
     const id = await runToEnd({ task: 'do the thing mock:done' });
 
-    expect(capturedSystemPrompt()).toBe(composeSystemPrompt(CONFIG_PROMPT, SESSION_HANDOFF_ONLY));
+    expect(capturedSystemPrompt()).toBe(composeSystemPrompt(CONFIG_PROMPT, SESSION_HANDOFF));
     expect(capturedSystemPrompt()).not.toContain('CEZ_TODOS_FILE');
     expect(existsSync(todosFile)).toBe(false);
     // …and nothing leaked into the parent cezar's inbox either.
     expect(existsSync(inheritedTodos)).toBe(false);
-    // The record agrees, so a later continuation reads the same answer.
-    expect(store.getRun(id)?.generateFollowups).toBe(false);
+    // New runs do not persist the retired preference.
+    expect(store.getRun(id)?.generateFollowups).toBeUndefined();
   }, 30_000);
 
-  it('keeps the per-task handoff journal — #471 turns off the inbox, not the notes', async () => {
+  it('keeps the per-task handoff journal and lifecycle tools', async () => {
     const id = await runToEnd({ task: 'do the thing mock:done' });
     expect(capturedSystemPrompt()).toContain('CEZ_HANDOFF_FILE');
     // hearsay-tools/cezarion#1234: the lifecycle rides in the same contract, as cezar tool calls.
@@ -637,25 +580,4 @@ describe('the global follow-up gate (dry run)', () => {
     );
   }, 30_000);
 
-  it('a client asking for follow-ups cannot override the gate', async () => {
-    const todosFile = join(repoRoot, '.ai/cezar/todos.json');
-    rmSync(todosFile, { force: true });
-    const id = await runToEnd({ task: 'do the thing mock:done', generateFollowups: true });
-    expect(capturedSystemPrompt()).not.toContain('CEZ_TODOS_FILE');
-    expect(existsSync(todosFile)).toBe(false);
-    expect(store.getRun(id)?.generateFollowups).toBe(false);
-  }, 30_000);
-
-  it('turning the flag on restores the inbox for a new run', async () => {
-    const todosFile = join(repoRoot, '.ai/cezar/todos.json');
-    rmSync(todosFile, { force: true });
-    process.env.CEZ_FOLLOWUPS = '1';
-    try {
-      await runToEnd({ task: 'do the thing with follow-ups mock:done' });
-      expect(capturedSystemPrompt()).toContain('CEZ_TODOS_FILE');
-      expect(existsSync(todosFile)).toBe(true);
-    } finally {
-      delete process.env.CEZ_FOLLOWUPS;
-    }
-  }, 30_000);
 });

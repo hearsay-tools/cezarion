@@ -29,11 +29,7 @@ beforeAll(async () => {
     return { ...record, id: `fixture-${variant}`, title: `Validate task views (${variant})`, status: 'done', groupId: 'fixture-group', variant, archived: false, worktreePath, branch: `cez/fixture-${variant}`, inputTokens: 42000, outputTokens: 6000, costUsd: 0.42, peakRssBytes: 440401920, diffStat: { adds: 2, dels: 0, files: 1 } }
   })
   writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify(runs))
-  writeFileSync(join(root, '.ai/cezar/todos.json'), JSON.stringify([
-    { id: 'follow-up', summary: 'Validate task layouts on desktop and mobile.', suggestedPrompt: 'Check task views.', runnable: true, taskId: 'fixture-A' },
-    { id: 'note', summary: 'Review the proposed chain before starting work.', runnable: false, taskId: 'fixture-B' },
-  ]))
-  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root, { CEZ_FOLLOWUPS: '1', CEZ_AUTOMATIONS: '1' }), stdio: 'ignore' })
+  server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root, { CEZ_AUTOMATIONS: '1' }), stdio: 'ignore' })
   base = await waitForFixtureServer(server)
   project = await bootProjectId(base)
   // The fixture has no GitHub remote, so create refuses a GitHub automation (#766); a schedule needs none.
@@ -54,14 +50,13 @@ const prepare = (width: number, theme: string, idle = true) => {
 it('renders assigned task flows at 1440 Wide, 402 and 360 in both themes without page overflow', () => {
   const pages: Array<[string, string, string]> = [
     ['project', scoped('/'), '[data-slot="tasks-table"]'], ['global', '/tasks?group=project', '[data-slot="global-task-row"]'],
-    ['inbox', scoped('/inbox'), '[data-slot="todo-card"]'], ['automations', scoped('/automations'), '[data-route="automations"] [data-slot="automation-card"]'],
+    ['inbox', scoped('/inbox'), '[data-route="inbox"]'], ['automations', scoped('/automations'), '[data-route="automations"] [data-slot="automation-card"]'],
     ['editor', scoped(`/automations/${automationId}`), '#automation-name'], ['compare', scoped('/compare/fixture-group'), '[data-slot="retained-variant"]'],
   ]
   for (const width of [1440, 402, 360]) for (const theme of ['light', 'dark']) for (const [name, path, selector] of pages) {
     browser.goto(base + path)
     browser.waitForFunction(`document.querySelector('${selector}') !== null`)
     prepare(width, theme)
-    if (name === 'inbox') browser.click('[data-slot="todo-instructions-toggle"]')
     const visualTarget = name === 'project' ? '[data-route="tasks"]' : selector
     settleVisual(browser, visualTarget, { theme, width: 'wide', idle: true })
     expect(browser.evaluate('document.documentElement.scrollWidth <= innerWidth')).toBe(true)
@@ -89,14 +84,11 @@ it('persists column choices, filters projects, and expands mobile resources thro
   browser.click('[data-action="clear-filters"]')
   browser.waitForFunction(`document.querySelectorAll('[data-slot="global-task-row"]').length === 2`)
 }, 60_000)
-it('keeps retained comparisons read-only and acknowledges a note through the API', () => {
+it('keeps retained comparisons read-only', () => {
   browser.goto(base + scoped('/compare/fixture-group')); prepare(402, 'light')
   browser.waitForFunction(`document.querySelectorAll('[data-slot="retained-variant"]').length === 2`)
   expect(browser.count('[data-slot="variant-pick"]')).toBe(0)
   expect(browser.text('[data-route="compare"]')).toContain('owned workers')
-  browser.goto(base + scoped('/inbox'))
-  browser.click('[data-action="todo-acknowledge"]')
-  browser.waitForFunction(`document.querySelectorAll('[data-slot="todo-card"]').length === 1`)
 }, 60_000)
 
 it('renders loading, retryable error, and filtered-empty states in both themes and phone widths', async () => {

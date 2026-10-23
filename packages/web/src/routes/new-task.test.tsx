@@ -67,7 +67,7 @@ const HEALTH: HealthResponse = {
     { name: 'git', available: true, version: '2.43.0' },
   ],
   forge: null,
-  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: true, singleProject: false, automations: false, preview: false, voice: false },
+  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
 }
 
 const HEALTH_MULTI: HealthResponse = {
@@ -613,7 +613,7 @@ describe('picker data flows', () => {
   it('drops a persisted model preset that belongs to another runner', async () => {
     writeDraft({
       text: '', source: null, runner: 'codex', agentProfile: null, model: 'claude-opus-4-8', effort: null, retiredVariants: false,
-      planFirst: false, worktree: null, autonomous: null, generateFollowups: null, archiveWhenDone: false, autoMergePr: false,
+      planFirst: false, worktree: null, autonomous: null, archiveWhenDone: false, autoMergePr: false,
     })
     serve({ health: HEALTH_MULTI, providerStatus: PROVIDERS_MULTI })
     renderNewTask()
@@ -1253,7 +1253,6 @@ describe('submit', () => {
         lastTask: { source: 'skill', ref: 'om-fix' },
         // The run also lands at the head of the recency list (picker sort)...
         recentSources: [{ source: 'skill', ref: 'om-fix' }],
-        lastGenerateFollowups: true,
         // ...and bumps its usage count for the #408 frequency sort (a workflow source would
         // NOT carry a skillUsage key at all — see the WORKFLOW test below).
         skillUsage: { 'om-fix': 1 },
@@ -1269,7 +1268,7 @@ describe('submit', () => {
     // lands in its errored state immediately and the test stays deterministic.
     writeDraft({
       text: '', source: { source: 'skill', ref: 'om-fix' }, runner: null, agentProfile: null, model: null, effort: null,
-      retiredVariants: false, planFirst: false, worktree: null, autonomous: null, generateFollowups: null, archiveWhenDone: false, autoMergePr: false,
+      retiredVariants: false, planFirst: false, worktree: null, autonomous: null, archiveWhenDone: false, autoMergePr: false,
     })
     serve({ createRun: { id: 'run-9' }, uiStateStatus: 404 })
     renderNewTask()
@@ -1330,7 +1329,6 @@ describe('submit', () => {
         // cockpit restoring a stale skill from this same file.
         lastTask: null,
         // Nothing was picked, so nothing joins the recency list or the frequency map.
-        lastGenerateFollowups: true,
       }),
     )
   })
@@ -1491,39 +1489,6 @@ describe('submit', () => {
     expect(postedBody()).toMatchObject({ runner: 'codex' })
   })
 
-  it('defaults follow-up generation on, but posts and remembers an explicit opt-out', async () => {
-    serve()
-    renderNewTask()
-    await pillReady()
-    const toggle = document.querySelector(
-      '[data-slot="generate-followups-toggle"]',
-    ) as HTMLButtonElement
-    expect(toggle.getAttribute('aria-checked')).toBe('true')
-
-    fireEvent.click(toggle)
-    expect(toggle.getAttribute('aria-checked')).toBe('false')
-    fireEvent.change(textarea(), { target: { value: 'No follow-up inbox items' } })
-    await startTask()
-
-    expect((postedBody() as Record<string, unknown>).generateFollowups).toBe(false)
-    await waitFor(() =>
-      expect(requests.find((r) => r.method === 'PUT' && r.url === '/api/v1/ui-state')?.body).toMatchObject({
-        lastGenerateFollowups: false,
-      }),
-    )
-  })
-
-  it('uses the remembered follow-up preference when the draft has no choice', async () => {
-    serve({ uiState: { lastGenerateFollowups: false } })
-    renderNewTask()
-    await pillReady()
-    expect(
-      document
-        .querySelector('[data-slot="generate-followups-toggle"]')
-        ?.getAttribute('aria-checked'),
-    ).toBe('false')
-  })
-
   it('applies an interactive skill hint to untouched controls while keeping both overridable', async () => {
     // The composer opens on no source, so an interactive skill only drives the recommendation
     // once it is the selected one — here from the draft.
@@ -1577,52 +1542,20 @@ describe('submit', () => {
   })
 
   // #471 — the composer must not offer a switch the server overrides anyway.
-  const inboxOffHealth: HealthResponse = {
+  const retiredInboxHealth: HealthResponse = {
     ...HEALTH,
-    capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: false, singleProject: false, automations: false, preview: false, voice: false },
+    capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
   }
   const followupsToggle = () =>
     document.querySelector('[data-slot="generate-followups-toggle"]')
 
-  it('hides the follow-up toggle when the server has the inbox off', async () => {
-    serve({ health: inboxOffHealth })
+  it('omits the retired follow-up toggle', async () => {
+    serve({ health: retiredInboxHealth })
     renderNewTask()
     await pillReady()
     await waitFor(() => expect(followupsToggle()).toBeNull())
     // The neighbouring toggles are untouched — the gate owns exactly one control.
     expect(document.querySelector('[data-slot="autonomous-toggle"]')).not.toBeNull()
-  })
-
-  it('posts generateFollowups:false from an inbox-less server', async () => {
-    serve({ health: inboxOffHealth })
-    renderNewTask()
-    await pillReady()
-    await waitFor(() => expect(followupsToggle()).toBeNull())
-
-    fireEvent.change(textarea(), { target: { value: 'No inbox on this server' } })
-    await startTask()
-
-    expect((postedBody() as Record<string, unknown>).generateFollowups).toBe(false)
-  })
-
-  it('does not overwrite the remembered preference it never offered', async () => {
-    // The user last chose "on". With the inbox off there is no toggle, so persisting the
-    // forced `false` would silently flip their choice for when CEZ_FOLLOWUPS comes back.
-    serve({ health: inboxOffHealth, uiState: { lastGenerateFollowups: true } })
-    renderNewTask()
-    await pillReady()
-    await waitFor(() => expect(followupsToggle()).toBeNull())
-
-    fireEvent.change(textarea(), { target: { value: 'Leave my preference alone' } })
-    await startTask()
-
-    await waitFor(() =>
-      expect(requests.some((r) => r.method === 'PUT' && r.url === '/api/v1/ui-state')).toBe(true),
-    )
-    const persisted = requests
-      .filter((r) => r.method === 'PUT' && r.url === '/api/v1/ui-state')
-      .map((r) => r.body as Record<string, unknown>)
-    for (const body of persisted) expect(body).not.toHaveProperty('lastGenerateFollowups')
   })
 
 })
@@ -1660,18 +1593,7 @@ describe('drafts and prefill', () => {
     expect(requests.some((r) => r.method === 'POST' && r.url === '/api/v1/runs')).toBe(false)
   })
 
-  // #374: the composer is the middle of the inbox round trip — the Run link carries `todo=`,
-  // and the started run must carry it back so the entry is marked started and leaves the inbox.
-  it('?todo= prefill: the entry id rides along to POST /api/v1/runs so the inbox entry is marked', async () => {
-    serve()
-    renderNewTask('/new?skill=deploy&ref=ship%20it&todo=t1')
-    await pillReady('deploy')
-    await startTask()
-
-    expect((postedBody() as Record<string, unknown>).todoId).toBe('t1')
-  })
-
-  it('a plain launch (no ?todo=) sends no todoId — the inbox is left alone', async () => {
+  it('launches omit retired Inbox fields', async () => {
     serve()
     renderNewTask()
     await pillReady()
@@ -1679,22 +1601,7 @@ describe('drafts and prefill', () => {
     await startTask()
 
     expect((postedBody() as Record<string, unknown>).todoId).toBeUndefined()
-  })
-
-  // The two are orthogonal concerns (#374 vs #444): turning follow-up generation OFF for the
-  // NEW task must never stop the entry it was launched FROM being marked started.
-  it('carries todoId even when follow-up generation is switched off', async () => {
-    serve()
-    renderNewTask('/new?skill=deploy&ref=ship%20it&todo=t1')
-    await pillReady('deploy')
-    fireEvent.click(
-      document.querySelector('[data-slot="generate-followups-toggle"]') as HTMLElement,
-    )
-    await startTask()
-
-    const body = postedBody() as Record<string, unknown>
-    expect(body.todoId).toBe('t1')
-    expect(body.generateFollowups).toBe(false)
+    expect((postedBody() as Record<string, unknown>).generateFollowups).toBeUndefined()
   })
 
   it('submit spends the draft text', async () => {
@@ -2256,24 +2163,6 @@ describe('the plan flow', () => {
     expect(requests.some((request) => request.url === '/api/v1/runs')).toBe(false)
   })
 
-  it('▶ Start carries the follow-up opt-out from the composer and remembers it', async () => {
-    serve({ createRun: { id: 'planned-no-followups' } })
-    renderNewTask()
-    await pillReady()
-    fireEvent.click(
-      document.querySelector('[data-slot="generate-followups-toggle"]') as HTMLElement,
-    )
-    await planTask('Plan without follow-ups')
-    fireEvent.click(document.querySelector('[data-slot="plan-start"]') as HTMLElement)
-
-    await waitFor(() => expect((postedBody() as Record<string, unknown>).generateFollowups).toBe(false))
-    await waitFor(() =>
-      expect(requests.find((r) => r.method === 'PUT' && r.url === '/api/v1/ui-state')?.body).toEqual({
-        lastGenerateFollowups: false,
-      }),
-    )
-  })
-
   it('embeds plan review in the page and Escape restores focus to the untouched draft', async () => {
     serve()
     renderNewTask()
@@ -2394,7 +2283,7 @@ describe('prompt templates on the new-task composer', () => {
     renderNewTask()
     await pillReady()
 
-    // No "templates" word next to the icon, unlike the roomier GitHub/Inbox composers.
+    // No "templates" word next to the icon, unlike the roomier GitHub composer.
     expect(templateTrigger().textContent).toContain('Template')
     expect(templateTrigger().querySelector('svg')).not.toBeNull()
   })
@@ -2658,7 +2547,6 @@ describe('the composer runner pill carries the account', () => {
     expect(postedBody()).not.toHaveProperty('agentProfile')
   })
 })
-
 
 describe('retained task submission (#164)', () => {
   it('keeps prompt and attachments read-only during delayed success and blocks repeat submits', async () => {

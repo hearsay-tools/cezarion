@@ -55,18 +55,19 @@ const allNavLinks = (root = sidebar()) => Array.from(root.querySelectorAll<HTMLA
 
 describe('AppShell', () => {
   it('keeps optional views in an overflow menu and marks the current overflow view', async () => {
-    renderShell('/inbox', { inboxCount: 2 })
+    renderShell('/automations', { })
     expect(within(nav()).queryByRole('link', { name: 'Inbox' })).toBeNull()
     const more = within(nav()).getByRole('button', { name: 'More views' })
     expect(more.getAttribute('data-active')).toBe('true')
     fireEvent.keyDown(more, { key: 'Enter' })
-    expect((await screen.findByRole('menuitem', { name: /Inbox/ })).getAttribute('aria-current')).toBe('page')
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Automations' }))
-    expect(screen.getByTestId('location').textContent).toBe('/automations')
+    expect((await screen.findByRole('menuitem', { name: 'Automations' })).getAttribute('aria-current')).toBe('page')
+    expect(screen.queryByRole('menuitem', { name: /Inbox/ })).toBeNull()
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Workflows' }))
+    expect(screen.getByTestId('location').textContent).toBe('/workflows')
   })
 
   it('moves Workflows into More when six views would crowd the overflow button', async () => {
-    renderShell('/workflows', { inboxCount: 2 })
+    renderShell('/workflows', { })
     expect(allNavLinks().map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Git', 'GitHub', 'Skills', 'Settings'])
     const more = within(nav()).getByRole('button', { name: 'More views' })
     expect(more.getAttribute('data-active')).toBe('true')
@@ -75,13 +76,13 @@ describe('AppShell', () => {
   })
 
   it('never shrinks the active tab so its label is not truncated beside the overflow button', () => {
-    renderShell('/settings', { inboxCount: 2 })
+    renderShell('/settings', { })
     const active = within(nav()).getByRole('link', { current: 'page' })
     expect(active.className).toContain('shrink-0')
   })
 
   it('draws the view tabs as the #622 final board: 30px tall, 7px radius, 28px icon tabs, 9px-padded labelled tab', () => {
-    renderShell('/settings', { inboxCount: 2 })
+    renderShell('/settings', { })
     const active = within(nav()).getByRole('link', { current: 'page' })
     expect(active.className).toContain('h-[30px]')
     expect(active.className).toContain('rounded-[7px]')
@@ -104,7 +105,7 @@ describe('AppShell', () => {
   })
 
   it('omits overflow when no optional view is available and keeps version in footer', () => {
-    renderShell('/', { inboxAvailable: false, automationsAvailable: false, forgeAvailable: false, version: '1.2.3' })
+    renderShell('/', { automationsAvailable: false, forgeAvailable: false, version: '1.2.3' })
     expect(within(nav()).queryByRole('button', { name: 'More views' })).toBeNull()
     expect(within(nav()).queryByRole('link', { name: 'GitHub' })).toBeNull()
     expect(footer().querySelector('[data-slot="version-chip"]')?.textContent).toBe('v1.2.3')
@@ -112,7 +113,7 @@ describe('AppShell', () => {
 
   // A schedule needs no GitHub remote (#766): the opt-in alone makes Automations an optional view.
   it('offers overflow for Automations alone, with no forge', () => {
-    renderShell('/', { inboxAvailable: false, automationsAvailable: true, forgeAvailable: false })
+    renderShell('/', { automationsAvailable: true, forgeAvailable: false })
     expect(within(nav()).getByRole('button', { name: 'More views' })).not.toBeNull()
     expect(within(nav()).queryByRole('link', { name: 'GitHub' })).toBeNull()
   })
@@ -338,7 +339,7 @@ describe('AppShell', () => {
 
   it('renders primary views as named router links', () => {
     // No optional view, so no More button: all six views are tabs.
-    renderShell('/', { inboxAvailable: false, automationsAvailable: false })
+    renderShell('/', { automationsAvailable: false })
     const links = allNavLinks()
     expect(links.map(a => a.getAttribute('aria-label'))).toEqual(['Tasks', 'Git', 'GitHub', 'Skills', 'Workflows', 'Settings'])
     expect(links.map(a => a.getAttribute('href'))).toEqual(['/', '/git', '/github', '/skills', '/workflows', '/settings'])
@@ -359,8 +360,7 @@ describe('AppShell', () => {
     renderShell('/', { automationsAvailable: false })
     const links = allNavLinks()
     expect(links.map((a) => a.getAttribute('href'))).not.toContain('/automations')
-    // Inbox still needs More, which takes Workflows along (see the crowding test above).
-    expect(links).toHaveLength(5)
+    expect(links).toHaveLength(6)
   })
 
   it('shows Automations in overflow once the capability is on', async () => {
@@ -556,16 +556,6 @@ describe('AppShell', () => {
         // The version shown is still the one actually running.
         expect(chip().textContent).toContain('v1.2.3')
       })
-    })
-
-    it('renders the Inbox count in overflow only for a non-zero count', async () => {
-      renderShell('/', { inboxCount: 2 })
-      expect(sidebar().querySelector('[data-slot="overflow-inbox-dot"]')).not.toBeNull()
-      fireEvent.keyDown(within(nav()).getByRole('button', { name: 'More views' }), { key: 'Enter' })
-      expect((await screen.findByRole('menuitem', { name: /Inbox/ })).textContent).toBe('Inbox2')
-      cleanup()
-      renderShell('/', { inboxCount: 0 })
-      expect(sidebar().querySelector('[data-slot="overflow-inbox-dot"]')).toBeNull()
     })
 
     it('renders no Skills update marker or badge (hearsay-tools/cezarion#1494)', () => {

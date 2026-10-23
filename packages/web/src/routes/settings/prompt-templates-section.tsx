@@ -32,7 +32,7 @@ import { cn } from '@/lib/utils'
 /**
  * Settings → Prompt templates (#413): "add the settings pane for editing these prompt templates
  * so I can make sure it always start as I wanted" — the issue's own words. The list here is
- * exactly the one the GitHub hand-over and Inbox follow-up composers read
+ * exactly the one task creation and GitHub hand-over read
  * (`PromptTemplateMenu` / `normalizePromptTemplates`), so an edit here reshapes both at once.
  *
  * Zero-config: an untouched repo shows `DEFAULT_PROMPT_TEMPLATES` with nothing persisted yet.

@@ -351,7 +351,6 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
     <Route path="/p/:projectId" element={<ProjectScopeRoute />}>
       <Route index element={<TasksOverviewRoute />} />
       <Route path="new" element={<NewTaskProjectRoute />} />
-
       {/* Every task tab shares one layout, which hosts the live preview pane (#781). */}
       <Route path="tasks/:id" element={<TaskPreviewLayout />}>
         <Route
@@ -419,7 +418,6 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
           </Suspense>
         }
       />
-
       {/* The Git view (issue 06 §3): each section is a URL — /git (Recently on main; a phone's
           Git screen unless ?view=repo), /git/commits (+ /:sha, one commit inside Recently on
           main), /git/not-landed (issue 08), /git/cleanup, /git/branches, and /git/changes (the main tree's uncommitted
@@ -534,7 +532,6 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
       <Route path="automations/new" element={<AutomationsRoute mode="new" />} />
       <Route path="automations/:automationId" element={<AutomationsRoute mode="edit" />} />
       <Route path="automations/:automationId/log" element={<AutomationsRoute mode="log" />} />
-
       {/* The skills catalog (R6 Step 1.4) — its own top-level surface, no settings sub-nav.
           `/settings/skills` redirects here (below) so pasted links keep working. */}
       <Route
@@ -545,11 +542,9 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
           </Suspense>
         }
       />
-
-      {/* The follow-up inbox (R6 Step 1.2): light — no markdown stack — so it rides the main
+      {/* Export guidance for old Inbox bookmarks: light — no markdown stack — so it rides the main
           bundle like the overview does. */}
       <Route path="inbox" element={<InboxRoute />} />
-
       {/* The workflow builder (R6 Step 1.6): /workflows opens the canvas on the repo's first
           saved chain, /workflows/:name deep-links a specific one. */}
       <Route
@@ -568,11 +563,9 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
           </Suspense>
         }
       />
-
       {/* Settings (R6 Step 1.3): registry-driven — the section list, nav and routes all come
           from routes/settings/registry.tsx. Hidden sections are NOT routed, so their URLs are
           honest 404s until the section ships (notifications unhides in Step 1.7).
-
           Only the PROJECT-scoped sections live here (multi-project spec, step 3.5); the
           global ones are the top-level `/settings/global/*` block below. */}
       <Route path="settings" element={<SettingsIndexRoute capabilities={capabilities} />} />
@@ -595,7 +588,6 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
           element={<MovedSettingsSectionRedirect sectionId={section.id} />}
         />
       ))}
-
       <Route path="*" element={<NotFoundRoute />} />
     </Route>
   )

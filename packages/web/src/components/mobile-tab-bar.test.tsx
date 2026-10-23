@@ -40,7 +40,7 @@ describe('MobileTabBar', () => {
   })
 
   it('never puts flag-gated or More views in the bar, even with every flag on', () => {
-    renderBar('/', { forge: true, inbox: true, automations: true })
+    renderBar('/', { forge: true, automations: true })
     expect(tabLabels()).toEqual(['Tasks', 'Git', 'GitHub', 'More'])
   })
 
@@ -98,27 +98,8 @@ describe('More sheet', () => {
     expect(within(sheet()).getByText('cezarion')).toBeTruthy()
   })
 
-  it('adds Inbox and Automations under the flag label, each only when its flag is on', () => {
-    const { unmount } = renderBar('/', { forge: true, inbox: true, automations: true }, { inboxCount: 2 })
-    open()
-    expect(within(sheet()).getAllByRole('link').map((a) => a.textContent)).toEqual(['Skills', 'Workflows', 'Project settings', 'Inbox2', 'Automations'])
-    expect(within(sheet()).getByText('Shown when their flag is on')).toBeTruthy()
-    unmount()
-    renderBar('/', { forge: true, inbox: true })
-    open()
-    expect(within(sheet()).getAllByRole('link').map((a) => a.textContent)).toEqual(['Skills', 'Workflows', 'Project settings', 'Inbox'])
-  })
-
-  it('shows the inbox count pill and no skills update pill', () => {
-    renderBar('/', { forge: true, inbox: true }, { inboxCount: 3 })
-    open()
-    expect(sheet().querySelector('[data-slot="skills-update"]')).toBeNull()
-    expect(within(sheet()).queryByText('1 update')).toBeNull()
-    expect(sheet().querySelector('[data-slot="inbox-count"]')!.textContent).toBe('3')
-  })
-
   it('shows no badges when nothing is pending', () => {
-    renderBar('/', { forge: true, inbox: true })
+    renderBar('/', { forge: true, })
     open()
     expect(within(sheet()).queryByText('1 update')).toBeNull()
     expect(sheet().querySelector('[data-slot="inbox-count"]')).toBeNull()
