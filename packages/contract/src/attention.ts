@@ -177,7 +177,8 @@ export function deriveAttention(run: AttentionInput): Attention {
     }
     // A CI or timer park is `waiting` on its own downstream work, not on you: it keeps the
     // running bucket and ring the monitoring activity gave it before the wait list.
-    if (waitingOn?.kind === 'ci') return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for CI' };
+    if (waitingOn?.kind === 'pr') return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: waitingOn.until === 'merge' ? 'waiting for merge' : 'waiting for CI' };
+    if (waitingOn?.kind === 'process') return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for a command' };
     if (waitingOn?.kind === 'timer') return { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' };
     // A resolved CI or timer wait owes the agent a wake that has not started: the same scheduler
     // wait as the worker wake above, never a human gate (rung 10).
@@ -257,8 +258,9 @@ export function deriveWebhookState(run: AttentionInput): WebhookTrigger | undefi
       return 'needs-you';
     case 'workers':
       return 'waiting-workers';
-    case 'ci':
-      return 'waiting-ci';
+    case 'pr':
+      // The webhook trigger names keep their wording; a merge wait is not CI (hearsay-tools/cezarion#1425).
+      return waitingOn.until === 'merge' ? 'waiting-other' : 'waiting-ci';
     case 'timer':
       return 'waiting-timer';
     case 'usage-limit':

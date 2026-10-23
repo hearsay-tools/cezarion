@@ -75,6 +75,12 @@ export const WAIT_CRITERIA = [
   { id: 'U24', scenario: 'baseline', name: 'a worker\'s second no-wait turn end asks its parent, and the reply resumes it' },
   { id: 'U26', scenario: 'baseline', name: 'footer capability follows provisioning on opening, live delivery, Continue and no-session recovery' },
   { id: 'U25', scenario: 'baseline', name: 'an automatic message supersedes a worker\'s fallback question' },
+  // hearsay-tools/cezarion#1446: process waits.
+  { id: 'U1p', scenario: 'baseline', name: 'a process wait registers through cezar_wait on the native wire, parks keeping its slot, and wakes with its exit code' },
+  { id: 'U2p', scenario: 'baseline', name: 'process and timer open: the timer wakes, the process wait stays open and is in the footer, the later process result is delivered' },
+  { id: 'U4p', scenario: 'baseline', name: 'cezar_cancel_wait cancels a process wait, aborts its watch, and no result is delivered' },
+  { id: 'U9p', scenario: 'provider-error', name: 'provider failure and clean close with a process wait open leave the run recoverable and the next result delivers' },
+  { id: 'U9pr', scenario: 'baseline', name: 'after a restart with no live session a process wait is watched again and its result delivers through the continuation' },
 ] as const;
 
 /** The native mocks' `mock:cezar-tool` prompt: one cezar tool call through the runner's own wire.

@@ -7,6 +7,9 @@ on:
     branches:
       - main
       - release/**
+  merge_group:
+    types: [checks_requested]
+    branches: [main]
   push:
     branches:
       - main
@@ -27,6 +30,37 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  queue-proof:
+    name: Verify exact queue CI evidence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      verified: ${{ steps.proof.outputs.verified }}
+      source: ${{ steps.proof.outputs.source }}
+    steps:
+      - name: Check out immutable main push
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - id: proof
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          retries: 0
+          script: |
+            core.setOutput('verified', 'false');
+            if (context.eventName !== 'push' || context.ref !== 'refs/heads/main') return;
+            const { queueCiProof } = require('./.github/scripts/queue-ci-proof.cjs');
+            const proof = await queueCiProof({ github, ...context.repo,
+              eventName: context.eventName, ref: context.ref, sha: context.sha });
+            core.setOutput('verified', String(proof.verified));
+            if (proof.verified) core.setOutput('source', proof.url);
+            await core.summary.addHeading('Queue CI evidence').addRaw(JSON.stringify(proof)).write();
+
   change-surface:
     name: Classify pull request change surface
     runs-on: ubuntu-24.04
@@ -142,7 +176,7 @@ jobs:
         if: github.event_name != 'workflow_dispatch' || steps['resolve-dispatch'].outputs.valid == 'true'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha || github.sha }}
+          ref: ${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha || github.event.merge_group.base_sha || github.sha }}
           persist-credentials: false
       - id: classify
         env:
@@ -159,6 +193,10 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha }}
           GH_TOKEN: ${{ github.token }}
         run: |
+          if [ "$EVENT_NAME" = merge_group ]; then
+            echo 'bump_pr=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           if [ "$EVENT_NAME" = workflow_dispatch ]; then
             if [ "$DISPATCH_VALID" != true ]; then
               echo 'bump_pr=false' >> "$GITHUB_OUTPUT"
@@ -198,6 +236,8 @@ jobs:
 
   build-and-package:
     name: Typecheck, unit, build, and package
+    needs: queue-proof
+    if: ${{ !cancelled() && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 15
 
@@ -301,8 +341,10 @@ jobs:
     # bumps, do not need to repeat the suites already covered by the relevant
     # release or docs gate; infra-only diffs cannot reach the package sources
     # Vitest covers, and their script tests run under build-and-package.
-    needs: [change-surface, classify-pr]
+    needs: [queue-proof, change-surface, classify-pr]
     if: >-
+      !cancelled() &&
+      (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') &&
       needs.change-surface.outputs.surface == 'full-matrix' &&
       needs.classify-pr.outputs.bump_pr != 'true'
     strategy:
@@ -363,8 +405,10 @@ jobs:
   node-floor:
     name: Node 24.15.0 floor, unit shard ${{ matrix.shard }}/2
     # Same docs-only, infra-only, and verified bump-PR skips as Vitest.
-    needs: [change-surface, classify-pr]
+    needs: [queue-proof, change-surface, classify-pr]
     if: >-
+      !cancelled() &&
+      (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') &&
       needs.change-surface.outputs.surface == 'full-matrix' &&
       needs.classify-pr.outputs.bump_pr != 'true'
     strategy:
@@ -457,8 +501,10 @@ jobs:
   cockpit-browser:
     name: Cockpit browser E2E shard ${{ matrix.shard }}/4
     # Same docs-only, infra-only, and verified bump-PR skips as Vitest.
-    needs: [change-surface, classify-pr]
+    needs: [queue-proof, change-surface, classify-pr]
     if: >-
+      !cancelled() &&
+      (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') &&
       needs.change-surface.outputs.surface == 'full-matrix' &&
       needs.classify-pr.outputs.bump_pr != 'true'
     strategy:
@@ -536,7 +582,7 @@ jobs:
   # cockpit browser jobs.
   verify:
     name: Unit, build, E2E, and package
-    needs: [change-surface, classify-pr, build-and-package, vitest, node-floor, cockpit-browser]
+    needs: [queue-proof, change-surface, classify-pr, build-and-package, vitest, node-floor, cockpit-browser]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -544,6 +590,13 @@ jobs:
     steps:
       - name: Require every verification job
         env:
+          PROOF_RESULT: ${{ needs.queue-proof.result }}
+          PROOF_VERIFIED: ${{ needs.queue-proof.outputs.verified }}
+          PROOF_SOURCE: ${{ needs.queue-proof.outputs.source }}
+          VERIFIED_SHA: ${{ github.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          CLASSIFY_RESULT: ${{ needs.classify-pr.result }}
+          SURFACE_RESULT: ${{ needs.change-surface.result }}
           BUILD_AND_PACKAGE_RESULT: ${{ needs['build-and-package'].result }}
           VITEST_RESULT: ${{ needs.vitest.result }}
           NODE_FLOOR_RESULT: ${{ needs['node-floor'].result }}
@@ -554,8 +607,18 @@ jobs:
           # classification, may leave Vitest and cockpit browser skipped.
           BUMP_PR: ${{ needs.classify-pr.outputs.bump_pr }}
         run: |
+          test "$CLASSIFY_RESULT" = success
+          test "$SURFACE_RESULT" = success
+          if [ "$EVENT_NAME" = push ] && [ "$PROOF_RESULT" = success ] && [ "$PROOF_VERIFIED" = true ]; then
+            test "$BUILD_AND_PACKAGE_RESULT" = skipped
+            test "$VITEST_RESULT" = skipped
+            test "$NODE_FLOOR_RESULT" = skipped
+            test "$COCKPIT_BROWSER_RESULT" = skipped
+            printf 'Reused queue verification for %s: %s\n' "$VERIFIED_SHA" "$PROOF_SOURCE" >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
           test "$BUILD_AND_PACKAGE_RESULT" = success
-          if [ "$CHANGE_SURFACE" = docs-only ] || [ "$CHANGE_SURFACE" = infra-only ] || [ "$BUMP_PR" = true ]; then
+          if [ "$EVENT_NAME" != merge_group ] && { [ "$CHANGE_SURFACE" = docs-only ] || [ "$CHANGE_SURFACE" = infra-only ] || [ "$BUMP_PR" = true ]; }; then
             test "$VITEST_RESULT" = success -o "$VITEST_RESULT" = skipped
             test "$NODE_FLOOR_RESULT" = success -o "$NODE_FLOOR_RESULT" = skipped
             test "$COCKPIT_BROWSER_RESULT" = success -o "$COCKPIT_BROWSER_RESULT" = skipped
@@ -578,6 +641,7 @@ jobs:
     if: ${{ !cancelled() && needs.verify.result == 'success' && github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main' }}
     permissions:
       actions: read
+      checks: read
       contents: write
       issues: read
       pull-requests: write
@@ -586,14 +650,41 @@ jobs:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
 
-  # The required "Automated Code Review" check. A called workflow's jobs show as
-  # "Review / <job>", so the required name has to live here. Outside a PR into
-  # main it carries another name: a skipped job reports success, and a skipped
-  # "Automated Code Review" must never satisfy the required check.
+  # Queue admission reads trusted base code and existing native PR-head review.
+  queue-admission:
+    name: Validate reviewed queue entry
+    needs: verify
+    if: ${{ !cancelled() && needs.verify.result == 'success' && github.event_name == 'merge_group' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+      pull-requests: read
+    steps:
+      - name: Check out trusted queue base
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.merge_group.base_sha }}
+          persist-credentials: false
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          retries: 0
+          script: |
+            const { mergeQueueAdmission } = require('./.github/scripts/merge-queue-admission.cjs');
+            try {
+              const admission = await mergeQueueAdmission({ github, ...context.repo, group: context.payload.merge_group });
+              await core.summary.addHeading('Existing PR-head review admission').addRaw(JSON.stringify(admission)).write();
+            } catch {
+              core.setFailed('Queue admission could not verify current native PR CI/review, membership and rules. Inspect the queue and retry; do not bypass.');
+            }
+
+  # Keep the protected name on PRs into main and on real queue admission.
+  # Other events use another name so a skipped job cannot supply review.
   review-result:
-    name: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main' && 'Automated Code Review' || 'Automated Code Review (not a pull request into main)' }}
-    needs: [verify, review]
-    if: always() && github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main'
+    name: ${{ (github.event_name == 'merge_group' || (github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main')) && 'Automated Code Review' || 'Automated Code Review (not a pull request into main)' }}
+    needs: [verify, review, queue-admission]
+    if: always() && (github.event_name == 'merge_group' || (github.event_name == 'pull_request_target' && github.event.pull_request.base.ref == 'main'))
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
@@ -602,7 +693,14 @@ jobs:
         env:
           VERIFY_RESULT: ${{ needs.verify.result }}
           REVIEW_RESULT: ${{ needs.review.result }}
+          QUEUE_RESULT: ${{ needs.queue-admission.result }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
+          if [ "$EVENT_NAME" = merge_group ]; then
+            test "$VERIFY_RESULT" = success
+            test "$QUEUE_RESULT" = success
+            exit 0
+          fi
           if [ "$REVIEW_RESULT" = success ]; then
             exit 0
           fi
@@ -626,6 +724,7 @@ jobs:
     name: Publish npm snapshot
     needs: verify
     if: >-
+      !cancelled() && needs.verify.result == 'success' &&
       github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -642,7 +741,7 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.ref }}
+          ref: ${{ github.sha }}
           persist-credentials: false
 
       - name: Set up pnpm

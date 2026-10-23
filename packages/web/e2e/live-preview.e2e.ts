@@ -146,8 +146,33 @@ describe('live preview', () => {
     // First the pane leaves its state screens (server start, then the browser's cold launch, which
     // took over 10 s on a loaded CI runner: failure bundle live-preview/registers-runs-streams-
     // takes-a-click-and-stops-1, PR #792), so the frame check below gets its own wait budget. A
-    // launch that fails leaves a state screen up, and the bundle shows its reason.
-    browser.waitForFunction(`!document.querySelector('[data-slot="preview-pane"] [data-slot="preview-state"]')`)
+    // launch that fails leaves a terminal state screen up: the wait ends on it at once, with the
+    // pane's reason in the failure, instead of polling out its budget.
+    // Evidence (hearsay-tools/cezarion#1474): this spec failed with "predicate never became truthy:
+    // !document.querySelector('[data-slot="preview-pane"] [data-slot="preview-state"]')" (bundle
+    // .ai/qa/failures/live-preview/registers-runs-streams-takes-a-click-and-stops-1/: probe.json
+    // names only that predicate, while screenshot.png shows "The browser stopped" with the log tail
+    // "Chromium did not open its DevTools port within 30 s (/usr/bin/google-chrome)" and one D-Bus
+    // line; CI run 39864969030, job 120124823181, artifact cockpit-failures-shard-1). Chrome was
+    // stalled, not crashed, so the launch now retries once and this budget covers two attempts.
+    // No local run reproduces the stall: a fresh-profile launch took 0.25 s idle and 2 s pinned to
+    // one CPU with 8 busy loops. Its unit reproduction is a fake that never opens its port on the
+    // first run: `npm test -- packages/cezar/src/preview/chromium.test.ts -t 'retries once'`. Run
+    // this test with `npm run test:e2e -- live-preview.e2e.ts -t 'registers, runs, streams, takes a
+    // click and stops'`. Before: 1 of 300 ci.yml runs (2026-10-18 to 2026-10-22, first attempts
+    // included) failed here. After: 2 of 2 CI runs passed (39925276822, 39934204853).
+    const left = browser.waitForValue(
+      `(() => {
+        const state = document.querySelector('[data-slot="preview-pane"] [data-slot="preview-state"]');
+        if (!state) return 'gone';
+        const stage = state.getAttribute('data-state');
+        return ['browser-exited', 'sandbox-failed', 'chromium-missing'].includes(stage) ? stage + ': ' + state.textContent : null;
+      })()`,
+      value => typeof value === 'string',
+      // bound: two 30 s launch attempts, each after a server start (hearsay-tools/cezarion#1474)
+      { timeoutMs: 75_000 },
+    )
+    expect(left).toBe('gone')
 
     // The canvas holds the page: the fixture button's fill is green, not white or empty. The frame
     // must also be the size of the pane (Chromium's viewport follows the pane through a burst of

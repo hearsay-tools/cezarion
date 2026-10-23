@@ -8,10 +8,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // The launch timeout SIGKILLs its child; the test reads the child from the spawn itself.
 // A pid file the fake writes is no proof: under load the timeout can kill the fake before
 // its first statement runs, and the file never appears (hearsay-tools/cezarion#953).
-const { spawned } = vi.hoisted(() => ({ spawned: [] as ChildProcess[] }));
+// `runningAtSpawn[i]` holds the earlier children still running when child `i` started.
+const { spawned, runningAtSpawn } = vi.hoisted(() => ({ spawned: [] as ChildProcess[], runningAtSpawn: [] as ChildProcess[][] }));
 vi.mock('node:child_process', async (original) => {
   const actual = await original<typeof import('node:child_process')>();
   return { ...actual, spawn: ((...args: Parameters<typeof actual.spawn>) => {
+    runningAtSpawn.push(spawned.filter(child => child.exitCode === null && child.signalCode === null));
     const child = actual.spawn(...args);
     spawned.push(child);
     return child;
@@ -563,22 +565,61 @@ setInterval(()=>{},1000);`,
     expect(err.stderrTail.endsWith('END')).toBe(true);
   });
 
-  it.skipIf(!posix)('kills the process and reports kind timeout when the port never appears', async () => {
+  it.skipIf(!posix)('records the exit code of a Chromium that exits early, and launches it only once', async () => {
+    const runs = join(dir, 'runs');
+    const bin = script('exits', `require('fs').appendFileSync(${JSON.stringify(runs)}, 'run\\n');process.exit(3);`);
+    const err = await launchChromium(bin, join(dir, 'profile'), {}, { timeoutMs: 5_000 }).catch(e => e);
+    expect(err).toBeInstanceOf(ChromiumError);
+    expect(err).toMatchObject({ kind: 'exited', exitCode: 3 });
+    expect(err.signal).toBeUndefined();
+    expect(readFileSync(runs, 'utf8')).toBe('run\n');
+  });
+
+  it.skipIf(!posix)('kills a launch that never opens its port and retries once, after the first process exited (#1474)', async () => {
+    const runs = join(dir, 'runs');
+    // Run 1 stalls, as Chrome did on a CI runner; run 2 opens its port.
+    const bin = script(
+      'stalls-once',
+      `const fs=require('fs');const path=require('path');
+fs.appendFileSync(${JSON.stringify(runs)}, 'run\\n');
+if (fs.readFileSync(${JSON.stringify(runs)}, 'utf8').split('\\n').length > 2) {
+  const arg=process.argv.find(a=>a.startsWith('--user-data-dir='));
+  fs.writeFileSync(path.join(arg.split('=')[1],'DevToolsActivePort'),'41236\\n/devtools/browser/abc\\n');
+}
+setInterval(()=>{},1000);`,
+    );
+    const { proc, port } = await launchChromium(bin, join(dir, 'profile'), {}, { timeoutMs: 400 });
+    try {
+      expect(port).toBe(41236);
+      expect(readFileSync(runs, 'utf8')).toBe('run\nrun\n');
+      const attempts = spawned.flatMap((child, index) => (child.spawnfile === bin ? [index] : []));
+      expect(attempts).toHaveLength(2);
+      // The retry starts only once the killed attempt has let go of the profile.
+      expect(spawned[attempts[0]!]!.signalCode).toBe('SIGKILL');
+      expect(runningAtSpawn[attempts[1]!]).not.toContain(spawned[attempts[0]!]);
+    } finally {
+      proc.kill();
+    }
+  });
+
+  it.skipIf(!posix)('kills both attempts and reports kind timeout when the port never appears twice', async () => {
     const bin = script('hang', `setInterval(()=>{},1000);`);
     const err = await launchChromium(bin, join(dir, 'profile'), {}, { timeoutMs: 400 }).catch(e => e);
     expect(err).toBeInstanceOf(ChromiumError);
     expect(err.kind).toBe('timeout');
-    // The owner's diagnostics name the binary and the deadline it missed.
-    expect(err.message).toBe(`Chromium did not open its DevTools port within 0.4 s (${bin})`);
-    const child = spawned.find(candidate => candidate.spawnfile === bin);
-    expect(child?.pid).toBeGreaterThan(1);
+    // The owner's diagnostics name the binary, the deadline it missed, and that it missed it twice.
+    expect(err.message).toBe(`Chromium did not open its DevTools port within 0.4 s, twice (${bin})`);
+    const children = spawned.filter(candidate => candidate.spawnfile === bin);
+    expect(children).toHaveLength(2);
     // Reaping the killed child is OS work, the same class as the 1 s vi.waitFor default that
     // timed out in run 38774681222 (hearsay-tools/cezarion#1071). It has not failed in CI; the
     // explicit budget keeps a loaded runner from tripping it.
     await vi.waitFor(
       () => {
-        expect(child!.signalCode).toBe('SIGKILL');
-        expect(() => process.kill(child!.pid!, 0)).toThrow();
+        for (const child of children) {
+          expect(child.signalCode).toBe('SIGKILL');
+          expect(() => process.kill(child.pid!, 0)).toThrow();
+        }
       },
       { timeout: 10_000, interval: 50 },
     );
@@ -665,6 +706,8 @@ setInterval(()=>{},1000);`,
 });
 
 describe('launchChromium leak-detection Chromium regression (#972)', () => {
+  const LAUNCH_BUDGET_MS = 120_000;
+  const PAGE_STEPS_BUDGET_MS = 120_000;
   const bin = resolveChromium();
   const posix = process.platform !== 'win32';
   let dir: string;
@@ -706,7 +749,9 @@ describe('launchChromium leak-detection Chromium regression (#972)', () => {
         res.end(html);
       });
       const profile = join(dir, 'profile');
-      const { proc, port } = await launchChromium(bin!, profile, { CEZ_PREVIEW_NO_SANDBOX: '1' });
+      // bound: a cold Chrome start on a loaded CI runner took over the product's 30 s
+      // (job 119853707395, hearsay-tools/cezarion#1467). The wait still ends on DevToolsActivePort.
+      const { proc, port } = await launchChromium(bin!, profile, { CEZ_PREVIEW_NO_SANDBOX: '1' }, { timeoutMs: LAUNCH_BUDGET_MS });
       procs.push(proc);
       const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as Array<{
         type: string;
@@ -729,7 +774,7 @@ describe('launchChromium leak-detection Chromium regression (#972)', () => {
         // Wait on the load the submit causes, not on a poll of location.pathname. The poll ran
         // under vi.waitFor's 1 s default and timed out in CI when the POST took longer on a
         // loaded runner (run 38774681222, hearsay-tools/cezarion#1071). Subscribe before the
-        // submit so the event cannot fire first; the test's 45 s budget bounds the wait.
+        // submit so the event cannot fire first; the test's budget bounds the wait.
         const submitted = new Promise<void>(resolve => {
           const off = cdp.on('Page.loadEventFired', () => {
             off();
@@ -780,7 +825,8 @@ describe('launchChromium leak-detection Chromium regression (#972)', () => {
         proc.kill();
       }
     },
-    // launchChromium waits up to 30 s for DevToolsActivePort (#781); CI timed this cell out at the 5 s default (#978).
-    45_000,
+    // bound: the launch budget plus PAGE_STEPS_BUDGET_MS for the three page loads. Under 48 busy
+    // loops on one CPU those took about 38 s and the old 45 s budget failed (#978, #1467).
+    LAUNCH_BUDGET_MS + PAGE_STEPS_BUDGET_MS,
   );
 });

@@ -13,7 +13,7 @@ vi.mock('node:timers/promises', () => ({setTimeout: (ms:number, value:unknown, o
  signal.addEventListener('abort',abort,{once:true});
 })}));
 const identity: CiPrIdentity = {prUrl:'https://github.com/org/repo/pull/12',repository:'org/repo',prNumber:12,headSha:'a'.repeat(40)};
-const wait = (seconds = 1800): CiWait => ({...identity,id:crypto.randomUUID(),generation:'g',turnId:'t',timeoutSeconds:seconds,registeredAt:new Date().toISOString(),deadline:new Date(Date.now()+seconds*1000).toISOString(),phase:'registered'});
+const wait = (seconds = 1800): CiWait => ({...identity,id:crypto.randomUUID(),generation:'g',turnId:'t',timeoutSeconds:seconds,until:'checks',wakeOnConflict:true,registeredAt:new Date().toISOString(),deadline:new Date(Date.now()+seconds*1000).toISOString(),phase:'registered'});
 const controllers: AbortController[]=[];
 const services: CiWatcherSupervisor[]=[];
 function start(github: GithubCiClient, seconds=1800) {const s=new CiWatcherSupervisor({github});services.push(s);const c=new AbortController();controllers.push(c);return {service:s,controller:c,result:s.watch(wait(seconds),c.signal)};}

@@ -47,7 +47,7 @@ describe('cezar-ci MCP server instructions', () => {
     try {
       expect((await on.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_preview_serve', 'cezar_preview_stop']);
       const instructions = on.client.getInstructions()!;
-      expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR, or want to re-check something later; end your turn after it answers.');
+      expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR or on a background job you started, or want to re-check something later; end your turn after it answers.');
       expect(instructions).toContain('- cezar_preview_serve: load when you have started, or are about to start, a web server the user should click through.');
     } finally { await on.close(); }
     for (const value of [undefined, '0', 'true']) {
@@ -65,7 +65,7 @@ describe('cezar-ci MCP server instructions', () => {
     try {
       const wait = (await client.listTools()).tools.find(tool => tool.name === 'cezar_wait')!;
       const properties = wait.inputSchema.properties as Record<string, any>;
-      expect(properties.kind.enum).toEqual(['ci', 'worker', 'timer']);
+      expect(properties.kind.enum).toEqual(['pr', 'worker', 'timer', 'process']);
       for (const key of ['worker_ids', 'request_ids']) {
         expect(properties[key]).toMatchObject({ type: 'array', minItems: 1, maxItems: 32 });
         expect(properties[key].description).toMatch(/^kind "worker":/);

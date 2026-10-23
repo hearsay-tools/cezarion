@@ -5,7 +5,7 @@ import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { withDelayedCommand, withHeldPipeResponse, withHeldPrintResponse } from '../core/owned-input-delivery.testkit.ts';
+import { withHeldAck, withHeldResponse } from '../core/owned-input-delivery.testkit.ts';
 import { attentionFields } from '../task-cli/projections.ts';
 import { ASK_TEXT, MONITORING_TEXT, messagesPrompt, REJECTED_ASK_TEXT } from './monitoring-turn.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
@@ -94,9 +94,9 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
             expect(monitoringWakeOf(store.getRun(p.id))).toBeDefined();
           } finally { release(); credentials.close(); }
         };
-        if (transport === 'protocol' && backend !== 'claude' && backend !== 'cursor') await withDelayedCommand(backend, exercise);
-        else if (transport === 'pipe-write' && backend === 'claude') await withHeldPipeResponse(backend, exercise);
-        else if (transport === 'model-work' && backend === 'cursor') await withHeldPrintResponse(exercise);
+        if (transport === 'protocol' && backend !== 'claude' && backend !== 'cursor') await withHeldAck(backend, exercise);
+        else if (transport === 'pipe-write' && backend === 'claude') await withHeldResponse(backend, exercise);
+        else if (transport === 'model-work' && backend === 'cursor') await withHeldResponse('cursor', exercise);
         else await exercise(() => {});
       });
     }

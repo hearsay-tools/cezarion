@@ -211,15 +211,20 @@ it('keeps a native permission prompt above worker-wait attention (hearsay-tools/
  *  `waits` but no `waitingOn` key, so the rows below pass RECORDS. */
 describe('open waits', () => {
   const openCi = () => ({
-    kind: 'ci' as const, id: '11111111-1111-4111-8111-111111111111', source: 'agent' as const, via: 'cezar_wait' as const,
+    kind: 'pr' as const, id: '11111111-1111-4111-8111-111111111111', source: 'agent' as const, via: 'cezar_wait' as const,
     registeredAt: '2026-10-17T15:10:00.000Z', deadline: '2026-10-17T15:40:00.000Z', phase: 'open' as const, turnId: 'turn-1',
     prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40),
-    generation: 'gen-1', timeoutSeconds: 1800,
+    generation: 'gen-1', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
   });
   const openTimer = () => ({
     kind: 'timer' as const, id: '22222222-2222-4222-8222-222222222222', source: 'agent' as const, via: 'cezar_wait' as const,
     registeredAt: '2026-10-17T15:00:00.000Z', deadline: '2026-10-17T15:05:00.000Z', phase: 'open' as const, turnId: 'turn-1',
     seconds: 300,
+  });
+
+  it('reads a waiting record parked on a process wait as running, waiting for a command (hearsay-tools/cezarion#1446)', () => {
+    const waitingOn = { kind: 'process' as const, waitId: '77777777-7777-4777-8777-777777777777', pid: 4242, deadline: '2026-10-17T15:30:00.000Z' };
+    expect(deriveAttention({ status: 'waiting', waitingOn })).toEqual({ bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for a command' });
   });
 
   it('reads a waiting record with an open CI or timer wait as running, not Needs you', () => {
@@ -228,6 +233,13 @@ describe('open waits', () => {
     expect(deriveAttention({ status: 'waiting', waits: [openCi()] })).toEqual({
       bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for CI',
     });
+  });
+
+  // hearsay-tools/cezarion#1425: a PR wait's target names what the run waits for.
+  it('labels an open PR merge wait waiting for merge', () => {
+    expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'pr', until: 'merge', waitId: '11111111-1111-4111-8111-111111111111',
+      prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' } } as never))
+      .toMatchObject({ bucket: 'running', shape: 'ring', label: 'waiting for merge' });
   });
 
   it('keeps an open human signal above the wait', () => {
@@ -239,7 +251,7 @@ describe('open waits', () => {
   it('follows a summary\'s waitingOn when the row carries no waits', () => {
     expect(deriveAttention({
       status: 'waiting',
-      waitingOn: { kind: 'ci', waitId: '11111111-1111-4111-8111-111111111111', prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' },
+      waitingOn: { kind: 'pr', until: 'checks', waitId: '11111111-1111-4111-8111-111111111111', prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' },
     }).label).toBe('waiting for CI');
     expect(deriveAttention({ status: 'waiting', waitingOn: { kind: 'timer', waitId: '22222222-2222-4222-8222-222222222222', at: '2026-10-17T15:05:00.000Z' } }).label).toBe('monitoring');
   });
@@ -296,9 +308,9 @@ describe('computeWaitingOn and worker entries', () => {
     outcomes: reported.map((workerId) => ({ workerId, status: 'done' as const, observedAt: '2026-10-19T10:03:00.000Z' })),
   });
   const ci = {
-    kind: 'ci' as const, id: '11111111-1111-4111-8111-111111111111', source: 'agent' as const, via: 'cezar_wait' as const,
+    kind: 'pr' as const, id: '11111111-1111-4111-8111-111111111111', source: 'agent' as const, via: 'cezar_wait' as const,
     registeredAt: '2026-10-19T10:00:00.000Z', deadline: '2026-10-19T10:30:00.000Z', phase: 'open' as const, turnId: 'turn-1',
-    prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40), generation: 'gen-1', timeoutSeconds: 1800,
+    prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40), generation: 'gen-1', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
   };
 
   it('computeWaitingOn counts unreported workers across two worker entries', () => {
@@ -384,7 +396,7 @@ describe('computeWaitingOn and worker entries', () => {
 
 // hearsay-tools/cezarion#1356: the state a project webhook filters on, read off the same ladder.
 describe('deriveWebhookState', () => {
-  const ci = { kind: 'ci' as const, waitId: '11111111-1111-4111-8111-111111111111', prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' };
+  const ci = { kind: 'pr' as const, until: 'checks' as const, waitId: '11111111-1111-4111-8111-111111111111', prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, deadline: '2026-10-17T15:40:00.000Z' };
   const timer = { kind: 'timer' as const, waitId: '22222222-2222-4222-8222-222222222222', at: '2026-10-17T15:05:00.000Z' };
   const cases: ReadonlyArray<[string, AttentionInput, ReturnType<typeof deriveWebhookState>]> = [
     ['a plain waiting run', { status: 'waiting' }, 'needs-you'],
@@ -403,6 +415,8 @@ describe('deriveWebhookState', () => {
     ['a worker on its parent\'s reply', { status: 'waiting', delegation: { role: 'worker' }, waitingOn: { kind: 'workers', count: 1, replies: true } } as AttentionInput, 'waiting-workers'],
     ['a CI wait', { status: 'waiting', waitingOn: ci }, 'waiting-ci'],
     ['a timer wait', { status: 'waiting', waitingOn: timer }, 'waiting-timer'],
+    // hearsay-tools/cezarion#1446: no option of its own, so the catch-all.
+    ['a process wait', { status: 'waiting', waitingOn: { kind: 'process', waitId: '77777777-7777-4777-8777-777777777777', pid: 4242, deadline: '2026-10-17T15:30:00.000Z' } }, 'waiting-other'],
     // A usage-limit park is parked on a clock, as the scheduled resume it replaces was: no state.
     ['a usage-limit wait', { status: 'waiting', waitingOn: { kind: 'usage-limit', at: '2026-10-17T16:00:00.000Z' } }, undefined],
     ['a resolved wait owed a wake', { status: 'waiting', waitWakePending: true }, undefined],

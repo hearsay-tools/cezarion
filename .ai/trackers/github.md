@@ -272,9 +272,9 @@ gh pr review {prNumber} --request-changes --body "<body>"
 GitHub rejects self-approval (reviewing your own PR); surface that instead of working around it.
 
 #### merge-pr
-`{prNumber}`; squash is the default merge strategy. `--auto` merges when checks pass; `--delete-branch` only when asked.
+`{prNumber}`; squash is the default merge strategy. Read the current head and pass `--match-head-commit {headSha}`. Under queue protection this requests enqueueing, not an immediate merge. Do not use `--admin` or bypass checks. `--delete-branch` only when asked. Wait for actual `mergedAt` before reporting a merge or doing merge cleanup. The `merge-queue` label is a process label; it does not prove GitHub queue membership. See `docs/sdlc/ci.md` for maintainer-owned activation.
 ```bash
-gh pr merge {prNumber} --squash
+gh pr merge {prNumber} --squash --match-head-commit {headSha}
 ```
 
 #### mark-pr-ready

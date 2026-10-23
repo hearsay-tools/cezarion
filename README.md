@@ -591,14 +591,15 @@ segment.
 
 ---
 
-## Waiting for PR checks and timers
+## Waiting for PR checks, merges and timers
 
-An agent waits on something outside its turn with `cezar_wait`. With `kind: "ci"` and
-a GitHub PR URL in `pr`, Cezarion watches the PR's CI outside the model. The optional
+An agent waits on something outside its turn with `cezar_wait`. With `kind: "pr"` and
+a GitHub PR URL in `pr`, Cezarion watches the PR outside the model: its checks
+(`until: "checks"`, the default) or its merge (`until: "merge"`). The optional
 `timeout_seconds` defaults to 1,800 and accepts 1–7,200. With `kind: "timer"`,
 `seconds` (60–7,200) and an optional `note`, Cezarion wakes the agent at that time and
 hands the note back. No authored configuration or worker delegation permission is
-needed. A CI wait requires `gh`, access to the repository, and a supported GitHub
+needed. A PR wait requires `gh`, access to the repository, and a supported GitHub
 host; GitHub Enterprise hosts must already be recognized by the forge/auth
 configuration. Tool startup itself makes no GitHub request. With **Monitoring
 wake-up** turned off in **Settings → Resources**, `cezar_wait` refuses a timer
@@ -614,11 +615,23 @@ complete, it reads the checks again to decide the result. A result describes wha
 GitHub reported; it does not predict workflows that have not appeared yet or grant
 merge approval.
 
+A merge wait (`until: "merge"`, hearsay-tools/cezarion#1425) reads the PR's state at
+once and then every 30 seconds within its deadline. It ends as `merged` only when
+GitHub reports the PR merged, with the merge time and merge commit when GitHub gives
+them, and as `closed` when the PR closed without merge. Green checks keep it open,
+and so does a new head commit. A merge wait holds none of the four watcher slots, so
+long merge waits never delay a checks wait. By default both targets also end as
+`conflicting` when the PR has merge conflicts. Set `wake_on_conflict: false` when the
+agent watches a PR it does not own, such as another agent's PR its work depends on:
+it cannot resolve those conflicts. With `until: "checks"`, GitHub often runs no
+workflows on a conflicting PR, so such a wait usually ends as `no_checks` or at its
+deadline. A checks wait and a merge wait on the same PR are two waits.
+
 The agent asks you with `cezar_ask`, a card of one to four questions in the ask
 format. A question with two to four options shows them as choices; a question without
 options is open, and the card shows a text box for your answer. The task reads Needs
-you once the turn ends, and your next message answers it. `cezar_wait` takes CI and
-timers only, and points an agent that asks it for a human wait to `cezar_ask`. A run
+you once the turn ends, and your next message answers it. `cezar_wait` takes PR waits,
+worker waits and timers only, and points an agent that asks it for a human wait to `cezar_ask`. A run
 has one question to you at a time, and the agent cannot cancel it once you have seen
 it. The ask-marker card, a native question and `CEZ:MONITORING` with re-checks off
 open the same kind of wait. When the work is
@@ -632,9 +645,9 @@ autonomous task does not wait for you until its automatic-wake budget is spent.
 A run can have several waits open at once, up to 16. Each answer carries the
 wait's id, its absolute deadline and the list of waits still open, and
 `cezar_cancel_wait` closes one by its id. The agent ends its turn to wait, with no
-marker required. The run is then `waiting`, and the pill reads **waiting for CI**
-or **monitoring** rather than Needs you. The header lists every open wait: **Waiting
-for CI — owner/repo#N** with a PR link and the deadline, or **Next automatic check**
+marker required. The run is then `waiting`, and the pill reads **waiting for CI**,
+**waiting for merge** or **monitoring** rather than Needs you. The header lists every open wait: **Waiting
+for CI — owner/repo#N** or **Waiting for merge — owner/repo#N** with a PR link and the deadline, or **Next automatic check**
 with its time and note. **CI result ready — waiting for capacity** means the
 observation is owed to the agent and its wake turn has not started yet. A run parked
 on CI or a timer keeps its agent slot, a monitoring slot when one is free, so the
@@ -662,7 +675,9 @@ observation after an ambiguous delivery checkpoint, identified by its stable
 lifecycle input ID.
 
 The deprecated `cezar_wait_for_ci` tool was removed (hearsay-tools/cezarion#1236):
-call `cezar_wait` with `kind: "ci"` instead.
+call `cezar_wait` with `kind: "pr"` instead. `kind: "ci"` itself was replaced by
+`kind: "pr"` (hearsay-tools/cezarion#1425) and is refused with a message that names
+the new spelling.
 
 The adapters are bundled for Claude (including `claude-cli`), Codex, OpenCode,
 Cursor, Pi and OMP. Internal socket/capability environment values are runtime wiring,
@@ -834,8 +849,8 @@ disagree. Read those rather than the raw status:
   unless its top open wait is CI or a timer (below). A pending question shows as `question`
   on `status`, with the agent's Markdown context as `questionContext` when it sent one, and as
   `waitingOn` `{ kind: 'human' }`; never clear a task on its absence alone.
-- `attention: running` with `attentionLabel` "waiting for CI" or "monitoring" (`status: waiting`
-  with an open CI wait or timer in `waitingOn`) is neither settled nor attention: the agent is
+- `attention: running` with `attentionLabel` "waiting for CI", "waiting for merge" or "monitoring"
+  (`status: waiting` with an open PR wait or timer in `waitingOn`) is neither settled nor attention: the agent is
   still working on its own sub-agents or a watched command, whatever its last log line says.
 - `attention: none` with "waiting on 2 workers" is a task parked on its own workers; it will wake
   by itself.

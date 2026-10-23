@@ -134,10 +134,10 @@ test('main push CI routes only after evidence and repairs routing after retry',a
  const comment=h.calls.findLastIndex(([route])=>route==='POST /repos/{owner}/{repo}/issues/{issue_number}/comments');
  const label=h.calls.findLastIndex(([route])=>route==='POST /repos/{owner}/{repo}/issues/{issue_number}/labels');
  assert.ok(label>comment);assert.deepEqual(h.calls[label][1].labels,['main-ci-failure']);
- assert.match(h.state.issues[0].body,/workflow run/);
+ assert.match(h.state.issues[1].body,/cez-main-ci-attempt:v1:/);
 });
 test('CI accepts only same-repository main pushes',async()=>{
- for(const patch of [{event:'pull_request_target'},{event:'workflow_dispatch'},{event:undefined},{head_branch:'release/x'},{head_repository:{full_name:'foreign/repo'}}]) {
+ for(const patch of [{event:'merge_group'},{event:'pull_request_target'},{event:'workflow_dispatch'},{event:undefined},{head_branch:'release/x'},{head_repository:{full_name:'foreign/repo'}}]) {
   const h=harness();mainCi(h,patch);await reportFailure(h.options);assert.equal(h.calls.length,0);
  }
 });
@@ -160,10 +160,10 @@ test('cancelled main CI ignores failures that start after the cancellation',asyn
  h.state.jobs.push(cancelled,gate);h.state.annotations={[cancelled.id]:[{annotation_level:'failure',message:'The operation was canceled.'}]};
  const result=await reportFailure(h.options);
  assert.equal(result.reported,1);
- assert.deepEqual(h.state.issues.map(issue=>issue.title),['[Task]: Investigate delegation-integration.test.ts failure']);
+ assert.deepEqual(h.state.issues.filter(issue=>issue.body.includes('cez-failure-signature:')).map(issue=>issue.title),['[Task]: Investigate delegation-integration.test.ts failure']);
  assert.ok(!h.state.comments.some(comment=>/Require every verification job/.test(comment.body)));
  h.state.jobs=[cancelled,gate];h.state.run.id++;h.options.event.workflow_run.id++;
- assert.equal((await reportFailure(h.options)).reported,0);assert.equal(h.state.issues.length,1);
+ assert.equal((await reportFailure(h.options)).reported,0);assert.equal(h.state.issues.length,2);
 });
 test('a time limit is not the cancellation: a later failure still reports',async()=>{
  const h=harness(), failed=h.state.jobs[0];mainCi(h,{conclusion:'cancelled'});
@@ -181,6 +181,6 @@ test('routing failure retries without duplicating saved evidence or routing clos
  await reportFailure(h.options);assert.equal(h.state.comments.length,1);
  const count=h.calls.filter(([route])=>route.endsWith('/labels')).length;
  assert.equal(count,2);
- h.state.issues[0].state='closed';await reportFailure(h.options);
+ h.state.issues.find(issue=>issue.body.includes('cez-main-ci-attempt:')).state='closed';await reportFailure(h.options);
  assert.equal(h.calls.filter(([route])=>route.endsWith('/labels')).length,count);
 });

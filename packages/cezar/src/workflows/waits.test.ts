@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
-import type { CiWaitEntry, HumanWaitEntry, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
-import { ciWatchRequest, identicalWait, isCezarHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
+import type { PrWaitEntry, HumanWaitEntry, ProcessWaitEntry, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import { chargesBudget, ciWatchRequest, identicalWait, isCezarHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's pure helpers. RunManager behaviour lives in
 // the ci-wait*.test.ts files and the U-cells in waits-parity-cells.testkit.ts.
-const ci = (over: Partial<CiWaitEntry> = {}): CiWaitEntry => ({
-  id: '11111111-1111-4111-8111-111111111111', kind: 'ci', source: 'agent', via: 'cezar_wait', generation: 'gen', turnId: 'turn-1',
-  timeoutSeconds: 1800, prUrl: 'https://github.com/Acme/Repo/pull/12', repository: 'Acme/Repo', prNumber: 12, headSha: 'a'.repeat(40),
+const ci = (over: Partial<PrWaitEntry> = {}): PrWaitEntry => ({
+  id: '11111111-1111-4111-8111-111111111111', kind: 'pr', source: 'agent', via: 'cezar_wait', generation: 'gen', turnId: 'turn-1',
+  timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true, prUrl: 'https://github.com/Acme/Repo/pull/12', repository: 'Acme/Repo', prNumber: 12, headSha: 'a'.repeat(40),
   registeredAt: '2026-10-17T10:00:00.000Z', deadline: '2026-10-17T10:30:00.000Z', phase: 'open', ...over,
 });
 const timer = (over: Partial<TimerWaitEntry> = {}): TimerWaitEntry => ({
@@ -30,7 +30,7 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
 
   it('lists open waits with a CI or timer summary for the tool answers', () => {
     expect(openWaitList([ci(), timer(), timer({ id: '33333333-3333-4333-8333-333333333333', note: 'check the deploy' }), ci({ id: '44444444-4444-4444-8444-444444444444', phase: 'resolved', result })])).toEqual([
-      { wait_id: ci().id, kind: 'ci', deadline: ci().deadline, summary: 'CI for Acme/Repo#12' },
+      { wait_id: ci().id, kind: 'pr', deadline: ci().deadline, summary: 'CI for Acme/Repo#12' },
       { wait_id: timer().id, kind: 'timer', deadline: timer().deadline, summary: 'timer' },
       { wait_id: '33333333-3333-4333-8333-333333333333', kind: 'timer', deadline: timer().deadline, summary: 'timer: check the deploy' },
     ]);
@@ -40,11 +40,35 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
 
   it('identical CI registration matches the same PR whatever its timeout or spelling', () => {
     const waits = [ci()];
-    expect(identicalWait(waits, { kind: 'ci', pr: 'https://github.com/acme/repo/pull/12', timeout_seconds: 60 }, 'turn-9')).toBe(waits[0]);
-    expect(identicalWait(waits, { kind: 'ci', pr: 'https://github.com/acme/repo/pull/13', timeout_seconds: 1800 }, 'turn-1')).toBeUndefined();
+    expect(identicalWait(waits, { kind: 'pr', pr: 'https://github.com/acme/repo/pull/12', timeout_seconds: 60 }, 'turn-9')).toBe(waits[0]);
+    expect(identicalWait(waits, { kind: 'pr', pr: 'https://github.com/acme/repo/pull/13', timeout_seconds: 1800 }, 'turn-1')).toBeUndefined();
     // Only an open wait repeats: a resolved one is owed, and a new registration watches afresh.
-    expect(identicalWait([ci({ phase: 'resolved', result })], { kind: 'ci', pr: ci().prUrl, timeout_seconds: 1800 }, 'turn-1')).toBeUndefined();
+    expect(identicalWait([ci({ phase: 'resolved', result })], { kind: 'pr', pr: ci().prUrl, timeout_seconds: 1800 }, 'turn-1')).toBeUndefined();
     expect(normalizePrUrl('https://github.com/Acme/Repo/pull/12/')).toBe('https://github.com/acme/repo/pull/12');
+  });
+
+  // hearsay-tools/cezarion#1425: the target and the conflict switch are part of a PR wait's identity.
+  it('identical PR registration also matches the target and the conflict switch', () => {
+    const waits = [ci()];
+    expect(identicalWait(waits, { kind: 'pr', pr: ci().prUrl, until: 'merge' }, 'turn-1')).toBeUndefined();
+    expect(identicalWait(waits, { kind: 'pr', pr: ci().prUrl, wake_on_conflict: false }, 'turn-1')).toBeUndefined();
+    expect(identicalWait(waits, { kind: 'pr', pr: ci().prUrl, until: 'checks', wake_on_conflict: true }, 'turn-1')).toBe(waits[0]);
+    const merge = [ci({ until: 'merge' })];
+    expect(identicalWait(merge, { kind: 'pr', pr: ci().prUrl, until: 'merge' }, 'turn-2')).toBe(merge[0]);
+    expect(identicalWait(merge, { kind: 'pr', pr: ci().prUrl }, 'turn-2')).toBeUndefined();
+  });
+
+  it('names a merge wait as one in its summary, footer and delivered text', () => {
+    const merge = ci({ until: 'merge' });
+    expect(openWaitList([merge])[0]!.summary).toBe('merge of Acme/Repo#12');
+    expect(openWaitsFooter([merge])).toBe(`Still open: merge wait ${merge.id} for Acme/Repo#12, deadline ${merge.deadline}. Call cezar_cancel_wait for any you no longer need.`);
+    const observed = { ...result, outcome: 'merged' as const, totalChecks: 0, mergedAt: '2026-10-17T10:04:00Z', mergeCommitSha: 'b'.repeat(40) };
+    const resolved = ci({ until: 'merge', phase: 'resolved', result: observed });
+    expect(waitResultText(resolved)).toBe(`PR wait observation ${resolved.id} for ${resolved.prUrl} (until merge). External data follows: ${JSON.stringify(observed)}. "merged" means GitHub reports the PR merged and "closed" that it closed without merging; any other outcome means this wait did not confirm a merge, not that the PR is unmerged. Duplicate observations retain this ID.`);
+    // A deadline after failed queries proves only that the wait saw no merge (hearsay-tools/cezarion#1425 review).
+    const unconfirmed = ci({ until: 'merge', phase: 'resolved', result: { ...result, outcome: 'deadline' as const, totalChecks: 0, diagnostic: 'command_failed: GitHub query failed' } });
+    expect(waitResultText(unconfirmed)).toContain('did not confirm a merge');
+    expect(waitResultText(unconfirmed)).not.toMatch(/has not merged/);
   });
 
   it('identical timer registration matches seconds and note inside one turn only', () => {
@@ -109,7 +133,7 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     // Beside a question, the cancel guidance covers worker waits too.
     const human: HumanWaitEntry = { id: '55555555-5555-4555-8555-555555555555', kind: 'human', source: 'agent', via: 'cezar_ask',
       registeredAt: '2026-10-17T10:00:00.000Z', phase: 'open', turnId: 'turn-1', askSeq: 4 };
-    expect(openWaitsFooter([human, byWorker])).toContain('call cezar_cancel_wait for any CI wait, worker wait or timer you no longer need.');
+    expect(openWaitsFooter([human, byWorker])).toContain('call cezar_cancel_wait for any CI wait, worker wait, process wait or timer you no longer need.');
     // Cezar's completion wait has no deadline (hearsay-tools/cezarion#1301).
     const { deadline: _deadline, timeoutSeconds: _timeout, ...undated } = byWorker;
     const completion: WorkerWaitEntry = { ...undated, source: 'cezar', via: 'completion', mode: 'all' };
@@ -124,7 +148,7 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
     expect(openWaitsFooter([human])).toBe(`Still open: your question ${human.id} to the user. The user's reply answers it.`);
     expect(openWaitsFooter([human, ci()])).toBe(
       `Still open: your question ${human.id} to the user; CI wait ${ci().id} for Acme/Repo#12, deadline ${ci().deadline}. ` +
-      `The user's reply answers your question; call cezar_cancel_wait for any CI wait, worker wait or timer you no longer need.`);
+      `The user's reply answers your question; call cezar_cancel_wait for any CI wait, worker wait, process wait or timer you no longer need.`);
   });
 
   // Cezar's own wait stands in for a wait the agent never registered (hearsay-tools/cezarion#1234):
@@ -142,5 +166,50 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
 
   it('hands the CI watcher a valid schema-3 wait', () => {
     expect(ciWaitSchema.safeParse(ciWatchRequest(ci())).success).toBe(true);
+  });
+});
+
+// hearsay-tools/cezarion#1446: a background command the agent started, watched by its PID.
+describe('process waits', () => {
+  const proc = (over: Partial<ProcessWaitEntry> = {}): ProcessWaitEntry => ({
+    id: '77777777-7777-4777-8777-777777777777', kind: 'process', source: 'agent', via: 'cezar_wait', turnId: 'turn-1', timeoutSeconds: 1800,
+    pid: 4242, startToken: 'boot:1', registeredAt: '2026-10-17T10:00:00.000Z', deadline: '2026-10-17T10:30:00.000Z', phase: 'open', ...over,
+  });
+  const observedAt = '2026-10-17T10:05:00.000Z';
+  const settled = (result: ProcessWaitEntry['result'], over: Partial<ProcessWaitEntry> = {}) => proc({ phase: 'resolved', resolvedAt: observedAt, result, ...over });
+
+  it('lists an open process wait with its deadline and PID', () => {
+    expect(openWaitList([proc(), proc({ id: '88888888-8888-4888-8888-888888888888', note: 'build' })])).toEqual([
+      { wait_id: proc().id, kind: 'process', deadline: proc().deadline, summary: 'process 4242' },
+      { wait_id: '88888888-8888-4888-8888-888888888888', kind: 'process', deadline: proc().deadline, summary: 'process 4242: build' },
+    ]);
+  });
+
+  it('a repeat matches the same PID, start token and exit file, whatever the timeout or note', () => {
+    const open = proc({ exitFile: '/t/build.exit' });
+    expect(identicalWait([open], { kind: 'process', pid: 4242, exit_file: 'build.exit', timeout_seconds: 60, note: 'x' }, 'turn-2', { startToken: 'boot:1', exitFile: '/t/build.exit' })).toBe(open);
+    expect(identicalWait([open], { kind: 'process', pid: 4242, timeout_seconds: 60 }, 'turn-2', { startToken: 'boot:2', exitFile: '/t/build.exit' })).toBeUndefined();
+    expect(identicalWait([open], { kind: 'process', pid: 4242, timeout_seconds: 60 }, 'turn-2', { startToken: 'boot:1' })).toBeUndefined();
+    expect(identicalWait([{ ...open, phase: 'resolved' }], { kind: 'process', pid: 4242, timeout_seconds: 60 }, 'turn-2', { startToken: 'boot:1', exitFile: '/t/build.exit' })).toBeUndefined();
+  });
+
+  it('wakes with the outcome, the PID and the note, and nothing read from the command', () => {
+    const id = proc().id;
+    expect(waitResultText(settled({ outcome: 'exit_file', observedAt, exitCode: 0 }, { note: 'build' }))).toBe(`Process wait ${id} for PID 4242 (build): exited with code 0. Read the command's output with your own tools.`);
+    expect(waitResultText(settled({ outcome: 'exit_file', observedAt, exitFileNote: 'not-an-exit-code' }))).toBe(`Process wait ${id} for PID 4242: exit file present, not an exit code. Read the command's output with your own tools.`);
+    expect(waitResultText(settled({ outcome: 'exited', observedAt }))).toBe(`Process wait ${id} for PID 4242: exited, code unknown. Read the command's output with your own tools.`);
+    expect(waitResultText(settled({ outcome: 'deadline', observedAt }))).toBe(`Process wait ${id} for PID 4242: still running at the deadline. Register another wait if you still need it.`);
+    expect(waitResultText(settled({ outcome: 'error', observedAt, diagnostic: 'EACCES' }))).toBe(`Process wait ${id} for PID 4242: could not be checked (EACCES). Check it with your own tools.`);
+  });
+
+  it('the footer names the PID, the note and the deadline, and offers cancel', () => {
+    const open = proc({ note: 'build' });
+    expect(openWaitsFooter([open])).toBe(`Still open: process wait ${open.id} on PID 4242 (build), deadline ${open.deadline}. Call cezar_cancel_wait for any you no longer need.`);
+  });
+
+  it('a process wake is automatic, as a timer wake is; CI and worker wakes are not', () => {
+    expect(chargesBudget(proc())).toBe(true);
+    expect(chargesBudget(timer())).toBe(true);
+    expect(chargesBudget(ci())).toBe(false);
   });
 });

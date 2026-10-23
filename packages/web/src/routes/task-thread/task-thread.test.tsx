@@ -329,12 +329,12 @@ describe('ThreadView', () => {
     expect(textarea.placeholder).toBe('Message the agent — / for skills, @ for files…')
   })
 
-  it('a voice tell fills the composer, shows its prompt, cancels back to empty', () => {
+  it('a voice tell fills and marks the composer, cancels back to empty', () => {
     const thread = run('running')
     renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
     const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
     const tell = { kind: 'tell', decisionId: 'd1', runId: thread.id, text: 'use the second plan' } as const
-    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
+    expect(document.querySelector('[data-slot="composer"]')?.hasAttribute('data-voice-proposal')).toBe(false)
 
     let result: ReturnType<typeof voiceStore.propose> | undefined
     act(() => {
@@ -343,13 +343,11 @@ describe('ThreadView', () => {
     expect(result).toEqual({ ok: true })
     expect(textarea.value).toBe('use the second plan')
     expect(document.querySelector('[data-slot="composer"]')?.getAttribute('data-voice-proposal')).toBe('true')
-    expect(document.querySelector('[data-slot="composer-voice-prompt"]')?.textContent).toBe(
-      'Send this message? Say “yes, confirmed” or press Return.',
-    )
+    // The palette's confirmation panel says how to confirm; the composer only shows what it filled.
+    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
 
     act(() => voiceStore.cancel())
     expect(textarea.value).toBe('')
-    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
     expect(document.querySelector('[data-slot="composer"]')?.hasAttribute('data-voice-proposal')).toBe(false)
   })
 
@@ -377,10 +375,10 @@ describe('ThreadView', () => {
     })
     expect(voiceStore.getProposal()).toBeUndefined()
     expect(textarea.value).toBe('')
-    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
+    expect(document.querySelector('[data-slot="composer"]')?.hasAttribute('data-voice-proposal')).toBe(false)
   })
 
-  it('a refused confirm keeps the tell, its draft and its prompt', () => {
+  it('a refused confirm keeps the tell, its draft and its mark', () => {
     const thread = run('running')
     const { rerender, queryClient } = renderView(<ThreadView run={thread} thread={reduceThread(EVENTS)} />)
     const textarea = screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement
@@ -400,7 +398,7 @@ describe('ThreadView', () => {
     expect(result).toEqual({ ok: false, reason: 'busy' })
     expect(voiceStore.getProposal()).toMatchObject({ decisionId: 'd1' })
     expect(textarea.value).toBe('hello')
-    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).not.toBeNull()
+    expect(document.querySelector('[data-slot="composer"]')?.getAttribute('data-voice-proposal')).toBe('true')
   })
 
   it('switching to another task clears the tell proposed for the first', () => {
@@ -419,7 +417,6 @@ describe('ThreadView', () => {
     expect((screen.getByLabelText('Reply to the agent') as HTMLTextAreaElement).value).toBe('')
     expect(voiceStore.getProposal()).toBeUndefined()
     expect(voiceStore.lastDrop()).toBe('task-closed')
-    expect(document.querySelector('[data-slot="composer-voice-prompt"]')).toBeNull()
     expect(document.querySelector('[data-slot="composer"]')?.hasAttribute('data-voice-proposal')).toBe(false)
   })
 
@@ -1063,7 +1060,7 @@ describe('ThreadView', () => {
     expect(document.querySelector('[data-slot="plan-mirror"]')).toBeNull()
     expect(document.querySelector('[data-slot="run-header"] [data-slot="workflow-steps"]')).toBeNull()
     const dock = document.querySelector('[data-slot="run-activity-dock"]')!
-    expect(dock.textContent).toContain('Session activity')
+    expect(dock.textContent).toContain('Activity')
     // The status is the same line the header pill reads (hearsay-tools/cezarion#1333).
     expect(dock.textContent).toContain('Running')
     // The workflow row names the workflow and the step the run is on.
@@ -1647,6 +1644,46 @@ it('reads attention from the record, not from an ask the transcript still shows'
   const thread = reduceThread([line(1, 'ask.requested', { requestId: 'ask', questions: [{ header: 'Choice', question: 'Choose a path', options: [{ label: 'Proceed' }] }] })])
   renderView(<ThreadView run={run('waiting', onWorkerWait())} thread={thread} />)
   expect(document.querySelector('[data-slot="pill"]')?.textContent?.toLowerCase()).toContain('waiting on 1 worker')
+})
+
+describe('the pending question (#1495)', () => {
+  const askEvent = (seq: number, requestId: string) =>
+    line(seq, 'ask.requested', { requestId, questions: [{ header: 'Choice', question: `Choose ${requestId}`, options: [{ label: 'First' }, { label: 'Second' }] }] })
+
+  it('pins the pending ask and shows a marker at its origin', () => {
+    const thread = reduceThread([askEvent(1, 'q1'), line(2, 'note', { message: 'later work' })])
+    renderView(<ThreadView run={run('waiting')} thread={thread} />)
+    expect(document.querySelectorAll('[data-slot="ask-card"][data-pinned="true"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-slot="ask-origin"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-slot="ask-card"][data-resolved="false"]')).toHaveLength(1)
+    const rows = [...document.querySelectorAll<HTMLElement>('[data-slot="thread-row"]')]
+    expect(rows.at(-1)?.dataset.rowKey).toBe('pending-ask:q1')
+  })
+
+  it('pins a pending ask whose turn is outside the loaded history', () => {
+    const ask = askEvent(10, 'q1')
+    const visibleEvents = [line(50, 'note', { message: 'later work' })]
+    const history: import('@/api/run-history').RunHistoryState = { visibleEvents, currentEvents: [ask, ...visibleEvents], isPending: false, contextPending: false, fallback: false, hasOlder: true, isFetchingOlder: false, olderError: undefined, loadOlder: async () => {}, jumpToLatest: async () => {}, retainedPages: 1 }
+    renderView(<ThreadView run={run('waiting')} thread={reduceThread(visibleEvents)} currentThread={reduceThread([ask, ...visibleEvents])} history={history} />)
+    expect(document.querySelector('[data-slot="ask-card"][data-pinned="true"]')).not.toBeNull()
+    expect(document.querySelector('[data-slot="ask-origin"]')).toBeNull()
+    expect(screen.getByRole('button', { name: 'Show where it was asked' })).toBeTruthy()
+  })
+
+  it('pins the newest of two unanswered asks without progressive history', () => {
+    const thread = reduceThread([askEvent(1, 'q0'), askEvent(2, 'q1')])
+    renderView(<ThreadView run={run('waiting')} thread={thread} />)
+    expect(document.querySelector('[data-pinned="true"]')?.textContent).toContain('Choose q1')
+    expect(document.querySelectorAll('[data-slot="ask-card"][data-resolved="false"]')).toHaveLength(1)
+  })
+
+  it('an answered ask renders its summary and no pinned card', () => {
+    const thread = reduceThread([askEvent(1, 'q1'), line(2, 'user-message', { text: 'First' })])
+    renderView(<ThreadView run={run('running')} thread={thread} />)
+    expect(document.querySelector('[data-slot="ask-card"][data-resolved="true"]')).not.toBeNull()
+    expect(document.querySelector('[data-pinned]')).toBeNull()
+    expect(document.querySelector('[data-slot="ask-origin"]')).toBeNull()
+  })
 })
 
 describe('composer execution actions (#201)', () => {

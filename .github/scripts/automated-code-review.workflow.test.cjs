@@ -343,14 +343,8 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(codex, /working-directory: pull-request/);
 
   assert.match(codex, /continue-on-error: true/, 'the Codex step must hand control on, not fail the job outright');
-  const stepTimeout = codex.match(/^ {8}timeout-minutes: (\d+)$/m);
-  assert.ok(stepTimeout, 'the Codex step needs its own timeout-minutes');
-  const jobTimeout = codex.match(/^ {4}timeout-minutes: (\d+)$/m);
-  assert.ok(jobTimeout, 'the codex-review job needs a timeout-minutes');
-  assert.ok(
-    Number(stepTimeout[1]) < Number(jobTimeout[1]),
-    `the Codex step timeout (${stepTimeout[1]}m) must fire before the job timeout (${jobTimeout[1]}m), or the publishing steps get skipped`,
-  );
+  assert.match(codex, /timeout-minutes: \$\{\{ fromJSON\(steps\.review-budget\.outputs\.minutes\) \}\}/);
+  assert.match(codex, /^ {4}timeout-minutes: 30$/m, 'the 24-minute action cap leaves setup and upload time');
   assert.match(codex, /name: Require a complete Codex review/);
   assert.match(codex, /REVIEW_OUTCOME: \$\{\{ steps\.codex-review\.outcome \}\}/);
   assert.match(codex, /if \[ ! -s "\$FINDINGS" \]; then\n\s+echo "::error::/, 'a missing review file must fail loudly');
@@ -405,7 +399,7 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.doesNotMatch(aggregate, /name: Automated Code Review/, 'the required check name belongs to ci.yml, not to a called job');
   assert.match(aggregate, /\[ "\$VALIDATE_RESULT" = 'success' \] \|\| exit 1/);
   assert.match(aggregate, /claude\) \[ "\$CLAUDE_RESULT" = 'success' \] \|\| exit 1 ;;/);
-  assert.match(aggregate, /codex\) \[ "\$CODEX_RESULT" = 'success' \] \|\| exit 1 ;;/);
+  assert.match(aggregate, /if \[ \"\$CODEX_RESULT\" != 'success' \]; then/);
   assert.match(aggregate, /\[ "\$POST_RESULT" = 'success' \] \|\| exit 1/);
   assert.match(aggregate, /REVIEW_ROUND_RESULT: \$\{\{ needs\.review-round\.result \}\}/);
   assert.match(aggregate, /CAN_REVIEW: \$\{\{ needs\.review-round\.outputs\.can_review \}\}/);
@@ -424,7 +418,7 @@ test('automated review workflow keeps its round cap, provider, permission, and c
   assert.match(validator, /classifyFromEnv/);
   assert.match(validator, /\[\[ "\$ACTOR" == \*'\[bot\]' && "\$ACTOR" != 'claude\[bot\]' \]\]/);
   assert.ok(validator.indexOf('name: Reject untrusted bot actors') < validator.indexOf('id: provider'), 'bot guard must run before provider validation and the wildcard action allowlist');
-  assert.match(aggregate, /permissions: \{\}/);
+  assert.match(aggregate, /permissions:\n      contents: read\n      actions: read\n      checks: read/);
   assert.equal((workflow.match(/applyVerdicts\(/g) || []).length, 1, 'only post-review applies verdicts to threads');
 });
 
@@ -873,7 +867,7 @@ test('the Automated Code Review check fails on new or still-open finding threads
   const { spawnSync } = require('node:child_process');
   const { tmpdir } = require('node:os');
   const workflow = parse(fs.readFileSync(workflowPath, 'utf8'));
-  const [step] = workflow.jobs['review-complete'].steps;
+  const step = workflow.jobs['review-complete'].steps.find(step => step.name === 'Require the selected review path to succeed');
   const passing = {
     VALIDATE_RESULT: 'success', REVIEW_ROUND_RESULT: 'success', CAN_REVIEW: 'true', PROVIDER: 'codex',
     CLAUDE_RESULT: 'skipped', CODEX_RESULT: 'success', POST_RESULT: 'success', NEW_THREADS: '0', OPEN_THREADS: '0',
@@ -1024,7 +1018,7 @@ test('ci.yml starts the review after verify and owns the required Automated Code
   const named = Object.values(ci.jobs).filter(j => typeof j.name === 'string' && j.name.includes('Automated Code Review'));
   assert.equal(named.length, 1, 'exactly one ci.yml job carries the required check name');
   const result = ci.jobs['review-result'];
-  assert.deepEqual(result.needs, ['verify', 'review']);
+  assert.deepEqual(result.needs, ['verify', 'review', 'queue-admission']);
   assert.deepEqual(result.permissions, {});
   for (const [context, expected] of routing) {
     assert.equal(evaluate(result.if, { github: context }), expected, JSON.stringify(context));
@@ -1034,7 +1028,7 @@ test('ci.yml starts the review after verify and owns the required Automated Code
 
   const [step] = result.steps;
   const run = env => spawnSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', step.run], {
-    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', ...env }, encoding: 'utf8',
+    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', EVENT_NAME: 'pull_request_target', ...env }, encoding: 'utf8',
   });
   assert.equal(run({ VERIFY_RESULT: 'success', REVIEW_RESULT: 'success' }).status, 0);
   for (const reviewResult of ['failure', 'cancelled', 'skipped', '']) {
@@ -1070,7 +1064,7 @@ test('review findings never reach the CI failure sweep as an error cause', async
   const { spawnSync } = require('node:child_process');
   const { causesForStep } = require('./failure-diagnostics.cjs');
   const run = (script, env) => spawnSync('bash', ['--noprofile', '--norc', '-eu', '-o', 'pipefail', '-c', script], {
-    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', ...env }, encoding: 'utf8',
+    env: { PATH: process.env.PATH, BASH_ENV: '/dev/null', EVENT_NAME: 'pull_request_target', ...env }, encoding: 'utf8',
   });
   // GitHub renders a ::<level>:: workflow command into the job log as ##[<level>].
   const swept = (result, stepName) => causesForStep({
@@ -1079,7 +1073,7 @@ test('review findings never reach the CI failure sweep as an error cause', async
   }).map(cause => cause.kind);
 
   const review = parse(fs.readFileSync(workflowPath, 'utf8'));
-  const [verdict] = review.jobs['review-complete'].steps;
+  const verdict = review.jobs['review-complete'].steps.find(step => step.name === 'Require the selected review path to succeed');
   const passing = {
     VALIDATE_RESULT: 'success', REVIEW_ROUND_RESULT: 'success', CAN_REVIEW: 'true', PROVIDER: 'codex',
     CLAUDE_RESULT: 'skipped', CODEX_RESULT: 'success', POST_RESULT: 'success', NEW_THREADS: '0', OPEN_THREADS: '0',

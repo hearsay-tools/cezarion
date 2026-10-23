@@ -10,8 +10,10 @@ import codexReview from '../../../../cezar/src/core/__fixtures__/codex/review-mo
 import opencodeSubtask from '../../../../cezar/src/core/__fixtures__/opencode/subtask-nested.expected.json'
 
 import {
+  PENDING_ASK_SECTION_ID,
   SessionTranscript,
   agentTranscriptSections,
+  askRow,
   buildTranscriptRows,
   mainTranscriptSections,
   type TranscriptSection,
@@ -20,7 +22,7 @@ import { createQueryClient } from '@/api/query-client'
 import { PreviewPaneContext, type PreviewPane } from './preview/preview-state'
 import { clearThreadScrollCaches } from './thread-scroll'
 import { collectSubagents, subagentChildren } from './subagent-dock'
-import { reduceThread, type ThreadEntry, type ThreadState } from './thread-state'
+import { reduceThread, type ThreadAsk, type ThreadEntry, type ThreadState } from './thread-state'
 
 beforeEach(() => {
   vi.stubGlobal(
@@ -68,6 +70,81 @@ const asRunEvents = (events: object[]): RunEvent[] =>
     ts: '2026-07-31T00:00:00.000Z',
     ...event,
   })) as RunEvent[]
+
+const ask = (id: string, overrides: Partial<ThreadAsk> = {}): ThreadAsk => ({
+  kind: 'ask',
+  id,
+  questions: [{ header: 'Pick', question: `Question ${id}?`, options: [{ label: 'A' }, { label: 'B' }] }],
+  resolved: false,
+  ...overrides,
+})
+
+const note = (id: string): ThreadEntry => ({ kind: 'message', id, role: 'assistant', text: `Later ${id}` })
+
+describe('pending ask placement (#1495)', () => {
+  const visible = (...items: ThreadEntry[]): ThreadState => ({ turns: [{ id: 't1', items }] })
+
+  it('pins the pending ask after the last turn and marks its origin', () => {
+    const thread = visible(ask('q1'), note('n1'))
+    const sections = mainTranscriptSections(run({ task: '' }), thread, thread, 'q1')
+
+    const pinned = sections.at(-1)
+    expect(pinned).toMatchObject({ id: PENDING_ASK_SECTION_ID, inDaySequence: false })
+    expect(pinned?.entries).toEqual([expect.objectContaining({ kind: 'ask', id: 'q1', placement: 'pinned' })])
+    expect(sections.find(section => section.id === 't1')?.entries[0]).toMatchObject({ id: 'q1', placement: 'origin' })
+    const rows = buildTranscriptRows(sections, 'r1')
+    expect(askRow(rows, 'q1', 'pinned')).toEqual({ key: 'pending-ask:q1', index: rows.length - 1 })
+    expect(askRow(rows, 'q1', 'origin')?.key).toBe('t1:q1')
+  })
+
+  it('pins from currentThread when the origin turn is not loaded', () => {
+    const sections = mainTranscriptSections(
+      run({ task: '' }),
+      visible(note('n1')),
+      { turns: [{ id: 'ctx', items: [ask('q1')] }] },
+      'q1',
+    )
+    const rows = buildTranscriptRows(sections, 'r1')
+    expect(askRow(rows, 'q1', 'pinned')?.key).toBe('pending-ask:q1')
+    expect(askRow(rows, 'q1', 'origin')).toBeUndefined()
+  })
+
+  it('renders a stale unresolved ask as resolved', () => {
+    const thread = visible(ask('q0'), ask('q1'))
+    const sections = mainTranscriptSections(run({ task: '' }), thread, { turns: [{ id: 'ctx', items: [ask('q1')] }] }, 'q1')
+    const stale = sections.find(section => section.id === 't1')?.entries[0]
+    expect(stale).toMatchObject({ id: 'q0', resolved: true })
+    expect(stale).not.toHaveProperty('placement')
+  })
+
+  it('keeps a stale visible ask resolved after the pending one is answered', () => {
+    // q0's answer is in a dropped page; q1 was answered from the current context.
+    const thread = visible(ask('q0'))
+    const sections = mainTranscriptSections(run({ task: '' }), thread, { turns: [{ id: 'ctx', items: [ask('q1', { resolved: true })] }] }, null)
+    expect(sections.find(section => section.id === 't1')?.entries[0]).toMatchObject({ id: 'q0', resolved: true })
+    expect(sections.map(section => section.id)).not.toContain(PENDING_ASK_SECTION_ID)
+  })
+
+  it('keeps stale asks resolved when the pending ask has no unresolved copy', () => {
+    const thread = visible(ask('q0'))
+    const sections = mainTranscriptSections(run({ task: '' }), thread, { turns: [{ id: 'ctx', items: [ask('q1', { resolved: true })] }] }, 'q1')
+    expect(sections.find(section => section.id === 't1')?.entries[0]).toMatchObject({ id: 'q0', resolved: true })
+  })
+
+  it('adds nothing when no ask is pending', () => {
+    const pending = ask('q1')
+    const thread = visible(pending)
+    const sections = mainTranscriptSections(run({ task: '' }), thread)
+    expect(sections.map(section => section.id)).toEqual(['t1'])
+    expect(sections[0]?.entries[0]).toBe(pending)
+  })
+
+  it('ignores a pending id whose currentThread ask is resolved', () => {
+    const thread = visible(ask('q1', { resolved: true }))
+    const sections = mainTranscriptSections(run({ task: '' }), thread, thread, 'q1')
+    expect(sections.map(section => section.id)).toEqual(['t1'])
+  })
+})
 
 describe('transcript adapters and row building', () => {
   it('preserves initial images, queued messages, turn messages, and established row keys', () => {

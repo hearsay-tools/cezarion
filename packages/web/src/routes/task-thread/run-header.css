@@ -7,6 +7,10 @@
 
 [data-slot='run-actions-menu'] [role^='menuitem'] > svg { display: none; }
 
+@media (hover: hover) and (pointer: fine) {
+  [data-slot='parent-task-link']:hover { color: var(--foreground); text-decoration: underline; text-underline-offset: 0.2em; }
+}
+
 @media (max-width: 767px) {
   [data-slot='run-title-row'] { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px; }
   [data-slot='run-title-row'] [data-slot='session-kind'] { grid-column: 1; grid-row: 1; }

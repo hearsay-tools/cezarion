@@ -9,6 +9,7 @@ import { waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { seedTranscript } from './seed-transcript'
+import { largeThreadEvents } from './fixtures/make-large-thread'
 // fixture-server starts: 1
 
 const artifacts = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -16,6 +17,7 @@ const parentId = randomUUID(), orphanId = randomUUID(), absentId = randomUUID()
 const waitingId = randomUUID(), askId = randomUUID(), emptyId = randomUUID()
 const loadingId = randomUUID(), errorId = randomUUID()
 const requestParentId = randomUUID(), requestWorkerId = randomUUID()
+const longWorkerId = randomUUID()
 const ids = Array.from({ length: 32 }, () => randomUUID())
 const now = new Date().toISOString()
 const region = '[aria-label="Task relationships"]'
@@ -37,6 +39,7 @@ beforeAll(async () => {
     record(parentId, 'Relationship parent with 32 workers', { delegation: rootMetadata(ids), issueNumber: 751, steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }] }),
     ...ids.map((id, i) => record(id, `Owned worker ${i + 1}`, { archived: i === 31, delegation: worker(id, parentId, i === 0 ? { destroy: { requestedAt: now, phase: 'incomplete', remaining: ['branch'], error: 'Branch is checked out elsewhere' } } : {}) })),
     record(orphanId, 'Worker with unavailable parent', { delegation: worker(orphanId, absentId) }),
+    record(longWorkerId, 'Worker with a long task title that must fit beside Parent and the title controls', { delegation: worker(longWorkerId, parentId), steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }] }),
     record(waitingId, 'Waiting root fixture', { status: 'waiting', delegation: { ...rootMetadata([absentId]), wait: wait() } }),
     // Every ask opens a human wait; attention reads it (hearsay-tools/cezarion#1236, phase 4b).
     record(askId, 'Question root fixture', { status: 'waiting', delegation: { ...rootMetadata([absentId]), wait: wait() },
@@ -52,6 +55,7 @@ beforeAll(async () => {
     { seq: 2, ts: now, runId: askId, stepId: 'task', type: 'agent-input', input: { id: randomUUID(), source: 'agent', parentRunId: parentId, text: 'Preserve the human question', createdAt: now } },
   ]
   seedTranscript(join(root, '.ai/cezar/runs', `${askId}.ndjson`), events.map(event => JSON.stringify(event)).join('\n') + '\n')
+  seedTranscript(join(root, '.ai/cezar/runs', `${longWorkerId}.ndjson`), largeThreadEvents(40).map(event => JSON.stringify({ ...event, runId: longWorkerId })).join('\n') + '\n')
   // A second real registered project exercises the slim workspace index in Tasks/palette.
   const other = join(root, 'other-project')
   execFileSync('git', ['init', '-q', '-b', 'main', other])
@@ -75,9 +79,7 @@ afterAll(async () => {
   if (root) rmSync(root, { recursive: true, force: true })
 })
 
-// Relationships live in the Session activity dock above the composer (#751).
-// The dock is collapsed by default on a phone, so reaching the region requires a click
-// there and is already open on desktop.
+// Roots list workers in Session activity. Workers link to their parent in the header.
 function reveal(expectedHeading?: string) {
   // After in-app navigation, wait for the destination heading before using its dock.
   // Keep checking the disclosure state until the relationship region appears.
@@ -86,6 +88,7 @@ function reveal(expectedHeading?: string) {
     : `document.querySelector('h1')?.textContent?.trim() === ${JSON.stringify(expectedHeading)}`
   browser.waitForValue(`(() => {
     if (!(${headingReady})) return null
+    if (document.querySelector('[data-slot="parent-task-link"]')) return true
     if (document.querySelector(${JSON.stringify(region)})) return true
     document.querySelector('[data-slot="run-activity-dock"] > button[aria-expanded="false"]')?.click()
     document.querySelector('[data-slot="run-activity-workers"] > button[aria-expanded="false"]')?.click()
@@ -165,23 +168,89 @@ for (const [width, height] of [[1440, 900], [360, 640]]) for (const theme of ['l
     expect(facts.theme).toBe(true); expect(facts.reducedMotion).toBe(true); expect(facts.focusRing).not.toBe('none')
     browser.screenshot(join(artifacts, `workers-${width}-${theme}.png`), { viewport: true })
     browser.press('Enter')
-    // In-app navigation, so the worker task arrives with its own dock state: collapsed at
-    // phone width until `reveal` opens it.
+    // Parent navigation is available without opening either activity disclosure.
     browser.waitForFunction(`location.pathname === '${route(ids[0]!)}'`)
     reveal(`Owned worker 1`)
-    browser.waitForFunction(`document.querySelector('${region} a[aria-label="Parent task ${parentId}"]') !== null`)
-    expect(browser.evaluate(`document.querySelector('${region} a[aria-label="Parent task ${parentId}"]').getAttribute('href')`)).toBe(route(parentId))
+    const parentLink = '[data-slot="parent-task-link"]'
+    browser.waitForFunction(`document.querySelector('${parentLink}')?.textContent.includes('Relationship parent')`)
+    expect(browser.evaluate(`document.querySelector('${parentLink}').getAttribute('href')`)).toBe(route(parentId))
+    expect(browser.count('[data-slot="run-activity-workers"]')).toBe(0)
+    const parentFacts = waitForSettledSample(browser, `(() => {
+      const link = document.querySelector('${parentLink}'), rect = link.getBoundingClientRect();
+      return { height: rect.height, overflow: document.documentElement.scrollWidth > innerWidth,
+        visible: rect.top >= 0 && rect.bottom <= innerHeight };
+    })()`) as { height: number; overflow: boolean; visible: boolean }
+    expect(parentFacts.height).toBeGreaterThanOrEqual(44)
+    expect(parentFacts.overflow).toBe(false)
+    expect(parentFacts.visible).toBe(true)
+    browser.screenshot(join(artifacts, `worker-parent-${width}-${theme}.png`), { viewport: true })
+    browser.click(parentLink)
+    browser.waitForFunction(`location.pathname === '${route(parentId)}' && document.querySelector('[data-slot="run-activity-workers"]') !== null`)
+  }, 120_000)
+}
+
+for (const width of [320, 360]) for (const theme of ['light', 'dark']) {
+  it(`${width}px ${theme}: fixed Parent remains usable at the bottom of a long worker transcript`, () => {
+    browser.setViewport(width, 800)
+    browser.goto(`${base}/settings/global/appearance`)
+    browser.waitForFunction(`document.querySelector('[data-slot="appearance-theme"]') !== null`)
+    clickAppearanceControl(browser, 'theme', theme)
+    browser.waitForFunction(`localStorage.getItem('cez-theme') === '${theme}'`)
+    browser.goto(`${base}${route(longWorkerId)}`)
+    browser.waitForFunction(`document.body.textContent.includes('Pass 40:')`)
+    const link = '[data-slot="mobile-parent-task-link"]'
+    browser.waitForFunction(`document.querySelector('${link}') !== null`)
+    browser.evaluate(`(() => { const main = document.querySelector('[data-slot="main"]'); main.scrollTop = main.scrollHeight; })()`)
+    const facts = waitForSettledSample(browser, `(() => {
+      const main = document.querySelector('[data-slot="main"]'), link = document.querySelector('${link}');
+      const r = link.getBoundingClientRect(), title = document.querySelector('[data-slot="mobile-run-title"] h1');
+      const controls = [...document.querySelectorAll('[data-slot="mobile-top-bar"] a, [data-slot="mobile-top-bar"] button')];
+      return { scroll: main.scrollTop, bottomGap: main.scrollHeight - main.scrollTop - main.clientHeight,
+        breadcrumbBottom: document.querySelector('[data-slot="parent-task-link"]').getBoundingClientRect().bottom,
+        visible: r.top >= 0 && r.bottom <= innerHeight, height: r.height, width: r.width,
+        hit: link.contains(document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)),
+        controls: controls.map(el => { const b = el.getBoundingClientRect(); return { name: el.getAttribute('aria-label'), x: b.x, right: b.right, height: b.height }; }),
+        titleWidth: title.getBoundingClientRect().width, titleOverflow: getComputedStyle(title).textOverflow,
+        overflow: document.documentElement.scrollWidth > innerWidth, theme: document.documentElement.classList.contains('light') === ${theme === 'light'},
+        href: link.getAttribute('href') };
+    })()`) as { scroll: number; bottomGap: number; breadcrumbBottom: number; visible: boolean; height: number; width: number; hit: boolean; controls: { name: string; x: number; right: number; height: number }[]; titleWidth: number; titleOverflow: string; overflow: boolean; theme: boolean; href: string }
+    observations.push({ case: 'mobile parent at transcript bottom', viewportWidth: width, selectedTheme: theme, ...facts })
+    expect(facts.scroll).toBeGreaterThan(1000)
+    expect(facts.bottomGap).toBeLessThanOrEqual(1)
+    expect(facts.breadcrumbBottom).toBeLessThan(0)
+    expect(facts.visible).toBe(true); expect(facts.hit).toBe(true)
+    expect(facts.height).toBeGreaterThanOrEqual(44); expect(facts.width).toBeGreaterThanOrEqual(44)
+    expect(facts.overflow).toBe(false); expect(facts.theme).toBe(true)
+    expect(facts.titleWidth).toBeGreaterThan(0); expect(facts.titleOverflow).toBe('ellipsis')
+    expect(facts.href).toBe(route(parentId))
+    expect(facts.controls.map(control => control.name)).toEqual(['Back', 'Rename task', `Parent task ${parentId}`, 'Run actions'])
+    for (const [index, control] of facts.controls.entries()) {
+      expect(control.height).toBeGreaterThanOrEqual(44)
+      expect(control.x).toBeGreaterThanOrEqual(index ? facts.controls[index - 1]!.right : 0)
+      expect(control.right).toBeLessThanOrEqual(width)
+    }
+    browser.evaluate(`document.querySelector('[data-slot="mobile-run-bar"] [aria-label="Rename task"]').focus()`)
+    browser.press('Tab')
+    const focus = waitForSettledSample(browser, `({ focused: document.activeElement === document.querySelector('${link}'), outline: getComputedStyle(document.querySelector('${link}')).outlineStyle })`) as { focused: boolean; outline: string }
+    expect(focus.focused).toBe(true)
+    expect(focus.outline).toBe('solid')
+    browser.screenshot(join(artifacts, `worker-parent-bottom-${width}-${theme}.png`), { viewport: true })
+    browser.press('Enter')
+    browser.waitForFunction(`location.pathname === '${route(parentId)}' && document.querySelector('h1')?.textContent.includes('Relationship parent')`)
+    expect(browser.count(link)).toBe(0)
   }, 120_000)
 }
 
 it('shows unavailable parent with retry, successful empty state, worker wait and preserved human ask attribution', () => {
   browser.setViewport(1440, 900)
   open(orphanId)
-  browser.waitForFunction(`document.querySelector('${region}').textContent.includes('Parent record unavailable')`)
-  expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
+  const parentRegion = '[data-slot="parent-task"]'
+  browser.waitForFunction(`document.querySelector('${parentRegion}').textContent.includes('Parent record unavailable')`)
+  expect(browser.evaluate(`[...document.querySelectorAll('${parentRegion} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
   expect(browser.snapshot()).toContain('Retry parent task')
-  browser.evaluate(`(() => { const buttons = [...document.querySelectorAll('${region} button')]; buttons.find(button => button.textContent.includes('Retry')).click(); })()`)
-  expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
+  browser.evaluate(`(() => { const buttons = [...document.querySelectorAll('${parentRegion} button')]; buttons.find(button => button.textContent.includes('Retry')).click(); })()`)
+  browser.waitForFunction(`document.querySelector('${parentRegion}').textContent.includes('Parent record unavailable')`)
+  expect(browser.evaluate(`[...document.querySelectorAll('${parentRegion} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)
   open(emptyId); browser.waitForFunction(`document.querySelector('${region}').textContent.includes('No workers')`)
   // A full record carries its worker ids, so the count is said (#617).
   open(waitingId); expect(browser.text(region)).toContain('Waiting on 1 worker')
@@ -286,7 +355,11 @@ it('keeps request waits consistent in threads, global tasks and the palette at p
       open(id)
       browser.waitForFunction(`document.querySelector('[data-slot="paused-hint"]') !== null`)
       expect(browser.text('[data-slot="paused-hint"]')).toContain(label)
-      expect(browser.text(region)).toContain(label)
+      if (id === requestWorkerId) {
+        browser.waitForFunction(`document.querySelector('[data-slot="parent-task"]')?.textContent.includes('Parent awaiting worker reply')`)
+        expect(browser.count('[data-slot="run-activity-workers"]')).toBe(0)
+        expect(browser.text('[data-slot="parent-task"]')).toContain('Parent awaiting worker reply')
+      } else expect(browser.text(region)).toContain(label)
       expect(browser.count('[data-slot="ask-card"]')).toBe(0)
       expect(waitForSettledSample(browser, 'document.documentElement.scrollWidth > innerWidth')).toBe(false)
       browser.screenshot(join(artifacts, `request-wait-${id === requestWorkerId ? 'worker' : 'parent'}-${width}-${theme}.png`), { viewport: true })

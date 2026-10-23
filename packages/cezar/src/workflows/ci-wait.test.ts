@@ -26,8 +26,8 @@ const success = (): CiWaitResult => ({ outcome: 'passed', headSha: identity.head
 
 // hearsay-tools/cezarion#1233: CI waits live in the run's wait list; a parked one is an open wait
 // on a `waiting` run.
-const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'ci');
-const lastCiWaitOf = (id: string) => [...(store.getRun(id)?.lastWaits ?? [])].reverse().find(entry => entry.kind === 'ci');
+const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'pr');
+const lastCiWaitOf = (id: string) => [...(store.getRun(id)?.lastWaits ?? [])].reverse().find(entry => entry.kind === 'pr');
 const parked = (id: string) => ciWaitOf(id)?.phase === 'open' && store.getRun(id)?.status === 'waiting';
 
 /** Control only external GitHub; RunManager, store, scheduler and runner wire stay real. */
@@ -43,7 +43,7 @@ function github() {
 
 async function register(id: string) {
   const state = (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(id)!;
-  return timed(await manager.registerWait(id, { kind: 'ci', pr, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration));
+  return timed(await manager.registerWait(id, { kind: 'pr', pr, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration));
 }
 
 describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () => {
@@ -52,7 +52,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
 
   it('rejects registration outside an active run without writing a receipt', async () => {
     github();
-    await expect(Promise.resolve().then(() => manager.registerWait('absent', { kind: 'ci', pr, timeout_seconds: 30 }, 'cezar_wait', 'old')))
+    await expect(Promise.resolve().then(() => manager.registerWait('absent', { kind: 'pr', pr, timeout_seconds: 30 }, 'cezar_wait', 'old')))
       .rejects.toMatchObject({ code: 'run_missing' });
     expect(store.listRuns()).toEqual([]);
   });
@@ -66,7 +66,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const receipt = await register(run.id);
     expect(receipt.phase).toBe('open');
     const persisted = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string; waits?: Wait[] }>;
-    expect(persisted.find(row => row.id === run.id)?.waits?.find(entry => entry.kind === 'ci')?.id).toBe(receipt.id);
+    expect(persisted.find(row => row.id === run.id)?.waits?.find(entry => entry.kind === 'pr')?.id).toBe(receipt.id);
     writeFileSync(gate, 'end');
     await until(() => parked(run.id));
     expect(store.getRun(run.id)?.waits?.some(entry => entry.kind === 'timer')).toBeFalsy();
@@ -292,6 +292,31 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === receipt.id)).toHaveLength(1);
   });
 
+  // hearsay-tools/cezarion#1425: recovery re-arms a merge wait as a merge wait, with no live session.
+  it('rebuilds a parked merge wait after restart and delivers its merged result once', async () => {
+    let settle!: (result: CiWaitResult) => void;
+    const watched: CiWait[] = [];
+    const supervisor = { resolve: async () => identity, watch: (wait: CiWait) => { watched.push(wait); return new Promise<CiWaitResult>(done => { settle = done; }); }, close() {} };
+    externalResource.supervisor = supervisor;
+    Object.assign(manager, { ciSupervisor: supervisor });
+    const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
+    const state = (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(run.id)!;
+    const receipt = await manager.registerWait(run.id, { kind: 'pr', pr, until: 'merge', wake_on_conflict: false, timeout_seconds: 30 }, 'cezar_wait', state.ciGeneration);
+    await restart();
+    expect(manager.isActive(run.id)).toBe(false);
+    expect(watched.at(-1)).toMatchObject({ id: receipt.id, until: 'merge', wakeOnConflict: false });
+    // The committed row at the wake boundary already holds the result and its input.
+    let committed: { waits?: Wait[]; agentInputs?: Array<{ id: string; text: string }> } | undefined;
+    const engine = manager as unknown as { queueWaitWake(id: string): void };
+    const queue = engine.queueWaitWake.bind(manager);
+    vi.spyOn(engine, 'queueWaitWake').mockImplementation(id => { if (id === run.id) committed = readPersistedRuns(join(root, '.ai/cezar')).find(row => row.id === id); queue(id); });
+    settle({ outcome: 'merged', headSha: identity.headSha, observedAt: new Date().toISOString(), checks: [], totalChecks: 0, truncated: false, mergedAt: '2026-10-23T09:00:00Z' });
+    await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
+    expect(committed?.waits?.find(wait => wait.id === receipt.id)).toMatchObject({ phase: 'resolved', until: 'merge', result: { outcome: 'merged' } });
+    expect(committed?.agentInputs?.find(input => input.id === receipt.id)?.text).toContain('(until merge)');
+    expect(store.getRun(run.id)?.agentInputs?.filter(input => input.id === receipt.id)).toHaveLength(1);
+  });
+
   it('cancellation retires the wait and never reopens the run on late completion', async () => {
     const external = github();
     const run = await parent(); await until(() => store.getRun(run.id)?.status === 'waiting');
@@ -361,7 +386,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     const requests = manager.registerRequestWait(p.id, { requestIds: [request.id], timeoutSeconds: 30 });
     expect([workers.phase, requests.phase]).toEqual(['registered', 'registered']);
     const waits = store.getRun(p.id)!.waits!;
-    expect(waits.map(wait => [wait.id, wait.kind, wait.phase])).toEqual([[ci.id, 'ci', 'open'], [workers.id, 'worker', 'open'], [requests.id, 'worker', 'open']]);
+    expect(waits.map(wait => [wait.id, wait.kind, wait.phase])).toEqual([[ci.id, 'pr', 'open'], [workers.id, 'worker', 'open'], [requests.id, 'worker', 'open']]);
     expect(waits.find(wait => wait.id === workers.id)).toMatchObject({ via: 'cez-worker-wait', workerIds: [w.id] });
     expect(waits.find(wait => wait.id === requests.id)).toMatchObject({ via: 'cez-worker-wait', requestIds: [request.id] });
     expect(store.getRun(p.id)?.delegation).not.toHaveProperty('wait');
@@ -478,7 +503,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
 const generationOf = (id: string) => (manager as unknown as { active: Map<string, { ciGeneration: string }> }).active.get(id)!.ciGeneration;
 const prUrl = (n: number) => `https://github.com/acme/repo/pull/${n}`;
 const registerPr = async (id: string, n: number, timeout = 30) =>
-  timed(await manager.registerWait(id, { kind: 'ci', pr: prUrl(n), timeout_seconds: timeout }, 'cezar_wait', generationOf(id)));
+  timed(await manager.registerWait(id, { kind: 'pr', pr: prUrl(n), timeout_seconds: timeout }, 'cezar_wait', generationOf(id)));
 const registerTimer = async (id: string, seconds = 60, note?: string) =>
   timed(await manager.registerWait(id, { kind: 'timer', seconds, ...(note === undefined ? {} : { note }) }, 'cezar_wait', generationOf(id)));
 const waitById = (id: string, waitId: string) => store.getRun(id)?.waits?.find((entry): entry is TimedWait => entry.id === waitId && entry.kind !== 'human');
@@ -542,8 +567,8 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     githubByPr();
     const run = await waitingParent();
     const wait = await registerPr(run.id, 12, 30);
-    const again = await manager.registerWait(run.id, { kind: 'ci', pr: 'https://github.com/Acme/Repo/pull/12', timeout_seconds: 600 }, 'cezar_wait', generationOf(run.id));
-    expect(again).toMatchObject({ id: wait.id, deadline: wait.deadline, timeoutSeconds: 30 });
+    const again = await manager.registerWait(run.id, { kind: 'pr', pr: 'https://github.com/Acme/Repo/pull/12', timeout_seconds: 600 }, 'cezar_wait', generationOf(run.id));
+    expect(again).toMatchObject({ id: wait.id, deadline: wait.deadline, timeoutSeconds: 30, until: 'checks' as const, wakeOnConflict: true });
     const timer = await registerTimer(run.id, 120, 'deploy');
     expect((await registerTimer(run.id, 120, 'deploy')).id).toBe(timer.id);
     expect((await registerTimer(run.id, 180, 'deploy')).id).not.toBe(timer.id);
@@ -597,7 +622,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     release();
     const [first, second] = await pending;
     expect(first.id).not.toBe(second.id);
-    expect(store.getRun(run.id)?.waits?.map(wait => wait.kind === 'ci' ? wait.prNumber : undefined)).toEqual([12, 13]);
+    expect(store.getRun(run.id)?.waits?.map(wait => wait.kind === 'pr' ? wait.prNumber : undefined)).toEqual([12, 13]);
   });
 
   it('cancelWait on a resolved, undelivered wait answers already_resolved and the result is still delivered', async () => {
@@ -625,7 +650,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     // A refused registration registers nothing, so Cezar's own wait stays.
     expect(store.getRun(run.id)?.waits?.map(wait => wait.via)).toEqual(['no-wait']);
     // CI is an external event: Park until resumed does not refuse it.
-    await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: 'ci' });
+    await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: 'pr' });
     interval.mockReturnValue(5);
     const wait = await registerTimer(run.id, 600);
     interval.mockReturnValue(1);
@@ -642,7 +667,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     const run = await waitingParent();
     store.updateRun(run.id, { automaticWakes: 40 });
     await expect(registerTimer(run.id)).rejects.toMatchObject({ code: 'wake_budget_spent' });
-    await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: 'ci' });
+    await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: 'pr' });
   });
 
   it('registration refuses capacity at 16 open waits', async () => {
@@ -658,7 +683,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     // Only open waits count, as the store counts them: a resolved one frees its place.
     fireTimer(opened[0]!.id);
     await until(() => waitById(run.id, opened[0]!.id)?.phase !== 'open');
-    await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: 'ci' });
+    await expect(registerPr(run.id, 12)).resolves.toMatchObject({ kind: 'pr' });
   });
 
   it('restart: an open timer re-arms from its stored deadline and resolves through a continuation', async () => {
@@ -691,7 +716,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     githubByPr();
     const run = await waitingParent();
     const wait = await registerPr(run.id, 12);
-    if (wait.kind !== 'ci') throw Error('expected a CI wait');
+    if (wait.kind !== 'pr') throw Error('expected a CI wait');
     store.flush();
     const disk = readPersistedRuns(join(root, '.ai/cezar')) as Array<Record<string, unknown> & { id: string }>;
     const row = disk.find(entry => entry.id === run.id)!;

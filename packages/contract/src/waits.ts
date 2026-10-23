@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { askContextSchema, askRequestSchema } from './ask-schema.ts';
-import { ciPrIdentitySchema, ciPrUrlSchema, ciWaitErrorCodeSchema, ciWaitRequestSchema, ciWaitResultSchema } from './ci-wait.ts';
+import { ciPrIdentitySchema, ciPrUrlSchema, ciWaitErrorCodeSchema, ciWaitRequestSchema, ciWaitResultSchema, prWaitUntilSchema } from './ci-wait.ts';
 import { workerIdsSchema, workerOutcomeSchema, workerWaitModeSchema } from './delegation.ts';
 import type { DelegationState, RunDelegationSummary, WorkerCompletionWait, WorkerWait } from './delegation.ts';
 import { requestOutcomeSchema } from './conversations.ts';
@@ -25,6 +25,11 @@ export const LAST_WAITS_LIMIT = 16;
 export const TIMER_MIN_SECONDS = 60;
 export const TIMER_MAX_SECONDS = 7200;
 const NOTE_MAX = 512;
+/** A process wait's bounds (hearsay-tools/cezarion#1446): the CI wait's timeout range. */
+export const PROCESS_TIMEOUT_DEFAULT_SECONDS = 1800;
+export const PROCESS_TIMEOUT_MAX_SECONDS = 7200;
+export const PROCESS_EXIT_FILE_MAX = 4096;
+const pidSchema = z.number().int().min(2);
 
 /** `open` → `resolved` (its event fired or its deadline passed) → `delivered`, or `cancelled`. */
 export const waitPhaseSchema = z.enum(['open', 'resolved', 'delivered', 'cancelled']);
@@ -53,16 +58,20 @@ const waitBaseShape = {
   turnId: z.string().min(1).max(256),
 };
 
-export const ciWaitEntrySchema = z.object({
+/** A pull request's checks or its merge (hearsay-tools/cezarion#1425; kind `ci` before it, which
+ *  the store reads as `until: 'checks'`, `wakeOnConflict: true`). */
+export const prWaitEntrySchema = z.object({
   ...waitBaseShape,
-  kind: z.literal('ci'),
+  kind: z.literal('pr'),
   deadline: z.iso.datetime(),
   ...ciPrIdentitySchema.shape,
   generation: z.string().min(1).max(256),
   timeoutSeconds: z.number().int().min(1).max(7200),
+  until: prWaitUntilSchema,
+  wakeOnConflict: z.boolean(),
   result: ciWaitResultSchema.optional(),
 }).strict();
-export type CiWaitEntry = z.infer<typeof ciWaitEntrySchema>;
+export type PrWaitEntry = z.infer<typeof prWaitEntrySchema>;
 
 export const timerWaitEntrySchema = z.object({
   ...waitBaseShape,
@@ -72,6 +81,39 @@ export const timerWaitEntrySchema = z.object({
   note: z.string().max(NOTE_MAX).optional(),
 }).strict();
 export type TimerWaitEntry = z.infer<typeof timerWaitEntrySchema>;
+
+/**
+ * How a process wait ended (hearsay-tools/cezarion#1446): the exit file appeared (`exitCode` when
+ * its first line is an integer, else `exitFileNote`), the process is gone with no exit file
+ * (`exited`, code unknown), it still ran at the deadline, or the check failed (`error`).
+ */
+export const processWaitResultSchema = z.object({
+  outcome: z.enum(['exit_file', 'exited', 'deadline', 'error']),
+  observedAt: z.iso.datetime(),
+  exitCode: z.number().int().min(-2147483648).max(2147483647).optional(),
+  exitFileNote: z.literal('not-an-exit-code').optional(),
+  diagnostic: z.string().max(512).optional(),
+}).strict();
+export type ProcessWaitResult = z.infer<typeof processWaitResultSchema>;
+
+/**
+ * A command the agent started in the background, watched by its PID (hearsay-tools/cezarion#1446).
+ * `startToken` pins the process incarnation, so a reused PID never matches; it is absent when the
+ * PID was already gone at registration or the platform cannot say. `exitFile` is the resolved
+ * absolute path the command writes its exit code to.
+ */
+export const processWaitEntrySchema = z.object({
+  ...waitBaseShape,
+  kind: z.literal('process'),
+  deadline: z.iso.datetime(),
+  timeoutSeconds: z.number().int().min(1).max(PROCESS_TIMEOUT_MAX_SECONDS),
+  pid: pidSchema,
+  startToken: z.string().min(1).max(256).optional(),
+  exitFile: z.string().min(1).max(PROCESS_EXIT_FILE_MAX).optional(),
+  note: z.string().max(NOTE_MAX).optional(),
+  result: processWaitResultSchema.optional(),
+}).strict();
+export type ProcessWaitEntry = z.infer<typeof processWaitEntrySchema>;
 
 /** The user. `questions` is the card the agent asked with, absent for a plain "your turn";
  *  `askSeq` is the event cezar showed it as, once the turn ended: its `ask.requested`, the human
@@ -142,14 +184,15 @@ export type WorkerWaitEntry = z.infer<typeof workerWaitEntrySchema>;
 export type DeadlinedWorkerWaitEntry = WorkerWaitEntry & { deadline: string };
 export const hasWorkerDeadline = (entry: WorkerWaitEntry): entry is DeadlinedWorkerWaitEntry => entry.deadline !== undefined;
 
-export const waitSchema = z.discriminatedUnion('kind', [ciWaitEntrySchema, timerWaitEntrySchema, humanWaitEntrySchema, workerWaitEntrySchema]);
+export const waitSchema = z.discriminatedUnion('kind', [prWaitEntrySchema, timerWaitEntrySchema, humanWaitEntrySchema, workerWaitEntrySchema, processWaitEntrySchema]);
 export type Wait = z.infer<typeof waitSchema>;
 
 // ---- the tools ----------------------------------------------------------------------------
 
-/** `cezar_wait`. The `ci` branch keeps the removed `cezar_wait_for_ci`'s bounds and default. */
+/** `cezar_wait`. The `pr` branch keeps the removed `cezar_wait_for_ci`'s bounds and default;
+ *  it replaced kind `ci` (hearsay-tools/cezarion#1425). */
 export const cezarWaitRequestSchema = z.discriminatedUnion('kind', [
-  ciWaitRequestSchema.extend({ kind: z.literal('ci') }).strict(),
+  ciWaitRequestSchema.extend({ kind: z.literal('pr') }).strict(),
   z.object({
     kind: z.literal('worker'),
     worker_ids: workerIdsSchema.optional(),
@@ -169,22 +212,32 @@ export const cezarWaitRequestSchema = z.discriminatedUnion('kind', [
     seconds: z.number().int().min(TIMER_MIN_SECONDS).max(TIMER_MAX_SECONDS),
     note: z.string().max(NOTE_MAX).optional(),
   }).strict(),
+  z.object({
+    kind: z.literal('process'),
+    pid: pidSchema,
+    exit_file: z.string().min(1).max(PROCESS_EXIT_FILE_MAX).optional(),
+    timeout_seconds: z.number().int().min(1).max(PROCESS_TIMEOUT_MAX_SECONDS).default(PROCESS_TIMEOUT_DEFAULT_SECONDS),
+    note: z.string().max(NOTE_MAX).optional(),
+  }).strict(),
 ]);
 export type CezarWaitRequest = z.infer<typeof cezarWaitRequestSchema>;
+/** What a caller may send: the defaults (`until`, `wake_on_conflict`, `timeout_seconds`) still unset. */
+export type CezarWaitRequestInput = z.input<typeof cezarWaitRequestSchema>;
 
 export const cezarCancelWaitRequestSchema = z.object({ wait_id: z.uuid() }).strict();
 export type CezarCancelWaitRequest = z.infer<typeof cezarCancelWaitRequestSchema>;
 
-/** One still-open wait as both tools list it back to the agent. A CI, timer or worker wait
+/** One still-open wait as both tools list it back to the agent. A PR, timer, worker or process wait
  *  carries its deadline; a human wait has none. */
 const openWaitFields = { wait_id: z.uuid(), summary: z.string().max(256) };
 export const openWaitSchema = z.discriminatedUnion('kind', [
-  z.object({ ...openWaitFields, kind: z.enum(['ci', 'timer', 'worker']), deadline: z.iso.datetime() }).strict(),
+  z.object({ ...openWaitFields, kind: z.enum(['pr', 'timer', 'worker', 'process']), deadline: z.iso.datetime() }).strict(),
   z.object({ ...openWaitFields, kind: z.literal('human') }).strict(),
 ]);
 export type OpenWait = z.infer<typeof openWaitSchema>;
 
-export const waitErrorCodeSchema = z.enum([...ciWaitErrorCodeSchema.options, 'timers_disabled', 'wake_budget_spent', 'denied_scope']);
+export const waitErrorCodeSchema = z.enum([...ciWaitErrorCodeSchema.options, 'timers_disabled', 'wake_budget_spent', 'denied_scope',
+  'exit_file_outside', 'process_not_allowed', 'process_not_owned']);
 export type WaitErrorCode = z.infer<typeof waitErrorCodeSchema>;
 
 /** The bound on every wait and done refusal's `message`; the run manager fits its own to it. */
@@ -195,7 +248,7 @@ export const cezarWaitAnswerSchema = z.discriminatedUnion('ok', [
   z.object({
     ok: z.literal(true),
     wait_id: z.uuid(),
-    kind: z.enum(['ci', 'timer', 'worker']),
+    kind: z.enum(['pr', 'timer', 'worker', 'process']),
     deadline: z.iso.datetime(),
     open_waits: z.array(openWaitSchema).max(WAIT_LIMIT),
   }).strict(),
@@ -290,10 +343,10 @@ export type CezarDoneAnswer = z.infer<typeof cezarDoneAnswerSchema>;
 // ---- what the run is waiting on -----------------------------------------------------------
 
 /**
- * The run's top open wait, by the spec's order: human > usage limit > workers > CI > timer.
+ * The run's top open wait, by the spec's order: human > usage limit > workers > PR > process > timer.
  * A summary field: lists and `deriveAttention` read it instead of the wait list.
  */
-export const waitingOnSchema = z.discriminatedUnion('kind', [
+const waitingOnUnionSchema = z.discriminatedUnion('kind', [
   /** `shown` once the user sees the question (its `askSeq`): attention reads that as Needs you at
    *  any status, a wake turn's included (phase 4b, hearsay-tools/cezarion#1236). */
   z.object({ kind: z.literal('human'), shown: z.literal(true).optional() }),
@@ -304,15 +357,23 @@ export const waitingOnSchema = z.discriminatedUnion('kind', [
    *  no `waits`, can still say so (hearsay-tools/cezarion#1235). */
   z.object({ kind: z.literal('workers'), count: z.number().int().nonnegative(), replies: z.literal(true).optional() }),
   z.object({
-    kind: z.literal('ci'),
+    kind: z.literal('pr'),
+    until: prWaitUntilSchema,
     waitId: z.uuid(),
     prUrl: ciPrIdentitySchema.shape.prUrl,
     repository: ciPrIdentitySchema.shape.repository,
     prNumber: ciPrIdentitySchema.shape.prNumber,
     deadline: z.iso.datetime(),
   }),
+  /** A background command (hearsay-tools/cezarion#1446). */
+  z.object({ kind: z.literal('process'), waitId: z.uuid(), pid: pidSchema, deadline: z.iso.datetime(), note: z.string().max(NOTE_MAX).optional() }),
   z.object({ kind: z.literal('timer'), waitId: z.uuid(), at: z.iso.datetime(), note: z.string().max(NOTE_MAX).optional() }),
 ]);
+/** Stored summaries written before hearsay-tools/cezarion#1425 carry `{ kind: 'ci' }`: a checks wait. */
+export const waitingOnSchema = z.preprocess(
+  (value) => value && typeof value === 'object' && (value as { kind?: unknown }).kind === 'ci' ? { ...value, kind: 'pr', until: 'checks' } : value,
+  waitingOnUnionSchema,
+);
 export type WaitingOn = z.infer<typeof waitingOnSchema>;
 
 /** Full records carry the full delegation state; summaries and index rows the slim projection. */
@@ -337,7 +398,7 @@ function workersOwed(open: readonly Wait[]): number | undefined {
   return entries.reduce((sum, wait) => sum + workerEntryOwed(wait), 0);
 }
 
-function earliest<T extends CiWaitEntry | TimerWaitEntry>(waits: readonly T[]): T | undefined {
+function earliest<T extends PrWaitEntry | TimerWaitEntry | ProcessWaitEntry>(waits: readonly T[]): T | undefined {
   let best: T | undefined;
   for (const wait of waits) {
     if (!best || Date.parse(wait.deadline) < Date.parse(best.deadline)) best = wait;
@@ -358,10 +419,12 @@ export function computeWaitingOn(run: WaitingOnInput): WaitingOn | undefined {
     const replies = entries.every((wait) => wait.requestIds !== undefined);
     return { kind: 'workers', count: workers, ...(replies ? { replies: true as const } : {}) };
   }
-  const ci = earliest(open.filter((wait): wait is CiWaitEntry => wait.kind === 'ci'));
-  if (ci) {
-    return { kind: 'ci', waitId: ci.id, prUrl: ci.prUrl, repository: ci.repository, prNumber: ci.prNumber, deadline: ci.deadline };
+  const pr = earliest(open.filter((wait): wait is PrWaitEntry => wait.kind === 'pr'));
+  if (pr) {
+    return { kind: 'pr', until: pr.until, waitId: pr.id, prUrl: pr.prUrl, repository: pr.repository, prNumber: pr.prNumber, deadline: pr.deadline };
   }
+  const process = earliest(open.filter((wait): wait is ProcessWaitEntry => wait.kind === 'process'));
+  if (process) return { kind: 'process', waitId: process.id, pid: process.pid, deadline: process.deadline, ...(process.note === undefined ? {} : { note: process.note }) };
   const timer = earliest(open.filter((wait): wait is TimerWaitEntry => wait.kind === 'timer'));
   if (timer) return { kind: 'timer', waitId: timer.id, at: timer.deadline, ...(timer.note === undefined ? {} : { note: timer.note }) };
   return undefined;

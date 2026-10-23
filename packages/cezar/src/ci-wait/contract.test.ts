@@ -2,11 +2,13 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { request } from 'node:http';
 import { ciWaitRequestSchema, ciWaitSchema, ciWaitResultSchema, ciWaitReceiptSchema } from '@open-mercato/cezar-contract/ci-wait';
 import { previewServeResultSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
+import { cezarWaitRequestSchema } from '@open-mercato/cezar-contract/waits';
 import { cezarServerInstructions, cezarToolEnvNames, cezarTools, doneToolDefinition, waitToolDefinition } from './tools.ts';
+import { waitInvalidInput } from './errors.ts';
 
 describe('CI wait contract', () => {
   it('defaults timeout and rejects model-supplied authority and malformed PR URLs', () => {
-    expect(ciWaitRequestSchema.parse({ pr: 'https://github.com/org/repo/pull/12' })).toEqual({ pr: 'https://github.com/org/repo/pull/12', timeout_seconds: 1800 });
+    expect(ciWaitRequestSchema.parse({ pr: 'https://github.com/org/repo/pull/12' })).toEqual({ pr: 'https://github.com/org/repo/pull/12', until: 'checks', wake_on_conflict: true, timeout_seconds: 1800 });
     for (const pr of ['http://github.com/a/b/pull/1', 'https://user@github.com/a/b/pull/1', 'https://github.com:443/a/b/pull/1', 'https://github.com/a/b/pull/0', 'https://github.com/a/b/pull/1?q=x', 'https://github.com/a/b/pull/1#x', 'https://github.com/a/b/pull/1/', 'https://github.com/a/b/pull/9007199254740993']) {
       expect(ciWaitRequestSchema.safeParse({ pr }).success, pr).toBe(false);
     }
@@ -176,7 +178,7 @@ describe('private preview-serve route', () => {
 
 it('cezar_wait advertises worker fields with their bounds', () => {
   const schema = waitToolDefinition.inputSchema as { properties: Record<string, any> };
-  expect(schema.properties.kind.enum).toEqual(['ci', 'worker', 'timer']);
+  expect(schema.properties.kind.enum).toEqual(['pr', 'worker', 'timer', 'process']);
   expect(schema.properties.kind.description).toMatch(/worker/);
   for (const key of ['worker_ids', 'request_ids']) {
     expect(schema.properties[key]).toMatchObject({ type: 'array', minItems: 1, maxItems: 32 });
@@ -189,6 +191,26 @@ it('cezar_wait advertises worker fields with their bounds', () => {
   expect(schema.properties.timeout_seconds.description).toMatch(/kind "worker".*1800.*600/);
   expect(waitToolDefinition.description).toMatch(/worker/);
   expect(cezarTools().find(tool => tool.definition.name === 'cezar_cancel_wait')!.definition.description).toMatch(/worker/);
+});
+
+// hearsay-tools/cezarion#1446: the process kind, and the exit-file recipe every runner can follow.
+it('cezar_wait advertises the process fields and tells the agent how to write the exit file', () => {
+  const schema = waitToolDefinition.inputSchema as { properties: Record<string, any> };
+  expect(schema.properties.pid).toMatchObject({ type: 'integer', minimum: 2 });
+  expect(schema.properties.pid.description).toMatch(/^kind "process":/);
+  expect(schema.properties.exit_file).toMatchObject({ type: 'string', maxLength: 4096 });
+  expect(schema.properties.exit_file.description).toMatch(/^kind "process":/);
+  expect(schema.properties.timeout_seconds.description).toMatch(/kind "process": 1–7200, default 1800/);
+  expect(schema.properties.note.description).toMatch(/"process"/);
+  expect(schema.properties.kind.description).toMatch(/"process" wakes you when a background command you started ends/);
+  const description = waitToolDefinition.description;
+  expect(description).toContain(`sh -c '( cmd > "$TMPDIR/build.log" 2>&1; echo $? > "$TMPDIR/build.exit" ) > /dev/null 2>&1 & echo $!'`);
+  expect(description).toContain('Use a new exit file name for each command: a file that already exists resolves the wait at once.');
+  expect(description).toContain('The job outlives this session and Cezar does not stop it.');
+  const refused = cezarWaitRequestSchema.safeParse({ kind: 'human' });
+  expect(waitInvalidInput(refused.success ? undefined : refused.error)).toBe('`kind` must be "pr", "worker", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask.');
+  const pid = cezarWaitRequestSchema.safeParse({ kind: 'process', pid: 1 });
+  expect(waitInvalidInput(pid.success ? undefined : pid.error)).toBe('`pid` must be an integer of at least 2: the PID that `echo $!` printed (kind "process").');
 });
 
 it('accepts old observations and the new bounded conflict metadata', () => {

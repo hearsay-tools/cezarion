@@ -166,7 +166,7 @@ test('leaves ready, moved, closed and fork PRs alone', async () => {
 });
 
 test('ignores workflow runs that did not come from a pull request', async () => {
-  for (const payload of [workflowRun({ event: 'push' }), workflowRun({ event: 'workflow_dispatch' }), workflowRun({ head_sha: undefined })]) {
+  for (const payload of [workflowRun({ event: 'merge_group' }), workflowRun({ event: 'push' }), workflowRun({ event: 'workflow_dispatch' }), workflowRun({ head_sha: undefined })]) {
     const github = fakeGithub();
     await handleEvent({ github, owner, repo, eventName: 'workflow_run', payload });
     assert.deepEqual(github.calls, []);

@@ -821,18 +821,33 @@ runner DOES — is §7, and a new backend has to satisfy both.
 
 A run's waits live in one list on its record (`waits`, settled ones in `lastWaits`),
 typed by `packages/contract/src/waits.ts`; spec `.ai/specs/2026-10-17-unified-waits.md`.
-There are three kinds: `ci`, `timer` and, since phase 2, `human`. The agent opens the first two with
-`cezar_wait` and a human wait with `cezar_ask`. A wait is an observation the agent asked for;
+There are four agent kinds: `pr`, `timer`, `human` (since phase 2) and `process`
+(hearsay-tools/cezarion#1446); Cezar also opens `worker` waits. The agent opens `pr`, `timer`
+and `process` waits with `cezar_wait` and a human wait with `cezar_ask`. A wait is an observation the agent asked for;
 it never grants merge, review acceptance, or task-completion authority. There is no
 wait marker and no delegation prerequisite. `claude-cli` uses the Claude adapter.
 
-`cezar_wait({ kind: 'ci', pr, timeout_seconds? })` registers an external CI
-observation. `pr` is an HTTPS GitHub PR URL (at most 2,048 characters, positive PR
+`cezar_wait({ kind: 'pr', pr, until?, wake_on_conflict?, timeout_seconds? })` registers an
+external PR observation (hearsay-tools/cezarion#1425 renamed `kind: 'ci'` to `'pr'`; `'ci'` is
+`invalid_request`). `pr` is an HTTPS GitHub PR URL (at most 2,048 characters, positive PR
 number, no userinfo, port, query or fragment); `timeout_seconds` is an integer
-1–7,200, default 1,800. `cezar_wait({ kind: 'timer', seconds, note? })` opens a
+1–7,200, default 1,800. `until: 'checks'` (default) watches the PR's checks; `until: 'merge'`
+polls the PR's state every 30 seconds, outside the watcher slots, and resolves `merged` only on
+GitHub's `MERGED` state (with `mergedAt` and `mergeCommitSha` when GitHub gives them) or
+`closed` when the PR closed without merge. `wake_on_conflict` (default `true`) ends either
+target as `conflicting` on merge conflicts; an agent watching a PR it does not own sets it
+`false`. A checks wait and a merge wait on one PR are two waits. `cezar_wait({ kind: 'timer', seconds, note? })` opens a
 timer of 60–7,200 seconds with a note of at most 512 characters. Unknown keys, a
 field that does not fit its kind, and `kind: "human"` are `invalid_request`; the last one's
-message names `cezar_ask`. The tool advertises one flat object schema, because the Anthropic
+message names `cezar_ask`. `cezar_wait({ kind: 'process', pid, exit_file?, timeout_seconds?, note? })`
+waits for a background job the agent started to end (hearsay-tools/cezarion#1446). Cezar checks
+the exit file, then whether the PID, with its recorded start identity, still runs, every
+5 seconds until the deadline (default 1,800, at most 7,200 seconds). It reports `exited with code N`
+from the exit file's first line, or `exited, code unknown`, and never signals or stops the
+process. `exit_file` must resolve inside the task worktree or the task temp directory
+(`exit_file_outside`); Cezar's own PID and a session leader are `process_not_allowed`, and
+another user's process is `process_not_owned`. A process wait keeps its slot and counts
+against the automatic-wake budget, like a timer. The tool advertises one flat object schema, because the Anthropic
 tool API refuses a top-level union; the server validates the discriminated union. Every
 answer carries the wait id, its kind, its absolute deadline and `open_waits`.
 
@@ -964,7 +979,7 @@ a question or a permission gate parks for the human, an accepted `CEZ:DONE` fini
 a worker wait parks on its workers, and only then do open waits park the run, after
 the owed-input checks (held human input, unread agent input, an admitted wake) have
 found nothing. The parked run is `waiting` with its waits open, and `deriveAttention`
-reads it from `waitingOn`: **waiting for CI** or **monitoring**, the running bucket
+reads it from `waitingOn`: **waiting for CI**, **waiting for merge** or **monitoring**, the running bucket
 and a ring, never Needs you. A `waiting` run whose only waits are resolved reads
 **waiting for capacity** until its wake turn starts.
 

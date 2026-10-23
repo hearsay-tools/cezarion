@@ -47,13 +47,6 @@ function setup(run: ApiRun, response: () => Promise<Response> = async () => json
 }
 afterEach(() => { cleanup(); onlineManager.setOnline(true); vi.unstubAllGlobals() })
 
-it('keeps a scoped parent link in the Workers section', async () => {
-  const { requests } = setup(child, async () => json({ parentRunId: parentId, workers: [] }))
-  const link = screen.getByRole('link', { name: new RegExp(`parent task ${parentId}`, 'i') })
-  expect(link.getAttribute('href')).toBe(`/p/sample/tasks/${parentId}`)
-  expect(link.className).toContain('min-h-11')
-  await waitFor(() => expect(requests).toContain(`/api/v1/p/sample/runs/${workerId}/relationships`))
-})
 it('renders complete worker status and incomplete cleanup in accessible scoped links', async () => {
   setup(root, async () => json({ workers: [worker] }))
   const group = await screen.findByRole('group', { name: 'Task relationships' })
@@ -114,14 +107,6 @@ it('shows empty only after a successful root lookup', async () => {
   expect(await within(screen.getByRole('group', { name: 'Task relationships' })).findByText('No workers')).toBeTruthy()
 })
 
-it('keeps unavailable parent navigation and provides a parent-specific retry', async () => {
-  const { requests } = setup(child, async () => json({ parentRunId: parentId, workers: [] }))
-  expect(await screen.findByText('Parent record unavailable or deleted')).toBeTruthy()
-  expect(screen.getByRole('link', { name: `Parent task ${parentId}` })).toBeTruthy()
-  const count = requests.filter(path => path.endsWith(`/runs/${parentId}`)).length
-  fireEvent.click(screen.getByRole('button', { name: 'Retry parent task' }))
-  await waitFor(() => expect(requests.filter(path => path.endsWith(`/runs/${parentId}`))).toHaveLength(count + 1))
-})
 it('keeps last fetched worker status on a failed refresh and rejects malformed relationship responses', async () => {
   let attempts = 0
   const { client } = setup(root, async () => ++attempts === 1 ? json({ workers: [worker] }) : json({ workers: 'invalid' }))

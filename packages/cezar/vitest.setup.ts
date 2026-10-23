@@ -3,6 +3,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach } from 'vitest'
 
+// Test files start from shipped defaults, not the parent cockpit's flags or
+// task context (hearsay-tools/cezarion#1517). Scrub once before sandbox pins:
+// beforeAll and test bodies may then supply their own CEZ_* values. Keep the
+// narrower per-test cleanup below so existing file-level fixtures still work.
+for (const key of Object.keys(process.env)) {
+  if (key.toUpperCase().startsWith('CEZ_')) delete process.env[key]
+}
+
 // Cezar task worktrees pin TMPDIR under the repo (`.ai/cezar/tmp/<runId>`). That
 // makes `os.tmpdir()` land inside a git worktree, so suites that mkdtemp a
 // "non-repo" path still resolve `git rev-parse --show-toplevel` to the host
@@ -81,11 +89,27 @@ const HOST_BIN_AND_MODE_KEYS = [
   'CEZ_REMOTE', // Keep local-mode capabilities unless the test opts into hosted mode.
   'CEZ_AUTOMATIONS', // Keep automation routes and scheduling opt-in for each test.
   'CEZ_PREVIEW', // Keep preview capabilities and tool registration opt-in for each test.
+  'CEZ_VOICE', // Keep voice mode opt-in for each test (hearsay-tools/cezarion#1470).
+  'CEZ_SINGLE_PROJECT', // Keep multi-project mode unless the test opts into one project.
+  'CEZ_HIDE_TOKEN_METRICS', // Keep token and cost metrics shown unless the test hides them.
+  'CEZ_HIDE_TOKEN_USAGE',
+  'CEZ_HIDE_COST',
 ] as const
 
 const clearHostBinAndModeOverrides = (): void => {
   for (const key of HOST_BIN_AND_MODE_KEYS) delete process.env[key]
 }
+
+// The other flags `resolveCapabilities` reads. Like the task keys below, these are
+// cleared once per test file, not per test: `system-prompt.test.ts` sets both in
+// `beforeAll` for the whole file. `TYPESAFE_API_KEY` stays: it turns nothing on
+// without CEZ_VOICE, which the list above clears.
+const HOST_FILE_MODE_KEYS = [
+  'CEZ_FOLLOWUPS', // Keep the follow-up inbox opt-in for each file.
+  'CEZ_DRY_RUN', // Run the real runner paths unless the file opts into the mocks.
+] as const
+
+for (const key of HOST_FILE_MODE_KEYS) delete process.env[key]
 
 // A task session's own context (hearsay-tools/cezarion#953). Inherited, it pointed the
 // suite at the LIVE task: the mocks appended to its handoff file, and fixtures could reach

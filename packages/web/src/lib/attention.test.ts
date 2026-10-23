@@ -272,10 +272,10 @@ it('reads a queued parent with a resolved worker wait by whether its question is
  *  `summaryOf` keeps the record's `waits` and adds no `waitingOn`, the shape of a full or
  *  stream-patched record, which is what the cockpit derives attention from outside lists. */
 const openCi = () => ({
-  kind: 'ci' as const, id: '00000000-0000-4000-8000-0000000000c1', source: 'agent' as const, via: 'cezar_wait' as const,
+  kind: 'pr' as const, id: '00000000-0000-4000-8000-0000000000c1', source: 'agent' as const, via: 'cezar_wait' as const,
   registeredAt: '2026-10-17T15:10:00.000Z', deadline: '2026-10-17T15:40:00.000Z', phase: 'open' as const, turnId: 'turn-1',
   prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40),
-  generation: 'gen-1', timeoutSeconds: 1800,
+  generation: 'gen-1', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
 })
 const openTimer = () => ({
   kind: 'timer' as const, id: '00000000-0000-4000-8000-0000000000d1', source: 'agent' as const, via: 'cezar_wait' as const,

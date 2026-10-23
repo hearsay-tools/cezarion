@@ -11,6 +11,7 @@ import {
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
 
 import { isCockpitE2e } from '@/lib/e2e-mode'
+import { jumpLabel } from './pending-ask-navigation'
 import {
   NEAR_BOTTOM_SLACK_PX,
   isNearHistoryStart,
@@ -35,6 +36,14 @@ import {
  * hook is the only code steering it. Nothing here owns a nested scroll container.
  */
 
+/**
+ * Who owns a late jump focus in the main transcript (#1495). It outlives the hook instance on
+ * purpose: "Jump to latest" resets paged history, which unmounts the thread until the newest
+ * page is back, and the remounted thread must still take the focus. Mounting another task, a
+ * later jump or a reader gesture bumps the generation, which cancels it.
+ */
+const documentFocus = { viewKey: undefined as string | undefined, generation: 0 }
+
 /** One renderable thread row — a user bubble, a grouped block, whatever the view flattened. */
 export interface ThreadRow {
   key: string
@@ -54,10 +63,14 @@ export interface ThreadScrollControls {
   ownsMeasurementRestore: (viewKey: string) => boolean
   /** True while the reader is away from the live tail — the pill's visibility. */
   pillVisible: boolean
-  /** The pill's action: pin to the live tail and stick again. */
-  jumpToLatest: () => void
-  /** Navigate within loaded history, through virtua when the target is unmounted. */
-  jumpToRow: (key: string, index: number) => void
+  /** The pill's action: pin to the live tail and stick again. A focus target, when given,
+   *  receives focus once it exists under the scroller (the pending question, #1495). */
+  /** `focusTarget` returns the element to focus, null while it is not mounted yet, or false to
+   *  give the late focus up (its question was answered). */
+  jumpToLatest: (focusTarget?: (root: HTMLElement) => HTMLElement | null | false) => void
+  /** Navigate within loaded history, through virtua when the target is unmounted. Focus goes to
+   *  `focusTarget(row)` when it returns an element, otherwise to the row itself. */
+  jumpToRow: (key: string, index: number, focusTarget?: (row: HTMLElement) => HTMLElement | null) => void
   /** Load one older page while preserving the current pixel anchor. */
   loadOlder: () => void
   /** Re-pin if stuck — the keyboard-settled hook (content height didn't change, but the
@@ -270,9 +283,19 @@ export function useThreadScroll(
   useEffect(() => () => clearTimeout(wheelGestureTimerRef.current), [])
 
   const pendingFocusRef = useRef<MutationObserver | null>(null)
+  /** Each jump owns its late focus: a later jump, reader intent or a view change bumps it (#1495).
+   *  The main transcript keeps it in `documentFocus`, so it survives a remount of the same task. */
+  const focusGenerationRef = useRef(0)
+  const bumpFocus = useCallback((): number => {
+    if (surface !== 'document') return ++focusGenerationRef.current
+    return ++documentFocus.generation
+  }, [surface])
+  const ownsFocus = useCallback((viewKey: string, generation: number): boolean => surface === 'document'
+    ? documentFocus.viewKey === viewKey && documentFocus.generation === generation
+    : viewKeyRef.current === viewKey && focusGenerationRef.current === generation, [surface])
   useEffect(() => () => pendingFocusRef.current?.disconnect(), [viewKey, contentEl])
 
-  const jumpToRow = useCallback((key: string, index: number) => {
+  const jumpToRow = useCallback((key: string, index: number, focusTarget?: (row: HTMLElement) => HTMLElement | null) => {
     const scroller = scrollElRef.current
     if (!scroller || !contentEl) return
     pendingRestoreRef.current = null
@@ -282,15 +305,17 @@ export function useThreadScroll(
     stuckRef.current = false
     downIntentAtRef.current = 0
     setPillVisible(true)
+    bumpFocus()
     pendingFocusRef.current?.disconnect()
     const findRow = () => [...contentEl.querySelectorAll<HTMLElement>('[data-row-key]')]
       .find(row => row.dataset.rowKey === key)
     const focusRow = () => {
       const row = findRow()
       if (!row || getComputedStyle(row).visibility === 'hidden') return false
-      row.tabIndex = -1
-      row.focus({ preventScroll: true })
-      if (document.activeElement !== row) return false
+      const target = focusTarget?.(row) ?? row
+      if (target === row) row.tabIndex = -1
+      target.focus({ preventScroll: true })
+      if (document.activeElement !== target) return false
       pendingFocusRef.current?.disconnect()
       return true
     }
@@ -309,9 +334,11 @@ export function useThreadScroll(
       pendingFocusRef.current.observe(contentEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] })
     }
     saveThreadScroll(viewKey, { top: scroller.scrollTop, atBottom: false })
-  }, [contentEl, setOffset, viewKey])
+  }, [contentEl, setOffset, viewKey, bumpFocus])
 
-  const jumpToLatest = useCallback(() => {
+  const jumpToLatest = useCallback((focusTarget?: (root: HTMLElement) => HTMLElement | null | false) => {
+    const generation = bumpFocus()
+    const owner = viewKeyRef.current
     pendingFocusRef.current?.disconnect()
     const scroller = scrollElRef.current
     if (!scroller) return
@@ -326,15 +353,37 @@ export function useThreadScroll(
     const pin = () => {
       if (stuckRef.current) toBottom()
     }
+    // The refreshed tail can remount the transcript, so the target is looked up under the
+    // shell scroller, not the rows container, and focused when it exists.
+    const owns = () => ownsFocus(owner, generation)
+    // True when the wait is over: the target took focus, or the caller gave it up.
+    const focus = () => {
+      const target = focusTarget?.(scroller)
+      if (target === false) return true
+      if (!target) return false
+      target.focus({ preventScroll: true })
+      return document.activeElement === target
+    }
     void (onJumpToLatest?.() ?? Promise.resolve()).finally(() => {
       // Two frames: the history reset often paints the tail after the first rAF, so a single
       // native smooth scrollTo landed on the newest page's start instead of the live end.
       requestAnimationFrame(() => {
         pin()
-        requestAnimationFrame(pin)
+        requestAnimationFrame(() => {
+          pin()
+          // A later jump, a reader gesture or another task since the click: no late focus.
+          if (!focusTarget || !owns() || focus()) return
+          pendingFocusRef.current?.disconnect()
+          const observer = new MutationObserver(() => {
+            if (!owns()) observer.disconnect()
+            else if (focus()) observer.disconnect()
+          })
+          pendingFocusRef.current = observer
+          observer.observe(scroller, { childList: true, subtree: true })
+        })
       })
     })
-  }, [onJumpToLatest, viewKey, toBottom])
+  }, [onJumpToLatest, viewKey, toBottom, bumpFocus, ownsFocus])
 
   const lastRowKey = rowKeys.at(-1)
   const rowCount = rowKeys.length
@@ -342,7 +391,13 @@ export function useThreadScroll(
     historyRestoreGenerationRef.current += 1
     pendingHistoryRestoreRef.current = null
     loadingOlderRef.current = false
-  }, [viewKey])
+    if (surface !== 'document') focusGenerationRef.current += 1
+    // Another task in the main transcript cancels a late focus; a remount of the same one keeps it.
+    else if (documentFocus.viewKey !== viewKey) {
+      documentFocus.viewKey = viewKey
+      documentFocus.generation += 1
+    }
+  }, [viewKey, surface])
   useLayoutEffect(() => {
     const pending = pendingHistoryRestoreRef.current
     if (pending) {
@@ -386,6 +441,7 @@ export function useThreadScroll(
     let pointerScrolling = false
     let previousScrollTop = scroller.scrollTop
     const unstick = () => {
+      bumpFocus()
       pendingFocusRef.current?.disconnect()
       pendingRestoreRef.current = null
       measurementRestoreRef.current = null
@@ -544,7 +600,7 @@ export function useThreadScroll(
       scroller.removeEventListener('keydown', onKey)
       observer?.disconnect()
     }
-  }, [viewKey, contentEl, loadOlder, setOffset, toBottom, ownsMeasurementRestore])
+  }, [viewKey, contentEl, loadOlder, setOffset, toBottom, ownsMeasurementRestore, bumpFocus])
 
   return { attachContent, scrollElRef, virtualizerRef, restoreMeasurements, ownsMeasurementRestore, pillVisible, jumpToLatest, jumpToRow, loadOlder, restickIfStuck }
 }
@@ -736,17 +792,20 @@ function VirtualRowsSession({
   )
 }
 
-/** The floating "Jump to latest" pill, absolutely positioned above the dock by its caller. */
-export function JumpToLatestPill({ onJump }: { onJump: () => void }) {
+/** The floating "Jump to latest" pill, absolutely positioned above the dock by its caller. With a
+ *  question pending, it names how many questions wait at the tail (hearsay-tools/cezarion#1495). */
+export function JumpToLatestPill({ onJump, pendingQuestions = 0 }: { onJump: () => void; pendingQuestions?: number }) {
   return (
     <button
       type="button"
       data-slot="jump-to-latest"
-      onClick={onJump}
+      data-pending-questions={pendingQuestions > 0 ? pendingQuestions : undefined}
+      // Never forward the click event: the jump's optional argument is a focus target.
+      onClick={() => onJump()}
       className="pointer-events-auto inline-flex min-h-11 min-w-11 items-center gap-1.5 rounded-full border border-border bg-background px-3.5 text-xs font-medium text-muted-foreground shadow-modal hover:text-foreground"
     >
       <ArrowDownIcon aria-hidden className="size-3.5" />
-      Jump to latest
+      {jumpLabel(pendingQuestions)}
     </button>
   )
 }

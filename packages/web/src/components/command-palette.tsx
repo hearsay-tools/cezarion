@@ -5,7 +5,7 @@ import { useNavigate as useRouterNavigate } from 'react-router'
 import { useHealth, useProjects, useRuns, useRunsIndex, useRunsSearch, useSkills, useUiState } from '@/api/queries'
 import { useProjectSwitch } from '@/components/use-project-switch'
 import { scopeTo, useActiveProjectId, useNavigate } from '@/lib/project-router'
-import type { ProjectListEntry, RunIndexEntry, RunSummary } from '@open-mercato/cezar-api-client'
+import type { ProjectListEntry, RunIndexEntry, RunSummary, Skill } from '@open-mercato/cezar-api-client'
 import { visibleNavItems } from '@/components/nav-items'
 import { StatusDot } from '@/components/status-dot'
 import { NEXT_THEME } from '@/components/theme-toggle'
@@ -29,7 +29,7 @@ import { useCommandShortcut, useKeyShortcut } from '@/lib/use-command-shortcut'
 import { useProjectOrder } from '@/lib/use-project-order'
 import { useVoiceProposal } from '@/lib/voice/proposal-store'
 import { useVoiceCommand } from '@/components/voice/use-voice-command'
-import { VoiceRows } from '@/components/voice/voice-rows'
+import { CONFIRM_PLACEHOLDER, VoiceConfirm, VoiceRows } from '@/components/voice/voice-rows'
 
 /**
  * The ⌘K command palette (spec, "Cross-cutting"): projects, tasks, views, actions, skills —
@@ -72,9 +72,9 @@ export function orderRuns(runs: readonly RunSummary[]): RunSummary[] {
  *  - an earlier match beats a later one, gently, so a title hit outranks an id hit;
  *  - the score is the mean across tokens, so every token has to be good, not just one.
  *
- * Returns 0 to hide the row — cmdk drops anything scoring 0 and sorts the rest descending, both
- * within a group and between groups. That is what puts the best match at the top of the list
- * rather than wherever its section happens to sit.
+ * Returns 0 to hide the row — cmdk drops anything scoring 0 and sorts the rest descending within
+ * each group. Between groups, `rankGroups` orders them by the same score. Together they put the
+ * best match at the top of the list rather than wherever its section happens to sit.
  */
 export function paletteScore(value: string, search: string, keywords?: string[]): number {
   const query = search.trim().toLowerCase()
@@ -91,6 +91,76 @@ export function paletteScore(value: string, search: string, keywords?: string[])
   }
   return total / tokens.length
 }
+
+/**
+ * What cmdk filters a row on. A row's `CommandItem` spreads this object and `rankGroups` scores
+ * it, so the group order always ranks exactly what cmdk filters.
+ */
+export type PaletteMatch = { value: string; keywords?: string[] }
+
+/**
+ * Orders the palette's ranked groups during a search: the group with the best-scoring row first.
+ * Ties, and an empty query, keep the order the groups are given in (the sort is stable).
+ *
+ * cmdk is meant to do this itself and does not: cmdk 1.1.1 (and its `main` at the time of
+ * hearsay-tools/cezarion#1476) looks each group up as `[cmdk-group][data-value="<its internal
+ * id>"]`, while a group's `data-value` holds its heading. The lookup never matches, so cmdk never
+ * moves a group, and the order React renders here is the order the user sees. If a cmdk upgrade
+ * fixes that lookup, cmdk will also rank the pinned groups (voice rows, New task) by score, so
+ * check this palette's order again then.
+ */
+export function rankGroups<Group extends { rows: readonly PaletteMatch[] }>(groups: Group[], search: string): Group[] {
+  if (search.trim() === '') return groups
+  const best = (group: Group) =>
+    group.rows.reduce((max, row) => Math.max(max, paletteScore(row.value, search, row.keywords)), 0)
+  return groups
+    .map((group) => ({ group, score: best(group) }))
+    .sort((a, b) => b.score - a.score)
+    .map(({ group }) => group)
+}
+
+/**
+ * A task row's match. The id keeps duplicate titles apart; it also lets a pasted run id find its
+ * task. `runTitle`, matching the rendered text — filtering on a raw title hidden behind an
+ * auto-summary would surface rows for no visible reason.
+ *
+ * The project name is filter fodder for the same reason it is rendered: with every project's tasks
+ * in one list, "shop" has to narrow to shop's tasks. The branch and workflow are the fields the
+ * server's run search also matches (#864), so a hit it found there survives cmdk's own filter —
+ * and the Tasks table's search reads them too.
+ */
+function taskMatch(task: PaletteTask, projectName: string | null): PaletteMatch {
+  return {
+    value: `task ${runTitle(task)} ${task.id}`,
+    keywords: [
+      ...(projectName ? [projectName] : []),
+      ...referenceKeywords(task),
+      ...[task.branch, task.workflow, task.workflowLabel, task.pullRequestUrl, task.referencedPullRequestUrl, task.referencedIssueUrl]
+        .filter((field): field is string => !!field),
+    ],
+  }
+}
+
+/** The `view` prefix keeps values unique across groups and gives "view git" a deterministic hit;
+ *  the value is filter fodder, never rendered. */
+const viewMatch = (label: string): PaletteMatch => ({ value: `view ${label}` })
+
+/** The `project` prefix keeps values unique across groups; the id is what makes two same-named
+ *  registry entries separately reachable. The root is how you tell apart two checkouts of one
+ *  repo — searchable, but not worth a line of its own in a row this dense. */
+const projectMatch = (project: ProjectListEntry): PaletteMatch => ({
+  value: `project ${project.name} ${project.id}`,
+  keywords: [project.root],
+})
+
+/** The path suffix keeps values unique when a project skill shadows a global one of the same
+ *  name — both stay selectable. */
+const skillMatch = (skill: Skill): PaletteMatch => ({
+  value: `skill ${skill.name} ${skill.path}`,
+  keywords: skill.description ? [skill.description] : undefined,
+})
+
+const THEME_ACTION_MATCH: PaletteMatch = { value: 'action toggle theme' }
 
 /**
  * One palette task row, whichever project it came from.
@@ -221,6 +291,13 @@ export function orderProjects(
 
 export function CommandPalette() {
   const [open, setOpen] = React.useState(false)
+  // cmdk's selected row, controlled so voice mode can tell whether Return targets its Will do row
+  // (hearsay-tools/cezarion#1461). An empty value lets cmdk select the first row on open.
+  const [selected, setSelected] = React.useState('')
+  // A closed palette forgets it, so the next open pre-selects New task again.
+  React.useEffect(() => {
+    if (!open) setSelected('')
+  }, [open])
   const navigate = useNavigate()
 
   useCommandShortcut('k', () => setOpen((current) => !current))
@@ -258,6 +335,8 @@ export function CommandPalette() {
       description="Search projects, tasks, views, actions, and skills"
       showCloseButton={false}
       filter={paletteScore}
+      value={selected}
+      onValueChange={setSelected}
       // Two overrides of the shared dialog, both for this surface only — every other dialog in
       // the cockpit is a form, which wants to stay narrow and centred.
       //
@@ -274,7 +353,7 @@ export function CommandPalette() {
     >
       {/* The body mounts only while the dialog is open (Radix portals nothing when closed), so
           its queries — notably the skills fetch — run on first open, never on app boot. */}
-      <PaletteContent open={open} docked={docked} close={() => setOpen(false)} />
+      <PaletteContent open={open} docked={docked} selected={selected} close={() => setOpen(false)} />
     </CommandDialog>
   )
 }
@@ -298,20 +377,7 @@ function TaskItem({
   const label = runTitle(task)
   return (
     <CommandItem
-      // The id keeps duplicate titles apart; it also lets a pasted run id find its task.
-      // `runTitle`, matching the rendered text — filtering on a raw title hidden behind an
-      // auto-summary would surface rows for no visible reason.
-      value={`task ${label} ${task.id}`}
-      // The project name is filter fodder for the same reason it is rendered: with every
-      // project's tasks in one list, "shop" has to narrow to shop's tasks. The branch and
-      // workflow are the fields the server's run search also matches (#864), so a hit it found
-      // there survives cmdk's own filter — and the Tasks table's search reads them too.
-      keywords={[
-        ...(projectName ? [projectName] : []),
-        ...referenceKeywords(task),
-        ...[task.branch, task.workflow, task.workflowLabel, task.pullRequestUrl, task.referencedPullRequestUrl, task.referencedIssueUrl]
-          .filter((field): field is string => !!field),
-      ]}
+      {...taskMatch(task, projectName)}
       data-slot="palette-task"
       data-run-id={task.id}
       data-project-id={task.projectId ?? undefined}
@@ -337,12 +403,23 @@ function TaskItem({
   )
 }
 
-function PaletteContent({ open, docked, close }: { open: boolean; docked: boolean; close: () => void }) {
+function PaletteContent({
+  open,
+  docked,
+  selected,
+  close,
+}: {
+  open: boolean
+  docked: boolean
+  selected: string
+  close: () => void
+}) {
   const navigate = useNavigate()
   // The UNSCOPED twin, for the handful of targets that live outside every project (`/tasks`).
   const routerNavigate = useRouterNavigate()
   // Controlled so the body can tell the default view from a search. cmdk still owns filtering and
-  // ranking (`paletteScore`); this only decides which SECTIONS exist.
+  // the order within a group (`paletteScore`); this decides which SECTIONS exist and, through
+  // `rankGroups`, their order.
   const [search, setSearch] = React.useState('')
   const searching = search.trim() !== ''
   const activeProjectId = useActiveProjectId()
@@ -364,6 +441,7 @@ function PaletteContent({ open, docked, close }: { open: boolean; docked: boolea
   const voice = useVoiceCommand({
     enabled: health.data?.capabilities.voice === true,
     text: search,
+    selected,
     close,
     clearText: () => setSearch(''),
   })
@@ -455,10 +533,155 @@ function PaletteContent({ open, docked, close }: { open: boolean; docked: boolea
   }
   const nextTheme = NEXT_THEME[theme]
 
+  // The ranked groups, in their default order. Each carries the matches of its rows, so a search
+  // can order the groups by their best row (`rankGroups`). The voice rows and New task render
+  // above them and are never ranked: the voice rows answer the sentence itself, and New task is
+  // the palette's default action, headless, so ranked below a heading it would read as that
+  // group's row.
+  const views = [
+    // The one GLOBAL view, listed first because it is the only row here that is not about the
+    // project you are standing in. Multi-project only, matching the sidebar: with one project it
+    // would be that project's own Tasks page under another name.
+    ...(multiProject ? [{ label: 'All tasks', to: '/tasks', icon: LayersIcon, global: true }] : []),
+    ...visibleNavItems({
+      forge: health.data?.forge?.available === true,
+      inbox: health.data?.capabilities.followups === true,
+      automations: health.data?.capabilities.automations === true,
+    }).map((item) => ({ label: item.label, to: item.to, icon: item.icon, global: false })),
+  ]
+  const groups: { rows: PaletteMatch[]; node: React.ReactNode }[] = [
+    {
+      rows: views.map((view) => viewMatch(view.label)),
+      node: (
+        <CommandGroup key="views" heading="Views">
+          {views.map((view) => {
+            const Icon = view.icon
+            return (
+              <CommandItem
+                key={view.to}
+                {...viewMatch(view.label)}
+                data-slot="palette-view"
+                data-nav-to={view.to}
+                onSelect={() => (view.global ? goGlobal(view.to) : go(view.to))}
+              >
+                <Icon aria-hidden="true" />
+                {view.label}
+              </CommandItem>
+            )
+          })}
+        </CommandGroup>
+      ),
+    },
+  ]
+  if (orderedProjects.length > 0) {
+    groups.push({
+      rows: orderedProjects.map(projectMatch),
+      node: (
+        <CommandGroup key="projects" heading="Projects">
+          {orderedProjects.map((project) => {
+            const active = project.id === activeProjectId
+            // Nothing to open: the folder is gone. The row stays listed (Settings → Projects owns
+            // removing it) but cannot be picked, rather than navigating into a project whose
+            // every request 4xxs — the same rule the composer's project pill applies.
+            const missing = project.status === 'missing'
+            return (
+              <CommandItem
+                key={project.id}
+                {...projectMatch(project)}
+                data-slot="palette-project"
+                data-project-id={project.id}
+                disabled={missing}
+                onSelect={() => goProject(project.id)}
+              >
+                <FolderOpenIcon aria-hidden="true" />
+                <span className="min-w-0 flex-1 truncate">{project.name}</span>
+                {missing ? (
+                  <span className="shrink-0 text-xs text-soft-foreground">folder not found</span>
+                ) : project.branch !== undefined ? (
+                  <span className="shrink-0 font-mono text-xs text-soft-foreground">
+                    {project.branch}
+                  </span>
+                ) : null}
+                {active ? (
+                  <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
+                ) : null}
+              </CommandItem>
+            )
+          })}
+        </CommandGroup>
+      ),
+    })
+  }
+  if (otherTasks.length > 0) {
+    groups.push({
+      // Scored only during a search, so the default view never pays for a pass over every task.
+      rows: searching ? otherTasks.map((task) => taskMatch(task, taskProjectName(task))) : [],
+      node: (
+        <CommandGroup key="tasks" heading="Tasks">
+          {otherTasks.map((task) => (
+            <TaskItem
+              key={taskKey(task)}
+              task={task}
+              projectName={taskProjectName(task)}
+              showProject={showProjectOnTasks}
+              now={now}
+              onSelect={selectTask}
+            />
+          ))}
+        </CommandGroup>
+      ),
+    })
+  }
+  groups.push({
+    rows: [THEME_ACTION_MATCH],
+    node: (
+      <CommandGroup key="actions" heading="Actions">
+        <CommandItem
+          {...THEME_ACTION_MATCH}
+          data-slot="palette-action"
+          data-action="toggle-theme"
+          onSelect={() => {
+            setTheme(nextTheme)
+            close()
+          }}
+        >
+          <SunMoonIcon aria-hidden="true" />
+          Toggle theme
+          <CommandShortcut className="tracking-normal">
+            {theme} → {nextTheme}
+          </CommandShortcut>
+        </CommandItem>
+      </CommandGroup>
+    ),
+  })
+  if (orderedSkills.length > 0) {
+    groups.push({
+      rows: orderedSkills.map(skillMatch),
+      node: (
+        <CommandGroup key="skills" heading="Skills">
+          {orderedSkills.map((skill) => (
+            <CommandItem
+              key={skill.path}
+              {...skillMatch(skill)}
+              data-slot="palette-skill"
+              data-skill={skill.name}
+              onSelect={() => go(`/new?skill=${encodeURIComponent(skill.name)}`)}
+            >
+              <span className="shrink-0 font-medium">{skill.name}</span>
+              {skill.description ? (
+                <span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">{skill.description}</span>
+              ) : null}
+            </CommandItem>
+          ))}
+        </CommandGroup>
+      ),
+    })
+  }
+
   return (
     <>
       <CommandInput
-        placeholder="Search projects, tasks, views, actions, skills…"
+        placeholder={voice.confirm ? CONFIRM_PLACEHOLDER : 'Search projects, tasks, views, actions, skills…'}
         value={search}
         onValueChange={setSearch}
         onKeyDown={(event) => {
@@ -471,176 +694,57 @@ function PaletteContent({ open, docked, close }: { open: boolean; docked: boolea
           the bottom edge as violently as the old centring moved the top. */}
       {/* Docked, the list stays short so the palette covers less of the card behind it. */}
       <CommandList className={docked ? 'max-h-[28vh]' : 'max-h-[55vh] min-h-[14rem] sm:max-h-[60vh] lg:max-h-[68vh]'}>
-        <VoiceRows row={voice.row} committable={search.trim() !== ''} onSelect={voice.onSelect} />
-        {/* A voice row answers the sentence; "nothing matches" would contradict it. */}
-        {voice.row ? null : <CommandEmpty>Nothing matches.</CommandEmpty>}
+        {/* A proposal waiting for its confirmation replaces the search: one panel, so the screen
+            says what Return does (hearsay-tools/cezarion#1461). Typing brings the search back. */}
+        {voice.confirm ? (
+          <VoiceConfirm
+            confirm={voice.confirm}
+            notice={voice.row?.kind === 'notice' ? voice.row.text : undefined}
+            onConfirm={voice.onConfirm}
+          />
+        ) : (
+          <>
+            <VoiceRows row={voice.row} committable={search.trim() !== ''} onSelect={voice.onSelect} />
+            {/* A voice row answers the sentence; "nothing matches" would contradict it. */}
+            {voice.row ? null : <CommandEmpty>Nothing matches.</CommandEmpty>}
 
-        {/* First, headless, and the row an empty query pre-selects: opening ⌘K and pressing
-            Enter starts a task. It used to sit ninth in Views with a duplicate down in Actions;
-            one authoritative row at the top is what "New task" being the default means. */}
-        <CommandGroup>
-          <CommandItem
-            value="new task"
-            data-slot="palette-view"
-            data-nav-to="/new"
-            onSelect={() => go('/new')}
-          >
-            <PlusIcon aria-hidden="true" />
-            New task
-            <CommandShortcut>C</CommandShortcut>
-          </CommandItem>
-        </CommandGroup>
-
-        {/* Only in the DEFAULT view. Once you type, splitting tasks by read-state is noise: it
-            floats a section of near-misses above the exact match you are looking for, purely
-            because that section renders first. Searching gets one ranked Tasks list. */}
-        {!searching && recentlyFinished.length > 0 ? (
-          <CommandGroup heading="Recently finished">
-            {recentlyFinished.map((task) => (
-              <TaskItem
-                key={taskKey(task)}
-                task={task}
-                projectName={taskProjectName(task)}
-                showProject={showProjectOnTasks}
-                now={now}
-                onSelect={selectTask}
-              />
-            ))}
-          </CommandGroup>
-        ) : null}
-
-        <CommandGroup heading="Views">
-          {/* The one GLOBAL view, listed first because it is the only row here that is not
-              about the project you are standing in. Multi-project only, matching the sidebar:
-              with one project it would be that project's own Tasks page under another name. */}
-          {multiProject ? (
-            <CommandItem
-              value="view All tasks"
-              data-slot="palette-view"
-              data-nav-to="/tasks"
-              onSelect={() => goGlobal('/tasks')}
-            >
-              <LayersIcon aria-hidden="true" />
-              All tasks
-            </CommandItem>
-          ) : null}
-          {visibleNavItems({
-            forge: health.data?.forge?.available === true,
-            inbox: health.data?.capabilities.followups === true,
-            automations: health.data?.capabilities.automations === true,
-          }).map((item) => {
-            const Icon = item.icon
-            return (
+            {/* First, headless, and the row an empty query pre-selects: opening ⌘K and pressing
+                Enter starts a task. It used to sit ninth in Views with a duplicate down in Actions;
+                one authoritative row at the top is what "New task" being the default means. */}
+            <CommandGroup>
               <CommandItem
-                key={item.to}
-                // The `view` prefix keeps values unique across groups and gives "view git" a
-                // deterministic hit; the value is filter fodder, never rendered.
-                value={`view ${item.label}`}
+                value="new task"
                 data-slot="palette-view"
-                data-nav-to={item.to}
-                onSelect={() => go(item.to)}
+                data-nav-to="/new"
+                onSelect={() => go('/new')}
               >
-                <Icon aria-hidden="true" />
-                {item.label}
+                <PlusIcon aria-hidden="true" />
+                New task
+                <CommandShortcut>C</CommandShortcut>
               </CommandItem>
-            )
-          })}
-        </CommandGroup>
+            </CommandGroup>
 
-        {orderedProjects.length > 0 ? (
-          <CommandGroup heading="Projects">
-            {orderedProjects.map((project) => {
-              const active = project.id === activeProjectId
-              // Nothing to open: the folder is gone. The row stays listed (Settings → Projects
-              // owns removing it) but cannot be picked, rather than navigating into a project
-              // whose every request 4xxs — the same rule the composer's project pill applies.
-              const missing = project.status === 'missing'
-              return (
-                <CommandItem
-                  key={project.id}
-                  // The `project` prefix keeps values unique across groups; the id is what makes
-                  // two same-named registry entries separately reachable.
-                  value={`project ${project.name} ${project.id}`}
-                  // The root is how you tell apart two checkouts of one repo — searchable, but
-                  // not worth a line of its own in a row this dense.
-                  keywords={[project.root]}
-                  data-slot="palette-project"
-                  data-project-id={project.id}
-                  disabled={missing}
-                  onSelect={() => goProject(project.id)}
-                >
-                  <FolderOpenIcon aria-hidden="true" />
-                  <span className="min-w-0 flex-1 truncate">{project.name}</span>
-                  {missing ? (
-                    <span className="shrink-0 text-xs text-soft-foreground">folder not found</span>
-                  ) : project.branch !== undefined ? (
-                    <span className="shrink-0 font-mono text-xs text-soft-foreground">
-                      {project.branch}
-                    </span>
-                  ) : null}
-                  {active ? (
-                    <CheckIcon aria-hidden="true" className="size-3.5 shrink-0 text-link-foreground" />
-                  ) : null}
-                </CommandItem>
-              )
-            })}
-          </CommandGroup>
-        ) : null}
+            {/* Only in the DEFAULT view. Once you type, splitting tasks by read-state is noise: it
+                floats a section of near-misses above the exact match you are looking for, purely
+                because that section renders first. Searching gets one ranked Tasks list. */}
+            {!searching && recentlyFinished.length > 0 ? (
+              <CommandGroup heading="Recently finished">
+                {recentlyFinished.map((task) => (
+                  <TaskItem
+                    key={taskKey(task)}
+                    task={task}
+                    projectName={taskProjectName(task)}
+                    showProject={showProjectOnTasks}
+                    now={now}
+                    onSelect={selectTask}
+                  />
+                ))}
+              </CommandGroup>
+            ) : null}
 
-        {otherTasks.length > 0 ? (
-          <CommandGroup heading="Tasks">
-            {otherTasks.map((task) => (
-              <TaskItem
-                key={taskKey(task)}
-                task={task}
-                projectName={taskProjectName(task)}
-                showProject={showProjectOnTasks}
-                now={now}
-                onSelect={selectTask}
-              />
-            ))}
-          </CommandGroup>
-        ) : null}
-
-        <CommandGroup heading="Actions">
-          <CommandItem
-            value="action toggle theme"
-            data-slot="palette-action"
-            data-action="toggle-theme"
-            onSelect={() => {
-              setTheme(nextTheme)
-              close()
-            }}
-          >
-            <SunMoonIcon aria-hidden="true" />
-            Toggle theme
-            <CommandShortcut className="tracking-normal">
-              {theme} → {nextTheme}
-            </CommandShortcut>
-          </CommandItem>
-        </CommandGroup>
-
-        {orderedSkills.length > 0 ? (
-          <CommandGroup heading="Skills">
-            {orderedSkills.map((skill) => (
-              <CommandItem
-                key={skill.path}
-                // The path suffix keeps values unique when a project skill shadows a global
-                // one of the same name — both stay selectable.
-                value={`skill ${skill.name} ${skill.path}`}
-                keywords={skill.description ? [skill.description] : undefined}
-                data-slot="palette-skill"
-                data-skill={skill.name}
-                onSelect={() => go(`/new?skill=${encodeURIComponent(skill.name)}`)}
-              >
-                <span className="shrink-0 font-medium">{skill.name}</span>
-                {skill.description ? (
-                  <span className="min-w-0 flex-1 truncate text-xs text-soft-foreground">{skill.description}</span>
-                ) : null}
-              </CommandItem>
-            ))}
-          </CommandGroup>
-        ) : null}
+            {rankGroups(groups, search).map((group) => group.node)}
+          </>
+        )}
       </CommandList>
       {cappedProjects.length > 0 ? (
         <p data-slot="palette-search-truncated" role="status" className="border-t border-border px-3 py-2 text-[11px] text-soft-foreground">

@@ -36,7 +36,7 @@ export function automationsToolEnabled(env: NodeJS.ProcessEnv = process.env): bo
  */
 function flatWaitInputSchema() {
   const properties: Record<string, unknown> = {};
-  // `timeout_seconds` is in both the ci and worker kinds: the ci schema's bounds (1–7200, default
+  // `timeout_seconds` is in both the pr and worker kinds: the pr schema's bounds (1–7200, default
   // 1800) are the advertised ones, and the worker's own (1–1800, default 600) ride in the description.
   for (const option of [...cezarWaitRequestSchema.options].reverse()) {
     Object.assign(properties, z.toJSONSchema(option, { io: 'input' }).properties);
@@ -45,14 +45,18 @@ function flatWaitInputSchema() {
   return {
     type: 'object' as const,
     properties: {
-      kind: { type: 'string', enum: cezarWaitRequestSchema.options.map(option => option.shape.kind.value), description: '"ci" waits for the checks of a GitHub pull request; "worker" waits for workers or request replies; "timer" wakes you after `seconds`.' },
-      pr: field('pr', 'kind "ci": the HTTPS GitHub pull request URL.'),
+      kind: { type: 'string', enum: cezarWaitRequestSchema.options.map(option => option.shape.kind.value), description: '"pr" waits for a GitHub pull request: its checks or its merge (see `until`); "worker" waits for workers or request replies; "timer" wakes you after `seconds`; "process" wakes you when a background command you started ends.' },
+      pr: field('pr', 'kind "pr": the HTTPS GitHub pull request URL.'),
+      until: field('until', 'kind "pr": "checks" (default) wakes you when the checks finish; "merge" wakes you only when GitHub reports the PR merged or closed without merge, so green checks keep it open.'),
+      wake_on_conflict: field('wake_on_conflict', 'kind "pr": Default true. Set false when you watch a PR you do not own, such as another agent\'s PR your work depends on: you cannot resolve its conflicts. With until "checks", GitHub often runs no workflows on a conflicting PR, so the wait usually ends as no_checks or deadline.'),
       worker_ids: field('worker_ids', 'kind "worker": the workers you own to wait for (1–32 unique ids). Give this or request_ids, not both.'),
       request_ids: field('request_ids', 'kind "worker": the requests you sent to wait for a reply to (1–32 unique ids). Give this or worker_ids, not both.'),
       mode: field('mode', 'kind "worker": "any" wakes you when one selected id settles (default), "all" when every one has, "one" takes exactly one id.'),
-      timeout_seconds: field('timeout_seconds', 'The deadline in seconds. kind "ci": 1–7200, default 1800. kind "worker": 1–1800, default 600 (the default shown is the ci one).'),
+      timeout_seconds: field('timeout_seconds', 'The deadline in seconds. kind "pr": 1–7200, default 1800. kind "worker": 1–1800, default 600 (the default shown is the pr one). kind "process": 1–7200, default 1800.'),
       seconds: field('seconds', 'kind "timer": seconds until the wake (60–7200).'),
-      note: field('note', 'kind "timer": what to re-check, handed back to you at the wake.'),
+      pid: field('pid', 'kind "process": the PID of the background command, as `echo $!` printed it.'),
+      exit_file: field('exit_file', 'kind "process": optional file the command writes its exit code to, in $TMPDIR or the worktree; a new name for each command.'),
+      note: field('note', 'kind "timer" or "process": what to re-check, handed back to you at the wake.'),
     },
     required: ['kind'],
     additionalProperties: false,
@@ -61,7 +65,13 @@ function flatWaitInputSchema() {
 
 export const waitToolDefinition = {
   name: 'cezar_wait',
-  description: 'Open a wait on something outside this turn: CI on a GitHub pull request (kind "ci"), workers or the replies to requests you sent (kind "worker"), or a timer (kind "timer"). End your turn after it answers; Cezar wakes you when any open wait resolves, with its result. A human message wakes you too and closes no wait. Several waits can be open at once; the answer lists them. To wait for the user, call cezar_ask. A CI observation is not merge approval.',
+  description: 'Open a wait on something outside this turn: a GitHub pull request\'s checks or its merge (kind "pr"), workers or the replies to requests you sent (kind "worker"), a timer (kind "timer"), or a background command you started (kind "process"). End your turn after it answers; Cezar wakes you when any open wait resolves, with its result. A human message wakes you too and closes no wait. Several waits can be open at once; the answer lists them. To wait for the user, call cezar_ask. A checks observation is not merge approval; only a merge wait\'s "merged" outcome means the PR merged. ' +
+    // hearsay-tools/cezarion#1446: the `sh -c` wrapper because omp's own shell prints no `$!`.
+    'kind "process" wakes you when a command you started in the background ends. Start it as ' +
+    '`sh -c \'( cmd > "$TMPDIR/build.log" 2>&1; echo $? > "$TMPDIR/build.exit" ) > /dev/null 2>&1 & echo $!\'` ' +
+    'and pass the printed PID as `pid` and the exit file as `exit_file`, so the wake reports the exit code. ' +
+    'Use a new exit file name for each command: a file that already exists resolves the wait at once. ' +
+    'The job outlives this session and Cezar does not stop it.',
   inputSchema: flatWaitInputSchema(),
 };
 /**
@@ -91,7 +101,7 @@ export async function invokeAskTool(input: unknown) {
 
 export const cancelWaitToolDefinition = {
   name: 'cezar_cancel_wait',
-  description: 'Close a wait you opened with cezar_wait (CI, worker or timer) or cezar_ask, by its wait_id, so it never wakes you. A question the user already sees cannot be cancelled; only their answer ends it. A wait that already resolved is delivered with your next wake anyway; the answer says so and lists the waits still open.',
+  description: 'Close a wait you opened with cezar_wait (PR, worker or timer) or cezar_ask, by its wait_id, so it never wakes you. A question the user already sees cannot be cancelled; only their answer ends it. A wait that already resolved is delivered with your next wake anyway; the answer says so and lists the waits still open.',
   inputSchema: { ...z.toJSONSchema(cezarCancelWaitRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 
@@ -188,7 +198,7 @@ export async function invokeScheduledTasksTool(input: unknown) {
 const SCHEDULE_TASK_TOOL: CezarTool = { definition: scheduleTaskToolDefinition, trigger: 'load when work should start later as a new task (in an hour, tomorrow, next week) instead of keeping this session waiting.', label: 'Schedule a task', invoke: invokeScheduleTaskTool };
 const SCHEDULED_TASKS_TOOL: CezarTool = { definition: scheduledTasksToolDefinition, trigger: 'load when you need to list, change, pause, resume or cancel a one-time scheduled task.', label: 'Scheduled tasks', invoke: invokeScheduledTasksTool };
 
-const WAIT_TOOL: CezarTool = { definition: waitToolDefinition, trigger: 'load when you are waiting on CI for a PR, or want to re-check something later; end your turn after it answers.', label: 'Wait', invoke: invokeWaitTool };
+const WAIT_TOOL: CezarTool = { definition: waitToolDefinition, trigger: 'load when you are waiting on CI for a PR or on a background job you started, or want to re-check something later; end your turn after it answers.', label: 'Wait', invoke: invokeWaitTool };
 const ASK_TOOL: CezarTool = { definition: askToolDefinition, trigger: 'load for a user decision or missing input; provide the full draft or findings in its rendered context field.', label: 'Ask the user', invoke: invokeAskTool };
 const CANCEL_WAIT_TOOL: CezarTool = { definition: cancelWaitToolDefinition, trigger: 'load when a wait you registered is no longer needed.', label: 'Cancel wait', invoke: invokeCancelWaitTool };
 const DONE_TOOL: CezarTool = { definition: doneToolDefinition, trigger: 'load when the task is complete and verified.', label: 'Done', invoke: invokeDoneTool };
