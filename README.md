@@ -1551,6 +1551,7 @@ npm run typecheck    # refresh server declarations, then check all four workspac
 npm run typecheck:web # refresh server declarations, then check web sources
 npm test             # vitest — server + cockpit unit suites
 npm run test:changed # iteration only: tests related to branch + working-tree changes
+pnpm metrics <file> # function complexity; add --test <test-file> for coverage and CRAP
 npm run test:unit    # node:test — fast core-module tests
 npm run test:package # pack/install and exercise the built CLI
 npm run test:e2e     # real-browser cockpit suite (agent-browser)
@@ -1560,6 +1561,38 @@ npm run test:e2e:local # full browser suite in four isolated, concurrent lanes
 The four-lane local browser run needs roughly 8 GiB of RAM at peak. It keeps CI's
 serial-per-shard policy unchanged. See [cockpit E2E testing](packages/web/e2e/README.md#full-local-suite-in-four-lanes)
 for lane isolation, logs, and cleanup.
+
+Calculate metrics for one JavaScript or TypeScript file, or select a function:
+
+```bash
+pnpm metrics packages/contract/src/attention.ts
+pnpm metrics packages/contract/src/attention.ts --function deriveAttention
+pnpm --silent metrics packages/contract/src/attention.ts --line 150 --json
+pnpm metrics packages/contract/src/attention.ts --function deriveAttention --test packages/contract/src/attention.test.ts
+pnpm metrics packages/contract/src/attention.ts --coverage coverage/coverage-final.json
+```
+
+Complexity follows ESLint's classic convention, including short-circuit operators,
+optional chaining, default parameters and each non-default switch case. Functions,
+methods and arrow functions have separate scores. Module and class initialization
+are excluded. Use `Class.method` or `--line` when a name is ambiguous.
+
+CRAP is `C² × (1 − coverage)³ + C`, using executable line coverage within each
+function body. This is the line-coverage variant; the original proposal used
+basis-path coverage. An empty function uses its call counter. Missing coverage
+shows `unavailable`, or `null` for CRAP in JSON. It never assumes zero coverage.
+The command discovers `coverage/coverage-final.json` from the source directory
+up to the checkout root, then the current directory. An explicit `--coverage`
+selects an Istanbul JSON report. Reports older than the source leave CRAP unavailable;
+reports must describe the current source, so regenerate them after source changes.
+
+Repeat `--test` to collect coverage from several Vitest test files. This runs only
+the supplied tests in the unit projects, with two workers and a ten-minute limit.
+Coverage files are temporary and are removed after the calculation. A failed test
+run exits nonzero and produces no scores. Without `--test`, no tests run. Test logs
+go to stderr, so `--json` stdout contains only the report. This tool belongs to the
+checkout and is available after the normal dependency installation. Use
+`pnpm --silent metrics ... --json` to also suppress pnpm's command banner.
 
 For iteration, run affected test files or `npm run test:changed` (inspect with
 `-- --plan`; override the local main comparison with `-- --base=<ref>`).
