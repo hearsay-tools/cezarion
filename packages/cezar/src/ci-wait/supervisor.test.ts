@@ -83,6 +83,12 @@ it('rejects metadata for a different PR number', async () => {
  await expect(supervisor('passed').resolve('https://github.com/org/repo/pull/13')).rejects.toMatchObject({code:'malformed_data'});
 });
 
+// hearsay-tools/cezarion#1425: a PR the agent does not own may conflict; the wait still reports its checks.
+it('ignores a conflict when the wait does not wake on conflict, and reports the checks', async () => {
+ const result = await supervisor('conflicting').watch({...wait(),wakeOnConflict:false},new AbortController().signal);
+ expect(result).toMatchObject({outcome:'passed',mergeable:'CONFLICTING',mergeStateStatus:'DIRTY'});
+});
+
 it('reports a conflict from real gh metadata with unchanged canonical identity', async () => {
  const result = await supervisor('conflicting').watch(wait(),new AbortController().signal);
  expect(result).toMatchObject({outcome:'conflicting',mergeable:'CONFLICTING',mergeStateStatus:'DIRTY',headSha:'a'.repeat(40)});

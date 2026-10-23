@@ -76,7 +76,8 @@ export class CiWatcherSupervisor {
       metadata = value;
       return value;
     };
-    const conflict = () => metadata?.mergeable === 'CONFLICTING'
+    // A PR the agent does not own may conflict without ending its wait (hearsay-tools/cezarion#1425).
+    const conflict = () => wait.wakeOnConflict !== false && metadata?.mergeable === 'CONFLICTING'
       ? observe('conflicting', {diagnostic: 'The pull request conflicts with its base. Inspect the PR; this observation does not authorize a repair or merge.'})
       : undefined;
     const stopped = () => {
