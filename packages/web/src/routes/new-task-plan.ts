@@ -94,8 +94,10 @@ export function buildPlannedRunBody(opts: {
   runnerExplicit?: boolean
   defaultRunner?: Runner
   images: readonly AttachmentInput[]
+  archiveWhenDone?: boolean
+  autoMergePr?: boolean
 }): CreateRunInput {
-  const { task, steps, model, modelsLocked, effort, runner, runnerExplicit, defaultRunner, images } =
+  const { task, steps, model, modelsLocked, effort, runner, runnerExplicit, defaultRunner, images, archiveWhenDone, autoMergePr } =
     opts
   return {
     task,
@@ -104,5 +106,7 @@ export function buildPlannedRunBody(opts: {
     effort: modelsLocked ? undefined : effort || undefined,
     runner: runnerOverride(runner, defaultRunner, runnerExplicit),
     images: images.length > 0 ? [...images] : undefined,
+    ...(archiveWhenDone ? { archiveWhenDone: true } : {}),
+    ...(autoMergePr ? { autoMergePr: true } : {}),
   }
 }

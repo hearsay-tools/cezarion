@@ -636,17 +636,18 @@ describe('worker parks, slots and session close', { timeout: 45_000 }, () => {
     fixtureUpdateRun(settles.id, { status: 'done' });
     store.flush();
     const after = readPersistedRuns(join(root, '.ai/cezar')) as Array<{ id: string }>;
-    // The other wait's deadline is a few seconds out: only a re-armed timer can resolve it.
-    const due = new Date(Date.now() + 3_000).toISOString();
-    const disk = before.map(record => record.id === settles.id ? after.find(next => next.id === settles.id)!
-      : record.id === p.id ? { ...record, waits: (record as unknown as { waits: Wait[] }).waits.map(wait => wait.id === deadline.id ? { ...wait, deadline: due } : wait) } : record);
+    // bound: the registered 600 s deadline exceeds the 45 s row guard; fake timers drive expiry.
+    const disk = before.map(record => record.id === settles.id ? after.find(next => next.id === settles.id)! : record);
     expect(disk.find(record => record.id === p.id)).toMatchObject({ waits: expect.arrayContaining([expect.objectContaining({ id: observed.id, phase: 'open' })]) });
-    await restart(false, disk);
+    await restart(true, disk);
+    expect(entryOf(p.id, deadline.id)).toMatchObject({ phase: 'open', deadline: deadline.deadline });
+    expect(internals().waitTimers.has(deadline.id)).toBe(true);
     await until(() => settledOf(p.id, observed.id)?.phase === 'delivered');
     expect(settledOf(p.id, observed.id)).toMatchObject({ result: { reason: 'outcome' }, outcomes: [{ workerId: settles.id, status: 'done' }] });
     await until(() => store.getRun(p.id)?.status === 'waiting');
     // The deadline of the wait still open is armed again; its expiry wakes the parent.
-    expect(internals().waitTimers.has(deadline.id)).toBe(true);
+    await vi.advanceTimersByTimeAsync(Date.parse(deadline.deadline) - Date.now());
+    vi.useRealTimers();
     await until(() => settledOf(p.id, deadline.id)?.phase === 'delivered');
     expect(settledOf(p.id, deadline.id)).toMatchObject({ result: { reason: 'timeout' } });
   });

@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, describe, expect, it } from 'vitest'
+import type { CreateAutomationInput } from '@open-mercato/cezar-api-client'
 
 // Test-only reach into the service: the round trip must run the CLI's own parser and body
 // builder, not a copy of them (AGENTS.md: cross-package test reaches are ugly on purpose).
@@ -40,6 +41,11 @@ function pollDraft(overrides: Partial<AutomationDraft> = {}): AutomationDraft {
   }
 }
 
+function completionDraft(draft: AutomationDraft, completion: Partial<Pick<CreateAutomationInput['task'], 'archiveWhenDone' | 'autoMergePr'>>): AutomationDraft {
+  const body = toCreateBody(draft)
+  return fromDefinition({ ...body, task: { ...body.task, ...completion } })
+}
+
 describe('shellQuote', () => {
   it('single-quotes for a POSIX shell, closing and escaping embedded quotes', () => {
     expect(shellQuote('plain')).toBe("'plain'")
@@ -58,6 +64,13 @@ describe('cliOf', () => {
   it('says --no-autonomous and --enable when the draft does', () => {
     const line = cliOf(scheduleDraft({ autonomous: false, enabled: true, runner: 'codex', model: 'gpt-5' }))
     expect(line).toContain(" --runner 'codex' --model 'gpt-5' --no-autonomous --enable --prompt ")
+  })
+
+  it('prints enabled completion controls as flags', () => {
+    const draft = completionDraft(scheduleDraft(), { archiveWhenDone: true, autoMergePr: true })
+    expect(flagExpressible(draft)).toBe(true)
+    expect(cliOf(draft)).toContain(' --archive-when-done --auto-merge-pr ')
+    expect(cliOf(scheduleDraft())).not.toMatch(/--archive-when-done|--auto-merge-pr/)
   })
 
   it('prints a poll with any-of labels and authors as flags', () => {
@@ -143,6 +156,9 @@ describe('Copy as CLI round-trips through a real shell into the cez automation r
     ['a poll with a label starting with a dash', pollDraft({ filters: { anyLabels: ['-wip'], lookbackDays: 7, maxRecords: 25 } }), 'add'],
     ['a label event with a changed label', pollDraft({ events: ['issue.labeled'], filters: { changedLabels: ['needs-agent'], lookbackDays: 7, maxRecords: 25 } }), 'add'],
     ['a poll with exclusions', pollDraft({ prompt: HOSTILE, filters: { excludeLabels: ["won't fix"], lookbackDays: 3, maxRecords: 10 } }), 'create'],
+    ['a schedule that archives completed tasks', completionDraft(scheduleDraft(), { archiveWhenDone: true }), 'add'],
+    ['a poll that merges PRs', completionDraft(pollDraft(), { autoMergePr: true }), 'add'],
+    ['a schedule with both completion controls', completionDraft(scheduleDraft(), { archiveWhenDone: true, autoMergePr: true }), 'add'],
     ['a cockpit-made schedule with a description', scheduleDraft({ prompt: HOSTILE, description: "It's `daily`", taskExtra: {} }), 'create'],
   ]
 

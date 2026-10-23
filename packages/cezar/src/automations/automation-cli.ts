@@ -56,6 +56,7 @@ One JSON object per invocation; exit 0 ok, 1 check failed, 2 refused or no cockp
                     | --at <YYYY-MM-DDTHH:MM> | --in <30m|6h|7d>) [--tz <zone>] [--latest-start <6h>]
       [--prompt <text> | --prompt-file <path>] [--workflow <w>] [--runner <id>] [--model <m>]
       [--autonomous | --no-autonomous] [--label <l>]... [--author <a>]... [--changed-label <l>]... [--include-existing] [--enable]
+      [--archive-when-done] [--auto-merge-pr]
                                            the same from flags. --cron takes "M H * * *" (daily), "M H * * 1-5"
                                            (weekdays), "M H * * D" (0 or 7 = Sunday) or "0 */N * * *"
                                            (N in 1,2,3,4,6,8,12); anything else needs the JSON form.
@@ -63,6 +64,10 @@ One JSON object per invocation; exit 0 ok, 1 check failed, 2 refused or no cockp
                                            name; the cockpit's zone when left out), --in is elapsed time from
                                            now. --latest-start (10m to 30d) bounds how late a start may still
                                            launch after Cezarion was down
+                                           --archive-when-done archives each task after Done (default off).
+                                           --auto-merge-pr merges its PR after Done when current-head CI and
+                                           GitHub rules pass (default off); it may mark a draft ready.
+                                           With both flags, merge before archive; without a PR, archive on Done.
   update <id> [--file <def.json> | --json '<json>']
                                            replace the editable keys you give; the rest keep their value;
                                            "task" merges key by key, and null removes a task key
@@ -91,6 +96,7 @@ const ADD_FLAGS = {
   prompt: { type: 'string' }, 'prompt-file': { type: 'string' },
   workflow: { type: 'string' }, runner: { type: 'string' }, model: { type: 'string' },
   autonomous: { type: 'boolean' }, 'no-autonomous': { type: 'boolean' },
+  'archive-when-done': { type: 'boolean' }, 'auto-merge-pr': { type: 'boolean' },
   label: { type: 'string', multiple: true }, author: { type: 'string', multiple: true },
   'changed-label': { type: 'string', multiple: true },
   'include-existing': { type: 'boolean' },
@@ -134,6 +140,7 @@ export function parseEvery(value: string): number {
 export interface AddFlags {
   name?: string; cron?: string; on?: string; every?: string;
   workflow?: string; runner?: string; model?: string; autonomous?: boolean; 'no-autonomous'?: boolean;
+  'archive-when-done'?: boolean; 'auto-merge-pr'?: boolean;
   label?: string[]; author?: string[]; 'changed-label'?: string[]; 'include-existing'?: boolean; enable?: boolean;
   at?: string; in?: string; tz?: string; 'latest-start'?: string;
 }
@@ -177,6 +184,8 @@ export function bodyFromAddFlags(values: AddFlags, prompt: string, once: { timeZ
   if (!isOnce && !values.cron && !values.on) usageError('give --cron "<M H * * *>" for a schedule, --at or --in for a one-time schedule, or --on <event> for a GitHub poll');
   if (values.autonomous && values['no-autonomous']) usageError('give --autonomous OR --no-autonomous, not both');
   const task: CreateAutomationInput['task'] = { prompt, worktree: true, autonomous: !values['no-autonomous'] };
+  if (values['archive-when-done']) task.archiveWhenDone = true;
+  if (values['auto-merge-pr']) task.autoMergePr = true;
   if (values.workflow) task.workflow = values.workflow;
   if (values.runner) task.runner = values.runner as CreateAutomationInput['task']['runner'];
   if (values.model) task.model = values.model;

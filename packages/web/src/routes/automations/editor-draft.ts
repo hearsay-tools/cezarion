@@ -34,12 +34,14 @@ export interface AutomationDraft {
   runner?: Runner
   model?: string
   autonomous: boolean
+  archiveWhenDone: boolean
+  autoMergePr: boolean
   /** The state the user wants after saving. */
   enabled: boolean
   retiredVariants: boolean
   /** Task keys the editor has no control for (effort, a system prompt …), carried
    *  through an edit untouched. */
-  taskExtra: Omit<TaskInput, 'prompt' | 'workflow' | 'runner' | 'model' | 'autonomous'>
+  taskExtra: Omit<TaskInput, 'prompt' | 'workflow' | 'runner' | 'model' | 'autonomous' | 'archiveWhenDone' | 'autoMergePr'>
 }
 
 /** What `fromDefinition` reads: a stored definition, or the create body built from a draft. */
@@ -57,7 +59,7 @@ type DraftSource = Partial<{
 }>
 
 export function fromDefinition(source: DraftSource = {}): AutomationDraft {
-  const { prompt, workflow, runner, model, autonomous, variants, ...taskExtra } = source.task ?? { prompt: '' }
+  const { prompt, workflow, runner, model, autonomous, archiveWhenDone, autoMergePr, variants, ...taskExtra } = source.task ?? { prompt: '' }
   const fresh = source.task === undefined
   return {
     retiredVariants: variants !== undefined && variants !== 1,
@@ -74,6 +76,8 @@ export function fromDefinition(source: DraftSource = {}): AutomationDraft {
     ...(runner !== undefined ? { runner } : {}),
     ...(model !== undefined ? { model } : {}),
     autonomous: autonomous ?? true,
+    archiveWhenDone: archiveWhenDone ?? false,
+    autoMergePr: autoMergePr ?? false,
     enabled: source.enabled ?? source.enable ?? false,
     taskExtra,
   }
@@ -105,6 +109,8 @@ function taskBody(draft: AutomationDraft): TaskInput {
     ...(draft.runner ? { runner: draft.runner } : {}),
     ...(draft.model ? { model: draft.model } : {}),
     autonomous: draft.autonomous,
+    ...(draft.archiveWhenDone ? { archiveWhenDone: true } : {}),
+    ...(draft.autoMergePr ? { autoMergePr: true } : {}),
   }
 }
 
@@ -126,5 +132,10 @@ export function toCreateBody(draft: AutomationDraft): CreateAutomationInput {
 }
 
 export function toUpdateBody(draft: AutomationDraft, revision: number): UpdateAutomationInput {
-  return { ...commonBody(draft), enabled: draft.enabled, expectedRevision: revision }
+  return {
+    ...commonBody(draft),
+    task: { ...taskBody(draft), archiveWhenDone: draft.archiveWhenDone, autoMergePr: draft.autoMergePr },
+    enabled: draft.enabled,
+    expectedRevision: revision,
+  }
 }

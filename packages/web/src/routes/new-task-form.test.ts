@@ -40,6 +40,17 @@ const skill = (name: string, source: Skill['source'] = 'ai'): Skill => ({
 
 const workflow = (name: string): WorkflowDef => ({ name, source: 'built-in', steps: [] })
 
+describe('completion choices in create bodies', () => {
+  const input = { task: 'Ship', source: null, runner: 'claude' as const, model: '', variants: 1, images: [] }
+  it('omits default-off choices and carries each opt-in independently', () => {
+    expect(buildCreateRunBody(input)).not.toHaveProperty('archiveWhenDone')
+    expect(buildCreateRunBody(input)).not.toHaveProperty('autoMergePr')
+    expect(buildCreateRunBody({ ...input, archiveWhenDone: true, autoMergePr: false })).toMatchObject({ archiveWhenDone: true })
+    expect(buildCreateRunBody({ ...input, archiveWhenDone: true, autoMergePr: true })).toMatchObject({ archiveWhenDone: true, autoMergePr: true })
+    expect(buildAutomationTask({ ...input, autoMergePr: true })).toMatchObject({ autoMergePr: true })
+  })
+})
+
 describe('availableRunners (legacy renderChrome rule)', () => {
   it('offers only auto for Cursor without advertised effort and clears stale effort', () => {
     const options = effortOptionsForModel('cursor', 'model[effort=high]')

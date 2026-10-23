@@ -814,6 +814,8 @@ export interface StartRunInput {
   /** Autonomous mode (#autonomous): eligible turn ends auto-continue until done
    *  or the safety cap. Native asks, input delivery and lifecycle waits still apply. */
   autonomous?: boolean;
+  archiveWhenDone?: boolean;
+  autoMergePr?: boolean;
   /** Task webhook opt-in (#589). Persisted on the record at creation; read from there after. */
   notify?: boolean;
   /** Attachments from the queued prompt stack (#472), re-encoded from disk by
@@ -3101,6 +3103,8 @@ export class RunManager {
       // auto-nudge reads `input.autonomous` (`execute`), but the record is the
       // only source those after-the-fact consumers have.
       autonomous: input.autonomous === true,
+      archiveWhenDone: input.archiveWhenDone,
+      autoMergePr: input.autoMergePr,
       notify: input.notify === true,
       // Persist the explicit opt-out so queued-run restart recovery and the
       // session Git routes can distinguish it from a removed isolated worktree.

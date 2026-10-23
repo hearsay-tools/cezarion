@@ -80,11 +80,12 @@ describe('guarded automatic archive', () => {
     const { store, id } = setup(overrides as Partial<RunRecord>);
     expect(store.archiveOnMergeSnapshot(id, repo)).toBeUndefined();
   });
-  it('refuses incomplete merge observations, association changes, pins and registered processes', () => {
+  it('refuses incomplete merge observations, association changes and live pins', () => {
     const { store, id } = setup(); const snapshot = store.archiveOnMergeSnapshot(id, repo)!;
     expect(store.archiveAfterMerge(snapshot, [], repo)).toBe(false);
     store.pin(id, 'active'); expect(store.archiveOnMergeSnapshot(id, repo)).toBeUndefined(); store.unpin(id, 'active');
-    registerRunProcess(id, process.pid); expect(store.archiveOnMergeSnapshot(id, repo)).toBeUndefined(); unregisterRunProcess(id);
+    registerRunProcess(id, process.pid);
+    try { expect(store.archiveOnMergeSnapshot(id, repo)).toBeDefined(); } finally { unregisterRunProcess(id); }
     store.updateRun(id, { pullRequests: [pr, { number: 43, source: 'declared' }] });
     expect(store.archiveAfterMerge(snapshot, observations(snapshot), repo)).toBe(false);
   });
@@ -135,6 +136,7 @@ describe('guarded automatic archive', () => {
     expect(store.archiveOnMergeSnapshot(id, repo)).toBeUndefined();
     store.commitWorkerCancellation(worker.id);
     expect(store.archiveOnMergeSnapshot(id, repo)).toBeUndefined();
+    expect(store.getRun(id)?.archiveBlocker?.runId).toBe(worker.id);
     const proof = store.readWorkerExecution(worker.id)!;
     expect(store.commitWorkerExecutionComplete(worker.id, proof.generation)).toBe(true);
     store.flush();
@@ -144,11 +146,13 @@ describe('guarded automatic archive', () => {
     processProbes.scan.mockClear(); processProbes.unshared.mockClear();
     const snapshot = store.archiveOnMergeSnapshot(id, repo)!;
     expect(snapshot?.pullRequests).toEqual([{ owner: 'o', repo: 'r', number: 42 }]);
-    expect(processProbes.scan).toHaveBeenCalledTimes(1);
+    store.archiveMergeBlocker(snapshot, snapshot.pullRequests[0]!, repo);
+    expect(store.getRun(id)?.archiveBlocker).toMatchObject({ runId: worker.id, pullRequestUrl: `${repo}/pull/42` });
+    expect(processProbes.scan).not.toHaveBeenCalled();
     const seen: boolean[][] = [];
     store.on('run', () => seen.push([store.getRun(id)!.archived, store.getRun(worker.id)!.archived]));
     expect(store.archiveAfterMerge(snapshot, observations(snapshot), repo)).toBe(true);
-    expect(processProbes.scan).toHaveBeenCalledTimes(2);
+    expect(processProbes.scan).not.toHaveBeenCalled();
     expect(processProbes.unshared).not.toHaveBeenCalled();
     expect(seen.every(pair => pair.every(Boolean))).toBe(true);
     expect(readPersistedRuns(dir).every(run => run.archived)).toBe(true);
@@ -160,4 +164,24 @@ describe('guarded automatic archive', () => {
     const page = store.listArchiveOnMergeCandidates(0, 1);
     expect(store.listArchiveOnMergeCandidates(page[0]!.seq, 1)).toEqual([]);
   });
+});
+
+it('manual archive overrides pending input while automatic archive exposes the blocking task', () => {
+  const { store, id } = setup({ hasPendingPermission: true });
+  expect(store.archiveOnMergeSnapshot(id, repo)).toBeUndefined();
+  expect(store.getRun(id)?.archiveBlocker).toMatchObject({ runId: id, message: expect.stringContaining('permission') });
+  store.setArchived(id, true);
+  expect(store.getRun(id)).toMatchObject({ archived: true });
+  expect(store.getRun(id)?.archiveBlocker).toBeUndefined();
+});
+it('automatic and manual archive retain registered processes and worktrees', () => {
+  const { store, id, dir } = setup({ worktreePath: '/retained/task/worktree' });
+  registerRunProcess(id, process.pid);
+  try {
+    const snapshot = store.archiveOnMergeSnapshot(id, repo)!;
+    expect(store.archiveAfterMerge(snapshot, observations(snapshot), repo)).toBe(true);
+    expect(readPersistedRuns(dir)[0]).toMatchObject({ archived: true, worktreePath: '/retained/task/worktree' });
+    store.setArchived(id, false); store.setArchived(id, true);
+    expect(store.getRun(id)?.worktreePath).toBe('/retained/task/worktree');
+  } finally { unregisterRunProcess(id); }
 });

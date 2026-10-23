@@ -1,5 +1,6 @@
-import { execFileSync, spawn } from 'node:child_process';
+import childProcess, { execFileSync, spawn, type ChildProcess, type ExecFileOptions, type SpawnOptions } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setTimeout as realSetTimeout } from 'node:timers';
@@ -9,9 +10,11 @@ import { RunStore } from '../runs/store.ts';
 import { RunManager } from '../workflows/run.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { HARNESS_ADAPTERS, withOwnedInputRun, waitFor } from './harness-parity.testkit.ts';
-import { killFromPidFile, requirePid, writePidSource } from '../pid-file.testkit.ts';
+import { readPid, requirePid } from '../pid-file.testkit.ts';
 
-const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+// bound: native mock turns and real saves use the same 30 s per-step guard as R24/R25
+// (hearsay-tools/cezarion#1322); their measured pinned-load startup exceeded 10 s.
+const FIXTURE_STEP_MS = 30_000;
 
 // hearsay-tools/cezarion#934: native provider failures and Stop must settle
 // independently of the retained worktree-writer proof. Registered as R61–R66.
@@ -38,9 +41,11 @@ describe('harness parity — settlement during blocked autosave', () => {
             await withOwnedInputRun(backend, hasTail ? 'ask-snapshot' : 'baseline', async ({ store, manager, runId, repoRoot, adoptContext }) => {
               if (continuation || outcome !== 'failed') {
                 manager.enqueueOwnedRun(runId);
-                await waitFor(() => store.getRun(runId)?.status === 'waiting');
+                // bound: the native mock must park before Finish or Continue can act.
+                await waitFor(() => store.getRun(runId)?.status === 'waiting', FIXTURE_STEP_MS);
                 if (hasTail) {
-                  await waitFor(() => !!store.transcriptFacts(runId).pendingAsk?.fallback);
+                  // bound: wait for the native ASK snapshot before expiring the continuation.
+                  await waitFor(() => !!store.transcriptFacts(runId).pendingAsk?.fallback, FIXTURE_STEP_MS);
                   expect(store.getRun(runId)?.steps.map(step => step.status)).toEqual(['waiting', 'pending']);
                 }
                 if (continuation) {
@@ -50,11 +55,11 @@ describe('harness parity — settlement during blocked autosave', () => {
                     clearTimeout(state.idleTimer);
                     expire();
                   } else manager.finish(runId);
-                  await waitFor(() => !manager.isActive(runId));
+                  // bound: the first Finish saves through real Git under the product budget.
+                  await waitFor(() => !manager.isActive(runId), FIXTURE_STEP_MS);
                 }
               }
               const bin = mkdtempSync(join(tmpdir(), 'cez-settlement-git-'));
-              const path = process.env.PATH;
               let replacement: { store: RunStore; manager: RunManager } | undefined;
               let unrelated: ReturnType<typeof spawn> | undefined;
               let unrelatedExit: Promise<unknown> | undefined;
@@ -65,55 +70,67 @@ describe('harness parity — settlement during blocked autosave', () => {
                 saveTask = intercepted(...args);
                 return saveTask as ReturnType<typeof save>;
               });
-              writeFileSync(join(bin, 'git'), `#!${process.execPath}\n
+              // Intercept only autosave's status spawn. Real Git handles every other call;
+              // the old PATH shim booted Node for all pre-save Git commands, consuming the
+              // pid guard before this save even started (hearsay-tools/cezarion#1385).
+              const nativeSpawn = childProcess.spawn;
+              let git: ChildProcess | undefined;
+              let gitExit: Promise<unknown> | undefined;
+              const interceptSpawn = vi.spyOn(childProcess, 'spawn').mockImplementation(((...args: unknown[]) => {
+                const [command, argv, options] = args;
+                if (git || command !== 'git' || !Array.isArray(argv) || !argv.includes('status') || !argv.includes('--porcelain')) {
+                  return Reflect.apply(nativeSpawn, childProcess, args);
+                }
+                git = nativeSpawn(process.execPath, ['-e', `
 const fs = require('node:fs');
-const args = process.argv.slice(2);
-const released = () => fs.existsSync(${JSON.stringify(join(bin, 'exit'))});
-// hearsay-tools/cezarion#1080: the turn-end diff stat starts its \`add -N\` beside the
-// blocked save. At load 34-43 that fake Git booted after the release (cursor R64 in the
-// #902 gate, unit run 3). Hold every intent-to-add up to that point so the race is
-// deterministic, then flag any command that writes the worktree's REAL index after the
-// release: \`add -N\`, and \`diff\`, which refreshes the index it reads. A private
-// GIT_INDEX_FILE is not the worktree's index.
-if (args.includes('add') && args.includes('-N')) {
-  const until = Date.now() + 1000;
-  while (!released() && Date.now() < until) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
-}
-if (((args.includes('add') && args.includes('-N')) || args.includes('diff')) && !process.env.GIT_INDEX_FILE && released()) {
-  fs.writeFileSync(${JSON.stringify(join(bin, 'unexpected-writer'))}, 'index mutation: ' + args.join(' '));
-}
-if (args.includes('status') && args.includes('--porcelain')) {
-  // Reproduce startup delayed past the 500 ms command budget (hearsay-tools/cezarion#1216).
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 800);
-  // Born after the holder baseline in a session of its own, outside Git's group.
-  const holder = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`setInterval(() => { if (require('node:fs').existsSync(${JSON.stringify(join(bin, 'move'))})) process.chdir(${JSON.stringify(bin)}); }, 10)`)}], { detached: true, stdio: 'ignore' });
-  holder.unref();
-  fs.writeFileSync(${JSON.stringify(join(bin, 'holder'))}, String(holder.pid));
-  ${writePidSource(join(bin, 'pid'))}
-  const timer = setInterval(() => {
-    if (fs.existsSync(${JSON.stringify(join(bin, 'exit'))})) {
-      clearInterval(timer); process.exit(0);
-    }
-  }, 5);
-} else {
-  const r = require('node:child_process').spawnSync(${JSON.stringify(realGit)}, args, {stdio:'inherit'});
-  process.exit(r.status ?? 1);
-}
-`, { mode: 0o755 });
-              process.env.PATH = `${bin}:${path}`;
+// A real detached descendant inherits autosave's marker, cwd and environment.
+const holder = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`setInterval(() => { if (require('node:fs').existsSync(${JSON.stringify(join(bin, 'move'))})) process.chdir(${JSON.stringify(bin)}); }, 10)`)}], { detached: true, stdio: 'ignore' });
+holder.unref();
+fs.writeFileSync(${JSON.stringify(join(bin, 'holder'))}, String(holder.pid));
+const timer = setInterval(() => {
+  if (fs.existsSync(${JSON.stringify(join(bin, 'exit'))})) { clearInterval(timer); process.exit(0); }
+}, 5);`], options as SpawnOptions);
+                gitExit = new Promise(resolve => git!.once('exit', resolve));
+                return git;
+              }) as typeof spawn);
+              // Keep the execFile-based index-writer check (hearsay-tools/cezarion#1080).
+              // Once the intercepted save starts, hold add -N's completion until release,
+              // so its following diff runs beside that save. Before spawn, let Git finish:
+              // R66's settleSuccess diff must complete before final autosave can start.
+              // Every call still runs real Git. Observe both the held
+              // add and the later diff: neither may use the worktree's real index.
+              let releaseIndex!: () => void;
+              const indexReleased = new Promise<void>(resolve => { releaseIndex = resolve; });
+              const exec = childProcess.execFile;
+              const interceptExec = vi.spyOn(childProcess, 'execFile').mockImplementation(((...args: unknown[]) => {
+                const [command, argv, options] = args;
+                const callback = args.at(-1);
+                if (command !== 'git' || !Array.isArray(argv) || typeof callback !== 'function') return Reflect.apply(exec, childProcess, args);
+                const add = argv.includes('add') && argv.includes('-N');
+                const diff = argv.includes('diff');
+                const checkIndex = () => {
+                  if ((add || diff) && !(options as ExecFileOptions).env?.GIT_INDEX_FILE && existsSync(join(bin, 'exit'))) {
+                    writeFileSync(join(bin, 'unexpected-writer'), 'index mutation: ' + argv.join(' '));
+                  }
+                };
+                const wrapped = (...result: unknown[]) => {
+                  if (add && git) void indexReleased.then(() => { checkIndex(); callback(...result); });
+                  else { checkIndex(); callback(...result); }
+                };
+                return Reflect.apply(exec, childProcess, [...args.slice(0, -1), wrapped]);
+              }) as typeof exec);
+              syncBuiltinESMExports();
               budget = { timeoutMs: 500, killGraceMs: 100, confirmMs: 100 };
-              // hearsay-tools/cezarion#1216: an 800 ms shim startup reproduces R63's
-              // missing pid: the 500 ms command deadline kills Node before it writes it.
-              // Gate only that deadline on the holder handshake, not runner/poll timers.
-              // Keep the same timer handle so autosave's clearTimeout still cancels it.
-              // The existing 10 s precondition bound also limits a missing handshake.
-              const startupDeadline = Date.now() + 10_000;
+              // bound: only the intercepted command's 500 ms deadline is shortened. Start
+              // its budget after the holder PID handshake, never against Node startup.
+              // The per-step handshake guard below bounds a broken fixture; clearTimeout
+              // retains the real handle and still cancels this deadline on completion.
               const deadlineClock = vi.spyOn(globalThis, 'setTimeout').mockImplementation(((callback: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
-                if (ms !== budget!.timeoutMs) return realSetTimeout(callback, ms, ...args);
-                let ready = existsSync(join(bin, 'pid'));
+                if (ms !== budget!.timeoutMs || !git) return realSetTimeout(callback, ms, ...args);
+                let ready = false;
                 const timer = realSetTimeout(() => {
-                  if (!ready && Date.now() < startupDeadline) {
-                    ready = existsSync(join(bin, 'pid'));
+                  if (!ready) {
+                    ready = readPid(join(bin, 'holder')) !== undefined;
                     timer.refresh();
                   } else callback(...args);
                 }, ms);
@@ -123,13 +140,17 @@ if (args.includes('status') && args.includes('--porcelain')) {
                 const prompt = HARNESS_ADAPTERS[backend].scenarios['provider-error']!;
                 if (continuation) {
                   expect(manager.continueRun(runId, { text: outcome === 'failed' ? prompt : outcome === 'cancelled' ? `Library: Vitest. ${HARNESS_ADAPTERS[backend].scenarios.done!}` : 'mock:baseline' }).ok).toBe(true);
-                  if (outcome === 'success') await waitFor(() => store.getRun(runId)?.status === 'waiting');
+                  if (outcome === 'success') {
+                    // bound: the continued native turn must park before Finish.
+                    await waitFor(() => store.getRun(runId)?.status === 'waiting', FIXTURE_STEP_MS);
+                  }
                 } else if (outcome === 'failed') {
                   store.updateRun(runId, { task: prompt });
                   manager.enqueueOwnedRun(runId);
                 }
                 if (outcome !== 'failed' && !(continuation && outcome === 'cancelled')) expect(manager.finish(runId)).toBe(true);
-                await waitFor(() => existsSync(join(bin, 'pid')));
+                // bound: fixture startup ends when the real detached holder publishes a complete PID.
+                await waitFor(() => readPid(join(bin, 'holder')) !== undefined, FIXTURE_STEP_MS);
                 if (hasTail) expect(store.getRun(runId)?.steps.slice(0, 2).map(step => step.status)).toEqual(['done', 'pending']);
                 const dir = store.getRun(runId)!.worktreePath!;
                 writeFileSync(join(dir, 'progress.txt'), 'recover me\n');
@@ -143,21 +164,19 @@ for (const signal of ['SIGTERM', 'SIGINT', 'SIGHUP']) process.on(signal, () => r
 setInterval(() => require('node:child_process').spawn(process.execPath, ['-e', 'setTimeout(() => {}, 40)'], { stdio: 'ignore' }), 20);`], { cwd: dir, stdio: 'ignore' });
                 unrelatedExit = new Promise(resolve => unrelated!.once('exit', resolve));
                 writeFileSync(join(bin, 'exit'), 'exit');
-                const gitPid = requirePid(join(bin, 'pid'));
+                releaseIndex();
+                const gitPid = git!.pid!;
+                // bound: observe the Git leader's actual exit after releasing it.
                 await waitFor(() => { try { process.kill(gitPid, 0); return false; } catch { return true; } });
                 if (outcome === 'cancelled') expect(manager.cancel(runId)).toBe(true);
-                // The first blocked report can precede the first holder poll under load ("process
+                // bound: the first blocked report can precede the first holder poll under load ("process
                 // inspection pending; retained cwd holder PIDs: none", seen in the full suite at load
                 // 30+); the refusal below quotes the latest report, so wait for the one naming the holder.
                 await waitFor(() => store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('termination not confirmed') &&
                   String(event.message).includes(`holder PIDs: ${holder}`)), 5000);
-                // No custom bound here (hearsay-tools/cezarion#1095). Settlement still waits for the
-                // turn-end diff stat (`execution.turns`), and that stat runs four or five Git
-                // processes through this fake's Node shim after the release above. At load ~50 those
-                // boots outran the old 3 s bound. Independence from the holder is proven by the
-                // holder still being alive at the assertions below, since it lives until `finally`,
-                // not by how fast settlement is.
-                await waitFor(() => !manager.isActive(runId));
+                // bound: wait for settlement and the real turn-end diff stat. Independence
+                // from cleanup is proven by the live holder below, not by elapsed time.
+                await waitFor(() => !manager.isActive(runId), FIXTURE_STEP_MS);
                 expect(outcome === 'success' ? ['done', 'review'] : [outcome]).toContain(store.getRun(runId)?.status);
                 expect(store.getRun(runId)?.stopping).toBeUndefined();
                 expect(store.readWorkerExecution(runId)?.phase).toBe('complete');
@@ -176,6 +195,7 @@ setInterval(() => require('node:child_process').spawn(process.execPath, ['-e', '
                 expect(existsSync(join(dir, 'unexpected-tail'))).toBe(false);
                 if (!continuation && outcome === 'failed') {
                   writeFileSync(join(bin, 'move'), 'move');
+                  // bound: the holder must move its real cwd before replacement-manager recovery.
                   await waitFor(() => readlinkSync(`/proc/${holder!}/cwd`) === bin);
                   manager.dispose(); store.close();
                   const reopened = RunStore.open(join(repoRoot, '.ai/cezar'), { keepLive: true });
@@ -188,24 +208,37 @@ setInterval(() => require('node:child_process').spawn(process.execPath, ['-e', '
                 }
               } finally {
                 deadlineClock.mockRestore();
-                process.env.PATH = path;
+                writeFileSync(join(bin, 'exit'), 'exit');
+                releaseIndex();
                 unrelated?.kill('SIGKILL');
                 await unrelatedExit;
+                git?.kill('SIGKILL');
+                await gitExit;
+                // A failed handshake must still reap any holder the leader already spawned.
+                holder ??= readPid(join(bin, 'holder'));
                 if (holder) {
                   try { process.kill(holder, 'SIGKILL'); } catch { /* gone */ }
+                  // bound: reap the owned holder before releasing its durable cleanup hold.
                   await waitFor(() => { try { process.kill(holder!, 0); return false; } catch { return true; } });
                 }
-                killFromPidFile(join(bin, 'pid'));
                 await saveTask;
                 if (replacement) {
+                  // bound: replacement-manager recovery must remove the persisted cleanup proof.
                   await waitFor(() => !existsSync(join(repoRoot, '.ai/cezar/runs', `${runId}.autosave-cleanup.json`)));
                   const release = replacement.manager.claimForPublish(runId);
                   expect(release).not.toBeNull(); release?.();
                 }
-                await waitFor(() => !manager.isActive(runId));
+                // bound: Finish must settle before fixture process interception is removed.
+                await waitFor(() => !manager.isActive(runId), FIXTURE_STEP_MS);
+                interceptExec.mockRestore();
+                interceptSpawn.mockRestore();
+                syncBuiltinESMExports();
                 rmSync(bin, { recursive: true, force: true });
               }
-              if (!replacement) await waitFor(() => store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('cleanup confirmed')));
+              if (!replacement) {
+                // bound: wait for autosave's cleanup confirmation after the holder exits.
+                await waitFor(() => store.readEvents(runId).some(event => event.type === 'note' && String(event.message).includes('cleanup confirmed')));
+              }
               if (!replacement) {
                 const release = manager.claimForPublish(runId);
                 expect(release).not.toBeNull(); release?.();

@@ -36,6 +36,8 @@ export interface NewTaskDraft {
    *  null → interactive-skill hint, then workspace/env policy (skills default on).
    *  Plan-first overrides every choice. See resolveComposerRunMode. */
   autonomous: boolean | null
+  archiveWhenDone: boolean
+  autoMergePr: boolean
 }
 
 export interface ComposerRunModeInput {
@@ -103,6 +105,8 @@ const EMPTY: NewTaskDraft = {
   planFirst: false,
   worktree: null,
   autonomous: null,
+  archiveWhenDone: false,
+  autoMergePr: false,
 }
 
 const STORAGE_KEY = 'cez-new-task-draft'
@@ -137,6 +141,8 @@ function normalize(raw: unknown): NewTaskDraft {
     planFirst: obj.planFirst === true,
     worktree: typeof obj.worktree === 'boolean' ? obj.worktree : null,
     autonomous: typeof obj.autonomous === 'boolean' ? obj.autonomous : null,
+    archiveWhenDone: obj.archiveWhenDone === true,
+    autoMergePr: obj.autoMergePr === true,
   }
 }
 

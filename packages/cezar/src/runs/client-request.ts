@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
  * Include every behavior-affecting input, including attachments.
  * The record stores this hash, never the payload.
  */
-const KEYS = ['task', 'workflow', 'steps', 'runner', 'model', 'effort', 'agentProfile', 'autonomous', 'worktree', 'systemPrompt', 'images'] as const;
+const KEYS = ['task', 'workflow', 'steps', 'runner', 'model', 'effort', 'agentProfile', 'autonomous', 'worktree', 'systemPrompt', 'images', 'archiveWhenDone', 'autoMergePr'] as const;
 
 export type ClientRequestPayload = Partial<Record<(typeof KEYS)[number], unknown>> & Record<string, unknown>;
 

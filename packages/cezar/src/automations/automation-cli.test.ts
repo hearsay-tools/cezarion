@@ -97,6 +97,45 @@ describe('cez automation', () => {
       expect(last()).toMatchObject({ enabled: true });
     });
 
+    it.each([
+      [[], {}],
+      [['--archive-when-done'], { archiveWhenDone: true }],
+      [['--auto-merge-pr'], { autoMergePr: true }],
+      [['--archive-when-done', '--auto-merge-pr'], { archiveWhenDone: true, autoMergePr: true }],
+    ] as const)('saves completion controls from %j without enabling the automation', async (flags, expected) => {
+      expect(await run(['add', '--name', 'Completion', '--cron', '0 4 * * *', '--prompt-file', 'task.md', ...flags], env(), {
+        readFile: async () => 'Finish the task',
+      })).toBe(EXIT.ok);
+      const task = { prompt: 'Finish the task', worktree: true, autonomous: true, ...expected };
+      expect(posted[0]?.body).toMatchObject({ task });
+      expect((posted[0]?.body as { task: unknown }).task).toEqual(task);
+      const id = String(last().id);
+      expect(last()).toMatchObject({ enabled: false });
+      expect(await run(['show', id])).toBe(EXIT.ok);
+      expect((last().automation as { task: unknown }).task).toEqual(task);
+    });
+
+    it.each([
+      { name: 'GitHub', trigger: { on: 'issue.opened' } },
+      { name: 'repeating schedule', trigger: { cron: '0 4 * * *' } },
+      { name: 'one-time wall time', trigger: { at: '2030-01-15T09:00', tz: 'UTC' } },
+      { name: 'one-time delay', trigger: { in: '7d', tz: 'UTC' } },
+    ])('keeps completion controls on the $name trigger', ({ trigger }) => {
+      const body = bodyFromAddFlags({ name: 'Completion', ...trigger, 'archive-when-done': true, 'auto-merge-pr': true }, 'Finish');
+      expect(body.task).toMatchObject({ archiveWhenDone: true, autoMergePr: true });
+      expect(body.enable).toBeUndefined();
+    });
+
+    it('preserves completion controls through JSON input and task updates', async () => {
+      const definition = { name: 'Completion', kind: 'schedule', schedule: { type: 'daily' }, task: { prompt: 'Finish', archiveWhenDone: true, autoMergePr: true } };
+      expect(await run(['create'], env(), { stdin: async () => JSON.stringify(definition) })).toBe(EXIT.ok);
+      const id = String(last().id);
+      expect(await run(['update', id, '--file', 'update.json'], env(), { readFile: async () => JSON.stringify({ task: { prompt: 'Revised' } }) })).toBe(EXIT.ok);
+      expect(posted.at(-1)?.body).toMatchObject({ task: { prompt: 'Revised', archiveWhenDone: true, autoMergePr: true } });
+      expect(await run(['update', id, '--json', JSON.stringify({ task: { archiveWhenDone: false, autoMergePr: null } })])).toBe(EXIT.ok);
+      expect((posted.at(-1)?.body as { task: unknown }).task).toEqual({ prompt: 'Revised', archiveWhenDone: false });
+    });
+
     it('opts a GitHub poll into existing matches without enabling it', () => {
       expect(bodyFromAddFlags({ name: 'History', on: 'issue.opened', 'include-existing': true }, 'Review')).toMatchObject({ filters: { includeExisting: true } });
       expect(bodyFromAddFlags({ name: 'History', on: 'issue.opened', 'include-existing': true }, 'Review')).not.toHaveProperty('enable');
@@ -457,5 +496,13 @@ describe('cez automation', () => {
   it('schema prints the reference with no env at all', async () => {
     expect(await run(['schema'], {})).toBe(EXIT.ok);
     expect(out).toEqual([AUTOMATION_SCHEMA_REFERENCE]);
+  });
+
+  it('help names both completion flags and their default', async () => {
+    expect(await run(['add', '--help'], {})).toBe(EXIT.ok);
+    expect(out[0]).toMatch(/--archive-when-done[^\n]*default off/);
+    expect(out[0]).toMatch(/--auto-merge-pr[^\n]*after Done/);
+    expect(out[0]).toContain('GitHub rules pass (default off)');
+    expect(discoveries).toBe(0);
   });
 });

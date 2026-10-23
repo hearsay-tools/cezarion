@@ -337,6 +337,8 @@ export function buildCreateRunBody(opts: {
   worktree?: boolean
   /** true → autonomous run (never pauses for the user). Sent only when on. */
   autonomous?: boolean
+  archiveWhenDone?: boolean
+  autoMergePr?: boolean
 }): CreateRunInput {
   const {
     task,
@@ -351,6 +353,8 @@ export function buildCreateRunBody(opts: {
     images,
     worktree,
     autonomous,
+    archiveWhenDone,
+    autoMergePr,
   } = opts
   return {
     task,
@@ -366,6 +370,8 @@ export function buildCreateRunBody(opts: {
     images: images.length > 0 ? [...images] : undefined,
     worktree: worktree === false ? false : undefined,
     autonomous: autonomous === true ? true : undefined,
+    ...(archiveWhenDone ? { archiveWhenDone: true } : {}),
+    ...(autoMergePr ? { autoMergePr: true } : {}),
   }
 }
 

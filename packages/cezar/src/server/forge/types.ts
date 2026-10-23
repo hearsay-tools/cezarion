@@ -162,6 +162,12 @@ export interface ForgeMergeInput {
   method: ForgeMergeMethod;
   expectedHeadSha: string;
   overrideRules?: boolean;
+  /** Automated completion requires at least one check and every check passing; forbids overrides. */
+  requirePassingChecks?: boolean;
+  /** Confirm this PR still belongs to the task branch before mutation. */
+  expectedHeadRef?: string;
+  /** Internal coordinator guard; rechecked after reads and before mutation. Never serialized. */
+  canProceed?: () => boolean;
 }
 
 export type ForgeMergeResult =
@@ -241,6 +247,7 @@ export interface ForgeDriver {
   /** The branch's open/merged PR, or null when none (or the forge is down). */
   prStatus(branch: string): Promise<ForgePrStatus | null>;
   prMergeState?(number: number, opts?: { refresh?: boolean }): Promise<ForgePrMergeStateResult>;
+  readyPR?(number: number, input: { expectedHeadSha: string; expectedHeadRef: string; canProceed?: () => boolean }): Promise<ForgePrMergeStateResult>;
   mergePR?(number: number, input: ForgeMergeInput): Promise<ForgeMergeResult>;
   /** Bounded, read-only file changes for a pull request. */
   prDiff?(number: number, opts?: { refresh?: boolean }): Promise<ForgePrDiffResult>;

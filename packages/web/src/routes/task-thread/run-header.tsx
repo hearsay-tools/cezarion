@@ -2,7 +2,7 @@ import './run-header.css'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { AppWindowIcon, FileTextIcon, MailIcon, PencilIcon, PinOffIcon } from 'lucide-react'
 import { CircleDotIcon, CopyIcon, EllipsisIcon, GitPullRequestIcon, PinIcon, Trash2Icon, XIcon } from '@/components/design-icons'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useId, useMemo, useRef, useState } from 'react'
 import { Link, useNavigate } from '@/lib/project-router'
 
 import { deleteRun } from '@/api/client'
@@ -52,6 +52,7 @@ import { taskItemTabs, type TaskItemTab } from '@/lib/tasks-table'
 import { cn } from '@/lib/utils'
 
 import { ArchiveButton } from './archive-action'
+import { CompletionStatus } from './completion-status'
 import { runStatusLine, statusLineText } from './run-status'
 import { OpenInMenuForRun, copyToClipboard, useResumeInTerminal, useRunReferenceRequests } from './run-workspace'
 import { HandoffAction, useHandoffActionVisible } from './handoff-action'
@@ -223,7 +224,7 @@ export function RunHeader({
   // exactly one surface offers it on any given screen. Stop takes the composer's slot on a
   // failed run holding wait results (hearsay-tools/cezarion#1233), so the header carries
   // Archive on the Session tab too.
-  const archiveButton = flags.archive && (tab !== 'session' || !archiveInComposer(run)) ? <ArchiveButton run={run} /> : null
+  const archiveButton = !run.archiveBlocker && flags.archive && (tab !== 'session' || !archiveInComposer(run)) ? <ArchiveButton run={run} /> : null
   const handoffVisible = useHandoffActionVisible(run)
 
   return (
@@ -239,6 +240,7 @@ export function RunHeader({
       )}
     >
       {run.archived && run.autoArchive?.reason === 'pull-requests-merged' && run.autoArchive.archivedAt === run.archivedAt ? <p data-slot="auto-archive-reason" className="text-[13px] text-muted-foreground">Archived automatically after all associated PRs merged.</p> : null}
+      <CompletionStatus run={run} />
       <div className="w-full">
         {run.delegation?.role === 'worker' ? <ParentTaskLink id={run.delegation.parentRunId} /> : null}
         {/* Pushed phone screen (#621): the shell's top bar carries back, the title and the run
@@ -500,6 +502,8 @@ function ActionsKebab({
 }) {
   const flags = runActionFlags(run)
   const command = resumeHint(run)
+  const completionPatch = usePatchRun(run.id)
+  const completionHelpId = useId()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -536,6 +540,20 @@ function ActionsKebab({
             {run.pinned ? 'Unpin task' : 'Pin task'}
           </DropdownMenuCheckboxItem>
         ) : null}
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="text-xs text-muted-foreground">AFTER DONE</DropdownMenuLabel>
+        <DropdownMenuCheckboxItem data-slot="archive-when-done" className="min-h-11" checked={run.archiveWhenDone === true} disabled={completionPatch.isPending}
+          onCheckedChange={(archiveWhenDone) => completionPatch.mutate({ archiveWhenDone }, { onError: error => toast(error.message, { tone: 'danger' }) })}>
+          Archive when Done
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuCheckboxItem data-slot="auto-merge-pr" className="min-h-11" checked={run.autoMergePr === true} disabled={completionPatch.isPending}
+          aria-describedby={completionHelpId}
+          onCheckedChange={(autoMergePr) => completionPatch.mutate({ autoMergePr }, { onError: error => toast(error.message, { tone: 'danger' }) })}>
+          Auto-merge PR
+        </DropdownMenuCheckboxItem>
+        <p id={completionHelpId} className="text-xs text-muted-foreground [padding-inline:0.5rem] [padding-block:0.5rem]">
+          After Done, auto-merge can mark a draft PR ready. It waits for current-head CI and GitHub rules. Merge comes before archive.
+        </p>
         {flags.deleteRun ? <DropdownMenuSeparator /> : null}
         {flags.deleteRun ? (
           <DropdownMenuItem variant="destructive" onSelect={() => actions.setConfirming('delete')}>

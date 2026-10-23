@@ -138,7 +138,8 @@ and an orchestrator keeps a whole queue of them moving.
   automation: hand off "fix this", "upgrade that", "triage these" and walk away.
 - ✅ **The agent finishes and you have to trust it.** Every task's diff stays on
   its own branch: inspect it, send notes back into the same session, or push a
-  **draft PR** — never an auto-merge. Turn on the optional **review gate**
+  **draft PR**. Auto merge is off by default; each task can opt in to merge after Done.
+  Turn on the optional **review gate**
   (`CEZ_REVIEW_GATE=1` or Settings → Agents) and a finished run with changes
   waits in `review` for you.
 - ♻️ **Losing a session when it fails.** Every run records its `claude` session id.
@@ -246,7 +247,7 @@ most of the features here got their final shape.
 packaged-CLI e2e — the same gate a release runs) but it is *not* a release: it
 can be rough, a flag or a screen may change under you, and something occasionally
 breaks in a way no test caught. Nothing is at risk beyond your patience — every
-task runs in its own git worktree and Cezarion never auto-merges — but if you need a
+task runs in its own git worktree and auto merge is off by default — but if you need a
 boring day, stay on the stable release. Pin a nightly you liked with its exact
 version (`npx cezarion@<nightly-version>` — the cockpit prints the
 version it booted, and the date in it tells you how old the build is), and drop
@@ -307,8 +308,9 @@ you to inspect.
 ```
 
 When a check fails, the workflow can loop back to an earlier step (bounded by
-`max`) with the failing output appended to the retried agent's prompt. Nothing
-auto-merges: a finished run's changes stay on its branch until you act on them.
+`max`) with the failing output appended to the retried agent's prompt. By default,
+a finished run's changes stay on its branch until you act on them. A task can opt
+into merging its PR after Done, subject to current-head CI and GitHub rules.
 With the optional review gate on, a run with changes rests in `review` instead
 of `done`.
 
@@ -357,9 +359,9 @@ The moves that make the cockpit worth the browser tab:
   unlimited) and reclaims the rest — directory only, the `cez/<id8>` branch is
   always kept, so the work stays recoverable. Settings → Resources shows every
   worktree's disk use with per-row delete and a **Reclaim now** button.
-- 🛡️ **You stay the merge button.** Read a finished run's diff, type notes that go
+- 🛡️ **You control merging.** Read a finished run's diff, type notes that go
   straight back into the agent's session, or push a `gh pr create --draft`.
-  Nothing auto-merges. The **review gate** is optional (`CEZ_REVIEW_GATE=1`, or
+  Auto merge is off by default and requires a task to opt in. The **review gate** is optional (`CEZ_REVIEW_GATE=1`, or
   Settings → Agents): with it on, a successful run with changes parks in `review`
   until you accept it. Autonomous runs always skip it.
 - 🗂️ **Every project in one cockpit.** One `cez serve` hosts every repo you
@@ -864,9 +866,19 @@ Without either flag, `start` still runs `quick-task`.
 `cez discover --runner`; `--model` and `--effort` pin the rest. `--backend` is a permanent
 alias of `--runner` with no warning. Giving both with different values exits 64.
 
+`--archive-when-done` archives the task after **Done**. `--auto-merge-pr` merges its
+PR after **Done** only when current-head CI and GitHub rules pass. It can mark a
+draft PR ready. Both controls are off by default. They also appear as switches in
+the task composer and task details. With both on, Cezarion merges before it archives;
+without a PR, it archives on Done. Pending or blocked completion actions show their
+reason in task details. Use `status <id> --full` to read the saved `archiveWhenDone`,
+`autoMergePr` and `completionAction` fields. Existing task choices can be changed
+through `PATCH /api/v1/p/:projectId/runs/:id` with the matching boolean fields.
+
 `start` is retry-safe: it sends a request id (`--request-id <UUID>` to pick your own), and a
-retry with the same id and task answers with the run the first one created (`created: false`)
-instead of starting a second. Also: `list`, `stop`, `finish`, `diff [--stat]`, `open`.
+retry with the same id and start options answers with the run the first one created
+(`created: false`) instead of starting a second. Changing a completion control on that
+retry is a payload conflict. Also: `list`, `stop`, `finish`, `diff [--stat]`, `open`.
 Use `archive <id>` to hide a task from `list`, `unarchive <id>` to restore it, and
 `list --all` to include archived tasks. `list` never shows owned workers, with or without
 `--all`: they are steer targets of their parent task. Id-addressed commands (`status`, `wait`,
@@ -964,6 +976,13 @@ hours) and anything else is a usage error pointing to the JSON form. `update` re
 it is given, except `task`, which merges key by key (`null` removes one); it restates `enabled`
 and echoes the revision it read, so a concurrent edit in the cockpit is refused (exit 2), never
 overwritten. Mutating commands print the automation's cockpit page as `url`.
+
+`add` accepts `--archive-when-done` and `--auto-merge-pr` with the same behavior as
+`cez task start`. The JSON keys are `task.archiveWhenDone` and `task.autoMergePr`.
+Both are optional booleans and default to off. The automation editor has the same
+switches. Editing these choices affects future tasks only; it does not change tasks
+the automation already launched. Enabling an automation or making its tasks autonomous
+does not enable either completion control.
 
 GitHub automations exclude events before enablement by default. Turn on **Include existing items**
 in the editor, pass `--include-existing` to `add`, or set `"filters": {"includeExisting": true,
