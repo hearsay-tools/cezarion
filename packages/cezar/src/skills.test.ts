@@ -3,24 +3,23 @@ import { homedir, tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { importableSkillSchema } from '@open-mercato/cezar-contract/skills';
-import * as config from './config.ts';
 import { workspaceUiStatePath } from './paths.ts';
 import * as remote from './skills-remote.ts';
 import {
   discoverSkills,
-  filterImportedTeamSkills,
-  readImportedSkills,
+  filterDisabledTeamSkills,
+  readDisabledTeamSkills,
   type Skill,
 } from './skills.ts';
 
 /**
- * The opt-out gate's two pure halves (#391 follow-up: the promo banner is gone, replaced by
- * per-skill curation). `readImportedSkills` parses a user-editable ui-state as a tri-state
- * (absent = not curated = keep all); `filterImportedTeamSkills` applies the gate. Kept pure so
- * they are testable without a network clone — the gated repo set is otherwise a vendor default.
+ * The off-list's two pure halves. `readDisabledTeamSkills` parses a user-editable ui-state;
+ * `filterDisabledTeamSkills` applies it by source repo and name. Pure, so they are testable
+ * without a network clone.
  */
 
-const OM = 'open-mercato/skills';
+const A = 'acme/skills';
+const B = 'other/skills';
 const tempDirs: string[] = [];
 
 afterEach(async () => {
@@ -41,97 +40,61 @@ function localSkill(name: string): Skill {
   return { name, body: `${name} body`, path: `/repo/.ai/cezar/skills/${name}.md`, source: 'cezar' };
 }
 
-describe('readImportedSkills', () => {
-  it('returns the string names from a well-formed array', () => {
-    expect(readImportedSkills({ importedSkills: ['pr-create', 'code-review'] })).toEqual([
-      'pr-create',
-      'code-review',
-    ]);
+describe('readDisabledTeamSkills', () => {
+  it('keeps only well-formed { repo, name } entries', () => {
+    expect(
+      readDisabledTeamSkills({
+        disabledTeamSkills: [{ repo: A, name: 'x' }, 'x', { name: 'y' }, { repo: A, name: '' }, 3],
+      }),
+    ).toEqual([{ repo: A, name: 'x' }]);
   });
 
-  it('returns undefined for a missing key — not curated, so the caller keeps all', () => {
-    expect(readImportedSkills({})).toBeUndefined();
+  it('reads a missing key as nothing switched off', () => {
+    expect(readDisabledTeamSkills({})).toEqual([]);
   });
 
-  it('returns undefined for a non-array (a hand-edited file) — the safe, keep-all reading', () => {
-    expect(readImportedSkills({ importedSkills: 'pr-create' })).toBeUndefined();
-  });
-
-  it('distinguishes an explicit empty array (curated to nothing) from absent', () => {
-    expect(readImportedSkills({ importedSkills: [] })).toEqual([]);
-  });
-
-  it('drops non-string and empty entries rather than throwing', () => {
-    expect(readImportedSkills({ importedSkills: ['ok', 42, '', null, 'fine'] })).toEqual(['ok', 'fine']);
+  it('reads a non-array as nothing switched off', () => {
+    expect(readDisabledTeamSkills({ disabledTeamSkills: 'x' })).toEqual([]);
   });
 });
 
-describe('filterImportedTeamSkills', () => {
-  const gated = new Set([OM]);
-
-  it('keeps every gated-repo skill when not curated (undefined) — opt-out default, no upgrade break', () => {
-    const skills = [teamSkill('pr-create', OM), teamSkill('code-review', OM)];
-    expect(filterImportedTeamSkills(skills, gated, undefined).map((s) => s.name)).toEqual([
-      'pr-create',
-      'code-review',
-    ]);
+describe('filterDisabledTeamSkills', () => {
+  it('drops the skill from the named repo', () => {
+    expect(filterDisabledTeamSkills([teamSkill('x', A)], [{ repo: A, name: 'x' }])).toEqual([]);
   });
 
-  it('drops a gated-repo skill once curated away (explicit empty array)', () => {
-    const skills = [teamSkill('pr-create', OM), teamSkill('code-review', OM)];
-    expect(filterImportedTeamSkills(skills, gated, []).map((s) => s.name)).toEqual([]);
+  it('keeps the same name from another repo', () => {
+    expect(filterDisabledTeamSkills([teamSkill('x', B)], [{ repo: A, name: 'x' }]).map((s) => s.team?.repo)).toEqual([B]);
   });
 
-  it('keeps only the named skills from a gated repo when curated', () => {
-    const skills = [teamSkill('pr-create', OM), teamSkill('code-review', OM)];
-    expect(filterImportedTeamSkills(skills, gated, ['code-review']).map((s) => s.name)).toEqual([
-      'code-review',
-    ]);
+  it('never drops a local skill', () => {
+    expect(filterDisabledTeamSkills([localSkill('x')], [{ repo: A, name: 'x' }]).map((s) => s.name)).toEqual(['x']);
   });
 
-  it('keeps every skill from a repo that is not gated (custom team repo auto-loads)', () => {
-    const skills = [teamSkill('alpha', 'acme/team-skills'), teamSkill('beta', 'acme/team-skills')];
-    expect(filterImportedTeamSkills(skills, gated, []).map((s) => s.name)).toEqual(['alpha', 'beta']);
-  });
-
-  it('never gates a local skill (no team field), even when curated to nothing', () => {
-    const skills = [localSkill('house-rules'), teamSkill('pr-create', OM)];
-    expect(filterImportedTeamSkills(skills, gated, []).map((s) => s.name)).toEqual(['house-rules']);
-  });
-
-  it('gates nothing when the gated set is empty (repo configured its own skillsRepos)', () => {
-    const skills = [teamSkill('pr-create', OM)];
-    expect(filterImportedTeamSkills(skills, new Set(), []).map((s) => s.name)).toEqual(['pr-create']);
+  it('keeps everything for an empty off-list', () => {
+    const skills = [teamSkill('x', A), localSkill('y')];
+    expect(filterDisabledTeamSkills(skills, [])).toEqual(skills);
   });
 });
 
-/**
- * hearsay-tools/cezarion#1408 (port of upstream open-mercato/cezar#1082): the default-skill
- * selection lives in each project's `.ai/cezar/ui-state.json`. The old workspace value only seeds
- * a project that has no selection of its own.
- */
-describe('discoverSkills default-skill selection per project (#1408)', () => {
-  const teamNames = async (repoRoot: string) =>
-    (await discoverSkills(repoRoot)).filter((skill) => skill.source === 'team').map((skill) => skill.name);
-
-  async function project(importedSkills?: string[]): Promise<string> {
+describe('discoverSkills team-skill off-list', () => {
+  async function project(uiState?: Record<string, unknown>): Promise<string> {
     const repoRoot = await mkdtemp(join(tmpdir(), 'cezar-skills-'));
     tempDirs.push(repoRoot);
     await mkdir(join(repoRoot, '.ai/cezar'), { recursive: true });
-    if (importedSkills) await writeFile(join(repoRoot, '.ai/cezar/ui-state.json'), JSON.stringify({ importedSkills }));
+    if (uiState) await writeFile(join(repoRoot, '.ai/cezar/ui-state.json'), JSON.stringify(uiState));
     return repoRoot;
   }
 
-  async function workspaceSelection(importedSkills: string[]): Promise<void> {
-    await mkdir(dirname(workspaceUiStatePath()), { recursive: true });
-    await writeFile(workspaceUiStatePath(), JSON.stringify({ importedSkills }));
-  }
+  const teamNames = async (repoRoot: string) =>
+    (await discoverSkills(repoRoot)).filter((skill) => skill.source === 'team').map((skill) => skill.name);
 
   // A home of its own: an inherited CEZ_HOME keeps a real workspace ui-state this must not touch.
   let home: string;
   beforeEach(async () => {
     home = await mkdtemp(join(tmpdir(), 'cezar-skills-home-'));
     vi.stubEnv('CEZ_HOME', home);
+    vi.spyOn(remote, 'getTeamSkillsCached').mockReturnValue([teamSkill('x', A), teamSkill('y', A)]);
   });
 
   afterEach(async () => {
@@ -140,33 +103,34 @@ describe('discoverSkills default-skill selection per project (#1408)', () => {
     await rm(home, { recursive: true, force: true });
   });
 
-  function offerDefaults(): void {
-    vi.spyOn(remote, 'getTeamSkillsCached').mockReturnValue([teamSkill('om-fix', OM), teamSkill('om-review', OM)]);
-    vi.spyOn(config, 'gatedSkillsRepos').mockResolvedValue(new Set([OM]));
-  }
-
-  it('an empty project selection hides every default skill, even when the workspace lists them', async () => {
-    offerDefaults();
-    await workspaceSelection(['om-fix', 'om-review']);
-    expect(await teamNames(await project([]))).toEqual([]);
+  it('shows every team skill when nothing is switched off', async () => {
+    expect(await teamNames(await project())).toEqual(['x', 'y']);
   });
 
-  it('keeps a separate selection for each project', async () => {
-    offerDefaults();
-    const first = await project(['om-fix']);
-    const second = await project(['om-review']);
-    expect(await teamNames(first)).toEqual(['om-fix']);
-    expect(await teamNames(second)).toEqual(['om-review']);
+  it('hides a switched-off skill', async () => {
+    expect(await teamNames(await project({ disabledTeamSkills: [{ repo: A, name: 'x' }] }))).toEqual(['y']);
   });
 
-  it('a project with no selection keeps the legacy workspace selection', async () => {
-    offerDefaults();
-    await workspaceSelection(['om-review']);
-    expect(await teamNames(await project())).toEqual(['om-review']);
+  it('ignores the legacy importedSkills keys, project and workspace', async () => {
+    await mkdir(dirname(workspaceUiStatePath()), { recursive: true });
+    await writeFile(workspaceUiStatePath(), JSON.stringify({ importedSkills: ['nothing'] }));
+    expect(await teamNames(await project({ importedSkills: [] }))).toEqual(['x', 'y']);
+  });
+
+  it('a junk off-list switches nothing off', async () => {
+    expect(await teamNames(await project({ disabledTeamSkills: ['x', { name: 'x' }] }))).toEqual(['x', 'y']);
+  });
+
+  it('switching one source off lets the same name from another source win', async () => {
+    vi.spyOn(remote, 'getTeamSkillsCached').mockReturnValue([teamSkill('x', A), teamSkill('x', B)]);
+    const catalog = async (uiState?: Record<string, unknown>) =>
+      (await discoverSkills(await project(uiState))).filter((skill) => skill.name === 'x');
+    expect((await catalog()).map((s) => s.team?.repo)).toEqual([A]);
+    expect((await catalog({ disabledTeamSkills: [{ repo: A, name: 'x' }] })).map((s) => s.team?.repo)).toEqual([B]);
   });
 
   it('the importable catalog carries the full skill, a description-less one included', () => {
-    const skill = teamSkill('om-fix', OM);
+    const skill = teamSkill('x', A);
     expect(importableSkillSchema.parse(skill)).toEqual(skill);
   });
 });

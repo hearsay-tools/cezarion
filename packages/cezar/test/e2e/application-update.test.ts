@@ -571,7 +571,7 @@ for (const ephemeral of [false, true]) test(`built production CLI acknowledges i
   const cli = new URL('../../dist/index.js', import.meta.url).pathname;
   const host = ephemeral ? '127.0.0.2' : '127.0.0.1';
   const child = spawn(process.execPath, [cli, 'serve', '--repo', root, '--bind-host', host, '--port', String(ephemeral ? 0 : port), '--no-open', '--restart-exact'], {
-    cwd: root, env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_NO_BANNER: '1', CEZ_REMOTE: '0',
+    cwd: root, env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_REMOTE: '0',
       npm_config_cache: join(root, 'cache'), npm_config_prefix: join(root, 'prefix') },
     stdio: ['ignore', 'ignore', 'ignore', 'ipc'],
   });

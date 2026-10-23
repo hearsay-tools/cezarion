@@ -83,7 +83,8 @@ import {
 import { askRequestSchema } from '@open-mercato/cezar-contract/ask-schema';
 import type { AgentEvent, ContentBlock, InputDelivery } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
-import { discoverSkills, type Skill } from '../skills.ts';
+import { readProjectUiState, readProjectUiStateSync } from '../ui-state.ts';
+import { discoverSkills, filterDisabledTeamSkills, readDisabledTeamSkills, type Skill } from '../skills.ts';
 import { resolveCapabilities } from '../server/capabilities.ts';
 import { automationCliCommand, automationsPrompt } from '../automations/prompts.ts';
 import { createAutomationSkill } from '../automations/builtin-skill.ts';
@@ -1916,6 +1917,14 @@ export class RunManager {
     return discoverSkills(this.repoRoot, { builtin: this.builtinSkills() });
   }
   /**
+   * The run's skill registry minus the project's off-list as it is now (#1494). The registry is
+   * discovered when the run starts or continues, so a team skill switched off since then is still
+   * in `state.skills`; every prompt a step, a Continue or a live `/name` builds reads this instead.
+   */
+  private enabledSkills(state: ActiveRun): Skill[] {
+    return filterDisabledTeamSkills(state.skills ?? [], readDisabledTeamSkills(readProjectUiStateSync(this.repoRoot)));
+  }
+  /**
    * A live `/name` message already carries the skill's body, and `sendMessage` answers
    * synchronously, so its files and companions install after the message went out (#1408).
    * When anything new landed, or a team skill's files went to a cache copy the message could not
@@ -1955,9 +1964,12 @@ export class RunManager {
    * The run's OWN task worktree gets every root and the companions their bodies name
    * (`provisionSkills`): links to local and global skills, generated `SKILL.md` files, and marked
    * team copies, in `.claude/skills`, `.agents/skills` and `.cursor/skills`, recorded in the
-   * worktree's git dir and kept out of git by a worktree-local `.gitignore`. Companions resolve
-   * against the ungated team list too, so a default team skill switched off in the picker still
-   * serves a skill that runs it: the selection curates the picker, it is no loading boundary.
+   * worktree's git dir and kept out of git by a worktree-local `.gitignore`. The project's
+   * off-list (`disabledTeamSkills`, #1494) is read fresh on every pass and applied to the saved
+   * registry, the roots and the team list alike: a team skill switched off for the project is
+   * never installed, not even for a skill that runs it, and a switch-off made after the run
+   * started holds for the next step, a live `/name` and Continue. Copies a pass installed before
+   * the switch stay in the worktree until the task ends: cezar removes nothing mid-task (#1494).
    *
    * Any other cwd — worktree off, a non-git project, a Continue whose worktree is gone — is the
    * main checkout or unknown, where those directories are LOCAL skills to `discoverSkills` that
@@ -1974,12 +1986,16 @@ export class RunManager {
   ): Promise<{ notes: string[]; filesDir: Map<string, string>; installed: string[] }> {
     const notes: string[] = [];
     const filesDir = new Map<string, string>();
-    const registry = state.skills ?? [];
-    const roots = [...new Set([wanted.stepSkill, wanted.slash].filter((name): name is string => Boolean(name)))]
-      .flatMap((name) => registry.filter((skill) => skill.name === name).slice(0, 1));
+    const wantedNames = [...new Set([wanted.stepSkill, wanted.slash].filter((name): name is string => Boolean(name)))];
     // Stop can land during an earlier await (Continue's team-cache wait): a stopped run writes
     // nothing, here or between the pass's own steps.
     const stopped = () => Boolean(state.cancelled) || this.workerExecutionStopped(runId);
+    if (wantedNames.length === 0 || stopped()) return { notes, filesDir, installed: [] };
+    // The off-list as it is now, applied to every input: the saved registry predates a switch
+    // made during the run, so it is filtered as well as the fresh team list.
+    const disabled = readDisabledTeamSkills(await readProjectUiState(this.repoRoot));
+    const registry = filterDisabledTeamSkills(state.skills ?? [], disabled);
+    const roots = wantedNames.flatMap((name) => registry.filter((skill) => skill.name === name).slice(0, 1));
     if (roots.length === 0 || stopped()) return { notes, filesDir, installed: [] };
     const teamRoots = roots.filter((skill) => skill.source === 'team' && skill.team?.dir);
     const cacheCopy = async (skill: Skill): Promise<void> => {
@@ -1992,7 +2008,8 @@ export class RunManager {
       for (const skill of teamRoots) await cacheCopy(skill);
       return { notes, filesDir, installed: [] };
     }
-    const result = await provisionSkills(state.cwd, roots, [...registry, ...getTeamSkillsCached(this.repoRoot)], { cancelled: stopped });
+    const catalog = [...registry, ...filterDisabledTeamSkills(getTeamSkillsCached(this.repoRoot), disabled)];
+    const result = await provisionSkills(state.cwd, roots, catalog, { cancelled: stopped });
     if (stopped()) return { notes, filesDir, installed: [] };
     for (const skill of teamRoots) {
       const written = result.teamCopies[skill.name] ?? [];
@@ -6406,7 +6423,7 @@ export class RunManager {
     // (save, `cp`, attach to a GitHub issue/PR) — and it's the only usable reference on backends
     // (codex, opencode) that drop image blocks entirely before reaching the model.
     const blocks = contentBlocksOf(content);
-    const expanded = userAuthored ? expandRegistrySlashSkill(blocks, state.skills ?? []) : blocks;
+    const expanded = userAuthored ? expandRegistrySlashSkill(blocks, this.enabledSkills(state)) : blocks;
     const deliverable: ContentBlock[] = persisted.length
       ? [...expanded, pastedAttachmentsNote(persisted)]
       : expanded.length ? expanded : [{ type: 'text', text: 'The user attached a document, but it could not be saved. Ask them to attach it again before discussing its contents.' }];
@@ -7321,7 +7338,7 @@ export class RunManager {
     const continuationSlash = leadingSlashSkillName(prompt);
     let continuationFiles = new Map<string, string>();
     if (continuedSkillName) {
-      let skill = (state.skills ?? []).find((candidate) => candidate.name === continuedSkillName);
+      let skill = this.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
       if (!skill) {
         // Boot recovery can outrun the async team-skills cache (`getTeamSkillsCached`
         // returns [] until `initialTeamSkillsLoad` resolves). Wait briefly, then
@@ -7339,7 +7356,7 @@ export class RunManager {
             }, () => undefined);
           });
           state.skills = await this.discoverSkills().catch(() => state.skills ?? []);
-          skill = (state.skills ?? []).find((candidate) => candidate.name === continuedSkillName);
+          skill = this.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
         } catch {
           // Best-effort — a slow or failing team-skills load must not fail Continue.
         }
@@ -7359,7 +7376,7 @@ export class RunManager {
         });
       }
     }
-    if (!continuedSkillName || !(state.skills ?? []).some((candidate) => candidate.name === continuedSkillName)) {
+    if (!continuedSkillName || !this.enabledSkills(state).some((candidate) => candidate.name === continuedSkillName)) {
       if (continuationSlash) continuationFiles = (await this.provisionRunSkills(runId, state, { slash: continuationSlash })).filesDir;
     }
     state.currentStepId = stepId;
@@ -7394,7 +7411,7 @@ export class RunManager {
     try {
     // Provisioning determines the actual capability, including a fresh session after recovery.
     const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !!ciTools });
-    const openingPrompt = withResumeContext(expandRegistrySlashSkillText(prompt, state.skills ?? [], continuationFiles) +
+    const openingPrompt = withResumeContext(expandRegistrySlashSkillText(prompt, this.enabledSkills(state), continuationFiles) +
       (setupNote ? `\n\n${setupNote}` : '') + (footer ? `\n\n${footer}` : ''), checkpoint);
     const continuationTail = composeSystemPrompt(
       record?.systemPrompt,
@@ -7873,7 +7890,6 @@ export class RunManager {
           state,
           step,
           input,
-          skills,
           checkFailure,
           interactive,
           emit,
@@ -8025,7 +8041,6 @@ export class RunManager {
     state: ActiveRun,
     step: WorkflowStepDef,
     input: StartRunInput,
-    skills: Skill[],
     checkFailure: string | null,
     interactive: boolean,
     emit: (event: { type: string; stepId?: string; [k: string]: unknown }) => void,
@@ -8048,7 +8063,7 @@ export class RunManager {
     const provisioned = await this.provisionRunSkills(runId, state, { stepSkill: step.skill, slash: leadingSlashSkillName(rawPrompt) });
     for (const message of provisioned.notes) emit({ type: 'note', stepId: step.id, message });
     if (step.skill) {
-      const skill = skills.find((s) => s.name === step.skill);
+      const skill = this.enabledSkills(state).find((s) => s.name === step.skill);
       if (skill) {
         // The body alone often does not identify the selected skill. Keep its
         // name and catalog description in the normalized runner payload so a
@@ -8067,7 +8082,7 @@ export class RunManager {
 
     // Opening prompts bypass deliverMessage. Expand before workflow and attachment
     // context so a leading registry skill matches, without changing the stored task.
-    let userPrompt = expandRegistrySlashSkillText(rawPrompt, state.skills ?? [], provisioned.filesDir);
+    let userPrompt = expandRegistrySlashSkillText(rawPrompt, this.enabledSkills(state), provisioned.filesDir);
     if (chainNote) userPrompt = `${chainNote}\n\n---\n\n${userPrompt}`;
     if (checkFailure) {
       userPrompt += `\n\nA verification command failed after the previous attempt. Fix the cause. Failing output:\n\n${checkFailure}`;

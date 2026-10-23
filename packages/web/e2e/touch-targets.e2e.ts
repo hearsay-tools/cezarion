@@ -44,7 +44,7 @@ beforeAll(async () => {
     steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'touch-fixture-session' }],
   } satisfies RunRecord]))
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
-    env: fixtureServeEnv(root, { CEZ_SKILLS_AUTO_UPDATE: '0' }), stdio: 'ignore',
+    env: fixtureServeEnv(root), stdio: 'ignore',
   })
   baseUrl = await waitForFixtureServer(server)
   project = await bootProjectId(baseUrl)
