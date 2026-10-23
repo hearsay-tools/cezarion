@@ -1,0 +1,258 @@
+import assert from 'node:assert/strict';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import test from 'node:test';
+import { analyzeSource } from '../.ai/skills/check-code-quality/scripts/code-metrics.mjs';
+import { runCheck } from '../.ai/skills/check-code-quality/scripts/check.mjs';
+import { convertNodeCoverage } from '../.ai/skills/check-code-quality/scripts/coverage.mjs';
+import { finishReport, markdownReport } from '../.ai/skills/check-code-quality/scripts/quality-report.mjs';
+import { thresholds } from '../.ai/skills/check-code-quality/scripts/changed-functions.mjs';
+
+function fixture(t) {
+  const cwd = mkdtempSync(join(tmpdir(), 'quality-check-'));
+  t.after(() => rmSync(cwd, { recursive: true, force: true }));
+  const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  const write = (file, content) => writeFileSync(join(cwd, file), content);
+  git('init', '-q');
+  git('config', 'user.name', 'Quality Test');
+  git('config', 'user.email', 'quality@example.invalid');
+  write('package.json', '{"type":"module"}');
+  write('.gitignore', 'reports/\ncoverage.json\n*.test.mjs\nsetup.mjs\nnode_modules/\n');
+  write('source.mjs', 'export function choose(x) { return x; }\nexport const untouched = () => 1;');
+  git('add', '.');
+  git('commit', '-qm', 'baseline');
+  const base = git('rev-parse', 'HEAD');
+  write('source.mjs', 'export function choose(x) {\n if (x) return 1;\n return 2;\n}\nexport const untouched = () => 1;');
+  write('source.test.mjs', `import assert from 'node:assert/strict';
+    import { choose } from './source.mjs';
+    assert.equal(choose(true), 1); assert.equal(choose(false), 2);`);
+  return { cwd, base, git, write };
+}
+
+function coverage(f, file = 'source.mjs') {
+  const path = join(f.cwd, file);
+  const functions = analyzeSource(readFileSync(path, 'utf8'), path);
+  const entry = { path, fnMap: {}, f: {}, statementMap: {}, s: {} };
+  for (const [id, fn] of functions.entries()) {
+    entry.fnMap[id] = { name: fn.name, loc: { start: fn.bodyLoc, end: { line: fn.bodyEndLine, column: 1 } } };
+    entry.f[id] = 1;
+    entry.statementMap[id] = { start: fn.bodyLoc, end: fn.bodyLoc };
+    entry.s[id] = 1;
+  }
+  return { [path]: entry };
+}
+
+async function invoke(f, args = [], dependencies = {}) {
+  let output = '', error = '';
+  const code = await runCheck(['--base', f.base, '--json', ...args], {
+    cwd: f.cwd, stdout: { write: text => { output += text; } }, stderr: { write: text => { error += text; } },
+    ...dependencies,
+  });
+  return { code, report: JSON.parse(output), error };
+}
+
+test('groups Node tests, converts process coverage, matches changed functions and writes reports', async t => {
+  const f = fixture(t);
+  f.write('setup.mjs', 'globalThis.qualitySetup = true;');
+  f.write('source.test.mjs', 'import { choose } from "./source.mjs"; choose(true);');
+  f.write('setup.test.mjs', `import assert from "node:assert/strict";
+    import { choose } from "./source.mjs";
+    assert.equal(globalThis.qualitySetup, true); assert.equal(choose(false), 2);`);
+  const { code, report, error } = await invoke(f, ['--runner', 'node', '--test', 'source.test.mjs',
+    '--test', 'setup.test.mjs', '--node-import', 'setup.mjs', '--output', 'reports/quality.md']);
+  assert.equal(code, 0, error + JSON.stringify(report));
+  assert.equal(report.status, 'pass');
+  assert.equal(report.base, f.base);
+  assert.equal(report.summary.functions, 1);
+  assert.equal(report.files[0].functions[0].name, 'choose');
+  assert.equal(report.files[0].functions[0].coverage.percent, 100);
+  assert.equal(report.files[0].functions[0].crap, 2);
+  assert.equal(report.files[0].functions[0].baseline.complexity, 1);
+  assert.equal(report.measurement.runner, 'node');
+  assert.ok(report.measurement.command.includes(join(f.cwd, 'setup.test.mjs')));
+  assert.deepEqual(JSON.parse(readFileSync(join(f.cwd, 'reports/quality.json'), 'utf8')), report);
+  assert.match(readFileSync(join(f.cwd, 'reports/quality.md'), 'utf8'), /Result: PASS/);
+});
+
+test('pass, exceeded and incomplete are distinct process exit codes', async t => {
+  const f = fixture(t);
+  const cli = fileURLToPath(new URL('../.ai/skills/check-code-quality/scripts/check.mjs', import.meta.url));
+  for (const [decisions, expected] of [[19, 0], [20, 1]]) {
+    f.write('source.mjs', `export function choose(x) { ${'if (x) x--; '.repeat(decisions)} return x; }`);
+    f.write('coverage.json', JSON.stringify(coverage(f)));
+    const result = spawnSync(process.execPath, [cli, '--base', f.base, '--coverage', 'coverage.json', '--json'], { cwd: f.cwd, encoding: 'utf8' });
+    assert.equal(result.status, expected, result.stdout + result.stderr);
+    const report = JSON.parse(result.stdout);
+    assert.equal(report.files[0].functions[0].complexity, decisions + 1);
+  }
+  const incomplete = spawnSync(process.execPath, [cli, '--base', f.base, '--json'], { cwd: f.cwd, encoding: 'utf8' });
+  assert.equal(incomplete.status, 2);
+  assert.equal(JSON.parse(incomplete.stdout).status, 'incomplete');
+});
+
+test('missing, stale and unmatched coverage remain incomplete', async t => {
+  const f = fixture(t);
+  f.write('coverage.json', '{}');
+  const absent = await invoke(f, ['--coverage', 'coverage.json']);
+  assert.equal(absent.code, 2);
+  assert.equal(absent.report.summary.unavailable, 1);
+  const report = coverage(f);
+  report[join(f.cwd, 'source.mjs')].fnMap[0].loc.start.column++;
+  f.write('coverage.json', JSON.stringify(report));
+  assert.equal((await invoke(f, ['--coverage', 'coverage.json'])).code, 2);
+  f.write('coverage.json', JSON.stringify(coverage(f)));
+  utimesSync(join(f.cwd, 'coverage.json'), new Date(0), new Date(0));
+  const stale = await invoke(f, ['--coverage', 'coverage.json']);
+  assert.equal(stale.code, 2);
+  assert.match(stale.report.files[0].functions[0].coverage.reason, /newer/);
+});
+
+test('coverage is collected once for every changed file and temporary reports are removed', async t => {
+  const f = fixture(t);
+  f.write('second.mjs', 'export function second() { return 2; }');
+  let calls = 0, temporary;
+  const result = await invoke(f, ['--test', 'source.test.mjs'], {
+    collect(options, directory) {
+      calls++;
+      temporary = directory;
+      assert.deepEqual(options.files, ['second.mjs', 'source.mjs']);
+      const path = join(directory, 'coverage-final.json');
+      writeFileSync(path, JSON.stringify({ ...coverage(f), ...coverage(f, 'second.mjs') }));
+      return { path, runner: 'fixture' };
+    },
+  });
+  assert.equal(result.code, 0, JSON.stringify(result.report));
+  assert.equal(calls, 1);
+  assert.equal(existsSync(temporary), false);
+  assert.equal(result.report.summary.functions, 2);
+});
+
+test('a source edit or new function during coverage invalidates the check', async t => {
+  for (const added of [true, false]) {
+    const f = fixture(t);
+    let temporary;
+    const result = await invoke(f, ['--test', 'source.test.mjs'], {
+      collect(options, directory) {
+        temporary = directory;
+        const path = join(directory, 'coverage-final.json');
+        writeFileSync(path, JSON.stringify(coverage(f)));
+        if (added) f.write('added.mjs', 'export function added() {}');
+        else f.write('source.mjs', 'export function changed() {}');
+        return { path, runner: 'fixture' };
+      },
+    });
+    assert.equal(result.code, 2);
+    assert.match(result.report.errors.join(' '), /Source changed|source set/);
+    assert.equal(existsSync(temporary), false);
+  }
+});
+
+test('a successful collection cannot hide a missing function result', async t => {
+  const f = fixture(t);
+  f.write('coverage.json', JSON.stringify(coverage(f)));
+  const result = await invoke(f, ['--coverage', 'coverage.json'], {
+    measure: file => ({ ...file, functions: [] }),
+  });
+  assert.equal(result.code, 2);
+  assert.equal(result.report.summary.expectedFunctions, 1);
+  assert.equal(result.report.summary.functions, 0);
+});
+
+test('failing Node tests produce no accepted scores and keep logs off JSON stdout', async t => {
+  const f = fixture(t);
+  f.write('source.test.mjs', 'throw new Error("intentional coverage failure");');
+  const result = await invoke(f, ['--runner', 'node', '--test', 'source.test.mjs']);
+  assert.equal(result.code, 2);
+  assert.match(result.report.errors.join(' '), /Coverage tests failed/);
+  assert.match(result.error, /intentional coverage failure/);
+  assert.equal(result.report.summary.functions, 0);
+});
+
+test('Vitest resolves in the target project and receives all files, tests and projects once', async t => {
+  const f = fixture(t);
+  f.write('second.mjs', 'export function second() { return 2; }');
+  const directory = join(f.cwd, 'node_modules/vitest');
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(join(directory, 'package.json'), '{"name":"vitest","version":"1.0.0"}');
+  writeFileSync(join(directory, 'vitest.mjs'), `
+    import assert from 'node:assert/strict';
+    import { writeFileSync } from 'node:fs';
+    import { join } from 'node:path';
+    const args = process.argv.slice(2);
+    assert.equal(process.cwd(), ${JSON.stringify(f.cwd)});
+    assert.equal(args.filter(arg => arg === '--coverage.include').length, 2);
+    assert.equal(args[args.indexOf('--project') + 1], 'unit');
+    assert.equal(args.at(-1), ${JSON.stringify(join(f.cwd, 'source.test.mjs'))});
+    writeFileSync(join(args[args.indexOf('--coverage.reportsDirectory') + 1], 'coverage-final.json'), ${JSON.stringify(JSON.stringify({ ...coverage(f), ...coverage(f, 'second.mjs') }))});
+    console.log('fixture vitest log');
+  `);
+  const result = await invoke(f, ['--test', 'source.test.mjs', '--project', 'unit']);
+  assert.equal(result.code, 0, JSON.stringify(result.report));
+  assert.match(result.error, /fixture vitest log/);
+  assert.equal(result.report.measurement.runner, 'vitest');
+});
+
+test('invalid runner arguments fail before starting tests', async t => {
+  const f = fixture(t);
+  for (const args of [['--runner', 'unknown'], ['--runner', 'node'],
+    ['--coverage', 'coverage.json', '--test', 'source.test.mjs'],
+    ['--runner', 'node', '--test', 'source.test.mjs', '--project', 'unit'],
+    ['--test', 'source.test.mjs', '--node-import', 'source.test.mjs'],
+    ['--test', 'source.test.mjs', '--project', ''], ['--output', 'source.mjs'],
+    ['--test', 'source.mjs']]) {
+    const result = await invoke(f, args, { collect: () => assert.fail('must not run tests') });
+    assert.equal(result.code, 2, JSON.stringify(args));
+    assert.equal(result.report.status, 'incomplete');
+  }
+});
+
+test('empty supported change set passes without running tests', async t => {
+  const f = fixture(t);
+  f.git('checkout', '--', 'source.mjs');
+  const result = await invoke(f, [], { collect: () => assert.fail('must not run tests') });
+  assert.equal(result.code, 0);
+  assert.equal(result.report.summary.functions, 0);
+  assert.equal(result.report.summary.maxCrap, null);
+});
+
+test('Node conversion rejects missing reports and Node runner refuses transformed sources', async t => {
+  const f = fixture(t);
+  const raw = join(f.cwd, 'reports');
+  mkdirSync(raw);
+  await assert.rejects(convertNodeCoverage(raw, ['source.mjs'], f.cwd, join(raw, 'out.json')), /no V8 coverage/);
+  f.write('typed.ts', 'export function typed(x: string) { return x; }');
+  const result = await invoke(f, ['--runner', 'node', '--test', 'source.test.mjs']);
+  assert.equal(result.code, 2);
+  assert.match(result.report.errors.join(' '), /untransformed JavaScript/);
+});
+
+test('report thresholds include CRAP equality, missing coverage and escaped paths', () => {
+  const fn = { name: 'choose', line: 1, column: 1, complexity: 20, crap: 30,
+    coverage: { status: 'available', percent: 100 }, exceeded: [] };
+  const file = { file: 'quoted|file.mjs', sourceHash: 'abc', functions: [fn] };
+  const scan = { files: [file], thresholds, base: 'base', head: 'head', deletedFiles: [] };
+  const pass = finishReport(scan, [file], null);
+  assert.equal(pass.status, 'pass');
+  assert.match(markdownReport(pass), /quoted\\\|file/);
+  fn.crap = 30.01;
+  fn.exceeded = ['crap'];
+  assert.equal(finishReport(scan, [file], null).status, 'exceeded');
+  fn.crap = null;
+  fn.coverage = { status: 'unavailable', reason: 'missing' };
+  assert.equal(finishReport(scan, [file], null).status, 'incomplete');
+});
+
+test('copied skill runs the complete Node coverage check outside this checkout', t => {
+  const f = fixture(t);
+  const skill = join(f.cwd, 'node_modules/copied-skill');
+  mkdirSync(join(f.cwd, 'node_modules'));
+  cpSync(fileURLToPath(new URL('../.ai/skills/check-code-quality', import.meta.url)), skill, { recursive: true });
+  symlinkSync(fileURLToPath(new URL('../node_modules', import.meta.url)), join(skill, 'node_modules'), 'dir');
+  const result = spawnSync(process.execPath, [join(skill, 'scripts/check.mjs'), '--base', f.base,
+    '--runner', 'node', '--test', 'source.test.mjs', '--json'], { cwd: f.cwd, encoding: 'utf8' });
+  assert.equal(result.status, 0, result.stdout + result.stderr);
+  assert.equal(JSON.parse(result.stdout).summary.functions, 1);
+});
