@@ -279,32 +279,6 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     expect(existsSync(await manifestPath())).toBe(false);
   });
 
-  it('withdrawProvisionedSkills removes only the named owned entries and keeps the rest (#1494)', async () => {
-    await provisionSkills(worktree, [lead], [lead, helper]);
-    // The user replaced one of cezar's helper copies: that one is theirs now.
-    const mine = join(worktree, '.cursor', 'skills', 'helper-skill');
-    rmSync(mine, { recursive: true, force: true });
-    mkdirSync(mine);
-    writeFileSync(join(mine, 'SKILL.md'), 'MINE\n');
-    await withdrawProvisionedSkills(worktree, new Set(['helper-skill']));
-    for (const dir of ['.claude', '.agents']) {
-      expect(existsSync(join(worktree, dir, 'skills', 'helper-skill')), dir).toBe(false);
-      expect(readFileSync(join(worktree, dir, 'skills', '.gitignore'), 'utf8')).not.toContain('/helper-skill');
-    }
-    expect(readFileSync(join(mine, 'SKILL.md'), 'utf8')).toBe('MINE\n');
-    for (const dir of AGENT_DIRS) expect(existsSync(join(worktree, dir, 'skills', 'lead-skill', 'SKILL.md')), dir).toBe(true);
-    const manifest = JSON.parse(readFileSync(await manifestPath(), 'utf8')) as { roots: string[]; entries: Array<{ skill?: string }> };
-    expect(manifest.roots).toEqual(['lead-skill']);
-    expect(manifest.entries.some((entry) => entry.skill === 'helper-skill')).toBe(false);
-  });
-
-  it('withdrawProvisionedSkills drops a withdrawn root so a later pass does not bring it back (#1494)', async () => {
-    await provisionSkills(worktree, [lead], [lead, helper]);
-    await withdrawProvisionedSkills(worktree, new Set(['lead-skill']));
-    await provisionSkills(worktree, [], [lead, helper]);
-    for (const dir of AGENT_DIRS) expect(existsSync(join(worktree, dir, 'skills', 'lead-skill')), dir).toBe(false);
-  });
-
   it('falls back to a copy when a link cannot be made', async () => {
     const refuse = async () => { throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); };
     await provisionSkills(worktree, [lead], [lead, helper], { symlink: refuse });
@@ -326,6 +300,65 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     };
     return { team, cleanup: () => rmSync(seeded.sourceDir, { recursive: true, force: true }) };
   };
+
+  // hearsay-tools/cezarion#1494: withdrawal matches each entry's own source and name.
+  type Manifest = { roots: string[]; entries: Array<{ skill?: string; repo?: string; kind: string }> };
+  const readManifest = async () => JSON.parse(readFileSync(await manifestPath(), 'utf8')) as Manifest;
+
+  it("withdrawProvisionedSkills removes only the off-listed source's owned entries and keeps the root (#1494)", async () => {
+    const { team, cleanup } = await seedTeam('team-off');
+    try {
+      await provisionSkills(worktree, [team, lead], [team, lead, helper]);
+      expect((await readManifest()).entries.filter((entry) => entry.skill === 'team-off').every((entry) => entry.repo === team.team!.repo)).toBe(true);
+      // The user replaced one of cezar's copies: that one is theirs now.
+      const mine = join(worktree, '.cursor', 'skills', 'team-off');
+      rmSync(mine, { recursive: true, force: true });
+      mkdirSync(mine);
+      writeFileSync(join(mine, 'SKILL.md'), 'MINE\n');
+      // The same name from another source is not this copy.
+      expect(await withdrawProvisionedSkills(worktree, [{ repo: 'org-provision/elsewhere', name: 'team-off' }])).toEqual([]);
+      expect(existsSync(join(worktree, '.agents', 'skills', 'team-off', 'SKILL.md'))).toBe(true);
+
+      expect(await withdrawProvisionedSkills(worktree, [{ repo: team.team!.repo, name: 'team-off' }])).toEqual(['team-off']);
+      for (const dir of ['.claude', '.agents']) {
+        expect(existsSync(join(worktree, dir, 'skills', 'team-off')), dir).toBe(false);
+        expect(readFileSync(join(worktree, dir, 'skills', '.gitignore'), 'utf8')).not.toContain('/team-off');
+      }
+      expect(readFileSync(join(mine, 'SKILL.md'), 'utf8')).toBe('MINE\n');
+      for (const dir of AGENT_DIRS) {
+        expect(existsSync(join(worktree, dir, 'skills', 'lead-skill', 'SKILL.md')), dir).toBe(true);
+        expect(existsSync(join(worktree, dir, 'skills', 'helper-skill', 'SKILL.md')), dir).toBe(true);
+      }
+      const manifest = await readManifest();
+      expect(manifest.roots).toEqual(['team-off', 'lead-skill']);
+      expect(manifest.entries.some((entry) => entry.skill === 'team-off')).toBe(false);
+      // With no enabled copy in the catalog, the next full pass drops the root.
+      await provisionSkills(worktree, [], [lead, helper]);
+      expect((await readManifest()).roots).toEqual(['lead-skill']);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('withdrawProvisionedSkills reads an older team copy\'s source from its marker, and never withdraws an older entry with no source (#1494)', async () => {
+    const { team, cleanup } = await seedTeam('team-old');
+    try {
+      const flat: Skill = { name: 'flat-old', body: 'FLAT', path: 'org-provision/flat@main:flat-old.md', source: 'team',
+        team: { repo: 'org-provision/flat', ref: 'main', path: 'flat-old.md', dir: false } };
+      await provisionSkills(worktree, [team, flat], [team, flat]);
+      // A record written before entries carried their source.
+      const manifest = await readManifest();
+      for (const entry of manifest.entries) delete entry.repo;
+      writeFileSync(await manifestPath(), JSON.stringify({ version: 1, ...manifest }));
+      await withdrawProvisionedSkills(worktree, [{ repo: team.team!.repo, name: 'team-old' }, { repo: 'org-provision/flat', name: 'flat-old' }]);
+      for (const dir of AGENT_DIRS) {
+        expect(existsSync(join(worktree, dir, 'skills', 'team-old')), dir).toBe(false);
+        expect(readFileSync(join(worktree, dir, 'skills', 'flat-old', 'SKILL.md'), 'utf8'), dir).toContain('FLAT');
+      }
+    } finally {
+      cleanup();
+    }
+  });
 
   it('never writes a team skill into a directory the user owns', async () => {
     const { team, cleanup } = await seedTeam('team-mine');

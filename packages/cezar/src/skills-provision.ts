@@ -3,6 +3,7 @@ import { createHash, type Hash } from 'node:crypto';
 import { copyFile, cp, lstat, mkdir, readdir, readFile, readlink, realpath, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { promisify } from 'node:util';
+import type { TeamSkillRef } from '@open-mercato/cezar-contract/skills';
 import type { Skill } from './skills.ts';
 import { excludeFromGit, landsInside, materializeSkillDir, TEAM_SKILL_AGENT_DIRS } from './skills-remote.ts';
 
@@ -94,6 +95,10 @@ export interface ProvisionedEntry {
   identity: string;
   /** A pending entry's other finished form: the copy a failed link falls back to. */
   alternate?: string;
+  /** The team source (`skillsRepos[].repo`) an entry made from a team skill came from (#1494),
+   *  so withdrawal can match the off-list by source. Absent on local skills and on older records;
+   *  `teamRepoOf` then reads a team copy's marker, and any other entry is never withdrawn. */
+  repo?: string;
 }
 
 /** `current` is what cezar left at the entry's path (either finished form of a pending one). */
@@ -346,7 +351,7 @@ async function provisionPass(
           const identity = await identityOf(dir, 'team-copy');
           if (!identity?.startsWith('marker:')) continue;
           if (records.get(rel)?.identity !== identity) installed.add(skill.name);
-          records.set(rel, { path: rel, kind: 'team-copy', skill: skill.name, identity });
+          records.set(rel, { path: rel, kind: 'team-copy', skill: skill.name, identity, ...teamRepo(skill) });
         }
         await save();
         continue;
@@ -370,6 +375,8 @@ async function provisionPass(
         const source = record?.kind === 'copy' ? await copySource() : plan.source;
         if (record && record.kind !== 'pending' && current === record.identity && record.source === source) {
           wanted.add(rel);
+          // An older record learns its team source, so withdrawal can match it.
+          if (skill.team && record.repo !== skill.team.repo) records.set(rel, { ...record, ...teamRepo(skill) });
           continue;
         }
         if (record && matches(record, current)) await removePath(dest);
@@ -383,7 +390,7 @@ async function provisionPass(
           continue;
         }
         const pending = async (identity: string, alternate?: string) => {
-          records.set(rel, { path: rel, kind: 'pending', skill: skill.name, identity, ...(alternate ? { alternate } : {}) });
+          records.set(rel, { path: rel, kind: 'pending', skill: skill.name, identity, ...(alternate ? { alternate } : {}), ...teamRepo(skill) });
           await save();
         };
         await mkdir(dirname(dest), { recursive: true });
@@ -420,7 +427,7 @@ async function provisionPass(
         }
         records.set(rel, {
           path: rel, kind, skill: skill.name, source: kind === 'copy' ? await copySource() : plan.source,
-          identity: (await identityOf(dest, kind))!,
+          identity: (await identityOf(dest, kind))!, ...teamRepo(skill),
         });
         wanted.add(rel);
         installed.add(skill.name);
@@ -487,27 +494,54 @@ async function syncIgnoreFile(
   await save();
 }
 
+/** `{ repo }` for an entry made from a team skill, `{}` otherwise. */
+function teamRepo(skill: Skill): { repo?: string } {
+  return skill.team ? { repo: skill.team.repo } : {};
+}
+
 /**
- * Take `names` back out of `worktree` (#1494): drop them from the recorded roots and remove each
- * entry recorded for them that still is what cezar left. A path the user replaced, and every skill
- * cezar has no record of, stays. Other recorded skills are not touched, so a pass that cannot see
- * the whole catalog (a cold team cache) removes nothing else. Never throws.
+ * The team source a record came from: its recorded `repo`, or for an older team copy the `repo`
+ * in the marker its identity holds. Undefined for local skills and for older records of other
+ * kinds, which withdrawal therefore never matches.
  */
-export function withdrawProvisionedSkills(worktree: string, names: ReadonlySet<string>): Promise<void> {
-  if (names.size === 0) return Promise.resolve();
+function teamRepoOf(record: ProvisionedEntry): string | undefined {
+  if (record.repo) return record.repo;
+  if (record.kind !== 'team-copy' || !record.identity.startsWith('marker:')) return undefined;
+  try {
+    const repo = (JSON.parse(record.identity.slice('marker:'.length)) as { repo?: unknown }).repo;
+    return typeof repo === 'string' ? repo : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Take switched-off team skills back out of `worktree` (#1494): remove each entry cezar recorded
+ * whose OWN source and name are on `disabled` and that still is what cezar left. Nothing is
+ * inferred from a skill's absence in a catalog, so a pass that runs before the team sources load
+ * removes nothing it should keep. A path the user replaced, a local skill, another source's copy
+ * of the same name, and an older record with no known source all stay.
+ *
+ * The recorded roots are kept: a root whose copy went may still be wanted from another source,
+ * and the next full pass drops it when no enabled copy exists. Returns the recorded roots that
+ * lost an entry, so the caller can install an enabled copy in their place. Never throws.
+ */
+export function withdrawProvisionedSkills(worktree: string, disabled: readonly TeamSkillRef[]): Promise<string[]> {
+  if (disabled.length === 0) return Promise.resolve([]);
+  const off = new Set(disabled.map((ref) => JSON.stringify([ref.repo, ref.name])));
   return serialized(worktree, async () => {
     try {
       const gitDir = await gitDirOf(worktree);
       const root = await realpath(worktree).catch(() => null);
-      if (!gitDir || root === null) return;
+      if (!gitDir || root === null) return [];
       const manifestFile = join(gitDir, MANIFEST_FILE);
       const manifest = await readManifest(manifestFile);
-      const doomed = manifest.entries.filter((entry) => entry.kind !== 'ignore-file' && entry.skill && names.has(entry.skill));
-      if (doomed.length === 0 && !manifest.roots.some((name) => names.has(name))) return;
+      const doomed = manifest.entries.filter((entry) => entry.kind !== 'ignore-file' && entry.skill &&
+        off.has(JSON.stringify([teamRepoOf(entry), entry.skill])));
+      if (doomed.length === 0) return [];
       const records = new Map(manifest.entries.map((entry) => [entry.path, entry]));
       const save = () => writeManifest(manifestFile, { ...manifest, entries: [...records.values()] });
       const contained = (rel: string) => landsInside(root, dirname(join(worktree, rel)));
-      manifest.roots = manifest.roots.filter((name) => !names.has(name));
       for (const record of doomed) {
         if (await ownedAt(worktree, record, contained)) await removePath(join(worktree, record.path));
         else if (record.kind === 'pending' && (await contained(record.path)) && (await lstat(join(worktree, record.path)).catch(() => null))) {
@@ -517,8 +551,10 @@ export function withdrawProvisionedSkills(worktree: string, names: ReadonlySet<s
       }
       await save();
       for (const agentDir of TEAM_SKILL_AGENT_DIRS) await syncIgnoreFile(worktree, root, records, save, agentDir, ownedNamesIn(records, agentDir));
+      const lost = new Set(doomed.map((record) => record.skill!));
+      return manifest.roots.filter((name) => lost.has(name));
     } catch {
-      // Best effort: a copy left behind is still out of git.
+      return []; // Best effort: a copy left behind is still out of git.
     }
   });
 }

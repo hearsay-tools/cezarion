@@ -18,6 +18,7 @@ import * as runners from '../core/runner-factory.ts';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { discoverSkills } from '../skills.ts';
+import * as remote from '../skills-remote.ts';
 import { bareDirFor, refreshTeamSkills } from '../skills-remote.ts';
 import { seedTeamDirSkillClone, writeSkillsReposConfig } from '../skills-remote.testkit.ts';
 import { RunManager } from './run.ts';
@@ -380,6 +381,74 @@ describe('team directory skills never land in the main checkout (#1024)', { time
       expect(existsSync(join(run.spec.cwd, agentDir, 'skills', TEAM_SKILL)), agentDir).toBe(false);
     }
     expect(readFileSync(join(run.spec.cwd, '.agents/skills/user-own-1494/SKILL.md'), 'utf8')).toBe('mine\n');
+    sessions[before]!();
+  });
+
+  // Two sources offering the same directory skill: switches are per source (#1494).
+  const A_BODY = 'SOURCE-A-PLAYBOOK-1494';
+  const B_BODY = 'SOURCE-B-PLAYBOOK-1494';
+  async function seedTwoSources(): Promise<{ a: string; b: string }> {
+    const a = `org-a-${randomUUID().slice(0, 8)}/skills`;
+    const b = `org-b-${randomUUID().slice(0, 8)}/skills`;
+    writeSkillsReposConfig(repoRoot, [a, b]);
+    for (const [repo, body] of [[a, A_BODY], [b, B_BODY]] as const) {
+      const source = await seedTeamDirSkillClone(repo, TEAM_SKILL, { 'SKILL.md': `---\ndescription: ${repo}\n---\n${body}\n` });
+      cleanup.push(source.sourceDir);
+    }
+    await refreshTeamSkills(repoRoot);
+    return { a, b };
+  }
+  const offList = (refs: Array<{ repo: string; name: string }>) => {
+    mkdirSync(join(repoRoot, '.ai/cezar'), { recursive: true });
+    writeFileSync(join(repoRoot, '.ai/cezar/ui-state.json'), JSON.stringify({ disabledTeamSkills: refs }));
+  };
+  const installedBody = (worktree: string, agentDir: string) => {
+    const file = join(worktree, agentDir, 'skills', TEAM_SKILL, 'SKILL.md');
+    return existsSync(file) ? readFileSync(file, 'utf8') : null;
+  };
+  const manifestRoots = async (worktree: string): Promise<string[]> => {
+    const gitDir = (await execFileAsync('git', ['rev-parse', '--absolute-git-dir'], { cwd: worktree })).stdout.trim();
+    return (JSON.parse(readFileSync(join(gitDir, 'cezar-skills.json'), 'utf8')) as { roots: string[] }).roots;
+  };
+
+  it('a rootless Continue before the team sources load keeps an enabled copy of a name another source switched off (#1494)', async () => {
+    const { a } = await seedTwoSources();
+    writeLocalSkill('other-1494', 'OTHER-1494');
+    offList([{ repo: a, name: TEAM_SKILL }]);
+    const run = await launch(promptWorkflow, `/${TEAM_SKILL} please`);
+    for (const agentDir of AGENT_SKILL_DIRS) expect(installedBody(run.spec.cwd, agentDir), agentDir).toContain(B_BODY);
+    await run.finish();
+    // Recovery outran the team load: no team skill is in memory yet.
+    const cold = vi.spyOn(remote, 'getTeamSkillsCached').mockReturnValue([]);
+    const before = launches.length;
+    expect(manager.continueRun(run.id, { text: 'keep going' })).toEqual({ ok: true });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(before), { timeout: LAUNCH_WAIT_MS });
+    cold.mockRestore();
+    // The cache is warm again; an unrelated pass runs.
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: '/other-1494 go' }])).toBe(true);
+    await (manager as unknown as { active: Map<string, { liveSkillProvisioning?: Promise<void> }> })
+      .active.get(run.id)?.liveSkillProvisioning;
+    for (const agentDir of AGENT_SKILL_DIRS) {
+      expect(installedBody(run.spec.cwd, agentDir), agentDir).toContain(B_BODY);
+      expect(existsSync(join(run.spec.cwd, agentDir, 'skills', 'other-1494')), `${agentDir} other`).toBe(true);
+    }
+    expect(await manifestRoots(run.spec.cwd)).toContain(TEAM_SKILL);
+    sessions[before]!();
+  });
+
+  it("a rootless Continue removes a switched-off source's copy while another source's copy is on (#1494)", async () => {
+    const { a } = await seedTwoSources();
+    const run = await launch(promptWorkflow, `/${TEAM_SKILL} please`);
+    for (const agentDir of AGENT_SKILL_DIRS) expect(installedBody(run.spec.cwd, agentDir), agentDir).toContain(A_BODY);
+    await run.finish();
+    offList([{ repo: a, name: TEAM_SKILL }]);
+    const before = launches.length;
+    expect(manager.continueRun(run.id, { text: 'keep going' })).toEqual({ ok: true });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(before), { timeout: LAUNCH_WAIT_MS });
+    for (const agentDir of AGENT_SKILL_DIRS) {
+      // The enabled source's copy takes the switched-off one's place.
+      expect(installedBody(run.spec.cwd, agentDir), agentDir).toContain(B_BODY);
+    }
     sessions[before]!();
   });
 
