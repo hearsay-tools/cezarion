@@ -28,7 +28,7 @@ vi.mock('@/lib/project-router', () => ({
   useProjectPathname: () => mocks.path ?? (mocks.openRunId === null ? '/' : `/tasks/${mocks.openRunId}`),
 }))
 
-const { looksLikeSentence, useVoiceCommand } = await import('./use-voice-command')
+const { looksLikeSentence, useVoiceCommand, VOICE_ROW_VALUE } = await import('./use-voice-command')
 
 /** One engine request the test answers by hand. The mock ignores the abort signal on purpose, so
  *  a late answer to an aborted request still arrives and the hook has to ignore it itself. */
@@ -39,6 +39,9 @@ interface Call {
   reject(error: unknown): void
 }
 let calls: Call[] = []
+
+/** The Will do row before its sentence's decision arrives. */
+const READING = { kind: 'will-do', text: 'Reading…', pending: true }
 
 const DECISION_ID = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 
@@ -66,12 +69,14 @@ afterEach(() => {
   vi.useRealTimers()
 })
 
+/** `selected` stands for cmdk's selection; the Will do row unless a test moves it. */
 function setup({ enabled = true, text = '' }: { enabled?: boolean; text?: string } = {}) {
   const close = vi.fn()
   const hook = renderHook(() => {
     const [current, setText] = useState(text)
-    const voice = useVoiceCommand({ enabled, text: current, close, clearText: () => setText('') })
-    return { voice, text: current, setText }
+    const [selected, setSelected] = useState(VOICE_ROW_VALUE)
+    const voice = useVoiceCommand({ enabled, text: current, selected, close, clearText: () => setText('') })
+    return { voice, text: current, setText, setSelected }
   })
   return { ...hook, close }
 }
@@ -88,6 +93,7 @@ function enter(harness: Harness, { repeat = false }: { repeat?: boolean } = {}) 
 }
 
 const type = (harness: Harness, text: string) => act(() => harness.result.current.setText(text))
+const select = (harness: Harness, value: string) => act(() => harness.result.current.setSelected(value))
 const advance = (ms: number) => act(() => vi.advanceTimersByTimeAsync(ms))
 const answer = async (call: Call | undefined, decision: VoiceDecision) => {
   if (!call) throw new Error('no engine request to answer')
@@ -191,7 +197,7 @@ describe('useVoiceCommand', () => {
 
     // The aborted request answers late anyway: it must not reach the row.
     await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
-    expect(harness.result.current.voice.row).toBeUndefined()
+    expect(harness.result.current.voice.row).toEqual(READING)
 
     await answer(calls[1], { action: 'open', decisionId: DECISION_ID(2), status: 'done', position: 1, confidence: 0.9 })
     expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Open “Bravo” — first done' })
@@ -211,12 +217,81 @@ describe('useVoiceCommand', () => {
 
     await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
 
+    expect(mocks.navigate).toHaveBeenCalledTimes(1)
     expect(mocks.navigate).toHaveBeenCalledWith('/tasks/a')
     expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith(DECISION_ID(1), 'executed')
     expect(harness.close).toHaveBeenCalled()
     // The preview the debounce would have started reuses the committed request.
     await advance(300)
     expect(calls).toHaveLength(1)
+  })
+
+  it('shows a pending Will do row as soon as the text is a sentence', () => {
+    const harness = setup()
+    type(harness, 'open the next failed task')
+    expect(calls).toHaveLength(0)
+    expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Reading…', pending: true })
+  })
+
+  it('Enter with another row selected leaves Return to cmdk', async () => {
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' })]
+    const harness = setup()
+    type(harness, 'open the next failed task')
+    select(harness, 'task Alpha a')
+
+    const { handled, event } = enter(harness)
+    expect(handled).toBe(false)
+    expect(event.preventDefault).not.toHaveBeenCalled()
+    expect(calls).toHaveLength(0)
+    await advance(300)
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+    expect(mocks.navigate).not.toHaveBeenCalled()
+  })
+
+  it('a late decision keeps the user\'s selection and never acts for it', async () => {
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' })]
+    const harness = setup()
+    type(harness, 'open the next failed task')
+    await advance(300)
+    select(harness, 'task Alpha a')
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+
+    expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Open “Alpha” — next failed' })
+    expect(enter(harness).handled).toBe(false)
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    expect(mocks.reportVoiceOutcome).not.toHaveBeenCalled()
+  })
+
+  it('moving the selection while Return waits drops the commit', async () => {
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' })]
+    const click = selectedItem()
+    const harness = setup()
+    type(harness, 'open the next failed task')
+
+    expect(enter(harness).handled).toBe(true)
+    select(harness, 'view Inbox')
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    expect(mocks.reportVoiceOutcome).not.toHaveBeenCalledWith(DECISION_ID(1), 'executed')
+    expect(click).not.toHaveBeenCalled()
+  })
+
+  it('moving away and back while Return waits still drops the commit', async () => {
+    mocks.runs = [failed({ id: 'a', title: 'Alpha' })]
+    const harness = setup()
+    type(harness, 'open the next failed task')
+
+    expect(enter(harness).handled).toBe(true)
+    select(harness, 'view Inbox')
+    select(harness, VOICE_ROW_VALUE)
+    await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
+
+    expect(mocks.navigate).not.toHaveBeenCalled()
+    // A fresh Return on the Will do row commits again, and acts on the decision it already has.
+    expect(enter(harness).handled).toBe(true)
+    await advance(0)
+    expect(mocks.navigate).toHaveBeenCalledWith('/tasks/a')
   })
 
   it('opens a variant group at its compare page', async () => {
@@ -262,7 +337,8 @@ describe('useVoiceCommand', () => {
     expect(confirm).not.toHaveBeenCalled()
     expect(harness.result.current.text).toBe('')
     expect(harness.result.current.voice.mode).toBe('proposal')
-    expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Answer Library: Vitest' })
+    expect(harness.result.current.voice.row).toBeUndefined()
+    expect(harness.result.current.voice.confirm).toEqual({ heading: 'Answer the question', lines: ['Library: Vitest'] })
 
     // A later Return in the emptied input is the confirmation.
     expect(enter(harness).handled).toBe(true)
@@ -346,7 +422,46 @@ describe('useVoiceCommand', () => {
     await proposeAnswer(harness, 2, [option(1, 'Fast')])
 
     expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith(DECISION_ID(1), 'replaced')
-    expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Answer Library: Vitest; Build: Fast' })
+    expect(harness.result.current.voice.confirm).toEqual({
+      heading: 'Answer the question',
+      lines: ['Library: Vitest', 'Build: Fast'],
+    })
+  })
+
+  it('describes a waiting tell for the confirmation panel until the user types', async () => {
+    mocks.openRunId = 'r1'
+    mocks.runs = [voiceRun({ id: 'r1', title: 'Fix flaky shard', status: 'waiting' })]
+    voiceStore.registerComposer({
+      runId: 'r1',
+      getDraft: () => '',
+      setDraft: () => true,
+      clearVoiceDraft: () => true,
+      submit: () => true,
+    })
+    const harness = setup()
+    type(harness, 'tell it: ship it')
+    enter(harness)
+    await answer(calls[0], { action: 'tell', decisionId: DECISION_ID(1), runId: 'r1', text: 'ship it', confidence: 0.9 })
+
+    expect(harness.result.current.voice.confirm).toEqual({ heading: 'Send to “Fix flaky shard”', lines: ['ship it'] })
+    // Typing is a new search ("yes, confirmed", "no", another sentence): the panel steps aside.
+    type(harness, 'y')
+    expect(harness.result.current.voice.confirm).toBeUndefined()
+    type(harness, '')
+    act(() => harness.result.current.voice.onConfirm())
+    expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith(DECISION_ID(1), 'confirmed')
+  })
+
+  it('names the task in the answer panel and keeps a refusal beside it', async () => {
+    mocks.openRunId = 'r1'
+    mocks.runs = [voiceRun({ id: 'r1', title: 'Fix flaky shard', status: 'waiting' })]
+    voiceStore.registerAskCard(card(['Library', 'Build']))
+    const harness = setup()
+    await proposeAnswer(harness, 1, [option(0, 'Vitest')])
+
+    expect(enter(harness).handled).toBe(true)
+    expect(harness.result.current.voice.confirm).toEqual({ heading: 'Answer “Fix flaky shard”', lines: ['Library: Vitest'] })
+    expect(harness.result.current.voice.row).toEqual({ kind: 'notice', text: 'Question 2 (Build) still needs an answer.' })
   })
 
   it('says why a proposal could not be made', async () => {
@@ -633,7 +748,7 @@ describe('useVoiceCommand', () => {
 
     enter(harness)
     await advance(2999)
-    expect(harness.result.current.voice.row).toBeUndefined()
+    expect(harness.result.current.voice.row).toEqual(READING)
     expect(click).not.toHaveBeenCalled()
     await advance(1)
 
@@ -768,7 +883,7 @@ describe('useVoiceCommand', () => {
     expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Answer Library: Vitest' })
 
     act(() => voiceStore.syncPendingAsk('r1', 'ask_2'))
-    expect(harness.result.current.voice.row).toBeUndefined()
+    expect(harness.result.current.voice.row).toEqual(READING)
     enter(harness)
     // Return asks again for the question now shown, and never acts on the old decision.
     expect(calls).toHaveLength(2)
@@ -820,7 +935,7 @@ describe('useVoiceCommand', () => {
     expect(harness.result.current.voice.row).toEqual({ kind: 'notice', text: 'The screen changed. Try again.' })
 
     act(() => voiceStore.syncPendingAsk('r1', 'ask_1'))
-    expect(harness.result.current.voice.row).toBeUndefined()
+    expect(harness.result.current.voice.row).toEqual(READING)
     await advance(300)
     await answer(calls[1], answerDecision(2, [option(0, 'Vitest')]))
     expect(harness.result.current.voice.row).toEqual({ kind: 'will-do', text: 'Answer Library: Vitest' })
@@ -859,7 +974,7 @@ describe('useVoiceCommand', () => {
     // Back/Forward to another project: same page kind, no open task, the palette stays mounted.
     mocks.projectId = 'proj-b'
     harness.rerender()
-    expect(harness.result.current.voice.row).toBeUndefined()
+    expect(harness.result.current.voice.row).toEqual(READING)
     enter(harness)
     expect(calls).toHaveLength(2)
 

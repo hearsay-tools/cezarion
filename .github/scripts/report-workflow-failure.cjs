@@ -1,5 +1,6 @@
 const {causesForStep} = require('./failure-diagnostics.cjs');
 const {createFailureWriter} = require('./failure-issue-writer.cjs');
+const {routeMainCiSummary} = require('./main-ci-summary.cjs');
 const LOG_LIMIT = 2 * 1024 * 1024;
 // Oversized single logs are unrecoverable per-job evidence gaps; the sweep
 // records this code without failing, everything else stays a coverage problem.
@@ -95,6 +96,7 @@ async function reportFailure({github,owner,repo,event,log=()=>{},fetchImpl=fetch
   }
   const writer=await createFailureWriter({github,owner,repo,log});
   let reported=0;
+  const reports=[];
   for(const job of failed) {
     if(!Number.isSafeInteger(job.id) || job.id < 1) throw new Error('Invalid failed job');
     let jobLog='';
@@ -108,17 +110,11 @@ async function reportFailure({github,owner,repo,event,log=()=>{},fetchImpl=fetch
       const causes=causesForStep({run,job,step,log:jobLog});
       const results=await writer.reportStep({run,job,step,causes});
       reported+=results.filter(result=>result.reported).length;
-      // reportStep commits diagnostic evidence before returning. Retry the label
-      // write even for an already-recorded occurrence after an API failure.
-      if (run.name === 'CI') {
-        for (const {issue} of results) {
-          if (issue.state !== 'open') continue;
-          await github.request('POST /repos/{owner}/{repo}/issues/{issue_number}/labels', {
-            ...base,issue_number:issue.number,labels:['main-ci-failure'],
-          });
-        }
-      }
+      reports.push(...results.map(result=>result.issue));
     }
+  }
+  if(run.name==='CI') {
+    await routeMainCiSummary({github,owner,repo,run,issues:writer.issues,reports});
   }
   return {reported};
 }

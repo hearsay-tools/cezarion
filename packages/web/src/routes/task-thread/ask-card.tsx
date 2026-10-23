@@ -307,11 +307,6 @@ function PendingAsk({ ask, run }: { ask: ThreadAsk; run: ApiRun }) {
           </span>
         </div>
       )}
-      {voiceAnswers ? (
-        <p data-slot="ask-voice-prompt" className="mt-3 text-xs font-medium text-foreground">
-          Send these answers? Say “yes, confirmed” or press Return.
-        </p>
-      ) : null}
       {delivery.blockedBy === 'provider' ? (
         <div data-slot="ask-provider-gate" className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           <span>{delivery.reason}</span>

@@ -191,6 +191,59 @@ describe('palette voice mode', () => {
     // bound: the debounce wait above may take up to 10 s on a loaded host.
   }, 20_000)
 
+  it('Enter opens the result selected below the Will do row', async () => {
+    mocks.voiceDecide.mockResolvedValue({
+      action: 'open',
+      decisionId: '00000000-0000-4000-8000-000000000004',
+      status: 'done',
+      position: 1,
+      confidence: 0.9,
+    } satisfies VoiceDecision)
+    renderPalette({
+      voice: true,
+      runs: [run({ id: 'a', title: 'Fix flaky shard' }), run({ id: 'b', title: 'Beta', status: 'done' })],
+    })
+    const input = await openPalette()
+
+    fireEvent.change(input, { target: { value: 'fix flaky shard' } })
+    // bound: the 300 ms preview debounce runs on real timers here, under a loaded host.
+    await screen.findByText('Open “Beta” — first done', undefined, { timeout: 10_000 })
+    const voiceRow = () => document.querySelector('[data-slot="voice-row"]')
+    expect(voiceRow()?.getAttribute('data-selected')).toBe('true')
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await waitFor(() => expect(voiceRow()?.getAttribute('data-selected')).toBe('false'))
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toMatch(/\/tasks\/a$/))
+    expect(mocks.reportVoiceOutcome).not.toHaveBeenCalledWith('00000000-0000-4000-8000-000000000004', 'executed')
+    // bound: the debounce wait above may take up to 10 s on a loaded host.
+  }, 20_000)
+
+  it('Enter right after a sentence commits it through the highlighted Will do row', async () => {
+    mocks.voiceDecide.mockResolvedValue({
+      action: 'open',
+      decisionId: '00000000-0000-4000-8000-000000000005',
+      status: 'done',
+      position: 1,
+      confidence: 0.9,
+    } satisfies VoiceDecision)
+    renderPalette({
+      voice: true,
+      runs: [run({ id: 'a', title: 'Fix flaky shard' }), run({ id: 'b', title: 'Beta', status: 'done' })],
+    })
+    const input = await openPalette()
+
+    fireEvent.change(input, { target: { value: 'fix flaky shard' } })
+    const row = document.querySelector('[data-slot="voice-row"]')
+    expect(row?.textContent).toContain('Reading…')
+    expect(row?.getAttribute('data-selected')).toBe('true')
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/tasks/b'))
+    expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000005', 'executed')
+  })
+
   it('docks the palette during a proposal', async () => {
     let applied: VoiceAnswer[] = []
     voiceStore.registerAskCard({
@@ -229,13 +282,66 @@ describe('palette voice mode', () => {
     expect(overlay()?.className).toContain('bg-transparent')
     expect(input.value).toBe('')
     expect(document.activeElement).toBe(input)
-    expect(screen.getByText('Answer “Pick a library”: Library: Vitest')).toBeTruthy()
+    // The confirmation panel replaces the search: one highlighted row saying what Return sends.
+    const panel = document.querySelector('[data-slot="voice-confirm"]')
+    expect(panel?.textContent).toBe('Answer “Pick a library”Library: Vitest')
+    expect(panel?.getAttribute('data-selected')).toBe('true')
+    expect(document.querySelectorAll('[cmdk-item]')).toHaveLength(1)
+    expect(input.placeholder).toBe('Say “yes, confirmed” or press Return to send…')
+    expect(document.querySelector('[data-slot="voice-confirm-hints"]')?.textContent).toBe('↵ SendEsc Cancel')
+
+    // Typing ("yes, confirmed", "no", a new sentence) brings the search back.
+    fireEvent.change(input, { target: { value: 'y' } })
+    expect(document.querySelector('[data-slot="voice-confirm"]')).toBeNull()
+    expect(input.placeholder).toBe('Search projects, tasks, views, actions, skills…')
+    fireEvent.change(input, { target: { value: '' } })
+    await waitFor(() => expect(document.querySelector('[data-slot="voice-confirm"]')?.getAttribute('data-selected')).toBe('true'))
 
     // Esc closes the palette, which drops the proposal and reports it.
     fireEvent.keyDown(input, { key: 'Escape' })
     await waitFor(() => expect(content()).toBeNull())
     expect(voiceStore.getProposal()).toBeUndefined()
     expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000002', 'cancelled')
+  })
+
+  it('the target cannot change under the confirmation panel: the docked palette stays modal', async () => {
+    // The panel shows the stored proposal while confirming sends what the card holds. They agree
+    // because the docked palette stays modal: the card cannot be edited while the panel shows.
+    let applied: VoiceAnswer[] = []
+    voiceStore.registerAskCard({
+      runId: 'r1',
+      requestId: 'ask_1',
+      headers: ['Library'],
+      read: () => ({ selections: {}, otherAnswers: {} }),
+      apply: (answers) => {
+        applied = answers
+      },
+      restore: () => {
+        applied = []
+      },
+      unanswered: () => (applied.length > 0 ? [] : [0]),
+      send: () => true,
+    })
+    mocks.voiceDecide.mockResolvedValue({
+      action: 'answer',
+      decisionId: '00000000-0000-4000-8000-000000000006',
+      runId: 'r1',
+      askRequestId: 'ask_1',
+      answers: [{ question: 0, kind: 'option', labels: ['Vitest'] }],
+      confidence: 0.9,
+    } satisfies VoiceDecision)
+    renderPalette({ voice: true, runs: [run({ id: 'r1', title: 'Pick a library', status: 'waiting' })], entry: '/tasks/r1' })
+    const input = await openPalette()
+    fireEvent.change(input, { target: { value: 'answer vitest to question one' } })
+    fireEvent.keyDown(input, { key: 'Enter' })
+    await waitFor(() => expect(document.querySelector('[data-slot="voice-confirm"]')).not.toBeNull())
+
+    // Radix's modal layer: the page outside the palette takes no pointer input, and focus stays in
+    // the palette. A press outside dismisses it, and closing cancels the proposal (Esc, above).
+    expect(document.body.style.pointerEvents).toBe('none')
+    expect(content()?.getAttribute('data-voice-proposal')).toBe('true')
+    expect(document.activeElement).toBe(input)
+    expect(applied).toEqual([{ question: 0, kind: 'option', labels: ['Vitest'] }])
   })
 
   it('docks a tell at the top, away from the composer at the bottom', async () => {
