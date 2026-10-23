@@ -192,7 +192,6 @@ rl.on('line', (line) => {
 rl.on('close', () => { queue.then(() => process.exit(0)); });
 
 async function handle(command) {
-  if (delivery && command.type === 'prompt' && !admitPrompt(command)) return;
   if (command.type === 'prompt' && (command.message.includes('mock:autonomous') || command.message.startsWith('Continue working autonomously until the task is fully complete.'))) {
     const { autonomousReply } = await import('./mock-autonomous.mjs');
     // Recorded like every other prompt, so a test can count the autonomous nudges pi received.
@@ -260,6 +259,8 @@ async function handle(command) {
     }
   }
   if (command.type === 'prompt') command.message = answerNudge(command.message);
+  // After the recording hook: a rejected prompt still reached pi's RPC.
+  if (delivery && command.type === 'prompt' && !admitPrompt(command)) return;
   // `mock:ack-only` → the prompt is accepted and no agent run starts (hearsay-tools/cezarion#1301).
   if (command.type === 'prompt' && command.message.includes('mock:ack-only')) {
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
