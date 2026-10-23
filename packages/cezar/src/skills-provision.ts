@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { createHash, type Hash } from 'node:crypto';
 import { copyFile, cp, lstat, mkdir, readdir, readFile, readlink, realpath, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
@@ -156,11 +157,21 @@ async function writeManifest(file: string, manifest: SkillManifest): Promise<voi
   await rename(staging, file);
 }
 
+/** Each worktree's git dir, once found: every provisioning pass, rootless ones included, needs it. */
+const gitDirs = new Map<string, string>();
+
 async function gitDirOf(worktree: string): Promise<string | null> {
+  const key = resolve(worktree);
+  const known = gitDirs.get(key);
+  // A worktree removed and created again may have another git dir: re-ask when it is gone.
+  if (known && existsSync(known)) return known;
   try {
     const { stdout } = await execFileAsync('git', ['rev-parse', '--absolute-git-dir'], { cwd: worktree, timeout: 10_000 });
-    return stdout.trim() || null;
+    const dir = stdout.trim() || null;
+    if (dir) gitDirs.set(key, dir); else gitDirs.delete(key);
+    return dir;
   } catch {
+    gitDirs.delete(key);
     return null;
   }
 }
@@ -300,12 +311,18 @@ async function provisionPass(
     const linkType = process.platform === 'win32' ? 'junction' : 'dir';
 
     const safeRoots = roots.filter((skill) => SAFE_SKILL_NAME.test(skill.name));
+    // A rootless pass in a worktree with nothing recorded has nothing to reconcile: no record.
+    if (safeRoots.length === 0 && manifest.roots.length === 0 && manifest.entries.length === 0) return result;
     const rootNames = [...new Set([...manifest.roots, ...safeRoots.map((skill) => skill.name)])];
     const allRoots = rootNames.flatMap((name) => {
       const found = safeRoots.find((skill) => skill.name === name) ?? catalog.find((skill) => skill.name === name);
       return found ? [found] : [];
     });
-    manifest.roots = allRoots.map((skill) => skill.name);
+    // A recorded root the catalog does not offer now (team sources still loading, or every copy
+    // switched off) stays recorded with its entries, so a later pass installs its enabled copy
+    // once one is offered (#1494). Its absence alone never removes anything.
+    const unresolved = new Set(rootNames.filter((name) => !allRoots.some((skill) => skill.name === name)));
+    manifest.roots = rootNames;
     const closure = skillClosure(allRoots, catalog);
     if (closure.truncated) result.truncated = closure.truncated;
     const skills = closure.skills.filter((skill) => SAFE_SKILL_NAME.test(skill.name));
@@ -439,6 +456,7 @@ async function provisionPass(
     checkpoint();
     for (const record of [...records.values()]) {
       if (record.kind === 'ignore-file' || wanted.has(record.path)) continue;
+      if (record.skill && unresolved.has(record.skill)) continue;
       if (await ownedAt(worktree, record, contained)) await removePath(join(worktree, record.path));
       else if (record.kind === 'pending' && (await contained(record.path)) && (await lstat(join(worktree, record.path)).catch(() => null))) {
         continue; // changed since the interrupted pass: never deleted, still kept out of git
@@ -517,28 +535,43 @@ function teamRepoOf(record: ProvisionedEntry): string | undefined {
 
 /**
  * Take switched-off team skills back out of `worktree` (#1494): remove each entry cezar recorded
- * whose OWN source and name are on `disabled` and that still is what cezar left. Nothing is
- * inferred from a skill's absence in a catalog, so a pass that runs before the team sources load
- * removes nothing it should keep. A path the user replaced, a local skill, another source's copy
- * of the same name, and an older record with no known source all stay.
+ * whose OWN source and name are on `disabled` and that still is what cezar left. A path the user
+ * replaced, a local skill and another source's copy of the same name stay.
  *
- * The recorded roots are kept: a root whose copy went may still be wanted from another source,
- * and the next full pass drops it when no enabled copy exists. Returns the recorded roots that
- * lost an entry, so the caller can install an enabled copy in their place. Never throws.
+ * An older record of a flat team skill knows no source (a generated `SKILL.md` written before
+ * entries carried `repo`). It goes only when its name is in `orphaned`: names the loaded team
+ * list offers with every copy switched off and nothing else providing them. The caller builds
+ * that from the catalog it has; a name the catalog does not offer yet is never in it, so nothing
+ * is inferred from absence alone.
+ *
+ * The recorded roots are kept. A root whose copy went is reconciled by the next `provisionSkills`
+ * pass, rootless ones included: it installs the enabled copy once the catalog offers one. So a
+ * crash between this write and that pass, or a guess made while a source was still loading,
+ * leaves a record a later pass recovers from. Never throws.
  */
-export function withdrawProvisionedSkills(worktree: string, disabled: readonly TeamSkillRef[]): Promise<string[]> {
-  if (disabled.length === 0) return Promise.resolve([]);
+export function withdrawProvisionedSkills(
+  worktree: string,
+  disabled: readonly TeamSkillRef[],
+  orphaned: ReadonlySet<string> = new Set(),
+): Promise<void> {
+  if (disabled.length === 0) return Promise.resolve();
   const off = new Set(disabled.map((ref) => JSON.stringify([ref.repo, ref.name])));
+  const withdrawn = (entry: ProvisionedEntry): boolean => {
+    if (entry.kind === 'ignore-file' || !entry.skill) return false;
+    const repo = teamRepoOf(entry);
+    if (repo !== undefined) return off.has(JSON.stringify([repo, entry.skill]));
+    // No known source: only a body-generated entry can be an older flat team skill.
+    return Boolean(entry.source?.startsWith('body:')) && orphaned.has(entry.skill);
+  };
   return serialized(worktree, async () => {
     try {
       const gitDir = await gitDirOf(worktree);
       const root = await realpath(worktree).catch(() => null);
-      if (!gitDir || root === null) return [];
+      if (!gitDir || root === null) return;
       const manifestFile = join(gitDir, MANIFEST_FILE);
       const manifest = await readManifest(manifestFile);
-      const doomed = manifest.entries.filter((entry) => entry.kind !== 'ignore-file' && entry.skill &&
-        off.has(JSON.stringify([teamRepoOf(entry), entry.skill])));
-      if (doomed.length === 0) return [];
+      const doomed = manifest.entries.filter(withdrawn);
+      if (doomed.length === 0) return;
       const records = new Map(manifest.entries.map((entry) => [entry.path, entry]));
       const save = () => writeManifest(manifestFile, { ...manifest, entries: [...records.values()] });
       const contained = (rel: string) => landsInside(root, dirname(join(worktree, rel)));
@@ -551,10 +584,8 @@ export function withdrawProvisionedSkills(worktree: string, disabled: readonly T
       }
       await save();
       for (const agentDir of TEAM_SKILL_AGENT_DIRS) await syncIgnoreFile(worktree, root, records, save, agentDir, ownedNamesIn(records, agentDir));
-      const lost = new Set(doomed.map((record) => record.skill!));
-      return manifest.roots.filter((name) => lost.has(name));
     } catch {
-      return []; // Best effort: a copy left behind is still out of git.
+      // Best effort: a copy left behind is still out of git.
     }
   });
 }

@@ -20,7 +20,8 @@ import { RunStore } from '../runs/store.ts';
 import { discoverSkills } from '../skills.ts';
 import * as remote from '../skills-remote.ts';
 import { bareDirFor, refreshTeamSkills } from '../skills-remote.ts';
-import { seedTeamDirSkillClone, writeSkillsReposConfig } from '../skills-remote.testkit.ts';
+import { seedTeamDirSkillClone, seedTeamSkillsClone, writeSkillsReposConfig } from '../skills-remote.testkit.ts';
+import { withdrawProvisionedSkills } from '../skills-provision.ts';
 import { RunManager } from './run.ts';
 import { plannedWorkflow, skillTaskSteps, type WorkflowDef } from './types.ts';
 
@@ -449,6 +450,83 @@ describe('team directory skills never land in the main checkout (#1024)', { time
       // The enabled source's copy takes the switched-off one's place.
       expect(installedBody(run.spec.cwd, agentDir), agentDir).toContain(B_BODY);
     }
+    sessions[before]!();
+  });
+
+  /** Strip `repo` from every recorded entry: a manifest written before entries carried their source. */
+  const stripRecordedSources = async (worktree: string): Promise<void> => {
+    const gitDir = (await execFileAsync('git', ['rev-parse', '--absolute-git-dir'], { cwd: worktree })).stdout.trim();
+    const file = join(gitDir, 'cezar-skills.json');
+    const manifest = JSON.parse(readFileSync(file, 'utf8')) as { entries: Array<{ repo?: string }> };
+    for (const entry of manifest.entries) delete entry.repo;
+    writeFileSync(file, JSON.stringify(manifest));
+  };
+  const FLAT = 'flat-1494';
+  async function seedFlatSource(): Promise<string> {
+    const repo = `org-flat-${randomUUID().slice(0, 8)}/skills`;
+    writeSkillsReposConfig(repoRoot, [repo]);
+    const clone = await seedTeamSkillsClone(repo, { [FLAT]: 'FLAT-1494-BODY' });
+    cleanup.push(clone.sourceDir);
+    await refreshTeamSkills(repoRoot);
+    return repo;
+  }
+  const flatInstalled = (worktree: string) => AGENT_SKILL_DIRS.map((agentDir) => existsSync(join(worktree, agentDir, 'skills', FLAT, 'SKILL.md')));
+
+  it('a rootless Continue removes an older flat team copy with no recorded source once its only source is switched off (#1494)', async () => {
+    const repo = await seedFlatSource();
+    const run = await launch(promptWorkflow, `/${FLAT} please`);
+    expect(flatInstalled(run.spec.cwd)).toEqual([true, true, true]);
+    await run.finish();
+    await stripRecordedSources(run.spec.cwd);
+    offList([{ repo, name: FLAT }]);
+    const before = launches.length;
+    expect(manager.continueRun(run.id, { text: 'keep going' })).toEqual({ ok: true });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(before), { timeout: LAUNCH_WAIT_MS });
+    expect(flatInstalled(run.spec.cwd)).toEqual([false, false, false]);
+    sessions[before]!();
+  });
+
+  it('an older flat team copy survives a cold rootless Continue, and a later warm pass removes it once switched off (#1494)', async () => {
+    const repo = await seedFlatSource();
+    writeLocalSkill('other-1494', 'OTHER-1494');
+    const run = await launch(promptWorkflow, `/${FLAT} please`);
+    await run.finish();
+    await stripRecordedSources(run.spec.cwd);
+    offList([{ repo, name: FLAT }]);
+    const cold = vi.spyOn(remote, 'getTeamSkillsCached').mockReturnValue([]);
+    const before = launches.length;
+    expect(manager.continueRun(run.id, { text: 'keep going' })).toEqual({ ok: true });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(before), { timeout: LAUNCH_WAIT_MS });
+    expect(flatInstalled(run.spec.cwd)).toEqual([true, true, true]);
+    cold.mockRestore();
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: '/other-1494 go' }])).toBe(true);
+    await (manager as unknown as { active: Map<string, { liveSkillProvisioning?: Promise<void> }> })
+      .active.get(run.id)?.liveSkillProvisioning;
+    expect(flatInstalled(run.spec.cwd)).toEqual([false, false, false]);
+    sessions[before]!();
+  });
+
+  it('after a crash between withdrawal and install, a new manager installs the enabled copy on a rootless Continue (#1494)', async () => {
+    const { a } = await seedTwoSources();
+    const run = await launch(promptWorkflow, `/${TEAM_SKILL} please`);
+    for (const agentDir of AGENT_SKILL_DIRS) expect(installedBody(run.spec.cwd, agentDir), agentDir).toContain(A_BODY);
+    await run.finish();
+    offList([{ repo: a, name: TEAM_SKILL }]);
+    // The process got as far as the withdrawal's write, then died.
+    await withdrawProvisionedSkills(run.spec.cwd, [{ repo: a, name: TEAM_SKILL }]);
+    const gitDir = (await execFileAsync('git', ['rev-parse', '--absolute-git-dir'], { cwd: run.spec.cwd })).stdout.trim();
+    const committed = JSON.parse(readFileSync(join(gitDir, 'cezar-skills.json'), 'utf8')) as { roots: string[]; entries: Array<{ skill?: string }> };
+    expect(committed.roots).toContain(TEAM_SKILL);
+    expect(committed.entries.some((entry) => entry.skill === TEAM_SKILL)).toBe(false);
+    for (const agentDir of AGENT_SKILL_DIRS) expect(installedBody(run.spec.cwd, agentDir), agentDir).toBeNull();
+    // A new process, with the team sources loaded.
+    await drainFixtureManagers(repoRoot);
+    manager.dispose();
+    manager = createFixtureManager(store, repoRoot);
+    const before = launches.length;
+    expect(manager.continueRun(run.id, { text: 'keep going' })).toEqual({ ok: true });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(before), { timeout: LAUNCH_WAIT_MS });
+    for (const agentDir of AGENT_SKILL_DIRS) expect(installedBody(run.spec.cwd, agentDir), agentDir).toContain(B_BODY);
     sessions[before]!();
   });
 
