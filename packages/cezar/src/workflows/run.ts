@@ -4961,14 +4961,18 @@ export class RunManager {
   }
 
   /** A root's done blocked by its workers. In a live session the agent gets the refusal
-   * `cezar_done` gives, as one automatic turn (`settleTurn`, hearsay-tools/cezarion#1301); a
-   * closed session gets it as a queued lifecycle wake that reopens it (`queueCompletionRefusal`),
+   * `cezar_done` gives, as one automatic turn (`settleTurn`, hearsay-tools/cezarion#1301), at its
+   * turn boundary, else at the live turn end; a closed session gets it as a queued lifecycle wake
+   * that reopens it (`queueCompletionRefusal`),
    * a legacy accepted Finish's settlement included. A pending human question keeps its park. */
   private deferParentCompletion(runId: string): boolean {
     const gate = this.completionGate(runId);
     if (gate === 'accept') return false;
     const state = this.active.get(runId);
-    if (typeof gate === 'object' && state?.session) this.settleTurn(runId, state, 'gate', this.boundaryTurn(runId, state, state.session, true), gate);
+    // Mid-turn, the live turn end takes its done to the gate itself, behind owed input and waits.
+    if (typeof gate === 'object' && state?.session && state.atTurnBoundary === state.session) {
+      this.settleTurn(runId, state, 'gate', this.boundaryTurn(runId, state, state.session, true), gate);
+    }
     return true;
   }
 
@@ -9342,8 +9346,8 @@ export class RunManager {
       return true;
     }
     if (entry !== 'turn-end') openAlias();
-    // Only the turn end itself delivers owed input; a later entry finds it already tried.
-    let decision = decideTurnEnd(facts(entry === 'turn-end' ? undefined : false));
+    // The turn end and the gate deliver owed input; an acknowledgement or readiness finds it already tried.
+    let decision = decideTurnEnd(facts(entry === 'turn-end' || entry === 'gate' ? undefined : false));
     const keepDone = turn.done && (!refused || (decision.kind === 'defer' && !!decision.keepDone));
     if (entry === 'turn-end') this.recordDoneAtBoundary(state, keepDone, turn.doneRequest);
     else if (entry === 'ack' && turn.done && !keepDone) state.doneAtBoundary = undefined;
