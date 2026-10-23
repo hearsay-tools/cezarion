@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
-import { basename, sep } from 'node:path';
+import { basename, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { agentHomePaths } from './paths.ts';
@@ -71,3 +72,51 @@ describe('test runs never read the host home (hearsay-tools/cezarion#1361)', () 
     expect(agentHomeEnv()).toEqual(unset);
   });
 });
+
+// Run the real setup in a new Vitest process: values set in this worker would
+// already be too late to exercise inherited-environment cleanup.
+it('scrubs inherited CEZ flags but preserves test-owned flags (hearsay-tools/cezarion#1517)', () => {
+  const repo = fileURLToPath(new URL('../../../', import.meta.url));
+  mkdirSync(join(repo, '.ai/qa'), { recursive: true });
+  const scratch = mkdtempSync(join(repo, '.ai/qa/unit-env-'));
+  try {
+    const fixture = join(scratch, 'environment.test.ts');
+    writeFileSync(fixture, `
+import { beforeAll, expect, it } from 'vitest';
+import { basename } from 'node:path';
+const inheritedKeys = ['CEZ_TEST_INHERITED_SENTINEL', 'CEZ_VOICE', 'CEZ_PROJECT_WARMUP'];
+for (const key of inheritedKeys) expect(process.env[key], key).toBeUndefined();
+expect(basename(process.env.CEZ_HOME!)).toMatch(/^cez-vitest-home-/);
+expect(process.env.UNIT_ENV_SENTINEL).toBe('preserved');
+beforeAll(() => { process.env.CEZ_DRY_RUN = 'from-beforeAll'; });
+it('permits a test-owned flag', () => {
+  expect(process.env.CEZ_DRY_RUN).toBe('from-beforeAll');
+  process.env.CEZ_VOICE = '1';
+  expect(process.env.CEZ_VOICE).toBe('1');
+});
+it('keeps the file flag and existing per-test cleanup', () => {
+  expect(process.env.CEZ_DRY_RUN).toBe('from-beforeAll');
+  expect(process.env.CEZ_VOICE).toBeUndefined();
+});
+`);
+    const config = join(scratch, 'vitest.config.mjs');
+    writeFileSync(config, `export default ${JSON.stringify({ test: {
+      environment: 'node', include: [fixture],
+      setupFiles: [join(repo, 'packages/cezar/vitest.setup.ts')],
+      passWithNoTests: false, maxWorkers: 1,
+    } })}`);
+    // Pass only the minimal process environment and synthetic values, never
+    // the parent's task controller or credentials.
+    const env = Object.fromEntries(['PATH', 'SystemRoot', 'SYSTEMROOT', 'ComSpec', 'PATHEXT']
+      .flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]!]]));
+    const output = execFileSync(process.execPath, [join(repo, 'node_modules/vitest/vitest.mjs'),
+      'run', '--config', config], {
+      cwd: repo, encoding: 'utf8', timeout: 60_000,
+      env: { ...env, CEZ_TEST_INHERITED_SENTINEL: 'inherited', CEZ_VOICE: '1',
+        CEZ_PROJECT_WARMUP: '0', CEZ_HOME: scratch, UNIT_ENV_SENTINEL: 'preserved' },
+    });
+    expect(output).toContain('2 passed');
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}, 90_000);

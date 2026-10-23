@@ -3,6 +3,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach } from 'vitest'
 
+// Test files start from shipped defaults, not the parent cockpit's flags or
+// task context (hearsay-tools/cezarion#1517). Scrub once before sandbox pins:
+// beforeAll and test bodies may then supply their own CEZ_* values. Keep the
+// narrower per-test cleanup below so existing file-level fixtures still work.
+for (const key of Object.keys(process.env)) {
+  if (key.toUpperCase().startsWith('CEZ_')) delete process.env[key]
+}
+
 // Cezar task worktrees pin TMPDIR under the repo (`.ai/cezar/tmp/<runId>`). That
 // makes `os.tmpdir()` land inside a git worktree, so suites that mkdtemp a
 // "non-repo" path still resolve `git rev-parse --show-toplevel` to the host
