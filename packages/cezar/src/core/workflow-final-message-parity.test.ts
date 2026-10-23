@@ -18,6 +18,7 @@ const noReplyNotes = (events: readonly Record<string, unknown>[]) =>
 const autonomousNotes = (events: readonly Record<string, unknown>[]) =>
   events.filter(e => e.type === 'note' && String(e.message).includes('continuing without pausing'));
 const shortenNudgeBound = (manager: { noWaitNudgeReplyMs?: number }) => {
+  // bound: exercise expiry without the production five-minute wait; late replies are gated.
   manager.noWaitNudgeReplyMs = 300;
 };
 const lateDoneContent = (events: readonly Record<string, unknown>[]) =>
@@ -129,19 +130,33 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           continue;
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
-          await withOwnedInputRun(backend, 'silent-tail-late-reply', async ({ store, manager, runId }) => {
-            shortenNudgeBound(manager as unknown as { noWaitNudgeReplyMs?: number });
-            const startSeq = store.readEvents(runId).length;
-            manager.enqueueOwnedRun(runId);
-            await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
-            expect(store.getRun(runId)?.status).toBe('waiting');
-            expect(manager['busySlots']()).toBe(0);
-            await waitFor(() => store.getRun(runId)?.status === 'running');
-            expect(manager['busySlots']()).toBe(1);
-            await waitFor(() => store.getRun(runId)?.status === 'done');
-            expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
-            expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
-          });
+          const gateRoot = mkdtempSync(join(tmpdir(), 'cez-late-reply-'));
+          const release = join(gateRoot, 'release');
+          try {
+            await withOwnedInputRun(backend, 'silent-tail-late-reply', async ({ store, manager, runId }) => {
+              shortenNudgeBound(manager as unknown as { noWaitNudgeReplyMs?: number });
+              const startSeq = store.readEvents(runId).length;
+              manager.enqueueOwnedRun(runId);
+              await waitFor(() => noReplyNotes(store.readEvents(runId).slice(startSeq)).length === 1);
+              expect(store.getRun(runId)?.status).toBe('waiting');
+              expect(manager['busySlots']()).toBe(0);
+              // The native reply stays blocked until parking and slot release are observed.
+              // Capture the resumed slot in the store callback: DONE can follow in the same tick.
+              let resumedSlots: number | undefined;
+              const onRun = (run: { id: string; status: string }) => {
+                if (run.id === runId && run.status === 'running') resumedSlots ??= manager['busySlots']();
+              };
+              store.on('run', onRun);
+              try {
+                writeFileSync(release, 'go');
+                await waitFor(() => resumedSlots !== undefined);
+                expect(resumedSlots).toBe(1);
+                await waitFor(() => store.getRun(runId)?.status === 'done');
+              } finally { store.off('run', onRun); }
+              expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
+              expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
+            }, { env: { CEZ_MOCK_RELEASE_FILE: release } });
+          } finally { rmSync(gateRoot, { recursive: true, force: true }); }
         }, 30_000);
         continue;
       }
@@ -167,10 +182,11 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               const parkedSeq = store.readEvents(runId).length;
               // The mock waits for observed parking instead of racing a 200 ms window.
               writeFileSync(release, 'go');
-              // Hold is 800 ms; this poll must expire before content if turn.started is ignored.
-              await waitFor(() => store.getRun(runId)?.status === 'running', 400);
+              // Content has its own gate, so only native turn-start can resume the run here.
+              await waitFor(() => store.getRun(runId)?.status === 'running');
               expect(manager['busySlots']()).toBe(1);
               expect(lateDoneContent(store.readEvents(runId).slice(parkedSeq))).toBe(false);
+              writeFileSync(`${release}.content`, 'go');
               await waitFor(() => store.getRun(runId)?.status === 'done');
               expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
               expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
