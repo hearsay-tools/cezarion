@@ -647,6 +647,8 @@ const startRunSchema = z
     // Autonomous mode (#autonomous): the run never parks at `waiting` — it
     // auto-continues until the agent signals done. No "needs you" is raised.
     autonomous: z.boolean().optional(),
+    archiveWhenDone: z.boolean().optional(),
+    autoMergePr: z.boolean().optional(),
     // Generate follow-up inbox entries (spec 007, #444). Honoured only while
     // the `followups` capability is on (#471) — off, the server pins it to
     // false whatever the client asked for. Omitted still means "enabled" for
@@ -836,6 +838,8 @@ const uiStateSchema = z
 const patchRunSchema = z.object({
   title: z.string().trim().min(1).max(300).optional(),
   task: z.string().trim().min(1).max(100_000).optional(),
+  archiveWhenDone: z.boolean().optional(),
+  autoMergePr: z.boolean().optional(),
 });
 
 // Session commit (redesign R5 — §"Git/session API additions").
@@ -4086,6 +4090,8 @@ export function createApp(deps: ServerDeps) {
         systemPrompt: parsed.data.systemPrompt,
         worktree: parsed.data.worktree,
         autonomous: parsed.data.autonomous,
+        archiveWhenDone: parsed.data.archiveWhenDone,
+        autoMergePr: parsed.data.autoMergePr,
         // Opt-in inbox (#471): the capability is the ceiling, so a client asking
         // for follow-ups on a server that has them off gets a plain `false`
         // rather than an error — the run is still perfectly valid without them.
@@ -4202,6 +4208,12 @@ export function createApp(deps: ServerDeps) {
           title: parsed.data.title,
           titleSummary: parsed.data.title,
           titleOrigin: 'user',
+        });
+      }
+      if (parsed.data.archiveWhenDone !== undefined || parsed.data.autoMergePr !== undefined) {
+        store.updateRun(id, {
+          ...(parsed.data.archiveWhenDone === undefined ? {} : { archiveWhenDone: parsed.data.archiveWhenDone }),
+          ...(parsed.data.autoMergePr === undefined ? {} : { autoMergePr: parsed.data.autoMergePr }),
         });
       }
       return c.json(store.getRun(id));

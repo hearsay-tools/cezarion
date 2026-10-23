@@ -553,6 +553,8 @@ interface ActiveRun {
   /** Autonomous mode (#autonomous): nudge eligible turn ends until done or the cap.
    *  Pending input, native asks and lifecycle waits retain priority. */
   autonomous?: boolean;
+  archiveWhenDone?: boolean;
+  autoMergePr?: boolean;
   /** An eligible boundary nudge refused until the current transport becomes ready.
    * Retains its slot, bounded by the existing idle timer; never represents a sent input. */
   autonomousNudgePending?: AgentSession;
@@ -3096,6 +3098,8 @@ export class RunManager {
       // auto-nudge reads `input.autonomous` (`execute`), but the record is the
       // only source those after-the-fact consumers have.
       autonomous: input.autonomous === true,
+      archiveWhenDone: input.archiveWhenDone,
+      autoMergePr: input.autoMergePr,
       notify: input.notify === true,
       // Persist the explicit opt-out so queued-run restart recovery and the
       // session Git routes can distinguish it from a removed isolated worktree.

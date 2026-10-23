@@ -7,7 +7,7 @@ import { createHash } from 'node:crypto';
  * Include every behavior-affecting input, including attachments and follow-up generation.
  * Only bookkeeping (the inbox id) stays out. The record stores this hash, never the payload.
  */
-const KEYS = ['task', 'workflow', 'steps', 'runner', 'model', 'effort', 'agentProfile', 'autonomous', 'worktree', 'systemPrompt', 'images', 'generateFollowups'] as const;
+const KEYS = ['task', 'workflow', 'steps', 'runner', 'model', 'effort', 'agentProfile', 'autonomous', 'worktree', 'systemPrompt', 'images', 'generateFollowups', 'archiveWhenDone', 'autoMergePr'] as const;
 
 export type ClientRequestPayload = Partial<Record<(typeof KEYS)[number], unknown>> & Record<string, unknown>;
 

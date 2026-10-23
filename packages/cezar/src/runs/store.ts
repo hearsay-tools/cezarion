@@ -249,6 +249,9 @@ export const runRecordSchema = z.object({
    *  Used by the autonomous nudge and terminal review policy. Continue/recovery
    *  preserve it; absent on legacy records means non-autonomous. */
   autonomous: z.boolean().optional(),
+  archiveWhenDone: contractRunRecordSchema.shape.archiveWhenDone,
+  autoMergePr: contractRunRecordSchema.shape.autoMergePr,
+  completionAction: contractRunRecordSchema.shape.completionAction,
   /** Task webhook opt-in (#589). Absent = off; `POST /runs/:id/notify` flips it at any time. */
   notify: z.boolean().optional().catch(undefined),
   /** The last task-webhook delivery's outcome (#589), written by `runs/webhook.ts`. */
@@ -2712,6 +2715,8 @@ export class RunStore extends EventEmitter {
     agentProfile?: string;
     generateFollowups?: boolean;
     autonomous?: boolean;
+    archiveWhenDone?: boolean;
+    autoMergePr?: boolean;
     /** Task webhook opt-in (#589), set at creation so the first transition is already covered. */
     notify?: boolean;
     worktree?: false;
@@ -2756,6 +2761,8 @@ export class RunStore extends EventEmitter {
       agentProfile: input.agentProfile,
       generateFollowups: input.generateFollowups,
       autonomous: input.autonomous,
+      archiveWhenDone: input.archiveWhenDone,
+      autoMergePr: input.autoMergePr,
       ...(input.notify ? { notify: true } : {}),
       worktree: input.worktree,
       groupId: input.groupId,
