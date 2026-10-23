@@ -165,6 +165,28 @@ describe('palette voice mode', () => {
     // bound: the debounce wait above may take up to 10 s on a loaded host.
   }, 20_000)
 
+  it('keeps the Will do row above a result the sentence also matches (#1476)', async () => {
+    mocks.voiceDecide.mockResolvedValue({
+      action: 'open',
+      decisionId: '00000000-0000-4000-8000-000000000001',
+      status: 'failed',
+      position: 'next',
+      confidence: 0.9,
+    } satisfies VoiceDecision)
+    renderPalette({ voice: true, runs: [run({ id: 'a', title: 'Fix flaky shard' })] })
+    const input = await openPalette()
+
+    // Every word of the sentence hits the task row, so its group ranks above the rest.
+    fireEvent.change(input, { target: { value: 'fix flaky' } })
+
+    // bound: the 300 ms preview debounce runs on real timers here, under a loaded host.
+    await screen.findByText('Open “Fix flaky shard” — next failed', undefined, { timeout: 10_000 })
+    const items = [...(content()?.querySelectorAll('[cmdk-item]') ?? [])]
+    expect(items[0]?.getAttribute('data-slot')).toBe('voice-row')
+    expect(items.some((item) => item.getAttribute('data-run-id') === 'a')).toBe(true)
+    // bound: the debounce wait above may take up to 10 s on a loaded host.
+  }, 20_000)
+
   it('a numbered candidate in the preview opens when clicked, before any Return', async () => {
     mocks.voiceDecide.mockResolvedValue({
       action: 'open',
