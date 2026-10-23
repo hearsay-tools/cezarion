@@ -73,6 +73,34 @@ describe('cezar-ci MCP server instructions', () => {
     } finally { await close(); }
   });
 
+  // hearsay-tools/cezarion#1465: the one-time schedule tools ride the automations opt-in.
+  it('lists the schedule tools only with CEZ_AUTOMATIONS=1', async () => {
+    const on = await connect({ CEZ_AUTOMATIONS: '1' });
+    try {
+      expect((await on.client.listTools()).tools.map(tool => tool.name)).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
+    } finally { await on.close(); }
+    for (const value of [undefined, '0', 'true']) {
+      const off = await connect(value === undefined ? {} : { CEZ_AUTOMATIONS: value });
+      try {
+        expect((await off.client.listTools()).tools.map(tool => tool.name)).not.toContain('cezar_schedule_task');
+        expect(off.client.getInstructions()).not.toContain('cezar_scheduled_tasks');
+      } finally { await off.close(); }
+    }
+  });
+
+  it('server instructions carry one trigger line per schedule tool', async () => {
+    const env = { CEZ_AUTOMATIONS: '1', CEZ_PREVIEW: '1' };
+    const { client, close } = await connect(env);
+    try {
+      const instructions = client.getInstructions()!;
+      expect(instructions).toContain('- cezar_schedule_task: load when work should start later as a new task (in an hour, tomorrow, next week) instead of keeping this session waiting.');
+      expect(instructions).toContain('- cezar_scheduled_tasks: load when you need to list, change, pause, resume or cancel a one-time scheduled task.');
+      for (const { definition } of cezarTools(env)) {
+        for (const key of Object.keys(definition.inputSchema.properties ?? {})) expect(instructions).not.toMatch(new RegExp(`\\b${key}\\b`));
+      }
+    } finally { await close(); }
+  });
+
   it('tells the agent to pin the port and that cezar starts the command', () => {
     const preview = cezarTools({ CEZ_PREVIEW: '1' }).find(tool => tool.definition.name === 'cezar_preview_serve')!;
     expect(preview.definition.description).toContain('pin the port (`vite --strictPort`, `next dev -p`)');

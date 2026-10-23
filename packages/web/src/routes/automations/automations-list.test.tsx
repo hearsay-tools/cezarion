@@ -24,9 +24,9 @@ function routed(handler: (path: string, init?: RequestInit) => Response | undefi
 const response = (automations: unknown[], extra: Partial<AutomationsResponse> = {}) =>
   ({ available: true, timeZone: 'Europe/Warsaw', scheduler: { state: 'scheduled' }, automations, ...extra }) as AutomationsResponse
 
-function mount(data: AutomationsResponse | undefined, error = '', refresh = vi.fn(async () => undefined)) {
+function mount(data: AutomationsResponse | undefined, error = '', refresh = vi.fn(async () => undefined), archived?: { value: boolean; onChange: (next: boolean) => void }) {
   const client = createQueryClient()
-  render(<QueryClientProvider client={client}><MemoryRouter><AutomationsList data={data} error={error} refresh={refresh} /></MemoryRouter></QueryClientProvider>)
+  render(<QueryClientProvider client={client}><MemoryRouter><AutomationsList data={data} error={error} refresh={refresh} {...(archived ? { archived: archived.value, onArchivedChange: archived.onChange } : {})} /></MemoryRouter></QueryClientProvider>)
   return refresh
 }
 
@@ -102,4 +102,72 @@ it('shows the recent activity of each automation on its card, newest first and c
   mount(response([schedule]))
   expect(await screen.findByText('No new matching pull requests.')).not.toBeNull()
   expect(screen.getByRole('heading', { name: 'Recent activity' })).not.toBeNull()
+})
+
+// hearsay-tools/cezarion#1465: one-time schedules in the list.
+const once = { ...base, id: 'o1', name: 'Check the rollout', kind: 'schedule', enabled: true, schedule: { type: 'once', at: '2030-01-15T09:00', timeZone: 'Europe/Warsaw' }, task, nextRunAt: '2030-01-15T08:00:00.000Z', onceStatus: 'waiting' }
+
+it('shows the once label and Waiting badge', () => {
+  routed(() => undefined)
+  mount(response([once, { ...once, id: 'o2', name: 'Missed one', enabled: false, nextRunAt: undefined, onceStatus: 'missed' }]))
+  expect(screen.getAllByText('once on Tue 15 Jan 2030 at 09:00 (Europe/Warsaw)')).toHaveLength(2)
+  expect(screen.getByText('Waiting')).not.toBeNull()
+  expect(screen.getByText('Missed')).not.toBeNull()
+  expect(screen.queryByText('Enabled')).toBeNull()
+  expect(screen.getAllByRole('button', { name: 'Cancel' })).toHaveLength(2)
+})
+
+it('Cancel confirms and posts', async () => {
+  const calls: { path: string; method?: string }[] = []
+  routed((path, init) => {
+    calls.push({ path, method: init?.method })
+    return path.endsWith('/cancel') ? json({ automation: { ...once, archived: { at: '2026-10-22T13:00:00Z', outcome: 'cancelled' } } }) : undefined
+  })
+  const refresh = mount(response([once]))
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(calls.some((call) => call.path.endsWith('/cancel'))).toBe(false)
+  expect(screen.getByText('Cancel “Check the rollout”? It will never run, and it moves to Archived.')).not.toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Keep' }))
+  expect(screen.queryByText(/It will never run/)).toBeNull()
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel schedule' }))
+  await waitFor(() => expect(calls.find((call) => call.path.endsWith('/o1/cancel'))?.method).toBe('POST'))
+  await waitFor(() => expect(refresh).toHaveBeenCalled())
+})
+
+// The Cancel button leaves the DOM when the confirm opens, so focus moves to Keep, not to <body>.
+it('opening the cancel confirm moves focus to Keep, and Keep returns it to Cancel', () => {
+  routed(() => undefined)
+  mount(response([once]))
+  fireEvent.click(screen.getByRole('button', { name: 'Cancel' }))
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Keep' }))
+  fireEvent.click(screen.getByRole('button', { name: 'Keep' }))
+  expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Cancel' }))
+})
+
+it('Archived filter requests archived=only and links the run', () => {
+  routed(() => undefined)
+  const onChange = vi.fn()
+  mount(response([once]), '', undefined, { value: false, onChange })
+  const filter = screen.getByRole('button', { name: 'Archived' })
+  expect(filter.getAttribute('aria-pressed')).toBe('false')
+  fireEvent.click(filter)
+  expect(onChange).toHaveBeenCalledWith(true)
+  cleanup()
+  const launched = { ...once, enabled: false, nextRunAt: undefined, onceStatus: 'archived', archived: { at: '2030-01-15T08:00:05Z', outcome: 'launched', runId: 'run-9' } }
+  const cancelled = { ...once, id: 'o3', name: 'Dropped', enabled: false, nextRunAt: undefined, onceStatus: 'archived', archived: { at: '2026-10-22T13:00:00Z', outcome: 'cancelled' } }
+  mount(response([launched, cancelled]), '', undefined, { value: true, onChange })
+  expect(screen.getByRole('button', { name: 'Archived' }).getAttribute('aria-pressed')).toBe('true')
+  expect(screen.getAllByText('Archived', { selector: '[data-slot="pill"], [data-slot="pill"] *' }).length).toBeGreaterThan(0)
+  expect(screen.getByRole('link', { name: 'Open task' }).getAttribute('href')).toBe('/tasks/run-9')
+  expect(screen.getByText('Cancelled — no task was started.')).not.toBeNull()
+  for (const name of ['Edit', 'Pause', 'Enable', 'Run now', 'Cancel']) expect(screen.queryByRole(name === 'Edit' ? 'link' : 'button', { name })).toBeNull()
+})
+
+// Review of #1465: an archived schedule stays inspectable. Its card links to a read-only detail.
+it('an archived card links to its read-only detail', () => {
+  routed(() => undefined)
+  const launched = { ...once, enabled: false, nextRunAt: undefined, onceStatus: 'archived', archived: { at: '2030-01-15T08:00:05Z', outcome: 'launched', runId: 'run-9' } }
+  mount(response([launched]), '', undefined, { value: true, onChange: vi.fn() })
+  expect(screen.getByRole('link', { name: 'Details' }).getAttribute('href')).toBe('/automations/o1')
 })

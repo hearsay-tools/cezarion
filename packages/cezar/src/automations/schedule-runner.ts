@@ -1,6 +1,14 @@
-import { nextOccurrence, occurrencesBetween } from '@open-mercato/cezar-contract/automation-schedule';
+import { nextOccurrence, occurrencesBetween, onceCutoff, onceInstant } from '@open-mercato/cezar-contract/automation-schedule';
 import type { AutomationLease, AutomationStore } from './store.ts';
-import { isScheduleAutomation, type AutomationReceipt, type ScheduleAutomationDefinition } from './types.ts';
+import {
+  isOnceSchedule,
+  isScheduleAutomation,
+  type AutomationArchive,
+  type AutomationDefinition,
+  type AutomationReceipt,
+  type OnceScheduleDefinition,
+  type ScheduleAutomationDefinition,
+} from './types.ts';
 
 /**
  * The schedule kind's evaluator (spec 2026-10-02-scheduled-automations § Lifecycle): what fires
@@ -19,6 +27,14 @@ import { isScheduleAutomation, type AutomationReceipt, type ScheduleAutomationDe
  * `skipped` and throws `ScheduleLeaseHeldError`, so the workspace floor retries it; by then the
  * winner's receipt turns the retry into a `duplicate`, never a second launch. Held leases and
  * duplicates are not failures and do not count towards the three-strike auto-pause.
+ *
+ * A one-time schedule (`once`, hearsay-tools/cezarion#1465) takes its own path in every entry
+ * point (`fireOnce`, `runOnce`, `launchOnce`) and never reaches the age rule above. It has no
+ * later occurrence: on time or late it launches once, past its cutoff it stops as `missed`, a
+ * failed launch stops it as `failed`, and a launched task archives it. Every launch path reserves
+ * the same receipt key, and the ARCHIVE INVARIANT holds the one-task guarantee across crashes: a
+ * `once` that has a `launched` receipt is archived, whatever the definition file says yet
+ * (`healArchive`). See `.ai/specs/2026-10-02-scheduled-automations.md` § One-time schedules.
  */
 
 export const SCHEDULE_GRACE_MS = 10 * 60_000;
@@ -27,7 +43,8 @@ export const SCHEDULE_AUTO_PAUSE_AFTER = 3;
 /** The cap the missed-occurrence count runs under: a count that reaches it is a lower bound. */
 const OCCURRENCE_LIMIT = 1_000;
 
-export type ScheduleTrigger = 'schedule' | 'catch-up' | 'manual';
+/** `late` and `retry` are a one-time schedule's own: a start after downtime, a failed launch fired again. */
+export type ScheduleTrigger = 'schedule' | 'catch-up' | 'manual' | 'late' | 'retry';
 
 export interface ScheduleOccurrence {
   /** The scheduled wall-time instant (UTC ISO); for `manual`, the launch time. */
@@ -113,7 +130,11 @@ export class ScheduleRunner {
   dueAt(definition: ScheduleAutomationDefinition): number | null {
     const state = this.handle.store.state(definition.id) ?? {};
     if (state.nextRunAt) return Date.parse(state.nextRunAt);
-    const next = nextOccurrence(definition.schedule, this.now(), this.handle.timeZone);
+    // A once is due at its instant even when that has passed: a lost state file, or an instant
+    // that passed while cezar was down, must still reach `fireOnce`, which decides late or missed.
+    const next = isOnceSchedule(definition)
+      ? onceInstant(definition.schedule)
+      : nextOccurrence(definition.schedule, this.now(), this.handle.timeZone);
     if (next === null) return null;
     this.handle.store.setState(definition.id, (current) => ({ ...current, revision: definition.revision, nextRunAt: new Date(next).toISOString() }));
     return next;
@@ -132,6 +153,7 @@ export class ScheduleRunner {
         this.handle.onChange?.(definition.id, current?.revision ?? definition.revision);
         return { result: 'skipped' } as const;
       }
+      if (isOnceSchedule(current)) return this.fireOnce(current);
       const now = this.now();
       const due = this.dueAt(definition);
       if (due === null) return { result: 'skipped' } as const;
@@ -165,6 +187,7 @@ export class ScheduleRunner {
     const outcome = await this.underLease(async () => {
       const current = this.currentUnderLease(definition);
       if (!current) return { result: 'skipped' } as const;
+      if (isOnceSchedule(current)) return this.runOnce(current, 'manual');
       const now = this.now();
       return this.launch(current, { at: new Date(now).toISOString(), trigger: 'manual' }, now, null);
     });
@@ -182,11 +205,160 @@ export class ScheduleRunner {
       if (this.handle.store.latestReceipts().get(receipt.receiptKey)?.status !== 'launch-error') {
         return { result: 'duplicate', occurrenceAt } as const;
       }
+      if (isOnceSchedule(current)) {
+        if (this.healArchive(current) || current.archived) return { result: 'duplicate', occurrenceAt } as const;
+        // An edit of the due time moved the key: the old receipt names a schedule that is gone.
+        if (receipt.receiptKey !== `${current.id}:${this.onceEventId(current)}`) return { result: 'duplicate', occurrenceAt } as const;
+        return this.launchOnce(current, { at: occurrenceAt, trigger: 'retry' }, this.rereserve(receipt));
+      }
       const reserved: AutomationReceipt = { ...receipt, status: 'reserved', error: undefined, updatedAt: new Date(now).toISOString() };
       this.handle.store.appendReceipt(reserved);
       return this.launchReserved(current, { at: occurrenceAt, trigger: 'manual' }, reserved, now, null);
     });
     return outcome ?? { result: 'lease-held', occurrenceAt };
+  }
+
+  /**
+   * The archive invariant: a `once` with a `launched` receipt is archived. A launch writes the
+   * receipt first and the archive second, so a crash in between leaves the receipt; every later
+   * action on the definition calls this first and writes the missing archive from it. Answers the
+   * archived definition, or `undefined` when the automation has no launched receipt.
+   */
+  healArchive(definition: OnceScheduleDefinition): AutomationDefinition | undefined {
+    const { store } = this.handle;
+    // Its own key only: a recurring schedule edited to `once` keeps its earlier launched receipts.
+    const launched = store.latestReceipts().get(`${definition.id}:${this.onceEventId(definition)}`);
+    if (launched?.status !== 'launched') return undefined;
+    const healed = store.archive(definition.id, {
+      at: new Date(this.now()).toISOString(),
+      outcome: 'launched',
+      ...(launched.runId ? { runId: launched.runId } : {}),
+      receiptId: launched.receiptId,
+    });
+    if (healed) this.handle.onChange?.(healed.id, healed.revision);
+    return healed ?? store.get(definition.id);
+  }
+
+  /** The receipt key every launch path of a `once` shares; an edit of `at` or `timeZone` moves it. */
+  private onceEventId(definition: OnceScheduleDefinition): string {
+    return `once:${definition.schedule.at}|${definition.schedule.timeZone}`;
+  }
+
+  /** The timer fired a `once`, or found it due at boot. Called under the lease, current revision. */
+  private async fireOnce(definition: OnceScheduleDefinition): Promise<ScheduleFireOutcome> {
+    const now = this.now();
+    const due = onceInstant(definition.schedule);
+    if (due === null) return { result: 'skipped' };
+    const occurrenceAt = new Date(due).toISOString();
+    if (due > now) return { result: 'skipped', occurrenceAt };
+    if (await this.settleOnce(definition)) return { result: 'duplicate', occurrenceAt };
+    // Settling may have found a crash-lost launch and left the schedule Failed: no automatic exit.
+    if (this.handle.store.get(definition.id)?.enabled === false) return { result: 'skipped', occurrenceAt };
+    const cutoff = onceCutoff(definition.schedule);
+    if (cutoff !== null && now > cutoff) {
+      const minutes = Math.round((now - due) / 60_000);
+      this.stopOnce(definition.id, 'missed');
+      await this.logOnce({
+        automationId: definition.id,
+        revision: definition.revision,
+        result: 'missed',
+        reason: `Missed: Cezarion was not running at ${wallTime(due, definition.schedule.timeZone)} and started ${minutes} minutes later, past its latest start. Nothing was launched; use Run now to start it.`,
+      });
+      return { result: 'skipped', occurrenceAt };
+    }
+    await this.handle.ready?.();
+    return this.runOnce(definition, now - due <= SCHEDULE_GRACE_MS ? 'schedule' : 'late');
+  }
+
+  /**
+   * Launches a `once` under the lease: through its existing receipt when an earlier launch failed
+   * (one key, at most one task), else a fresh reservation. A launched receipt archives instead.
+   */
+  private async runOnce(definition: OnceScheduleDefinition, trigger: ScheduleTrigger): Promise<ScheduleFireOutcome> {
+    const { store } = this.handle;
+    const due = onceInstant(definition.schedule);
+    const occurrenceAt = new Date(due ?? this.now()).toISOString();
+    if (this.healArchive(definition) || definition.archived) return { result: 'duplicate', occurrenceAt };
+    const occurrence: ScheduleOccurrence = { at: occurrenceAt, trigger };
+    const eventId = this.onceEventId(definition);
+    const key = `${definition.id}:${eventId}`;
+    let existing = store.latestReceipts().get(key);
+    if (existing?.status === 'reserved' && !store.isReservationInFlight(existing.receiptId)) {
+      await this.handle.reconcile?.();
+      if (this.healArchive(definition)) return { result: 'duplicate', occurrenceAt };
+      existing = store.latestReceipts().get(key);
+    }
+    if (existing?.status === 'launch-error') return this.launchOnce(definition, occurrence, this.rereserve(existing));
+    const receipt = store.reserveReceipt({ automationId: definition.id, revision: definition.revision, eventId, occurrenceAt });
+    if (!receipt) {
+      await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'duplicate', reason: 'A launch of this one-time schedule is already in flight.' });
+      return { result: 'duplicate', occurrenceAt };
+    }
+    return this.launchOnce(definition, occurrence, receipt);
+  }
+
+  private rereserve(receipt: AutomationReceipt): AutomationReceipt {
+    const reserved: AutomationReceipt = { ...receipt, status: 'reserved', error: undefined, updatedAt: new Date(this.now()).toISOString() };
+    this.handle.store.appendReceipt(reserved);
+    return reserved;
+  }
+
+  /** Receipt first, archive second: the order the archive invariant relies on. */
+  private async launchOnce(definition: OnceScheduleDefinition, occurrence: ScheduleOccurrence, receipt: AutomationReceipt): Promise<ScheduleFireOutcome> {
+    const { store } = this.handle;
+    if (!this.handle.launch) {
+      this.stopOnce(definition.id, 'failed');
+      store.appendReceipt({ ...receipt, status: 'launch-error', error: 'This cockpit cannot launch tasks.', updatedAt: new Date(this.now()).toISOString() });
+      return { result: 'detection-only', occurrenceAt: occurrence.at };
+    }
+    const started = Date.now();
+    let runId: string;
+    try {
+      ({ runId } = await this.handle.launch(definition, occurrence, receipt.receiptId));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      // The stop before the receipt: a launch-error receipt then always means a stopped schedule,
+      // and a crash between the two leaves `reserved`, which reconciliation settles as Failed.
+      this.stopOnce(definition.id, 'failed');
+      store.appendReceipt({ ...receipt, status: 'launch-error', error: message, updatedAt: new Date(this.now()).toISOString() });
+      await this.logOnce({ automationId: definition.id, revision: definition.revision, result: 'failed', reason: message, receiptId: receipt.receiptId, durationMs: Date.now() - started });
+      return { result: 'failed', occurrenceAt: occurrence.at };
+    }
+    store.appendReceipt({ ...receipt, status: 'launched', runId, updatedAt: new Date(this.now()).toISOString() });
+    const result = occurrence.trigger === 'schedule' ? 'launched' : occurrence.trigger === 'late' ? 'catch-up' : 'manual';
+    const trigger: AutomationArchive['trigger'] = occurrence.trigger === 'catch-up' ? 'late' : occurrence.trigger;
+    const archived = store.archive(definition.id, { at: new Date(this.now()).toISOString(), outcome: 'launched', runId, receiptId: receipt.receiptId, trigger });
+    store.setState(definition.id, (current) => ({ ...current, lastRunAt: occurrence.at, lastSuccessAt: new Date(this.now()).toISOString() }));
+    this.handle.onChange?.(definition.id, archived?.revision ?? definition.revision);
+    await this.logOnce({
+      automationId: definition.id, revision: definition.revision, result,
+      reason: onceReason(occurrence, this.now(), definition.schedule.timeZone),
+      receiptId: receipt.receiptId, runId, durationMs: Date.now() - started,
+    });
+    return { result, runId, occurrenceAt: occurrence.at };
+  }
+
+  /** A one-time log row is a record, not a gate: the stop or archive it follows has already landed. */
+  private async logOnce(entry: Parameters<AutomationStore['appendLog']>[0]): Promise<void> {
+    await this.handle.store.appendLog(entry).catch(() => {});
+  }
+
+  private stopOnce(id: string, outcome: 'failed' | 'missed'): void {
+    stopOnceSchedule(this.handle.store, id, outcome, this.handle.onChange);
+  }
+
+  /**
+   * Settles every unresolved receipt of a `once` before any decision on it: a `reserved` receipt
+   * no launch here is running is a crash leftover, perhaps another cockpit's after this one booted.
+   * Reconciliation turns it into `launched` (a task claims it; the archive then heals) or
+   * `launch-error` (the schedule is Failed). Answers the archived definition, as `healArchive`.
+   */
+  async settleOnce(definition: OnceScheduleDefinition): Promise<AutomationDefinition | undefined> {
+    const { store } = this.handle;
+    const leftover = [...store.latestReceipts().values()]
+      .some((row) => row.automationId === definition.id && row.status === 'reserved' && !store.isReservationInFlight(row.receiptId));
+    if (leftover) await this.handle.reconcile?.();
+    return this.healArchive(definition);
   }
 
   /**
@@ -256,7 +428,8 @@ export class ScheduleRunner {
       return { result: 'detection-only', occurrenceAt: occurrence.at };
     }
     const started = Date.now();
-    const result: 'launched' | 'catch-up' | 'manual' = occurrence.trigger === 'schedule' ? 'launched' : occurrence.trigger;
+    // Repeating schedules never carry the once-only `late` and `retry` triggers.
+    const result: 'launched' | 'catch-up' | 'manual' = occurrence.trigger === 'schedule' ? 'launched' : occurrence.trigger === 'catch-up' ? 'catch-up' : 'manual';
     let runId: string;
     try {
       ({ runId } = await this.handle.launch(definition, occurrence, receipt.receiptId));
@@ -385,11 +558,56 @@ function nextIso(definition: ScheduleAutomationDefinition, afterMs: number, time
   return next === null ? undefined : new Date(next).toISOString();
 }
 
+/** `2026-09-14 00:00 America/New_York`: a one-time schedule's own wall time. */
+function wallTime(ms: number, timeZone: string): string {
+  const text = new Intl.DateTimeFormat('sv-SE', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(ms));
+  return `${text} ${timeZone}`;
+}
+
+function onceReason(occurrence: ScheduleOccurrence, now: number, timeZone: string): string {
+  const due = Date.parse(occurrence.at);
+  const when = wallTime(due, timeZone);
+  switch (occurrence.trigger) {
+    case 'late': return `Started ${Math.round((now - due) / 60_000)} minutes late: the one-time schedule was due at ${when} while Cezarion was not running or the machine was asleep.`;
+    case 'manual': return `Started by hand; the one-time schedule was due at ${when}.`;
+    case 'retry': return `Retried a failed launch of the one-time schedule due at ${when}.`;
+    default: return `One-time schedule due at ${when}.`;
+  }
+}
+
 function reasonFor(occurrence: ScheduleOccurrence, timeZone: string): string {
   const when = new Intl.DateTimeFormat('en-GB', { timeZone, weekday: 'short', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).format(new Date(occurrence.at));
   switch (occurrence.trigger) {
     case 'schedule': return `Scheduled run at ${when}.`;
     case 'catch-up': return `Caught up the ${when} occurrence missed while cezar was not running or the machine was asleep.`;
     case 'manual': return `Started by hand at ${when}.`;
+    case 'late': return `Started late; it was due at ${when}.`;
+    case 'retry': return `Retried the ${when} launch.`;
   }
+}
+
+/**
+ * A `once` that ended without a task: pause the CURRENT revision and record why, in one write.
+ * Already paused, archived or gone: nothing to do (the reason still lands in state). Shared with
+ * receipt reconciliation, which settles a crash-lost launch into Failed the same way.
+ */
+export function stopOnceSchedule(
+  store: AutomationStore,
+  id: string,
+  outcome: 'failed' | 'missed',
+  onChange?: (automationId: string, revision: number) => void,
+): void {
+  store.reload();
+  const current = store.get(id);
+  const arm = () => ({ nextRunAt: undefined, onceOutcome: outcome });
+  if (current && !current.archived) {
+    const { revision, createdAt: _c, updatedAt: _u, id: _id, ...editable } = current;
+    try {
+      const stopped = store.update(id, revision, { ...editable, enabled: false }, arm);
+      onChange?.(stopped.id, stopped.revision);
+      return;
+    } catch { /* edited meanwhile: record the reason on whatever is current */ }
+  }
+  store.setState(id, (state) => ({ ...state, ...arm() }));
+  onChange?.(id, current?.revision ?? 0);
 }

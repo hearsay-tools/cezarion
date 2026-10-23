@@ -90,3 +90,15 @@ describe('toUpdateBody', () => {
     expect(body).toMatchObject({ events: ['issue.opened'], intervalSeconds: 300 })
   })
 })
+
+// hearsay-tools/cezarion#1465.
+describe('once', () => {
+  it('once round-trips through fromDefinition and toCreateBody', () => {
+    const schedule = { type: 'once' as const, at: '2030-01-15T09:00', timeZone: 'America/New_York', latestStartMinutes: 360 }
+    const draft = fromDefinition({ name: 'Check', kind: 'schedule', schedule, task: { prompt: 'Go' } })
+    expect(draft.schedule).toMatchObject(schedule)
+    expect(toCreateBody(draft).schedule).toEqual(schedule)
+    const { latestStartMinutes: _dropped, ...noLimit } = schedule
+    expect(toCreateBody(fromDefinition({ name: 'Check', kind: 'schedule', schedule: noLimit, task: { prompt: 'Go' } })).schedule).toEqual(noLimit)
+  })
+})

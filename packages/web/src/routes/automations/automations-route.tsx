@@ -6,6 +6,7 @@ import { useHealth } from '@/api/queries'
 import { CenteredState } from '@/components/centered-state'
 import { Button } from '@/components/ui/button'
 import { Link, useNavigate } from '@/lib/project-router'
+import { ArchivedAutomation } from './archived-view'
 import { AutomationEditor } from './editor'
 import { AutomationsList } from './automations-list'
 import { AutomationLogScreen } from './log'
@@ -15,7 +16,10 @@ import { useAutomations } from './use-automations'
 export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'edit' | 'log' }) {
   const { automationId } = useParams()
   const navigate = useNavigate()
-  const { data, error, refresh } = useAutomations()
+  // hearsay-tools/cezarion#1465: the list shows archived one-time schedules on request only.
+  const [archived, setArchived] = useState(false)
+  // A schedule looked up by id may be archived: its read-only record is still reachable by link.
+  const { data, error, refresh } = useAutomations(mode === 'list' ? (archived ? 'only' : undefined) : 'include')
   // Bumped by the editor's Reload and nothing else: a background revision change must reach the
   // user as the save-time 409, not as a form that silently resets under their typing.
   const [reloadToken, setReloadToken] = useState(0)
@@ -56,7 +60,7 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
   const found = data?.automations.find((item) => item.id === automationId)
 
   // The list owns its loading and error states, so it renders before the data guard below.
-  if (mode === 'list') return <AutomationsList data={data} error={error} refresh={refresh} />
+  if (mode === 'list') return <AutomationsList data={data} error={error} refresh={refresh} archived={archived} onArchivedChange={setArchived} />
 
   // The editor and the log read the forge and the zone from the list, so they wait for it too. A
   // failed REFRESH with data already in hand must not tear the screen down under an open draft.
@@ -70,9 +74,10 @@ export function AutomationsRoute({ mode = 'list' }: { mode?: 'list' | 'new' | 'e
   if (mode === 'new') return <AutomationEditor forge={forge} timeZone={data.timeZone} onSaved={saved} />
   if (mode === 'edit') {
     if (!found) return <PageFrame title="Automation not found" subtitle="This automation may have been removed."><Button asChild variant="outline"><Link to="/automations">Back to automations</Link></Button></PageFrame>
+    if (found.archived) return <ArchivedAutomation automation={found} timeZone={data.timeZone} onDeleted={saved} />
     return <AutomationEditor key={`${found.id}:${reloadToken}`} automation={found} forge={forge} timeZone={data.timeZone} onSaved={saved} onReload={() => void refresh().then(() => setReloadToken((token) => token + 1))} />
   }
   return automationId
-    ? <AutomationLogScreen automationId={automationId} automationName={found?.name} timeZone={data.timeZone} />
+    ? <AutomationLogScreen automationId={automationId} automationName={found?.name} timeZone={data.timeZone} readOnly={Boolean(found?.archived)} />
     : <PageState text="Automation not found." />
 }

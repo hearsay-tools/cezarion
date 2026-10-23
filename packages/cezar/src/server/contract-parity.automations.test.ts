@@ -7,6 +7,7 @@ import type {
   automationCheckSchema,
   automationDetailResponseSchema,
   automationLogResponseSchema,
+  automationCreateResponseSchema,
   automationResponseSchema,
   automationRetryResponseSchema,
   automationRunResponseSchema,
@@ -65,6 +66,10 @@ describe('src/contract automation schemas match the routes exactly', () => {
     (typeof client.api.v1.automations)[':id']['pause']['$post'],
     200
   >;
+  type CancelAutomation200 = InferResponseType<
+    (typeof client.api.v1.automations)[':id']['cancel']['$post'],
+    200
+  >;
   type CheckAutomation202 = InferResponseType<
     (typeof client.api.v1.automations)[':id']['check']['$post'],
     202
@@ -87,11 +92,12 @@ describe('src/contract automation schemas match the routes exactly', () => {
 
   type _Checks = [
     Assert<Exact<z.infer<typeof automationsResponseSchema>, Automations200>>,
-    Assert<Exact<z.infer<typeof automationResponseSchema>, CreateAutomation201>>,
+    Assert<Exact<z.infer<typeof automationCreateResponseSchema>, CreateAutomation201>>,
     Assert<Exact<z.infer<typeof automationDetailResponseSchema>, Automation200>>,
     Assert<Exact<z.infer<typeof automationResponseSchema>, UpdateAutomation200>>,
     Assert<Exact<z.infer<typeof automationResponseSchema>, EnableAutomation200>>,
     Assert<Exact<z.infer<typeof automationResponseSchema>, PauseAutomation200>>,
+    Assert<Exact<z.infer<typeof automationResponseSchema>, CancelAutomation200>>,
     Assert<Exact<z.infer<typeof automationCheckQueuedResponseSchema>, CheckAutomation202>>,
     Assert<Exact<z.infer<typeof automationRunResponseSchema>, RunAutomation202>>,
     Assert<Exact<z.infer<typeof automationLogResponseSchema>, AutomationLog200>>,

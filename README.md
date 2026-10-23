@@ -899,7 +899,9 @@ cez automation add --name 'Review PRs' --on pull_request.opened --every 5m --lab
 cez automation add --name 'Agent triage' --on issue.labeled --changed-label needs-agent --prompt 'Triage #{{github.number}}'
 cez automation create --file def.json [--enable]         # full JSON form; stdin when no flag is given
 cez automation update <id> --json '{"task":{"prompt":"…"}}'
-cez automation check <id> [--execute] · run <id> · list · show <id> · enable <id> · pause <id> · delete <id>
+cez automation add --name 'Check the rollout' --at 2026-10-29T09:00 --tz Europe/Warsaw --prompt 'Check the rollout'
+cez automation add --name 'Follow up' --in 7d --latest-start 6h --prompt 'Follow up on the migration'
+cez automation check <id> [--execute] · run <id> · list [--archived include|only] · show <id> · enable <id> · pause <id> · cancel <id> · delete <id>
 ```
 
 `add` and `create` send the same body and create the automation **paused** unless `--enable` is
@@ -922,6 +924,20 @@ execution cursor; it never launches tasks. For label triggers, the window applie
 event's time, so a newly added label can match an old issue even with history off. Historical
 label discovery revisits the rolling window because later comments can move issues between pages;
 receipts prevent those repeated observations from launching duplicate tasks.
+
+A **one-time schedule** (**Once** in the editor, `--at` or `--in` on `add`, `"schedule":
+{"type": "once", "at": "2026-10-29T09:00", "timeZone": "Europe/Warsaw"}` in JSON) starts one
+ordinary task at a wall-clock time in an explicit IANA zone. It is created paused like every
+automation; **Enable** arms it. When it is due, Cezarion starts the task and moves the schedule to
+**Archived** with a link to that task; **Run now** does the same at once, so it never runs twice.
+**Cancel** archives it without a task. An archived schedule cannot change, and the list hides it
+until you pick the **Archived** filter. Cezarion must be running at the due time. If it was not,
+the schedule starts on the next boot only within its **Latest start** (no limit by default; 10
+minutes to 30 days); after that it is marked **Missed** and stays until you edit, cancel or run it.
+A launch that fails marks it **Failed**, and nothing retries on its own; **Retry** or **Run now**
+relaunches the same receipt, so one schedule starts at most one task. Agents can create and manage
+one-time schedules with the `cezar_schedule_task` and `cezar_scheduled_tasks` tools, which exist
+only with `CEZ_AUTOMATIONS=1` and also create schedules paused unless the user asked for them to run.
 
 Automation list counters use two windows. **Launched** counts every stored task with that
 automation's provenance, across definition revisions, including each variant, completed and
@@ -1021,7 +1037,7 @@ Useful environment variables:
 | `CEZ_CLAUDE_SETTING_SOURCES` | When set, Claude agent runs also pass `--setting-sources <value>` (e.g. `user,project,local`). Unset or empty omits the flag. Provider verification is never given this flag. |
 | `CEZ_FOLLOWUPS=1` | Turn on the global follow-up **Inbox**: agents are asked to leave follow-ups in `todos.json` when they finish, and the Inbox view appears. Off by default — each task's own **Notes** handoff journal runs either way. |
 | `CEZ_ARCHIVE_ON_MERGE=1` | Archive settled task families after all associated pull requests merge. Off by default; only `1` enables this environment default. Saved project settings override global Tasks settings, which override the environment. Runs in the background while the cockpit is open, including unopened projects, without starting agents. Unarchive preserves restored tasks until a later merge. |
-| `CEZ_AUTOMATIONS=1` | Turn on **automations** (GitHub polls and schedules): the Automations view appears and Cezarion runs each enabled automation while it is open, launching an ordinary task per match or per occurrence. A schedule (daily, weekdays, weekly, every N hours, in the server's time zone) needs no GitHub remote; a GitHub automation polls on its interval. Off by default, and only the exact value `1` enables it — without it nothing polls or fires, the automations endpoints answer `409`, and the nav item is absent. Read at boot, so restart after changing it; definitions, receipts and high-watermarks are retained, so unsetting it and restarting restores the feature without migration or data loss. |
+| `CEZ_AUTOMATIONS=1` | Turn on **automations** (GitHub polls and schedules): the Automations view appears and Cezarion runs each enabled automation while it is open, launching an ordinary task per match or per occurrence. A schedule (daily, weekdays, weekly, every N hours, in the server's time zone, or once at a set time in a named zone) needs no GitHub remote; a GitHub automation polls on its interval. Off by default, and only the exact value `1` enables it — without it nothing polls or fires, the automations endpoints answer `409`, and the nav item is absent. Read at boot, so restart after changing it; definitions, receipts and high-watermarks are retained, so unsetting it and restarting restores the feature without migration or data loss. |
 | `CEZ_VOICE=1` | Turn on **voice mode** (experimental): the ⌘K palette understands a sentence such as “open the next finished task” or “answer yes”, and the server asks Jev (TypeSafe) to turn it into one action that the cockpit shows and runs. Needs `TYPESAFE_API_KEY` (read by the server only; `CEZ_DRY_RUN=1` uses a fake engine instead). Off by default, and only the exact value `1` enables it — without it the voice endpoints answer `409` and the palette is unchanged. Read at boot, so restart after changing it. |
 | `CEZ_PREVIEW=1` | Turn on **live preview** (experimental): agents register a dev server with the `cezar_preview_serve` tool, and the cockpit opens it in a headless Chromium on the host, docked next to the task. Cezarion first runs a registered command after you press Run and open. Agents can then use `cezar_preview_stop({ port, restart?: boolean })` to stop or restart their own Cezarion-started server with that unchanged approval; changed command, cwd or path needs Run and open again. Adopted servers cannot be stopped by this tool. Off by default, and only the exact value `1` enables it — without it the tool is not listed, its route and the preview WebSocket refuse, and `capabilities.preview` is `false`. Read at boot, so restart after changing it. |
 | `CEZ_PREVIEW_NO_SANDBOX=1` | Launch the preview's Chromium with `--no-sandbox`. Off by default and never added automatically, not even for root or in a container; use it only where Chromium's sandbox cannot start, and only for pages you trust. Only the exact value `1` applies. Read at boot. |
