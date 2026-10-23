@@ -1,7 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { createServer } from 'node:net';
-import { expect, it, vi } from 'vitest';
-import { withDelayedCommand, withRejectedCommand } from './owned-input-delivery.testkit.ts';
+import { existsSync } from 'node:fs';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { withHeldAck, withHeldResponse, withRejectedInput } from './owned-input-delivery.testkit.ts';
+import { HARNESS_ADAPTERS } from './harness-parity.testkit.ts';
 
 /** A delivered receipt; an observable harness may also have reported reading it (#505). */
 const delivered = (input: object, stored: { consumedAt?: string; awaitingRead?: true } | undefined) =>
@@ -11,7 +13,7 @@ import { driveSeam, promptFor, waitFor, withOwnedInputRun } from './harness-pari
 
 for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
   it.each(['fresh', 'continuation'] as const)(`${backend} %s rejected transport remains queued and replays the same input after reopening`, async mode => {
-    await withRejectedCommand(backend, async () => {
+    await withRejectedInput(backend, async () => {
       await withOwnedInputRun(backend, 'baseline', async fixture => {
         const { store, manager, runId, parentRunId } = fixture;
         manager.enqueueOwnedRun(runId);
@@ -42,7 +44,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
 
 for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
   it(`${backend} delayed ACK keeps the in-flight input in the 32 cap and merges concurrent queue writes exactly once`, async () => {
-    await withDelayedCommand(backend, async release => {
+    await withHeldAck(backend, async release => {
       await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
         manager.enqueueOwnedRun(runId);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
@@ -66,7 +68,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
   }, 60_000);
 
   it.each(['owned', 'scheduler'] as const)(`${backend} %s DONE before ACK closes only after acceptance without needing a phantom turn`, async origin => {
-    await withDelayedCommand(backend, async release => {
+    await withHeldAck(backend, async release => {
       await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
         manager.enqueueOwnedRun(runId);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
@@ -91,7 +93,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
 
 for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
   it(`${backend} a completed turn with a delayed ACK holds auto-end and resumes it after acceptance`, async () => {
-    await withDelayedCommand(backend, async release => {
+    await withHeldAck(backend, async release => {
       await driveSeam(backend, 'hold', {
         sessionOptions: { autoEndAfterFirstTurn: true },
         whileOpen: async (session, { v1 }) => {
@@ -113,7 +115,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
   }, 60_000);
 
   it.each(['finish', 'cancel', 'dispose'] as const)(`${backend} pending ACK settles without a delivery receipt or reopened lifecycle after %s`, async stop => {
-    await withDelayedCommand(backend, async release => {
+    await withHeldAck(backend, async release => {
       await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
         manager.enqueueOwnedRun(runId);
         await waitFor(() => store.getRun(runId)?.status === 'waiting');
@@ -170,7 +172,7 @@ for (const backend of ['claude', 'codex', 'opencode', 'pi', 'omp'] as const) {
 // The HTTP response and SSE error travel over independent sockets. Force the
 // error to reach the manager before releasing the successful transport ACK.
 it.each(['fresh', 'continuation'] as const)('opencode %s provider failure before HTTP ACK retains the accepted input receipt', async mode => {
-  await withDelayedCommand('opencode', async release => {
+  await withHeldAck('opencode', async release => {
     await withOwnedInputRun('opencode', 'baseline', async ({ store, manager, runId, parentRunId }) => {
       manager.enqueueOwnedRun(runId);
       await waitFor(() => store.getRun(runId)?.status === 'waiting');
@@ -214,7 +216,7 @@ it('opencode fixture reaches waiting when the requested runner port is occupied'
 }, 60_000);
 
 it.each(['unresponsive', 'cancel', 'finish'] as const)('opencode provider failure with %s ACK terminates without inventing delivery', async stop => {
-  await withDelayedCommand('opencode', async () => {
+  await withHeldAck('opencode', async () => {
     await withOwnedInputRun('opencode', 'baseline', async ({ store, manager, runId, parentRunId }) => {
       manager.enqueueOwnedRun(runId);
       await waitFor(() => store.getRun(runId)?.status === 'waiting');
@@ -236,3 +238,31 @@ it.each(['unresponsive', 'cancel', 'finish'] as const)('opencode provider failur
     });
   }, 'mock:provider-error');
 }, 60_000);
+
+describe('delivery control wrappers', () => {
+  afterEach(() => vi.unstubAllEnvs());
+  const wrappers = {
+    withRejectedInput: (body: () => Promise<void>) => withRejectedInput('codex', body),
+    withHeldAck: (body: () => Promise<void>) => withHeldAck('codex', body),
+    withHeldResponse: (body: () => Promise<void>) => withHeldResponse('codex', body),
+  };
+  it.each(Object.keys(wrappers) as Array<keyof typeof wrappers>)('%s scopes the control to its body and restores the environment', async name => {
+    const bin = HARNESS_ADAPTERS.codex.binEnv;
+    vi.stubEnv('CEZ_DRY_RUN', '1');
+    vi.stubEnv(bin, '/prior/codex');
+    delete process.env.CEZ_MOCK_DELIVERY_CONTROL;
+    const restored = () => {
+      expect(process.env.CEZ_MOCK_DELIVERY_CONTROL).toBeUndefined();
+      expect(process.env.CEZ_DRY_RUN).toBe('1');
+      expect(process.env[bin]).toBe('/prior/codex');
+    };
+    await wrappers[name](async () => {
+      expect(existsSync(process.env.CEZ_MOCK_DELIVERY_CONTROL!)).toBe(true);
+      expect(process.env.CEZ_DRY_RUN).toBe('0');
+      expect(process.env[bin]).toBe(HARNESS_ADAPTERS.codex.mockBin);
+    });
+    restored();
+    await expect(wrappers[name](async () => { throw new Error('body failed'); })).rejects.toThrow('body failed');
+    restored();
+  });
+});

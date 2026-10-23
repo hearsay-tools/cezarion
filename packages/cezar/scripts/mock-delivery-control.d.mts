@@ -9,6 +9,8 @@ export function createDeliveryControl(root: string, options: DeliveryControlOpti
   release(): void;
   lift(): void;
 };
+/** Throws on a malformed control. A kind outside `supportedKinds` makes the mock exit with
+ *  an error naming the variable when an input matches, before it answers that input. */
 export function readDeliveryControl(supportedKinds: readonly DeliveryKind[]): {
   kind: DeliveryKind;
   /** True when this input must be rejected now; a non-persistent rule claims once across processes. */

@@ -15,7 +15,7 @@ import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, RunMan
 import { currentUsage } from '../core/process-usage.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { withDelayedCommand } from '../core/owned-input-delivery.testkit.ts';
+import { withHeldAck } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 import {
@@ -359,7 +359,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           expect(store.getRun(w.id)?.status).toBe('queued');
           expect(semaphore.busy()).toBe(0);
         };
-        if (delayedAck) await withDelayedCommand('opencode', exercise, 'Workers are still live');
+        if (delayedAck) await withHeldAck('opencode', exercise, 'Workers are still live');
         else await exercise(() => {});
       });
     }

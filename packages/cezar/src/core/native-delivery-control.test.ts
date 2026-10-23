@@ -37,10 +37,21 @@ describe('native delivery control module', () => {
     ['a relative path', () => 'control.json'],
     ['a missing file', () => join(tempRoot(), 'missing.json')],
     ['invalid JSON', () => { const path = join(tempRoot(), 'bad.json'); writeFileSync(path, '{'); return path; }],
-    ['an unsupported kind', () => createDeliveryControl(tempRoot(), { kind: 'reject', match: 'x' }).path],
   ])('fails closed on %s', (_name, path) => {
     vi.stubEnv('CEZ_MOCK_DELIVERY_CONTROL', path());
     expect(() => readDeliveryControl(['hold-response'])).toThrow(/^CEZ_MOCK_DELIVERY_CONTROL: /);
+  });
+
+  it('runs unconfigured on an unsupported kind until an input matches, then exits with the variable named', () => {
+    const control = createDeliveryControl(tempRoot(), { kind: 'reject', match: 'reject-owned-turn' });
+    const delivery = reader(control, ['hold-response']);
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const exit = vi.spyOn(process, 'exit').mockImplementation(((code?: number) => { throw new Error(`exit ${code}`); }) as never);
+    try {
+      expect(delivery.holdResponse('other')).toBeUndefined();
+      expect(() => delivery.holdResponse('x reject-owned-turn')).toThrow('exit 1');
+      expect(stderr).toHaveBeenCalledWith('CEZ_MOCK_DELIVERY_CONTROL: this native mock does not support reject\n');
+    } finally { stderr.mockRestore(); exit.mockRestore(); }
   });
 
   it('claims a rejection once across readers', () => {
@@ -87,7 +98,7 @@ describe('native delivery control module', () => {
     expect(delivery.holdResponse('other')).toBeUndefined();
     expect(control.held()).toBe(false);
     let resolved = false;
-    const pending = delivery.holdResponse('mock:hold').then(() => { resolved = true; });
+    const pending = delivery.holdResponse('mock:hold')!.then(() => { resolved = true; });
     expect(control.held()).toBe(true);
     await new Promise(resolve => setImmediate(resolve));
     expect(resolved).toBe(false);
@@ -114,7 +125,7 @@ const EXEMPT: Partial<Record<RunnerId, Partial<Record<DeliveryKind, string>>>> =
   cursor: { reject: 'U13' },
 };
 const ENV_BASE = { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_ARGS_FILE: '' };
-type Wire = { v1: AgentEvent[] };
+type Wire = { v1: readonly AgentEvent[] };
 /** A baseline turn on a fresh native subprocess, then `exercise` once it has ended. */
 function seam(runner: RunnerId, path: string, exercise?: (session: AgentSession, wire: Wire) => Promise<void>) {
   return driveSeam(runner, 'baseline', {
@@ -237,8 +248,12 @@ describe.each(RUNNER_IDS)('%s native delivery control', runner => {
     const criterion = EXEMPT[runner]?.[kind];
     if (criterion) it(`${kind} is the named exemption ${criterion}, and the mock fails closed`, async () => {
       expect(exemptionFor(criterion, runner)?.kind).toBe('capability-absent');
-      const unsupported = control({ kind, match: 'x' });
-      const observation = await driveSeam(runner, 'baseline', { spec: { env: { ...ENV_BASE, CEZ_MOCK_DELIVERY_CONTROL: unsupported.path } } });
+      const unsupported = control({ kind, match: 'unsupported-control' });
+      // Unmatched inputs run as if unconfigured: a mixed-runner fixture reaches this mock too.
+      expect((await driveSeam(runner, 'baseline', { spec: { env: { ...ENV_BASE, CEZ_MOCK_DELIVERY_CONTROL: unsupported.path } } }))
+        .v1.some(event => event.type === 'turn-end')).toBe(true);
+      const observation = await driveSeam(runner, 'baseline', {
+        spec: { userPrompt: 'mock:agent-echo unsupported-control', env: { ...ENV_BASE, CEZ_MOCK_DELIVERY_CONTROL: unsupported.path } } });
       expect(observation.v1.some(event => event.type === 'turn-end')).toBe(false);
       expect(JSON.stringify(observation)).toContain(`CEZ_MOCK_DELIVERY_CONTROL: this native mock does not support ${kind}`);
     }, 60_000);

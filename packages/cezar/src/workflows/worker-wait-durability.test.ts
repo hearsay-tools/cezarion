@@ -14,7 +14,6 @@ import { RunManager } from './run.ts';
 import { currentUsage } from '../core/process-usage.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { withDelayedCommand } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 import {

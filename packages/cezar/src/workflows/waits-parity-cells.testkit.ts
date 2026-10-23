@@ -21,7 +21,7 @@ import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt, MONITORING_TEXT } from './monitoring-turn.testkit.ts';
 import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
-import { withDelayedCommand, withHeldPrintResponse, withRejectedCommand } from '../core/owned-input-delivery.testkit.ts';
+import { withHeldAck, withRejectedInput } from '../core/owned-input-delivery.testkit.ts';
 import { ciNativeMessages, gatedProviderFailure, MESSAGE_WAKE_OPENING, persistentWakeFailure, thenSay, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
 
 // hearsay-tools/cezarion#1233: every runner opens, cancels and survives CI and timer waits on its
@@ -688,8 +688,8 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           // An acknowledgement after the wake turn ended still leaves the run in the question's park.
           await answerQuestion(run.id, askSeq);
         };
-        if (runner === 'cursor') await withHeldPrintResponse(exercise);
-        else await withDelayedCommand(runner as 'codex' | 'opencode' | 'pi' | 'omp', exercise);
+        // Cursor print acknowledges on its first model work, which the control holds after init.
+        await withHeldAck(runner as 'codex' | 'opencode' | 'pi' | 'omp' | 'cursor', exercise);
       });
 
       it(`${runner} U13 a wait result beside a pending portable question whose acknowledgement is rejected stays resolved, is retried, and the question stays answerable`, async () => {
@@ -697,7 +697,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           expect(exemptionFor('U13', runner)?.kind).toBe('capability-absent');
           return;
         }
-        await withRejectedCommand(runner as 'codex' | 'opencode' | 'pi' | 'omp', async () => {
+        await withRejectedInput(runner as 'codex' | 'opencode' | 'pi' | 'omp', async () => {
           retryAtOnce();
           const { run, timer, askSeq } = await timerBesideQuestion(runner, `reject-owned-turn${runner === 'opencode' ? ' mock:reject-agent-post' : ''}`);
           fireTimer(timer.id);
@@ -718,7 +718,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           expect(exemptionFor('U13', runner)?.kind).toBe('capability-absent');
           return;
         }
-        await withRejectedCommand(runner as 'codex' | 'opencode' | 'pi' | 'omp', async lift => {
+        await withRejectedInput(runner as 'codex' | 'opencode' | 'pi' | 'omp', async lift => {
           retryAtOnce();
           const { run, timer, askSeq } = await timerBesideQuestion(runner, `reject-owned-turn${runner === 'opencode' ? ' mock:reject-agent-post' : ''}`);
           fireTimer(timer.id);
@@ -1760,7 +1760,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
           expect(exemptionFor('U20a', runner)?.kind).toBe('capability-absent');
           return;
         }
-        await withDelayedCommand(runner as 'codex' | 'opencode' | 'pi' | 'omp', async release => {
+        await withHeldAck(runner as 'codex' | 'opencode' | 'pi' | 'omp', async release => {
           const { p, w, progress } = await conversingParent(runner);
           const refusal = `Workers are still live: ${w.id}.`;
           const turns = turnEnds(p.id);
@@ -2156,7 +2156,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
             expect(nudgeNotes(p.id)).toHaveLength(1);
           };
           if (runner === 'opencode' && variant === 'silent') {
-            await withDelayedCommand('opencode', exercise, 'mock:ack-only');
+            await withHeldAck('opencode', exercise, 'mock:ack-only');
           } else await exercise(() => {});
         });
       }

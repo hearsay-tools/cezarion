@@ -39,11 +39,21 @@ export function readDeliveryControl(supportedKinds) {
   try {
     if (!path || !isAbsolute(path)) throw new Error('expected an absolute control path');
     config = validate(JSON.parse(readFileSync(path, 'utf8')));
-    if (!supportedKinds.includes(config.kind)) throw new Error(`this native mock does not support ${config.kind}`);
   } catch (error) {
     throw new Error(`${ENV}: ${error.message}`, { cause: error });
   }
-  const matches = (kind, text) => config.kind === kind && typeof text === 'string' && text.includes(config.match);
+  // The variable reaches every mock a fixture starts, so a mixed-runner fixture (a Claude
+  // worker under an OMP parent) sees a kind its own wire cannot carry. Such a mock runs
+  // unconfigured until an input matches; then it fails closed before it answers.
+  const supported = supportedKinds.includes(config.kind);
+  const matches = (kind, text) => {
+    if (typeof text !== 'string' || !text.includes(config.match)) return false;
+    if (!supported) {
+      process.stderr.write(`${ENV}: this native mock does not support ${config.kind}\n`);
+      process.exit(1);
+    }
+    return config.kind === kind;
+  };
   const released = () => existsSync(`${path}.released`);
   return {
     kind: config.kind,
