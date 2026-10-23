@@ -4,6 +4,8 @@ Status: approved by the owner (2026-10-17). Phase 1: hearsay-tools/cezarion#1233
 calls its build made are under [Phase 1 decisions](#phase-1-decisions). On 2026-10-18 the owner
 split the human wait out of `cezar_wait` into its own tool, `cezar_ask`, with a required card
 that may hold open questions (hearsay-tools/cezarion#1234, [Phase 2 decisions](#phase-2-decisions)).
+The process wait kind was added for hearsay-tools/cezarion#1446 (owner approved 2026-10-23,
+[Process wait decisions](#process-wait-decisions)).
 Supersedes the narrow re-arm design for hearsay-tools/cezarion#1197 and absorbs
 hearsay-tools/cezarion#1226 (agent-facing cancel).
 
@@ -1266,3 +1268,196 @@ tables hold for the states they list. One row per exit.
 
 Every state 4b changes keeps a default exit that needs no human except the open question itself,
 whose only exit is a human answer by design (phase 2a).
+
+## Process wait decisions
+
+hearsay-tools/cezarion#1446 adds a fifth kind, `process`. An agent that starts a long command
+with its own shell tool passes the PID to `cezar_wait`, ends its turn, and is woken when the
+command ends. Cezar only watches: it runs no command and sends no signal, so `allowedTools`,
+`bashAllowlist`, the Codex sandbox and approvals still govern the command itself. Claude's
+native background-task notification covers only Claude; Codex, OpenCode, pi, Cursor and omp
+have no wake on a background command, and agents guessed timers or held turns open instead
+(the issue's scan: 3,024 shell calls at the 600 s limit, 295 `gh … --watch` calls).
+
+Calls made by the owner (2026-10-23):
+
+- **Kind name `process`.**
+- **Ownership: three refusals only.** The wait reads liveness and one file; it adds no capability
+  the agent's shell lacks (`kill -0`, `ps`). Cezar refuses another user's PID, the agent's own
+  process and Cezar's own PID (and PID ≤ 1), because each of those can only time out or cannot
+  be identified. There is no positive "belongs to this task" check: it would guard nothing, cost
+  a slow macOS path, and refuse legitimate `setsid` or `env -i` jobs.
+- **Approach: a process supervisor shaped like the CI watcher.** A `ProcessWaitSupervisor` with
+  `watch(request, signal) → Promise<ProcessWaitResult>` sits beside `CiWatcherSupervisor`.
+  `armWait`, `disarmWait`, `settleWait`, restart re-arming and the terminal paths reuse the CI
+  watch path. Tests replace `watch` as the CI cells do (`vi.spyOn(….prototype, 'watch')`).
+- **Recommendations taken as written:** each process wake counts against the automatic-wake
+  budget; the kind is refused with `timers_disabled` when `monitoringWakeIntervalMinutes()` is
+  `null`; the `waitingOn` order is human > usage limit > workers > CI > process > timer; the poll
+  interval is 5 s.
+
+### The request
+
+`cezar_wait({ kind: 'process', pid, exit_file?, timeout_seconds?, note? })`:
+
+| Field | Bounds |
+| --- | --- |
+| `pid` | integer ≥ 2 |
+| `exit_file` | optional absolute or worktree-relative path, at most 4,096 characters |
+| `timeout_seconds` | 1–7,200, default 1,800 (the CI bounds; the flat schema already advertises them) |
+| `note` | optional, at most 512 characters, as a timer's |
+
+The flat MCP schema gains `pid` and `exit_file`; `timeout_seconds` and `note` gain the process
+kind in their descriptions. The tool description gains this text about `exit_file`:
+
+> kind "process" wakes you when a command you started in the background ends. Start it as
+> `sh -c '( cmd > "$TMPDIR/build.log" 2>&1; echo $? > "$TMPDIR/build.exit" ) > /dev/null 2>&1 & echo $!'`
+> and pass the printed PID as `pid` and the exit file as `exit_file`, so the wake reports the exit
+> code. Use a new exit file name for each command: a file that already exists resolves the wait at once.
+
+The `sh -c` wrapper is required: omp's built-in shell prints no `$!` (checked 2026-10-23), and a
+real `sh` gives the same recipe on every runner. The redirect keeps the job from holding the shell
+tool's stdout open; `$TMPDIR` is the run's Cezar temp directory, outside the worktree, so autosave
+never commits the log or the exit file. With `CEZ_AGENT_TMPDIR=0`, `$TMPDIR` is the host's and the
+`exit_file_outside` refusal names the allowed directories (the worktree and, when on, the Cezar
+temp directory), so the agent can choose a git-ignored worktree path instead.
+
+### Registration
+
+In this order, refusing with a typed code:
+
+1. The run gates of every kind (`registrationGate`), then `WAIT_LIMIT`, then `timers_disabled` and
+   `wake_budget_spent` as for a timer.
+2. `exit_file`, when given, resolves against the worktree, then through `realpath` of its parent
+   directory (the file itself may not exist yet). It must sit inside the run's worktree or the
+   directory `resolveAgentTmpDir(dataDir, runId)` returns, with no symlink leaving either.
+   Otherwise `exit_file_outside`. With `CEZ_AGENT_TMPDIR=0` only the worktree qualifies.
+3. `pid ≤ 1`, `process.pid`, or the PID of a session leader Cezar spawned (the grouped leaders in
+   `core/session-process.ts`) → `process_not_allowed`.
+4. `kill(pid, 0)` answering `EPERM` → `process_not_owned`.
+5. The start token is read with `processStartToken`. A PID already gone is no error: the
+   command was fast, and the wait opens and resolves at its first check (exit file, else `exited`).
+
+The exit file is checked before the PID at every tick, so a command that already finished and
+wrote its file reports its code even when its PID was since reused.
+
+**Idempotency.** An open process wait with the same `pid`, the same start token and the same
+`exit_file` is returned instead of a second one.
+
+**Entry.** `processWaitEntrySchema`: the base fields, `kind: 'process'`, `deadline`,
+`timeoutSeconds`, `pid`, optional `startToken`, `exitFile` (the resolved absolute path),
+`note`, and `result` once resolved.
+
+### Resolution
+
+The supervisor polls every 5 s and resolves the first of:
+
+| Outcome | When | Wake text says |
+| --- | --- | --- |
+| `exit_file` | the exit file exists | `exited with code N`, or `exit file present, not an exit code` |
+| `exited` | the PID is gone, a zombie, or its start token differs | `exited, code unknown` |
+| `deadline` | the deadline passed with the process still running | `still running at the deadline` (distinct from an exit) |
+| `error` | the probe threw | `could not be checked` with a short diagnostic; never reads as success |
+
+Cezar reads at most 64 bytes of the exit file, takes the first line, and reports it only when it
+parses as an integer in −2^31…2^31−1. No other byte reaches the agent, a record or an event. A
+symlink that now leaves the allowed directories reads as `error`.
+The wake text names the PID and note and tells the agent to read its own log.
+
+### Parking, slot and budget
+
+- **Slot:** a process park keeps its slot like CI and timer (`keepsSlot`), arms no idle timer, and
+  so keeps the session (and any runner-tracked background job) open while it waits.
+- **Budget:** a resolution at the spent budget is cancelled with the cap note, as a timer's is
+  (`cancelTimersAtCap` generalised), and a `budget` human wait opens when nothing else is open.
+  A delivered process wake is charged as a timer wake is.
+- **Cancel, Stop, Finish, delete:** the wait is cancelled and its watch aborted. The process is not
+  signalled (hearsay-tools/cezarion#1311 owns ending escaped jobs).
+- **Restart:** recovery re-arms from the stored `pid`, `startToken` and `exitFile`; an overdue
+  deadline resolves at once; a different boot makes the token differ, so it resolves `exited`.
+  The wake goes through the scheduler-owned continuation when no session is live.
+
+### Display
+
+- `waitingOn` gains `{ kind: 'process', waitId, pid, deadline, note? }`, ranked after CI.
+- `deriveAttention` adds the rung `waiting for a command` (bucket running, ring), after CI and
+  before timer. The open-wait list and footer say `process wait <id> on PID N (note), deadline …`.
+- The cockpit's waits section (`run-waits.tsx`) shows the open wait (PID, note, deadline) and,
+  once settled, its outcome and exit code. The sidebar meta line follows the timer's.
+
+### Store and compatibility
+
+- `RUN_DATABASE_SCHEMA_VERSION` 9, no table change, as every earlier kind did: a schema-8 build
+  has no path that skips an unknown `kind` in `waits` and would drop the row's wait list.
+  `BACKWARD_COMPATIBILITY.md` gets the additive entry, the schema-9 downgrade note, the new
+  refusal codes and the tool-surface change; `AGENT_PROTOCOL.md` names the kind.
+
+### Background jobs across a park
+
+Checked on the build host on 2026-10-23, by reading each runner's shell process's `pid`, `pgid`
+and `sid` (live Cezar sessions for Claude and Codex, one `-p`/`run` call each for OpenCode, pi and
+omp):
+
+| Runner | Where a shell-tool command runs | A `sh -c '( … ) & echo $!'` job |
+| --- | --- | --- |
+| claude | `/bin/bash -c` in a new session (`sid` = its pid) | Leaves the agent's process group |
+| codex | `bash` in a new session, same PID namespace as Cezar | Leaves the group; its PID is visible to Cezar |
+| opencode | `bash` in a new session | Leaves the group |
+| pi | `bash` in a new session | Leaves the group |
+| omp | its built-in shell, in omp's own process (`$$` is omp); `$!` is empty | With the `sh -c` wrapper: a new session, reparented to `systemd --user`, still alive after omp exits |
+| cursor | `detached: true` (hearsay-tools/cezarion#1311) | Leaves the group |
+
+So Cezar's group signal at session close (`core/session-process.ts`, hearsay-tools/cezarion#1286)
+never reaches the job: it survives an idle close, a provider failure, a clean close, Cursor's
+per-turn exit and a Cezar restart, and the wait keeps watching it through all of them. The other
+side of the same fact: Stop and Finish do not end it either (hearsay-tools/cezarion#1311). No
+runner gets a refusal or a parity exemption. The tool description says the job outlives the session
+and is not stopped by Cezar.
+
+### Verification
+
+- New `RUNNER_IDS` parity part `process`, one file per runner (`waits-<runner>-process-parity.test.ts`)
+  registered in `WAIT_PARITY_FILES` and the guard, with a stubbed supervisor: U1p register on the
+  native wire, park and wake with the exit code (and `exited, code unknown` without an exit file);
+  U2p beside a timer, the other stays open in the footer; U4p cancel delivers nothing;
+  U9p provider failure and clean close leave it recoverable; U17p restart with no live session
+  re-arms and delivers through the continuation. Each proven red without the change.
+- Unit tests for the real supervisor against real child processes: exit file, kill, PID reuse
+  (token mismatch), deadline, confinement and the 64-byte read.
+- Contract tests: the entry and request schemas, `computeWaitingOn` order, the attention rung.
+- Cockpit unit tests for the waits section.
+
+### Transitions out (process wait)
+
+Shipped defaults: `maxParallel` 2, `maxMonitoringSessions` 2, wake budget 40,
+`IDLE_TIMEOUT_MS` 15 min, poll 5 s, deadline default 30 min and at most 2 h.
+
+| State | Trigger | Who or what fires it | Behavior at shipped defaults |
+| --- | --- | --- | --- |
+| `waiting`, process wait open, session live | The exit file appears | The process supervisor | Resolves `exit_file` with the code; the wake turn starts at once (slot held) |
+| | The process is gone, a zombie, or its token differs | The process supervisor | Resolves `exited`; wake at once |
+| | The deadline passes | The process supervisor | Resolves `deadline` ("still running"); wake at once |
+| | The probe fails | The process supervisor | Resolves `error`; wake at once; never success |
+| | Another wait resolves, or a human or worker message arrives | That wait's resolver, `deliverMessage` | The wake delivers it; the process wait stays open in the footer; the turn end re-parks |
+| | Claude's native background-task notification | The runner (unsolicited turn) | `resumeParkedRun`; the process wait stays open; the turn end decides again |
+| | `cezar_cancel_wait` | The agent, in a later turn | Cancelled; nothing delivered |
+| | Stop, Finish, cancel, deletion | The user | Cancelled without a wake; the process is not signalled |
+| | Resolution at the spent wake budget | `resolveWait` | Cancelled with the cap note; a `budget` human wait opens if nothing else is open |
+| | Provider failure or clean session close | The runner | The run stays `waiting`; the supervisor keeps watching; the resolution reopens the run through the scheduler continuation |
+| | Cezar restarts | Recovery | Re-armed from the stored PID, token and exit file; overdue deadline resolves at once; wake through the continuation |
+| `waiting`, process wait open, no live process between turns (Cursor print, after a restart) | Any trigger above | As above | Same outcomes; every wake goes through the continuation |
+| `waiting`, process wait resolved, wake pending | A slot frees | The scheduler | The wake turn delivers the result; `waiting for capacity` until then |
+| | Three failed deliveries | The delivery bound | The run settles `failed` and keeps the result for Continue |
+
+Every row has a default exit that needs no human: the supervisor's next poll or the deadline
+(at most 2 h) always fires.
+
+Calls made by the agent (owner to check):
+
+- New refusal codes `exit_file_outside`, `process_not_allowed`, `process_not_owned`.
+- Registration with a PID already gone opens and resolves at once instead of refusing.
+- The exit file is read only up to 64 bytes and only an integer first line is reported.
+- Idempotency keys on PID, start token and exit file, whatever the timeout or note.
+- A separate parity part, so the existing per-runner files stay under their duration budget.
+- The recommended command uses an `sh -c` wrapper on every runner, for omp's sake.
+- `CEZ_AGENT_TMPDIR=0` keeps the worktree-only confinement; the refusal says where to write instead.

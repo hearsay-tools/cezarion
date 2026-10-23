@@ -821,8 +821,9 @@ runner DOES — is §7, and a new backend has to satisfy both.
 
 A run's waits live in one list on its record (`waits`, settled ones in `lastWaits`),
 typed by `packages/contract/src/waits.ts`; spec `.ai/specs/2026-10-17-unified-waits.md`.
-There are three kinds: `ci`, `timer` and, since phase 2, `human`. The agent opens the first two with
-`cezar_wait` and a human wait with `cezar_ask`. A wait is an observation the agent asked for;
+There are four agent kinds: `ci`, `timer`, `human` (since phase 2) and `process`
+(hearsay-tools/cezarion#1446); Cezar also opens `worker` waits. The agent opens `ci`, `timer`
+and `process` waits with `cezar_wait` and a human wait with `cezar_ask`. A wait is an observation the agent asked for;
 it never grants merge, review acceptance, or task-completion authority. There is no
 wait marker and no delegation prerequisite. `claude-cli` uses the Claude adapter.
 
@@ -832,7 +833,15 @@ number, no userinfo, port, query or fragment); `timeout_seconds` is an integer
 1–7,200, default 1,800. `cezar_wait({ kind: 'timer', seconds, note? })` opens a
 timer of 60–7,200 seconds with a note of at most 512 characters. Unknown keys, a
 field that does not fit its kind, and `kind: "human"` are `invalid_request`; the last one's
-message names `cezar_ask`. The tool advertises one flat object schema, because the Anthropic
+message names `cezar_ask`. `cezar_wait({ kind: 'process', pid, exit_file?, timeout_seconds?, note? })`
+waits for a background job the agent started to end (hearsay-tools/cezarion#1446). Cezar checks
+the exit file, then whether the PID, with its recorded start identity, still runs, every
+5 seconds until the deadline (default 1,800, at most 7,200 seconds). It reports `exited with code N`
+from the exit file's first line, or `exited, code unknown`, and never signals or stops the
+process. `exit_file` must resolve inside the task worktree or the task temp directory
+(`exit_file_outside`); Cezar's own PID and a session leader are `process_not_allowed`, and
+another user's process is `process_not_owned`. A process wait keeps its slot and counts
+against the automatic-wake budget, like a timer. The tool advertises one flat object schema, because the Anthropic
 tool API refuses a top-level union; the server validates the discriminated union. Every
 answer carries the wait id, its kind, its absolute deadline and `open_waits`.
 
