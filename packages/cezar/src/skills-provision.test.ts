@@ -12,6 +12,7 @@ import {
   provisionSkills,
   removeProvisionedSkills,
   skillClosure,
+  withdrawProvisionedSkills,
 } from './skills-provision.ts';
 import { seedTeamDirSkillClone } from './skills-remote.testkit.ts';
 
@@ -276,6 +277,32 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     expect(readFileSync(join(worktree, '.claude', 'skills', 'mine', 'SKILL.md'), 'utf8')).toBe('mine\n');
     expect(existsSync(join(home, 'skills-src', 'lead-skill', 'SKILL.md'))).toBe(true);
     expect(existsSync(await manifestPath())).toBe(false);
+  });
+
+  it('withdrawProvisionedSkills removes only the named owned entries and keeps the rest (#1494)', async () => {
+    await provisionSkills(worktree, [lead], [lead, helper]);
+    // The user replaced one of cezar's helper copies: that one is theirs now.
+    const mine = join(worktree, '.cursor', 'skills', 'helper-skill');
+    rmSync(mine, { recursive: true, force: true });
+    mkdirSync(mine);
+    writeFileSync(join(mine, 'SKILL.md'), 'MINE\n');
+    await withdrawProvisionedSkills(worktree, new Set(['helper-skill']));
+    for (const dir of ['.claude', '.agents']) {
+      expect(existsSync(join(worktree, dir, 'skills', 'helper-skill')), dir).toBe(false);
+      expect(readFileSync(join(worktree, dir, 'skills', '.gitignore'), 'utf8')).not.toContain('/helper-skill');
+    }
+    expect(readFileSync(join(mine, 'SKILL.md'), 'utf8')).toBe('MINE\n');
+    for (const dir of AGENT_DIRS) expect(existsSync(join(worktree, dir, 'skills', 'lead-skill', 'SKILL.md')), dir).toBe(true);
+    const manifest = JSON.parse(readFileSync(await manifestPath(), 'utf8')) as { roots: string[]; entries: Array<{ skill?: string }> };
+    expect(manifest.roots).toEqual(['lead-skill']);
+    expect(manifest.entries.some((entry) => entry.skill === 'helper-skill')).toBe(false);
+  });
+
+  it('withdrawProvisionedSkills drops a withdrawn root so a later pass does not bring it back (#1494)', async () => {
+    await provisionSkills(worktree, [lead], [lead, helper]);
+    await withdrawProvisionedSkills(worktree, new Set(['lead-skill']));
+    await provisionSkills(worktree, [], [lead, helper]);
+    for (const dir of AGENT_DIRS) expect(existsSync(join(worktree, dir, 'skills', 'lead-skill')), dir).toBe(false);
   });
 
   it('falls back to a copy when a link cannot be made', async () => {

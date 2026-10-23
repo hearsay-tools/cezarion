@@ -87,7 +87,7 @@ import { resolveCapabilities } from '../server/capabilities.ts';
 import { automationCliCommand, automationsPrompt } from '../automations/prompts.ts';
 import { createAutomationSkill } from '../automations/builtin-skill.ts';
 import { getTeamSkillsCached, materializeSkillToCache, TEAM_SKILL_AGENT_DIRS, waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
-import { MAX_SKILL_CLOSURE, provisionSkills } from '../skills-provision.ts';
+import { MAX_SKILL_CLOSURE, provisionSkills, withdrawProvisionedSkills } from '../skills-provision.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
@@ -1943,10 +1943,13 @@ export class RunManager {
    * The run's OWN task worktree gets every root and the companions their bodies name
    * (`provisionSkills`): links to local and global skills, generated `SKILL.md` files, and marked
    * team copies, in `.claude/skills`, `.agents/skills` and `.cursor/skills`, recorded in the
-   * worktree's git dir and kept out of git by a worktree-local `.gitignore`. Companions resolve
-   * against the team list minus the project's off-list (`disabledTeamSkills`, #1494), read fresh
-   * on every pass: a team skill switched off for the project is never installed, not even for a
-   * skill that runs it, and a switch-off made after the run started holds on Continue.
+   * worktree's git dir and kept out of git by a worktree-local `.gitignore`. The project's
+   * off-list (`disabledTeamSkills`, #1494) is read fresh on every pass and applied to the saved
+   * registry, the roots and the team list alike: a team skill switched off for the project is
+   * never installed, not even for a skill that runs it, and a switch-off made after the run
+   * started holds for the next step, a live `/name` and Continue. In the run's own task worktree
+   * every pass, one with no root included, also removes the copies cezar recorded of a name the
+   * off-list took away (`withdrawProvisionedSkills`); the user's own installs stay.
    *
    * Any other cwd — worktree off, a non-git project, a Continue whose worktree is gone — is the
    * main checkout or unknown, where those directories are LOCAL skills to `discoverSkills` that
@@ -1963,13 +1966,19 @@ export class RunManager {
   ): Promise<{ notes: string[]; filesDir: Map<string, string>; installed: string[] }> {
     const notes: string[] = [];
     const filesDir = new Map<string, string>();
-    const registry = state.skills ?? [];
-    const roots = [...new Set([wanted.stepSkill, wanted.slash].filter((name): name is string => Boolean(name)))]
-      .flatMap((name) => registry.filter((skill) => skill.name === name).slice(0, 1));
+    const wantedNames = [...new Set([wanted.stepSkill, wanted.slash].filter((name): name is string => Boolean(name)))];
     // Stop can land during an earlier await (Continue's team-cache wait): a stopped run writes
     // nothing, here or between the pass's own steps.
     const stopped = () => Boolean(state.cancelled) || this.workerExecutionStopped(runId);
-    if (roots.length === 0 || stopped()) return { notes, filesDir, installed: [] };
+    if (stopped()) return { notes, filesDir, installed: [] };
+    const ownWorktree = this.isOwnTaskWorktree(runId, state.cwd);
+    if (wantedNames.length === 0 && !ownWorktree) return { notes, filesDir, installed: [] };
+    // The off-list as it is now, applied to every input: the saved registry predates a switch
+    // made during the run, so it is filtered as well as the fresh team list.
+    const disabled = readDisabledTeamSkills(await readProjectUiState(this.repoRoot));
+    const registry = filterDisabledTeamSkills(state.skills ?? [], disabled);
+    const roots = wantedNames.flatMap((name) => registry.filter((skill) => skill.name === name).slice(0, 1));
+    if (stopped()) return { notes, filesDir, installed: [] };
     const teamRoots = roots.filter((skill) => skill.source === 'team' && skill.team?.dir);
     const cacheCopy = async (skill: Skill): Promise<void> => {
       const dir = await materializeSkillToCache(skill).catch(() => null);
@@ -1977,13 +1986,17 @@ export class RunManager {
       notes.push(`team skill "${skill.name}" materialized to ${dir}`);
       filesDir.set(skill.name, dir);
     };
-    if (!this.isOwnTaskWorktree(runId, state.cwd)) {
+    if (!ownWorktree) {
       for (const skill of teamRoots) await cacheCopy(skill);
       return { notes, filesDir, installed: [] };
     }
-    const disabled = readDisabledTeamSkills(await readProjectUiState(this.repoRoot));
-    const teamSkills = filterDisabledTeamSkills(getTeamSkillsCached(this.repoRoot), disabled);
-    const result = await provisionSkills(state.cwd, roots, [...registry, ...teamSkills], { cancelled: stopped });
+    const catalog = [...registry, ...filterDisabledTeamSkills(getTeamSkillsCached(this.repoRoot), disabled)];
+    // A switched-off name that no enabled copy still offers leaves the worktree, even on a pass
+    // with no root (#1494). Only entries cezar recorded as its own are removed.
+    const offered = new Set(catalog.map((skill) => skill.name));
+    await withdrawProvisionedSkills(state.cwd, new Set(disabled.map((ref) => ref.name).filter((name) => !offered.has(name))));
+    if (roots.length === 0 || stopped()) return { notes, filesDir, installed: [] };
+    const result = await provisionSkills(state.cwd, roots, catalog, { cancelled: stopped });
     if (stopped()) return { notes, filesDir, installed: [] };
     for (const skill of teamRoots) {
       const written = result.teamCopies[skill.name] ?? [];
@@ -7431,7 +7444,8 @@ export class RunManager {
       }
     }
     if (!continuedSkillName || !(state.skills ?? []).some((candidate) => candidate.name === continuedSkillName)) {
-      if (continuationSlash) continuationFiles = (await this.provisionRunSkills(runId, state, { slash: continuationSlash })).filesDir;
+      // Without a slash too: the pass still takes back team skills switched off since (#1494).
+      continuationFiles = (await this.provisionRunSkills(runId, state, { slash: continuationSlash })).filesDir;
     }
     state.currentStepId = stepId;
     this.beginUsageInvocation(runId, state, stepId);

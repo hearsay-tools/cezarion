@@ -347,6 +347,42 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     sessions[before]!();
   });
 
+  it('a companion switched off during a live run is not installed by a later live /name (#1494)', async () => {
+    const { repo } = await seedTeamSource();
+    writeLocalSkill('lead-1494', `then run ${TEAM_SKILL}`);
+    // The run's saved registry holds the team skill: it was on when the run started.
+    const run = await launch(promptWorkflow, 'go');
+    switchOff(repo);
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: '/lead-1494 now' }])).toBe(true);
+    await (manager as unknown as { active: Map<string, { liveSkillProvisioning?: Promise<void> }> })
+      .active.get(run.id)?.liveSkillProvisioning;
+    for (const agentDir of AGENT_SKILL_DIRS) {
+      expect(existsSync(join(run.spec.cwd, agentDir, 'skills', 'lead-1494')), `${agentDir} lead`).toBe(true);
+      expect(existsSync(join(run.spec.cwd, agentDir, 'skills', TEAM_SKILL)), `${agentDir} team`).toBe(false);
+    }
+    await run.finish();
+  });
+
+  it("Continue removes cezar's copies of a team skill switched off after it was installed, and nothing else (#1494)", async () => {
+    const { repo } = await seedTeamSource();
+    const run = await runToEnd(undefined);
+    for (const agentDir of AGENT_SKILL_DIRS) {
+      expect(existsSync(join(run.spec.cwd, agentDir, 'skills', TEAM_SKILL, 'SKILL.md')), agentDir).toBe(true);
+    }
+    // The user's own install, beside cezar's copies.
+    mkdirSync(join(run.spec.cwd, '.agents/skills/user-own-1494'), { recursive: true });
+    writeFileSync(join(run.spec.cwd, '.agents/skills/user-own-1494/SKILL.md'), 'mine\n');
+    switchOff(repo);
+    const before = launches.length;
+    expect(manager.continueRun(run.id, { text: 'keep going' })).toEqual({ ok: true });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(before), { timeout: LAUNCH_WAIT_MS });
+    for (const agentDir of AGENT_SKILL_DIRS) {
+      expect(existsSync(join(run.spec.cwd, agentDir, 'skills', TEAM_SKILL)), agentDir).toBe(false);
+    }
+    expect(readFileSync(join(run.spec.cwd, '.agents/skills/user-own-1494/SKILL.md'), 'utf8')).toBe('mine\n');
+    sessions[before]!();
+  });
+
   describe('guards', () => {
     it('an in-place run writes no skill entry in the checkout', async () => {
       writeLocalSkill('lead-1408', 'then run helper-1408');
