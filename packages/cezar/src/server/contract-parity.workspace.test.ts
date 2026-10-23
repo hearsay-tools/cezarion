@@ -32,7 +32,6 @@ import type {
   providerStatusResponseSchema,
   runnerModelCatalogResponseSchema,
   setConfigResponseSchema,
-  skillsUpdateStateSchema,
   uiStateSchema,
   workspaceConfigResponseSchema,
   workspaceUiStateSchema,
@@ -103,17 +102,6 @@ describe('src/contract projects/workspace schemas match the routes exactly', () 
   type SetWorkspaceUiState200 = InferResponseType<(typeof client.api.v1.workspace)['ui-state']['$put'], 200>;
   type Config200 = InferResponseType<typeof client.api.v1.config.$get, 200>;
   type SetConfig200 = InferResponseType<typeof client.api.v1.config.$put, 200>;
-
-  // ---- skills updates ---------------------------------------------------------------------
-  type SkillsUpdate200 = InferResponseType<(typeof client.api.v1.workspace)['skills-update']['$get'], 200>;
-  type SkillsUpdateCheck200 = InferResponseType<
-    (typeof client.api.v1.workspace)['skills-update']['check']['$post'],
-    200
-  >;
-  type SkillsUpdateApply200 = InferResponseType<
-    (typeof client.api.v1.workspace)['skills-update']['apply']['$post'],
-    200
-  >;
 
   // ---- providers, models, open targets ----------------------------------------------------
   type ProviderStatus200 = InferResponseType<typeof client.api.v1.providers.status.$get, 200>;
@@ -201,10 +189,6 @@ describe('src/contract projects/workspace schemas match the routes exactly', () 
     Assert<ExactOpen<z.infer<typeof workspaceUiStateSchema>, SetWorkspaceUiState200>>,
     Assert<Exact<z.infer<typeof configResponseSchema>, Config200>>,
     Assert<Exact<z.infer<typeof setConfigResponseSchema>, SetConfig200>>,
-    // skills updates
-    Assert<Exact<z.infer<typeof skillsUpdateStateSchema>, SkillsUpdate200>>,
-    Assert<Exact<z.infer<typeof skillsUpdateStateSchema>, SkillsUpdateCheck200>>,
-    Assert<Exact<z.infer<typeof skillsUpdateStateSchema>, SkillsUpdateApply200>>,
     // providers, models, open targets
     Assert<Exact<z.infer<typeof providerStatusResponseSchema>, ProviderStatus200>>,
     Assert<Exact<z.infer<typeof providerStatusResponseSchema>, ProviderEnabled200>>,

@@ -1,5 +1,5 @@
 {
-  "$comment": "Bare sleeps and short wait bounds the server unit tests carried when the ratchet landed (hearsay-tools/cezarion#1155). Keyed by file, rule and the line text so a moved line does not churn it. This list only shrinks: fix a site, then run TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts. Rules: AGENTS.md § Validation.",
+  "$comment": "Bare sleeps and short wait bounds the server unit tests carried when the ratchet landed (hearsay-tools/cezarion#1155). Keyed by file, rule and the line text so a moved line does not churn it. This list only shrinks: fix a site, then run TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts. Rules: AGENTS.md \u00a7 Validation.",
   "sites": [
     {
       "file": "application-update/service.test.ts",
@@ -982,7 +982,7 @@
     {
       "file": "server/ws.test.ts",
       "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(state.stopped).toBe(1), { timeout: 2_000 }); // …then reaped, releasing it",
+      "site": "await vi.waitFor(() => expect(state.stopped).toBe(1), { timeout: 2_000 }); // \u2026then reaped, releasing it",
       "count": 1
     },
     {
@@ -1001,18 +1001,6 @@
       "file": "session-signal-cli.test.ts",
       "rule": "sleep",
       "site": "await new Promise(resolve => setTimeout(resolve, 1_000));",
-      "count": 1
-    },
-    {
-      "file": "skills-update.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(async () => { await expect(readFile(lockPath, 'utf8')).resolves.toContain(String(process.pid)); });",
-      "count": 1
-    },
-    {
-      "file": "skills-update.test.ts",
-      "rule": "short-bound",
-      "site": "const active = first.check(repo); await vi.waitFor(async () => { await expect(import('node:fs/promises').then((fs) => fs.stat(join(home, '.cache', 'cez', 'skills-update.lock')))).resolves.toBeDefined(); });",
       "count": 1
     },
     {
