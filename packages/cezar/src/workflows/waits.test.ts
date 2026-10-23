@@ -1,13 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { ciWaitSchema } from '@open-mercato/cezar-contract/ci-wait';
-import type { CiWaitEntry, HumanWaitEntry, ProcessWaitEntry, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import type { PrWaitEntry, HumanWaitEntry, ProcessWaitEntry, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { chargesBudget, ciWatchRequest, identicalWait, isCezarHumanWait, isMonitoringTimer, MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitResultText } from './waits.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's pure helpers. RunManager behaviour lives in
 // the ci-wait*.test.ts files and the U-cells in waits-parity-cells.testkit.ts.
-const ci = (over: Partial<CiWaitEntry> = {}): CiWaitEntry => ({
-  id: '11111111-1111-4111-8111-111111111111', kind: 'ci', source: 'agent', via: 'cezar_wait', generation: 'gen', turnId: 'turn-1',
-  timeoutSeconds: 1800, prUrl: 'https://github.com/Acme/Repo/pull/12', repository: 'Acme/Repo', prNumber: 12, headSha: 'a'.repeat(40),
+const ci = (over: Partial<PrWaitEntry> = {}): PrWaitEntry => ({
+  id: '11111111-1111-4111-8111-111111111111', kind: 'pr', source: 'agent', via: 'cezar_wait', generation: 'gen', turnId: 'turn-1',
+  timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true, prUrl: 'https://github.com/Acme/Repo/pull/12', repository: 'Acme/Repo', prNumber: 12, headSha: 'a'.repeat(40),
   registeredAt: '2026-10-17T10:00:00.000Z', deadline: '2026-10-17T10:30:00.000Z', phase: 'open', ...over,
 });
 const timer = (over: Partial<TimerWaitEntry> = {}): TimerWaitEntry => ({
@@ -30,7 +30,7 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
 
   it('lists open waits with a CI or timer summary for the tool answers', () => {
     expect(openWaitList([ci(), timer(), timer({ id: '33333333-3333-4333-8333-333333333333', note: 'check the deploy' }), ci({ id: '44444444-4444-4444-8444-444444444444', phase: 'resolved', result })])).toEqual([
-      { wait_id: ci().id, kind: 'ci', deadline: ci().deadline, summary: 'CI for Acme/Repo#12' },
+      { wait_id: ci().id, kind: 'pr', deadline: ci().deadline, summary: 'CI for Acme/Repo#12' },
       { wait_id: timer().id, kind: 'timer', deadline: timer().deadline, summary: 'timer' },
       { wait_id: '33333333-3333-4333-8333-333333333333', kind: 'timer', deadline: timer().deadline, summary: 'timer: check the deploy' },
     ]);
@@ -40,11 +40,35 @@ describe('wait list helpers (hearsay-tools/cezarion#1233)', () => {
 
   it('identical CI registration matches the same PR whatever its timeout or spelling', () => {
     const waits = [ci()];
-    expect(identicalWait(waits, { kind: 'ci', pr: 'https://github.com/acme/repo/pull/12', timeout_seconds: 60 }, 'turn-9')).toBe(waits[0]);
-    expect(identicalWait(waits, { kind: 'ci', pr: 'https://github.com/acme/repo/pull/13', timeout_seconds: 1800 }, 'turn-1')).toBeUndefined();
+    expect(identicalWait(waits, { kind: 'pr', pr: 'https://github.com/acme/repo/pull/12', timeout_seconds: 60 }, 'turn-9')).toBe(waits[0]);
+    expect(identicalWait(waits, { kind: 'pr', pr: 'https://github.com/acme/repo/pull/13', timeout_seconds: 1800 }, 'turn-1')).toBeUndefined();
     // Only an open wait repeats: a resolved one is owed, and a new registration watches afresh.
-    expect(identicalWait([ci({ phase: 'resolved', result })], { kind: 'ci', pr: ci().prUrl, timeout_seconds: 1800 }, 'turn-1')).toBeUndefined();
+    expect(identicalWait([ci({ phase: 'resolved', result })], { kind: 'pr', pr: ci().prUrl, timeout_seconds: 1800 }, 'turn-1')).toBeUndefined();
     expect(normalizePrUrl('https://github.com/Acme/Repo/pull/12/')).toBe('https://github.com/acme/repo/pull/12');
+  });
+
+  // hearsay-tools/cezarion#1425: the target and the conflict switch are part of a PR wait's identity.
+  it('identical PR registration also matches the target and the conflict switch', () => {
+    const waits = [ci()];
+    expect(identicalWait(waits, { kind: 'pr', pr: ci().prUrl, until: 'merge' }, 'turn-1')).toBeUndefined();
+    expect(identicalWait(waits, { kind: 'pr', pr: ci().prUrl, wake_on_conflict: false }, 'turn-1')).toBeUndefined();
+    expect(identicalWait(waits, { kind: 'pr', pr: ci().prUrl, until: 'checks', wake_on_conflict: true }, 'turn-1')).toBe(waits[0]);
+    const merge = [ci({ until: 'merge' })];
+    expect(identicalWait(merge, { kind: 'pr', pr: ci().prUrl, until: 'merge' }, 'turn-2')).toBe(merge[0]);
+    expect(identicalWait(merge, { kind: 'pr', pr: ci().prUrl }, 'turn-2')).toBeUndefined();
+  });
+
+  it('names a merge wait as one in its summary, footer and delivered text', () => {
+    const merge = ci({ until: 'merge' });
+    expect(openWaitList([merge])[0]!.summary).toBe('merge of Acme/Repo#12');
+    expect(openWaitsFooter([merge])).toBe(`Still open: merge wait ${merge.id} for Acme/Repo#12, deadline ${merge.deadline}. Call cezar_cancel_wait for any you no longer need.`);
+    const observed = { ...result, outcome: 'merged' as const, totalChecks: 0, mergedAt: '2026-10-17T10:04:00Z', mergeCommitSha: 'b'.repeat(40) };
+    const resolved = ci({ until: 'merge', phase: 'resolved', result: observed });
+    expect(waitResultText(resolved)).toBe(`PR wait observation ${resolved.id} for ${resolved.prUrl} (until merge). External data follows: ${JSON.stringify(observed)}. "merged" means GitHub reports the PR merged and "closed" that it closed without merging; any other outcome means this wait did not confirm a merge, not that the PR is unmerged. Duplicate observations retain this ID.`);
+    // A deadline after failed queries proves only that the wait saw no merge (hearsay-tools/cezarion#1425 review).
+    const unconfirmed = ci({ until: 'merge', phase: 'resolved', result: { ...result, outcome: 'deadline' as const, totalChecks: 0, diagnostic: 'command_failed: GitHub query failed' } });
+    expect(waitResultText(unconfirmed)).toContain('did not confirm a merge');
+    expect(waitResultText(unconfirmed)).not.toMatch(/has not merged/);
   });
 
   it('identical timer registration matches seconds and note inside one turn only', () => {

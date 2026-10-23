@@ -14,8 +14,8 @@ import { gatedProviderFailure } from './waits-parity.testkit.ts';
 
 // hearsay-tools/cezarion#1233: CI waits live in the run's wait list; a parked one is an open wait
 // on a waiting run.
-const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'ci');
-const lastCiWaitOf = (id: string) => [...(store.getRun(id)?.lastWaits ?? [])].reverse().find(entry => entry.kind === 'ci');
+const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'pr');
+const lastCiWaitOf = (id: string) => [...(store.getRun(id)?.lastWaits ?? [])].reverse().find(entry => entry.kind === 'pr');
 const parked = (id: string) => ciWaitOf(id)?.phase === 'open' && store.getRun(id)?.status === 'waiting';
 
 const externalResource = vi.hoisted(() => ({ supervisor: {} }));
@@ -37,7 +37,7 @@ function active(id: string) {
   return (manager as unknown as { active: Map<string, { session: AgentSession; ciGeneration: string }> }).active.get(id);
 }
 function register(id: string): Promise<Wait> {
-  return manager.registerWait(id, { kind: 'ci', pr: identity.prUrl, timeout_seconds: 30 }, 'cezar_wait', active(id)!.ciGeneration);
+  return manager.registerWait(id, { kind: 'pr', pr: identity.prUrl, timeout_seconds: 30 }, 'cezar_wait', active(id)!.ciGeneration);
 }
 
 async function ownedChain(runner: RunnerId, workflow: WorkflowDef) {

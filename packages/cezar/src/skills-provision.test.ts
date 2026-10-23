@@ -19,6 +19,10 @@ const execFileAsync = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 const AGENT_DIRS = ['.claude', '.agents', '.cursor'];
 
+/** The instruction `improve-codebase-architecture` (mattpocock/skills@5beb35b) gives for its companion. */
+const GRILLING_INSTRUCTION =
+  'Once the user picks a candidate, call the Skill tool with "grilling" to walk the decision tree with them: constraints, dependencies, the shape of the deepened module, what sits behind the seam, what tests survive.';
+
 function skill(name: string, body = '', source: Skill['source'] = 'ai'): Skill {
   return { name, body, path: `/skills/${name}/SKILL.md`, source };
 }
@@ -34,6 +38,26 @@ describe('mentionsSkill', () => {
     expect(mentionsSkill('then run /fix on it', 'fix')).toBe(true);
     expect(mentionsSkill('then run `fix` on it', 'fix')).toBe(true);
     expect(mentionsSkill('fix the bug', 'fix')).toBe(false);
+  });
+
+  it('matches a plain name inside a matched pair of quotes', () => {
+    expect(mentionsSkill(GRILLING_INSTRUCTION, 'grilling')).toBe(true);
+    expect(mentionsSkill("call the Skill tool with 'grilling'", 'grilling')).toBe(true);
+    expect(mentionsSkill('call the Skill tool with \u201cgrilling\u201d', 'grilling')).toBe(true);
+    expect(mentionsSkill('call the Skill tool with \u2018grilling\u2019', 'grilling')).toBe(true);
+  });
+
+  it('never matches a quoted phrase, a longer quoted name or mismatched quotes', () => {
+    expect(mentionsSkill('say "fix the bug" to it', 'fix')).toBe(false);
+    expect(mentionsSkill('the "fixer" step', 'fix')).toBe(false);
+    expect(mentionsSkill('the "prefix" step', 'fix')).toBe(false);
+    expect(mentionsSkill('the "fix\' step', 'fix')).toBe(false);
+    expect(mentionsSkill("the user's fix's scope", 'fix')).toBe(false);
+  });
+
+  it('keeps matching a hyphenated name inside quotes as a word', () => {
+    expect(mentionsSkill('run "om-code-review" now', 'om-code-review')).toBe(true);
+    expect(mentionsSkill('run "om-code-reviewer" now', 'om-code-review')).toBe(false);
   });
 });
 
@@ -65,6 +89,25 @@ describe('skillClosure', () => {
     expect(MAX_SKILL_CLOSURE).toBe(24);
     expect(result.skills).toHaveLength(24);
     expect(result.truncated).toBe('step-24');
+  });
+
+  it('follows quoted plain names transitively', () => {
+    const root = skill('improve-codebase-architecture', GRILLING_INSTRUCTION);
+    const grilling = skill('grilling', "then call the Skill tool with 'probe'");
+    const probe = skill('probe');
+    const prose = skill('walk');
+    expect(skillClosure([root], [prose, probe, grilling, root]).skills.map((s) => s.name)).toEqual([
+      'improve-codebase-architecture',
+      'grilling',
+      'probe',
+    ]);
+  });
+
+  it('caps a closure of quoted plain names', () => {
+    const chain = Array.from({ length: 30 }, (_, i) => skill(`step${i}`, i < 29 ? `next "step${i + 1}"` : ''));
+    const result = skillClosure([chain[0]!], chain);
+    expect(result.skills).toHaveLength(MAX_SKILL_CLOSURE);
+    expect(result.truncated).toBe(`step${MAX_SKILL_CLOSURE}`);
   });
 
   it('reports no truncation when the closure fits', () => {
@@ -126,6 +169,24 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     }
     expect(await status(worktree)).toBe('');
     expect(await status(main)).toBe(mainStatus);
+  });
+
+  it('installs a companion the root names in double quotes', async () => {
+    const src = join(home, 'skills-src');
+    mkdirSync(join(src, 'improve-codebase-architecture'));
+    mkdirSync(join(src, 'grilling'));
+    const rootFile = join(src, 'improve-codebase-architecture', 'SKILL.md');
+    const grillingFile = join(src, 'grilling', 'SKILL.md');
+    writeFileSync(rootFile, `---\nname: improve-codebase-architecture\n---\n${GRILLING_INSTRUCTION}\n`);
+    writeFileSync(grillingFile, '---\nname: grilling\n---\nGRILL\n');
+    const root: Skill = { name: 'improve-codebase-architecture', body: GRILLING_INSTRUCTION, path: rootFile, source: 'global' };
+    const grilling: Skill = { name: 'grilling', body: 'GRILL', path: grillingFile, source: 'global' };
+    const result = await provisionSkills(worktree, [root], [root, grilling, helper]);
+    expect(result.installed).toEqual(['improve-codebase-architecture', 'grilling']);
+    for (const dir of AGENT_DIRS) {
+      expect(readlinkSync(join(worktree, dir, 'skills', 'grilling'))).toBe(join(src, 'grilling'));
+    }
+    expect(await status(worktree)).toBe('');
   });
 
   it('writes a generated SKILL.md for a built-in skill', async () => {

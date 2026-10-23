@@ -1461,3 +1461,32 @@ Calls made by the agent (owner to check):
 - A separate parity part, so the existing per-runner files stay under their duration budget.
 - The recommended command uses an `sh -c` wrapper on every runner, for omp's sake.
 - `CEZ_AGENT_TMPDIR=0` keeps the worktree-only confinement; the refusal says where to write instead.
+
+## PR waits: kind `pr` and the merge target (2026-10-23)
+
+hearsay-tools/cezarion#1425, design `docs/superpowers/specs/2026-10-23-pr-merge-wait-design.md`
+(local working file). The owner chose a new kind with no alias: `kind: 'ci'` became
+`kind: 'pr'`, in the tool request and in the stored entry, with `until: 'checks' | 'merge'`
+(default `checks`) and `wake_on_conflict` (default `true`). Where this spec says a CI wait, read
+a PR wait with `until: 'checks'`. A merge wait polls the PR's state every 30 seconds outside the
+watcher slots and resolves `merged`, `closed`, `conflicting` (when asked), `deadline`, `error`
+or `cancelled`. Stored `ci` entries and a stored summary's `waitingOn` of `{ kind: 'ci' }` read
+as checks waits; `RUN_DATABASE_SCHEMA_VERSION` stays 8 (`BACKWARD_COMPATIBILITY.md` §3).
+
+### Transitions out (merge wait)
+
+The merge wait is an `open` PR wait entry; it adds no run state. The run parks `waiting` on it
+as on any open wait.
+
+| State | Trigger | Who or what fires it | Behavior at shipped defaults |
+| --- | --- | --- | --- |
+| open merge wait | GitHub reports `MERGED` | Supervisor poll, every 30 s | Resolves `merged`; one wake |
+| open merge wait | GitHub reports `CLOSED` | Supervisor poll | Resolves `closed`; one wake |
+| open merge wait | Merge conflicts, `wakeOnConflict` true | Supervisor poll | Resolves `conflicting`; one wake |
+| open merge wait | Deadline (1–7,200 s, default 1,800) | Supervisor deadline signal | Resolves `deadline`; one wake |
+| open merge wait | Fatal `gh` error | Supervisor poll | Resolves `error`; one wake |
+| open merge wait | `cezar_cancel_wait`, Stop, finish, delete | Agent or Cezar | Cancelled; no wake |
+| open merge wait | Cockpit restart | Recovery | Rebuilds the poll from the stored entry; the deadline is unchanged |
+
+Every row but cancellation exits with no human action. A transient `gh` failure retries and
+never ends the wait before its deadline.

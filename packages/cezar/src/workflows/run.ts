@@ -2,13 +2,13 @@ import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } f
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { askErrorMessage, doneErrorMessage, scheduleRefusal, waitErrorMessage } from '../ci-wait/errors.ts';
 import type { ScheduleTaskAnswer, ScheduleTaskRequest, ScheduledTasksAnswer, ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
-import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type DoneErrorCode, type CiWaitEntry, type HumanWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
+import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type CezarWaitRequestInput, type DoneErrorCode, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { AUTONOMOUS_NUDGE, decideTurnEnd } from './turn-end.ts';
 import { nextLineEntry } from './line-order.ts';
 import { executionAccount } from './execution-account.ts';
-import { chargesBudget, ciWatchRequest, hasCiWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
+import { chargesBudget, ciWatchRequest, hasPrWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
@@ -1416,7 +1416,7 @@ export class RunManager {
   /** One CI watch per open CI wait, keyed by wait id. */
   private readonly ciWatches = new Map<string, { runId: string; abort: AbortController }>();
   /** CI lookups in flight, keyed by run id and normalized PR URL: two PRs may register at once. */
-  private readonly ciRegistrations = new Map<string, { runId: string; abort: AbortController; promise: Promise<CiWaitEntry | TimerWaitEntry> }>();
+  private readonly ciRegistrations = new Map<string, { runId: string; abort: AbortController; promise: Promise<PrWaitEntry | TimerWaitEntry> }>();
   /** A resolution whose checkpoint failed, retried by wait id. */
   private readonly ciRetries = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
   /** Process waits' watches (hearsay-tools/cezarion#1446), by wait id. */
@@ -2313,7 +2313,7 @@ export class RunManager {
    * `{ code }`. An identical registration (same PR; or same seconds and note in the same turn)
    * returns the open wait it repeats.
    */
-  async registerWait(runId: string, request: CezarWaitRequest, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<CiWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry> {
+  async registerWait(runId: string, request: CezarWaitRequestInput, via: WaitVia, generation: string, capabilitySignal?: AbortSignal): Promise<PrWaitEntry | TimerWaitEntry | WorkerWaitEntry | ProcessWaitEntry> {
     const parsed = cezarWaitRequestSchema.parse(request);
     const { refuse, assertCanRegister } = this.registrationGate(runId, generation, capabilitySignal);
     const { state: active, run } = assertCanRegister();
@@ -2345,7 +2345,7 @@ export class RunManager {
         ...(parsed.note === undefined ? {} : { note: parsed.note }) };
       return this.openWait(runId, active, wait);
     }
-    const key = `${runId}\n${normalizePrUrl(parsed.pr)}`;
+    const key = `${runId}\n${normalizePrUrl(parsed.pr)}\n${parsed.until}\n${parsed.wake_on_conflict}`;
     const pending = this.ciRegistrations.get(key);
     if (pending) return pending.promise;
     const abort = new AbortController();
@@ -2366,8 +2366,8 @@ export class RunManager {
       if (repeated && repeated.kind !== 'process') return repeated;
       if (openWaits(this.store.getRun(runId) ?? {}).length >= WAIT_LIMIT) refuse('capacity');
       const now = Date.now();
-      const wait: CiWaitEntry = { ...identity, id: randomUUID(), kind: 'ci', source: 'agent', via, generation, turnId,
-        timeoutSeconds: parsed.timeout_seconds, registeredAt: new Date(now).toISOString(),
+      const wait: PrWaitEntry = { ...identity, id: randomUUID(), kind: 'pr', source: 'agent', via, generation, turnId,
+        timeoutSeconds: parsed.timeout_seconds, until: parsed.until, wakeOnConflict: parsed.wake_on_conflict, registeredAt: new Date(now).toISOString(),
         deadline: new Date(now + parsed.timeout_seconds * 1000).toISOString(), phase: 'open' };
       return this.openWait(runId, active, wait);
     })();
@@ -2456,7 +2456,7 @@ export class RunManager {
    *  overdue timer (restart) resolves at once. */
   private armWait(runId: string, wait: Wait): void {
     if (this.disposed || wait.phase !== 'open') return;
-    if (wait.kind === 'ci') { this.startCiWatch(runId, wait); return; }
+    if (wait.kind === 'pr') { this.startCiWatch(runId, wait); return; }
     if (wait.kind === 'process') { this.startProcessWatch(runId, wait); return; }
     // Only the user's answer, or a cancel, ends a human wait: nothing to arm.
     if (wait.kind === 'human') return;
@@ -2542,7 +2542,7 @@ export class RunManager {
       diagnostic: (error instanceof Error ? error.message : String(error)).slice(0, 512) }));
   }
 
-  private startCiWatch(runId: string, wait: CiWaitEntry): void {
+  private startCiWatch(runId: string, wait: PrWaitEntry): void {
     if (this.disposed || this.ciWatches.has(wait.id) || wait.phase !== 'open') return;
     const abort = new AbortController();
     const watch = { runId, abort };
@@ -2591,7 +2591,7 @@ export class RunManager {
       return;
     }
     const resolvedAt = new Date().toISOString();
-    const settled: Wait = latest.kind === 'ci'
+    const settled: Wait = latest.kind === 'pr'
       ? { ...latest, phase: 'resolved', resolvedAt, result: (result as CiWaitResult | undefined) ?? { outcome: 'deadline', headSha: latest.headSha, observedAt: resolvedAt, checks: [], totalChecks: 0, truncated: false } }
       : latest.kind === 'process'
         ? { ...latest, phase: 'resolved', resolvedAt, result: (result as ProcessWaitResult | undefined) ?? { outcome: 'deadline', observedAt: resolvedAt } }
@@ -2774,7 +2774,7 @@ export class RunManager {
     }
     this.clearIdleTimer(state);
     const top = computeWaitingOn(run)?.kind;
-    const keepsSlot = top === 'ci' || top === 'process' || top === 'timer' || (top === undefined && resolvedWaits(run).length > 0);
+    const keepsSlot = top === 'pr' || top === 'process' || top === 'timer' || (top === undefined && resolvedWaits(run).length > 0);
     // A park that frees its slot publishes the intent first: a refused write throws and keeps it.
     if (keepsSlot) {
       this.store.updateRun(runId, { status: 'waiting' });
@@ -2842,7 +2842,7 @@ export class RunManager {
     } else if (!this.isActive(runId)) {
       // No live session: create a scheduler-owned continuation, never a direct provider call.
       this.store.updateRun(runId, { status: 'waiting' });
-      const text = resolved.some(wait => wait.kind === 'ci')
+      const text = resolved.some(wait => wait.kind === 'pr')
         ? 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.'
         : resolved.some(wait => wait.kind === 'worker')
           ? 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.'
@@ -6360,7 +6360,7 @@ export class RunManager {
     if (askPending && !admitted) return false;
     // An open or owed CI wait holds conversation input for its own admitted wake (#476); a message
     // is a wake of its own, so an admitted one goes beside it (hearsay-tools/cezarion#1235).
-    if (!admitted && (hasCiWait(run) || (resolved.length && !queue.some(input => !input.deliveredAt)))) return false;
+    if (!admitted && (hasPrWait(run) || (resolved.length && !queue.some(input => !input.deliveredAt)))) return false;
     const batch = agentInputBatch(queue, input => this.formatAgentInput(input));
     if (!batch) return false;
     const text = batch.inputs.map(input => this.formatAgentInput(input)).join('\n\n');

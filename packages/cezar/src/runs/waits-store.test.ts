@@ -51,12 +51,12 @@ function parseOne(row: Record<string, unknown>): RunRecord {
   return parsed.data![0]!;
 }
 
-function ciEntry(overrides: Partial<Extract<Wait, { kind: 'ci' }>> = {}): Extract<Wait, { kind: 'ci' }> {
+function ciEntry(overrides: Partial<Extract<Wait, { kind: 'pr' }>> = {}): Extract<Wait, { kind: 'pr' }> {
   return {
-    id: randomUUID(), kind: 'ci', source: 'agent', via: 'cezar_wait', registeredAt: iso(0), deadline: iso(1_800_000), phase: 'open',
+    id: randomUUID(), kind: 'pr', source: 'agent', via: 'cezar_wait', registeredAt: iso(0), deadline: iso(1_800_000), phase: 'open',
     turnId: 'turn-1', prUrl: legacyCi.prUrl, repository: legacyCi.repository, prNumber: legacyCi.prNumber, headSha: legacyCi.headSha,
-    generation: 'session', timeoutSeconds: 1800, ...overrides,
-  } as Extract<Wait, { kind: 'ci' }>;
+    generation: 'session', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true, ...overrides,
+  } as Extract<Wait, { kind: 'pr' }>;
 }
 
 function humanEntry(overrides: Partial<Extract<Wait, { kind: 'human' }>> = {}): Wait {
@@ -84,7 +84,7 @@ describe('upgrade-on-read of legacy wait fields', () => {
     // A waiting park's current step waits with it, as every other park writes it.
     expect(run.steps[0]!.status).toBe('waiting');
     expect(run.waits).toEqual([expect.objectContaining({
-      id: legacyCi.id, kind: 'ci', source: 'agent', phase: 'resolved', via: 'cezar_wait_for_ci', result, resolvedAt: result.observedAt,
+      id: legacyCi.id, kind: 'pr', source: 'agent', phase: 'resolved', via: 'cezar_wait_for_ci', result, resolvedAt: result.observedAt,
       prUrl: legacyCi.prUrl, headSha: legacyCi.headSha, generation: 'session', turnId: 'turn-1', deadline: legacyCi.deadline,
     })]);
     expect(run.waits![0]).not.toHaveProperty('wakeId');
@@ -97,16 +97,29 @@ describe('upgrade-on-read of legacy wait fields', () => {
   it('maps registered/parked → open, delivered → lastWaits delivered, withdrawn → lastWaits cancelled', () => {
     for (const phase of ['registered', 'parked'] as const) {
       const run = parseOne(legacyRow({ activity: 'monitoring', ciWait: { ...legacyCi, phase } }));
-      expect(run.waits).toEqual([expect.objectContaining({ id: legacyCi.id, kind: 'ci', phase: 'open' })]);
+      expect(run.waits).toEqual([expect.objectContaining({ id: legacyCi.id, kind: 'pr', phase: 'open' })]);
       expect(run.status).toBe('waiting');
     }
     const deliveredAt = iso(-500);
     const delivered = parseOne(legacyRow({ status: 'done', lastCiWait: { ...legacyCi, phase: 'delivered', result, wakeId: legacyCi.id, deliveredAt } }));
     expect(delivered.waits).toBeUndefined();
-    expect(delivered.lastWaits).toEqual([expect.objectContaining({ id: legacyCi.id, kind: 'ci', phase: 'delivered', deliveredAt, result })]);
+    expect(delivered.lastWaits).toEqual([expect.objectContaining({ id: legacyCi.id, kind: 'pr', phase: 'delivered', deliveredAt, result })]);
     expect(delivered).not.toHaveProperty('lastCiWait');
     const withdrawn = parseOne(legacyRow({ status: 'done', lastCiWait: { ...legacyCi, phase: 'withdrawn' } }));
-    expect(withdrawn.lastWaits).toEqual([expect.objectContaining({ id: legacyCi.id, kind: 'ci', phase: 'cancelled' })]);
+    expect(withdrawn.lastWaits).toEqual([expect.objectContaining({ id: legacyCi.id, kind: 'pr', phase: 'cancelled' })]);
+  });
+
+  // hearsay-tools/cezarion#1425: kind "ci" became kind "pr"; rows written before keep reading.
+  it('reads stored ci entries and a legacy ciWait as pr checks waits that wake on conflict', () => {
+    const asCi = ({ until: _until, wakeOnConflict: _wake, ...entry }: Extract<Wait, { kind: 'pr' }>) => ({ ...entry, kind: 'ci' }) as Record<string, unknown>;
+    const open = asCi(ciEntry());
+    const settled = asCi(ciEntry({ phase: 'delivered', result, deliveredAt: iso(-100) }));
+    const run = parseOne(legacyRow({ status: 'waiting', waits: [open], lastWaits: [settled] }));
+    expect(run.waits).toEqual([expect.objectContaining({ id: open.id, kind: 'pr', until: 'checks' as const, wakeOnConflict: true, phase: 'open' })]);
+    expect(run.lastWaits).toEqual([expect.objectContaining({ id: settled.id, kind: 'pr', until: 'checks' as const, wakeOnConflict: true, result })]);
+    expect(run.lastWaitsError).toBeUndefined();
+    const legacy = parseOne(legacyRow({ activity: 'monitoring', ciWait: { ...legacyCi, phase: 'parked' } }));
+    expect(legacy.waits).toEqual([expect.objectContaining({ id: legacyCi.id, kind: 'pr', until: 'checks' as const, wakeOnConflict: true })]);
   });
 
   it('upgrades running+monitoring+monitoringWakeAt into an open timer due at monitoringWakeAt', () => {
@@ -143,7 +156,7 @@ describe('upgrade-on-read of legacy wait fields', () => {
   it('drops one unreadable wait entry, keeps the run and its readable waits, and sets lastWaitsError', () => {
     const readable = ciEntry();
     const settled = timerEntry({ phase: 'delivered', deliveredAt: iso(0) });
-    const run = parseOne(legacyRow({ status: 'waiting', waits: [readable, { id: 'nope', kind: 'ci', phase: 'open' }], lastWaits: [settled, { kind: 'timer' }] }));
+    const run = parseOne(legacyRow({ status: 'waiting', waits: [readable, { id: 'nope', kind: 'pr', phase: 'open' }], lastWaits: [settled, { kind: 'timer' }] }));
     expect(run.status).toBe('waiting');
     expect(run.waits).toEqual([readable]);
     expect(run.lastWaits).toEqual([settled]);
@@ -385,7 +398,7 @@ describe('opening a v3 store', () => {
     try {
       const run = store.getRun(RUN_ID)!;
       expect(run.status).toBe('waiting');
-      expect(run.waits).toEqual([expect.objectContaining({ id: legacyCi.id, kind: 'ci', phase: 'resolved', result })]);
+      expect(run.waits).toEqual([expect.objectContaining({ id: legacyCi.id, kind: 'pr', phase: 'resolved', result })]);
       expect(run.agentInputs).toHaveLength(1);
       store.flush();
     } finally {

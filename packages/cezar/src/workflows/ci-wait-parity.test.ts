@@ -7,8 +7,8 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 // hearsay-tools/cezarion#1233: CI waits live in the run's wait list; a parked one is an open wait
 // on a waiting run.
-const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'ci');
-const lastCiWaitOf = (id: string) => [...(store.getRun(id)?.lastWaits ?? [])].reverse().find(entry => entry.kind === 'ci');
+const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'pr');
+const lastCiWaitOf = (id: string) => [...(store.getRun(id)?.lastWaits ?? [])].reverse().find(entry => entry.kind === 'pr');
 const parked = (id: string) => ciWaitOf(id)?.phase === 'open' && store.getRun(id)?.status === 'waiting';
 
 // The production controller, bundled tool, runner, store and scheduler remain real.

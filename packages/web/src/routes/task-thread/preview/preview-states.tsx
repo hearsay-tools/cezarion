@@ -281,20 +281,22 @@ function SandboxFailed({ state, actions }: StageProps<'sandbox-failed'>) {
 }
 
 function BrowserExited({ state, actions }: StageProps<'browser-exited'>) {
+  // A launch that missed its deadline never ran, so it did not "exit" (hearsay-tools/cezarion#1474).
+  // A state with no reason comes from an older server, which only knew exits.
+  const timedOut = state.reason === 'timeout'
+  const how = state.signal ? ` (${state.signal})` : state.exitCode !== undefined ? ` (code ${state.exitCode})` : ''
+  const restart = state.serverUp ? 'The dev server is still up; only the browser needs a restart.' : 'The browser needs a restart.'
+  const diagnostics = timedOut ? 'Chromium did not start in time' : `Chromium exited${how}`
   return (
-    <Shell state={state.stage} icon={<CircleXIcon className="text-danger" />} title="The browser stopped">
-      <Body>
-        {`Chromium exited unexpectedly${state.signal ? ` (${state.signal})` : ''}. ${
-          state.serverUp ? 'The dev server is still up; only the browser needs a restart.' : 'The browser needs a restart.'
-        }`}
-      </Body>
+    <Shell state={state.stage} icon={<CircleXIcon className="text-danger" />} title={timedOut ? 'The browser did not start' : 'The browser stopped'}>
+      <Body>{timedOut ? `Chromium did not open its DevTools port in time. ${restart}` : `Chromium exited unexpectedly${how}. ${restart}`}</Body>
       <LogTail text={state.stderrTail} source="chromium" onCopy={actions.copy} />
       <Actions>
         <Button variant="contrast" onClick={actions.retryBrowser}>
           <RotateCcwIcon aria-hidden="true" />
           Retry
         </Button>
-        <Button variant="outline" onClick={() => actions.copy(`Chromium exited${state.signal ? ` (${state.signal})` : ''}\n${state.stderrTail}`)}>
+        <Button variant="outline" onClick={() => actions.copy(`${diagnostics}\n${state.stderrTail}`)}>
           <CopyIcon aria-hidden="true" />
           Copy diagnostics
         </Button>

@@ -22,7 +22,7 @@ describe('atomic CI wait checkpoints', () => {
     store.updateRun(id, { status: 'running' });
     wait = { id: randomUUID(), generation: 'session', turnId: 'turn', prUrl: 'https://github.com/acme/repo/pull/12',
       repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40), registeredAt: new Date().toISOString(),
-      deadline: new Date(Date.now() + 30_000).toISOString(), timeoutSeconds: 30, phase: 'registered' };
+      deadline: new Date(Date.now() + 30_000).toISOString(), timeoutSeconds: 30, until: 'checks' as const, wakeOnConflict: true, phase: 'registered' };
   });
   afterEach(() => { vi.restoreAllMocks(); store.flush(); rmSync(directory, { recursive: true, force: true }); });
   const input = (runId: string, waitId: string): AgentInput => ({ id: waitId, parentRunId: runId, source: 'lifecycle', text: 'CI observation', createdAt: new Date().toISOString() });
@@ -45,7 +45,7 @@ describe('atomic CI wait checkpoints', () => {
     store.commitCiWait(id, settled, input(id, wait.id));
     store.commitCiWait(id, settled, input(id, wait.id));
     const reopened = RunStore.open(directory, { keepLive: true });
-    expect(reopened.getRun(id)?.waits).toEqual([expect.objectContaining({ id: wait.id, kind: 'ci', phase: 'resolved', result: expect.objectContaining({ outcome: 'deadline' }) })]);
+    expect(reopened.getRun(id)?.waits).toEqual([expect.objectContaining({ id: wait.id, kind: 'pr', phase: 'resolved', result: expect.objectContaining({ outcome: 'deadline' }) })]);
     expect(reopened.getRun(id)?.agentInputs).toHaveLength(1);
   });
 

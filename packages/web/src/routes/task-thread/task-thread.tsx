@@ -510,12 +510,6 @@ export function ThreadView({
             <p className="px-1 text-xs text-muted-foreground" role="status">Starts a new agent conversation.</p>
           ) : null}
 
-          {tellProposed ? (
-            <p data-slot="composer-voice-prompt" className="px-1 text-xs font-medium text-foreground">
-              Send this message? Say “yes, confirmed” or press Return.
-            </p>
-          ) : null}
-
           <Composer
             ref={composerRef}
             voiceProposal={tellProposed}

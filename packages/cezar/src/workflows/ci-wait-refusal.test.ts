@@ -1,10 +1,8 @@
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerWaitRequestSchema } from '@open-mercato/cezar-contract/delegation';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { repointMockImports } from '../core/mock-patch.testkit.ts';
+import { createDeliveryControl } from '../../scripts/mock-delivery-control.mjs';
 import { DelegationService } from '../delegation/service.ts';
 import { CiToolController } from '../ci-wait/controller.ts';
 import { callCezarWait } from '../ci-wait/client.ts';
@@ -12,39 +10,21 @@ import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { manager, store, root, worker, fixtureUpdateRun, lastWaitOf, until, waitOf, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
-// Delay only native mock output. The runner, lifecycle, IPC and persistence stay real.
+// Hold only native turn content: the mock admits the hold scenario (ACK and turn start where the
+// wire has them) and sends nothing more until release. The runner, lifecycle, IPC and persistence
+// stay real. The fixture root and environment are reset by `useWorkerWaitFixture`.
 function holdNativeTurn(runner: RunnerId) {
   const adapter = HARNESS_ADAPTERS[runner];
-  const release = join(root, 'release-turn'), received = join(root, 'held-turn');
-  let source = readFileSync(adapter.mockBin, 'utf8').replace(/^#!.*\n/, '');
-  const gate = `await ciRefusalGate();`;
-  if (runner === 'codex' || runner === 'opencode') {
-    const pattern = /setTimeout\(\(\) => \{(\s+const held =)/;
-    expect(source.match(pattern)).not.toBeNull();
-    source = source.replace(pattern, `setTimeout(async () => { ${gate}$1`);
-  } else {
-    const anchor = runner === 'claude' ? "const held = 'parity hold: content after the pause';"
-      : runner === 'pi' ? "sendText(['parity hold: content after the pause']);"
-      : runner === 'omp' ? "assistantText(['parity hold: content after the pause']);"
-      : "if (prompt.includes('mock:hold')) await new Promise(resolve => setTimeout(resolve, 500));";
-    expect(source.split(anchor)).toHaveLength(2);
-    source = source.replace(anchor, runner === 'cursor' ? `if (prompt.includes('mock:hold')) { ${gate} }` : `${gate}\n${anchor}`);
-  }
-  source = repointMockImports(adapter.mockBin, source);
-  const mock = join(root, 'gated-native.mjs');
-  writeFileSync(mock, `#!/usr/bin/env node\nimport * as ciGateFs from 'node:fs';
-async function ciRefusalGate() {
-  ciGateFs.writeFileSync(${JSON.stringify(received)}, '');
-  while (!ciGateFs.existsSync(${JSON.stringify(release)})) await new Promise(resolve => setTimeout(resolve, 5));
-}\n${source}`, { mode: 0o755 });
+  const control = createDeliveryControl(root, { kind: 'hold-response', match: adapter.scenarios.hold! });
   process.env.CEZ_DRY_RUN = '0';
-  process.env[adapter.binEnv] = mock;
-  return { received: () => existsSync(received), release: () => writeFileSync(release, '') };
+  process.env[adapter.binEnv] = adapter.mockBin;
+  process.env.CEZ_MOCK_DELIVERY_CONTROL = control.path;
+  return { received: control.held, release: control.release };
 }
 
 const pr = 'https://github.com/acme/repo/pull/12';
 const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
-const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'ci');
+const ciWaitOf = (id: string) => store.getRun(id)?.waits?.find(entry => entry.kind === 'pr');
 
 // hearsay-tools/cezarion#1235 phase 3a: worker waits are entries in the wait list beside CI, so the
 // R27 refusal (#713: no CI wait while a worker wait is pending or owed) is gone. These cells pin
@@ -67,7 +47,7 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
       const tools = controller.provision(manager.cezarToolHandlers(run.id, state.ciGeneration));
       const child = await worker(run.id);
       const wait = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
-      await expect(callCezarWait({ kind: 'ci', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'ci' });
+      await expect(callCezarWait({ kind: 'pr', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'pr' });
       const ci = ciWaitOf(run.id);
       expect(ci).toMatchObject({ phase: 'open' });
       fixtureUpdateRun(child.id, { status: 'done' });
@@ -77,7 +57,7 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
       expect(queued()?.deliveredAt).toBeUndefined();
       expect(store.readEvents(run.id).filter(e => e.type === 'turn-end')).toHaveLength(0);
       // The same CI registration is answered again while the worker result is owed.
-      await expect(callCezarWait({ kind: 'ci', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'ci' });
+      await expect(callCezarWait({ kind: 'pr', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'pr' });
       expect(ciWaitOf(run.id)?.id).toBe(ci!.id);
       wire.release();
       await until(() => !!queued()?.deliveredAt && !waitOf(store.getRun(run.id)));
@@ -126,7 +106,7 @@ describe('R27 CI registration beside worker waits — #713, hearsay-tools/cezari
         const next = manager.registerWorkerWait(run.id, workerWaitRequestSchema.parse({ workerIds: [child.id] }));
         manager.reconcileWorkerWaits();
         manager.cancelWorkerWait(run.id, next.id);
-        await expect(callCezarWait({ kind: 'ci', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'ci' });
+        await expect(callCezarWait({ kind: 'pr', pr }, tools.env)).resolves.toMatchObject({ ok: true, kind: 'pr' });
       } finally { wire.release(); await controller.close(); }
     });
   }

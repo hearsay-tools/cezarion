@@ -39,12 +39,23 @@ export function answerRowText(
   headers: readonly string[] | undefined,
   taskTitle?: string,
 ): string {
-  const entries = answers.map((answer) => {
+  return `Answer ${taskTitle ? `“${taskTitle}”: ` : ''}${answerLines(answers, headers).join('; ')}`
+}
+
+/** One `<header>: <labels or Other text>` entry per answered question. */
+export function answerLines(answers: readonly VoiceAnswer[], headers: readonly string[] | undefined): string[] {
+  return answers.map((answer) => {
     const header = headers?.[answer.question] || `question ${answer.question + 1}`
     const value = answer.kind === 'option' ? answer.labels.join(', ') : answer.text
     return `${header}: ${value}`
   })
-  return `Answer ${taskTitle ? `“${taskTitle}”: ` : ''}${entries.join('; ')}`
+}
+
+/** The confirmation panel's heading: `Answer “<task>”` or `Send to “<task>”`, with a fallback
+ *  when the palette does not know the task's title. */
+export function confirmHeading(kind: 'answer' | 'tell', taskTitle?: string): string {
+  if (kind === 'answer') return taskTitle ? `Answer “${taskTitle}”` : 'Answer the question'
+  return taskTitle ? `Send to “${taskTitle}”` : 'Send to this task'
 }
 
 /** `Tell “<task>”: <text>`, or `Tell it: <text>` without a known task title. */

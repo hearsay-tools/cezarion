@@ -248,6 +248,15 @@ describe('PreviewPane', () => {
     expect(onLive).toHaveBeenLastCalledWith(false)
   })
 
+  it('the status names a launch that timed out apart from a browser that exited (#1474)', () => {
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
+    transport('open')
+    message({ t: 'state', stage: 'browser-exited', reason: 'timeout', stderrTail: '', serverUp: true })
+    expect(screen.getByText('browser timed out')).toBeTruthy()
+    message({ t: 'state', stage: 'browser-exited', reason: 'exited', stderrTail: '', serverUp: true })
+    expect(screen.getByText('browser exited')).toBeTruthy()
+  })
+
   it('a takeover ends the stream: no live dot, no navigation, status paused', () => {
     const onLive = vi.fn()
     render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onLive={onLive} onClose={() => undefined} />)

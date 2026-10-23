@@ -9,7 +9,7 @@ import { GithubCiClient } from './github.ts';
 const fixture = fileURLToPath(new URL('./fixtures/gh.mjs', import.meta.url));
 const supervisors: CiWatcherSupervisor[] = [];
 const dirs: string[] = [];
-const wait = (seconds = 30): CiWait => ({id:crypto.randomUUID(),generation:'generation',turnId:'turn',prUrl:'https://github.com/org/repo/pull/12',repository:'org/repo',prNumber:12,headSha:'a'.repeat(40),registeredAt:new Date().toISOString(),deadline:new Date(Date.now()+seconds*1000).toISOString(),timeoutSeconds:seconds,phase:'registered'});
+const wait = (seconds = 30): CiWait => ({id:crypto.randomUUID(),generation:'generation',turnId:'turn',prUrl:'https://github.com/org/repo/pull/12',repository:'org/repo',prNumber:12,headSha:'a'.repeat(40),registeredAt:new Date().toISOString(),deadline:new Date(Date.now()+seconds*1000).toISOString(),timeoutSeconds:seconds,until:'checks',wakeOnConflict:true,phase:'registered'});
 function supervisor(mode: string, env: Record<string,string> = {}, github?: GithubCiClient) {
  const s = new CiWatcherSupervisor({github: github ?? new GithubCiClient({command:{file:process.execPath,args:[fixture]},env:{...process.env,CI_FIXTURE_MODE:mode,...env}})}); supervisors.push(s); return s;
 }
@@ -81,6 +81,12 @@ it.each(['passed','failed','head_changed','mixed_passed','conflicting'] as const
 
 it('rejects metadata for a different PR number', async () => {
  await expect(supervisor('passed').resolve('https://github.com/org/repo/pull/13')).rejects.toMatchObject({code:'malformed_data'});
+});
+
+// hearsay-tools/cezarion#1425: a PR the agent does not own may conflict; the wait still reports its checks.
+it('ignores a conflict when the wait does not wake on conflict, and reports the checks', async () => {
+ const result = await supervisor('conflicting').watch({...wait(),wakeOnConflict:false},new AbortController().signal);
+ expect(result).toMatchObject({outcome:'passed',mergeable:'CONFLICTING',mergeStateStatus:'DIRTY'});
 });
 
 it('reports a conflict from real gh metadata with unchanged canonical identity', async () => {

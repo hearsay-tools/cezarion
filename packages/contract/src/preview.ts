@@ -157,7 +157,11 @@ export const previewStateMessageSchema = z.discriminatedUnion('stage', [
   z.object({
     t: z.literal('state'),
     stage: z.literal('browser-exited'),
+    /** `timeout`: Chromium never opened its DevTools port, even after one retry. `exited`: it ended
+     *  on its own. Absent from an older server, which sent both as an exit (hearsay-tools/cezarion#1474). */
+    reason: z.enum(['timeout', 'exited']).optional(),
     signal: z.string().optional(),
+    exitCode: z.number().int().optional(),
     stderrTail: z.string(),
     serverUp: z.boolean(),
   }),

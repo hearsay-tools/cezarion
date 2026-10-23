@@ -205,9 +205,12 @@ export function previewInvalidInput(error: z.ZodError, input: unknown): PreviewS
 // hearsay-tools/cezarion#1233: `cezar_wait` and `cezar_cancel_wait` refusals name the first
 // failing field and its rule, never the value the agent sent.
 const WAIT_FIELD_RULES: Record<string, string> = {
-  kind: 'must be "ci", "worker", "timer" or "process"; ask the user with cezar_ask',
-  pr: 'must be an HTTPS GitHub pull request URL (kind "ci")',
-  timeout_seconds: 'must be an integer between 1 and 7200 (kind "ci" or "process") or between 1 and 1800 (kind "worker")',
+  // hearsay-tools/cezarion#1425: an agent still sending kind "ci" learns the new spelling here.
+  kind: 'must be "pr", "worker", "timer" or "process" (kind "ci" was replaced by kind "pr"); ask the user with cezar_ask',
+  pr: 'must be an HTTPS GitHub pull request URL (kind "pr")',
+  until: 'must be "checks" or "merge" (kind "pr")',
+  wake_on_conflict: 'must be true or false (kind "pr")',
+  timeout_seconds: 'must be an integer between 1 and 7200 (kind "pr" or "process") or between 1 and 1800 (kind "worker")',
   worker_ids: 'must be 1 to 32 unique worker ids you own (kind "worker"; give worker_ids or request_ids, not both)',
   request_ids: 'must be 1 to 32 unique ids of requests you sent (kind "worker"; give worker_ids or request_ids, not both)',
   mode: 'must be "one", "any" or "all"; "one" takes exactly one id (kind "worker")',
@@ -217,7 +220,7 @@ const WAIT_FIELD_RULES: Record<string, string> = {
   exit_file: 'must be a path of 1 to 4096 characters (kind "process")',
   wait_id: 'must be a wait_id that cezar_wait answered',
 };
-const WAIT_FIELDS = 'kind "ci" takes pr and timeout_seconds; kind "worker" takes worker_ids or request_ids, mode and timeout_seconds; kind "timer" takes seconds and note; kind "process" takes pid, exit_file, timeout_seconds and note';
+const WAIT_FIELDS = 'kind "pr" takes pr, until, wake_on_conflict and timeout_seconds; kind "worker" takes worker_ids or request_ids, mode and timeout_seconds; kind "timer" takes seconds and note; kind "process" takes pid, exit_file, timeout_seconds and note';
 
 export function waitInvalidInput(error?: z.ZodError): string {
   const issue = error?.issues[0];

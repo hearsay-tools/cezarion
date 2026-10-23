@@ -2,6 +2,10 @@
 // Load only when configured: ordinary mock turns retain their event-loop ordering.
 const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
   : (await import('./mock-failure-control.mjs')).readFailureControl();
+// Print acknowledges an input on its first model work and cannot refuse one, so a held
+// acknowledgement and a held response both hold that first model work.
+const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
+  : (await import('./mock-delivery-control.mjs')).readDeliveryControl(['hold-ack', 'hold-response']);
 import { appendFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 // Publish a pid atomically (temporary sibling, then rename): a test reading it sees no
 // file or a whole pid, never the empty file whose Number() is 0 (hearsay-tools/cezarion#953).
@@ -114,6 +118,10 @@ if (mode === 'unrelated-startup-error') { process.stderr.write('Account unavaila
 // hearsay-tools/cezarion#1112: a slow process start, before the init frame that opens the native turn.
 if (prompt.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
 frame({ type: 'system', subtype: 'init', session_id: id, model: flag('--model') ?? 'auto', cwd: process.cwd() });
+if (delivery) {
+  await new Promise(resolve => delivery.ack(prompt, resolve));
+  await delivery.holdResponse(prompt);
+}
 if (mode === 'model-rejection-after-init' || mode === 'model-rejection-after-work') {
   if (mode === 'model-rejection-after-work') assistant('Work already began');
   rejectModel(); process.exit(1);
@@ -229,7 +237,6 @@ if (prompt.includes('mock:hold')) await new Promise(resolve => setTimeout(resolv
 if (prompt === 'inspect the working tree' || prompt.includes('mock:baseline')) {
   readTool(); const text = 'Cursor inspected the workspace.'; assistant(text); result(text); process.exit(0);
 }
-// owned-input-delivery.testkit.ts patches the exact line below to hold the print response; keep it verbatim.
 if (prompt.includes('mock:agent-echo')) { finish(prompt); process.exit(0); }
 const text = `turn ${turn}: ${prompt}`;
 if (mode === 'delay-work' && resumeId) await new Promise(resolve => setTimeout(resolve, 200));

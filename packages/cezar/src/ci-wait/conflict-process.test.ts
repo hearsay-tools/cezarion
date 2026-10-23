@@ -26,7 +26,7 @@ it('reaps the owned native watch child before returning a probe conflict', async
  supervisor = new CiWatcherSupervisor({github});
  const controller = new AbortController();
  const pending = supervisor.watch({id:crypto.randomUUID(),generation:'g',turnId:'t',prUrl:'https://github.com/org/repo/pull/12',repository:'org/repo',prNumber:12,
-  headSha:'a'.repeat(40),registeredAt:new Date().toISOString(),deadline:new Date(Date.now()+120_000).toISOString(),timeoutSeconds:120,phase:'registered'},controller.signal);
+  headSha:'a'.repeat(40),registeredAt:new Date().toISOString(),deadline:new Date(Date.now()+120_000).toISOString(),timeoutSeconds:120,until:'checks',wakeOnConflict:true,phase:'registered'},controller.signal);
  try {
   // Wait on the child-published log, not a sleep racing fixture startup under load.
   await vi.waitFor(async () => { expect(await readFile(log,'utf8')).toContain('--watch'); expect(probes.length).toBe(1); }, {timeout:20_000});
