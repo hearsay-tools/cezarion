@@ -2,7 +2,7 @@
 
 Result: PASS. All 144 changed functions across 5 files have complexity <= 20 and CRAP <= 30. Equality passes.
 
-Pinned merge-base: `f05cbed3c546337d8a6e06ac53e6733cbc457a12` (PR target: main).
+Pinned merge-base: `9c8caa3586ec879632964aa05e945bcd5543e97b` (PR target: main).
 
 The source hashes below identify the exact measured code. The change scanner includes committed, staged, unstaged and untracked work. Functions in test files stay in scope. The root metrics wrapper contains no implemented functions. Markdown, JSON and the dependency lockfile have no function scores.
 
