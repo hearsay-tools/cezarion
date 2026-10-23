@@ -16,7 +16,6 @@ import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
 import { ProviderAuthService } from '../core/provider-auth.ts';
-import { SkillsUpdateService } from '../skills-update.ts';
 import { registerProject } from '../workspace/projects.ts';
 import { RunManager, type AutomationToolService, type StartRunInput } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
@@ -30,11 +29,7 @@ vi.mock('../core/backend-detect.ts', async (importOriginal) => ({
   detectEnvironment: async () => [],
 }));
 const discovery = () => {
-  // The skills coordinator also writes a HOME cache lock before reading locks.
-  const skillsUpdate = new SkillsUpdateService();
-  skillsUpdate.check = async (repoRoot) => skillsUpdate.snapshot(repoRoot);
   return {
-    skillsUpdate,
     modelCatalog: new RunnerModelCatalog({ adapters: {} }),
     providerAuth: new ProviderAuthService({
       runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }),
