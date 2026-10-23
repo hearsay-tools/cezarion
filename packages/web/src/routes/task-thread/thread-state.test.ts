@@ -887,6 +887,15 @@ describe('reduceThread — AskUser cards (#473)', () => {
     expect(ask).toMatchObject({ kind: 'ask', questions: [ASK.questions[0], open] })
   })
 
+  // hearsay-tools/cezarion#1458: the card shows its Markdown context; older asks have none.
+  it('ask.requested carries its context, and an ask without one or with an empty one has none', () => {
+    const find = (extra: object) => allItems([line(2, 'ask.requested', { ...ASK, ...extra })]).find((i) => i.kind === 'ask')
+    expect(find({ context: '## Draft' })).toMatchObject({ kind: 'ask', context: '## Draft' })
+    expect(find({})).not.toHaveProperty('context')
+    expect(find({ context: '' })).not.toHaveProperty('context')
+    expect(find({ context: 42 })).not.toHaveProperty('context')
+  })
+
   it('the next user-message resolves the ask and records the answer', () => {
     const ask = allItems([
       line(1, 'text', { text: 'options' }),

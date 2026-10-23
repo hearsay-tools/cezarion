@@ -728,3 +728,33 @@ describe('AskCard voice proposals', () => {
     ).toEqual({ ok: false, reason: 'no-card' })
   })
 })
+
+// hearsay-tools/cezarion#1458: the agent's draft or findings, as Markdown above the questions.
+describe('AskCard context', () => {
+  const context = 'The plan has **two** steps.\n\n- parse\n- render'
+
+  it('renders the context as Markdown in a focusable region before the first question', () => {
+    renderAsk({ ...singleAsk, context })
+    const region = screen.getByRole('region', { name: 'Context' })
+    expect(region.getAttribute('data-slot')).toBe('ask-context')
+    expect(region.tabIndex).toBe(0)
+    expect(within(region).getByText('two').closest('[data-streamdown="strong"]')).not.toBeNull()
+    expect(within(region).getAllByRole('listitem')).toHaveLength(2)
+    const question = screen.getByText('Which date library should I standardize on?')
+    expect(region.compareDocumentPosition(question) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('renders it on a card routed to the parent too', () => {
+    renderAsk({ ...singleAsk, context, routedToParent: true, parentRunId: '11111111-2222-4333-8444-555555555555' })
+    expect(within(screen.getByRole('region', { name: 'Context' })).getByText('two').closest('[data-streamdown="strong"]')).not.toBeNull()
+  })
+
+  it('shows no context region for an ask without one, or once it is answered', () => {
+    renderAsk(singleAsk)
+    expect(screen.queryByRole('region', { name: 'Context' })).toBeNull()
+    expect(screen.getByText('Which date library should I standardize on?')).toBeTruthy()
+    cleanup()
+    renderAsk({ ...singleAsk, context, resolved: true, answer: 'Library: Luxon' })
+    expect(screen.queryByRole('region', { name: 'Context' })).toBeNull()
+  })
+})

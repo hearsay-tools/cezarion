@@ -37,23 +37,26 @@ describe('wait tool definitions', () => {
   // hearsay-tools/cezarion#1234: the user's answer has its own tool, and its card is required.
   it('advertises cezar_ask with a required card, whose questions take options only when they offer choices', () => {
     const schema = askToolDefinition.inputSchema;
-    expect(schema).toMatchObject({ type: 'object', required: ['questions'], additionalProperties: false });
-    expect(Object.keys(schema.properties ?? {})).toEqual(['questions']);
+    expect(schema).toMatchObject({ type: 'object', required: ['context', 'questions'], additionalProperties: false });
+    expect(Object.keys(schema.properties ?? {})).toEqual(['context', 'questions']);
+    expect(schema.properties).toMatchObject({ context: { type: 'string', minLength: 1, maxLength: 20000 } });
     expect(schema.properties).toMatchObject({ questions: { type: 'array', minItems: 1, maxItems: 4, items: { required: ['header', 'question'], properties: { header: { maxLength: 12 }, options: { minItems: 2, maxItems: 4 } } } } });
     expect(JSON.stringify(schema)).not.toMatch(/"(?:oneOf|anyOf|allOf)"/);
     expect(askToolDefinition.description).toContain('leave the options out to let the user type the answer');
-    // hearsay-tools/cezarion#1428: the description names the order and the real limits.
-    expect(askToolDefinition.description).toContain('Before you call it, send everything the decision depends on (the full draft, every finding, what each option means) as assistant text: the user sees only your assistant text and this card, never your reasoning or these arguments.');
+    // hearsay-tools/cezarion#1458: the content goes in context, the tested text (research 77dfb5c4).
+    expect(askToolDefinition.description).toMatch(/^Ask the user for a decision or missing input\. Put the full draft, findings, evidence and option meanings needed for the decision in context\. Cezar renders context as Markdown above the question card\. The user cannot see your reasoning or rejected tool calls\. The question is a short choice, not the place for supporting detail\. /);
+    expect(askToolDefinition.description).toMatch(/Then end your turn; the user's answer wakes you\.$/);
+    expect(askToolDefinition.description).not.toContain('assistant text');
     expect(askToolDefinition.description).toContain('a header of at most 12 characters, a short question of at most 400 characters');
-    expect(cezarServerInstructions()).toContain('- cezar_ask: load when you need the user: a decision only they can make, or missing input; send the full context as assistant text before you call it, and end your turn after it answers.');
+    expect(cezarServerInstructions()).toContain('- cezar_ask: load for a user decision or missing input; provide the full draft or findings in its rendered context field.');
   });
 
   // hearsay-tools/cezarion#1428: a rejected card's arguments never reach the user, so the retry
   // hint says where the detail that no longer fits goes.
-  it('tells a rejected cezar_ask to send the detail it cuts as assistant text before it retries', () => {
-    expect(askAnswerHint({ ok: false, code: 'invalid_request', message: 'too long' })).toBe('Not asked. The user never sees the arguments of a rejected call: send any detail you cut from the card as assistant text first, then call cezar_ask again with a short question.');
+  it('tells a rejected cezar_ask to put the detail it cuts in context before it retries', () => {
+    expect(askAnswerHint({ ok: false, code: 'invalid_request', message: 'too long' })).toBe('Not asked. The user never sees a rejected call. Fix the call from the message: put the detail in context and keep each question short.');
     expect(askAnswerHint({ ok: false, code: 'autonomous_run', message: 'continue', open_waits: [] })).toBe('Not asked. Fix the call from the message, or continue without asking.');
-    expect(askAnswerHint({ ok: true, wait_id: 'w', open_waits: [] })).toMatch(/^Asked\. The user sees this card and your assistant text/);
+    expect(askAnswerHint({ ok: true, wait_id: 'w', open_waits: [] })).toBe('Asked. Cezar shows the context and question card to the user. End your turn; the user\'s answer wakes you.');
   });
 
   it('lists no cezar_wait_for_ci: no tool, no trigger line, no admission (hearsay-tools/cezarion#1236)', () => {
@@ -63,7 +66,7 @@ describe('wait tool definitions', () => {
       const instructions = cezarServerInstructions(env);
       expect(instructions).not.toContain('- cezar_wait_for_ci:');
       expect(instructions).toContain('- cezar_wait: load when you are waiting on CI for a PR, or want to re-check something later; end your turn after it answers.');
-      expect(instructions).toContain('- cezar_ask: load when you need the user: a decision only they can make, or missing input; send the full context as assistant text before you call it, and end your turn after it answers.');
+      expect(instructions).toContain('- cezar_ask: load for a user decision or missing input; provide the full draft or findings in its rendered context field.');
       expect(instructions).toContain('- cezar_cancel_wait: load when a wait you registered is no longer needed.');
     }
     const claude = buildClaudeArgs({ ...spec, allowedTools: ['Read'] });
@@ -215,6 +218,7 @@ describe('U0 wait tools on every native wire', () => {
   const wait = { id: '11111111-1111-4111-8111-111111111111', kind: 'ci' as const, source: 'agent' as const, via: 'cezar_wait' as const, generation: 'gen', turnId: 'turn', timeoutSeconds: 1800, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'open' as const };
   const openWaits = [{ wait_id: wait.id, kind: 'ci' as const, deadline: wait.deadline, summary: 'CI for owner/repo#1' }];
   const call = (name: string, args: unknown) => `mock:cezar-tool ${name} ${Buffer.from(JSON.stringify(args)).toString('base64url')}`;
+  const context = '## Findings\n\n- the parser drops comments';
   const questions = [{ header: 'Area', question: 'Which area should I start with?', multiSelect: false, options: [{ label: 'Parser' }, { label: 'Lexer' }] }];
   const humanId = '22222222-2222-4222-8222-222222222222';
   const humanOpen = [{ wait_id: humanId, kind: 'human' as const, summary: 'human: Which area should I start with?' }];
@@ -223,8 +227,8 @@ describe('U0 wait tools on every native wire', () => {
     { tool: 'cezar_wait', args: { kind: 'ci', pr: wait.prUrl }, resume: true },
     { tool: 'cezar_cancel_wait', args: { wait_id: wait.id }, resume: false },
     // hearsay-tools/cezarion#1234: the user is asked through cezar_ask, with its card.
-    { tool: 'cezar_ask', args: { questions }, resume: false },
-    { tool: 'cezar_ask', args: { questions }, resume: true },
+    { tool: 'cezar_ask', args: { context, questions }, resume: false },
+    { tool: 'cezar_ask', args: { context, questions }, resume: true },
     // hearsay-tools/cezarion#1234: cezar_done reaches the session's finishTurn.
     { tool: 'cezar_done', args: {}, resume: false },
     { tool: 'cezar_done', args: {}, resume: true },
@@ -265,9 +269,9 @@ describe('U0 wait tools on every native wire', () => {
         expect(result.response.isError).not.toBe(true);
         const [json, hint] = result.response.content[0].text.split('\n');
         if (tool === 'cezar_ask') {
-          expect(calls).toEqual([['ask', { questions }]]);
+          expect(calls).toEqual([['ask', { context, questions }]]);
           expect(JSON.parse(json)).toEqual({ ok: true, wait_id: humanId, open_waits: humanOpen });
-          expect(hint).toBe('Asked. The user sees this card and your assistant text, never your reasoning or these arguments. If the question refers to a draft or findings you have not sent as assistant text, send them in full now. Then end your turn; the user\'s answer wakes you.');
+          expect(hint).toBe('Asked. Cezar shows the context and question card to the user. End your turn; the user\'s answer wakes you.');
         } else if (tool === 'cezar_wait') {
           expect(calls).toEqual([['wait', { ...args, timeout_seconds: 1800 }, 'cezar_wait']]);
           expect(JSON.parse(json)).toEqual({ ok: true, wait_id: wait.id, kind: 'ci', deadline: wait.deadline, open_waits: openWaits });

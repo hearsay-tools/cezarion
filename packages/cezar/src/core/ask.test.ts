@@ -222,6 +222,32 @@ describe('parseAskMarker', () => {
     });
   });
 
+  // hearsay-tools/cezarion#1458: the ask line takes an optional context, kept through the
+  // normalizer that drops unknown keys and repairs drift in the questions.
+  it('keeps an optional context, also when the questions need normalizing', () => {
+    const context = '## Findings\n\n- one';
+    const question = { header: 'Choice', question: 'Which?', options: [{ label: 'A' }, { label: 'B' }] };
+    expect(parseAskMarkerResult(`CEZ:ASK ${JSON.stringify({ context, questions: [question] })}`)).toMatchObject({ kind: 'valid', normalized: false, request: { context } });
+    const drifted = { context, extra: 1, questions: [{ ...question, header: 'Much too long header' }] };
+    const result = parseAskMarkerResult(`CEZ:ASK ${JSON.stringify(drifted)}`);
+    expect(result).toMatchObject({ kind: 'valid', normalized: true, request: { context, questions: [{ header: 'Much too lon' }] } });
+    expect(parseAskMarkerResult(`CEZ:ASK ${JSON.stringify({ questions: [question] })}`)).toMatchObject({ kind: 'valid', request: { questions: [question] } });
+    expect(parseAskMarkerResult(`CEZ:ASK ${JSON.stringify({ questions: [question] })}`)).not.toHaveProperty('request.context');
+  });
+
+  // Review of hearsay-tools/cezarion#1458: context can hold the warning an approval depends on, so
+  // a bad one is never clipped or dropped: the card is refused and the raw marker text stays.
+  it('refuses a card whose context is overlong, empty or not a string, and keeps the raw text', () => {
+    const question = { header: 'Choice', question: 'Deploy now?', options: [{ label: 'Yes' }, { label: 'No' }] };
+    const warning = 'Do not deploy until the backup is verified.';
+    const turn = `CEZ:ASK ${JSON.stringify({ context: 'x'.repeat(20_000) + warning, questions: [question] })}`;
+    expect(parseAskMarkerResult(turn)).toMatchObject({ kind: 'invalid-structure' });
+    expect(stripAskMarker(turn)).toContain(warning);
+    for (const context of ['', 42]) {
+      expect(parseAskMarkerResult(`CEZ:ASK ${JSON.stringify({ context, questions: [question] })}`)).toMatchObject({ kind: 'invalid-structure' });
+    }
+  });
+
   it('ignores a marker that is not at the end of the turn', () => {
     expect(parseAskMarker(`CEZ:ASK ${askJson}\nand then more text after`)).toBeNull();
   });

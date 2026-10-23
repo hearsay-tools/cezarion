@@ -36,6 +36,12 @@ describe('parent-routed worker questions (#505)', () => {
     expect(text).toContain('2. [Name] What should the table be called? (open question: answer in your own words)');
     expect(text).toContain('\nDB: <option>\nName: <your answer>\n');
   });
+  // hearsay-tools/cezarion#1458: the parent reads the worker's context above the questions.
+  it('prints the context before the questions, and nothing for a question without one', () => {
+    const text = formatQuestionText(W, randomUUID(), { ...request, context: '## Findings\n\n- the index is stale' });
+    expect(text).toContain(`Your worker ${W} is waiting for your answer:\nContext:\n## Findings\n\n- the index is stale\n\n1. [DB] Which database?`);
+    expect(formatQuestionText(W, 'id', request)).toContain(`Your worker ${W} is waiting for your answer:\n1. [DB] Which database?`);
+  });
   it('treats only a reply to that question as its answer', () => {
     const message = questionMessage({ ...base, now: '2026-09-24T10:00:00.000Z' });
     const input = (kind: 'reply' | 'progress' | 'follow-up', requestId?: string): AgentInput => ({ id: randomUUID(), source: 'agent', parentRunId: P,

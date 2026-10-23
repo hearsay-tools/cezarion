@@ -81,11 +81,12 @@ export function askErrorMessage(code: AskErrorCode): string {
 }
 
 const L = ASK_LIMITS;
-const ASK_FIELDS = `cezar_ask takes only questions: 1–${L.questions} questions with unique texts, each with a header of 1–${L.header} characters, a question of 1–${L.question} characters, an optional id of 1–${L.id} characters, and either ${L.minOptions}–${L.maxOptions} options with unique labels of 1–${L.label} characters and descriptions of at most ${L.description} characters, or no options for an open question`;
-/** hearsay-tools/cezarion#1428: a rejected call never reaches the user, so the agent that cut the
- *  context out of a card to fit it must send that context as text, not refer to it as sent. */
-const ASK_CONTEXT = 'The user never sees a rejected call: send longer context (a draft, findings, an explanation) as assistant text before you call cezar_ask, and keep each question short.';
+const ASK_FIELDS = `cezar_ask takes context and questions: context of 1–${L.context} characters of Markdown, shown above the card, and 1–${L.questions} questions with unique texts, each with a header of 1–${L.header} characters, a question of 1–${L.question} characters, an optional id of 1–${L.id} characters, and either ${L.minOptions}–${L.maxOptions} options with unique labels of 1–${L.label} characters and descriptions of at most ${L.description} characters, or no options for an open question`;
+/** hearsay-tools/cezarion#1428: a rejected call never reaches the user. hearsay-tools/cezarion#1458:
+ *  the detail cut from a question belongs in `context`, which the user reads above the card. */
+const ASK_CONTEXT = 'The user never sees a rejected call. Put the draft, findings, evidence and option meanings in context, and keep each question short.';
 const ASK_FIELD_RULES: Record<string, string> = {
+  context: `must be 1–${L.context} characters of Markdown`,
   questions: `must be a list of 1–${L.questions} questions with unique texts`,
   question_entry: 'must be an object with a header and a question',
   id: `must be 1–${L.id} characters`,
@@ -112,7 +113,7 @@ export function askInvalidInput(error?: z.ZodError): string {
   if (issue?.code === 'unrecognized_keys') return `Unknown field ${issue.keys.map(key => JSON.stringify(key.slice(0, 64))).join(', ')}. ${tail}`;
   const failures = new Map<string, string>();
   for (const entry of error?.issues ?? []) {
-    const rule = entry.path[0] === 'questions' ? askFieldRule(entry.path) : undefined;
+    const rule = entry.path[0] === 'questions' ? askFieldRule(entry.path) : entry.path[0] === 'context' ? ASK_FIELD_RULES.context : undefined;
     const name = entry.path.filter(part => typeof part === 'string' || typeof part === 'number').join('.');
     if (rule && !failures.has(name)) failures.set(name, `\`${name}\` ${rule}`);
   }

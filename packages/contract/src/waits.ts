@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { askRequestSchema } from './ask-schema.ts';
+import { askContextSchema, askRequestSchema } from './ask-schema.ts';
 import { ciPrIdentitySchema, ciPrUrlSchema, ciWaitErrorCodeSchema, ciWaitRequestSchema, ciWaitResultSchema } from './ci-wait.ts';
 import { workerIdsSchema, workerOutcomeSchema, workerWaitModeSchema } from './delegation.ts';
 import type { DelegationState, RunDelegationSummary, WorkerCompletionWait, WorkerWait } from './delegation.ts';
@@ -80,6 +80,8 @@ export const humanWaitEntrySchema = z.object({
   ...waitBaseShape,
   kind: z.literal('human'),
   questions: askRequestSchema.shape.questions.optional(),
+  /** The card's Markdown context (hearsay-tools/cezarion#1458); absent on waits recorded before it. */
+  context: askContextSchema.optional(),
   askSeq: z.number().int().nonnegative().optional(),
 }).strict();
 export type HumanWaitEntry = z.infer<typeof humanWaitEntrySchema>;
@@ -209,8 +211,9 @@ export type CezarWaitAnswer = z.infer<typeof cezarWaitAnswerSchema>;
 /**
  * `cezar_ask` (hearsay-tools/cezarion#1234): the user's answer, asked with a card. A question
  * without options is open, and the user types its answer. The wait it opens has no deadline.
+ * `context` is required here (hearsay-tools/cezarion#1458), optional in every stored shape.
  */
-export const cezarAskRequestSchema = askRequestSchema;
+export const cezarAskRequestSchema = askRequestSchema.extend({ context: askContextSchema });
 export type CezarAskRequest = z.infer<typeof cezarAskRequestSchema>;
 
 /** The refusals a question can meet: the session's, the run's capacity, and an autonomous run. */

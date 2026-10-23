@@ -43,6 +43,10 @@ export type CezarToolHandlers = {
 type Capability = CezarToolHandlers & { lifetime: AbortController };
 export type CiToolSession = { descriptor: NonNullable<AgentRunSpec['cezarTools']>; env: Record<string, string>; revoke(): void };
 const unavailable = { code: 'unavailable' as const, message: ciErrorMessage('unavailable') };
+/** `cezar_ask` carries up to 20,000 characters of context (hearsay-tools/cezarion#1458). JSON can
+ *  escape a character to six bytes, so the largest valid card (context, four questions with four
+ *  options, every field at its limit) is about 166 KB; 256 KiB admits it with room to spare. */
+const ASK_BODY_LIMIT = 262_144;
 
 /** Separate from the cockpit and delegation APIs. No TCP listener or durable credentials. */
 export class CiToolController {
@@ -173,7 +177,7 @@ export function ciToolRoutes(capabilities: Map<string, Capability>) {
       c.set('capability', capability);
       await next();
     })
-    .post('/api/v1/tools/ask', bodyLimit({ maxSize: 16_384, onError: c => c.json({ ok: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 16 KiB.' }) }), jsonZodValidator(cezarAskRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, code: 'invalid_request' as const, message: askInvalidInput(error) }) }), async c => {
+    .post('/api/v1/tools/ask', bodyLimit({ maxSize: ASK_BODY_LIMIT, onError: c => c.json({ ok: false as const, code: 'invalid_request' as const, message: 'The arguments exceed 256 KiB.' }) }), jsonZodValidator(cezarAskRequestSchema, { invalid: (c, error) => c.json({ ok: false as const, code: 'invalid_request' as const, message: askInvalidInput(error) }) }), async c => {
       const capability = c.get('capability');
       try {
         const answer = cezarAskAnswerSchema.parse(await capability.ask(c.req.valid('json'), capability.lifetime.signal));

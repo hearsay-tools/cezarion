@@ -120,6 +120,21 @@ describe('TaskWebhook', () => {
     ]);
   });
 
+  // hearsay-tools/cezarion#1458: the payload carries the context the card shows above the question.
+  it('carries the pending question and its context in task.question', async () => {
+    const { calls, fetchImpl } = recorder();
+    const webhook = attach(fetchImpl);
+    const run = optedIn();
+    store.updateRun(run.id, { status: 'running' });
+    const questions = [{ header: 'Choice', question: 'Which module?', options: [{ label: 'Parser' }, { label: 'Runner' }] }];
+    store.appendEvent(run.id, { type: 'ask.requested', requestId: 'ask-1', context: '## Findings', questions });
+    store.commitWait(run.id, { id: '00000000-0000-4000-8000-0000000000ad', kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: '2026-09-05T00:00:00.000Z', phase: 'open', turnId: 'turn-1', context: '## Findings', questions });
+    store.updateRun(run.id, { status: 'waiting' });
+    await webhook.idle();
+    expect(calls.map((call) => call.body.event)).toEqual(['task.question']);
+    expect(calls[0]!.body.task).toMatchObject({ question: questions, questionContext: '## Findings' });
+  });
+
   it('with no stored triggers sends only Needs you, Failed, Done and Cancelled', async () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl);
