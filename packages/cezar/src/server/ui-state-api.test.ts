@@ -77,13 +77,13 @@ describe('the ui-state API — skillUsage (#408)', () => {
     expect((await put({ disabledTeamSkills: [{ repo: 'a', name: 'x', ref: 'main' }] })).status).toBe(400);
   });
 
-  it('GET /skills/importable returns every team skill, switched-off ones included', async () => {
-    const skills = ['x', 'y'].map((name) => ({
-      name,
-      body: name,
-      path: `acme/skills@main:${name}.md`,
+  it('GET /skills/importable returns every team skill, switched-off ones and every source copy included', async () => {
+    const skills = [['x', 'acme/skills'], ['y', 'acme/skills'], ['x', 'other/skills']].map(([name, repo]) => ({
+      name: name!,
+      body: name!,
+      path: `${repo}@main:${name}.md`,
       source: 'team' as const,
-      team: { repo: 'acme/skills', ref: 'main', path: `${name}.md`, dir: false },
+      team: { repo: repo!, ref: 'main', path: `${name}.md`, dir: false },
     }));
     vi.spyOn(remote, 'getTeamSkillsCached').mockReturnValue(skills);
     await put({ disabledTeamSkills: [{ repo: 'acme/skills', name: 'x' }] });

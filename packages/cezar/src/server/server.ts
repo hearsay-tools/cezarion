@@ -3320,7 +3320,8 @@ export function createApp(deps: ServerDeps) {
     })
 
     // Every team skill the configured sources offer, including those this project switched
-    // off, so the Skills catalog can show each with its toggle. Empty without `skillsRepos`.
+    // off, so the Skills catalog can show each with its toggle: one entry per source copy, so a
+    // name two sources offer comes twice (#1494). Empty without `skillsRepos`.
     // `wait=1` lets the panel wait out a cold team-skill cache, same as `GET /skills` (spec 005).
     .get('/skills/importable', queryZodValidator(waitQuery), async (c) => {
       const repoRoot = c.get('project').root;
