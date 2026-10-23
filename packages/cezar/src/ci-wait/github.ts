@@ -1,5 +1,6 @@
 import { spawn } from 'node:child_process';
 import { z } from 'zod';
+import { matchesGithubPullRequest, mergedPullRequestObservations } from '../merge-observations.ts';
 import { ciPrIdentitySchema, ciWaitRequestSchema, type CiPrIdentity, type CiWaitErrorCode } from '@open-mercato/cezar-contract/ci-wait';
 
 export const CI_QUERY_TIMEOUT_MS = 10_000;
@@ -134,6 +135,25 @@ function commandError(result: CiCommandResult): CiGithubError {
   if (/404|not found|could not resolve|no pull requests/i.test(result.stderr)) return new CiGithubError('inaccessible_pr', 'PR is inaccessible; verify its URL and repository access.');
   return new CiGithubError('command_failed', 'GitHub query failed; check connectivity and GitHub availability, then retry.', true);
 }
+/** One bounded workflow query shared by CI waits and strict completion merging. */
+export function activeWorkflowRunsArgs(pr: Pick<CiPrIdentity, 'repository' | 'headSha'>): string[] {
+  return ['api', '--hostname', 'github.com',
+      `repos/${pr.repository}/actions/runs?head_sha=${pr.headSha}&per_page=100`, '--paginate',
+      '--jq', `{total_count, workflow_runs: [.workflow_runs[] | [.id, .status, (.head_sha | if type == "string" and test("^[0-9a-fA-F]{40}$") then ascii_downcase == ${JSON.stringify(pr.headSha.toLowerCase())} else null end)]]} | @json`];
+}
+
+export function parseActiveWorkflowRuns(text: string): boolean {
+  // Compact tuples keep 1000 ordinary runs below the output cap while retaining
+  // independent head matching. --jq emits one JSON line per page; --slurp cannot be combined with --jq.
+  const pages = parseJson('[' + text.trim().split(/\r?\n/).filter(Boolean).join(',') + ']', workflowPagesSchema);
+  const runs = pages.flatMap(page => page.workflow_runs);
+  const unique = new Set(runs.map(run => run[0]));
+  if (unique.size !== runs.length || unique.size < Math.max(...pages.map(page => page.total_count))) {
+    throw new CiGithubError('malformed_data', 'GitHub returned an incomplete workflow run list; retry the CI wait.');
+  }
+  return runs.some(([, status, headMatches]) => headMatches && status !== 'completed');
+}
+
 export class GithubCiClient {
   private readonly queries = new CiSemaphore(CI_QUERY_LIMIT);
   private readonly command: CiCommandOptions;
@@ -165,7 +185,8 @@ export class GithubCiClient {
     if (!validUrl.success) throw new CiGithubError('malformed_data', 'GitHub returned an invalid canonical PR URL.');
     const url = new URL(metadata.url);
     const parts = url.pathname.split('/');
-    if (url.hostname !== supplied.hostname || Number(parts[4]) !== metadata.number || metadata.number !== Number(supplied.pathname.split('/')[4])) throw new CiGithubError('malformed_data', 'GitHub returned inconsistent PR identity.');
+    const suppliedParts = supplied.pathname.split('/');
+    if (!matchesGithubPullRequest({ owner: suppliedParts[1]!, repo: suppliedParts[2]!, number: Number(suppliedParts[4]) }, metadata)) throw new CiGithubError('malformed_data', 'GitHub returned inconsistent PR identity.');
     return { ...ciPrIdentitySchema.parse({ prUrl: metadata.url, repository: `${parts[1]}/${parts[2]}`, prNumber: metadata.number, headSha: metadata.headRefOid }),
       mergeable: metadata.mergeable, mergeStateStatus: metadata.mergeStateStatus, raw };
   }
@@ -179,29 +200,19 @@ export class GithubCiClient {
   }
   /** The PR's state for a merge wait, in one bounded query with its head and mergeability. */
   async mergeState(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubPrMergeState> {
-    const { headSha, mergeable, mergeStateStatus, raw } = await this.readMetadata(pr.prUrl, signal, true);
+    const { headSha, mergeable, mergeStateStatus, repository, prNumber, raw } = await this.readMetadata(pr.prUrl, signal, true);
     const parsed = mergeStateSchema.safeParse(raw);
     if (!parsed.success) throw new CiGithubError('malformed_data', 'GitHub returned malformed structured data; update gh and retry.');
     const { state, mergedAt, mergeCommit } = parsed.data;
+    const [owner, repo] = repository.split('/');
+    if (this.env.CEZ_DRY_RUN !== '1') mergedPullRequestObservations.observe({ owner: owner!, repo: repo!, number: prNumber }, raw);
     return { headSha, mergeable, mergeStateStatus, state, ...(mergedAt ? { mergedAt } : {}), ...(mergeCommit ? { mergeCommitSha: mergeCommit.oid.toLowerCase() } : {}) };
   }
   async head(pr: CiPrIdentity, signal: AbortSignal): Promise<string> { return (await this.metadata(pr, signal)).headSha; }
   async hasActiveRuns(pr: CiPrIdentity, signal: AbortSignal): Promise<boolean> {
-    // gh follows every page in one bounded query. Keep counts so GitHub's filtered
-    // search cap or a changing page set cannot turn incomplete data into success.
-    const result = await this.query(['api', '--hostname', 'github.com',
-      `repos/${pr.repository}/actions/runs?head_sha=${pr.headSha}&per_page=100`, '--paginate',
-      '--jq', `{total_count, workflow_runs: [.workflow_runs[] | [.id, .status, (.head_sha | if type == "string" and test("^[0-9a-fA-F]{40}$") then ascii_downcase == ${JSON.stringify(pr.headSha.toLowerCase())} else null end)]]} | @json`], signal);
+    const result = await this.query(activeWorkflowRunsArgs(pr), signal);
     if (result.code !== 0) throw commandError(result);
-    // Compact tuples keep 1000 ordinary runs below the output cap while retaining
-    // independent head matching. --jq emits one JSON line per page; --slurp cannot be combined with --jq.
-    const pages = parseJson('[' + result.stdout.trim().split(/\r?\n/).filter(Boolean).join(',') + ']', workflowPagesSchema);
-    const runs = pages.flatMap(page => page.workflow_runs);
-    const unique = new Set(runs.map(run => run[0]));
-    if (unique.size !== runs.length || unique.size < Math.max(...pages.map(page => page.total_count))) {
-      throw new CiGithubError('malformed_data', 'GitHub returned an incomplete workflow run list; retry the CI wait.');
-    }
-    return runs.some(([, status, headMatches]) => headMatches && status !== 'completed');
+    return parseActiveWorkflowRuns(result.stdout);
   }
   async checks(pr: CiPrIdentity, signal: AbortSignal): Promise<GithubCheck[]> {
     const result = await this.query(['pr', 'checks', String(pr.prNumber), '--repo', `github.com/${pr.repository}`, '--json', 'name,state,link,bucket'], signal);

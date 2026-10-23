@@ -6,6 +6,14 @@ import type { AutomationDefinition } from '@open-mercato/cezar-api-client'
 import { fromDefinition, toCreateBody, toUpdateBody, type AutomationDraft } from './editor-draft'
 
 describe('fromDefinition', () => {
+  it('starts completion choices off and restores saved opt-ins outside taskExtra', () => {
+    expect(fromDefinition()).toMatchObject({ archiveWhenDone: false, autoMergePr: false })
+    const draft = fromDefinition({ task: { prompt: 'Ship', archiveWhenDone: true, autoMergePr: true, effort: 'high' } })
+    expect(draft).toMatchObject({ archiveWhenDone: true, autoMergePr: true, taskExtra: { effort: 'high' } })
+    expect(draft.taskExtra).not.toHaveProperty('autoMergePr')
+    expect(toCreateBody(draft).task).toMatchObject({ archiveWhenDone: true, autoMergePr: true })
+    expect(toUpdateBody({ ...draft, archiveWhenDone: false, autoMergePr: false }, 2).task).toMatchObject({ archiveWhenDone: false, autoMergePr: false, effort: 'high' })
+  })
   it('starts a new draft as a paused daily 04:00 schedule that runs autonomously', () => {
     expect(fromDefinition()).toMatchObject({
       name: '',

@@ -18,7 +18,7 @@ export function shellQuote(value: string): string {
 }
 
 /** The task keys `add` has flags for. `worktree` is not a flag: `add` always sends `true`. */
-const FLAG_TASK_KEYS: ReadonlySet<string> = new Set(['prompt', 'workflow', 'runner', 'model', 'autonomous', 'worktree'])
+const FLAG_TASK_KEYS: ReadonlySet<string> = new Set(['prompt', 'workflow', 'runner', 'model', 'autonomous', 'worktree', 'archiveWhenDone', 'autoMergePr'])
 /** The poll filters `add` has flags for, besides the two bounds it always sends at 7 and 25. */
 const FLAG_FILTER_LISTS: ReadonlySet<string> = new Set(['anyLabels', 'authors', 'changedLabels'])
 
@@ -28,6 +28,8 @@ function bodyFlagExpressible(body: CreateAutomationInput): boolean {
   if (!body.name.trim() || !body.task.prompt.trim()) return false
   const task = body.task as Record<string, unknown>
   if (Object.keys(task).some((key) => !FLAG_TASK_KEYS.has(key))) return false
+  // The positive flags send true; use JSON to preserve an explicit false.
+  if (task.archiveWhenDone === false || task.autoMergePr === false) return false
   if (task.worktree !== true) return false
   if (body.kind === 'schedule') return body.schedule !== undefined
   const { events, filters } = body
@@ -80,6 +82,8 @@ function flagsOf(body: CreateAutomationInput): string {
   if (task.runner) parts.push(flag('runner', task.runner))
   if (task.model) parts.push(flag('model', task.model))
   if (task.autonomous === false) parts.push('--no-autonomous')
+  if (task.archiveWhenDone) parts.push('--archive-when-done')
+  if (task.autoMergePr) parts.push('--auto-merge-pr')
   if (body.enable === true) parts.push('--enable')
   parts.push(flag('prompt', task.prompt))
   return parts.join(' ')
