@@ -229,7 +229,7 @@ export function AutomationEditor({ automation, forge, timeZone, onSaved, onReloa
                 <p className="text-sm break-words text-muted-foreground">{pollSentence(draft)}</p>
               </section>
             )}
-          <CopyAsCliCard draft={draft} />
+          {!draft.retiredVariants ? <CopyAsCliCard draft={draft} /> : null}
         </aside>
       </form>
     </PageFrame>
