@@ -391,18 +391,9 @@ async function unwrapValidated<R extends ClientResponse<unknown, number, Respons
 }
 
 /**
- * The one `fetch` both request paths go through — hand-written and typed alike.
- *
- * Shared rather than duplicated because the two behaviours below are the contract, and a
- * migrated route that quietly lost either of them would be a regression nobody sees until a
- * server is down:
- *
- * - **Credentials.** Remote installations are commonly behind reverse-proxy Basic Auth, and
- *   every background query/mutation must reuse that authenticated browser session just like
- *   navigation does. `include` is harmless for the root-relative, same-origin paths used here.
- * - **Unreachable is an `ApiError`, not a `TypeError`.** The request never got an answer — not
- *   an HTTP failure, hence status 0 — but callers get one error type either way instead of two.
- *   An abort is re-thrown untouched: that is the caller cancelling, not the server failing.
+ * Shared fetch boundary for typed and hand-written requests. Include browser credentials,
+ * convert unreachable transport failures to status-0 ApiError, and rethrow caller aborts
+ * unchanged.
  */
 async function fetchOrThrow(url: string, init?: RequestInit): Promise<Response> {
   try {

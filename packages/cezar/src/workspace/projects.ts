@@ -12,18 +12,9 @@ import {
 } from './config.ts';
 
 /**
- * Project registry operations over `~/.cezar/config.json` (spec
- * 2026-07-20-multi-project-workspace, "Project identity" + "Boot flow"):
- *
- * - `registerProject(root)` — realpath-normalize, dedupe by realpath, allocate
- *   a human-readable slug from `basename(root)`. Registration is additive and
- *   goes through the read-modify-write merge, so the worst race outcome
- *   between concurrent `cezar serve` processes is a lost `lastOpenedAt` bump —
- *   never a lost project.
- * - `listProjects()` — registry entries + a cheap per-root status/branch probe
- *   behind a short TTL cache, so a sidebar render never shells `git` N times.
- * - `removeProject(id)` — unregister only. It never touches any file inside
- *   the repo (a project's own state stays in `<repo>/.ai/cezar/`).
+ * Registry operations: canonical-root registration and slug allocation through merge writes,
+ * cached status probes, and unregister-only removal. Atomic replacement does not serialize
+ * concurrent merges; removing a registry entry never deletes project files.
  */
 
 /**

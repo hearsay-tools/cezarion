@@ -2,18 +2,9 @@ import { z } from 'zod';
 import { isValidTimeZone, isoWeekday, zonedParts, zonedWallTimeToUtc } from './zoned-time.ts';
 
 /**
- * A scheduled automation's trigger (spec `.ai/specs/2026-10-02-scheduled-automations.md`, issue
- * #766; origin: upstream open-mercato/cezar #985) and the pure occurrence math over it, shared
- * by the server's schedule runner and the cockpit's editor preview — one implementation, so what
- * the editor previews is what the timer fires.
- *
- * Four bounded repeating shapes rather than cron: every day at HH:MM, weekdays at HH:MM, one
- * weekday at HH:MM, every N hours from midnight. A cron string is DERIVED for display (`cronOf` /
- * `parseCron`), never stored and never evaluated — the shapes are what the math runs.
- *
- * The fifth shape, `once` (hearsay-tools/cezarion#1465), fires a single time: `at` is a wall
- * time in its OWN `timeZone`, never the server's, and `latestStartMinutes` bounds how late a
- * start after downtime may be. It has no cron form.
+ * Bounded schedule shapes and shared occurrence math for server and editor. Repeating cron
+ * strings are derived display/input forms, never stored or evaluated. once uses its own timezone
+ * and latest-start bound, with no cron form.
  */
 
 export const SCHEDULE_TYPES = ['daily', 'weekdays', 'weekly', 'hours', 'once'] as const;

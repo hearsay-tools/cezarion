@@ -1,19 +1,6 @@
 /**
- * Rendering environment assignments into a shell command line — the CLI-handoff half of agent
- * profiles (spec 2026-07-29-agent-profiles).
- *
- * A run executed under a second account only resumes under that same account: `claude --resume
- * <id>` reads `<CLAUDE_CONFIG_DIR>/sessions`, so a handoff without the variable does not fail
- * loudly — it silently starts a fresh conversation. The variable therefore has to travel with
- * every command cezar hands to a terminal, and it has to SURVIVE the command, because the window
- * stays open and the user types the next `claude` in it themselves. Hence `export` / `set` rather
- * than a one-shot `VAR=v cmd` prefix.
- *
- * There is no portable spelling: `VAR=v cmd` is meaningless to `cmd.exe`, and `set "VAR=v"` is
- * meaningless to a POSIX shell. So this renders per platform, and — the load-bearing part —
- * refuses rather than guesses. `null` means "this value cannot be embedded safely here", and
- * every caller must then fail closed: opening a terminal on the WRONG account is worse than not
- * opening one, because the user cannot see which account a shell is pointed at.
+ * Render persistent account environment assignments for POSIX or Windows terminal takeover.
+ * Return null for values that cannot be embedded safely; callers must refuse the handoff.
  */
 
 /** Values that cannot be embedded safely, per platform. Control characters are rejected

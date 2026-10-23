@@ -10,29 +10,9 @@ import { deriveRunContextEvents } from './event-history.ts';
 import type { RunRecord, RunStore } from './store.ts';
 
 /**
- * The task webhook (#589, spec 2026-09-25-task-webhook-handoff): a run that opted in with
- * `notify: true` POSTs its status changes to the project's webhook with a Bearer token.
- *
- * What it reports is the run's webhook STATE (`deriveWebhookState`, hearsay-tools/cezarion#1356),
- * not its raw status: one delivery each time the run enters a state the project selected in
- * `webhook.triggers` (default `DEFAULT_WEBHOOK_TRIGGERS`). Entering Needs you with a question
- * pending is `task.question`; every other entry is `task.status`. A run in no state (queued, a
- * scheduled resume, waiting for capacity) sends nothing, and leaving a selected state for an
- * unselected one sends nothing either.
- *
- * One subscriber per project store, on the store's `'run'` emission. That emission is the single
- * choke point every status change passes through — both turn-end handlers in `workflows/run.ts`,
- * both `ActiveRun` construction sites, recovery and the routes — so nothing upstream is edited
- * to feed it. The subscriber diffs each record against the last one it saw and queues a delivery
- * for what changed.
- *
- * A record created opted in sends `task.subscribed` once; a record created without it sends
- * nothing until `POST /runs/:id/notify` opts it in.
- *
- * Delivery is best-effort and never touches the run's lifecycle: one in-order queue per run, a
- * 10 s timeout, 3 attempts with backoff, and the outcome written to `run.webhook` plus a
- * `webhook.failed` thread event when every attempt failed. The queue is in memory; a restart
- * drops what was pending (out of scope in #589).
+ * Opted-in task webhooks from selected derived-state entries. One store subscriber queues
+ * ordered per-run deliveries with bounded retries. Failures never change lifecycle; pending
+ * in-memory deliveries can be lost on restart.
  */
 
 export type TaskWebhookEvent = 'task.status' | 'task.question' | 'task.subscribed' | 'task.test';
@@ -297,14 +277,8 @@ export class TaskWebhook {
 }
 
 /**
- * Every project's `TaskWebhook`, keyed by store (#589). It exists so the subscriber can be
- * attached BEFORE `manager.recover()`: recovery re-queues, resumes or fails the runs that were
- * live when the last process exited, and a subscriber attached after it would seed those new
- * statuses as the starting state and never report them. `index.ts` attaches the boot project
- * right after opening its store; every lazily built project attaches through
- * `ProjectContexts`' `prepareManager` hook, which runs before that project's recovery.
- *
- * Deliveries wait for `setOrigin`, which `startServer` calls once it knows its port.
+ * Attach one webhook subscriber per store before recovery. Wait for setOrigin before delivering
+ * so startup transitions retain a usable cockpit URL.
  */
 export class TaskWebhooks {
   private readonly hooks = new WeakMap<RunStore, TaskWebhook>();

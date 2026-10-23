@@ -7,11 +7,10 @@ import { noJitter, retryDelayMs, SCRATCH_BACKOFF, type Backoff } from './retry-b
 
 type Pending = { at: number; attempts: number; generation?: string; resourceId?: string };
 
-/** Terminal intent lives in the generation checkpoint as well as the run index. Unknown
- * evidence is retained and reprobed, including when the index cannot load the worker.
- * One timer serves every pending id, and a tick shares one `/proc` scan across every id it
- * probes; a retained id backs off to hourly (hearsay-tools/cezarion#879). The batch does not
- * jitter: ids that probe together should keep probing together. */
+/**
+ * Keep terminal cleanup intent in the generation checkpoint as well as the index. Retain and
+ * retry unknown evidence. One timer and shared process snapshot serve pending cleanup.
+ */
 export class WorkerScratchCleanup {
   private due = new Map<string, Pending>();
   private timer?: NodeJS.Timeout;

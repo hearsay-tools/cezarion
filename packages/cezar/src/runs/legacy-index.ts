@@ -5,18 +5,9 @@ import { dirname, join } from 'node:path';
 import { anotherCockpitOwner } from '../server/cockpit-ownership.ts';
 
 /**
- * The legacy run index at the moment `runs.db` imports it (#779, plan step 4): its exact bytes,
- * a durable copy of them beside it, and the checks that no older cezar is still writing it.
- *
- * An older cezar writes only `runs.json` and knows nothing of `runs.db`, so importing while one
- * still runs would freeze a file that keeps moving. Two signals say one does:
- * - a live cockpit other than this process holds `cockpit.lock`. A new cockpit takes that lock
- *   before it opens its store, so with no import done yet the holder is an older cockpit (v0.15.1
- *   and later write the lock), or a new one about to import, which a retry lets finish first;
- * - `runs.json` is not the file that was read. Older cezars save it by temp file and rename, so
- *   every save replaces the inode, and a save during the import shows.
- * An older process that holds no lock (a `cez run`, a cockpit before v0.15.1) and saves nothing
- * while the import runs is not seen; whatever it writes later is never imported.
+ * Read and back up exact legacy-index bytes. Refuse import for a foreign live cockpit or changed
+ * input. A lockless old writer that stays idle during import is not detectable; its later writes
+ * are not imported.
  */
 
 /** The legacy index (#779): read once, imported into `runs.db`, never written again. */
@@ -117,13 +108,9 @@ function syncDirectory(path: string): void {
 }
 
 /**
- * Keep `snapshot`'s exact bytes beside `runs.json` and answer the backup's file name. An existing
- * `runs.json.pre-sqlite.bak` is trusted only when it holds those very bytes (same size and
- * sha256). One that does not — an earlier snapshot, a file a crash cut short — is never touched:
- * the bytes go to `runs.json.pre-sqlite.<sha256 prefix>.bak` instead.
- *
- * The import calls this only inside its transaction, once nothing can refuse it any more: an
- * attempt an older cezar's writes refuse leaves no backup, so retries cannot multiply them.
+ * Keep exact snapshot bytes beside runs.json. Reuse a matching backup; preserve a different
+ * backup and use a digest-suffixed name. Called only after refusal checks inside the import
+ * transaction.
  */
 export function backUpLegacyIndex(dataDir: string, snapshot: LegacyIndexSnapshot): string {
   for (const name of [LEGACY_INDEX_BACKUP_FILE, `runs.json.pre-sqlite.${snapshot.sha256.slice(0, 12)}.bak`]) {

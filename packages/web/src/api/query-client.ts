@@ -3,29 +3,8 @@ import { QueryClient } from '@tanstack/react-query'
 import { ApiError } from './client'
 
 /**
- * Defaults for a cockpit talking to a server on localhost.
- *
- * The doctrine (spec, "Architecture"): SSE streams are for immediacy, `GET /api/runs` and
- * `GET /api/runs/:id` are authoritative. So freshness comes from the stream invalidating these
- * queries (Step 3.2) — not from polling and not from a short staleTime. Both would re-fetch on
- * a schedule that has nothing to do with when the data actually changed, and would paper over a
- * broken stream with data that happens to be nearly right.
- *
- * The doctrine holds because everything it covers is OURS, and these families override it per query
- * for different reasons:
- *
- * - `useReferenceStatuses` — GitHub is not ours and pushes the cockpit nothing, so a "checks
- *   running" chip would say that forever. It is not a blanket interval: the server tells it when
- *   to ask again (`recheckAfterMs`), and an answer that cannot change schedules nothing at all.
- * - `useRunsIndex` — a fixed interval, and deliberately a BACKSTOP rather than the mechanism. The
- *   workspace stream does reach this cache (`global-events.tsx` folds any project's run event into
- *   an invalidation); the interval covers only what a stream cannot promise — a dropped socket, a
- *   frozen tab, a run that ended while we were disconnected.
- *
- * - `useGithub` — owner-approved exception (#152): upstream edits emit no Cezar events.
- *   Foreground lists poll every 60 s, retaining the server cache; inactive lists do no work.
- *
- * Adding another needs the same kind of justification, in those terms.
+ * Query defaults for stream-patched local state. Reconcile from authoritative HTTP snapshots;
+ * external forge state and cold indexes use their explicit recheck policies.
  */
 export function createQueryClient(): QueryClient {
   return new QueryClient({

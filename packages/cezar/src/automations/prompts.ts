@@ -1,17 +1,7 @@
 /**
- * What a task is told about automations, and the playbook the built-in
- * `create-cezarion-automation` skill runs under (#774, port of upstream #985; design
- * `.ai/specs/2026-10-02-scheduled-automations.md` stage 2).
- *
- * Two texts, one mechanism. `automationsPrompt` is the SHORT part composed into every task's
- * system prompt while automations are on and the cockpit's address is in the agent's env — enough
- * for an agent to read "do X whenever Y" as an automation rather than a one-off, and to know the
- * CLI that creates one. `createAutomationSkillBody` is the full playbook, used only when the user
- * picks the skill. Neither is composed for a headless `cez run` or with `CEZ_AUTOMATIONS` unset: an
- * agent told about a CLI whose every call is refused reads the refusal as an instruction.
- *
- * Both take the CLI as an absolute command, never `cez` on PATH: an older install there may lack
- * the command, and nothing here may suggest an agent start a cockpit (owner, 2026-10-02).
+ * Short task instructions and the full automation playbook, composed only for reachable
+ * automations. Use the current absolute CLI command; do not substitute another automation
+ * mechanism.
  */
 import { fileURLToPath } from 'node:url';
 import { RUNNER_IDS } from '../core/agent-runner.ts';

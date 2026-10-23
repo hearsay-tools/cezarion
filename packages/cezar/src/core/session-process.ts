@@ -3,26 +3,9 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { afterExitDrain, exitDrainBudget, KILL_GRACE_MS } from './runner-runtime.ts';
 
 /**
- * Agent session leaders run in their own process group on POSIX (hearsay-tools/cezarion#890), so
- * Stop, the kill switches, destroy and cezar's own SIGINT/SIGTERM reach what an agent left
- * behind in the worktree. A leader that exits on its own (EOF, a crash, an outside kill) ended its
- * session too: after the exit drain its group gets SIGTERM, then SIGKILL after the grace, so a
- * stdio MCP server that ignores EOF or a background job does not outlive it
- * (hearsay-tools/cezarion#1286). A process that left the group (`setsid`, `setpgid`) is never
- * signalled.
- *
- * Signalling a group whose leader already exited is safe: Linux frees a pid number only when no
- * task uses it as a pid, pgid or sid (`__change_pid` → `free_pid`), and XNU skips a candidate pid
- * while `pghash_exists_locked(pid)` (`forkproc`). While any member lives no new process can get
- * the number; once the group is empty `kill(-pgid)` answers ESRCH. That holds only while one of
- * our processes is in the group, so when the leader exits its members are recorded by incarnation,
- * and the group is signalled later only while one of them is still in it. The reap after an exit
- * of its own rescans the group and keeps the rescan only when a recorded member is still in it,
- * so a child started after the exit is recorded too. A number freed and reused, even by a
- * double-fork daemon whose new leader already exited, is never signalled.
- *
- * win32 has no groups: the leader stays attached to cezar's console and `taskkill /T /F` ends
- * its tree by parent pid at call time.
+ * Own POSIX session process groups and track member incarnations before signalling after leader
+ * exit. Drain output before reaping; use the owned child tree on Windows. Escaped or unprovable
+ * descendants may survive rather than risk signalling reused identities.
  */
 
 type Member = { pid: number; token: string };
@@ -155,14 +138,11 @@ function scheduleKill(pgid: number, leader: Leader, signalledAt: number): void {
   setTimeout(check, Math.max(0, Math.min(GROUP_POLL_MS, deadline - Date.now())));
 }
 
-/** End what a leader that exited on its own left in its group, once (hearsay-tools/cezarion#1286).
- * The rescan precedes the SIGTERM: a member with the default action is usually gone before a scan
- * after the signal reads it, and a child started after the exit would then lose its voucher. The
- * rescan is kept only when a recorded member is still in it; otherwise the number is not ours.
- * That leaves one gap on the safe side: a member that starts a child and exits before the rescan
- * leaves nothing recorded, so the child outlives the session. Its group then reads exactly like a
- * reused number, and telling them apart needs proof the group never emptied, which only the
- * members' parent can observe. */
+/**
+ * Reap an exited leader’s group only while a recorded member still matches. Rescan before
+ * SIGTERM. If all recorded members disappeared first, retain unprovable descendants rather than
+ * signal a reused group.
+ */
 function reap(pgid: number, leader: Leader): void {
   if (leaders.get(pgid) !== leader || leader.signalledAt !== undefined) return;
   const recorded = leader.members ?? [];

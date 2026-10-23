@@ -5,29 +5,9 @@ import { z } from 'zod';
 import type { UpgradeRoute } from './upgrade-router.ts';
 
 /**
- * The cockpit's WebSocket subscription bus (`GET /api/v1/ws`, upgrade-only).
- * Design + the subscribe/unsubscribe discipline: spec
- * `.ai/specs/2026-07-23-websocket-subscriptions.md`.
- *
- * One socket per cockpit, many topics per socket: the client sends
- * `{type:'subscribe'|'unsubscribe', topic}` frames and receives
- * `{type:'event', topic, data}` frames for the topics it holds. The point of
- * the topic layer is that server-side work is DEMAND-DRIVEN: a topic's
- * publisher starts when its subscriber count goes 0→1 and is stopped at 1→0,
- * so a workspace with no cockpit open (or a cockpit that navigated away from
- * everything using a topic) costs zero timers, zero shell-outs, zero anything.
- * That is what replaced the per-tab `GET /api/health` poll (#369): N tabs used
- * to mean N polls every 5 s forever; now they mean one publisher while at
- * least one tab subscribes, and none afterwards.
- *
- * Security: the hub itself never decides who may connect — `handleUpgrade`
- * takes the upgrade guard's verdict, and server.ts supplies the WebSocket twin
- * of the `/api/*` request-origin guard (#426). See `verifyWsUpgrade` there for
- * what it admits, and the caveat about which topics may live on this hub.
- *
- * The hub does not listen on the HTTP server itself: the one `upgrade` listener
- * is `attachUpgradeRouter` (upgrade-router.ts, #781), and `socketHubRoute` is
- * this hub's route in it.
+ * Demand-driven topic WebSocket bus. Start publishers on first subscription and stop on last
+ * release. The browser’s shared live owner coordinates local demand. Upgrade authorization
+ * belongs to the supplied guard, not the hub.
  */
 
 /** The one upgrade path. Workspace-level like `/api/workspace/events` — never

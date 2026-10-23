@@ -13,18 +13,8 @@ import { TaskFileContext, taskFileHref } from './file-links'
 import { TaskLink } from './task-link'
 
 /**
- * Assistant markdown for the thread — Streamdown (spec tech pick: stable-block memoization,
- * unterminated-block repair while streaming) with code fences highlighted by the ONE Shiki
- * singleton in `lib/highlighter.ts`.
- *
- * The seam is Streamdown's `CodeHighlighterPlugin`: without a plugin its code blocks render
- * plaintext, so the singleton is the only Shiki in the app — Streamdown 2.x core carries no
- * highlighter of its own (`@streamdown/code` is deliberately NOT installed; it would ship a
- * second Shiki). The plugin protocol is sync-when-resident / callback-when-loading, which maps
- * exactly onto `highlightSync`/`highlight`.
- *
- * Both theme slots get the one CSS-variable theme: light/dark is the `--syn-*` variables
- * flipping with the `.light` class, not two token sets.
+ * Streamdown code-highlighter plugin over the shared Shiki instance. Return resident tokens
+ * synchronously or notify after lazy loading; both theme slots use SYN_THEME.
  */
 const shikiPlugin: CodeHighlighterPlugin = {
   name: 'shiki',

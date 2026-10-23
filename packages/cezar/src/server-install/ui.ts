@@ -3,14 +3,8 @@ import { CANCEL, PreflightError, type Cancellable, type SpinnerHandle, type Ui }
 import { StepAborted } from './steps.ts';
 
 /**
- * The interactive surface, implemented over `@clack/prompts` — the one place
- * the TUI library is imported. `types.ts`, the engine and the steps talk to
- * the `Ui` interface only, so `@clack/prompts` never enters the server/runtime
- * import graph (AGENTS.md keeps that stack tiny).
- *
- * Every prompt maps clack's cancel symbol to the `CANCEL` sentinel instead of
- * throwing, so a Ctrl-C mid-install is a value the engine can persist-and-exit
- * on, not an exception.
+ * Installer-only @clack/prompts adapter behind Ui. Convert cancellation to CANCEL so the engine
+ * can persist and exit without throwing.
  */
 
 /** The subset of `@clack/prompts` the UI uses — injectable for unit tests. */

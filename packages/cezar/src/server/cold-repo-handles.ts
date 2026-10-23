@@ -13,13 +13,8 @@ type Entry = {
 };
 
 /**
- * Demand-driven repository discovery for cold index rows (#97). Owned by one app, never by a
- * ProjectContext or RunStore: discovery cannot recover agents or write a stale runs.json.
- *
- * Reads return the last known handle synchronously. Each root has at most one queued/active
- * lookup, at most four lookups run at once, and each is aborted after five seconds. Failed
- * lookups retry only on a later read after a cooldown; no perpetual timer or network poll.
- * The route retains only registered cold roots, bounding memory/queued work by that registry.
+ * Demand-driven, bounded repository-handle discovery for cold projects. Reads must not construct
+ * project contexts or start recovery.
  */
 export class ColdRepoHandles {
   private readonly entries = new Map<string, Entry>();

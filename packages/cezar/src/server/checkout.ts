@@ -3,28 +3,9 @@ import { lstat, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve } from 'node:path';
 
 /**
- * `POST /api/projects/checkout` — the "Add project → Clone from GitHub" flow
- * (spec 2026-07-20-multi-project-workspace, step 4.3).
- *
- * The route itself (server.ts) owns the registry write; this module owns the
- * only two things that are genuinely dangerous about cloning on the operator's
- * behalf:
- *
- * 1. **Where the clone lands.** The target is always `<projectsDir>/<name>`
- *    with `name` a single, boring path segment. It is never a nested path,
- *    never `..`, never absolute — the checkout root is a root, not a starting
- *    point for traversal.
- * 2. **What cleanup may delete.** A failed clone must not leave a half-written
- *    directory behind (a later attempt would trip over it, and registering it
- *    would put a broken project in the sidebar). But "rm -rf the target" is a
- *    destructive path reached by a *network failure*, so it is guarded as
- *    tightly as `fs-browse.ts` guards containment — see `cleanupCheckout`.
- *
- * The load-bearing trick for (2) is that the target directory is created HERE,
- * with a non-recursive `mkdir`, before `gh` ever runs. That single syscall is
- * both the atomic existence check (EEXIST ⇒ 409, and we never touched what was
- * there) and the proof of ownership that authorizes cleanup: we only ever
- * delete a directory this operation is known to have created.
+ * Clone into one validated direct child of projectsDir. Reserve the directory with non-recursive
+ * mkdir before cloning; only guarded cleanup may remove a failed attempt. The route owns
+ * registration.
  */
 
 /** How long a clone may run before it is killed. Long enough for a large repo
@@ -135,24 +116,9 @@ export function isValidCheckoutName(name: string): boolean {
 }
 
 /**
- * Delete a partially-cloned checkout — the ONE destructive path in this module.
- *
- * Called only after `mkdir(target)` (non-recursive, so it succeeded only
- * because the directory did not exist and WE created it). Even with that proof
- * in hand, every one of these must hold or nothing is deleted:
- *
- * - `target` is still a real directory and NOT a symlink (`lstat`, not `stat`):
- *   between the mkdir and the failure, the directory could have been swapped
- *   for a link pointing anywhere.
- * - `projectsDir` and `target` both resolve (`realpath`), and the resolved
- *   target's PARENT is exactly the resolved checkout root. That is strict
- *   containment (nothing outside the root) *and* a depth limit (a direct child
- *   only, never the root itself, never a nested path).
- *
- * Any surprise — a vanished path, an unresolvable root, a `rm` that fails —
- * leaves the directory alone. Leaving a stray folder is a nuisance; deleting
- * the wrong one is unrecoverable, so every ambiguous case resolves toward "do
- * nothing".
+ * Remove only an attempt-owned real directory whose canonical parent is the checkout root.
+ * Refuse symlinks, the root itself and uncertain paths. Return false on any check or removal
+ * failure.
  */
 export async function cleanupCheckout(projectsDir: string, target: string): Promise<boolean> {
   let realRoot: string;

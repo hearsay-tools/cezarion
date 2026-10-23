@@ -6,12 +6,8 @@ import { findConfigFile, type ConfigFileDef } from './catalog.ts';
 import { validateConfig } from './validate.ts';
 
 /**
- * Read and write the coding agents' own config files, addressed by catalog id
- * (never by a client-supplied path, so traversal is impossible by
- * construction). Every function degrades — a missing file is "absent", an
- * unreadable one is an honest error — and none throw. Writes validate first,
- * refuse a stale overwrite via a content hash, write atomically through
- * symlinks, and never touch a byte the user did not type.
+ * Read and write native config by catalog id. Validate syntax and content version; write exact
+ * bytes atomically through symlinks. Missing files are absent; other failures return errors.
  */
 
 /** sha256 of the exact file bytes. mtime is coarse and lies across filesystems. */

@@ -1,15 +1,6 @@
 /**
- * Wall-clock ↔ instant conversion in a named IANA zone, on `Intl` alone (no library, Node-free,
- * so the cockpit and the server share one implementation — spec
- * `.ai/specs/2026-10-02-scheduled-automations.md`, issue #766; origin: upstream open-mercato/cezar
- * #985). Two consumers: the automation schedule math (`./automation-schedule.ts`) and the
- * usage-limit resume clock (`packages/cezar/src/core/usage-limit.ts`), which is where these
- * functions were born.
- *
- * `zonedWallTimeToUtc` iterates the zone offset to a fixed point. For a wall time that does not
- * exist (the spring-forward gap) the iteration settles on one instant near the gap rather than
- * throwing; for a wall time that exists twice (the fall-back hour) it settles on one of the two.
- * Both are what a schedule wants: fire once, never twice, never never.
+ * Shared Node-free wall-clock conversion using Intl. At DST gaps or overlaps choose one
+ * converged instant, so occurrence math does not emit duplicate local occurrences.
  */
 
 export interface ZonedParts {

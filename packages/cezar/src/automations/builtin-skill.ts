@@ -1,14 +1,7 @@
 /**
- * The built-in `create-cezarion-automation` skill (#774, port of upstream #985).
- *
- * cezar ships no skill files of its own; this is the one deliberate exception: the playbook for
- * turning a prompt into an automation belongs to the cockpit that runs automations, not to a
- * repository. A TypeScript constant rather than a Markdown file in the tarball, so the pack gate
- * and the discovery walk stay what they were.
- *
- * Gated by the caller (`RunManager.automationsReachable`): offered only when automations are on
- * AND a cockpit has handed the manager its address. A headless `cez run` or a cockpit without
- * `CEZ_AUTOMATIONS=1` would hand the agent a playbook whose every command is refused.
+ * Built-in automation playbook as a TypeScript constant. Offer only when the feature is enabled
+ * and the manager has a cockpit address; headless runs must not advertise an unavailable
+ * service.
  */
 import type { Skill } from '../skills.ts';
 import { CREATE_AUTOMATION_SKILL_NAME, createAutomationSkillBody } from './prompts.ts';

@@ -168,16 +168,8 @@ export const agentAccountStatusResponseSchema = z.object({ status: providerStatu
 export type AgentAccountStatusResponse = z.infer<typeof agentAccountStatusResponseSchema>;
 
 /**
- * `GET /api/v1/workspace/agent-profiles/:id/details` — who this account is signed in as.
- *
- * A SEPARATE, on-demand route rather than a field on the listing, and that is the whole point of
- * "hidden by default": if the listing carried an email, hiding it in the UI would be theatre — it
- * would already be in the response, the query cache and devtools. It is fetched only when the user
- * asks, is refused in hosted mode, and is never logged or persisted.
- *
- * `fields` is a labelled list rather than a fixed shape because what an agent knows about its own
- * login differs; inventing an empty "Organization" for one that has no such concept would be a
- * worse answer than omitting the row. `available: false` carries a `reason` in the user's terms.
+ * On-demand local account details, separate from ordinary listings. fields contains only
+ * explicitly selected display values; available:false includes a reason.
  */
 export const agentAccountDetailsResponseSchema = z.object({
   available: z.boolean(),
