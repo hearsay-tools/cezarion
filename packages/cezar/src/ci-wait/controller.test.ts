@@ -26,9 +26,11 @@ const coded = (code: string) => async (): Promise<never> => { throw Object.assig
 const controllers: CiToolController[] = [];
 afterEach(async () => { await Promise.all(controllers.splice(0).map(controller => controller.close())); });
 async function controller() { const value = await CiToolController.start(); controllers.push(value); return value; }
+// One connection per call, as client.ts does (hearsay-tools/cezarion#1484): the server closes a
+// connection after it refuses an oversized body, and a pooled keep-alive socket then resets the next call.
 function raw(env: Record<string,string>, body: string, token = env.CEZ_TOOL_TOKEN, route = 'wait') {
   return new Promise<{status:number;body:string}>((resolve, reject) => {
-    const req = request({ socketPath: env.CEZ_TOOL_SOCKET, path: `/api/v1/tools/${route}`, method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } }, res => {
+    const req = request({ socketPath: env.CEZ_TOOL_SOCKET, agent: false, path: `/api/v1/tools/${route}`, method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' } }, res => {
       let body = ''; res.on('data', chunk => body += chunk); res.on('end', () => resolve({ status: res.statusCode!, body }));
     }); req.on('error', reject); req.end(body);
   });

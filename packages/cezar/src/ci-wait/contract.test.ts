@@ -88,9 +88,10 @@ describe('private preview-serve route', () => {
     const notWait = async (): Promise<never> => { throw new Error('not a CI test'); };
     return owner.provision({ registerWait: notWait, ask: notWait, cancelWait: notWait, finishTurn: notWait, registerPreview });
   }
+  // One connection per call, as client.ts does: see raw() in controller.test.ts (hearsay-tools/cezarion#1484).
   function post(env: Record<string, string>, body: string, token = env.CEZ_TOOL_TOKEN!) {
     return new Promise<{ status: number; body: string }>((resolve, reject) => {
-      const req = request({ socketPath: env.CEZ_TOOL_SOCKET, path: '/api/v1/tools/preview-serve', method: 'POST', headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), 'content-type': 'application/json' } }, res => {
+      const req = request({ socketPath: env.CEZ_TOOL_SOCKET, agent: false, path: '/api/v1/tools/preview-serve', method: 'POST', headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), 'content-type': 'application/json' } }, res => {
         let text = ''; res.on('data', chunk => text += chunk); res.on('end', () => resolve({ status: res.statusCode!, body: text }));
       }); req.on('error', reject); req.end(body);
     });
