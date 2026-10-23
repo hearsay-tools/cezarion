@@ -1036,27 +1036,54 @@ describe('task thread', () => {
         return { overflow: document.documentElement.scrollWidth - innerWidth, visual: glyph.dataset.visual,
           glyphWhole: g.width >= 15 && g.right <= box.right, nameInside: n.right <= box.right + 1, nameWidth: Math.round(n.width),
           truncated: name.scrollWidth > name.clientWidth + 1, ellipsis: getComputedStyle(name).textOverflow,
-          color: getComputedStyle(name).color, label: summary.getAttribute('aria-label'), text: summary.textContent }
+          color: getComputedStyle(name).color, label: summary.getAttribute('aria-label'), text: summary.textContent,
+          statusTruncated: (() => { const l = summary.querySelector('[data-slot="run-activity-status-label"]'); return l.scrollWidth > l.clientWidth + 1 })() }
       })()`
-      type Folded = { overflow: number; visual: string; glyphWhole: boolean; nameInside: boolean; nameWidth: number; truncated: boolean; ellipsis: string; color: string; label: string; text: string }
+      type Folded = { overflow: number; visual: string; glyphWhole: boolean; nameInside: boolean; nameWidth: number; truncated: boolean; ellipsis: string; color: string; label: string; text: string; statusTruncated: boolean }
       const folded = waitForSettledSample<Folded>(browser, sample)
       expect(folded.overflow).toBeLessThanOrEqual(0)
       expect(folded.visual).toBe('active')
       expect(folded.glyphWhole).toBe(true)
       expect(folded.nameInside).toBe(true)
-      // The name keeps a few readable characters, never only the glyph.
-      expect(folded.nameWidth).toBeGreaterThanOrEqual(15)
+      // The name keeps a readable character and its ellipsis, never only the glyph.
+      expect(folded.nameWidth).toBeGreaterThanOrEqual(12)
       expect(folded.ellipsis).toBe('ellipsis')
       if (width < 768) expect(folded.truncated).toBe(true)
+      // A short status stays whole: the step name gives way first.
+      expect(folded.statusTruncated).toBe(false)
       expect(folded.text.startsWith('Activity')).toBe(true)
       expect(folded.label).toContain('; step Verify the change against every acceptance criterion in the ticket, running')
       browser.screenshot(`${artifactsDir}/folded-step-${width}-${theme}.png`, { viewport: true })
+
+      // The longest real status labels (packages/contract/src/attention.ts) share the phone row with
+      // the step: both shorten, and the status dot, the step glyph and the chevron stay in the card.
+      // The fixture cannot park a run on its workers, so a detached clone of the folded header,
+      // in a copy of the card at the card's width, carries the label instead.
+      const crowded = waitForSettledSample<{ status: boolean; label: boolean; step: boolean; chevron: boolean }>(browser, `(() => {
+        const card = document.querySelector('[data-slot="run-activity-dock"]')
+        const host = card.cloneNode(false)
+        host.style.width = card.getBoundingClientRect().width + 'px'
+        const clone = document.querySelector('${SESSION_ACTIVITY_SUMMARY}').cloneNode(true)
+        const status = clone.querySelector('[data-slot="run-activity-status"]')
+        ;[...status.childNodes].reverse().find((node) => node.textContent.trim()).textContent = 'Waiting on worker replies'
+        host.appendChild(clone)
+        document.body.appendChild(host)
+        const box = host.getBoundingClientRect()
+        const inside = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.left >= box.left - 1 && r.right <= box.right + 1 }
+        const result = { status: inside(status.firstElementChild), label: inside(status),
+          step: inside(clone.querySelector('[data-slot="run-activity-step"] [data-slot="workflow-glyph"]')), chevron: inside(clone.lastElementChild) }
+        host.remove()
+        return result
+      })()`)
+      if (width < 768) expect(crowded).toEqual({ status: true, label: true, step: true, chevron: true })
 
       focusWithKeyboard(browser, SESSION_ACTIVITY_SUMMARY)
       browser.press('Enter')
       browser.waitForFunction(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}')?.getAttribute('aria-expanded') === 'true'`)
       browser.press('Enter')
       browser.waitForFunction(`document.querySelector('${SESSION_ACTIVITY_SUMMARY}')?.getAttribute('aria-expanded') === 'false'`)
+      // Folding again brings the step back with the current name.
+      browser.waitForFunction(`document.querySelector('${SESSION_ACTIVITY_SUMMARY} [data-slot="run-activity-step-name"]')?.textContent === ${JSON.stringify(STEP_RUN.steps[1]!.name)}`)
 
       await browser.withCdp(async (request) => {
         const url = browser.url()

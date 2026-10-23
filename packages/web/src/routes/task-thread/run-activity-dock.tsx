@@ -196,9 +196,10 @@ function SessionActivityCard({
   const activeStep = workflow.length > 0 ? workflow[activeStepIndex(workflow)]! : undefined
   const activeStepState = activeStep ? railVisual(activeStep.status) : undefined
   const stepLabel = activeStep ? `; step ${activeStep.name}, ${activeStepState === 'active' ? 'running' : activeStepState}` : ''
-  // Status and step sit before the summary, outside its priority list: the summary takes only the
-  // space they leave (`flex-1` is a zero basis), drops its own items first, and only then does the
-  // step name shrink to an ellipsis. The glyph and a few characters always stay.
+  // Status and step sit before the summary, outside its priority list, in priority order. The status
+  // keeps its own width; the step grows from nothing up to its whole name; the summary grows only
+  // into what the step leaves and drops its own items. When even that is too much, the status
+  // shortens too. Each keeps its glyph and two characters, so the chevron never leaves the card.
   const foldedSummary: SummaryItem[] = [
     { id: 'runner', priority: 2, content: identity.runner },
     { id: 'model', priority: 4, content: identity.model },
@@ -224,7 +225,8 @@ function SessionActivityCard({
           openByRun.set(run.id, !open)
           setOpen(!open)
         }}
-        className="flex min-h-11 w-full min-w-0 items-center gap-2.5 px-3.5 py-2 text-start text-[14px] hover:bg-muted/40 active:bg-muted focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring"
+        // Folded, the row holds five values; 8px gaps leave a phone's status whole beside the step.
+        className={cn('flex min-h-11 w-full min-w-0 items-center px-3.5 py-2 text-start text-[14px] hover:bg-muted/40 active:bg-muted focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring', open ? 'gap-2.5' : 'gap-2')}
       >
         <LayersIcon aria-hidden className="size-4 shrink-0 text-accent-text" />
         {/* "Activity", not "Session activity": the whole page is the session, and the shorter
@@ -232,14 +234,16 @@ function SessionActivityCard({
         <span className="shrink-0 font-semibold">Activity</span>
         {open ? null : (
           <>
-            <span data-slot="run-activity-status" className={cn('inline-flex shrink-0 items-center gap-1.5 text-[13px] whitespace-nowrap text-muted-foreground', allComplete ? 'text-success' : failed && 'text-danger')}>{glyph}{statusText}</span>
+            <span data-slot="run-activity-status" title={statusText} className={cn('inline-flex min-w-[calc(0.875rem+3ch)] flex-[0_1_auto] items-center gap-1.5 text-[13px] whitespace-nowrap text-muted-foreground', allComplete ? 'text-success' : failed && 'text-danger')}>{glyph}<span data-slot="run-activity-status-label" className="min-w-0 truncate">{statusText}</span></span>
             {activeStep ? (
-              <span data-slot="run-activity-step" className="flex min-w-[calc(1.375rem+3ch)] shrink items-center gap-1.5 text-[13px] text-muted-foreground">
+              <span data-slot="run-activity-step" className="flex max-w-max min-w-[calc(1.375rem+2ch)] flex-[1_1_0] items-center gap-1.5 text-[13px] text-muted-foreground">
                 <WorkflowGlyph steps={workflow} decorative />
                 <span data-slot="run-activity-step-name" title={activeStep.name} className="min-w-0 truncate">{activeStep.name}</span>
               </span>
             ) : null}
-            <ActivitySummary items={foldedSummary} />
+            {/* A token grow factor: the step takes the free space first, up to its whole name. While
+                the summary shows nothing, a negative margin returns its gap to the status and step. */}
+            <span className="-ms-2 flex min-w-0 flex-[0.001_1_0] has-[[data-hidden=false]]:ms-0"><ActivitySummary items={foldedSummary} /></span>
           </>
         )}
         {open && cost ? <span data-slot="run-activity-cost" className="ms-auto shrink-0 text-[13px] text-muted-foreground tabular-nums">{cost}</span> : null}
