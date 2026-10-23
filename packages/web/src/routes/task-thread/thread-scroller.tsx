@@ -36,6 +36,14 @@ import {
  * hook is the only code steering it. Nothing here owns a nested scroll container.
  */
 
+/**
+ * Who owns a late jump focus in the main transcript (#1495). It outlives the hook instance on
+ * purpose: "Jump to latest" resets paged history, which unmounts the thread until the newest
+ * page is back, and the remounted thread must still take the focus. Mounting another task, a
+ * later jump or a reader gesture bumps the generation, which cancels it.
+ */
+const documentFocus = { viewKey: undefined as string | undefined, generation: 0 }
+
 /** One renderable thread row — a user bubble, a grouped block, whatever the view flattened. */
 export interface ThreadRow {
   key: string
@@ -273,8 +281,16 @@ export function useThreadScroll(
   useEffect(() => () => clearTimeout(wheelGestureTimerRef.current), [])
 
   const pendingFocusRef = useRef<MutationObserver | null>(null)
-  /** Each jump owns its late focus: a later jump, reader intent or a view change bumps it (#1495). */
+  /** Each jump owns its late focus: a later jump, reader intent or a view change bumps it (#1495).
+   *  The main transcript keeps it in `documentFocus`, so it survives a remount of the same task. */
   const focusGenerationRef = useRef(0)
+  const bumpFocus = useCallback((): number => {
+    if (surface !== 'document') return ++focusGenerationRef.current
+    return ++documentFocus.generation
+  }, [surface])
+  const ownsFocus = useCallback((viewKey: string, generation: number): boolean => surface === 'document'
+    ? documentFocus.viewKey === viewKey && documentFocus.generation === generation
+    : viewKeyRef.current === viewKey && focusGenerationRef.current === generation, [surface])
   useEffect(() => () => pendingFocusRef.current?.disconnect(), [viewKey, contentEl])
 
   const jumpToRow = useCallback((key: string, index: number, focusTarget?: (row: HTMLElement) => HTMLElement | null) => {
@@ -287,7 +303,7 @@ export function useThreadScroll(
     stuckRef.current = false
     downIntentAtRef.current = 0
     setPillVisible(true)
-    focusGenerationRef.current += 1
+    bumpFocus()
     pendingFocusRef.current?.disconnect()
     const findRow = () => [...contentEl.querySelectorAll<HTMLElement>('[data-row-key]')]
       .find(row => row.dataset.rowKey === key)
@@ -316,10 +332,10 @@ export function useThreadScroll(
       pendingFocusRef.current.observe(contentEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['style', 'class'] })
     }
     saveThreadScroll(viewKey, { top: scroller.scrollTop, atBottom: false })
-  }, [contentEl, setOffset, viewKey])
+  }, [contentEl, setOffset, viewKey, bumpFocus])
 
   const jumpToLatest = useCallback((focusTarget?: (root: HTMLElement) => HTMLElement | null) => {
-    const generation = ++focusGenerationRef.current
+    const generation = bumpFocus()
     const owner = viewKeyRef.current
     pendingFocusRef.current?.disconnect()
     const scroller = scrollElRef.current
@@ -337,7 +353,7 @@ export function useThreadScroll(
     }
     // The refreshed tail can remount the transcript, so the target is looked up under the
     // shell scroller, not the rows container, and focused when it exists.
-    const owns = () => focusGenerationRef.current === generation && viewKeyRef.current === owner && stuckRef.current
+    const owns = () => ownsFocus(owner, generation)
     const focus = () => {
       const target = focusTarget?.(scroller)
       if (!target) return false
@@ -363,16 +379,21 @@ export function useThreadScroll(
         })
       })
     })
-  }, [onJumpToLatest, viewKey, toBottom])
+  }, [onJumpToLatest, viewKey, toBottom, bumpFocus, ownsFocus])
 
   const lastRowKey = rowKeys.at(-1)
   const rowCount = rowKeys.length
   useLayoutEffect(() => {
     historyRestoreGenerationRef.current += 1
-    focusGenerationRef.current += 1
     pendingHistoryRestoreRef.current = null
     loadingOlderRef.current = false
-  }, [viewKey])
+    if (surface !== 'document') focusGenerationRef.current += 1
+    // Another task in the main transcript cancels a late focus; a remount of the same one keeps it.
+    else if (documentFocus.viewKey !== viewKey) {
+      documentFocus.viewKey = viewKey
+      documentFocus.generation += 1
+    }
+  }, [viewKey, surface])
   useLayoutEffect(() => {
     const pending = pendingHistoryRestoreRef.current
     if (pending) {
@@ -416,7 +437,7 @@ export function useThreadScroll(
     let pointerScrolling = false
     let previousScrollTop = scroller.scrollTop
     const unstick = () => {
-      focusGenerationRef.current += 1
+      bumpFocus()
       pendingFocusRef.current?.disconnect()
       pendingRestoreRef.current = null
       measurementRestoreRef.current = null
@@ -575,7 +596,7 @@ export function useThreadScroll(
       scroller.removeEventListener('keydown', onKey)
       observer?.disconnect()
     }
-  }, [viewKey, contentEl, loadOlder, setOffset, toBottom, ownsMeasurementRestore])
+  }, [viewKey, contentEl, loadOlder, setOffset, toBottom, ownsMeasurementRestore, bumpFocus])
 
   return { attachContent, scrollElRef, virtualizerRef, restoreMeasurements, ownsMeasurementRestore, pillVisible, jumpToLatest, jumpToRow, loadOlder, restickIfStuck }
 }

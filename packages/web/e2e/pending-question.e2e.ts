@@ -159,7 +159,8 @@ describe.each([
     expect(Number(browser.evaluate(cursorRequests))).toBeGreaterThan(0)
     // The answered question stays a summary and is never focused.
     expect(browser.evaluate(`document.activeElement?.closest('[data-resolved="true"]') === null`)).toBe(true)
-    expect(browser.count('[data-slot="ask-card"][data-resolved="false"]')).toBe(1)
+    // Virtualized rows may unmount the pinned card here, far below; never more than one copy.
+    expect(browser.count('[data-slot="ask-card"][data-resolved="false"]')).toBeLessThanOrEqual(1)
 
     const marker = '[data-slot="ask-go-to-question"]'
     const box = browser.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(marker)}).getBoundingClientRect(); return { w: r.width, h: r.height } })()`) as { w: number; h: number }
@@ -175,24 +176,26 @@ describe.each([
     browser.press('Enter')
     browser.waitForValue(`document.activeElement === document.querySelector(${JSON.stringify(FIRST_CHIP)})`,
       (value): value is true => value === true, { failure: 'Go to the question did not focus the first chip' })
+    expect(browser.count('[data-slot="ask-card"][data-resolved="false"]')).toBe(1)
   })
 
   it('keeps 44×44 targets and readable contrast in light and dark themes', () => {
-    openTask(width, height, query)
-    scrollAwayFromTail()
-    for (const selector of [PILL, '[data-slot="ask-show-origin"]']) {
+    // The pinned link is measured at the tail, where its row is mounted; the pill once away.
+    const measure = (selector: string) => {
       const box = browser.evaluate(`(() => { const r = document.querySelector(${JSON.stringify(selector)}).getBoundingClientRect(); return { w: r.width, h: r.height } })()`) as { w: number; h: number }
       expect(box.w, selector).toBeGreaterThanOrEqual(44)
       expect(box.h, selector).toBeGreaterThanOrEqual(44)
-    }
-    for (const theme of ['dark', 'light'] as const) {
-      browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
-      for (const selector of [PILL, '[data-slot="ask-show-origin"]']) {
+      for (const theme of ['dark', 'light'] as const) {
+        browser.evaluate(`document.documentElement.classList.toggle('light', ${theme === 'light'})`)
         const sample = browser.waitForValue<ContrastSample>(contrastSampleExpression(selector), (value) => value !== null)
         expect(sample.ratio, `${selector} in ${theme}`).toBeGreaterThanOrEqual(4.5)
       }
+      browser.evaluate(`document.documentElement.classList.remove('light')`)
     }
-    browser.evaluate(`document.documentElement.classList.remove('light')`)
+    openTask(width, height, query)
+    measure('[data-slot="ask-show-origin"]')
+    scrollAwayFromTail()
+    measure(PILL)
   })
 })
 
