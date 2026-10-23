@@ -1,3 +1,5 @@
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -49,6 +51,20 @@ describe('readExitCode', () => {
     expect(readExitCode(at('big.exit', '9'.repeat(10 * 1024 * 1024)), { worktree, tmpDir })).toEqual({ present: true });
     expect(readExitCode(at('wide.exit', '99999999999\n'), { worktree, tmpDir })).toEqual({ present: true });
     expect(readExitCode(at('empty.exit', ''), { worktree, tmpDir })).toEqual({ present: true });
+  });
+
+  // A FIFO with no writer blocks a plain open, and the reader runs on the server's event loop.
+  // The read runs in a child process so a regression fails the test instead of hanging the runner.
+  it('reports a FIFO as present without a code, without blocking', () => {
+    const fifo = join(tmpDir, 'fifo.exit');
+    expect(spawnSync('mkfifo', [fifo]).status).toBe(0);
+    const module = fileURLToPath(new URL('./exit-file.ts', import.meta.url));
+    const script = `import { readExitCode } from ${JSON.stringify(module)};
+      console.log(JSON.stringify(readExitCode(${JSON.stringify(fifo)}, ${JSON.stringify({ worktree, tmpDir })})));`;
+    // bound: a blocked open never returns; 20 s leaves room for a loaded host to start node.
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', script], { encoding: 'utf8', timeout: 20_000 });
+    expect(child.error).toBeUndefined();
+    expect(JSON.parse(child.stdout)).toEqual({ present: true });
   });
 
   it('throws when the file was swapped for a symlink that leaves the roots', () => {

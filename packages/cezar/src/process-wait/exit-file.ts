@@ -1,4 +1,4 @@
-import { closeSync, existsSync, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { dirname, isAbsolute, join, resolve, sep } from 'node:path';
 
 /**
@@ -43,7 +43,10 @@ export function confineExitFile(path: string, roots: ExitFileRoots): { ok: true;
 export function readExitCode(path: string, roots: ExitFileRoots): { present: false } | { present: true; exitCode?: number } {
   if (!existsSync(path)) return { present: false };
   if (!confineExitFile(path, roots).ok) throw new Error('the exit file now resolves outside the worktree and the Cezar temp directory');
-  const fd = openSync(path, 'r');
+  // Non-blocking: a FIFO with no writer would block a plain open, and this runs on the server's
+  // event loop. The opened descriptor, not a path stat, decides, so a file swapped in between
+  // the two cannot slip past.
+  const fd = openSync(path, constants.O_RDONLY | constants.O_NONBLOCK);
   try {
     if (!fstatSync(fd).isFile()) return { present: true };
     const buffer = Buffer.alloc(EXIT_FILE_READ_MAX);
