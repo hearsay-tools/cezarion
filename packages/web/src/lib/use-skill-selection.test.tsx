@@ -4,7 +4,8 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
-import { useTeamSkillSwitches } from './use-skill-selection'
+import type { Skill } from '@open-mercato/cezar-api-client'
+import { teamSkillRows, useTeamSkillSwitches } from './use-skill-selection'
 
 const toastMock = vi.hoisted(() => vi.fn())
 vi.mock('@/components/ui/toaster', () => ({ toast: toastMock }))
@@ -157,5 +158,32 @@ describe('useTeamSkillSwitches', () => {
     await waitFor(() => expect(view.client.getQueryState(['a', 'skills'])?.isInvalidated).toBe(true))
     expect(view.client.getQueryState(['a', 'skills', 'importable'])?.isInvalidated).toBe(true)
     expect(view.client.getQueryState(['b', 'skills'])?.isInvalidated).toBe(false)
+  })
+})
+
+describe('teamSkillRows', () => {
+  const teamSkill = (name: string, repo: string, ref = 'main'): Skill => ({
+    name,
+    source: 'team',
+    body: '',
+    path: `${repo}@${ref}:${name}/SKILL.md`,
+    team: { repo, ref, path: `${name}/SKILL.md`, dir: true },
+  })
+
+  it('keeps one row per {repo, name}: one repo at two refs shares one switch', () => {
+    const main = teamSkill('x', 'acme/skills', 'main')
+    const v2 = teamSkill('x', 'acme/skills', 'v2')
+    const rows = teamSkillRows([main, v2], [main], () => true)
+    expect(rows).toEqual([{ skill: main, on: true }])
+  })
+
+  it('names the winning repo on an ON copy that lost de-duplication', () => {
+    const a = teamSkill('x', 'acme/skills')
+    const b = teamSkill('x', 'beta/skills')
+    expect(teamSkillRows([a, b], [a], () => true)).toEqual([
+      { skill: a, on: true },
+      { skill: b, on: true, hiddenBy: 'acme/skills' },
+    ])
+    expect(teamSkillRows([a, b], [a], (ref) => ref.repo !== 'beta/skills')[1]).toEqual({ skill: b, on: false })
   })
 })

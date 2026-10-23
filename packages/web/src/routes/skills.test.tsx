@@ -401,6 +401,31 @@ describe('team skill switches (#1494)', () => {
     expect(switchFor('x', 'beta/skills')?.getAttribute('aria-checked')).toBe('true')
   })
 
+  it('one repo at two refs shows one row with one shared switch', async () => {
+    const main = team('x', 'acme/skills')
+    const v2: Skill = { ...main, path: 'acme/skills@v2:x/SKILL.md', team: { ...main.team!, ref: 'v2' } }
+    serve({ skills: [...SKILLS, main], importable: [main, v2] })
+    renderAt('/skills')
+    await waitFor(() => expect(switchFor('x')?.disabled).toBe(false))
+    expect(document.querySelectorAll('[data-slot="skill-row"][data-skill="x"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-slot="skills-list"] [data-slot="skill-switch"][data-skill="x"]')).toHaveLength(1)
+    expect(switchFor('x')?.getAttribute('aria-label')).toBe('Enable x')
+    expect(document.querySelector('[data-slot="skill-row"][data-skill="x"]')?.getAttribute('href')).toBe('/p/boot/skills?skill=x')
+  })
+
+  it('a long hiding source wraps instead of overflowing the row', async () => {
+    const long = `https://git.example.com/${'very-long-group/'.repeat(8)}skills.git`
+    const a = team('x', long)
+    const b = team('x', 'beta/skills')
+    serve({ skills: [...SKILLS, a], importable: [a, b] })
+    renderAt('/skills')
+    await waitFor(() => expect(switchFor('x', 'beta/skills')).not.toBeNull())
+    const note = document.querySelector('[data-slot="skill-row"][data-repo="beta/skills"] [data-slot="skill-hidden-by"]')!
+    expect(note.textContent).toBe(`hidden by ${long}`)
+    expect(note.className).toContain('[overflow-wrap:anywhere]')
+    expect(note.className).toContain('min-w-0')
+  })
+
   it('a local skill hides every team copy of its name', async () => {
     serve({ skills: CATALOG, importable: [...IMPORTABLE, team('om-fix')] })
     renderAt('/skills')

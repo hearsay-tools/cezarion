@@ -28,7 +28,8 @@ export function teamSkillRef(skill: Skill): TeamSkillRef | undefined {
 }
 
 /**
- * One row per team skill, in the order given. `hiddenBy` names what the catalog shows for that
+ * One row per `{ repo, name }`, in the order given: the switch key has no `ref`, so one repo
+ * configured at two refs offers one row and one switch, and the first entry wins. `hiddenBy` names what the catalog shows for that
  * name instead of an ON copy: the winning team skill's repo, or another skill's source. It is
  * unset for an OFF row and when the catalog has no entry for the name yet.
  */
@@ -40,9 +41,13 @@ export function teamSkillRows(
   const winners = new Map<string, Skill>()
   for (const skill of catalog) if (!winners.has(skill.name)) winners.set(skill.name, skill)
   const rows: Array<{ skill: Skill; on: boolean; hiddenBy?: string }> = []
+  const seen = new Set<string>()
   for (const skill of team) {
     const ref = teamSkillRef(skill)
     if (!ref) continue
+    const key = JSON.stringify([ref.repo, ref.name])
+    if (seen.has(key)) continue
+    seen.add(key)
     const on = isOn(ref)
     const winner = winners.get(skill.name)
     const winnerRef = winner ? teamSkillRef(winner) : undefined

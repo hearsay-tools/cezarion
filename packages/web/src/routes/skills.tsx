@@ -437,7 +437,7 @@ function SkillRow({
           className="self-start border-0 bg-transparent p-0 text-link-foreground"
         />
         {hiddenBy ? (
-          <span data-slot="skill-hidden-by" className="text-xs text-supporting-foreground">
+          <span data-slot="skill-hidden-by" className="min-w-0 text-xs text-supporting-foreground [overflow-wrap:anywhere]">
             hidden by {hiddenBy}
           </span>
         ) : null}
