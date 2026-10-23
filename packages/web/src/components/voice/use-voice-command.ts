@@ -29,9 +29,17 @@ import {
  * The Return that commits a sentence acts only on the decision for exactly that sentence, so it
  * can create a proposal but never confirm one (§ Input 5). Return confirms only in an empty input
  * while a proposal is shown.
+ *
+ * Return follows cmdk's selection (hearsay-tools/cezarion#1461): a sentence shows its Will do row
+ * at once, first and so selected, and Return commits only while that row is still selected. A row
+ * the user moved to keeps Return, and a decision that arrives later never takes it back.
  */
 
-export type VoiceRow = { kind: 'will-do' | 'notice'; text: string; choices?: string[] }
+/** The Will do row's cmdk value: the palette compares its selection against it. */
+export const VOICE_ROW_VALUE = 'voice-will-do'
+
+/** `pending`: the sentence's decision has not arrived yet. */
+export type VoiceRow = { kind: 'will-do' | 'notice'; text: string; choices?: string[]; pending?: true }
 export type VoiceMode = 'idle' | 'preview' | 'choosing' | 'proposal'
 
 /** How long the text must stay unchanged before the palette asks the engine. */
@@ -167,15 +175,22 @@ function proposalText(proposal: VoiceProposal, runs: readonly RunSummary[]): str
     : tellRowText(proposal.text, title)
 }
 
-/** Return falls back to whatever cmdk has selected, as it does without voice. Voice rows are
- *  never that fallback: a notice row can keep cmdk's selection after it stops being clickable. */
-function clickSelectedItem() {
-  document.querySelector<HTMLElement>('[cmdk-item][data-selected="true"]:not([data-slot^="voice-"])')?.click()
+/** Return falls back to the row cmdk would select without voice: the first ordinary row. Return
+ *  reaches this only from the Will do row, which sits above every ordinary row. */
+function clickFirstItem() {
+  document.querySelector<HTMLElement>('[cmdk-item]:not([data-slot^="voice-"]):not([data-disabled="true"])')?.click()
 }
 
 const OFF = { row: undefined, mode: 'idle' as const, onEnter: () => false, onClose: () => {}, onSelect: () => {} }
 
-export function useVoiceCommand(args: { enabled: boolean; text: string; close(): void; clearText(): void }): {
+export function useVoiceCommand(args: {
+  enabled: boolean
+  text: string
+  /** cmdk's selected value; Return commits a sentence only while it is `VOICE_ROW_VALUE`. */
+  selected: string
+  close(): void
+  clearText(): void
+}): {
   row: VoiceRow | undefined
   mode: VoiceMode
   /** True when voice handled the key (and prevented cmdk's own Return). */
@@ -359,7 +374,7 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
           return
         }
         case 'none':
-          if (decision.reason === 'not-a-command') return clickSelectedItem()
+          if (decision.reason === 'not-a-command') return clickFirstItem()
           return sayForDecision(NONE_NOTICES[decision.reason])
       }
     },
@@ -380,17 +395,19 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
     if (committing.current === made) committing.current = undefined
     // The text, the open task or the shown proposal moved on: this decision is for something else.
     if (!mounted.current || !sameKey(latest.current.key, committedKey)) return
+    // The user moved to another row while Return waited: that row is the choice now.
+    if (latest.current.selected !== VOICE_ROW_VALUE) return
     if (result === 'timeout') {
       // The late decision, if it ever comes, is aborted and so never acts.
       made.controller.abort()
       if (request.current === made) request.current = undefined
       sayForDecision(NOTICES.timedOut)
-      return clickSelectedItem()
+      return clickFirstItem()
     }
     if (result.kind === 'aborted') return
     if (result.kind === 'failed') {
       sayForDecision(NOTICES.unavailable)
-      return clickSelectedItem()
+      return clickFirstItem()
     }
     act(result.decision, made)
   }, [act, requestFor, sayForDecision])
@@ -510,7 +527,7 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
         confirmProposal()
         return handled()
       }
-      if (voiceable(text)) {
+      if (voiceable(text) && current.selected === VOICE_ROW_VALUE) {
         void commit()
         return handled()
       }
@@ -536,6 +553,8 @@ export function useVoiceCommand(args: { enabled: boolean; text: string; close():
     row = { kind: 'will-do', text: 'Which one?', choices: choosingLive.choices.map((choice) => choice.text) }
   } else if (settled && sameKey(settled.key, key) && voiceable(trimmed)) {
     row = previewRow(settled.result, settled.key, { runs: runs ?? [], sidebarView, openRunId })
+  } else if (voiceable(trimmed) && pick === null) {
+    row = { kind: 'will-do', text: 'Reading…', pending: true }
   } else if (proposal && trimmed === '') {
     row = { kind: 'will-do', text: proposalText(proposal, runs ?? []) }
   }

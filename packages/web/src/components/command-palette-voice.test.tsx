@@ -191,6 +191,59 @@ describe('palette voice mode', () => {
     // bound: the debounce wait above may take up to 10 s on a loaded host.
   }, 20_000)
 
+  it('Enter opens the result selected below the Will do row', async () => {
+    mocks.voiceDecide.mockResolvedValue({
+      action: 'open',
+      decisionId: '00000000-0000-4000-8000-000000000004',
+      status: 'done',
+      position: 1,
+      confidence: 0.9,
+    } satisfies VoiceDecision)
+    renderPalette({
+      voice: true,
+      runs: [run({ id: 'a', title: 'Fix flaky shard' }), run({ id: 'b', title: 'Beta', status: 'done' })],
+    })
+    const input = await openPalette()
+
+    fireEvent.change(input, { target: { value: 'fix flaky shard' } })
+    // bound: the 300 ms preview debounce runs on real timers here, under a loaded host.
+    await screen.findByText('Open “Beta” — first done', undefined, { timeout: 10_000 })
+    const voiceRow = () => document.querySelector('[data-slot="voice-row"]')
+    expect(voiceRow()?.getAttribute('data-selected')).toBe('true')
+
+    fireEvent.keyDown(input, { key: 'ArrowDown' })
+    await waitFor(() => expect(voiceRow()?.getAttribute('data-selected')).toBe('false'))
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toMatch(/\/tasks\/a$/))
+    expect(mocks.reportVoiceOutcome).not.toHaveBeenCalledWith('00000000-0000-4000-8000-000000000004', 'executed')
+    // bound: the debounce wait above may take up to 10 s on a loaded host.
+  }, 20_000)
+
+  it('Enter right after a sentence commits it through the highlighted Will do row', async () => {
+    mocks.voiceDecide.mockResolvedValue({
+      action: 'open',
+      decisionId: '00000000-0000-4000-8000-000000000005',
+      status: 'done',
+      position: 1,
+      confidence: 0.9,
+    } satisfies VoiceDecision)
+    renderPalette({
+      voice: true,
+      runs: [run({ id: 'a', title: 'Fix flaky shard' }), run({ id: 'b', title: 'Beta', status: 'done' })],
+    })
+    const input = await openPalette()
+
+    fireEvent.change(input, { target: { value: 'fix flaky shard' } })
+    const row = document.querySelector('[data-slot="voice-row"]')
+    expect(row?.textContent).toContain('Reading…')
+    expect(row?.getAttribute('data-selected')).toBe('true')
+    fireEvent.keyDown(input, { key: 'Enter' })
+
+    await waitFor(() => expect(screen.getByTestId('location').textContent).toBe('/tasks/b'))
+    expect(mocks.reportVoiceOutcome).toHaveBeenCalledWith('00000000-0000-4000-8000-000000000005', 'executed')
+  })
+
   it('docks the palette during a proposal', async () => {
     let applied: VoiceAnswer[] = []
     voiceStore.registerAskCard({

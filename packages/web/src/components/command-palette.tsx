@@ -221,6 +221,13 @@ export function orderProjects(
 
 export function CommandPalette() {
   const [open, setOpen] = React.useState(false)
+  // cmdk's selected row, controlled so voice mode can tell whether Return targets its Will do row
+  // (hearsay-tools/cezarion#1461). An empty value lets cmdk select the first row on open.
+  const [selected, setSelected] = React.useState('')
+  // A closed palette forgets it, so the next open pre-selects New task again.
+  React.useEffect(() => {
+    if (!open) setSelected('')
+  }, [open])
   const navigate = useNavigate()
 
   useCommandShortcut('k', () => setOpen((current) => !current))
@@ -258,6 +265,8 @@ export function CommandPalette() {
       description="Search projects, tasks, views, actions, and skills"
       showCloseButton={false}
       filter={paletteScore}
+      value={selected}
+      onValueChange={setSelected}
       // Two overrides of the shared dialog, both for this surface only — every other dialog in
       // the cockpit is a form, which wants to stay narrow and centred.
       //
@@ -274,7 +283,7 @@ export function CommandPalette() {
     >
       {/* The body mounts only while the dialog is open (Radix portals nothing when closed), so
           its queries — notably the skills fetch — run on first open, never on app boot. */}
-      <PaletteContent open={open} docked={docked} close={() => setOpen(false)} />
+      <PaletteContent open={open} docked={docked} selected={selected} close={() => setOpen(false)} />
     </CommandDialog>
   )
 }
@@ -337,7 +346,17 @@ function TaskItem({
   )
 }
 
-function PaletteContent({ open, docked, close }: { open: boolean; docked: boolean; close: () => void }) {
+function PaletteContent({
+  open,
+  docked,
+  selected,
+  close,
+}: {
+  open: boolean
+  docked: boolean
+  selected: string
+  close: () => void
+}) {
   const navigate = useNavigate()
   // The UNSCOPED twin, for the handful of targets that live outside every project (`/tasks`).
   const routerNavigate = useRouterNavigate()
@@ -364,6 +383,7 @@ function PaletteContent({ open, docked, close }: { open: boolean; docked: boolea
   const voice = useVoiceCommand({
     enabled: health.data?.capabilities.voice === true,
     text: search,
+    selected,
     close,
     clearText: () => setSearch(''),
   })
