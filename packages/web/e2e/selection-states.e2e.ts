@@ -25,7 +25,7 @@ beforeAll(async () => {
   // Headless Chrome can report hover:none even for mouse events. Exercise the actual
   // hover CSS at both widths; moving a pointer alone would silently test the rest style.
   process.env.AGENT_BROWSER_ARGS = [originalBrowserArgs, '--blink-settings=primaryHoverType=2'].filter(Boolean).join(',')
-  // No Git: the real composer must disable variants while leaving model selection available.
+  // No Git: model selection stays available.
   root = mkdtempSync(join(tmpdir(), 'cez-states-'))
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   mkdirSync(join(root, '.ai/skills'), { recursive: true })
@@ -432,12 +432,12 @@ describe('selection and control states (#171)', () => {
       browser.waitForFunction(`document.querySelector('[data-slot="reference-status-card"]') === null`)
     })
 
-    it(`${variant.id}: enabled control icons contrast and disabled selectors remain unavailable`, () => {
+    it(`${variant.id}: enabled control icons contrast and retired selectors stay absent`, () => {
       variantId = variant.id
       browser.goto(`${baseUrl}/p/${project}/new`)
       const model = 'button[data-slot="model-pill"]'
-      const disabled = 'button[data-slot="variants-pill"]'
-      browser.waitForFunction(`document.querySelector('${model}')?.disabled === false && document.querySelector('${disabled}')?.disabled === true`)
+      browser.waitForFunction(`document.querySelector('${model}')?.disabled === false`)
+      expect(browser.count('[data-slot="variants-pill"]')).toBe(0)
       applyContrastQaVariant(browser, variant)
       colorSample(`document.querySelector('[data-slot="execution-options"] summary').scrollIntoView({ block: 'center' })`)
       browser.click('[data-slot="execution-options"] summary')
@@ -454,11 +454,7 @@ describe('selection and control states (#171)', () => {
       expect(style(source).border).toBe('solid')
       expect((colorSample(contrastSampleExpression(source)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
       const enabledStyle = style(model)
-      const disabledStyle = style(disabled)
       expect(enabledStyle.border).toBe('solid')
-      expect(colorSample(`document.querySelector('${disabled}').disabled`)).toBe(true)
-      expect(disabledStyle.opacity).toBe('1')
-      expect((colorSample(contrastSampleExpression(disabled)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
       for (const state of ['rest', 'hover', 'focus']) {
         if (state === 'hover') {
           hoverVisiblePoint(browser, model)
@@ -486,11 +482,6 @@ describe('selection and control states (#171)', () => {
       browser.press('ArrowDown')
       browser.press('Enter')
       browser.waitForFunction(`document.querySelector('[role="menu"]') === null`)
-      // Native disabled behavior, with the actual product prop supplied by a non-Git repo.
-      expect(colorSample(`(() => {
-        const el = document.querySelector('${disabled}'); el.click(); el.focus()
-        return { disabled: el.disabled, focused: document.activeElement === el, menu: !!document.querySelector('[role="menu"]') }
-      })()`)).toEqual({ disabled: true, focused: false, menu: false })
       expect(waitForSettledSample(browser, 'document.documentElement.scrollWidth <= innerWidth')).toBe(true)
       browser.screenshot(`${artifacts}/states-composer-${variant.id}.png`, { viewport: true })
     })

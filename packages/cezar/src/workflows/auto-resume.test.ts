@@ -1,11 +1,11 @@
-import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
+import { createFixtureManager, drainFixtureManagers, fixtureWorkSettled } from './fixture-cleanup.testkit.ts';
 import { execFile } from 'node:child_process';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { RunStore } from '../runs/store.ts';
+import { RunStore, type RunRecord } from '../runs/store.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import {
@@ -296,9 +296,37 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // other to prove a window neither will ever get to test. Everything in the workspace stops.
     const semaphore = new WorkspaceSemaphore({ initial: { maxParallel: 2 } });
     const first = createFixtureManager(store, repoRoot, { semaphore });
+    async function checkpoint(runId: string, name: string, reached: (run: RunRecord) => boolean): Promise<void> {
+      let timer: ReturnType<typeof setTimeout>;
+      let onRun: (run: RunRecord) => void;
+      let onEvent: (entry: { runId: string }) => void;
+      try {
+        await new Promise<void>((resolve, reject) => {
+          const inspect = () => {
+            clearTimeout(timer);
+            const current = store.getRun(runId);
+            if (current && reached(current)) { resolve(); return; }
+            // bound: keep settle's 20 s mock-turn guard, but restart it on this run's own
+            // store writes/events. Work on the other run cannot hide an account deadlock.
+            timer = setTimeout(() => reject(new Error(
+              `${name}: ${runId} made no progress; ${JSON.stringify(store.getRun(runId))}`,
+            )), 20_000);
+          };
+          onRun = (run) => { if (run.id === runId) inspect(); };
+          onEvent = (entry) => { if (entry.runId === runId) inspect(); };
+          store.on('run', onRun);
+          store.on('event', onEvent);
+          inspect();
+        });
+      } finally {
+        clearTimeout(timer!);
+        store.off('run', onRun!);
+        store.off('event', onEvent!);
+      }
+    }
     const runs = [1, 2].map((n) => first.startRun(workflow, { task: `mock:limit pair ${n}` }));
-    for (const run of runs) await settle(run.id);
-    expect(runs.every((r) => store.getRun(r.id)?.autoResumeAt !== undefined)).toBe(true);
+    await Promise.all(runs.map((run, index) => checkpoint(run.id, `pair ${index + 1}: first usage limit`,
+      (current) => current.status === 'waiting' && current.autoResumeAt !== undefined)));
     first.dispose();
 
     // Both windows reopen together — the exact state the live deadlock started from. The task
@@ -313,14 +341,19 @@ describe('a run stopped by a usage limit resumes itself', () => {
     manager = createFixtureManager(store, repoRoot, { semaphore });
     await manager.recover();
 
-    await expect
-      .poll(
-        () =>
-          runs.filter((r) => store.getRun(r.id)?.steps.some((s) => s.id === 'continue-1' && s.status === 'done'))
-            .length,
-        { timeout: 25_000 },
-      )
-      .toBe(2);
+    await Promise.all(runs.map(async (run, index) => {
+      await checkpoint(run.id, `pair ${index + 1}: recovery admission`,
+        (current) => current.steps.some((step) => step.id === 'continue-1'));
+      await checkpoint(run.id, `pair ${index + 1}: resumed turn completion`,
+        (current) => current.steps.some((step) => step.id === 'continue-1' && step.status === 'done'));
+    }));
+    for (const run of runs) {
+      expect(store.getRun(run.id)?.steps.find((step) => step.id === 'continue-1')?.status).toBe('done');
+    }
+    // A done step precedes the continuation's final save. Let those owned calls settle before
+    // teardown cancels the sessions; under contention both saves can still be in flight here.
+    await fixtureWorkSettled(repoRoot);
+    // bound: keep the existing 60 s row guard for fixture settlement after the per-run checks.
   }, 60_000);
 
   it('watchdog: an idle queue with no appointment behind the hold starts work anyway', async () => {

@@ -811,7 +811,7 @@ export interface StartRunInput {
   systemPrompt?: string;
   /** Composer opt-out (#worktree-toggle): `false` runs the task in the repo
    *  working tree instead of an isolated worktree. Undefined/`true` keeps the
-   *  default per-task worktree. Ignored for variants (they always isolate). */
+   *  default per-task worktree. */
   worktree?: boolean;
   /** Autonomous mode (#autonomous): eligible turn ends auto-continue until done
    *  or the safety cap. Native asks, input delivery and lifecycle waits still apply. */
@@ -969,15 +969,6 @@ export function pastedAttachmentsText(attachments: PersistedAttachment[]): strin
 export function pastedAttachmentsNote(attachments: PersistedAttachment[]): ContentBlock {
   return { type: 'text', text: pastedAttachmentsText(attachments) };
 }
-
-/** Variant letters + the fixed diversification hints (spec 010). A runs the
- *  task verbatim; B/C get one constant sentence each — zero configuration. */
-export const VARIANT_LETTERS = ['A', 'B', 'C'] as const;
-const VARIANT_HINTS: Record<string, string | undefined> = {
-  A: undefined,
-  B: 'Approach hint: prefer the minimal, surgical change.',
-  C: 'Approach hint: prefer a thorough, structural approach.',
-};
 
 const RESTART_CONTINUATION_PROMPT =
   'The cezar process restarted while you were working on this task. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
@@ -3093,22 +3084,21 @@ export class RunManager {
     if (existing) {
       return existing.clientRequestHash === request.hash ? { run: existing, created: false } : { conflict: true };
     }
-    return { run: this.startRun(workflow, input, undefined, request), created: true };
+    return { run: this.startRun(workflow, input, request), created: true };
   }
 
   startRun(
     workflow: WorkflowDef,
     input: StartRunInput,
-    group?: { groupId: string; variant: string },
     clientRequest?: { id: string; hash: string },
   ): RunRecord {
-    // Sanitize at the manager boundary so CLI runs, workflows, variants, and
+    // Sanitize at the manager boundary so CLI runs, workflows, and
     // direct callers cannot bypass the HTTP policy.
     const effectiveInput = agentModelsLocked(this.repoRoot)
       ? { ...input, model: undefined, effort: undefined }
       : input;
     const run = this.store.createRun({
-      title: makeRunTitle(input.task, workflow) + (group ? ` (${group.variant})` : ''),
+      title: makeRunTitle(input.task, workflow),
       workflow: workflow.name,
       task: input.task,
       systemPrompt: input.systemPrompt,
@@ -3119,20 +3109,18 @@ export class RunManager {
       // so a queued run picks it up at dequeue and every later resume reads the same answer.
       agentProfile: input.agentProfile,
       // The global inbox is the ceiling on the per-run flag (#471). Enforced here rather than
-      // at the HTTP route because `cezar run`, the inbox's own "▶ Run" and variants all reach
+      // at the HTTP route because `cezar run` and the inbox's own "▶ Run" both reach
       // startRun directly — a route-level gate would leave those writing todos.json.
       generateFollowups: followupsEnabled() ? input.generateFollowups : false,
       // Persist autonomy on the record (#489) so the terminal review gate
-      // (`settleSuccess`) and the group-pick winner-park can honor it — mid-run
+      // (`settleSuccess`) can honor it — mid-run
       // auto-nudge reads `input.autonomous` (`execute`), but the record is the
       // only source those after-the-fact consumers have.
       autonomous: input.autonomous === true,
       notify: input.notify === true,
       // Persist the explicit opt-out so queued-run restart recovery and the
       // session Git routes can distinguish it from a removed isolated worktree.
-      worktree: !group && input.worktree === false ? false : undefined,
-      groupId: group?.groupId,
-      variant: group?.variant,
+      worktree: input.worktree === false ? false : undefined,
       clientRequestId: clientRequest?.id,
       clientRequestHash: clientRequest?.hash,
       automation: input.automation,
@@ -3224,24 +3212,6 @@ export class RunManager {
       throw new WorkerIdentityError('Accepted worker workflow definition is unavailable or changed');
     }
     return run.workflowDef;
-  }
-
-  /**
-   * Parallel variants (spec 010): N runs of the same workflow on the same
-   * task, sharing a groupId. Variant A gets the task verbatim; B and C get a
-   * fixed one-line approach hint appended to the *task input* (not the step
-   * template), so diversification works with any workflow. The normal queue
-   * applies — with maxParallel=2 a third variant simply waits.
-   */
-  startVariants(workflow: WorkflowDef, input: StartRunInput, count: number): RunRecord[] {
-    const groupId = randomUUID();
-    return VARIANT_LETTERS.slice(0, Math.min(Math.max(count, 1), VARIANT_LETTERS.length)).map(
-      (variant) => {
-        const hint = VARIANT_HINTS[variant];
-        const task = hint ? `${input.task}\n\n${hint}` : input.task;
-        return this.startRun(workflow, { ...input, task, worktree: undefined }, { groupId, variant });
-      },
-    );
   }
 
   /**

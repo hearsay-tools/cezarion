@@ -4,6 +4,7 @@ import {
   type NormalizedSchedule,
 } from '@open-mercato/cezar-api-client/contract/automation-schedule'
 import type {
+  AutomationTask,
   AutomationEvent,
   AutomationFilters,
   AutomationKind,
@@ -35,7 +36,8 @@ export interface AutomationDraft {
   autonomous: boolean
   /** The state the user wants after saving. */
   enabled: boolean
-  /** Task keys the editor has no control for (effort, variants, a system prompt …), carried
+  retiredVariants: boolean
+  /** Task keys the editor has no control for (effort, a system prompt …), carried
    *  through an edit untouched. */
   taskExtra: Omit<TaskInput, 'prompt' | 'workflow' | 'runner' | 'model' | 'autonomous'>
 }
@@ -49,15 +51,16 @@ type DraftSource = Partial<{
   intervalSeconds: number
   filters: AutomationFilters
   schedule: AutomationSchedule
-  task: TaskInput
+  task: TaskInput | AutomationTask
   enabled: boolean
   enable: boolean
 }>
 
 export function fromDefinition(source: DraftSource = {}): AutomationDraft {
-  const { prompt, workflow, runner, model, autonomous, ...taskExtra } = source.task ?? { prompt: '' }
+  const { prompt, workflow, runner, model, autonomous, variants, ...taskExtra } = source.task ?? { prompt: '' }
   const fresh = source.task === undefined
   return {
+    retiredVariants: variants !== undefined && variants !== 1,
     name: source.name ?? '',
     description: source.description ?? '',
     kind: source.kind ?? 'schedule',
@@ -94,6 +97,7 @@ function scheduleBody(schedule: NormalizedSchedule): AutomationSchedule {
 }
 
 function taskBody(draft: AutomationDraft): TaskInput {
+  if (draft.retiredVariants) throw new Error('Parallel variants are removed. Choose Use one task before saving this automation.')
   return {
     ...draft.taskExtra,
     prompt: draft.prompt,
