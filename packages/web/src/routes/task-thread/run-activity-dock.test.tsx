@@ -884,7 +884,7 @@ describe('Session activity — folded by default, folded while reading up (#1601
     const feed = scrollFeed()
     renderDock(fresh(), [], workers, 'ok', {}, { readerScroll: feed.subscribe, sticky: true })
     const dock = document.querySelector<HTMLElement>('[data-slot="thread-dock"]')!
-    dock.getBoundingClientRect = () => ({ height: 300 }) as DOMRect
+    vi.spyOn(dock, 'getBoundingClientRect').mockReturnValue({ height: 300 } as DOMRect)
     feed.emit({ direction: 'up', distanceFromBottom: 200 })
     expect(expanded()).toBe('true')
     feed.emit({ direction: 'up', distanceFromBottom: 301 })
