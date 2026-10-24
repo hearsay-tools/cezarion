@@ -27,6 +27,8 @@ export function TaskFilesRoute() {
 function FilesView({ run }: { run: ApiRun }) {
   const root = useRunFile(run.id, '')
   const artifacts = useArtifacts(run.id)
+  // Query-writer exception (hearsay-tools/cezarion#1649): file selection pushes history so
+  // Back restores the previous file. useSearchParamsWriter always replaces that history.
   const [query, setQuery] = useSearchParams()
   const selected = query.get('path')
   const artifactId = query.get('artifact')

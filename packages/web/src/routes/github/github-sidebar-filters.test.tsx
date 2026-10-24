@@ -335,6 +335,14 @@ describe('filter list visuals (#622)', () => {
 })
 
 describe('the phone filter screen and entry rules', () => {
+  it('clearing the filter preserves unrelated query keys', async () => {
+    stub()
+    renderAt('/github?origin=direct&filter=assigned')
+    await waitFor(() => expect(numbers()).toEqual([1]))
+    fireEvent.click(screen.getByRole('button', { name: 'Clear filters' }))
+    await waitFor(() => expect(where()).toBe('/github?origin=direct&filter=all'))
+  })
+
   it('bare /github on a phone is the filter screen; a row pushes the list with a way back', async () => {
     setDesktop(false)
     stub({ uiState: { githubView: 'prs' } })
