@@ -54,6 +54,7 @@ import {
   recordHandoffPeriodicAutosave,
   seedHandoffFile,
 } from '../handoff.ts';
+import { buildSessionContext, formatSessionContextReport, type SessionContext } from '../session-context.ts';
 import { attachmentDirectory, resolveAttachmentPath } from './attachment-path.ts';
 // Contract VALUES, like `workspaceUiStateSchema` in workspace/migrations.ts: the attachment
 // vocabulary the routes validate with is the same one the engine stores and re-reads by, so the
@@ -1863,6 +1864,39 @@ export class RunManager {
   /** The automations part of every session's system prompt, or nothing. */
   private automationsPart(): string | undefined {
     return this.automationsReachable() ? automationsPrompt(automationCliCommand()) : undefined;
+  }
+  /**
+   * One launch's session-start context (hearsay-tools/cezarion#1584): the run's own handoff,
+   * then the project's `context.yaml` rules for this recipient, read now and rendered once.
+   * Every launch reports its outcome as one lifecycle line. Both launch sites — a fresh step
+   * and `runContinuation` — come here; a live message never does. The prefix goes into the
+   * opening message only, never the system prompt a worker inherits (#778).
+   */
+  private sessionContextFor(runId: string, state: ActiveRun, stepId: string, openingPrompt: string): SessionContext {
+    const run = this.store.getRun(runId);
+    const role = run?.delegation?.role === 'worker' ? 'worker' : 'parent';
+    const handoff = handoffPath(this.dataDir, runId);
+    // A backend's own slash command only works at character zero (#676); a prefix would turn
+    // it into plain text, so such a launch gets no context and keeps the read instruction.
+    const context: SessionContext = leadingSlashSkillName(openingPrompt)
+      ? { prefix: '', handoffInjected: false, reports: [{ id: 'session-context', status: 'skipped', sources: [], reason: 'the opening message is a slash command, which must stay at its start' }] }
+      : buildSessionContext({
+        projectRoot: this.repoRoot,
+        cwd: state.cwd,
+        role,
+        handoffPath: handoff,
+        variables: {
+          ...(run ? { task: run.task, 'workflow.name': run.workflow } : {}),
+          'run.id': runId,
+          role,
+          'step.id': stepId,
+          'project.root': this.repoRoot,
+          'worktree.root': state.cwd,
+          'handoff.path': handoff,
+        },
+      });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: formatSessionContextReport(context.reports) });
+    return context;
   }
   /** Every skill lookup in this manager goes through here, so the built-ins reach all of them. */
   private discoverSkills(): Promise<Skill[]> {
@@ -7270,14 +7304,16 @@ export class RunManager {
     try {
     // Provisioning determines the actual capability, including a fresh session after recovery.
     const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !!ciTools });
-    const openingPrompt = withResumeContext(expandRegistrySlashSkillText(prompt, this.enabledSkills(state), continuationFiles) +
+    const resumedPrompt = withResumeContext(expandRegistrySlashSkillText(prompt, this.enabledSkills(state), continuationFiles) +
       (setupNote ? `\n\n${setupNote}` : '') + (footer ? `\n\n${footer}` : ''), checkpoint);
+    const sessionContext = this.sessionContextFor(runId, state, stepId, resumedPrompt);
+    const openingPrompt = sessionContext.prefix + resumedPrompt;
     const continuationTail = composeSystemPrompt(
       record?.systemPrompt,
       delegation?.instructions,
       this.automationsPart(),
       artifactInstructions(continueProfile.env.CEZ_ARTIFACTS_DIR),
-      handoffInstructions({ tools: !!ciTools }),
+      handoffInstructions({ tools: !!ciTools, handoffInjected: sessionContext.handoffInjected }),
     );
     session = startManagedSession(runner,
       {
@@ -8130,6 +8166,8 @@ export class RunManager {
     // Opening prompts bypass live delivery; do not infer tools before provisioning finishes.
     const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !!ciTools });
     if (footer) userPrompt += `\n\n${footer}`;
+    const sessionContext = this.sessionContextFor(runId, state, step.id, userPrompt);
+    userPrompt = sessionContext.prefix + userPrompt;
     try {
       session = startManagedSession(runner,
         {
@@ -8141,7 +8179,7 @@ export class RunManager {
             delegation?.instructions,
             this.automationsPart(),
             artifactInstructions(stepProfile.env.CEZ_ARTIFACTS_DIR),
-            handoffInstructions({ tools: !!ciTools }),
+            handoffInstructions({ tools: !!ciTools, handoffInjected: sessionContext.handoffInjected }),
           ),
           userPrompt,
           images,

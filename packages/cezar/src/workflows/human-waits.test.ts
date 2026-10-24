@@ -10,7 +10,7 @@ import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
-import { HANDOFF_ONLY_INSTRUCTIONS, handoffInstructions } from '../handoff.ts';
+import { handoffInstructions } from '../handoff.ts';
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
 import { eventCheckpoint, manager, parent, restart, root, semaphore, store, terminal, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
@@ -258,7 +258,8 @@ describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 4
     wire({ tools: false });
     await opened();
     const [prompt] = prompts();
-    expect(prompt).toContain(HANDOFF_ONLY_INSTRUCTIONS);
+    // The opening message carries the handoff (hearsay-tools/cezarion#1584), so step 1 points there.
+    expect(prompt).toContain(handoffInstructions({ tools: false, handoffInjected: true }));
     expect(prompt).not.toContain('Lifecycle tools (cezar)');
   });
 
@@ -297,7 +298,7 @@ describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 4
     engine().waitTimers.get(timer.id)!.timer._onTimeout();
     await until(() => inbound().some(text => text.includes(MONITORING_WAKE_NUDGE_MARKERS)));
     expect(inbound().some(text => text.includes(MONITORING_WAKE_NUDGE))).toBe(false);
-    expect(prompts()[1]).toContain(HANDOFF_ONLY_INSTRUCTIONS);
+    expect(prompts()[1]).toContain(handoffInstructions({ tools: false, handoffInjected: true }));
   });
 
   it('a session with cezar tools is taught the tools when it opens and when it continues', async () => {
@@ -309,7 +310,7 @@ describe('the lifecycle prompt follows the session\'s cezar tools', { timeout: 4
     expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
     await until(() => prompts().length === 2 && store.getRun(run.id)?.status === 'waiting');
     for (const prompt of prompts()) {
-      expect(prompt).toContain(handoffInstructions({ tools: true, }));
+      expect(prompt).toContain(handoffInstructions({ tools: true, handoffInjected: true }));
       expect(prompt).not.toContain('CEZ:DONE');
     }
   });
