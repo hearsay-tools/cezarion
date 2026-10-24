@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { analyzeSource } from '../.ai/skills/check-code-quality/scripts/code-metrics.mjs';
@@ -249,7 +249,10 @@ test('copied skill runs the complete Node coverage check outside this checkout',
   const f = fixture(t);
   const skill = join(f.cwd, 'node_modules/copied-skill');
   mkdirSync(join(f.cwd, 'node_modules'));
-  cpSync(fileURLToPath(new URL('../.ai/skills/check-code-quality', import.meta.url)), skill, { recursive: true });
+  // A skill-local dependency install must not collide with the fixture's dependency link.
+  cpSync(fileURLToPath(new URL('../.ai/skills/check-code-quality', import.meta.url)), skill, {
+    recursive: true, filter: source => basename(source) !== 'node_modules',
+  });
   symlinkSync(fileURLToPath(new URL('../node_modules', import.meta.url)), join(skill, 'node_modules'), 'dir');
   const result = spawnSync(process.execPath, [join(skill, 'scripts/check.mjs'), '--base', f.base,
     '--runner', 'node', '--test', 'source.test.mjs', '--json'], { cwd: f.cwd, encoding: 'utf8' });
