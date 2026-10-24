@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { expectNoWaitNudgeKinds } from './turn-end.testkit.ts';
 import { AUTONOMOUS_NUDGE, decideTurnEnd, NO_WAIT_NUDGE, NO_WAIT_NUDGE_MARKERS, turnEndHeartbeat, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
 
 /** A quiet final turn end whose owed input was already tried: nothing taken, nothing owed. */
@@ -72,8 +73,12 @@ describe('decideTurnEnd decides both nudge causes (hearsay-tools/cezarion#1234, 
     expect(decideTurnEnd({ ...quiet, ...live })).toMatchObject({ ifRefused: 'park-for-user' });
   });
 
-  it('the nudges name only tools and kinds that exist in this phase', () => {
-    expect(NO_WAIT_NUDGE).toBe('Your turn ended without a wait or done. Call cezar_ask if you need the user, cezar_wait (ci, worker or timer) if you are waiting on something, or cezar_done if the task is complete. If you owe the user a reply, write it in the same turn.');
+  it('the tool nudge advertises exactly the wait kinds accepted by the contract', () => {
+    expectNoWaitNudgeKinds(NO_WAIT_NUDGE);
+    for (const tool of ['cezar_ask', 'cezar_wait', 'cezar_done']) expect(NO_WAIT_NUDGE).toContain(tool);
+  });
+
+  it('the marker-only nudge names lifecycle markers without cezar tools', () => {
     expect(NO_WAIT_NUDGE_MARKERS.startsWith('Your turn ended without a wait or done. ')).toBe(true);
     for (const marker of ['CEZ:ASK', 'CEZ:MONITORING', 'CEZ:DONE']) expect(NO_WAIT_NUDGE_MARKERS).toContain(marker);
     expect(NO_WAIT_NUDGE_MARKERS).not.toContain('cezar_');

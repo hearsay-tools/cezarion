@@ -73,7 +73,7 @@ export const AUTONOMOUS_NUDGE =
 
 /** The no-wait nudge. It names the wait kinds `cezar_wait` takes. */
 export const NO_WAIT_NUDGE =
-  'Your turn ended without a wait or done. Call cezar_ask if you need the user, cezar_wait (ci, worker or timer) if you are waiting on something, or cezar_done if the task is complete. If you owe the user a reply, write it in the same turn.';
+  'Your turn ended without a wait or done. Call cezar_ask if you need the user, cezar_wait (pr, worker, timer or process) if you are waiting on something, or cezar_done if the task is complete. If you owe the user a reply, write it in the same turn.';
 
 /** The no-wait nudge for a session without cezar tools, which was taught the markers. */
 export const NO_WAIT_NUDGE_MARKERS =

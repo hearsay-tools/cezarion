@@ -9,9 +9,38 @@ The process wait kind was added for hearsay-tools/cezarion#1446 (owner approved 
 Supersedes the narrow re-arm design for hearsay-tools/cezarion#1197 and absorbs
 hearsay-tools/cezarion#1226 (agent-facing cancel).
 
+## Current interface (2026-10-23)
+
+Use this section for current calls. The base model and phase decisions below retain
+historical names and examples; the later amendments record the changes to them.
+
+- `cezar_wait` accepts `kind: 'pr'`, `'worker'`, `'timer'` or `'process'`, as defined by
+  `cezarWaitRequestSchema` in the [waits contract](../../packages/contract/src/waits.ts).
+  Use `pr` for checks (the default `until: 'checks'`) or merge (`until: 'merge'`).
+  `ci` is not a request alias. The [PR-wait amendment](#pr-waits-kind-pr-and-the-merge-target-2026-10-23)
+  describes the read conversion for stored `ci` entries. The
+  [process-wait amendment](#process-wait-decisions) describes `process`.
+- `cezar_ask({ context, questions })` requires both fields. `context` is Markdown,
+  1–20,000 characters, under `askContextSchema` in the
+  [ask format](../../packages/contract/src/ask-schema.ts). Put the full draft, findings,
+  evidence and option meanings needed for the decision there. Cezar renders it above the
+  question card. Keep each question short; supporting detail belongs in `context`.
+  Prose between tool calls may not reach the user; reasoning and rejected calls are not
+  shown. These are the card-context rules in the
+  [tool definitions](../../packages/cezar/src/ci-wait/tools.ts).
+
+Storage has a separate rule. `askRequestSchema` and `humanWaitEntrySchema` keep `context`
+optional, so historical asks and human waits still load. The ask line and routed questions
+may also lack it. This storage optionality does not permit a new `cezar_ask` call to omit
+`context` (hearsay-tools/cezarion#1458).
+
+The current run store uses schema 9. The [process-wait compatibility bump](#store-and-compatibility)
+requires it; the PR-only change added no bump. The durable version and downgrade rules are in
+[BACKWARD_COMPATIBILITY.md §3](../../BACKWARD_COMPATIBILITY.md#3-aicezar-state-files-packagescezarsrcrunsstorets-and-friends).
+
 ## Why
 
-An agent can park a run in at least eight ways today, each with its own state,
+Before phase 1, an agent could park a run in at least eight ways, each with its own state,
 exit and slot rule:
 
 | Mechanism | How the agent signals it | Stored as | Exit |
@@ -66,6 +95,9 @@ patching the matrix and make parking deterministic.
 
 ## The model
 
+This base model records the original phases. See [Current interface](#current-interface-2026-10-23)
+for current call syntax and the amendments below for later changes.
+
 ### Waits
 
 A run holds `waits: Wait[]` (open and recently settled) on its `RunRecord`.
@@ -118,7 +150,8 @@ One MCP server, already wired into every runner through the `cezarTools` list in
 - `cezar_wait({ kind, ... })` → `{ wait_id, kind, deadline, open_waits }`, for every kind but
   `human`. Validates synchronously and refuses with a typed reason (`invalid_request`,
   `capacity`, `timers_disabled`, …).
-- `cezar_ask({ questions })` → `{ wait_id, open_waits }`: the human wait, with its card. The
+- `cezar_ask({ context, questions })` → `{ wait_id, open_waits }`: the human wait, with its card
+  and required Markdown context (see [Current interface](#current-interface-2026-10-23)). The
   card is required: 1–4 questions in the ask format, each with 2–4 options or, with the
   options left out, an open question the user answers in words. Refuses with a typed reason
   (`invalid_request`, `capacity`, `autonomous_run` in an autonomous run, …). A separate tool,
@@ -166,7 +199,7 @@ At a turn end, in both handlers, through one shared function:
      questions and CI/worker waits today.)
    - Otherwise, if the previous turn was not already Cezar's no-wait nudge: send
      the nudge — "Your turn ended without a wait or done. Call `cezar_ask` if you
-     need the user, `cezar_wait` (`ci`, `worker` or `timer`) if you are waiting on
+     need the user, `cezar_wait` (`pr`, `worker`, `timer` or `process`) if you are waiting on
      something, or `cezar_done`." It counts against the automatic-wake budget.
    - Otherwise Cezar opens a human wait (`source: cezar`, reason `no-wait`) and
      the run shows Needs you, with a note.
@@ -1471,7 +1504,11 @@ hearsay-tools/cezarion#1425, design `docs/superpowers/specs/2026-10-23-pr-merge-
 a PR wait with `until: 'checks'`. A merge wait polls the PR's state every 30 seconds outside the
 watcher slots and resolves `merged`, `closed`, `conflicting` (when asked), `deadline`, `error`
 or `cancelled`. Stored `ci` entries and a stored summary's `waitingOn` of `{ kind: 'ci' }` read
-as checks waits; `RUN_DATABASE_SCHEMA_VERSION` stays 8 (`BACKWARD_COMPATIBILITY.md` §3).
+as checks waits. The PR-only change left `RUN_DATABASE_SCHEMA_VERSION` at 8; it added no bump.
+The combined implementation uses schema 9, required by the
+[process-wait compatibility bump](#store-and-compatibility). See
+[BACKWARD_COMPATIBILITY.md §3](../../BACKWARD_COMPATIBILITY.md#3-aicezar-state-files-packagescezarsrcrunsstorets-and-friends)
+for the durable store version and downgrade rules.
 
 ### Transitions out (merge wait)
 

@@ -19,6 +19,7 @@ import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
 import { handoffPath } from '../handoff.ts';
 import { claudeScheduleWakeupDelay, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, REFUSAL_DISCARDED_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
 import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
+import { expectNoWaitNudgeKinds } from './turn-end.testkit.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt, MONITORING_TEXT } from './monitoring-turn.testkit.ts';
 import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
@@ -1321,6 +1322,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios.baseline! });
         await until(() => gated(run.id));
         expect(prompted(runner, NO_WAIT_NUDGE)).toHaveLength(1);
+        expectNoWaitNudgeKinds(prompted(runner, NO_WAIT_NUDGE)[0]!);
         const [wait, ...more] = humanOpen(run.id);
         expect(more).toEqual([]);
         expect(wait).toMatchObject({ kind: 'human', via: 'no-wait', source: 'cezar', phase: 'open' });
@@ -1333,6 +1335,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(manager.sendMessage(run.id, [{ type: 'text', text: 'carry on' }])).toBe(true);
         await until(() => settled(run.id, wait!.id)?.phase === 'delivered');
         await until(() => prompted(runner, NO_WAIT_NUDGE).length === 2 && gated(run.id));
+        for (const nudge of prompted(runner, NO_WAIT_NUDGE)) expectNoWaitNudgeKinds(nudge);
         expect(store.getRun(run.id)?.automaticWakes).toBe(1);
         expect(manager.finish(run.id)).toBe(true);
         await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
