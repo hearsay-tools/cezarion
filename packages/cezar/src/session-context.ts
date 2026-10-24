@@ -1,4 +1,4 @@
-import { closeSync, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
+import { closeSync, constants, fstatSync, openSync, readSync, realpathSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { z } from 'zod';
@@ -70,12 +70,19 @@ const ruleSchema = z.object({
 
 type ReadResult = { ok: true; text: string } | { ok: false; reason: string; missing?: boolean };
 
-/** Read at most `limit` bytes of strict UTF-8; a larger file is refused, never truncated. */
+/**
+ * Read at most `limit` bytes of strict UTF-8; a larger file is refused, never truncated. Only a
+ * regular file is read. The open never blocks: a FIFO would otherwise wait for a writer and stall
+ * the launch path, which runs synchronously on the event loop.
+ */
 function readBoundedUtf8(path: string, limit: number): ReadResult {
   let fd: number | undefined;
   try {
-    fd = openSync(path, 'r');
-    const size = fstatSync(fd).size;
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+    const stat = fstatSync(fd);
+    if (stat.isDirectory()) return { ok: false, reason: 'is a directory' };
+    if (!stat.isFile()) return { ok: false, reason: 'not a regular file' };
+    const size = stat.size;
     if (size > limit) return { ok: false, reason: `larger than ${limit} bytes` };
     const buffer = Buffer.alloc(size);
     let read = 0;

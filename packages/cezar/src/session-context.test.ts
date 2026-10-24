@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -264,6 +265,26 @@ describe('session context: templates', () => {
     // Root can read a mode-000 file; the rule then applies, which is still not a crash.
     if (process.getuid?.() !== 0) expect(byId(context, 'locked')).toMatchObject({ status: 'skipped', reason: expect.stringContaining('unreadable') });
     expect(byId(context, 'dir')).toMatchObject({ status: 'skipped', reason: expect.stringContaining('outside the worktree') });
+  });
+});
+
+// A FIFO would block a synchronous open until a writer appears, stalling the launch path; a
+// stalled read would freeze this worker too, so the case runs only where `mkfifo` exists.
+describe.skipIf(process.platform === 'win32')('session context: special files', () => {
+  it('refuses a FIFO as context.yaml, as an included file and as the handoff, without blocking', () => {
+    execFileSync('mkfifo', [join(project, '.ai/cezar/context.yaml')]);
+    expect(loadSessionContextRules(project).reports).toEqual([
+      expect.objectContaining({ id: 'context.yaml', status: 'skipped', reason: 'not a regular file; custom rules skipped' }),
+    ]);
+    rmSync(join(project, '.ai/cezar/context.yaml'));
+    execFileSync('mkfifo', [join(worktree, 'pipe')]);
+    rules(`version: 1\nrules:\n${rule('pipe', '{{file:pipe}}')}`);
+    rmSync(handoff);
+    execFileSync('mkfifo', [handoff]);
+    const context = buildSessionContext(input());
+    expect(byId(context, 'pipe')).toMatchObject({ status: 'skipped', reason: 'file pipe: not a regular file' });
+    expect(context).toMatchObject({ prefix: '', handoffInjected: false });
+    expect(byId(context, 'handoff')).toMatchObject({ status: 'skipped', reason: 'not a regular file' });
   });
 });
 
