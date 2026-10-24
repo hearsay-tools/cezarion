@@ -54,6 +54,16 @@ dependency was named in the spec, so neither was replaced, and `monitoring` beca
 with no exit. Before deleting a timer, lock, cap or timeout, grep for everything that
 reaches a terminal state *because* of it.
 
+**Preserve queue-head reads when changing queue boundaries.** When splitting,
+merging or re-keying a queue, list every value the old task read when it reached
+the queue head, and read each one again at the head of the new queue. Carry stable
+identity through the queue rather than an earlier copy of mutable settings.
+hearsay-tools/cezarion#1639 is the worked example: dispatch-time snapshots retained
+removed webhooks and stale URL, token and trigger settings until sends started.
+Test the boundary: hold the head task, enqueue another, change the value, release
+the head, and assert what the queued task used. Cover removal or deselection when
+applicable.
+
 **A replacement that ships OFF is not a replacement.** Diff the default path, not the
 feature. The question is always: *with every new knob at its shipped default, what does
 the old scenario do now?* If the answer is "nothing", the change removed a mechanism and
