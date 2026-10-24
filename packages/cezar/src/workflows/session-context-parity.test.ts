@@ -5,13 +5,14 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { handoffPath } from '../handoff.ts';
-import { SESSION_CONTEXT_SEPARATOR } from '../session-context.ts';
 import { ciNativeMessages } from './waits-parity.testkit.ts';
 import { manager, restart, root, semaphore, store, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 import { QUICK_TASK_WORKFLOW, type WorkflowDef } from './types.ts';
 
 // hearsay-tools/cezarion#1584: every cezar-managed launch opens with the run's own handoff and
 // the project's context rules, on every native wire; a live message never does.
+/** The divider after the prefix, spelled out so this file also runs against a tree without it. */
+const SESSION_CONTEXT_SEPARATOR = '\n\n---\n\n';
 const CONTEXT_YAML = `version: 1
 rules:
   - id: vision

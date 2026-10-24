@@ -217,9 +217,9 @@ describe('session context: templates', () => {
   });
 
   it('keeps tokens inside variable values and file contents literal', () => {
-    writeFileSync(join(worktree, 'notes.md'), 'see {{task}} and {{file:secret.txt}}');
+    writeFileSync(join(worktree, 'notes.txt'), 'see {{task}} and {{file:secret.txt}}');
     writeFileSync(join(worktree, 'secret.txt'), 'SECRET');
-    rules(`version: 1\nrules:\n${rule('literal', '{{task}}|{{file:notes.md}}')}`);
+    rules(`version: 1\nrules:\n${rule('literal', '{{task}}|{{file:notes.txt}}')}`);
     const prefix = buildSessionContext(input({ variables: { task: 'run {{run.id}}' } })).prefix;
     expect(prefix).toContain('run {{run.id}}|see {{task}} and {{file:secret.txt}}');
     expect(prefix).not.toContain('SECRET');
