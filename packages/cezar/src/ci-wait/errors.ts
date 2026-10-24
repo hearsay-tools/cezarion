@@ -131,7 +131,8 @@ export function askInvalidInput(error?: z.ZodError): string {
 const doneMessages: Record<Exclude<DoneErrorCode, 'workers_outstanding' | 'workers_uncollected' | 'worker_questions'>, string> = {
   human_question_pending: 'Your question to the user is still unanswered. End your turn to wait for the answer; call cezar_done after it if the task is then complete.',
   worker_wait_pending: 'A worker wait is still pending, including any result awaiting delivery. End your turn to receive its result, then call cezar_done again.',
-  not_final_step: 'This workflow step is not the last one: when your turn ends, Cezar runs the next step, and only the last step can finish the task. End your turn once this step\'s work is complete.',
+  // Never returned since hearsay-tools/cezarion#1620: every agent step accepts cezar_done.
+  not_final_step: 'This workflow step is not the last one. Call cezar_done again once this step\'s work is complete.',
   root_finish_pending: 'The parent is finishing. End your turn; the parent completes that transition.',
   manager_disposed: 'The run manager was disposed. Resume the task in a running cockpit before finishing.',
   capability_revoked: 'This session\'s cezar tools were revoked. Use the current session tool.',

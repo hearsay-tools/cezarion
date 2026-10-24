@@ -22,6 +22,11 @@ import { ProjectContexts } from '../server/project-context.ts';
 import { readPersistedRuns, readPersistedText, seedRuns } from '../runs/run-store.testkit.ts';
 
 const until = (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15000, interval: 10 });
+/** The fake session's turn ends on the done line, which completes an earlier workflow step (hearsay-tools/cezarion#1620). */
+const doneTurn = (entry: { emit(event: AgentEvent): void }, text: string) => {
+  entry.emit({ type: 'text', text: `${text}\n\nCEZ:DONE` });
+  entry.emit({ type: 'turn-end' });
+};
 // Git worktrees + a live RunManager contend under full-suite workers. until() is already 15s;
 // the default 5s testTimeout / 10s hookTimeout cannot finish those waits. Teardown still cancels
 // and finishes sessions without polling, then waits for owned work before removing the fixture.
@@ -137,11 +142,11 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     await until(() => sessions.length === 2);
     expect(sessions[1]!.spec.userPrompt).toContain('Review: child');
     expect(sessions[1]!.spec.cwd).not.toBe(f.root);
-    sessions[1]!.finish('first attempt');
+    doneTurn(sessions[1]!, 'first attempt');
     // The check fails, so the agent step runs again with the failing output appended.
     await until(() => sessions.length === 3);
     expect(sessions[2]!.spec.userPrompt).toContain('first-run-fails');
-    sessions[2]!.finish('second attempt');
+    doneTurn(sessions[2]!, 'second attempt');
     // No committed diff and no review gate in this fixture: the chain settles as done.
     await until(() => f.store.getRun(child.workerId)?.status === 'done');
     const worker = f.store.getRun(child.workerId)!;
@@ -150,6 +155,32 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     ]);
     expect(f.store.readEvents(child.workerId).filter(event => event.type === 'check-output')).toHaveLength(2);
     expect(f.store.getRun(parent.id)?.delegation).toMatchObject({ role: 'root' });
+  });
+  // hearsay-tools/cezarion#1620: an earlier step that ends without done settles the worker as a
+  // single-step task's close does, keeps the step open, and a parent resume re-enters it.
+  it('settles a worker whose earlier step ends without done, and a parent resume re-enters that step', async () => {
+    const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, 'review.yaml'), [
+      'name: review', 'steps:',
+      '  - id: inspect', '    name: Inspect', '    prompt: "Review: {{task}}"',
+      '  - id: verify', '    command: "true"',
+    ].join('\n'));
+    f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner: 'claude', worktree: false });
+    await until(() => sessions.length === 1);
+    const caller = controller.credentials.authenticate(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!)!;
+    const child = await controller.service.spawn(caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID(), workflow: 'review' });
+    await until(() => sessions.length === 2);
+    sessions[1]!.finish('stopped early');
+    await until(() => f.store.getRun(child.workerId)?.status === 'done');
+    const steps = () => f.store.getRun(child.workerId)!.steps.filter(step => step.id === 'inspect' || step.id === 'verify').map(step => [step.id, step.status]);
+    expect(steps()).toEqual([['inspect', 'waiting'], ['verify', 'pending']]);
+    expect(f.store.readEvents(child.workerId).filter(event => event.type === 'check-output')).toEqual([]);
+    await controller.service.send(caller, { id: randomUUID(), recipientRunId: child.workerId, kind: 'request', text: 'Finish the review', resume: true, timeoutSeconds: 600 });
+    await until(() => sessions.length === 3);
+    doneTurn(sessions[2]!, 'reviewed');
+    await until(() => f.store.getRun(child.workerId)?.status === 'done' && steps()[1]?.[1] === 'done');
+    expect(steps()).toEqual([['inspect', 'done'], ['verify', 'done']]);
+    expect(f.store.readEvents(child.workerId).filter(event => event.type === 'check-output')).toHaveLength(1);
   });
   it.each(['queued', 'restart', 'continue'] as const)('refuses a catalog worker whose public workflow definition was edited after acceptance on %s (#451)', async mode => {
     const dir = join(f.root, '.ai/cezar/workflows'); mkdirSync(dir, { recursive: true });
@@ -238,7 +269,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(implement.effort).toBeUndefined();
     expect(implement.env?.CODEX_HOME).toBe(codexHome);
     expect(implement.env?.CLAUDE_CONFIG_DIR).not.toBe(a.home);
-    sessions[1]!.finish('implemented');
+    doneTurn(sessions[1]!, 'implemented');
     await until(() => sessions.length === 3);
     const review = sessions[2]!.spec;
     expect(review.userPrompt).toContain('Review: child');
@@ -271,7 +302,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     expect(sessions[1]!.spec.env?.CODEX_HOME).toBe(codexHome);
     // The codex login is removed once its step is over. The claude step's own pinned account is intact.
     rmSync(codexHome, { recursive: true, force: true });
-    sessions[1]!.finish('implemented');
+    doneTurn(sessions[1]!, 'implemented');
     await until(() => sessions.length === 3 || f.store.getRun(a.child.workerId)?.status === 'failed');
     expect(f.store.getRun(a.child.workerId)?.error).toBeUndefined();
     expect(sessions[2]!.spec.userPrompt).toContain('Review: child');
@@ -287,7 +318,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       '  - id: review', '    prompt: "Review: {{task}}"', '    runner: claude'].join('\n'));
     const a = await acceptIdentityWorker(undefined, undefined, { workflow: 'mixed' });
     await launchAccepted(a, 'queued'); await until(() => sessions.length === 2);
-    sessions[1]!.finish('implemented'); await until(() => sessions.length === 3);
+    doneTurn(sessions[1]!, 'implemented'); await until(() => sessions.length === 3);
     sessions[2]!.emit({ type: 'session', sessionId: 'review-session' }); sessions[2]!.finish('reviewed');
     expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
     rmSync(codexHome, { recursive: true, force: true });
@@ -753,7 +784,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     try {
       await until(() => sessions.length === 1);
       const token = sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN!;
-      sessions[0]!.finish(); await until(() => entered);
+      doneTurn(sessions[0]!, 'one'); await until(() => entered);
       expect(f.store.getRun(run.id)?.status).toBe('running');
       expect(controller.credentials.authenticate(token)).toBeUndefined();
     } finally { release(); }

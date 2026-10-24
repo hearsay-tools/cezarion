@@ -377,7 +377,13 @@ describe('cezar_done', () => {
   });
 
   it('cezar_done answers round-trip', () => {
-    expect(cezarDoneAnswerSchema.parse({ ok: true, finishes: 'at_turn_end', open_waits: [] }).ok).toBe(true);
+    expect(cezarDoneAnswerSchema.parse({ ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: [] }).ok).toBe(true);
+    // hearsay-tools/cezarion#1620: a step's done names the step it starts; a task's names none.
+    const step = { ok: true, finishes: 'at_turn_end', completes: 'step', next_step: 'Review', open_waits: [] };
+    expect(cezarDoneAnswerSchema.parse(step)).toEqual(step);
+    expect(cezarDoneAnswerSchema.safeParse({ ...step, next_step: undefined }).success).toBe(false);
+    expect(cezarDoneAnswerSchema.safeParse({ ...step, completes: 'task' }).success).toBe(false);
+    expect(cezarDoneAnswerSchema.safeParse({ ok: true, finishes: 'at_turn_end', open_waits: [] }).success).toBe(false);
     const refused = { ok: false, code: 'workers_outstanding', message: 'm', workers: [{ worker_id: 'w', reason: 'outstanding' }] };
     expect(cezarDoneAnswerSchema.parse(refused)).toEqual(refused);
     expect(cezarDoneAnswerSchema.safeParse({ ok: false, code: 'not_a_code', message: 'm' }).success).toBe(false);

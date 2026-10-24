@@ -57,6 +57,10 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
     await until(() => !!store.getRun(run.id)?.agentInputs?.some(input => input.source === 'lifecycle' && input.deliveredAt));
     expect(parkedOnWorkers(run.id)).toBe(false); expect(semaphore.busy()).toBe(1);
+    // The wake turn signals nothing; the earlier step completes only on a done (hearsay-tools/cezarion#1620),
+    // which the uncollected worker would refuse on any step.
+    await collect(w.id);
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
     await until(() => store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status !== 'pending');
     expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')?.status).toBe('done');
     expect(parkedOnWorkers(run.id)).toBe(false);
@@ -101,7 +105,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           release();
           await until(() => !!store.getRun(run.id)?.agentInputs?.find(input => input.id === wake?.id)?.deliveredAt);
           expect(waitOf(store.getRun(run.id))).toBeUndefined();
-          expect(semaphore.busy()).toBe(1); // Nonfinal auto-end/next step still owns capacity.
+          // The wake turn signals nothing; the earlier step completes only on a done (hearsay-tools/cezarion#1620).
+          expect(manager.sendMessage(run.id, [{ type: 'text', text: HARNESS_ADAPTERS[backend].scenarios.done! }])).toBe(true);
           await until(() => store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status !== 'pending');
           expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')?.status).toBe('done');
           await until(() => !manager.isActive(run.id));
@@ -198,13 +203,15 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     manager.requestWorkerStop(w.id); await manager.awaitRunTermination(w.id, 15000);
     expect(store.getRun(run.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);
     expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
-    expect(manager.sendMessage(run.id, [{ type: 'text', text: 'Vitest' }])).toBe(true);
+    // The answer signals done, which the uncollected worker would refuse (hearsay-tools/cezarion#1620).
+    await collect(w.id);
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: 'Vitest mock:done' }])).toBe(true);
     await until(() => store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status === 'done');
     expect(store.readEvents(run.id).filter(event => event.type === 'human-input-delivered')).toHaveLength(1);
   });
 
-  it('ordinary nonfinal auto-end still advances to the next check without a worker wait', async () => {
-    const run = manager.startRun({ name: 'ordinary chain', source: 'built-in', steps: [{ id: 'first', prompt: 'mock:hold' }, { id: 'next', command: 'echo checked' }] }, { task: 'parent', runner: 'claude' });
+  it('an ordinary earlier step advances to the next check on its done without a worker wait', async () => {
+    const run = manager.startRun({ name: 'ordinary chain', source: 'built-in', steps: [{ id: 'first', prompt: 'mock:done' }, { id: 'next', command: 'echo checked' }] }, { task: 'parent', runner: 'claude' });
     await until(() => terminal.includes(store.getRun(run.id)!.status));
     expect(store.getRun(run.id)?.steps.map(step => step.status)).toEqual(['done', 'done']);
     expect(semaphore.busy()).toBe(0);

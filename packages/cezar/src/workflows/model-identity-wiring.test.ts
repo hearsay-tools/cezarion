@@ -63,13 +63,13 @@ describe('model identity wiring (dry run)', () => {
     }
   });
 
-  // Agent step + trailing check, so the agent session auto-ends and the run
-  // reaches a terminal status instead of parking at `waiting`.
+  // Agent step + trailing check, so the run reaches a terminal status instead of
+  // parking at `waiting`. The agent step signals done (hearsay-tools/cezarion#1620).
   const workflow: WorkflowDef = {
     name: 'model-identity-test',
     source: 'built-in',
     steps: [
-      { id: 'work', prompt: '{{task}}' },
+      { id: 'work', prompt: '{{task}} mock:done' },
       { id: 'verify', command: 'true' },
     ],
   };

@@ -163,8 +163,10 @@ export function chainStepNote(steps: WorkflowStepDef[], index: number): string |
     );
   }
   sentences.push(
-    `Only end this turn with CEZ:DONE once step ${position}'s own goal is achieved, not just the run's overall task.`,
+    `Signal done (call cezar_done, or end your message with a CEZ:DONE line when you have no cezar tools) only once step ${position}'s own goal is achieved, not just the run's overall task.`,
   );
+  // hearsay-tools/cezarion#1620: the step completes only on that signal.
+  if (position < total) sentences.push(`Cezar starts step ${position + 1} only after that signal; a turn that ends without it keeps step ${position} open.`);
   return sentences.join(' ');
 }
 

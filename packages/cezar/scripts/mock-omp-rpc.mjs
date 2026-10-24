@@ -507,7 +507,7 @@ async function prompt(command, sent = command.message) {
       write({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', args: { command: 'build' }, partialResult: { content: [{ type: 'text', text: 'working' }] } });
       await sleep(100);
     }
-    assistantText(['busy progress finished']);
+    assistantText(['busy progress finished', '\n\nCEZ:DONE']);
     endTurn();
     return;
   }

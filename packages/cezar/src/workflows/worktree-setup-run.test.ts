@@ -23,12 +23,15 @@ import type { WorkflowDef } from './types.ts';
 const execFileAsync = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 const TERMINAL = ['done', 'review', 'failed', 'cancelled'];
-/** An agent step and a trailing check, so the run ends on its own instead of parking. */
+/**
+ * An agent step that signals done and a trailing check, so the run ends on its own instead of
+ * parking. An earlier step completes only on its done (hearsay-tools/cezarion#1620).
+ */
 const WORKFLOW: WorkflowDef = {
   name: 'setup-test',
   source: 'built-in',
   steps: [
-    { id: 'work', prompt: '{{task}}' },
+    { id: 'work', prompt: '{{task}} mock:done' },
     { id: 'verify', command: 'true' },
   ],
 };
@@ -148,7 +151,7 @@ describe('worktree setup on task start (#917)', () => {
     const id = await runToEnd(f, 'do the thing');
     expect(f.store.getRun(id)?.worktreeSetup).toBeUndefined();
     expect(messages(f, id).some((m) => m.includes('worktree setup'))).toBe(false);
-    expect(openingMessages(f)[0]).toBe('do the thing');
+    expect(openingMessages(f)[0]).toBe('do the thing mock:done');
   }, 60_000);
 
   it('an in-place run never runs setup', async () => {

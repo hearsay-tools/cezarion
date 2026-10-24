@@ -443,7 +443,9 @@ async function respond(userText, imageCount, uuid) {
   if (watchdogStall(userText)) return;
   if (userText.includes('mock:busy-progress')) {
     for (let i = 0; i < 24; i++) { emit({ type: 'ping' }); await sleep(100); }
-    emit({ type: 'result', subtype: 'success', result: 'busy complete' });
+    const busy = 'busy complete\n\nCEZ:DONE';
+    emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: busy }], usage: { input_tokens: 20, output_tokens: 10 } } });
+    emit({ type: 'result', subtype: 'success', result: busy });
     return;
   }
   if (userText.includes('mock:hold-done')) {

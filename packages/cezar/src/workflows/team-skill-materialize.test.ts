@@ -90,7 +90,15 @@ describe('team directory skills never land in the main checkout (#1024)', { time
           interrupt: finish,
           end: finish,
         };
-        sessions.push(finish);
+        // A turn that signals done, then the close: an agent step completes only on a done
+        // (hearsay-tools/cezarion#1620).
+        sessions.push(() => {
+          if (open) {
+            onEvent?.({ type: 'text', text: 'ok\n\nCEZ:DONE' });
+            onEvent?.({ type: 'turn-end' });
+          }
+          finish();
+        });
         queueMicrotask(() => onEvent?.({ type: 'session', sessionId: `sess-${launches.length}` }));
         return session;
       },
@@ -108,7 +116,7 @@ describe('team directory skills never land in the main checkout (#1024)', { time
     for (const dir of cleanup) rmSync(dir, { recursive: true, force: true });
   });
 
-  // A trailing check keeps the agent step non-interactive, so the run ends after its turn.
+  // A trailing check after the agent step: the step's done starts it, and the run then ends.
   const workflow: WorkflowDef = plannedWorkflow([...skillTaskSteps(TEAM_SKILL), { id: 'verify', command: 'true' }]);
 
   async function runToEnd(worktree: boolean | undefined): Promise<{ id: string; spec: AgentRunSpec }> {

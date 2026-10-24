@@ -362,7 +362,7 @@ function orderedTurnText(v1: string, v2: string): string | undefined {
  * whatever the text says, and beats any ask line in it. Only markers and waits count: no prose
  * raises the gate, and a rejected ask line is a turn end with no wait. */
 function classifyTurnEnd(turnText: string, completedAssistantText: string, options: {
-  sessionOpen: boolean; interactive: boolean; pendingHumanAsk: boolean;
+  sessionOpen: boolean; pendingHumanAsk: boolean;
   scheduledWake: boolean; liveWorkers: boolean;
   humanWait?: Pick<HumanWaitEntry, 'questions' | 'context'>; doneRequested?: boolean;
 }): AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean; waitCard: boolean } {
@@ -370,13 +370,13 @@ function classifyTurnEnd(turnText: string, completedAssistantText: string, optio
   const v1 = turnParkSignals(complete ?? turnText);
   const v2 = complete === undefined ? turnParkSignals(completedAssistantText) : v1;
   const doneLine = (v1.done || v2.done) && v1.askResult.kind === 'none' && v2.askResult.kind === 'none';
-  const done = options.interactive && options.sessionOpen && (!!options.doneRequested || doneLine);
+  const done = options.sessionOpen && (!!options.doneRequested || doneLine);
   const askTurn = resolveAskTurn(v1.askResult, v2.askResult, options.sessionOpen && !done);
   const surfaced = options.humanWait && options.sessionOpen && !done && !askTurn.ask ? options.humanWait : undefined;
   const waitCard = !!surfaced?.questions;
   const ask = askTurn.ask ?? humanWaitCard(surfaced) ?? null;
   const humanGate = !!surfaced && !waitCard;
-  const monitoring = options.interactive && options.sessionOpen && !done && !ask &&
+  const monitoring = options.sessionOpen && !done && !ask &&
     !options.pendingHumanAsk && !humanGate &&
     (v1.monitoring || v2.monitoring || options.scheduledWake || options.liveWorkers);
   return { ...askTurn, ask, done, monitoring, humanGate, waitCard };
@@ -462,7 +462,6 @@ type ContinueRunOptions = {
  *  turn end reads it from the turn; a later entry from what `parkAfterAck` kept (`boundaryTurn`). */
 type SettledTurn = {
   stepId: string | undefined;
-  finalStep: boolean;
   monitoring: boolean;
   humanGate: boolean;
   /** This turn's ask, which the turn end surfaces as a card; a later entry has none. */
@@ -542,16 +541,16 @@ interface ActiveRun {
   doneAtBoundary?: AgentSession;
   /** `cezar_done` accepted in this session since its last turn end (hearsay-tools/cezarion#1234). */
   doneRequested?: { session: AgentSession; summary?: string };
-  /** The session of a workflow step that is not the last: its turn end runs the next step and
-   *  never closes as done, so `cezar_done` is refused in it. */
-  nonFinalStepSession?: AgentSession;
+  /** The session's done completes a workflow step that is not the last, and this step runs next
+   *  (hearsay-tools/cezarion#1620). Undefined: the done finishes the task. */
+  nextStep?: { session: AgentSession; label: string };
+  /** The step an accepted done closed. A workflow step that is not the last advances only on it. */
+  completedStepId?: string;
   /** What declared the done `doneAtBoundary` closes on: the closing event names it. */
   doneClose?: { via: 'cezar_done' | 'done-line'; summary?: string };
   parkAfterAck?: { session: AgentSession; monitoring: boolean; humanGate?: boolean; nudgedLastTurn?: boolean; scheduleWakeup?: number | null };
   /** Last completed boundary belongs to exactly this still-open session. */
   atTurnBoundary?: AgentSession;
-  /** Resume a nonfinal step whose auto-end window was held by an inbox receipt. */
-  resumeInboxAutoEnd?: () => void;
   currentStepId?: string;
   idleTimer?: NodeJS.Timeout;
   /** The inactivity timer closed the wire; resource teardown must not imply task success. */
@@ -2092,7 +2091,9 @@ export class RunManager {
 
   /**
    * `cezar_done` (hearsay-tools/cezarion#1234). Accepted, the run finishes at this turn's end
-   * through the done branch, which cancels every open wait; refused, the answer says what to do
+   * through the done branch, which cancels every open wait; in a workflow step that is not the
+   * last, that branch completes the step and the next one starts (hearsay-tools/cezarion#1620), and
+   * the answer says which. Refused, the answer says what to do
    * first. The gate is the completion gate, in order: the session, a root finish, the user's
    * question, then for a root its workers' questions, live workers and uncollected results. The turn end re-checks it (`deferParentCompletion`).
    */
@@ -2108,14 +2109,14 @@ export class RunManager {
     const session = this.toolSessionRefusal(runId, state, generation, signal);
     const run = this.store.getRun(runId);
     if (session || !run || !state?.session) return refuse(session ?? 'run_missing', doneErrorMessage(session ?? 'run_missing'));
-    if (state.nonFinalStepSession === state.session) return refuse('not_final_step', doneErrorMessage('not_final_step'));
     if (this.executionBlockedByRootFinish(run)) return refuse('root_finish_pending', doneErrorMessage('root_finish_pending'));
     // The answer a continuation opened with is not a pending question while its turn runs.
     if (state.pendingHumanAsk || this.hasUnansweredHumanAsk(runId)) return refuse('human_question_pending', doneErrorMessage('human_question_pending'));
     const refusal = this.completionRefusal(runId);
     if (refusal) return refuse(refusal.code, refusal.message, refusal.workers);
     state.doneRequested = { session: state.session, ...(parsed.summary === undefined ? {} : { summary: parsed.summary }) };
-    return { ok: true, finishes: 'at_turn_end', open_waits };
+    const next = state.nextStep?.session === state.session ? state.nextStep.label : undefined;
+    return { ok: true, finishes: 'at_turn_end', ...(next === undefined ? { completes: 'task' as const } : { completes: 'step' as const, next_step: next }), open_waits };
   }
 
   /**
@@ -2173,9 +2174,12 @@ export class RunManager {
    *  the session closes instead of parking, so the run completes and frees its slot. */
   private closeAsDone(runId: string, state: ActiveRun, session: AgentSession | undefined): void {
     const close = state.doneClose;
+    // A workflow step that is not the last completes, and the next step starts (hearsay-tools/cezarion#1620).
+    const step = !!session && state.nextStep?.session === session;
+    state.completedStepId = state.currentStepId;
     if (close?.summary) this.store.appendEvent(runId, { type: 'note', message: close.summary });
-    this.store.appendEvent(runId, { type: 'lifecycle', message: 'goal achieved — session closed', via: close?.via ?? 'done-line' });
-    appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — goal achieved, session closed');
+    this.store.appendEvent(runId, { type: 'lifecycle', message: step ? 'step complete — session closed' : 'goal achieved — session closed', via: close?.via ?? 'done-line' });
+    appendHandoffHeartbeat(this.dataDir, runId, step ? 'turn complete — step done, session closed' : 'turn complete — goal achieved, session closed');
     this.cancelOpenWaits(runId);
     session?.end();
   }
@@ -5089,7 +5093,10 @@ export class RunManager {
     this.reconcileWorkerWaits();
     this.retireEmptyWake(runId);
     this.deliverConversationInput(runId);
-    this.active.get(runId)?.resumeInboxAutoEnd?.();
+    // A done the turn end kept behind this claim settles now that the input is read: the inbox
+    // acknowledgement is the boundary's last owed input (hearsay-tools/cezarion#1620).
+    const state = this.active.get(runId);
+    if (state?.session?.open) this.settleIdleBoundary(runId, state, state.session);
     this.releaseSlot();
     return result;
   }
@@ -6432,6 +6439,31 @@ export class RunManager {
     return -1;
   }
 
+  /** The workflow step after the one a continuation resumes, when that one is not the last: the
+   *  continuation's done completes the resumed step and starts this one (hearsay-tools/cezarion#1620). */
+  /**
+   * Whether a step session closed without its done while a later step waits (hearsay-tools/cezarion#1620).
+   * It reads and clears the done `closeAsDone` recorded. Finish is an explicit stop, settled as before.
+   */
+  private stepLeftOpen(state: ActiveRun, stepId: string, next: WorkflowStepDef | undefined): boolean {
+    const completed = state.completedStepId === stepId;
+    state.completedStepId = undefined;
+    return !!next && !completed && !state.finishRequested;
+  }
+
+  /** A resumed earlier step that closed without a done stays open: its workflow step, not the Continue's own. */
+  private async settleIncompleteContinuation(runId: string, stepId: string): Promise<void> {
+    const resumed = this.store.getRun(runId);
+    const source = resumed ? resumed.workflowDef?.steps[this.waitingWorkflowStepIndex(resumed)] : undefined;
+    await this.settleIncompleteStep(runId, source?.id ?? stepId);
+  }
+
+  private continuationNextStep(runId: string): WorkflowStepDef | undefined {
+    const run = this.store.getRun(runId);
+    const index = run?.workflowDef ? this.waitingWorkflowStepIndex(run) : -1;
+    return index >= 0 ? run!.workflowDef!.steps[index + 1] : undefined;
+  }
+
   private ciWorkflowResumeStepIndex(run: RunRecord): number {
     if (!run.workflowResumeStepId) return -1;
     return run.workflowDef?.steps.findIndex(step => step.id === run.workflowResumeStepId &&
@@ -7056,7 +7088,7 @@ export class RunManager {
         turnTail = 'none';
         const turnWakeDelay = scheduleWakeup;
         scheduleWakeup = undefined;
-        this.endTurn(runId, state, sink, { stepId, finalStep: true, text, completedText, scheduleWakeup: turnWakeDelay });
+        this.endTurn(runId, state, sink, { stepId, text, completedText, scheduleWakeup: turnWakeDelay });
       }
     };
 
@@ -7323,6 +7355,8 @@ export class RunManager {
     } catch (error) { ciTools?.revoke(); state.revokeCiTools = undefined; delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
     const sessionClosed = this.trackWorkerSessionResult(runId, session);
     state.session = session;
+    const resumedNext = this.continuationNextStep(runId);
+    state.nextStep = stepScope(session, resumedNext);
     state.sessionEverOpened = true;
     state.interrupt = () => session?.interrupt();
     let setupComplete = false;
@@ -7366,6 +7400,8 @@ export class RunManager {
         this.store.updateRun(runId, { status: 'cancelled', finishedAt: finishedAt(), currentStepId: undefined });
         this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
         appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=cancelled`);
+      } else if (this.stepLeftOpen(state, stepId, resumedNext)) {
+        await this.settleIncompleteContinuation(runId, stepId);
       } else if (!state.idleClosed && !this.unansweredWorkflowAsk(runId, state)) {
         this.store.updateStep(runId, stepId, { status: 'done', finishedAt: finishedAt() });
         this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'done' });
@@ -7675,6 +7711,8 @@ export class RunManager {
     let checkFailure: string | null = null;
     let runError: string | null = null;
     let deliveryCapped = false;
+    /** An earlier step whose session closed without a done (hearsay-tools/cezarion#1620). */
+    let incompleteStepId: string | undefined;
     // `startRun` already persisted the task's attachments so a queued bubble can render them
     // (#612). Reuse those files for the agent-facing path note instead of minting
     // duplicate pasted files when execution finally begins.
@@ -7719,8 +7757,6 @@ export class RunManager {
       : contentBlocksOf([...(input.images ?? []), ...(input.stackedImages ?? [])]);
     let startImages: ContentBlock[] | undefined = startBlocks.length ? startBlocks : undefined;
 
-    const lastAgentIdx = findLastAgentStepIndex(workflow);
-
     let i = startAt;
     while (i < workflow.steps.length) {
       if (state.cancelled || this.workerExecutionStopped(runId)) { state.cancelled = true; break; }
@@ -7739,9 +7775,9 @@ export class RunManager {
       emit({ type: 'step-start', stepId: step.id, name: step.name ?? step.id, kind, iteration });
 
       if (kind === 'agent') {
-        // The last agent step of the workflow is interactive: after its turn
-        // the session stays open for follow-ups until finish/idle/cancel.
-        const interactive = i === lastAgentIdx && i === workflow.steps.length - 1;
+        // Every agent step's session stays open after its turn until a done, finish, idle or cancel
+        // closes it. Only a done completes a step that is not the last (hearsay-tools/cezarion#1620).
+        const nextStep = workflow.steps[i + 1];
         const attemptStartedAt = Date.now();
         const failure = await this.runAgentStep(
           runId,
@@ -7749,7 +7785,7 @@ export class RunManager {
           step,
           input,
           checkFailure,
-          interactive,
+          nextStep,
           emit,
           startImages,
           taskBackend,
@@ -7809,6 +7845,8 @@ export class RunManager {
           return;
         }
         if (failure || deliveryCapped) break;
+        // A session that closed without a done leaves its step resumable; the tail never starts.
+        if (this.stepLeftOpen(state, step.id, nextStep)) { incompleteStepId = step.id; break; }
         if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) break;
         this.finishStep(runId, step.id, 'done', undefined, emit);
         // Finish is an explicit stop, not an answer or permission to run checks.
@@ -7882,6 +7920,11 @@ export class RunManager {
       this.store.updateRun(runId, { status: 'failed', error: runError, finishedAt, currentStepId: undefined });
       emit({ type: 'lifecycle', message: `run failed — ${runError}` });
       if (deliveryCapped) emit({ type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
+    } else if (incompleteStepId) {
+      await this.settleIncompleteStep(runId, incompleteStepId);
+      this.clearIdleTimer(state);
+      this.dropActive(runId);
+      return;
     } else if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) {
       await this.settleIdleClosedRun(runId, state);
       this.dropActive(runId);
@@ -7900,7 +7943,8 @@ export class RunManager {
     step: WorkflowStepDef,
     input: StartRunInput,
     checkFailure: string | null,
-    interactive: boolean,
+    /** The step after this one, which this step's done starts; undefined for the last step. */
+    nextStep: WorkflowStepDef | undefined,
     emit: (event: { type: string; stepId?: string; [k: string]: unknown }) => void,
     images: ContentBlock[] | undefined,
     taskBackend: RunnerId,
@@ -8035,7 +8079,7 @@ export class RunManager {
         turnTail = 'none';
         const turnWakeDelay = scheduleWakeup;
         scheduleWakeup = undefined;
-        this.endTurn(runId, state, sink, { stepId: step.id, finalStep: interactive, text, completedText, scheduleWakeup: turnWakeDelay });
+        this.endTurn(runId, state, sink, { stepId: step.id, text, completedText, scheduleWakeup: turnWakeDelay });
       }
     };
 
@@ -8105,11 +8149,8 @@ export class RunManager {
     const runner = createRunner(stepBackend);
     state.agentSessionError = undefined;
     let session: AgentSession | undefined;
-    const shouldAutoEnd = () => this.active.get(runId) !== state || state.session !== session ||
-      (state.atTurnBoundary === session && !state.pendingHumanAsk && !this.hasPendingHumanAsk(runId) &&
-        !this.store.getRun(runId)?.waits?.length && state.waitWakeTurn !== session && !state.agentInputFlight &&
-        !this.hasQueuedAgentInputs(runId));
     state.currentStepId = step.id;
+    state.completedStepId = undefined;
     this.beginUsageInvocation(runId, state, step.id);
     const delegation = this.provisionSession(runId, state);
     const ciTools = await this.provisionCiSession(runId, state);
@@ -8162,11 +8203,6 @@ export class RunManager {
         },
         onEvent,
         {
-          autoEndAfterFirstTurn: !interactive,
-          // Questions and unread inbox claims must survive this close window.
-          // Keep the native timer: the answer's completed turn rearms it, and
-          // admission/worker/CI guards retain authority over when it may close.
-          shouldAutoEnd,
           onUiEvent: (event) => {
             completedAssistantText = appendCompletedAssistantText(completedAssistantText, event);
             turnTail = trackTurnTail(turnTail, event);
@@ -8185,14 +8221,7 @@ export class RunManager {
     }
     const sessionClosed = this.trackWorkerSessionResult(runId, session);
     state.session = session;
-    state.nonFinalStepSession = interactive ? undefined : session;
-    state.resumeInboxAutoEnd = interactive ? undefined : () => {
-      // ACK may consume the last input after the runner's one-shot close timer fired.
-      // Release/expiry instead submit a provider turn through normal admission.
-      if (this.active.get(runId) === state && state.session === session && session?.open &&
-        state.atTurnBoundary === session && !state.cancelled && !state.pendingHumanAsk &&
-        !this.hasPendingHumanAsk(runId) && shouldAutoEnd()) session.end();
-    };
+    state.nextStep = stepScope(session, nextStep);
     state.sessionEverOpened = true;
     state.currentStepId = step.id;
     state.interrupt = () => session?.interrupt();
@@ -8232,7 +8261,7 @@ export class RunManager {
       this.clearIdleTimer(state);
       this.monitoring.delete(runId);
       this.waiting.delete(runId);
-      state.resumeInboxAutoEnd = undefined;
+      state.nextStep = undefined;
       state.waitWakeTurn = undefined;
       state.atTurnBoundary = undefined;
       state.doneAtBoundary = undefined;
@@ -8788,7 +8817,7 @@ export class RunManager {
    * OFF) AND the run is not autonomous. Autonomous runs — and runs with the gate
    * off — settle straight to `done`, leaving the diff in the worktree untouched.
    */
-  private async settleSuccess(runId: string, durableRootFinish = false): Promise<void> {
+  private async settleSuccess(runId: string, durableRootFinish = false, keepStepId?: string): Promise<void> {
     const state = this.active.get(runId);
     const continuationGeneration = this.continuationGenerations.get(runId);
     if (this.deferParentCompletion(runId)) return;
@@ -8836,8 +8865,9 @@ export class RunManager {
       const finishedAt = new Date().toISOString();
       // An idle-closed Continue remains waiting until the whole task succeeds.
       // Complete those intermediate steps before publishing terminal run status.
+      // A worker's incomplete earlier step stays `waiting`: a parent resume re-enters it (hearsay-tools/cezarion#1620).
       for (const step of this.store.getRun(runId)?.steps ?? []) {
-        if (step.status === 'running' || step.status === 'waiting') {
+        if (settlesAsDone(step, keepStepId)) {
           this.store.updateStep(runId, step.id, { status: 'done', finishedAt: step.finishedAt ?? finishedAt });
         }
       }
@@ -8881,7 +8911,7 @@ export class RunManager {
    * idle-closed process has ended, publish the same terminal outcome recovery
    * would produce so its parent can collect it. Explicit asks and worker waits
    * remain durable attention states. */
-  private async settleIdleClosedWorker(runId: string): Promise<boolean> {
+  private async settleIdleClosedWorker(runId: string, keepStepId?: string): Promise<boolean> {
     // An idle close supersedes Cezar's fallback question, so the worker settles as its plain park
     // did (hearsay-tools/cezarion#1301).
     this.supersedeWorkerFallback(runId);
@@ -8896,12 +8926,32 @@ export class RunManager {
       return true;
     }
     for (const step of run.steps) {
-      if (step.status === 'waiting' || step.status === 'running') {
+      if (settlesAsDone(step, keepStepId)) {
         this.store.updateStep(runId, step.id, { status: 'done', finishedAt });
       }
     }
-    await this.settleSuccess(runId);
+    await this.settleSuccess(runId, false, keepStepId);
     return true;
+  }
+
+  /**
+   * An earlier workflow step whose session closed without a done: a clean exit, an idle close, or
+   * a Continue that resumed it and closed the same way (hearsay-tools/cezarion#1620). The step stays
+   * `waiting` and the tail never starts. A root waits for Continue, which resumes the step. An owned
+   * worker settles as a single-step task's close does, so its parent can collect it; the step stays
+   * `waiting`, and a parent resume re-enters it. A question still pending keeps either one waiting.
+   */
+  private async settleIncompleteStep(runId: string, stepId: string): Promise<void> {
+    const run = this.store.getRun(runId);
+    if (!run) return;
+    for (const step of run.steps) if (step.status === 'running') this.store.updateStep(runId, step.id, { status: 'waiting' });
+    // A failed attempt a continuation recovers stays failed: the resume cursor finds it as it is.
+    if (run.steps.find(step => step.id === stepId)?.status !== 'failed') this.store.updateStep(runId, stepId, { status: 'waiting' });
+    this.store.appendEvent(runId, { type: 'lifecycle', stepId, message: `step "${stepId}" ended without done — Continue to resume it` });
+    if (run.delegation?.role === 'worker' && await this.settleIdleClosedWorker(runId, stepId)) return;
+    this.store.updateRun(runId, { status: 'waiting' });
+    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" ended without done — status=waiting; Continue to resume`);
+    this.store.flush();
   }
 
   /**
@@ -9061,13 +9111,13 @@ export class RunManager {
    * turn's prose beyond its markers.
    */
   private endTurn(runId: string, state: ActiveRun, sink: UiEventSink, turn: {
-    stepId: string; finalStep: boolean; text: string; completedText: string; scheduleWakeup: number | null | undefined;
+    stepId: string; text: string; completedText: string; scheduleWakeup: number | null | undefined;
   }): void {
     const sessionOpen = !state.cancelled && !!state.session?.open;
     const humanWait = this.turnEndHumanWait(runId);
     const doneRequest = this.takeDoneRequest(state);
     const read = classifyTurnEnd(turn.text, turn.completedText, {
-      sessionOpen, interactive: turn.finalStep, pendingHumanAsk: !!state.pendingHumanAsk,
+      sessionOpen, pendingHumanAsk: !!state.pendingHumanAsk,
       scheduledWake: turn.scheduleWakeup !== undefined,
       liveWorkers: this.monitorsLiveWorkers(runId),
       humanWait, doneRequested: !!doneRequest,
@@ -9090,10 +9140,10 @@ export class RunManager {
     if (ask && !askNudged) this.prepareHumanAsk(state);
     if (humanGate && !ask && !state.pendingHumanAsk) this.raiseHumanGate(runId, state);
     if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, humanWait, null);
-    state.parkAfterAck = (turn.finalStep || humanGate) && sessionOpen && state.session
+    state.parkAfterAck = sessionOpen && state.session
       ? { session: state.session, monitoring, humanGate, nudgedLastTurn, scheduleWakeup: turn.scheduleWakeup } : undefined;
     const settled = this.settleTurn(runId, state, 'turn-end', {
-      stepId: turn.stepId, finalStep: turn.finalStep, monitoring, humanGate, ask, askNudged, humanWait, sink,
+      stepId: turn.stepId, monitoring, humanGate, ask, askNudged, humanWait, sink,
       done: read.done, doneRequest, nudgedLastTurn, scheduleWakeup: turn.scheduleWakeup,
     });
     // A turn that completed is the ONLY evidence the provider's window actually reopened, so
@@ -9111,7 +9161,7 @@ export class RunManager {
   private boundaryTurn(runId: string, state: ActiveRun, session: AgentSession, done: boolean): SettledTurn {
     const ack = state.parkAfterAck?.session === session ? state.parkAfterAck : undefined;
     return {
-      stepId: state.currentStepId, finalStep: true, humanGate: !!ack?.humanGate, ask: null, askNudged: false, done,
+      stepId: state.currentStepId, humanGate: !!ack?.humanGate, ask: null, askNudged: false, done,
       // A done names no monitoring, as the turn end's own reading of it does (`classifyTurnEnd`).
       monitoring: !done && !!ack && (ack.monitoring || (!ack.humanGate && this.monitorsLiveWorkers(runId))),
       nudgedLastTurn: !!ack?.nudgedLastTurn, scheduleWakeup: ack?.scheduleWakeup,
@@ -9160,7 +9210,7 @@ export class RunManager {
         question: !!turn.ask || turn.humanGate || !!state.pendingHumanAsk || this.hasPendingHumanAsk(runId),
         agentWaits: this.holdsAgentWaits(runId),
         cezarHumanWait: (run?.waits ?? []).some(isCezarHumanWait),
-        finalStep: turn.finalStep,
+        stepScope: !!session && state.nextStep?.session === session,
         noWaitNudgedLastTurn: turn.nudgedLastTurn,
         completionNudgedLastTurn: !!session && state.completionNudgeAnswered === session,
         autonomous: !!state.autonomous,
@@ -9236,7 +9286,7 @@ export class RunManager {
     const settlesRefusal = !!refused && !('refused' in decision && decision.refused) && !(decision.kind === 'defer' && decision.keepDone);
     if (settlesRefusal) this.withdrawCezarHumanWaits(runId);
     switch (decision.kind) {
-      case 'closed': case 'input': case 'complete-step': case 'take-input':
+      case 'closed': case 'input': case 'take-input':
         return { kind: 'running' };
       case 'defer':
         // A refused autonomous nudge waits for readiness at this boundary, bounded by the idle timer.
@@ -9790,12 +9840,19 @@ export class RunManager {
   }
 }
 
-function findLastAgentStepIndex(workflow: WorkflowDef): number {
-  for (let i = workflow.steps.length - 1; i >= 0; i--) {
-    const step = workflow.steps[i];
-    if (step && stepKind(step) === 'agent') return i;
-  }
-  return -1;
+/** How `cezar_done` names the step its done starts: the rail's name, else the id. */
+/** The session whose done completes a step that is not the last, and the step it starts next. */
+function stepScope(session: AgentSession, next: WorkflowStepDef | undefined): ActiveRun['nextStep'] {
+  return next ? { session, label: stepLabel(next) } : undefined;
+}
+
+/** A step a successful settlement completes: still open, and not the one kept for a resume. */
+function settlesAsDone(step: { id: string; status: string }, keepStepId: string | undefined): boolean {
+  return (step.status === 'running' || step.status === 'waiting') && step.id !== keepStepId;
+}
+
+function stepLabel(step: WorkflowStepDef): string {
+  return step.name ?? step.id;
 }
 
 function applyTemplate(template: string, task: string): string {

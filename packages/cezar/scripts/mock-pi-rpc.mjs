@@ -439,6 +439,7 @@ async function handleCommand(command) {
     if (!gated) watchdogStall(command.message);
     if (command.message.includes('mock:busy-progress')) {
       for (let i = 0; i < 24; i++) { send({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'working' }] } }); await sleep(100); }
+      sendText(['busy complete\n\nCEZ:DONE']);
       sendTurnEnd();
     }
   } else if (command.type === 'prompt' && command.message.includes('mock:hold-gated')) {
