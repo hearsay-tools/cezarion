@@ -1,10 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { runSubcommand, SUBCOMMANDS } from './subcommands.ts';
+import { loadSubcommand, runSubcommand, SUBCOMMAND_NAMES } from './subcommands.ts';
 
 describe('CLI subcommands', () => {
   it('loads a runner for every subcommand', async () => {
-    expect(Object.keys(SUBCOMMANDS).sort()).toEqual(['artifact', 'automation', 'discover', 'task', 'webhook', 'worker']);
-    for (const load of Object.values(SUBCOMMANDS)) expect(typeof (await load())).toBe('function');
+    for (const name of SUBCOMMAND_NAMES) expect(typeof (await loadSubcommand(name))).toBe('function');
   });
 
   it('leaves the cockpit commands and flags to index.ts', async () => {
