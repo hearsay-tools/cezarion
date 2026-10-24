@@ -128,8 +128,10 @@ function renderDock(
     </QueryClientProvider>
   )
   const result = render(tree(record))
-  const card = screen.getByRole('button', { name: /^Session activity/ })
-  if (open && card.getAttribute('aria-expanded') !== 'true') fireEvent.click(card)
+  if (open) {
+    const card = screen.getByRole('button', { name: /^Session activity/ })
+    if (card.getAttribute('aria-expanded') !== 'true') fireEvent.click(card)
+  }
   return { ...result, rerenderRun: (next: ApiRun) => result.rerender(tree(next)) }
 }
 
