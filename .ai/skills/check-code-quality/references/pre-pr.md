@@ -34,6 +34,45 @@ node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
   --output .ai/qa/<issue>/code-quality.md
 ```
 
+When Squeal is validating this worktree, it can hold the test-environment lease
+needed by the `e2e` coverage measurement. The check then exits 2 with
+`timed out waiting for test environment held by pid N (node squeal.mjs daemon …)`.
+This coverage measurement is separate from Squeal's ordinary test results.
+For this measurement only, stop this worktree's daemon and start it again even
+when the check fails. From the repository root, wrap the command above as follows
+(replace `<issue>` before running):
+
+```sh
+(
+  set -e
+  test -d "$PWD"
+  squeal stop "$PWD"
+  trap '
+    measurement_status=$?
+    trap - EXIT
+    if ! squeal start "$PWD"; then
+      echo "Squeal restart failed; restore validation with squeal start in this worktree" >&2
+      if [ "$measurement_status" -eq 0 ]; then measurement_status=1; fi
+    fi
+    exit "$measurement_status"
+  ' EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
+    --project web --project e2e \
+    --test packages/web/src/routes/new-task.test.tsx \
+    --test packages/web/e2e/completion-controls.e2e.ts \
+    --output .ai/qa/<issue>/code-quality.md
+)
+```
+
+Under Codex, replace each `squeal` command with the absolute launcher from its
+SQUEAL message when it is not on PATH. If no daemon is validating this worktree,
+use the original command without the wrapper. Do not remove the lease lock or
+start a duplicate ordinary test run. Remove this workaround when
+[hearsay-tools/squeal#78](https://github.com/hearsay-tools/squeal/issues/78)
+lands and the installed Squeal version releases the idle browser lease.
+
 Server changes use `--project server`. Root `scripts/*.test.mjs` and
 `.github/scripts/*.test.cjs` files use `--runner node` with
 `--node-import scripts/test-git-env.mjs`. Do not write a wrapper Vitest
