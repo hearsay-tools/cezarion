@@ -73,6 +73,48 @@ test('assignShards validates a positive integer shard count', async () => {
   }
 });
 
+test('reserved work reduces the longest whole job without dropping test files', async () => {
+  const assignShards = await allocator();
+  const files = ['a', 'b', 'c', 'd'];
+  const durations = { a: 6, b: 5, c: 4, d: 3 };
+  const totals = bins => bins.map((bin, index) => bin.reduce((sum, file) => sum + durations[file], index === 0 ? 6 : 0));
+  const ordinary = assignShards(files, durations, 2);
+  const reserved = assignShards(files, durations, 2, [6, 0]);
+  assert.deepEqual(totals(ordinary), [15, 9]);
+  assert.deepEqual(totals(reserved), [11, 13]);
+  assert.deepEqual(reserved.flat().sort(), files);
+  assert.deepEqual(reserved, assignShards([...files].reverse(), durations, 2, [6, 0]));
+  assert.deepEqual(ordinary, assignShards(files, durations, 2, [0, 0]));
+});
+
+test('invalid reserved work cannot silently corrupt shard assignment', async () => {
+  const assignShards = await allocator();
+  for (const costs of [null, [1], [-1, 0], [NaN, 0], [Infinity, 0], ['1', 0], Array(2)]) {
+    assert.throws(() => assignShards(['a'], {}, 2, costs), /initial shard costs/);
+  }
+});
+
+test('floor sequencing reserves fixed work and includes every discovered specification once', async () => {
+  const { default: FloorSequencer } = await import('./node-floor-test-sequencer.mjs');
+  const specifications = [
+    { moduleId: '/repo/a.test.ts', project: { name: 'one' } },
+    { moduleId: '/repo/a.test.ts', project: { name: 'two' } },
+    { moduleId: '/repo/new.test.ts', project: { name: 'one' } },
+  ];
+  const selected = [];
+  for (const index of [1, 2]) {
+    const sequencer = new FloorSequencer({ config: { root: '/repo', maxWorkers: 4, shard: { index, count: 2 } } });
+    assert.equal(sequencer.shardCosts[0], 155000 * 4);
+    assert.equal(sequencer.shardCosts[1], 0);
+    assert.ok(sequencer.durations['packages/cezar/src/workflows/ci-wait-failure-parity.test.ts'] > 0);
+    selected.push(...await sequencer.shard(specifications));
+  }
+  assert.equal(selected.length, specifications.length);
+  assert.deepEqual(new Set(selected), new Set(specifications));
+  const invalid = new FloorSequencer({ config: { root: '/repo', maxWorkers: 0, shard: { index: 1, count: 2 } } });
+  assert.throws(() => invalid.shardCosts, /positive integer maxWorkers/);
+});
+
 test('sequencer shards cover every specification including duplicate module ids', async () => {
   const { default: Sequencer } = await import(moduleUrl);
   const specifications = [
