@@ -1194,13 +1194,20 @@ export function useAutomationNames(projectIds: readonly (string | undefined)[], 
       retry: false,
     })),
   })
-  const names = new Map<string, string>()
-  results.forEach((result, index) => {
-    if (!result.data?.available) return
-    for (const automation of result.data.automations) names.set(JSON.stringify([unique[index] ?? null, automation.id]), automation.name)
-  })
-  return (projectId: string | undefined, automationId: string): string | undefined =>
-    names.get(JSON.stringify([projectId ?? null, automationId]))
+  // One stable lookup per set of answers, so callers can memoize on it.
+  const answers = results.map((result) => result.data)
+  const version = JSON.stringify([unique, results.map((result) => result.dataUpdatedAt)])
+  return useMemo(() => {
+    const names = new Map<string, string>()
+    answers.forEach((data, index) => {
+      if (!data?.available) return
+      for (const automation of data.automations) names.set(JSON.stringify([unique[index] ?? null, automation.id]), automation.name)
+    })
+    return (projectId: string | undefined, automationId: string): string | undefined =>
+      names.get(JSON.stringify([projectId ?? null, automationId]))
+    // `version` changes exactly when an answer or the project set does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version])
 }
 
 export function useWorkflows() {

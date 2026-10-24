@@ -1,7 +1,7 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter, useLocation } from 'react-router'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
@@ -122,6 +122,8 @@ function stubFetch({
   costMetrics = true,
   refStatus,
   indexStatuses,
+  automations,
+  handoff = '',
 }: {
   runs?: RunIndexEntry[]
   projects?: ProjectListEntry[]
@@ -137,6 +139,10 @@ function stubFetch({
   >
   /** What the runs-index itself already knew — the free, no-round-trip path. */
   indexStatuses?: Record<string, { prs: Record<number, string>; issues: Record<number, string> }>
+  /** Per-project automation definitions; set, the host also reports automations on (#1616). */
+  automations?: Record<string, { id: string; name: string }[]>
+  /** Every run's handoff journal, for the inline preview. */
+  handoff?: string
 } = {}) {
   sent = []
   seenAt = undefined
@@ -165,11 +171,19 @@ function stubFetch({
         if (!found) return jsonResponse({ error: 'not found' }, 404)
         return jsonResponse({ ...found, task: found.title, tokensUsed: 0, steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'sess-1' }] })
       }
+      const journal = /^\/api\/v1\/p\/([^/]+)\/runs\/([^/]+)\/handoff$/.exec(path)
+      if (journal && method === 'GET') return new Response(handoff, { status: 200, headers: { 'content-type': 'text/plain' } })
+      const definitions = /^\/api\/v1\/p\/([^/]+)\/automations(?:\?|$)/.exec(path)
+      if (definitions && method === 'GET') {
+        const list = automations?.[definitions[1]!]
+        if (!list) return jsonResponse({ error: 'automations are off' }, 409)
+        return jsonResponse({ available: true, timeZone: 'UTC', scheduler: { state: 'idle' }, automations: list.map((entry) => ({ ...entry, counts: {} })) })
+      }
       const message = /^\/api\/v1\/p\/([^/]+)\/runs\/([^/]+)\/(messages|continue)$/.exec(path)
       if (message && method === 'POST') return jsonResponse({ ok: true })
       if (path === '/api/v1/health') {
         // Only the slice `usageMetricVisibility` reads — the host's cost/token gate.
-        return jsonResponse({ capabilities: { costMetrics, tokenUsageMetrics: true } })
+        return jsonResponse({ capabilities: { costMetrics, tokenUsageMetrics: true }, automations: automations !== undefined })
       }
       if (path === '/api/v1/projects') {
         return jsonResponse({ projects, bootProject: 'api', projectsDir: '/repos' })
@@ -270,7 +284,7 @@ describe('global tasks page', () => {
     renderPage()
 
     await screen.findByText('Add checkout endpoint')
-    expect(rowIds()).toEqual(['a1', 'w1', 'i1'])
+    expect(rowIds()).toEqual(['w1', 'i1', 'a1'])
     // The whole reason this page cannot use the scope-aware Link: each row leaves for a
     // different project.
     expect(screen.getByRole('link', { name: 'Add checkout endpoint' }).getAttribute('href')).toBe(
@@ -289,11 +303,11 @@ describe('global tasks page', () => {
     const storefront = screen.getByRole('button', { name: /storefront/ })
     fireEvent.click(storefront)
     // One tag, two repos — which is the entire point of tagging connected repositories.
-    await waitFor(() => expect(rowIds()).toEqual(['a1', 'w1']))
+    await waitFor(() => expect(rowIds()).toEqual(['w1', 'a1']))
     expect(storefront.getAttribute('aria-pressed')).toBe('true')
 
     fireEvent.click(storefront)
-    await waitFor(() => expect(rowIds()).toEqual(['a1', 'w1', 'i1']))
+    await waitFor(() => expect(rowIds()).toEqual(['w1', 'i1', 'a1']))
   })
 
   it('finds the repos nobody has tagged yet', async () => {
@@ -318,7 +332,7 @@ describe('global tasks page', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /storefront/ }))
     fireEvent.click(screen.getByRole('button', { name: /frontend/ }))
-    await waitFor(() => expect(rowIds()).toEqual(['a1', 'w1']))
+    await waitFor(() => expect(rowIds()).toEqual(['w1', 'a1']))
   })
 
   it('searches across title, project and branch', async () => {
@@ -426,7 +440,7 @@ describe('global tasks page', () => {
       // browsers rate-limit.
       expect((box as HTMLInputElement).value).toBe('checkout')
       await waitFor(() => expect(search()).toBe('?q=checkout'))
-      expect(rowIds()).toEqual(['a1', 'w1'])
+      expect(rowIds()).toEqual(['w1', 'a1'])
     })
 
     it('counts the grouping in the Clear badge, not just the facets', async () => {
@@ -458,9 +472,10 @@ describe('global tasks page', () => {
       fireEvent.click(clear)
       await waitFor(() => expect(search()).toBe(''))
       await waitFor(() => {
-        const groups = document.querySelectorAll('[data-slot="task-group"]')
-        expect(groups).toHaveLength(1)
-        expect(groups[0]!.getAttribute('data-group-key')).toBe('all')
+        // Back to the default: the sidebar's status groups (hearsay-tools/cezarion#1616).
+        expect(document.querySelectorAll('[data-slot="task-group"]')).toHaveLength(0)
+        expect([...document.querySelectorAll('[data-slot="task-status-group"]')].map((group) => group.getAttribute('data-bucket')))
+          .toEqual(['Needs you', 'Finished', 'Working'])
       })
     })
 
@@ -474,7 +489,7 @@ describe('global tasks page', () => {
 
       fireEvent.click(screen.getByRole('button', { name: /^Clear/ }))
       await waitFor(() => expect(search()).toBe(''))
-      expect(rowIds()).toEqual(['a1', 'w1', 'i1'])
+      expect(rowIds()).toEqual(['w1', 'i1', 'a1'])
     })
 
     it('adds and removes the archived flag, leaving active as the bare default', async () => {
@@ -490,7 +505,7 @@ describe('global tasks page', () => {
 
       fireEvent.click(screen.getByRole('button', { name: 'Active' }))
       await waitFor(() => expect(search()).toBe(''))
-      await waitFor(() => expect(rowIds()).toEqual(['a1', 'w1']))
+      await waitFor(() => expect(rowIds()).toEqual(['w1', 'a1']))
     })
 
     it('restores the archived view from the URL alone', async () => {
@@ -569,9 +584,9 @@ describe('global tasks page', () => {
 
     fireEvent.click(groupBy().getByText('Project'))
     await waitFor(() => {
-      const groups = document.querySelectorAll('[data-slot="task-group"]')
-      expect(groups).toHaveLength(1)
-      expect(groups[0]!.getAttribute('data-group-key')).toBe('all')
+      // Released: back to the sidebar's status groups (hearsay-tools/cezarion#1616).
+      expect(document.querySelectorAll('[data-slot="task-group"]')).toHaveLength(0)
+      expect(document.querySelectorAll('[data-slot="task-status-group"]').length).toBeGreaterThan(0)
     })
     expect(groupBy().getByText('Project').getAttribute('aria-pressed')).toBe('false')
   })
@@ -582,10 +597,10 @@ describe('global tasks page', () => {
     await screen.findByText('Add checkout endpoint')
 
     fireEvent.click(screen.getByRole('button', { name: /storefront/ }))
-    await waitFor(() => expect(rowIds()).toEqual(['a1', 'w1']))
+    await waitFor(() => expect(rowIds()).toEqual(['w1', 'a1']))
 
     fireEvent.click(screen.getByRole('button', { name: /^Clear/ }))
-    await waitFor(() => expect(rowIds()).toEqual(['a1', 'w1', 'i1']))
+    await waitFor(() => expect(rowIds()).toEqual(['w1', 'i1', 'a1']))
   })
 
   it('shows the PR / issue chip each task actually references', async () => {
@@ -1008,7 +1023,7 @@ describe('global tasks page', () => {
         body: { archived: true },
       }),
     )
-    await waitFor(() => expect(rowIds()).toEqual(['a1', 'w1']))
+    await waitFor(() => expect(rowIds()).toEqual(['w1', 'a1']))
   })
 
   it('restores an archived task from the Archived tab', async () => {
@@ -1039,7 +1054,7 @@ describe('global tasks page', () => {
 
     await waitFor(() => expect(screen.getByRole('status').textContent).toContain('still running'))
     // Rolled back: the row is still in the Active list.
-    await waitFor(() => expect(rowIds()).toEqual(['a1', 'w1', 'i1']))
+    await waitFor(() => expect(rowIds()).toEqual(['w1', 'i1', 'a1']))
   })
 
   it('picks up a read receipt made elsewhere, without a page refresh', async () => {
@@ -1181,4 +1196,88 @@ it('renders a parent request-wait as a global-task-row and hides the worker', as
   expect(row?.textContent).toContain('waiting on worker replies')
   expect(row?.textContent).not.toContain('needs you')
   expect(document.querySelector('[data-slot="global-task-row"][data-run-id="request-wait"]')).toBeNull()
+})
+
+describe('global tasks — status groups and origin (hearsay-tools/cezarion#1616)', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => {
+    cleanup()
+    vi.unstubAllGlobals()
+  })
+
+  const automated: RunIndexEntry = {
+    ...RUNS[2]!, projectId: 'web', id: 'nightly-run', title: 'Nightly health', automationId: 'health', status: 'done', createdAt: '2026-07-14T07:00:00Z',
+  }
+  const origins = () => [...document.querySelectorAll('[data-slot="global-task-row"] [data-slot="task-origin"]')].map((line) => line.textContent)
+
+  it('groups by status with coloured headings, and filters by origin through the URL', async () => {
+    stubFetch({ runs: [...RUNS, automated] })
+    renderPage()
+    await screen.findByText('Nightly health')
+    expect([...document.querySelectorAll('[data-slot="task-status-group"]')].map((group) => `${group.getAttribute('data-bucket')}:${group.getAttribute('data-tone')}`))
+      .toEqual(['Needs you:pending', 'Finished:success', 'Working:running'])
+    const chips = within(document.querySelector('[data-slot="origin-filter"]') as HTMLElement)
+    expect(chips.getByRole('button', { name: 'Automations 1' })).toBeTruthy()
+
+    fireEvent.click(chips.getByRole('button', { name: 'Automations 1' }))
+    await waitFor(() => expect(search()).toBe('?origin=automations'))
+    expect(rowIds()).toEqual(['nightly-run'])
+    // Origin survives the archive switch.
+    fireEvent.click(screen.getByRole('button', { name: 'Archived' }))
+    await waitFor(() => expect(search()).toBe('?archived=1&origin=automations'))
+  })
+
+  it('names project and origin under every title, falling back to the automation id', async () => {
+    stubFetch({ runs: [RUNS[0]!, automated] })
+    renderPage()
+    await screen.findByText('Nightly health')
+    const projectOf = (id: string) => PROJECTS.find((entry) => entry.id === id)!.name
+    // Finished (the automation task) sorts above Working (the direct one).
+    expect(origins()).toEqual([`${projectOf('web')}·health`, `${projectOf('api')}·Direct task`])
+  })
+
+  it('reads automation names when the host has automations on, and searches them', async () => {
+    stubFetch({ runs: [RUNS[0]!, automated], automations: { web: [{ id: 'health', name: 'Daily project health' }] } })
+    renderPage()
+    await waitFor(() => expect(origins()[0]).toMatch(/·Daily project health$/))
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks across projects' }), { target: { value: 'daily project' } })
+    await waitFor(() => expect(rowIds()).toEqual(['nightly-run']))
+  })
+
+  it('keeps tasks with equal ids from two projects apart', async () => {
+    stubFetch({ runs: [{ ...RUNS[2]!, projectId: 'api', id: 'same', groupId: 'g' }, { ...RUNS[2]!, projectId: 'infra', id: 'same', groupId: 'g' }] })
+    renderPage()
+    await waitFor(() => expect(rowIds()).toEqual(['same', 'same']))
+    expect([...document.querySelectorAll('[data-slot="global-task-row"]')].map((row) => row.getAttribute('data-project')).sort()).toEqual(['api', 'infra'])
+  })
+
+  it('keeps the project filter visible with multiple selections across origin changes', async () => {
+    stubFetch({ runs: [...RUNS, automated] })
+    renderPage(createQueryClient(), '/tasks?project=api&project=web&origin=direct')
+    await waitFor(() => expect(rowIds()).toEqual(['w1', 'a1']))
+    expect(document.querySelector('[data-slot="facet-project"]')).not.toBeNull()
+    fireEvent.click(within(document.querySelector('[data-slot="origin-filter"]') as HTMLElement).getByRole('button', { name: /^All/ }))
+    await waitFor(() => expect(search()).toBe('?project=api&project=web'))
+    expect(rowIds()).toEqual(['w1', 'nightly-run', 'a1'])
+  })
+
+  it('previews a row inline with Open task in its own project', async () => {
+    stubFetch({ runs: [RUNS[2]!], handoff: '# Handoff\n\n## Progress log\n\n- 10:00 — runner bumped\n' })
+    renderPage()
+    fireEvent.click(await screen.findByRole('button', { name: 'Show resources for Bump the runner' }))
+    expect(await screen.findByText('10:00 — runner bumped')).toBeTruthy()
+    expect(screen.getByRole('link', { name: 'Open task: Bump the runner' }).getAttribute('href')).toBe('/p/infra/tasks/i1')
+    expect(sent.some((request) => request.path === '/api/v1/p/infra/runs/i1/handoff')).toBe(true)
+  })
+
+  it('folds a group per view and reveals matches during a search', async () => {
+    stubFetch()
+    renderPage()
+    await screen.findByText('Bump the runner')
+    fireEvent.click(screen.getByRole('button', { name: 'Finished 1' }))
+    expect(rowIds()).toEqual(['w1', 'a1'])
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks across projects' }), { target: { value: 'runner' } })
+    await waitFor(() => expect(rowIds()).toEqual(['i1']))
+    expect(screen.getByRole('button', { name: 'Finished 1' }).getAttribute('aria-expanded')).toBe('true')
+  })
 })

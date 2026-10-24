@@ -9,6 +9,7 @@ import { archiveProjectRun, setProjectRunRead } from '@/api/client'
 import {
   queryKeys,
   rememberReferenceStatuses,
+  useAutomationNames,
   useHealth,
   useProjects,
   useRunsIndex,
@@ -21,6 +22,7 @@ import { Pill } from '@/components/pill'
 import { ReferenceList } from '@/components/reference-overflow'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { StatusDot } from '@/components/status-dot'
+import { GroupFoldControls, OriginFilter, StatusGroupSection, TaskOriginLine, TaskPreview } from '@/components/task-status-groups'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -62,7 +64,9 @@ import {
 import { scopeTo } from '@/lib/project-router'
 import { allProjectTags } from '@/lib/project-tags'
 import { canBeUnread, isReadDoneItem, isUnread, unreadMarkerTone } from '@/lib/read-state'
-import { runTitle, type ListView } from '@/lib/task-groups'
+import { runTitle, type BucketLabel, type ListView } from '@/lib/task-groups'
+import { groupIndexedTasks, groupMembers, groupTone, originCounts, rowTasks, type TaskOrigin } from '@/lib/task-origin'
+import { useTaskListFolds } from '@/lib/use-task-list-folds'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useNow } from '@/lib/use-now'
 import { cn } from '@/lib/utils'
@@ -208,7 +212,8 @@ export function GlobalTasksRoute() {
   const projects = useProjects()
   // The same host gate the per-project table honours: `CEZ_HIDE_COST` and friends turn these
   // columns off everywhere, and a cross-project view is not an exception.
-  const metrics = usageMetricVisibility(useHealth().data)
+  const health = useHealth()
+  const metrics = usageMetricVisibility(health.data)
   // Always enabled here — unlike the ⌘K palette, which parks it in a single-project workspace:
   // this page IS the index, so there is nothing else for it to fall back to. The interval is this
   // page's alone (see `useRunsIndex`), and it is now a BACKSTOP rather than the mechanism: any
@@ -286,11 +291,24 @@ export function GlobalTasksRoute() {
     () => toGlobalTasks(index.data?.runs ?? [], registry),
     [index.data, registry],
   )
-  const visible = React.useMemo(
-    () => filterGlobalTasks(tasks, filters, view),
-    [tasks, filters, view],
+  // Automation names for the origin line and search, read only for projects that show automation
+  // tasks; without them a row shows the recorded automation id (hearsay-tools/cezarion#1616).
+  const automationProjects = React.useMemo(
+    () => [...new Set(tasks.filter((task) => task.run.automationId !== undefined).map((task) => task.run.projectId))],
+    [tasks],
   )
+  const automationNameIn = useAutomationNames(automationProjects, health.data?.automations === true && automationProjects.length > 0)
+  const nameOf = React.useCallback((task: GlobalTask) =>
+    task.run.automationId === undefined ? undefined : automationNameIn(task.run.projectId, task.run.automationId), [automationNameIn])
+  const visible = React.useMemo(() => filterGlobalTasks(tasks, filters, view, nameOf), [tasks, filters, view, nameOf])
+  const originTotals = originCounts(tasksExcludingFacet(tasks, filters, view, 'origin', nameOf).map((task) => task.run), view)
   const groups = React.useMemo(() => groupGlobalTasks(visible, groupBy), [visible, groupBy])
+  // No alternative grouping picked: the sidebar's status groups, with queue numbers from each
+  // project's full queue in the index.
+  const statusGroups = groupBy === 'none' ? groupIndexedTasks(visible, view, index.data?.runs ?? []) : []
+  const revealed = new Set<BucketLabel>(filters.query.trim() !== '' ? statusGroups.map((group) => group.label) : [])
+  const folds = useTaskListFolds('global', view, revealed)
+  const setOrigin = (origin: TaskOrigin) => setFilters(({ origin: _previous, ...current }) => (origin === 'all' ? current : { ...current, origin }))
   /**
    * Every tracker reference on screen, asked about ONCE.
    *
@@ -362,13 +380,17 @@ export function GlobalTasksRoute() {
             Archived
           </ViewTab>
         <span data-slot="global-tasks-count" className="ml-auto text-[13px] text-soft-foreground tabular-nums">
-          {visible.length} of {tasks.length}
+          {visible.length} of {tasks.length}{truncated.length > 0 ? ' loaded' : ''}
         </span>
         </div>
         <div className="flex flex-wrap items-center gap-2.5">
           <div className="min-w-0 basis-full md:flex-1 md:basis-auto">{search}</div>
           <Button variant="outline" aria-expanded={filterDetailsOpen} onClick={() => setFilterDetailsOpen((open) => !open)}><SlidersHorizontalIcon aria-hidden="true" />Filters</Button>
           <Button asChild className="min-h-11"><Link to={scopeTo(projects.data?.bootProject ?? 'default', '/new')}><PlusIcon aria-hidden="true" />New task</Link></Button>
+        </div>
+        <div data-slot="task-origin-row" className="flex flex-wrap items-center gap-2.5">
+          <OriginFilter origin={filters.origin ?? 'all'} counts={originTotals} onChange={setOrigin} />
+          {statusGroups.length > 0 ? <GroupFoldControls onExpand={() => folds.setAll(statusGroups.map((group) => group.label), false)} onCollapse={() => folds.setAll(statusGroups.map((group) => group.label), true)} /> : null}
         </div>
       </header>
 
@@ -402,7 +424,32 @@ export function GlobalTasksRoute() {
           // No `projectId` on the provider, uniquely on this page: every chip under it names its
           // own, because the rows next to each other belong to different repositories.
           <ReferenceStatusProvider requests={referenceRequests}>
-            {groups.map((group) => (
+            {groupBy === 'none' ? statusGroups.map((group) => {
+              const members = groupMembers(group)
+              return (
+                <StatusGroupSection
+                  key={group.label}
+                  id={`global-group-${view}-${group.label.replaceAll(' ', '-')}`}
+                  label={group.label}
+                  count={members.length}
+                  tone={groupTone(group.label, members.map((task) => task.run))}
+                  folded={folds.isFolded(group.label)}
+                  collapsed={folds.isCollapsed(group.label)}
+                  onToggle={() => folds.toggle(group.label)}
+                >
+                  <TaskList
+                    tasks={group.rows.flatMap(rowTasks)}
+                    now={now}
+                    showProject
+                    onArchive={(task, archived) => archive.mutate({ task, archived })}
+                    onSetRead={(task, read) => setRead.mutate({ task, read })}
+                    busy={archive.isPending || setRead.isPending}
+                    showCost={metrics.cost}
+                    automationName={nameOf}
+                  />
+                </StatusGroupSection>
+              )
+            }) : groups.map((group) => (
               <section key={group.key} data-slot="task-group" data-group-key={group.key}>
                 {groupBy === 'none' ? null : (
                   <h2 className="mb-1.5 flex items-center gap-2 text-[12px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
@@ -433,6 +480,7 @@ export function GlobalTasksRoute() {
                   onSetRead={(task, read) => setRead.mutate({ task, read })}
                   busy={archive.isPending || setRead.isPending}
                   showCost={metrics.cost}
+                  automationName={nameOf}
                 />
               </section>
             ))}
@@ -654,6 +702,7 @@ function TaskList({
   onSetRead,
   busy,
   showCost,
+  automationName,
 }: {
   tasks: readonly GlobalTask[]
   now: number
@@ -662,6 +711,7 @@ function TaskList({
   onSetRead: (task: GlobalTask, read: boolean) => void
   busy: boolean
   showCost: boolean
+  automationName: (task: GlobalTask) => string | undefined
 }) {
   return (
     <div
@@ -680,6 +730,7 @@ function TaskList({
                 onSetRead={onSetRead}
                 busy={busy}
                 showCost={showCost}
+                automationName={automationName(task)}
               />
             ))}
       </TooltipProvider>
@@ -702,6 +753,7 @@ function TaskRow({
   onSetRead,
   busy,
   showCost,
+  automationName,
 }: {
   task: GlobalTask
   now: number
@@ -710,6 +762,7 @@ function TaskRow({
   onSetRead: (task: GlobalTask, read: boolean) => void
   busy: boolean
   showCost: boolean
+  automationName: string | undefined
 }) {
   const { run } = task
   const [resourcesOpen, setResourcesOpen] = React.useState(false)
@@ -763,15 +816,19 @@ function TaskRow({
             />
           ) : null}
         </span>
+        <div className="mt-1">
+          <TaskOriginLine
+            automationId={run.automationId}
+            automationName={automationName}
+            project={showProject ? (
+              <Link to={scopeTo(run.projectId, '/')} data-slot="task-project" className="truncate hover:text-foreground">
+                {task.projectName}
+              </Link>
+            ) : undefined}
+          />
+        </div>
         <div className="mt-2 flex flex-wrap items-center gap-2">
           <button type="button" aria-expanded={resourcesOpen} aria-label={`${resourcesOpen ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} onClick={() => setResourcesOpen((value) => !value)} aria-describedby={`global-status-${run.projectId}-${run.id}`} title="Resources and actions" className="min-h-[26px] rounded-md p-0 text-[11px] text-muted-foreground hover:bg-muted"><Pill id={`global-status-${run.projectId}-${run.id}`} dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>{attention.label}</Pill></button>
-      {showProject ? (
-        <span className="text-[11px] text-muted-foreground">
-          <Link to={scopeTo(run.projectId, '/')} className="truncate hover:text-foreground">
-            {task.projectName}
-          </Link>
-        </span>
-      ) : null}
       <span>
         {task.tags.length > 0 ? (
           <span className="flex flex-wrap items-center gap-1">
@@ -806,7 +863,8 @@ function TaskRow({
           <ArchiveToggle task={task} busy={busy} onArchive={onArchive} /><Button asChild variant="outline"><Link to={to}>Open task</Link></Button>
         </span>
       </div>
-    {resourcesOpen ? <div data-slot="global-task-resources" className="col-span-full">
+    {resourcesOpen ? <div data-slot="global-task-resources" className="col-span-full flex flex-col gap-3">
+      <TaskPreview projectId={run.projectId} runId={run.id} status={attention.label} error={run.error} open={<Button asChild variant="outline" className="min-h-11"><Link to={to}>Open task<span className="sr-only">: {runTitle(run)}</span></Link></Button>} />
       <dl className="grid grid-cols-2 gap-4 rounded-md bg-muted/50 p-4 text-xs md:grid-cols-3">
         {showCost ? <div><dt className="text-muted-foreground">Cost</dt><dd className="mt-1">{formatCost(run.costUsd) || '—'}</dd></div> : null}
         <div><dt className="text-muted-foreground">CPU</dt><dd data-usage="cpu" data-usage-kind={usage.cpu.kind} title={usage.cpu.title} className="mt-1">{usage.cpu.text || '—'}</dd></div>

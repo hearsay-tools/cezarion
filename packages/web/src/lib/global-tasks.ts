@@ -3,6 +3,7 @@ import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-cl
 import { matchesTaskReferenceNumber } from '@/lib/tasks-table'
 import { allProjectTags } from '@/lib/project-tags'
 import { isOwnedWorker, runTitle } from '@/lib/task-groups'
+import { matchesOrigin, parseOrigin, type TaskOrigin } from '@/lib/task-origin'
 
 /**
  * The pure half of the global Tasks page (`/tasks`): joining the cross-project run index to the
@@ -51,8 +52,9 @@ export interface GlobalTask {
  *  tag it stores, so no real one can collide with it. */
 export const UNTAGGED = ' untagged'
 
-/** How the table is grouped. `'none'` renders one flat list — the default, because a workspace
- *  small enough to read at a glance should not be pre-sorted into boxes. */
+/** How the table is grouped. `'none'` is no alternative grouping: the page then shows the
+ *  sidebar's status groups (Needs you, Finished, Working; one Archived group for history), the
+ *  default since hearsay-tools/cezarion#1616. The others replace those groups. */
 export type GroupBy = 'none' | 'project' | 'tag' | 'status' | 'workflow'
 
 /**
@@ -91,6 +93,8 @@ export interface GlobalTaskFilters {
   statuses: readonly string[]
   /** Workflow names. Empty = every workflow. */
   workflows: readonly string[]
+  /** Who started the task (hearsay-tools/cezarion#1616). Absent = All. */
+  origin?: TaskOrigin
 }
 
 export const NO_FILTERS: GlobalTaskFilters = {
@@ -112,7 +116,8 @@ export function toggleFacetValue(
 /** How many facet values are selected — the number the "Clear" affordance and each facet pill's
  *  badge print. The query is not one of them; it has its own visible input. */
 export function activeFacetCount(filters: GlobalTaskFilters): number {
-  return (filters.projects?.length ?? 0) + filters.tags.length + filters.statuses.length + filters.workflows.length
+  return (filters.projects?.length ?? 0) + filters.tags.length + filters.statuses.length + filters.workflows.length +
+    (filters.origin === undefined || filters.origin === 'all' ? 0 : 1)
 }
 
 /** Are any filters narrowing the list? Drives the empty state's wording — "nothing here" and
@@ -222,13 +227,15 @@ const matchesTags = (task: GlobalTask, selected: readonly string[]): boolean => 
  * branch name from a terminal to find the task that made it is a deliberate gesture, not an
  * accidental match, so dropping the column here does not mean dropping the ability.
  */
-function haystack(task: GlobalTask): string {
+function haystack(task: GlobalTask, automationName: AutomationNameOf): string {
   return [
     runTitle(task.run),
     task.projectName,
     task.run.workflow,
     task.run.branch ?? '',
     ...task.tags,
+    // The origin line under the title names the automation, so a search can too (#1616).
+    task.run.automationId === undefined ? '' : automationName(task) ?? task.run.automationId,
   ]
     .join('\n')
     .toLowerCase()
@@ -239,20 +246,25 @@ function haystack(task: GlobalTask): string {
  * somewhere (`shop auth` finds the auth task in shop, and nothing else) — the same
  * every-token rule the ⌘K palette uses, so the two search boxes behave alike.
  */
+/** An automation task's display name, when the page could read it. */
+export type AutomationNameOf = (task: GlobalTask) => string | undefined
+
 export function filterGlobalTasks(
   tasks: readonly GlobalTask[],
   filters: GlobalTaskFilters,
   view: 'active' | 'archived',
+  automationName: AutomationNameOf = () => undefined,
 ): GlobalTask[] {
   const tokens = filters.query.trim().toLowerCase().split(/\s+/).filter(Boolean)
   return tasks.filter((task) => {
     if (view === 'archived' ? !task.run.archived : task.run.archived) return false
+    if (!matchesOrigin(task.run, filters.origin ?? 'all')) return false
     if (!matchesFacet(filters.projects ?? [], [task.run.projectId])) return false
     if (!matchesFacet(filters.statuses, [task.run.status])) return false
     if (!matchesFacet(filters.workflows, [task.run.workflow])) return false
     if (!matchesTags(task, filters.tags)) return false
     if (tokens.length === 0) return true
-    const text = haystack(task)
+    const text = haystack(task, automationName)
     return tokens.every((token) => text.includes(token) || matchesTaskReferenceNumber(task.run, token))
   })
 }
@@ -264,9 +276,10 @@ export function tasksExcludingFacet(
   tasks: readonly GlobalTask[],
   filters: GlobalTaskFilters,
   view: 'active' | 'archived',
-  except: FacetId,
+  except: FacetId | 'origin',
+  automationName?: AutomationNameOf,
 ): GlobalTask[] {
-  return filterGlobalTasks(tasks, { ...filters, [except]: [] }, view)
+  return filterGlobalTasks(tasks, except === 'origin' ? { ...filters, origin: 'all' } : { ...filters, [except]: [] }, view, automationName)
 }
 
 /** One rendered group: a heading and its rows. `key` is stable identity (a project id, a tag,
@@ -355,6 +368,7 @@ export const SEARCH_PARAMS = {
   workflow: 'workflow',
   groupBy: 'group',
   archived: 'archived',
+  origin: 'origin',
 } as const
 
 const GROUP_BY_VALUES = new Set<string>(GROUP_BY_OPTIONS.map((option) => option.value))
@@ -400,6 +414,7 @@ export function urlStateToSearchParams(state: GlobalTasksUrlState): URLSearchPar
   for (const workflow of state.filters.workflows) params.append(SEARCH_PARAMS.workflow, workflow)
   if (state.groupBy !== 'none') params.set(SEARCH_PARAMS.groupBy, state.groupBy)
   if (state.view === 'archived') params.set(SEARCH_PARAMS.archived, '1')
+  if (state.filters.origin !== undefined && state.filters.origin !== 'all') params.set(SEARCH_PARAMS.origin, state.filters.origin)
   return params
 }
 
@@ -414,6 +429,7 @@ export function urlStateFromSearchParams(params: URLSearchParams): GlobalTasksUr
   const tags = params.getAll(SEARCH_PARAMS.tag).filter((tag) => tag !== '')
   if (params.get(SEARCH_PARAMS.untagged) === '1') tags.push(UNTAGGED)
   const group = params.get(SEARCH_PARAMS.groupBy) ?? ''
+  const origin = parseOrigin(params.get(SEARCH_PARAMS.origin))
   return {
     filters: {
       query: params.get(SEARCH_PARAMS.query) ?? '',
@@ -421,6 +437,7 @@ export function urlStateFromSearchParams(params: URLSearchParams): GlobalTasksUr
       tags,
       statuses: params.getAll(SEARCH_PARAMS.status).filter((status) => status !== ''),
       workflows: params.getAll(SEARCH_PARAMS.workflow).filter((workflow) => workflow !== ''),
+      ...(origin === 'all' ? {} : { origin }),
     },
     groupBy: GROUP_BY_VALUES.has(group) ? (group as GroupBy) : 'none',
     view: params.get(SEARCH_PARAMS.archived) === '1' ? 'archived' : 'active',
