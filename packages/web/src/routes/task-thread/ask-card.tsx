@@ -9,6 +9,8 @@ import { cn } from '@/lib/utils'
 
 import { useAskAnswer } from './ask-answer'
 import { Markdown } from './markdown'
+import { AskAnswers } from './ask-answers'
+import { ConversationMessage } from './thread-items'
 import type { ThreadAsk } from './thread-state'
 import type { UiAskQuestion } from '@open-mercato/cezar-api-client'
 
@@ -31,7 +33,7 @@ function formatAnswer(question: UiAskQuestion, labels: string[], otherAnswer?: s
  * has closed — a question outlives its session, so answering one that the agent
  * asked before an idle timeout or a restart reopens the session with the answer
  * as its opening prompt. The composer below stays available for a free-form
- * "Other". Once resolved, the card collapses to a compact summary.
+ * "Other". Resolved cards preserve the context, questions and options.
  */
 export function AskCard({ ask, run, onShowOrigin }: {
   ask: ThreadAsk
@@ -43,25 +45,25 @@ export function AskCard({ ask, run, onShowOrigin }: {
   // provider-status subscription) only mounts for a question that can still be answered.
   // Threads accumulate asks; every resolved one would otherwise carry live machinery for a
   // question nobody can answer again.
+  const context = ask.context ? <AskContext text={ask.context} /> : null
   if (ask.resolved) {
-    return (
-      <div
+    return <div className="flex flex-col gap-3">
+      {context}
+      <ConversationMessage role="user"
         data-slot="ask-card"
         data-resolved="true"
-        className="rounded-lg border border-border bg-card px-3.5 py-2.5 text-xs text-muted-foreground"
       >
         <span className="text-soft-foreground">
           {ask.closed === 'finish' ? 'Closed when the task finished' : ask.closed === 'superseded' ? 'Closed when the worker went on' : ask.answeredBy === 'parent' ? 'Answered by parent' : 'Answered'}
         </span>
-        {ask.answer ? (
-          <span className="ml-1.5 break-words whitespace-pre-line text-foreground">{ask.answer}</span>
-        ) : null}
-      </div>
-    )
+        <AskAnswers ask={ask} />
+      </ConversationMessage>
+    </div>
   }
   const showOrigin = ask.placement === 'pinned' && onShowOrigin ? onShowOrigin : undefined
-  if (ask.routedToParent) return <RoutedAsk ask={ask} onShowOrigin={showOrigin} />
-  return <PendingAsk ask={ask} run={run} onShowOrigin={showOrigin} />
+  return <div className="flex flex-col gap-3">{context}{ask.routedToParent
+    ? <RoutedAsk ask={ask} onShowOrigin={showOrigin} />
+    : <PendingAsk ask={ask} run={run} onShowOrigin={showOrigin} />}</div>
 }
 
 /** The pinned copy's link to the question's original place in the transcript. */
@@ -82,20 +84,20 @@ function ShowOriginLink({ onShowOrigin }: { onShowOrigin: () => void }) {
 
 /**
  * The draft, findings or evidence the agent sent with its question (hearsay-tools/cezarion#1458),
- * as Markdown above the questions. A long one scrolls inside the card, so the questions and
- * their chips stay in reach; the region takes focus so a keyboard can scroll it.
+ * as an ordinary agent response. The thread owns scrolling, even for long context.
  */
-function AskContext({ text }: { text: string }) {
+export function AskContext({ text }: { text: string }) {
   return (
+    <ConversationMessage role="agent">
     <div
       data-slot="ask-context"
       role="region"
       aria-label="Context"
-      tabIndex={0}
-      className="mbe-3 [max-block-size:min(45dvh,28rem)] overflow-y-auto overscroll-contain rounded-md border border-border bg-background/60 px-3 py-2 text-sm break-words text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring"
+      className="break-words text-sm text-foreground"
     >
       <Markdown breaks>{text}</Markdown>
     </div>
+    </ConversationMessage>
   )
 }
 
@@ -113,7 +115,6 @@ function RoutedAsk({ ask, onShowOrigin }: { ask: ThreadAsk; onShowOrigin: (() =>
       <div className="mb-2.5 flex items-center gap-2">
         <span className="text-xs font-medium text-link-foreground">The agent is asking its parent</span>
       </div>
-      {ask.context ? <AskContext text={ask.context} /> : null}
       <div className="flex flex-col gap-3">
         {ask.questions.map((question, index) => (
           <div key={question.id ?? index} role="group" aria-label={question.question}>
@@ -272,7 +273,6 @@ function PendingAsk({ ask, run, onShowOrigin }: { ask: ThreadAsk; run: ApiRun; o
       <div className="mb-2.5 flex items-center gap-2">
         <span className="text-xs font-medium text-link-foreground">The agent is asking</span>
       </div>
-      {ask.context ? <AskContext text={ask.context} /> : null}
       <div className="flex flex-col gap-4">
         {questions.map((question, index) => (
           <AskQuestionBlock
@@ -302,36 +302,8 @@ function PendingAsk({ ask, run, onShowOrigin }: { ask: ThreadAsk; run: ApiRun; o
           />
         ))}
       </div>
-      {oneTap && !hasOtherAnswer ? (
-        resuming ? (
-          <p data-slot="ask-resume-hint" className="mt-3 text-[11px] text-soft-foreground">
-            The session has ended — your answer reopens it and goes to the agent.
-          </p>
-        ) : null
-      ) : (
-        <div className="mt-3 flex items-center gap-2.5">
-          <Button
-            size="sm"
-            className="min-h-11"
-            disabled={delivery.isPending || blocked || !allAnswered}
-            onClick={sendAll}
-          >
-            {resuming ? 'Send answer & reopen' : 'Send answer'}
-          </Button>
-          {/* The slot names the resume state, so a selector for it can never match the ordinary
-              "pick one or more" hint a live run shows. */}
-          <span
-            data-slot={resuming ? 'ask-resume-hint' : 'ask-hint'}
-            className="text-[11px] text-soft-foreground"
-          >
-            {resuming
-              ? 'the session has ended — sending reopens it'
-              : hasOtherAnswer
-                ? `${questions.length > 1 ? 'answer each question above' : 'enter your answer above'} — or type a reply below`
-                : `${questions.length > 1 ? 'answer each question' : 'pick one or more'} — or type a reply below`}
-          </span>
-        </div>
-      )}
+      <AskSubmit oneTap={oneTap} hasOtherAnswer={hasOtherAnswer} resuming={resuming}
+        disabled={delivery.isPending || blocked || !allAnswered} questionCount={questions.length} onSend={sendAll} />
       {delivery.blockedBy === 'provider' ? (
         <div data-slot="ask-provider-gate" className="mt-3 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
           <span>{delivery.reason}</span>
@@ -352,6 +324,32 @@ function PendingAsk({ ask, run, onShowOrigin }: { ask: ThreadAsk; run: ApiRun; o
         </p>
       ) : null}
       {onShowOrigin ? <ShowOriginLink onShowOrigin={onShowOrigin} /> : null}
+    </div>
+  )
+}
+
+/** Submission controls have no question-selection or voice state of their own. */
+function AskSubmit({ oneTap, hasOtherAnswer, resuming, disabled, questionCount, onSend }: {
+  oneTap: boolean; hasOtherAnswer: boolean; resuming: boolean; disabled: boolean
+  questionCount: number; onSend: () => void
+}) {
+  if (oneTap && !hasOtherAnswer) return resuming ? (
+    <p data-slot="ask-resume-hint" className="mbs-3 text-[11px] text-soft-foreground">
+      The session has ended — your answer reopens it and goes to the agent.
+    </p>
+  ) : null
+  return (
+    <div className="mbs-3 flex items-center gap-2.5">
+      <Button size="sm" className="min-h-11" disabled={disabled} onClick={onSend}>
+        {resuming ? 'Send answer & reopen' : 'Send answer'}
+      </Button>
+      <span data-slot={resuming ? 'ask-resume-hint' : 'ask-hint'} className="text-[11px] text-soft-foreground">
+        {resuming
+          ? 'the session has ended — sending reopens it'
+          : hasOtherAnswer
+            ? `${questionCount > 1 ? 'answer each question above' : 'enter your answer above'} — or type a reply below`
+            : `${questionCount > 1 ? 'answer each question' : 'pick one or more'} — or type a reply below`}
+      </span>
     </div>
   )
 }

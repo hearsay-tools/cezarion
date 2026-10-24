@@ -44,7 +44,7 @@ import { useFinishRun } from './use-finish-run'
 import { useStopAction } from './stop-action'
 import { RunHeader } from './run-header'
 import { RunActivityDock } from './run-activity-dock'
-import { AskCard } from './ask-card'
+import { AskCard, AskContext } from './ask-card'
 import { PermissionCard } from './permission-card'
 import { useAskAnswer } from './ask-answer'
 import { useRunRecordReconcile } from './run-reconcile'
@@ -382,7 +382,10 @@ export function ThreadView({
         const pinned = askRow(current, ask.id, 'pinned')
         if (pinned) jumpToRow(pinned.key, pinned.index, (row) => pinnedAnswerControl(row))
       }
-      return <AskOriginMarker onGoToQuestion={goToQuestion} />
+      return <div className="flex flex-col gap-3">
+        {ask.resolved && ask.context ? <AskContext text={ask.context} /> : null}
+        {!ask.resolved ? <AskOriginMarker onGoToQuestion={goToQuestion} /> : null}
+      </div>
     }
     return <AskCard ask={ask} run={run} onShowOrigin={() => navigationRef.current.reveal()} />
   }, [run])
