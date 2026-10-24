@@ -1344,6 +1344,29 @@ describe('reduceThread — task webhook lines (#589)', () => {
       { tone: 'dim', text: 'Webhook (dry run, nothing sent): task.status · waiting' },
     ])
   })
+
+  // hearsay-tools/cezarion#1576
+  it('names the webhook a delivery failed for', () => {
+    const items = notes([
+      line(1, 'webhook.failed', { event: 'task.status', attempts: 1, error: 'HTTP 500', webhookId: 'w1', webhookName: 'Team bot' }),
+    ])
+    expect(items).toMatchObject([{ tone: 'danger', text: 'Delivery to Team bot failed (task.status) after 1 attempt: HTTP 500' }])
+  })
+
+  it('renders an agent report as a send line, a failed one as danger and a dry run as dim', () => {
+    const items = notes([
+      line(1, 'webhook.report', { webhookId: 'w1', webhookName: 'Team bot', deliveryId: 'd1', ok: true, title: 'Release 0.17 is out' }),
+      line(2, 'webhook.report', { webhookId: 'w1', webhookName: 'Team bot', deliveryId: 'd2', ok: false, error: 'HTTP 503' }),
+      line(3, 'webhook.report', { webhookId: 'w1', webhookName: 'Team bot', deliveryId: 'd3', ok: true, dryRun: true }),
+    ])
+    expect(items[0]).toMatchObject({ tone: 'dim', icon: 'handoff' })
+    expect(items[0]?.kind === 'note' && items[0].text).toMatch(/^Sent report to Team bot · .+ — Release 0\.17 is out$/)
+    expect(items[1]).toMatchObject({ tone: 'danger', text: 'Report to Team bot failed: HTTP 503' })
+    expect(items[1]).not.toHaveProperty('icon')
+    expect(items[2]).toMatchObject({ tone: 'dim' })
+    expect(items[2]).not.toHaveProperty('icon')
+    expect(items[2]?.kind === 'note' && items[2].text).toMatch(/^Report to Team bot \(dry run, nothing sent\) · /)
+  })
 })
 
 describe('reduceThread — preview servers (#781)', () => {
