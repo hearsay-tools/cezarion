@@ -39,7 +39,7 @@ export async function convertNodeCoverage(raw, files, cwd, output) {
 
 /** One bounded test run covers all changed files. Test output stays on stderr. */
 export async function collectCoverage(options, directory) {
-  const { runner, files, tests, imports, cwd } = options;
+  const { runner, files, tests, imports, testTimeout, cwd } = options;
   const output = join(directory, 'coverage-final.json');
   if (runner === 'vitest') {
     const argv = vitestCoverageArguments(options, directory);
@@ -52,7 +52,8 @@ export async function collectCoverage(options, directory) {
   }
   const raw = join(directory, 'raw');
   mkdirSync(raw);
-  const argv = [...imports.flatMap(file => ['--import', file]), '--test', ...tests];
+  const timeout = testTimeout ? [`--test-timeout=${testTimeout}`] : [];
+  const argv = [...imports.flatMap(file => ['--import', file]), '--test', ...timeout, ...tests];
   execute(argv, options, { ...process.env, NODE_V8_COVERAGE: raw });
   await convertNodeCoverage(raw, files, cwd, output);
   return { path: output, runner, command: [process.execPath, ...argv], environment: { NODE_V8_COVERAGE: '<temporary-directory>/raw' } };
