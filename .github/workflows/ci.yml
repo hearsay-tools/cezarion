@@ -401,7 +401,8 @@ jobs:
   # would notice a `node:sqlite` call the floor does not have (#779). This one
   # pins exactly the root manifest's `engines.node` and runs the unit gate there.
   # Typecheck and the Node unit suites are version-independent in their inputs,
-  # so shard 1 runs them once; both shards split the Vitest suites.
+  # so shard 1 runs them once; floor allocation reserves that fixed work before
+  # splitting Vitest modules using the floor's measured durations.
   node-floor:
     name: Node 24.15.0 floor, unit shard ${{ matrix.shard }}/2
     # Same docs-only, infra-only, and verified bump-PR skips as Vitest.
@@ -416,7 +417,9 @@ jobs:
       matrix:
         shard: [1, 2]
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    # bound: run 40077543858 passed every recorded test but reached 20m during
+    # final Node cleanup; allow setup retries and host variation after balancing.
+    timeout-minutes: 30
 
     permissions:
       contents: read
@@ -479,7 +482,7 @@ jobs:
       - name: Run server and cockpit unit suites
         # Keep four workers and both ordinary reporters; retain host load and each
         # test's measured duration/budget to diagnose hearsay-tools/cezarion#974.
-        run: npm test -- --shard=${{ matrix.shard }}/2 --maxWorkers=4 --reporter=default --reporter=github-actions --reporter=./.github/scripts/node-floor-reporter.mjs
+        run: npm test -- --shard=${{ matrix.shard }}/2 --maxWorkers=4 --config=./.github/scripts/node-floor-vitest.config.mjs --reporter=default --reporter=github-actions --reporter=./.github/scripts/node-floor-reporter.mjs
 
       - name: Upload floor measurements
         if: always()

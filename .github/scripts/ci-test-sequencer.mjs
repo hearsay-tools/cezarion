@@ -21,9 +21,14 @@ function fallbackDuration(measured) {
 }
 
 /** Deterministically assign every discovered file using longest-processing-time bins. */
-export function assignShards(filePaths, measuredDurations, count) {
+export function assignShards(filePaths, measuredDurations, count, initialCosts = []) {
   if (!Number.isInteger(count) || count <= 0) {
     throw new TypeError('shard count must be a positive integer');
+  }
+  if (!Array.isArray(initialCosts)
+    || (initialCosts.length !== 0 && initialCosts.length !== count)
+    || Array.from(initialCosts).some(value => !Number.isFinite(value) || value < 0)) {
+    throw new TypeError('initial shard costs must be finite non-negative numbers, one per shard');
   }
 
   const unique = new Set(filePaths);
@@ -38,7 +43,7 @@ export function assignShards(filePaths, measuredDurations, count) {
       duration: positiveDuration(measuredDurations[file]) ? measuredDurations[file] : fallback,
     }))
     .sort((a, b) => b.duration - a.duration || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
-  const bins = Array.from({ length: count }, () => ({ total: 0, files: [] }));
+  const bins = Array.from({ length: count }, (_, index) => ({ total: initialCosts[index] ?? 0, files: [] }));
 
   for (const entry of weighted) {
     let target = 0;
@@ -59,6 +64,8 @@ function repoRelative(root, moduleId) {
 export default class CiTestSequencer extends BaseSequencer {
   durations = durations;
 
+  get shardCosts() { return []; }
+
   async shard(specifications) {
     const { index, count } = this.ctx.config.shard;
     if (!Number.isInteger(index) || index < 1 || index > count) {
@@ -76,7 +83,7 @@ export default class CiTestSequencer extends BaseSequencer {
       byKey.set(key, specification);
       keyedDurations[key] = this.durations[file];
     });
-    const assigned = assignShards([...byKey.keys()], keyedDurations, count);
+    const assigned = assignShards([...byKey.keys()], keyedDurations, count, this.shardCosts);
     return assigned[index - 1].map((key) => byKey.get(key));
   }
 }
