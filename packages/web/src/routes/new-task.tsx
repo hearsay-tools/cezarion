@@ -1,7 +1,7 @@
 import { Button } from '@/components/ui/button'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { EyeIcon } from 'lucide-react'
-import { CheckIcon, CircleSlashIcon, CpuIcon, GitBranchIcon, GaugeIcon, TerminalIcon, SlidersHorizontalIcon, FolderOpenIcon, SparklesIcon, WorkflowIcon, XIcon } from '@/components/design-icons'
+import { CheckIcon, ChevronDownIcon, CircleSlashIcon, CpuIcon, GaugeIcon, TerminalIcon, SlidersHorizontalIcon, FolderOpenIcon, SparklesIcon, WorkflowIcon, XIcon } from '@/components/design-icons'
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 
@@ -722,18 +722,18 @@ export function NewTaskRoute() {
             </div>
           }
           executionOptions={
-            <div className="flex min-w-0 flex-col gap-4">
             <details data-slot="execution-options" open className="group rounded-xl border border-border bg-card xl:self-start">
-              <summary className="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-xs text-muted-foreground hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
+              <summary className="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-xs text-muted-foreground pointer-hover:bg-muted/50 active:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
                 <SlidersHorizontalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />
                 <span className="font-medium text-foreground">Execution settings</span>
                 <span data-slot="execution-summary" hidden className="min-w-0 basis-full truncate pl-5 xl:ml-auto xl:basis-auto xl:pl-0">
                   {RUNNERS.find((runner) => runner.id === displayRunner)?.label ?? displayRunner}
                   {' · '}{models.find((item) => item.id === model)?.label ?? 'auto'}
                 </span>
+                <ChevronDownIcon aria-hidden="true" className="new-task-settings-chevron size-4 shrink-0" />
               </summary>
-              <div className="space-y-3 border-t border-border px-5 pt-3 pb-5">
-                <p className="hidden text-[11px] text-muted-foreground xl:block">Control where and how this task runs.</p>
+              <div className="new-task-settings-body">
+                <p className="new-task-settings-description">Control this run and what happens after Done.</p>
                 <div role="group" aria-label="Run settings" className="new-task-run-settings">
                   {worktreeToggleShown ? (
                     <WorktreeToggle
@@ -741,6 +741,7 @@ export function NewTaskRoute() {
                       onChange={(on) => update({ worktree: on })}
                     />
                   ) : null}
+                  {repo.data ? <div className="new-task-base-branch flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>Base branch</span><BaseBranchPill repo={repo.data} /></div> : null}
                   <AutonomousToggle
                     on={autonomousOn}
                     disabled={draft.planFirst}
@@ -754,15 +755,10 @@ export function NewTaskRoute() {
                       This skill recommends an interactive run in the current checkout. You can change either setting.
                     </p>
                   ) : null}
-                  {repo.data ? <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>Base branch</span><BaseBranchPill repo={repo.data} /></div> : null}
                 </div>
-                <p data-slot="execution-tip" className="hidden rounded-lg bg-background p-3 text-[11px] leading-5 text-muted-foreground xl:block"><GitBranchIcon aria-hidden="true" className="mb-2 size-[18px] text-accent-text" />{worktreeOn && hasGit ? 'Changes stay in their own worktree, separate from your working directory.' : 'Changes are made in the current working directory.'}</p>
+                <CompletionControls embedded archiveWhenDone={draft.archiveWhenDone} autoMergePr={draft.autoMergePr} onChange={update} disabled={starting || planning} />
               </div>
             </details>
-            <section className="rounded-xl border border-border bg-card p-4">
-              <CompletionControls archiveWhenDone={draft.archiveWhenDone} autoMergePr={draft.autoMergePr} onChange={update} disabled={starting || planning} />
-            </section>
-                </div>
           }
           footerEnd={
             <>
@@ -854,7 +850,7 @@ function WorktreeToggle({
       }
       className="flex items-center justify-between gap-3 px-0 py-3 text-left"
     >
-      <span><span className="block text-[13px] font-medium">Worktree</span><span className="block text-[12px] text-muted-foreground">Run in an isolated working copy</span></span>
+      <span><span className="block text-[13px] font-medium">Worktree</span><span className="block text-[12px] text-muted-foreground">{on ? 'Changes stay in a separate working copy.' : 'Changes are made in the current working directory.'}</span></span>
       <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
     </button>
   )
