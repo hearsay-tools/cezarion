@@ -2,7 +2,13 @@ import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
 import { CompletionActionCoordinator } from './completion-actions.ts';
 import { discoverRepoHandle, lookupMergedPullRequests } from './forge/github.ts';
 import { resolveArchiveOnMerge, resolveGlobalArchiveOnMerge } from '../archive-on-merge-setting.ts';
-import type { WorkspaceConfigResponse, TestProjectWebhookResponse } from '@open-mercato/cezar-contract';
+import type {
+  AgentWebhooksResponse,
+  ProjectWebhookResponse,
+  SendAgentReportResponse,
+  TestProjectWebhookResponse,
+  WorkspaceConfigResponse,
+} from '@open-mercato/cezar-contract';
 export type { WorkspaceConfigResponse } from '@open-mercato/cezar-contract';
 import { permissionDecisionSchema } from '@open-mercato/cezar-contract/permissions';
 import { runIdParamSchema as permissionRunIdParamSchema } from '@open-mercato/cezar-contract/events';
@@ -68,7 +74,7 @@ import { jsonZodValidator, paramZodValidator, queryZodValidator } from './valida
 import { RecentVoiceActions } from '../voice/decision-log.ts';
 import { selectVoiceEngine } from '../voice/engine.ts';
 import { createVoiceRoutes } from '../voice/routes.ts';
-import { deliverOnce, TaskWebhooks } from '../runs/webhook.ts';
+import { deliverOnce, registryEntry, sendAgentReport, TaskWebhooks } from '../runs/webhook.ts';
 import { parse as parseYaml, stringify as stringifyYaml } from 'yaml';
 import { z } from 'zod';
 import { repoPullInputSchema, deleteBranchesInputSchema } from '@open-mercato/cezar-contract/repo';
@@ -100,7 +106,27 @@ import {
   attachmentInputSchema,
   attachmentFileParamSchema,
 } from '@open-mercato/cezar-contract/runs';
-import { updateProjectInputSchema } from '@open-mercato/cezar-contract/projects';
+import {
+  agentWebhookParamsSchema,
+  createProjectWebhookInputSchema,
+  projectWebhookParamsSchema,
+  sendAgentReportInputSchema,
+  updateProjectInputSchema,
+  updateProjectWebhookInputSchema,
+} from '@open-mercato/cezar-contract/projects';
+import { PROJECT_WEBHOOKS_MAX } from '@open-mercato/cezar-contract/project-limits';
+import {
+  agentWebhook,
+  agentWebhooks,
+  applyTaskWebhookInput,
+  createdWebhook,
+  editedWebhook,
+  nameTaken,
+  projectWebhooks,
+  redactWebhook,
+  setProjectWebhooks,
+  taskWebhooks as taskWebhookList,
+} from '../workspace/webhooks.ts';
 import { detectEnvironment } from '../core/backend-detect.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import type { ContentBlock } from '../core/agent-runner.ts';
@@ -188,6 +214,7 @@ import {
   mergeWriteWorkspaceConfig,
   effectiveComposerDefault,
   type WorkspaceConfig,
+  type StoredProjectWebhook,
   type WorkspaceProject,
 } from '../workspace/config.ts';
 import {
@@ -1246,6 +1273,65 @@ export function createApp(deps: ServerDeps) {
   const projectRegistryEntry = async (projectId: string): Promise<WorkspaceProject | undefined> => {
     const id = projectId === 'default' ? await resolveBootProject() : projectId;
     return (await loadWorkspaceConfig()).projects.find((entry) => entry.id === id);
+  };
+
+  /** One `task.test` POST to `webhook`, or a dry run under `CEZ_DRY_RUN=1`. */
+  const sendTestDelivery = async (projectId: string, webhook: StoredProjectWebhook): Promise<TestProjectWebhookResponse> => {
+    if (process.env.CEZ_DRY_RUN === '1') return { ok: true, dryRun: true };
+    const payload = {
+      event: 'task.test' as const,
+      deliveryId: randomUUID(),
+      projectId,
+      webhook: { id: webhook.id, name: webhook.name },
+      occurredAt: new Date().toISOString(),
+    };
+    const result = await deliverOnce(webhook, payload, { fetch: deps.taskWebhookFetch });
+    return {
+      ok: result.ok,
+      ...(result.status === undefined ? {} : { status: result.status }),
+      ...(result.error === undefined ? {} : { error: result.error }),
+    };
+  };
+
+  type WebhookEdit =
+    | { webhooks: StoredProjectWebhook[]; webhook: StoredProjectWebhook }
+    | { error: string; status: 404 | 409 };
+  /**
+   * Read-modify-write one project's webhook list (hearsay-tools/cezarion#1576), with the PATCH
+   * route's guards: single-project mode refuses, an unknown project 404s without a write, and a
+   * failed write (a read-only home) answers 500 having persisted nothing.
+   */
+  const editProjectWebhooks = async (
+    raw: string,
+    edit: (webhooks: StoredProjectWebhook[]) => WebhookEdit,
+  ): Promise<{ body: ProjectWebhookResponse } | { error: string; status: 400 | 404 | 409 | 500 }> => {
+    if (capabilities().singleProject) return { ...singleProjectRefusal('editing projects'), status: 409 };
+    if (!projectIdSchema.safeParse(raw).success) return { error: `unknown project: ${raw}`, status: 404 };
+    const id = raw === 'default' ? await resolveBootProject() : raw;
+    const known = await loadWorkspaceConfig().then((config) => config.projects.some((p) => p.id === id), () => false);
+    if (!known) return { error: `unknown project: ${id}`, status: 404 };
+    let updated: WorkspaceProject | undefined;
+    let outcome: WebhookEdit | undefined;
+    try {
+      await mergeWriteWorkspaceConfig((config) => {
+        const entry = config.projects.find((p) => p.id === id);
+        if (!entry) return;
+        outcome = edit([...projectWebhooks(entry)]);
+        if ('error' in outcome) return;
+        setProjectWebhooks(entry, outcome.webhooks);
+        updated = entry;
+      });
+    } catch (err) {
+      return { error: err instanceof Error ? err.message : String(err), status: 500 };
+    }
+    if (outcome && 'error' in outcome) return outcome;
+    if (!updated || !outcome) return { error: `unknown project: ${id}`, status: 404 };
+    return {
+      body: {
+        project: toProjectListEntry(updated, await probeProjectStatus(updated.root)),
+        webhook: redactWebhook(outcome.webhook),
+      },
+    };
   };
 
   const app = new Hono();
@@ -2599,12 +2685,8 @@ export function createApp(deps: ServerDeps) {
             // The token is write-only (#589): the form never has it back, so an omitted token
             // keeps the stored one and only `''` clears it. An omitted `triggers` keeps the stored
             // selection the same way, so a URL or token edit never resets it (#1356).
-            if (webhook === null) delete entry.webhook;
-            else {
-              const token = webhook.token === undefined ? entry.webhook?.token : webhook.token || undefined;
-              const triggers = webhook.triggers ?? entry.webhook?.triggers;
-              entry.webhook = { url: webhook.url, ...(token ? { token } : {}), ...(triggers === undefined ? {} : { triggers }) };
-            }
+            // Since #1576 this edits the first webhook with task notifications on.
+            applyTaskWebhookInput(entry, webhook);
           }
           updated = entry;
         });
@@ -2638,23 +2720,72 @@ export function createApp(deps: ServerDeps) {
       }
       const entry = await projectRegistryEntry(raw).catch(() => undefined);
       if (!entry) return c.json({ error: `unknown project: ${raw}` }, 404);
-      if (!entry.webhook) return c.json({ error: NO_WEBHOOK_ERROR }, 400);
-      const payload = {
-        event: 'task.test' as const,
-        deliveryId: randomUUID(),
-        projectId: entry.id,
-        occurredAt: new Date().toISOString(),
-      };
-      if (process.env.CEZ_DRY_RUN === '1') {
-        const body: TestProjectWebhookResponse = { ok: true, dryRun: true };
-        return c.json(body);
+      // Since #1576: the first webhook with task notifications on.
+      const webhook = taskWebhookList(entry)[0];
+      if (!webhook) return c.json({ error: NO_WEBHOOK_ERROR }, 400);
+      const body: TestProjectWebhookResponse = await sendTestDelivery(entry.id, webhook);
+      return c.json(body);
+    })
+
+    // ---- project webhooks (hearsay-tools/cezarion#1576) ----
+    // Several webhooks per project, each with its own task-state selection and an explicit
+    // "Expose to agents" switch. Registry edits like the PATCH above: refused in single-project
+    // mode, 404 on an unknown project or webhook, and a write that names nothing else leaves the
+    // rest of the entry alone. The first write stores `webhooks` and drops the old `webhook` key.
+    .post('/projects/:projectId/webhooks', jsonZodValidator(createProjectWebhookInputSchema), async (c) => {
+      const input = c.req.valid('json');
+      const answer = await editProjectWebhooks(c.req.param('projectId'), (webhooks) => {
+        if (webhooks.length >= PROJECT_WEBHOOKS_MAX) return { error: `a project holds at most ${PROJECT_WEBHOOKS_MAX} webhooks`, status: 409 };
+        if (nameTaken(webhooks, input.name)) return { error: webhookNameTakenError(input.name), status: 409 };
+        const webhook = createdWebhook(webhooks, input);
+        return { webhooks: [...webhooks, webhook], webhook };
+      });
+      if ('error' in answer) return c.json({ error: answer.error }, answer.status);
+      const body: ProjectWebhookResponse = answer.body;
+      return c.json(body, 201);
+    })
+
+    .patch('/projects/:projectId/webhooks/:webhookId', paramZodValidator(projectWebhookParamsSchema), jsonZodValidator(updateProjectWebhookInputSchema), async (c) => {
+      const { projectId, webhookId } = c.req.valid('param');
+      const input = c.req.valid('json');
+      const answer = await editProjectWebhooks(projectId, (webhooks) => {
+        const index = webhooks.findIndex((webhook) => webhook.id === webhookId);
+        if (index < 0) return { error: `unknown webhook: ${webhookId}`, status: 404 };
+        if (input.name !== undefined && nameTaken(webhooks, input.name, webhookId)) return { error: webhookNameTakenError(input.name), status: 409 };
+        const webhook = editedWebhook(webhooks[index]!, input);
+        return { webhooks: webhooks.map((entry, at) => (at === index ? webhook : entry)), webhook };
+      });
+      if ('error' in answer) return c.json({ error: answer.error }, answer.status);
+      const body: ProjectWebhookResponse = answer.body;
+      return c.json(body);
+    })
+
+    .delete('/projects/:projectId/webhooks/:webhookId', paramZodValidator(projectWebhookParamsSchema), async (c) => {
+      const { projectId, webhookId } = c.req.valid('param');
+      const answer = await editProjectWebhooks(projectId, (webhooks) => {
+        const webhook = webhooks.find((entry) => entry.id === webhookId);
+        if (!webhook) return { error: `unknown webhook: ${webhookId}`, status: 404 };
+        return { webhooks: webhooks.filter((entry) => entry !== webhook), webhook };
+      });
+      if ('error' in answer) return c.json({ error: answer.error }, answer.status);
+      const body: UpdateProjectResponse = { project: answer.body.project };
+      return c.json(body);
+    })
+
+    // "Send test" for one webhook: one `task.test` delivery, now, no retries.
+    .post('/projects/:projectId/webhooks/:webhookId/test', paramZodValidator(projectWebhookParamsSchema), async (c) => {
+      if (capabilities().singleProject) {
+        return c.json(singleProjectRefusal('editing projects'), 409);
       }
-      const result = await deliverOnce(entry.webhook, payload, { fetch: deps.taskWebhookFetch });
-      const body: TestProjectWebhookResponse = {
-        ok: result.ok,
-        ...(result.status === undefined ? {} : { status: result.status }),
-        ...(result.error === undefined ? {} : { error: result.error }),
-      };
+      const { projectId, webhookId } = c.req.valid('param');
+      if (!projectIdSchema.safeParse(projectId).success) {
+        return c.json({ error: `unknown project: ${projectId}` }, 404);
+      }
+      const entry = await projectRegistryEntry(projectId).catch(() => undefined);
+      if (!entry) return c.json({ error: `unknown project: ${projectId}` }, 404);
+      const webhook = projectWebhooks(entry).find((candidate) => candidate.id === webhookId);
+      if (!webhook) return c.json({ error: `unknown webhook: ${webhookId}` }, 404);
+      const body: TestProjectWebhookResponse = await sendTestDelivery(entry.id, webhook);
       return c.json(body);
     })
 
@@ -3779,7 +3910,7 @@ export function createApp(deps: ServerDeps) {
       if (!project.store.getRun(id)) return c.json({ error: 'not found' }, 404);
       if (notify) {
         const entry = await projectRegistryEntry(project.id).catch(() => undefined);
-        if (!entry?.webhook) return c.json({ error: NO_WEBHOOK_ERROR }, 400);
+        if (taskWebhookList(entry).length === 0) return c.json({ error: NO_WEBHOOK_ERROR }, 400);
       }
       const run = project.store.updateRun(id, { notify: notify ? true : undefined });
       if (!run) return c.json({ error: 'not found' }, 404);
@@ -3863,7 +3994,7 @@ export function createApp(deps: ServerDeps) {
       }
       // Task webhook (#589): an explicit `true` on a project with no webhook is refused, so a
       // bot learns in one round trip. `cez task start`'s implicit default never sends it there.
-      if (parsed.data.notify === true && !(await projectRegistryEntry(c.get('project').id).catch(() => undefined))?.webhook) {
+      if (parsed.data.notify === true && taskWebhookList(await projectRegistryEntry(c.get('project').id).catch(() => undefined)).length === 0) {
         return c.json({ error: NO_WEBHOOK_ERROR }, 400);
       }
       const images = parsed.data.images?.map(toPastedContent);
@@ -5724,6 +5855,35 @@ export function createApp(deps: ServerDeps) {
   //
   // Written as ONE chained expression because that is the only shape Hono can infer route types
   // from — it is what puts these routes in `AppType`, and so in the typed client.
+  // ---- chained family: agent webhooks (hearsay-tools/cezarion#1576, project-scoped) ----
+  // What `cez webhook` calls from inside a task: list the webhooks the owner exposed to agents in
+  // this project, and send one report through one of them. A webhook closed to agents answers
+  // the same 404 as an unknown one, so this interface cannot even confirm it exists.
+  const agentWebhooksRoutes = new Hono<ProjectApiEnv>()
+    .get('/agent-webhooks', async (c) => {
+      const project = c.get('project');
+      const body: AgentWebhooksResponse = { webhooks: agentWebhooks(await registryEntry(project.id, project.root).catch(() => undefined)) };
+      return c.json(body);
+    })
+
+    .post('/agent-webhooks/:webhook', paramZodValidator(agentWebhookParamsSchema.pick({ webhook: true })), jsonZodValidator(sendAgentReportInputSchema), async (c) => {
+      const project = c.get('project');
+      const { webhook: ref } = c.req.valid('param');
+      const entry = await registryEntry(project.id, project.root).catch(() => undefined);
+      const webhook = agentWebhook(entry, ref);
+      if (!entry || !webhook) return c.json({ error: `no webhook named "${ref}" is open to agents in this project — run \`cez webhook list\`` }, 404);
+      const outcome = await sendAgentReport({
+        projectId: entry.id,
+        webhook,
+        input: c.req.valid('json'),
+        store: project.store,
+        origin: taskWebhooks.currentOrigin(),
+        fetch: deps.taskWebhookFetch,
+      });
+      const body: SendAgentReportResponse = { ...outcome, webhook: { id: webhook.id, name: webhook.name } };
+      return c.json(body);
+    });
+
   const v1 = new Hono<ProjectApiEnv>()
     .use('*', resolveProjectScope)
     .route('/', launchKeyRoutes)
@@ -5732,6 +5892,7 @@ export function createApp(deps: ServerDeps) {
     .route('/', workflowsRoutes)
     .route('/', planRoutes)
     .route('/', automationsRoutes)
+    .route('/', agentWebhooksRoutes)
     .route('/', runsRoutes)
     .route('/', groupsRoutes)
     .route('/', openTargetsRoutes)
@@ -5980,6 +6141,8 @@ function taskWebhookHost(bindHost: string | undefined): string {
 export function cockpitOriginFor(bindHost: string | undefined, port: number): string {
   return `http://${taskWebhookHost(bindHost)}:${port}`;
 }
+
+const webhookNameTakenError = (name: string) => `this project already has a webhook named "${name.trim()}" — pick another name`;
 
 const NO_WEBHOOK_ERROR =
   'this project has no task webhook — set one in Settings → General → Task webhook, or start without notify';
