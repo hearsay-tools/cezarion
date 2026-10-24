@@ -118,7 +118,7 @@ function SessionActivityCard({
   // `chosen` is the reader's choice; `open` is what shows, after a temporary fold for reading.
   const [chosen, setChosen] = useState(() => openByRun.get(run.id) ?? false)
   const scrollFold = useReaderScrollFold(readerScroll, chosen)
-  const open = chosen && !scrollFold.folded
+  const open = scrollFold.open
   // Nested rows start closed on every viewport — the expanded card is a list of section heads,
   // and a reader opens the one they came for. Workers are the exception, open by default so
   // their task links stay directly reachable: they are navigation, not detail.
@@ -416,7 +416,7 @@ function useReaderScrollFold(subscribe: ((listener: ReaderScrollListener) => () 
   }), [subscribe])
   return {
     ref,
-    folded,
+    open: chosen && !folded,
     /** The reader toggled the card: their choice replaces any temporary fold. */
     chose: (next: boolean) => {
       setFolded(false)
