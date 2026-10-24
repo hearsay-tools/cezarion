@@ -370,12 +370,14 @@ describe('thread virtualization on a 1,000-row transcript', () => {
 describe('Activity folds while reading up (#1601)', () => {
   const SUMMARY = '[data-slot="run-activity-dock"] > button'
   const expanded = `document.querySelector('${SUMMARY}')?.getAttribute('aria-expanded')`
-  /** Like parkAt, with the gesture's direction: positive `deltaY` reads down. */
+  /** Like parkAt, with the gesture's direction: positive `deltaY` reads down. The target is
+   *  resolved once, so a relative target does not move on with each retry. */
   function readTo(target: string, deltaY: number) {
+    const top = Number(browser.evaluate(`(() => { const m = ${MAIN}; return Math.round(${target}) })()`))
     browser.evaluate(`${MAIN}.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true }))`)
     browser.waitForFunction(`(() => {
       const m = ${MAIN}
-      const target = ${target}
+      const target = ${top}
       if (Math.abs(m.scrollTop - target) > 50) {
         m.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true }))
         m.scrollTop = target
