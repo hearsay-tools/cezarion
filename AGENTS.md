@@ -134,10 +134,24 @@ wake at the budget cap cancelled its timer without opening the budget wait.
 field.** `ActiveRun` is built in `execute` AND in `runContinuation`; open-mercato/cezar#811 populated
 `state.skills` in the first only, so registry `/skill` expansion worked on new tasks and
 silently failed on every Continue and every restart recovery. The same shape recurs in the
-two near-identical turn-end handlers in `workflows/run.ts` (streaming and non-streaming):
-a lifecycle change applied to one of them ships half a fix. When you add a field that a
-delivery path reads, add it everywhere in the same commit or route both sites through one
-helper.
+fresh step's and the Continue's turn-end handlers in `workflows/run.ts` (`runAgentStep` and
+`runContinuation`): a lifecycle change applied to one of them ships half a fix. When you add
+a field that a delivery path reads, add it everywhere in the same commit or route both sites
+through one helper.
+
+**List each handler's side effects, in order, before you merge handlers into one.** Each
+handler carries its own order of side effects, and the merged method can lose one step of
+that order while every test stays green. Before you merge several handlers into one method,
+list what each handler does, in order, for each entry and each case. Name its input
+delivery, the timers or waits it opens, the gates it calls and the heartbeat or note it
+writes. Pin each line with a test, or name the test row that already covers it, before you
+delete the handler. hearsay-tools/cezarion#1534 is the worked example: it merged the twin
+turn-end blocks, `applyTurnEnd`, `parkAtTurnEnd`, `refuseCompletion` and
+`takeCompletionRefusal` into `settleTurn`, and two review rounds each found a lost
+guarantee. `refuseCompletion` left a mid-turn refusal to the live turn end; the new `gate`
+entry settled it at once, so it skipped queued input and parked before the turn ended.
+`applyTurnEnd` opened the monitoring timer for a turn that also carried an ask line; the
+new method opened it only after the input step, which an ask skips.
 
 **A fail-open helper needs a populated-input guarantee, or it lies.**
 `expandRegistrySlashSkill` returning its input unchanged on no-match is right on its own —
