@@ -139,7 +139,6 @@ let resumeAfterAsk = false;
 
 /** Same as mock-pi-rpc.mjs `watchdogStall`: a turn that never progresses (no-progress rows). */
 function watchdogStall(message) {
-  watchdogWritePid('watchdog.pid', String(process.pid));
   if (message.includes('input-closed')) {
     closeSync(0);
     watchdogWritePid('input-closed.pid', String(process.pid));
@@ -161,6 +160,8 @@ function watchdogStall(message) {
     spawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
     spawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
   }
+  // Publish readiness after mode setup: another process may signal us as soon as it sees it.
+  watchdogWritePid('watchdog.pid', String(process.pid));
 }
 
 /** #401: hold late wire frames until the test has observed the park (as the codex mock). */
