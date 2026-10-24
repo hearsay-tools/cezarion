@@ -10,9 +10,10 @@ import { Toaster, resetToasts } from '@/components/ui/toaster'
 import { AppRoutes } from '@/routes'
 
 /**
- * `/skills` (R6 Step 1.4): the catalog + detail against fixture payloads, the #377
- * ordering/bold rendering, the #384 refresh contract (selection and scroll survive), and the
- * bookmarklet panel's protected link generation. The pure rules themselves are pinned in
+ * `/skills` (R6 Step 1.4, grouped table since hearsay-tools/cezarion#1607): the table and its
+ * inline details against fixture payloads, the #377 ordering/bold rendering, the #384 refresh
+ * contract (the open skill and the scroll survive), the group controls, and the bookmarklet
+ * panel's protected link generation. The pure rules themselves are pinned in
  * lib/skills.test.ts and lib/bookmarklet.test.ts — this file asserts the SURFACE honors them.
  */
 
@@ -56,6 +57,7 @@ function serve({
   refreshedImportable,
   importableError = false,
   holdSkills = false,
+  holdImportable = false,
   uiState = {},
   workspaceUiState = {},
   failUiStateWrites = false,
@@ -67,6 +69,8 @@ function serve({
   refreshedImportable?: Skill[]
   importableError?: boolean
   holdSkills?: boolean
+  /** /skills/importable never answers: the team list stays unknown. */
+  holdImportable?: boolean
   uiState?: Record<string, unknown>
   workspaceUiState?: Record<string, unknown>
   /** The project ui-state PUT answers 500 without saving. */
@@ -97,6 +101,7 @@ function serve({
       }
       // Both the fast read and the ?wait=1 convergence read hit this endpoint.
       if (url.startsWith('/api/v1/skills/importable')) {
+        if (holdImportable) return new Promise<never>(() => {})
         return importableError
           ? // 409 is what a project whose run store cannot open answers; a 4xx is not retried.
             new Response(JSON.stringify({ error: 'store busy' }), { status: 409, headers: { 'content-type': 'application/json' } })
@@ -150,6 +155,17 @@ const rowNames = () =>
   [...document.querySelectorAll('[data-slot="skill-row"]')].map((el) => el.getAttribute('data-skill'))
 
 const detail = () => document.querySelector('[data-slot="skills-detail"] [data-slot="skill-detail"]')
+const row = (name: string, repo?: string) =>
+  document.querySelector<HTMLAnchorElement>(`[data-slot="skill-row"][data-skill="${name}"]${repo ? `[data-repo="${repo}"]` : ''}`)
+const groupRow = (label: string) =>
+  document.querySelector<HTMLTableRowElement>(`[data-slot="skill-group-row"][data-group="${label}"]`)
+const groupToggle = (label: string) =>
+  groupRow(label)?.querySelector<HTMLButtonElement>('[data-slot="skill-group-toggle"]') ?? null
+const groupSwitch = (label: string) =>
+  groupRow(label)?.querySelector<HTMLButtonElement>('[data-slot="skill-group-switch"]') ?? null
+const groupCount = (label: string) => groupRow(label)?.querySelector('[data-slot="skill-group-count"]')?.textContent
+const groupLabels = () =>
+  [...document.querySelectorAll('[data-slot="skill-group-row"]')].map((el) => el.getAttribute('data-group'))
 
 afterEach(() => {
   act(() => resetToasts())
@@ -157,52 +173,77 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe('the catalog list', () => {
-  it('renders project-first with bold project rows and source tags (#377)', async () => {
+describe('the grouped table', () => {
+  it('groups project skills before global ones, with bold project rows (#377)', async () => {
     serve()
     renderAt('/skills')
 
     await waitFor(() => expect(rowNames()).toEqual(['om-fix', 'om-review', 'zebra-global']))
-    const rows = [...document.querySelectorAll('[data-slot="skill-row"]')]
-    expect(rows[0]?.getAttribute('data-project')).toBe('true')
-    expect(rows[1]?.getAttribute('data-project')).toBe('true')
-    expect(rows[2]?.hasAttribute('data-project')).toBe(false)
-    // The tag says where each skill comes from.
-    expect(rows[0]?.querySelector('[data-slot="skill-source"]')?.textContent).toBe('ai')
-    expect(rows[2]?.querySelector('[data-slot="skill-source"]')?.textContent).toBe('global')
+    expect(groupLabels()).toEqual(['This project', 'Global'])
+    expect(row('om-fix')?.getAttribute('data-project')).toBe('true')
+    expect(row('om-review')?.getAttribute('data-project')).toBe('true')
+    expect(row('zebra-global')?.hasAttribute('data-project')).toBe(false)
+    // Local and global groups are always enabled: a locked, checked group control.
+    expect(groupSwitch('This project')?.getAttribute('aria-checked')).toBe('true')
+    expect(groupSwitch('This project')?.disabled).toBe(true)
+    expect(groupSwitch('This project')?.getAttribute('aria-label')).toBe('This project skills are always enabled')
+    expect(groupCount('This project')).toBe('2 / 2')
   })
 
-  it('the first skill is the default selection: detail shows markdown body, path, used-by', async () => {
+  it('opens no skill by default, and the Used by column names the workflow', async () => {
     serve()
     renderAt('/skills')
-
-    await waitFor(() => expect(detail()).not.toBeNull())
-    const pane = detail()!
-    expect(pane.querySelector('h2')?.textContent).toBe('om-fix')
-    expect(pane.querySelector('[data-slot="skill-path"]')?.textContent).toContain('.ai/skills/om-fix.md')
-    // `# om-fix` became a real heading — the body renders as markdown, not a <pre> dump.
-    await waitFor(() =>
-      expect(pane.querySelector('[data-slot="skill-body"] h1')?.textContent).toBe('om-fix'),
-    )
-    expect(pane.querySelector('[data-slot="skill-used-by"]')?.textContent).toContain('fix-and-verify › Fix')
+    await waitFor(() => expect(rowNames()).toHaveLength(3))
+    expect(detail()).toBeNull()
+    const cell = row('om-fix')!.closest('tr')!.querySelector('[data-slot="skill-used-by-cell"]')
+    await waitFor(() => expect(cell?.textContent).toBe('fix-and-verify'))
   })
 
-  it('clicking a row selects it via the URL and swaps the detail', async () => {
+  it('a click opens the full details directly below the row, and a second click folds them', async () => {
     serve()
     renderAt('/skills')
     await waitFor(() => expect(rowNames()).toHaveLength(3))
 
-    fireEvent.click(document.querySelector('[data-slot="skill-row"][data-skill="om-review"]')!)
+    fireEvent.click(row('om-fix')!)
+    await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('om-fix'))
+    const next = row('om-fix')!.closest('tr')!.nextElementSibling
+    expect(next?.getAttribute('data-slot')).toBe('skill-detail-row')
+    const pane = detail()!
+    expect(pane.querySelector('[data-slot="skill-path"]')?.textContent).toContain('.ai/skills/om-fix.md')
+    expect(pane.querySelector('[data-slot="skill-description"]')?.textContent).toBe('Fix an issue end to end')
+    await waitFor(() => expect(pane.querySelector('[data-slot="skill-body"] h1')?.textContent).toBe('om-fix'))
+    expect(pane.querySelector('[data-slot="skill-used-by"]')?.textContent).toContain('fix-and-verify › Fix')
+    expect(row('om-fix')?.getAttribute('aria-expanded')).toBe('true')
+    expect(row('om-fix')?.getAttribute('aria-current')).toBe('page')
+
+    fireEvent.click(row('om-fix')!)
+    await waitFor(() => expect(detail()).toBeNull())
+    expect(row('om-fix')?.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('opening another skill swaps the details', async () => {
+    serve()
+    renderAt('/skills?skill=om-fix')
+    await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('om-fix'))
+    fireEvent.click(row('om-review')!)
     await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('om-review'))
-    expect(
-      document
-        .querySelector('[data-slot="skill-row"][data-skill="om-review"]')
-        ?.getAttribute('aria-current'),
-    ).toBe('page')
-    // An unreferenced skill says so instead of showing an empty section.
-    expect(detail()?.querySelector('[data-slot="skill-used-by"]')?.textContent).toContain(
-      'Not referenced by a workflow yet',
-    )
+    expect(document.querySelectorAll('[data-slot="skill-detail-row"]')).toHaveLength(1)
+    expect(detail()?.querySelector('[data-slot="skill-used-by"]')?.textContent).toContain('Not referenced by a workflow yet')
+  })
+
+  it('folding a group hides its skills without changing them', async () => {
+    serve()
+    renderAt('/skills')
+    await waitFor(() => expect(rowNames()).toHaveLength(3))
+    expect(groupToggle('Global')?.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.click(groupToggle('Global')!)
+    expect(rowNames()).toEqual(['om-fix', 'om-review'])
+    expect(groupToggle('Global')?.getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(document.querySelector('[data-slot="skills-collapse-all"]')!)
+    expect(rowNames()).toEqual([])
+    fireEvent.click(document.querySelector('[data-slot="skills-expand-all"]')!)
+    expect(rowNames()).toEqual(['om-fix', 'om-review', 'zebra-global'])
+    expect(requests.some((r) => r.method === 'PUT')).toBe(false)
   })
 
   it('the filter narrows the rows but never hides the pinned bookmarklet entry', async () => {
@@ -214,10 +255,13 @@ describe('the catalog list', () => {
       target: { value: 'review' },
     })
     expect(rowNames()).toEqual(['om-review'])
+    expect(groupLabels()).toEqual(['This project'])
     expect(document.querySelector('[data-slot="bookmarklets-row"]')).not.toBeNull()
+    fireEvent.change(document.querySelector('[data-slot="skills-filter"]')!, { target: { value: 'zzz-none' } })
+    expect(document.querySelector('[data-slot="skill-rows"]')?.textContent).toContain('(no skills match)')
   })
 
-  it('an empty catalog explains where skills come from, and the panel is the fallback surface', async () => {
+  it('an empty catalog explains where skills come from', async () => {
     serve({ skills: [] })
     renderAt('/skills')
 
@@ -228,14 +272,23 @@ describe('the catalog list', () => {
       expect(text).toContain('.ai/cezar/skills/')
       expect(text).toContain('.agents/skills/')
     })
-    // No skills → the bookmarklet panel is the default detail (legacy fallback rule).
+  })
+
+  it('Run from GitHub opens the bookmarklet panel above the table, and a second click closes it', async () => {
+    serve()
+    renderAt('/skills')
+    await waitFor(() => expect(rowNames()).toHaveLength(3))
+    fireEvent.click(document.querySelector('[data-slot="bookmarklets-row"]')!)
     await waitFor(() => expect(document.querySelector('[data-slot="bookmarklet-panel"]')).not.toBeNull())
+    expect(rowNames()).toHaveLength(3)
+    fireEvent.click(document.querySelector('[data-slot="bookmarklets-row"]')!)
+    await waitFor(() => expect(document.querySelector('[data-slot="bookmarklet-panel"]')).toBeNull())
   })
 })
 
-describe('refresh (#384: selection and scroll survive)', () => {
-  it('POSTs /api/v1/skills/refresh, keeps the selected skill, the row container and its scroll', async () => {
-    serve({ refreshed: [...SKILLS, skill({ name: 'team-new', source: 'team' })] })
+describe('refresh (#384: the open skill and the scroll survive)', () => {
+  it('POSTs /api/v1/skills/refresh, keeps the open skill, the row container and its scroll', async () => {
+    serve({ refreshed: [...SKILLS, skill({ name: 'local-new', source: 'ai' })] })
     renderAt('/skills?skill=om-review')
     await waitFor(() => expect(rowNames()).toHaveLength(3))
 
@@ -246,64 +299,75 @@ describe('refresh (#384: selection and scroll survive)', () => {
     await waitFor(() =>
       expect(requests.some((r) => r.method === 'POST' && r.url === '/api/v1/skills/refresh')).toBe(true),
     )
-    // The refreshed catalog rendered (the new team skill is in the list)…
-    await waitFor(() => expect(rowNames()).toEqual(['om-fix', 'om-review', 'team-new', 'zebra-global']))
+    await waitFor(() => expect(rowNames()).toEqual(['local-new', 'om-fix', 'om-review', 'zebra-global']))
+    await waitFor(() => expect(document.body.textContent).toContain('Team skills refreshed.'))
 
-    // …but the pane was updated IN PLACE: same scroll container, same scroll offset, same
-    // selection — the legacy innerHTML rebuild lost all three.
+    // The table was updated IN PLACE: same scroll container, same scroll offset, same open
+    // skill — the legacy innerHTML rebuild lost all three.
     const rowsAfter = document.querySelector('[data-slot="skill-rows"]')!
     expect(rowsAfter).toBe(rowsBefore)
     expect(rowsAfter.scrollTop).toBe(120)
-    expect(
-      document
-        .querySelector('[data-slot="skill-row"][data-skill="om-review"]')
-        ?.getAttribute('aria-current'),
-    ).toBe('page')
+    expect(row('om-review')?.getAttribute('aria-current')).toBe('page')
     expect(detail()?.querySelector('h2')?.textContent).toBe('om-review')
   })
 
-  it('a refresh that drops the selected skill falls back to the first skill, never crashes', async () => {
+  it('stays visible and works after filtering, folding groups and opening a skill', async () => {
+    serve()
+    renderAt('/skills')
+    await waitFor(() => expect(rowNames()).toHaveLength(3))
+    fireEvent.change(document.querySelector('[data-slot="skills-filter"]')!, { target: { value: 'om' } })
+    fireEvent.click(groupToggle('This project')!)
+    fireEvent.click(groupToggle('This project')!)
+    fireEvent.click(row('om-fix')!)
+    await waitFor(() => expect(detail()).not.toBeNull())
+    const button = document.querySelector<HTMLButtonElement>('[data-slot="skills-refresh"]')!
+    expect(button.textContent).toBe('Refresh')
+    fireEvent.click(button)
+    await waitFor(() => expect(document.body.textContent).toContain('Team skills refreshed.'))
+    expect(button.disabled).toBe(false)
+    expect(detail()?.querySelector('h2')?.textContent).toBe('om-fix')
+  })
+
+  it('a refresh that drops the open skill folds its details, never crashes', async () => {
     serve({ refreshed: SKILLS.filter((s) => s.name !== 'om-review') })
     renderAt('/skills?skill=om-review')
     await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('om-review'))
 
     fireEvent.click(document.querySelector('[data-slot="skills-refresh"]')!)
-    await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('om-fix'))
+    await waitFor(() => expect(rowNames()).toEqual(['om-fix', 'zebra-global']))
+    expect(detail()).toBeNull()
   })
 })
 
-const team = (name: string, repo = 'acme/skills', description?: string): Skill => ({
+const team = (name: string, repo = 'acme/skills', description?: string, path = `${name}/SKILL.md`): Skill => ({
   name,
   source: 'team',
   body: `# ${name}\n\nBody of ${name}.`,
-  path: `${repo}@main:${name}/SKILL.md`,
-  team: { repo, ref: 'main', path: `${name}/SKILL.md`, dir: true },
+  path: `${repo}@main:${path}`,
+  team: { repo, ref: 'main', path, dir: true },
   ...(description ? { description } : {}),
 })
 
+const switchFor = (name: string, repo?: string) =>
+  document.querySelector<HTMLButtonElement>(
+    `[data-slot="skills-list"] [data-slot="skill-table-row"] [data-slot="skill-switch"][data-skill="${name}"]${repo ? `[data-repo="${repo}"]` : ''}`,
+  )
+const offListPuts = () =>
+  requests.filter(
+    (r) => r.method === 'PUT' && r.url === '/api/v1/ui-state' && (r.body as { disabledTeamSkills?: unknown })?.disabledTeamSkills !== undefined,
+  )
+
 /**
  * hearsay-tools/cezarion#1494: every team skill from a configured source has a per-project
- * switch, keyed by source repo AND name. One catalog lists every skill in two groups, previews a
- * switched-off team skill, and keeps local, global and built-in skills locked on. The off-list
- * lives in the project ui-state.
+ * switch, keyed by source repo AND name. The table lists switched-off skills next to enabled
+ * ones, previews them, and keeps local, global and built-in skills locked on. The off-list lives
+ * in the project ui-state.
  */
 describe('team skill switches (#1494)', () => {
   const IMPORTABLE = [team('pr-create', 'acme/skills', 'Open a PR from the current branch'), team('code-review', 'acme/skills', 'Review the diff for bugs')]
   // pr-create is on, so the server's catalog carries it; code-review is switched off.
   const CATALOG = [...SKILLS, IMPORTABLE[0]!]
   const offList = { disabledTeamSkills: [{ repo: 'acme/skills', name: 'code-review' }] }
-
-  const group = (slot: string) => document.querySelector(`[data-slot="${slot}"]`)
-  const groupRows = (slot: string) =>
-    [...(group(slot)?.querySelectorAll('[data-slot="skill-row"]') ?? [])].map((el) => el.getAttribute('data-skill'))
-  const switchFor = (name: string, repo?: string) =>
-    document.querySelector<HTMLButtonElement>(
-      `[data-slot="skills-list"] [data-slot="skill-switch"][data-skill="${name}"]${repo ? `[data-repo="${repo}"]` : ''}`,
-    )
-  const offListPuts = () =>
-    requests.filter(
-      (r) => r.method === 'PUT' && r.url === '/api/v1/ui-state' && (r.body as { disabledTeamSkills?: unknown })?.disabledTeamSkills !== undefined,
-    )
 
   it('a team skill from an explicit source has a live switch labelled Enable <name>', async () => {
     serve({ skills: [...SKILLS, team('x')], importable: [team('x')] })
@@ -314,24 +378,26 @@ describe('team skill switches (#1494)', () => {
     expect(switchFor('x')?.getAttribute('data-locked')).toBeNull()
   })
 
-  it('switching a team skill off moves it to Available and saves the off-list', async () => {
+  it('switching a team skill off keeps its row in place and saves the off-list', async () => {
     serve({ skills: [...SKILLS, team('x')], importable: [team('x')] })
     renderAt('/skills')
     await waitFor(() => expect(switchFor('x')?.disabled).toBe(false))
     fireEvent.click(switchFor('x')!)
-    await waitFor(() => expect(groupRows('skills-group-available')).toEqual(['x']))
-    expect(groupRows('skills-group-enabled')).not.toContain('x')
+    await waitFor(() => expect(switchFor('x')?.getAttribute('aria-checked')).toBe('false'))
+    expect(row('x')?.hasAttribute('data-enabled')).toBe(false)
+    expect(groupCount('acme/skills')).toBe('0 / 1')
     await waitFor(() => expect(offListPuts().at(-1)?.body).toEqual({ disabledTeamSkills: [{ repo: 'acme/skills', name: 'x' }] }))
     expect(requests.some((r) => r.method === 'PUT' && r.url === '/api/v1/workspace/ui-state')).toBe(false)
   })
 
-  it('lists Enabled and Available groups, each with its count', async () => {
+  it('lists enabled and disabled team skills together under their repository', async () => {
     serve({ skills: CATALOG, importable: IMPORTABLE, uiState: offList })
     renderAt('/skills')
-    await waitFor(() => expect(groupRows('skills-group-available')).toEqual(['code-review']))
-    expect(groupRows('skills-group-enabled')).toEqual(['om-fix', 'om-review', 'pr-create', 'zebra-global'])
-    expect(group('skills-group-enabled')?.querySelector('h2')?.textContent).toBe('Enabled · 4')
-    expect(group('skills-group-available')?.querySelector('h2')?.textContent).toBe('Available · 1')
+    await waitFor(() => expect(row('code-review')).not.toBeNull())
+    expect(groupLabels()).toEqual(['This project', 'acme/skills', 'Global'])
+    expect(rowNames()).toEqual(['om-fix', 'om-review', 'code-review', 'pr-create', 'zebra-global'])
+    expect(groupCount('acme/skills')).toBe('1 / 2')
+    expect(groupSwitch('acme/skills')?.getAttribute('aria-checked')).toBe('mixed')
   })
 
   it('previews a switched-off team skill with a notice and its switch', async () => {
@@ -369,13 +435,14 @@ describe('team skill switches (#1494)', () => {
     await waitFor(() => expect(switchFor('pr-create')?.disabled).toBe(false))
   })
 
-  it('switching an Available skill on removes it from the off-list and moves it to Enabled', async () => {
+  it('switching a disabled skill on removes it from the off-list', async () => {
     serve({ skills: CATALOG, importable: IMPORTABLE, uiState: offList })
     renderAt('/skills')
     await waitFor(() => expect(switchFor('code-review')?.disabled).toBe(false))
     fireEvent.click(switchFor('code-review')!)
-    await waitFor(() => expect(groupRows('skills-group-enabled')).toContain('code-review'))
-    expect(group('skills-group-available')).toBeNull()
+    await waitFor(() => expect(switchFor('code-review')?.getAttribute('aria-checked')).toBe('true'))
+    expect(groupCount('acme/skills')).toBe('2 / 2')
+    expect(groupSwitch('acme/skills')?.getAttribute('aria-checked')).toBe('true')
     await waitFor(() => expect(offListPuts().at(-1)?.body).toEqual({ disabledTeamSkills: [] }))
   })
 
@@ -385,14 +452,14 @@ describe('team skill switches (#1494)', () => {
     serve({ skills: [...SKILLS, a], importable: [a, b] })
     renderAt('/skills')
     await waitFor(() => expect(switchFor('x', 'beta/skills')).not.toBeNull())
-    const rows = [...document.querySelectorAll('[data-slot="skills-group-enabled"] [data-slot="skill-row"][data-skill="x"]')]
-    expect(rows.map((row) => row.getAttribute('data-repo'))).toEqual(['acme/skills', 'beta/skills'])
+    const rows = [...document.querySelectorAll('[data-slot="skill-row"][data-skill="x"]')]
+    expect(rows.map((el) => el.getAttribute('data-repo'))).toEqual(['acme/skills', 'beta/skills'])
     expect(rows[0]!.querySelector('[data-slot="skill-hidden-by"]')).toBeNull()
     expect(rows[1]!.querySelector('[data-slot="skill-hidden-by"]')?.textContent).toBe('hidden by acme/skills')
     // Each copy has its own switch, named by its source.
     expect(switchFor('x', 'acme/skills')?.getAttribute('aria-label')).toBe('Enable x from acme/skills')
     expect(switchFor('x', 'beta/skills')?.getAttribute('aria-label')).toBe('Enable x from beta/skills')
-    // Each row selects its own copy.
+    // Each row opens its own copy.
     fireEvent.click(rows[1]!)
     await waitFor(() => expect(detail()?.querySelector('[data-slot="skill-path"]')?.textContent).toContain('from beta/skills'))
     await waitFor(() => expect(switchFor('x', 'acme/skills')?.disabled).toBe(false))
@@ -408,9 +475,9 @@ describe('team skill switches (#1494)', () => {
     renderAt('/skills')
     await waitFor(() => expect(switchFor('x')?.disabled).toBe(false))
     expect(document.querySelectorAll('[data-slot="skill-row"][data-skill="x"]')).toHaveLength(1)
-    expect(document.querySelectorAll('[data-slot="skills-list"] [data-slot="skill-switch"][data-skill="x"]')).toHaveLength(1)
+    expect(document.querySelectorAll('[data-slot="skill-table-row"] [data-slot="skill-switch"][data-skill="x"]')).toHaveLength(1)
     expect(switchFor('x')?.getAttribute('aria-label')).toBe('Enable x')
-    expect(document.querySelector('[data-slot="skill-row"][data-skill="x"]')?.getAttribute('href')).toBe('/p/boot/skills?skill=x')
+    expect(row('x')?.getAttribute('href')).toBe('/p/boot/skills?skill=x')
   })
 
   it('a long hiding source wraps instead of overflowing the row', async () => {
@@ -420,7 +487,7 @@ describe('team skill switches (#1494)', () => {
     serve({ skills: [...SKILLS, a], importable: [a, b] })
     renderAt('/skills')
     await waitFor(() => expect(switchFor('x', 'beta/skills')).not.toBeNull())
-    const note = document.querySelector('[data-slot="skill-row"][data-repo="beta/skills"] [data-slot="skill-hidden-by"]')!
+    const note = row('x', 'beta/skills')!.querySelector('[data-slot="skill-hidden-by"]')!
     expect(note.textContent).toBe(`hidden by ${long}`)
     expect(note.className).toContain('[overflow-wrap:anywhere]')
     expect(note.className).toContain('min-w-0')
@@ -430,7 +497,7 @@ describe('team skill switches (#1494)', () => {
     serve({ skills: CATALOG, importable: [...IMPORTABLE, team('om-fix')] })
     renderAt('/skills')
     await waitFor(() => expect(switchFor('pr-create')?.disabled).toBe(false))
-    expect([...document.querySelectorAll('[data-slot="skill-row"][data-skill="om-fix"]')].map((row) => row.getAttribute('data-repo'))).toEqual([null])
+    expect([...document.querySelectorAll('[data-slot="skill-row"][data-skill="om-fix"]')].map((el) => el.getAttribute('data-repo'))).toEqual([null])
   })
 
   it('a rejected save toasts and the switch reverts', async () => {
@@ -440,28 +507,27 @@ describe('team skill switches (#1494)', () => {
     fireEvent.click(switchFor('x')!)
     await waitFor(() => expect(document.body.textContent).toContain('disk full'))
     await waitFor(() => expect(switchFor('x')?.getAttribute('aria-checked')).toBe('true'))
-    expect(group('skills-group-available')).toBeNull()
   })
 
-  it('the filter searches both groups', async () => {
+  it('the filter searches enabled and disabled skills alike', async () => {
     serve({ skills: CATALOG, importable: IMPORTABLE, uiState: offList })
     renderAt('/skills')
-    await waitFor(() => expect(groupRows('skills-group-available')).toEqual(['code-review']))
+    await waitFor(() => expect(row('code-review')).not.toBeNull())
     fireEvent.change(document.querySelector('[data-slot="skills-filter"]')!, { target: { value: 'review' } })
-    expect(groupRows('skills-group-enabled')).toEqual(['om-review'])
-    expect(groupRows('skills-group-available')).toEqual(['code-review'])
+    expect(rowNames()).toEqual(['om-review', 'code-review'])
   })
 
-  it('?skill=__import selects the first Available skill', async () => {
+  it('?skill=__import opens the first switched-off skill', async () => {
     serve({ skills: CATALOG, importable: IMPORTABLE, uiState: offList })
     renderAt('/skills?skill=__import')
     await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('code-review'))
   })
 
-  it('?skill=__import selects the first skill when nothing is Available', async () => {
+  it('?skill=__import opens nothing when every skill is enabled', async () => {
     serve({ skills: CATALOG, importable: [IMPORTABLE[0]!] })
     renderAt('/skills?skill=__import')
-    await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('om-fix'))
+    await waitFor(() => expect(switchFor('pr-create')?.disabled).toBe(false))
+    expect(detail()).toBeNull()
   })
 
   it('Refresh re-reads the team list, so a newly offered team skill gets a live switch', async () => {
@@ -481,16 +547,15 @@ describe('team skill switches (#1494)', () => {
   it('has no separate "Manage skills" entry', async () => {
     serve({ skills: CATALOG, importable: IMPORTABLE, uiState: offList })
     renderAt('/skills')
-    await waitFor(() => expect(groupRows('skills-group-available')).toEqual(['code-review']))
+    await waitFor(() => expect(row('code-review')).not.toBeNull())
     expect(document.querySelector('[data-slot="import-skills-row"]')).toBeNull()
     expect(document.body.textContent).not.toContain('Manage skills')
   })
 
-  it('without team skills there is no Available group, and the page says how to add a source', async () => {
+  it('without team skills the page says how to add a source', async () => {
     serve({ importable: [] })
     renderAt('/skills')
-    await waitFor(() => expect(groupRows('skills-group-enabled')).toHaveLength(3))
-    expect(group('skills-group-available')).toBeNull()
+    await waitFor(() => expect(rowNames()).toHaveLength(3))
     const hint = await waitFor(() => {
       const found = document.querySelector('[data-slot="skills-team-empty"]')
       expect(found).not.toBeNull()
@@ -510,14 +575,26 @@ describe('team skill switches (#1494)', () => {
     expect(requests.some((r) => r.url.includes('skills-update'))).toBe(false)
   })
 
-  it('loading keeps both cards with a status row', async () => {
+  it('loading shows a status row', async () => {
     serve({ holdSkills: true, importable: IMPORTABLE })
     renderAt('/skills')
     await waitFor(() => expect(document.querySelector('[data-slot="skills-list"] [role="status"]')).not.toBeNull())
-    expect(document.querySelector('[data-slot="skills-detail"] [role="status"]')).not.toBeNull()
+    expect(rowNames()).toEqual([])
   })
 
-  it('an importable error shows Retry, hides Available, and locks the team switches', async () => {
+  it('while the team list loads, a repository control shows no count and no off state', async () => {
+    serve({ skills: CATALOG, holdImportable: true })
+    renderAt('/skills')
+    await waitFor(() => expect(groupRow('acme/skills')).not.toBeNull())
+    expect(groupCount('acme/skills')).toBe('—')
+    expect(groupSwitch('acme/skills')?.hasAttribute('aria-checked')).toBe(false)
+    expect(groupSwitch('acme/skills')?.getAttribute('aria-busy')).toBe('true')
+    expect(groupSwitch('acme/skills')?.disabled).toBe(true)
+    // The skill switch reads on, the catalog's own answer.
+    expect(switchFor('pr-create')?.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('an importable error shows Retry and locks the team switches', async () => {
     serve({ skills: CATALOG, importableError: true, uiState: offList })
     renderAt('/skills')
     await waitFor(() => expect(document.querySelector('[data-slot="skills-importable-error"]')).not.toBeNull())
@@ -528,8 +605,9 @@ describe('team skill switches (#1494)', () => {
     await waitFor(() =>
       expect(requests.filter((r) => r.url.startsWith('/api/v1/skills/importable')).length).toBeGreaterThan(before),
     )
-    expect(group('skills-group-available')).toBeNull()
+    expect(row('code-review')).toBeNull()
     expect(switchFor('pr-create')?.disabled).toBe(true)
+    expect(groupSwitch('acme/skills')?.disabled).toBe(true)
     expect(offListPuts()).toEqual([])
   })
 
@@ -537,12 +615,153 @@ describe('team skill switches (#1494)', () => {
     serve({ skills: CATALOG, importable: IMPORTABLE, uiState: offList })
     renderAt('/skills')
     await waitFor(() => expect(switchFor('code-review')).not.toBeNull())
-    const row = document.querySelector('[data-slot="skill-row"][data-skill="code-review"]')!
+    const link = row('code-review')!
     const toggle = switchFor('code-review')!
-    expect(row.tagName).toBe('A')
-    expect(row.contains(toggle)).toBe(false)
+    expect(link.tagName).toBe('A')
+    expect(link.contains(toggle)).toBe(false)
     expect(toggle.tagName).toBe('BUTTON')
     expect(toggle.tabIndex).toBe(0)
+  })
+})
+
+/** hearsay-tools/cezarion#1607: repository and plugin or directory group controls. */
+describe('group controls (#1607)', () => {
+  const PLUGIN = [
+    team('dev-flow', 'acme/skills', 'Work a ticket', 'plugins/sdlc/skills/dev-flow/SKILL.md'),
+    team('plan-issue', 'acme/skills', 'Plan a ticket', 'plugins/sdlc/skills/plan-issue/SKILL.md'),
+    team('lint', 'acme/skills', 'Lint the code', 'frontend/skills/lint/SKILL.md'),
+    team('root-skill', 'acme/skills'),
+    team('other', 'beta/skills'),
+  ]
+  const off = (...names: string[]) => ({ disabledTeamSkills: names.map((name) => ({ repo: 'acme/skills', name })) })
+  const catalogWithout = (...names: string[]) => [...SKILLS, ...PLUGIN.filter((s) => !names.includes(s.name))]
+  const lastOffList = () =>
+    (offListPuts().at(-1)?.body as { disabledTeamSkills: Array<{ repo: string; name: string }> }).disabledTeamSkills
+      .map((ref) => `${ref.repo}:${ref.name}`)
+      .sort()
+
+  it('nests plugin and directory groups under their repository, folded by default', async () => {
+    serve({ skills: catalogWithout(), importable: PLUGIN })
+    renderAt('/skills')
+    await waitFor(() => expect(groupRow('sdlc')).not.toBeNull())
+    expect(groupLabels()).toEqual(['This project', 'acme/skills', 'frontend', 'sdlc', 'beta/skills', 'Global'])
+    expect(groupRow('sdlc')?.getAttribute('data-kind')).toBe('plugin')
+    expect(groupRow('frontend')?.getAttribute('data-kind')).toBe('directory')
+    expect(groupToggle('acme/skills')?.getAttribute('aria-expanded')).toBe('true')
+    expect(groupToggle('sdlc')?.getAttribute('aria-expanded')).toBe('false')
+    expect(row('dev-flow')).toBeNull()
+    expect(row('root-skill')).not.toBeNull()
+    fireEvent.click(groupToggle('sdlc')!)
+    expect(row('dev-flow')).not.toBeNull()
+    expect(row('lint')).toBeNull()
+  })
+
+  it('a mixed group enables every child, and an enabled one disables them, without touching other groups', async () => {
+    serve({ skills: catalogWithout('plan-issue'), importable: PLUGIN, uiState: off('plan-issue') })
+    renderAt('/skills')
+    await waitFor(() => expect(groupSwitch('sdlc')?.disabled).toBe(false))
+    expect(groupCount('sdlc')).toBe('1 / 2')
+    expect(groupSwitch('sdlc')?.getAttribute('aria-checked')).toBe('mixed')
+    expect(groupSwitch('sdlc')?.getAttribute('aria-label')).toBe('Enable all skills in sdlc')
+    expect(groupCount('acme/skills')).toBe('3 / 4')
+
+    fireEvent.click(groupSwitch('sdlc')!)
+    await waitFor(() => expect(groupSwitch('sdlc')?.getAttribute('aria-checked')).toBe('true'))
+    expect(groupCount('acme/skills')).toBe('4 / 4')
+    await waitFor(() => expect(lastOffList()).toEqual([]))
+
+    fireEvent.click(groupSwitch('sdlc')!)
+    await waitFor(() => expect(groupSwitch('sdlc')?.getAttribute('aria-checked')).toBe('false'))
+    expect(groupCount('sdlc')).toBe('0 / 2')
+    expect(groupSwitch('frontend')?.getAttribute('aria-checked')).toBe('true')
+    expect(groupSwitch('beta/skills')?.getAttribute('aria-checked')).toBe('true')
+    await waitFor(() => expect(lastOffList()).toEqual(['acme/skills:dev-flow', 'acme/skills:plan-issue']))
+    expect(offListPuts()).toHaveLength(2)
+  })
+
+  it('a repository control switches every child, filtered ones included', async () => {
+    serve({ skills: catalogWithout(), importable: PLUGIN })
+    renderAt('/skills')
+    await waitFor(() => expect(groupSwitch('acme/skills')?.disabled).toBe(false))
+    fireEvent.change(document.querySelector('[data-slot="skills-filter"]')!, { target: { value: 'lint' } })
+    expect(rowNames()).toEqual(['lint'])
+    fireEvent.click(groupSwitch('acme/skills')!)
+    await waitFor(() =>
+      expect(lastOffList()).toEqual([
+        'acme/skills:dev-flow',
+        'acme/skills:lint',
+        'acme/skills:plan-issue',
+        'acme/skills:root-skill',
+      ]),
+    )
+    expect(groupSwitch('beta/skills')).toBeNull() // filtered out, and untouched
+    fireEvent.change(document.querySelector('[data-slot="skills-filter"]')!, { target: { value: '' } })
+    expect(switchFor('other', 'beta/skills')?.getAttribute('aria-checked')).toBe('true')
+  })
+
+  it('a per-skill switch updates its parents counts and mixed states', async () => {
+    serve({ skills: catalogWithout(), importable: PLUGIN })
+    renderAt('/skills?skill=dev-flow')
+    await waitFor(() => expect(switchFor('dev-flow')?.disabled).toBe(false))
+    fireEvent.click(switchFor('dev-flow')!)
+    await waitFor(() => expect(groupSwitch('sdlc')?.getAttribute('aria-checked')).toBe('mixed'))
+    expect(groupCount('sdlc')).toBe('1 / 2')
+    expect(groupSwitch('acme/skills')?.getAttribute('aria-checked')).toBe('mixed')
+    expect(groupCount('acme/skills')).toBe('3 / 4')
+  })
+
+  it('a rejected group save toasts and restores the saved selection', async () => {
+    serve({ skills: catalogWithout(), importable: PLUGIN, failUiStateWrites: true })
+    renderAt('/skills')
+    await waitFor(() => expect(groupSwitch('sdlc')?.disabled).toBe(false))
+    fireEvent.click(groupSwitch('sdlc')!)
+    await waitFor(() => expect(document.body.textContent).toContain('disk full'))
+    await waitFor(() => expect(groupSwitch('sdlc')?.getAttribute('aria-checked')).toBe('true'))
+    expect(groupCount('sdlc')).toBe('2 / 2')
+  })
+
+  it('a skill link opens the skill and its parent groups', async () => {
+    serve({ skills: catalogWithout(), importable: PLUGIN })
+    renderAt('/skills?skill=plan-issue')
+    await waitFor(() => expect(detail()?.querySelector('h2')?.textContent).toBe('plan-issue'))
+    expect(groupToggle('sdlc')?.getAttribute('aria-expanded')).toBe('true')
+    expect(groupToggle('frontend')?.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('a twin link with ?repo opens that copy under its own repository', async () => {
+    serve({ skills: catalogWithout(), importable: [...PLUGIN, team('lint', 'beta/skills')] })
+    renderAt('/skills?skill=lint&repo=beta%2Fskills')
+    await waitFor(() => expect(detail()?.querySelector('[data-slot="skill-path"]')?.textContent).toContain('from beta/skills'))
+    expect(groupToggle('frontend')?.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('search matches repository and group names and reveals matches inside folded groups', async () => {
+    serve({ skills: catalogWithout(), importable: PLUGIN })
+    renderAt('/skills')
+    await waitFor(() => expect(groupRow('sdlc')).not.toBeNull())
+    fireEvent.change(document.querySelector('[data-slot="skills-filter"]')!, { target: { value: 'sdlc' } })
+    expect(rowNames()).toEqual(['dev-flow', 'plan-issue'])
+    expect(groupToggle('sdlc')?.getAttribute('aria-expanded')).toBe('true')
+    fireEvent.change(document.querySelector('[data-slot="skills-filter"]')!, { target: { value: 'beta' } })
+    expect(rowNames()).toEqual(['other'])
+    fireEvent.change(document.querySelector('[data-slot="skills-filter"]')!, { target: { value: 'ticket' } })
+    expect(rowNames()).toEqual(['dev-flow', 'plan-issue'])
+  })
+
+  it('fold and activation are separate keyboard controls with names', async () => {
+    serve({ skills: catalogWithout(), importable: PLUGIN })
+    renderAt('/skills')
+    await waitFor(() => expect(groupSwitch('sdlc')?.disabled).toBe(false))
+    const fold = groupToggle('sdlc')!
+    const check = groupSwitch('sdlc')!
+    expect(fold.tagName).toBe('BUTTON')
+    expect(fold.textContent).toContain('sdlc')
+    expect(fold.contains(check)).toBe(false)
+    expect(check.getAttribute('role')).toBe('checkbox')
+    expect(check.tabIndex).toBe(0)
+    fireEvent.click(fold)
+    expect(offListPuts()).toEqual([])
+    expect(groupSwitch('sdlc')?.getAttribute('aria-checked')).toBe('true')
   })
 })
 

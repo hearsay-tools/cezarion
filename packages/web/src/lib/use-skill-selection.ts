@@ -88,6 +88,7 @@ export function useTeamSkillSwitches(projectId: string): {
   disabled: readonly TeamSkillRef[]
   isOn: (ref: TeamSkillRef) => boolean
   toggle: (ref: TeamSkillRef) => void
+  setMany: (refs: readonly TeamSkillRef[], on: boolean) => void
   pending: boolean
   /** The project's stored off-list has loaded. Before it has, a toggle would build on a guess,
    *  so the switches stay disabled. */
@@ -103,18 +104,14 @@ export function useTeamSkillSwitches(projectId: string): {
     [disabled],
   )
 
-  const toggle = React.useCallback(
-    (ref: TeamSkillRef) => {
+  // Save a new off-list, built from the LATEST cache rather than the render's snapshot: a
+  // second change before the rerender must build on the first.
+  const write = React.useCallback(
+    (change: (base: TeamSkillRef[]) => TeamSkillRef[]) => {
       const uiStateKey = [projectId, 'ui-state'] as const
       const skillsKey = [projectId, 'skills'] as const
-      // The LATEST cache, not the render's snapshot: a second toggle before the rerender must
-      // build on the first.
       const current = queryClient.getQueryData<UiState>(uiStateKey)
-      const base = disabledTeamSkills(current)
-      const entry = { repo: ref.repo, name: ref.name }
-      const next = base.some((item) => sameRef(item, entry))
-        ? base.filter((item) => !sameRef(item, entry))
-        : [...base, entry]
+      const next = change(disabledTeamSkills(current))
       queryClient.setQueryData<UiState>(uiStateKey, { ...current, disabledTeamSkills: next })
       const writer = writerFor(projectId)
       const seq = ++writer.latest
@@ -139,5 +136,29 @@ export function useTeamSkillSwitches(projectId: string): {
     [projectId, queryClient],
   )
 
-  return { disabled, isOn, toggle, pending: inFlight > 0, ready: uiState.isSuccess }
+  const toggle = React.useCallback(
+    (ref: TeamSkillRef) => {
+      const entry = { repo: ref.repo, name: ref.name }
+      write((base) =>
+        base.some((item) => sameRef(item, entry)) ? base.filter((item) => !sameRef(item, entry)) : [...base, entry],
+      )
+    },
+    [write],
+  )
+
+  /** Switch every ref on or off in one save: a group control (hearsay-tools/cezarion#1607). */
+  const setMany = React.useCallback(
+    (refs: readonly TeamSkillRef[], on: boolean) => {
+      const entries = refs.map((ref) => ({ repo: ref.repo, name: ref.name }))
+      write((base) => {
+        if (on) return base.filter((item) => !entries.some((entry) => sameRef(item, entry)))
+        const next = [...base]
+        for (const entry of entries) if (!next.some((item) => sameRef(item, entry))) next.push(entry)
+        return next
+      })
+    },
+    [write],
+  )
+
+  return { disabled, isOn, toggle, setMany, pending: inFlight > 0, ready: uiState.isSuccess }
 }

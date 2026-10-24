@@ -12,7 +12,6 @@
 [data-slot="skill-detail"] > :is(p, section) { margin-block-start: 0; }
 .sw-detail-source { display: inline-flex; height: 26px; align-items: center; padding-inline: 8px; border-radius: 5px; background: color-mix(in oklch, var(--accent-strong) 10%, transparent); color: var(--link-foreground); font-weight: 500; white-space: pre; }
 .sw-detail-source [data-slot="skill-source"] { padding: 0; background: none; color: inherit; font-size: inherit; font-weight: inherit; }
-[data-slot="skills-detail"] [data-slot="skill-description"] { display: none; }
 [data-slot="skill-used-by"] > p { margin-block-start: 16px; line-height: 1.6; }
 [data-slot="skill-body"] { margin-block-start: 0; font-size: 13px; line-height: 1.65; }
 [data-slot="skill-body"] h1 { font-size: 18px; font-weight: 600; }
