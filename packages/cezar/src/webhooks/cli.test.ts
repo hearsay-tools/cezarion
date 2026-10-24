@@ -1,3 +1,6 @@
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import type { Cockpit, HttpResult } from '../task-cli/http.ts';
 import { runWebhookCommand, type WebhookIo } from './cli.ts';
@@ -80,6 +83,13 @@ describe('cez webhook', () => {
     expect(await runWebhookCommand(['list'], {}, h.io)).toBe(2);
     expect(h.json()).toMatchObject({ code: 'no-cockpit' });
   });
+
+  // bound: one cold `tsx` start of the whole CLI entry, which loads no server.
+  it('is dispatched by the CLI entry before the cockpit flags are parsed', async () => {
+    const { stdout } = await promisify(execFile)(process.execPath, ['--import', 'tsx', fileURLToPath(new URL('../index.ts', import.meta.url)), 'webhook', '--help']);
+    expect(stdout).toContain('cez webhook');
+    expect(stdout).not.toContain('start the cockpit');
+  }, 15_000);
 
   it('prints usage for --help', async () => {
     const h = harness(() => sent(true));
