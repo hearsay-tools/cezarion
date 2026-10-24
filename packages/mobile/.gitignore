@@ -1,0 +1,8 @@
+build/
+.gradle/
+local.properties
+*.keystore
+*.jks
+xcuserdata/
+*.xcuserstate
+.DS_Store
