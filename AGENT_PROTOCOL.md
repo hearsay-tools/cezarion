@@ -1928,6 +1928,27 @@ session transcript. Codex filters both child message deltas and completions;
 Claude excludes child assistant text from v1 and its result fallback buffer;
 the v2 fallback uses the same parent-only guard.
 
+**Text that cezar adds can change the scenario** (hearsay-tools/cezarion#1643). A native
+mock picks its scenario with `includes('mock:<scenario>')` over all of the native user text
+it receives, not over the task alone. That text also holds what cezar adds to the message:
+the system instructions of an in-thread runner, the resume context, and the session-start
+`<cezar-context>` blocks ([docs/context-injection.md](docs/context-injection.md),
+hearsay-tools/cezarion#1584). The handoff block repeats the task's Goal. So a Continue
+message also carries the first task's `mock:` token, and the mock replays the first task's
+scenario. When a change adds text to an opening message, strip that text before the mock
+matches a scenario. Do this in `packages/cezar/scripts/mock-session-context.mjs`, or in a
+helper next to it. The mock must still record the raw native text in its recording
+(`CEZ_MOCK_STDIN_FILE` or `CEZ_MOCK_ARGS_FILE`), because tests assert what cezar sent.
+Record first and strip after, as `mock-claude.mjs` does, or keep the raw text next to the
+stripped text, as `stripCommandMessage` and `rawMessage` do for Pi and OMP. An OpenCode
+request body is JSON, and JSON escapes the quote of an attribute. So a check for
+`<cezar-context id="` never matches that body. Check for `<cezar-context id=` without the
+quote, as `withoutSessionContextBody` does. The Cursor print mock matches only the text
+after the last `\n\n---\n\n` divider, so the blocks never reach its match. In
+hearsay-tools/cezarion#1638, the handoff replayed `mock:ask-snapshot` in the OpenCode cells
+of `workflow-ask-parity` rows Q5 and Q10. The cause showed only after a temporary debug log
+in `mock-opencode-serve.mjs`.
+
 R36–R39 (hearsay-tools/cezarion#399) record the shared monitoring wrap-up contract on every native
 prompt channel for fresh, Continue and restart-recovered sessions, and the
 automatic monitoring wake. Every runner honors `cezarTools`, so since
