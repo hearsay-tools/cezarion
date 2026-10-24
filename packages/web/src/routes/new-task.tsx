@@ -217,7 +217,7 @@ export function NewTaskRoute() {
               repo={repo.data}
               hasGit={hasGit}
               runMode={runMode}
-              webhook={{ url: webhook.webhookUrl, on: webhook.notifyOn, onChange: webhook.setNotifyChoice }}
+              webhook={{ targets: webhook.webhookTargets, on: webhook.notifyOn, onChange: webhook.setNotifyChoice }}
               interactiveSkill={sources.selectedSkill?.interactive === true}
               completionDisabled={starting || planning}
             />

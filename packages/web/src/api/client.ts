@@ -97,6 +97,9 @@ import type {
   UpdateProjectResponse,
   NotifyRunInput,
   TestProjectWebhookResponse,
+  CreateProjectWebhookInput,
+  UpdateProjectWebhookInput,
+  ProjectWebhookResponse,
   RepoBranchResponse,
   RepoPullBranchesResponse,
   RepoPullConfirmation,
@@ -1365,6 +1368,51 @@ export async function testProjectWebhook(projectId: string): Promise<TestProject
       param: { projectId: encodeURIComponent(projectId) },
     }),
     `/projects/${encodeURIComponent(projectId)}/webhook/test`,
+  )
+}
+
+/** Add one project webhook (hearsay-tools/cezarion#1576). 409 on a duplicate name or a full list. */
+export async function createProjectWebhook(projectId: string, input: CreateProjectWebhookInput): Promise<ProjectWebhookResponse> {
+  return unwrap(
+    await cez.api.v1.projects[':projectId'].webhooks.$post({
+      param: { projectId: encodeURIComponent(projectId) },
+      json: input,
+    }),
+    `/projects/${encodeURIComponent(projectId)}/webhooks`,
+  )
+}
+
+/** Edit one project webhook: each key applies only when named; an omitted token keeps it. */
+export async function updateProjectWebhook(
+  projectId: string,
+  webhookId: string,
+  input: UpdateProjectWebhookInput,
+): Promise<ProjectWebhookResponse> {
+  return unwrap(
+    await cez.api.v1.projects[':projectId'].webhooks[':webhookId'].$patch({
+      param: { projectId: encodeURIComponent(projectId), webhookId: encodeURIComponent(webhookId) },
+      json: input,
+    }),
+    `/projects/${encodeURIComponent(projectId)}/webhooks/${encodeURIComponent(webhookId)}`,
+  )
+}
+
+export async function removeProjectWebhook(projectId: string, webhookId: string): Promise<UpdateProjectResponse> {
+  return unwrap(
+    await cez.api.v1.projects[':projectId'].webhooks[':webhookId'].$delete({
+      param: { projectId: encodeURIComponent(projectId), webhookId: encodeURIComponent(webhookId) },
+    }),
+    `/projects/${encodeURIComponent(projectId)}/webhooks/${encodeURIComponent(webhookId)}`,
+  )
+}
+
+/** "Send test" for one webhook: one `task.test` delivery, answered with the endpoint's status. */
+export async function testOneProjectWebhook(projectId: string, webhookId: string): Promise<TestProjectWebhookResponse> {
+  return unwrap(
+    await cez.api.v1.projects[':projectId'].webhooks[':webhookId'].test.$post({
+      param: { projectId: encodeURIComponent(projectId), webhookId: encodeURIComponent(webhookId) },
+    }),
+    `/projects/${encodeURIComponent(projectId)}/webhooks/${encodeURIComponent(webhookId)}/test`,
   )
 }
 

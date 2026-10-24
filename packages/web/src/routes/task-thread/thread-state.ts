@@ -30,7 +30,8 @@ export interface ThreadNote {
   attribution?: { source: 'agent' | 'lifecycle'; parentRunId: string }
   /** Lifecycle/agent-input receipt overlay from `run.agentInputs` (#971). Absent when no receipt. */
   delivery?: 'queued' | 'delivered' | 'consumed'
-  /** A task-webhook hand-off line (#589) — rendered with the send glyph, not the dim bullet. */
+  /** A task-webhook hand-off line (#589), or a sent agent report (#1576) — rendered with the send
+   *  glyph, not the dim bullet. */
   icon?: 'handoff'
 }
 

@@ -80,6 +80,10 @@ import {
   pinRun,
   notifyRun,
   testProjectWebhook,
+  createProjectWebhook,
+  updateProjectWebhook,
+  removeProjectWebhook,
+  testOneProjectWebhook,
   removeQueuedMessage,
   registerProject,
   openAgentAccountFile,
@@ -125,6 +129,8 @@ import type {
   UpdateAgentProfileInput,
   UpdateProjectInput,
   NotifyRunInput,
+  CreateProjectWebhookInput,
+  UpdateProjectWebhookInput,
 } from '@open-mercato/cezar-api-client'
 import { liveRefetchInterval } from '@/lib/live-refetch'
 import {
@@ -612,6 +618,57 @@ function applyProjectPatch(
 /** "Send test" (#589) — the answer is the result; nothing cached changes. */
 export function useTestProjectWebhook() {
   return useMutation({ mutationFn: (projectId: string) => testProjectWebhook(projectId), retry: false })
+}
+
+/**
+ * The project-webhook mutations (hearsay-tools/cezarion#1576). Not optimistic: each form keeps
+ * its own draft, so nothing reads the cache between the click and the answer. The answer's
+ * `project` replaces the cached entry, and the invalidate re-reads the registry.
+ */
+function useProjectWebhookMutation<TVariables, TResult extends { project: ProjectListEntry }>(
+  mutationFn: (variables: TVariables) => Promise<TResult>,
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn,
+    retry: false,
+    onSuccess: ({ project: updated }) => {
+      queryClient.setQueryData<ProjectsResponse>(workspaceQueryKeys.projects, (current) =>
+        current === undefined
+          ? current
+          : { ...current, projects: current.projects.map((project) => (project.id === updated.id ? updated : project)) },
+      )
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.projects }),
+  })
+}
+
+export function useCreateProjectWebhook() {
+  return useProjectWebhookMutation((variables: { projectId: string } & CreateProjectWebhookInput) => {
+    const { projectId, ...input } = variables
+    return createProjectWebhook(projectId, input)
+  })
+}
+
+export function useUpdateProjectWebhook() {
+  return useProjectWebhookMutation((variables: { projectId: string; webhookId: string } & UpdateProjectWebhookInput) => {
+    const { projectId, webhookId, ...input } = variables
+    return updateProjectWebhook(projectId, webhookId, input)
+  })
+}
+
+export function useRemoveProjectWebhook() {
+  return useProjectWebhookMutation(({ projectId, webhookId }: { projectId: string; webhookId: string }) =>
+    removeProjectWebhook(projectId, webhookId),
+  )
+}
+
+/** "Send test" for one webhook — the answer is the result; nothing cached changes. */
+export function useTestOneProjectWebhook() {
+  return useMutation({
+    mutationFn: ({ projectId, webhookId }: { projectId: string; webhookId: string }) => testOneProjectWebhook(projectId, webhookId),
+    retry: false,
+  })
 }
 
 /**

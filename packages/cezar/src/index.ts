@@ -26,6 +26,7 @@ import { RunStore } from './runs/store.ts';
 import { RunStoreOpenError } from './runs/store-open-error.ts';
 import { ensureDataGitignore } from './data-gitignore.ts';
 import { TaskWebhooks } from './runs/webhook.ts';
+import { runSubcommand } from './subcommands.ts';
 import { RunManager } from './workflows/run.ts';
 import { loadWorkflows } from './workflows/load.ts';
 import { cockpitOriginFor, startServer, WorkspaceEventBus } from './server/server.ts';
@@ -64,6 +65,7 @@ Usage:
   cez worker                manage owned workers (see: worker --help)
   cez task                  start/watch/steer cockpit tasks from the terminal (see: task --help)
   cez automation            create and manage automations from a task (see: automation --help)
+  cez webhook               list and send to the project webhooks open to agents (see: webhook --help)
   cez artifact publish <path> publish a local task artifact (see: artifact --help)
   cez server-install        interactive wizard to host cezar on a server
   cez server-deploy         redeploy a new version (reload the service) + verify
@@ -99,31 +101,10 @@ Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repos
 workflows in .ai/cezar/workflows/.`;
 
 async function main(): Promise<void> {
-  if (process.argv[2] === 'discover') {
-    const { runDiscoverCommand } = await import('./discovery/cli.ts');
-    process.exitCode = await runDiscoverCommand(process.argv.slice(3), process.env);
-    return;
-  }
-  if (process.argv[2] === 'artifact') {
-    const { runArtifactCommand } = await import('./artifacts/cli.ts');
-    process.exitCode = await runArtifactCommand(process.argv.slice(3), process.env);
-    return;
-  }
-  if (process.argv[2] === 'task') {
-    // Before the global parseArgs, like `worker`: task flags are not cockpit flags (#504).
-    const { runTaskCommand } = await import('./task-cli/cli.ts');
-    process.exitCode = await runTaskCommand(process.argv.slice(3), process.env);
-    return;
-  }
-  if (process.argv[2] === 'automation') {
-    // Before the global parseArgs, like `task`: automation flags are not cockpit flags (#774).
-    const { runAutomationCommand } = await import('./automations/automation-cli.ts');
-    process.exitCode = await runAutomationCommand(process.argv.slice(3), process.env);
-    return;
-  }
-  if (process.argv[2] === 'worker') {
-    const { runWorkerCommand } = await import('./delegation/cli.ts');
-    process.exitCode = await runWorkerCommand(process.argv.slice(3), process.env);
+  // Subcommands with flags of their own run before the global parseArgs (#504, #774, #1576).
+  const subcommandExit = await runSubcommand(process.argv.slice(2), process.env);
+  if (subcommandExit !== undefined) {
+    process.exitCode = subcommandExit;
     return;
   }
   const { values, positionals } = parseArgs({
