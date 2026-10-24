@@ -231,10 +231,15 @@ export function deleteHandoff(dataDir: string, runId: string): void {
   }
 }
 
-const HANDOFF_JOURNAL = `## Handoff (cezar)
+const HANDOFF_AUTOSAVE_NOTE = `A "## Autosave (cezar)" section, when present, is cezar's record of an autosave commit on your branch (with the command that folds it back) or of work it left uncommitted; leave it in place.`;
+const HANDOFF_READ_STEP = `1. At the start of work, read it — "Resume notes" left by a previous session is your starting context. ${HANDOFF_AUTOSAVE_NOTE}`;
+/** Step 1 when the launch's opening message already carries the file (hearsay-tools/cezarion#1584). */
+const HANDOFF_INJECTED_STEP = `1. Its contents as of this launch open your first message for this session, in the cezar context block with id "handoff"; read the file again only when you need a later version. "Resume notes" left by a previous session is your starting context. ${HANDOFF_AUTOSAVE_NOTE}`;
+
+const handoffJournal = (injected: boolean) => `## Handoff (cezar)
 
 CEZ_HANDOFF_FILE (env) is the absolute path to this task's rolling handoff file. Treat it like a HANDOFF.md:
-1. At the start of work, read it — "Resume notes" left by a previous session is your starting context. A "## Autosave (cezar)" section, when present, is cezar's record of an autosave commit on your branch (with the command that folds it back) or of work it left uncommitted; leave it in place.
+${injected ? HANDOFF_INJECTED_STEP : HANDOFF_READ_STEP}
 2. After every meaningful milestone (passing tests, a commit, a PR, a scope decision), append one terse timestamped line under "## Progress log", newest at the top.
 3. Before finishing or pausing, update "## Resume notes" with what's done, what's next and any blockers. Leave it empty only when the task is truly complete.`;
 
@@ -254,15 +259,16 @@ const REFERENCES_AND_ATTACHMENTS = `Task reference markers: as soon as you know 
 User-attached screenshots and files (PDF, TXT, MD) are saved as real files; their absolute paths are listed in the message that carries them. Read a file from its path when you need its contents, and use the path when a task needs the file itself (saving, uploading, attaching to issues/PRs). An image also rides along inline, but that copy is for viewing only; a non-image attachment exists ONLY as the file at that path.`;
 
 /** The rolling handoff journal and lifecycle guidance for sessions without cezar tools. */
-export const HANDOFF_ONLY_INSTRUCTIONS = `${HANDOFF_JOURNAL}\n\n${LIFECYCLE_MARKERS}\n\n${REFERENCES_AND_ATTACHMENTS}`;
+export const HANDOFF_ONLY_INSTRUCTIONS = `${handoffJournal(false)}\n\n${LIFECYCLE_MARKERS}\n\n${REFERENCES_AND_ATTACHMENTS}`;
 
 /**
  * The handoff contract for one agent session. With `tools` (the session has cezar's tools) the
  * lifecycle is taught as cezar_done, cezar_ask and cezar_wait calls; without them it is today's marker
  * variant, `HANDOFF_ONLY_INSTRUCTIONS`. The marker lines are parsed in
- * both cases.
+ * both cases. With `handoffInjected` the launch's opening message already carries the file
+ * (hearsay-tools/cezarion#1584), so step 1 points there instead of asking for a read; the
+ * writing duties never change.
  */
-export function handoffInstructions(opts: { tools: boolean }): string {
-  const handoff = opts.tools ? `${HANDOFF_JOURNAL}\n\n${LIFECYCLE_TOOLS}\n\n${REFERENCES_AND_ATTACHMENTS}` : HANDOFF_ONLY_INSTRUCTIONS;
-  return handoff;
+export function handoffInstructions(opts: { tools: boolean; handoffInjected?: boolean }): string {
+  return `${handoffJournal(opts.handoffInjected ?? false)}\n\n${opts.tools ? LIFECYCLE_TOOLS : LIFECYCLE_MARKERS}\n\n${REFERENCES_AND_ATTACHMENTS}`;
 }
