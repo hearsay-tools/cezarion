@@ -244,22 +244,30 @@ test('project selection requires tests and supplies target cwd to the coverage r
 
 test('coverage resolves Vitest from the target project and keeps its output off JSON stdout', async t => {
   const f = fixture(t);
-  const vitest = join(f.cwd, 'node_modules/vitest');
-  mkdirSync(vitest, { recursive: true });
-  writeFileSync(join(vitest, 'package.json'), JSON.stringify({ name: 'vitest', version: '1.0.0' }));
+  for (const [name, exports] of [['vitest', { './node': './node.mjs' }], ['@vitest/coverage-v8', { '.': './node.mjs' }]]) {
+    mkdirSync(join(f.cwd, 'node_modules', name), { recursive: true });
+    writeFileSync(join(f.cwd, 'node_modules', name, 'package.json'), JSON.stringify({ name, version: '1.0.0', type: 'module', exports }));
+    writeFileSync(join(f.cwd, 'node_modules', name, 'node.mjs'), '');
+  }
   writeFileSync(join(f.cwd, 'source.test.ts'), '');
-  writeFileSync(join(vitest, 'vitest.mjs'), `
+  writeFileSync(join(f.cwd, 'node_modules/vitest/node.mjs'), `
     import assert from 'node:assert/strict';
     import { writeFileSync } from 'node:fs';
     import { join } from 'node:path';
-    assert.equal(process.cwd(), ${JSON.stringify(f.cwd)});
-    const args = process.argv.slice(2);
-    assert.equal(args[0], 'run');
-    assert.equal(args[args.indexOf('--project') + 1], 'custom-unit');
-    assert.ok(args.includes(${JSON.stringify(join(f.cwd, 'source.test.ts'))}));
-    const directory = args[args.indexOf('--coverage.reportsDirectory') + 1];
-    writeFileSync(join(directory, 'coverage-final.json'), ${JSON.stringify(JSON.stringify(f.report))});
-    console.log('coverage fixture output');
+    export async function createVitest(mode, options) {
+      assert.equal(process.cwd(), ${JSON.stringify(f.cwd)});
+      assert.equal(mode, 'test');
+      assert.deepEqual(options.project, ['custom-unit']);
+      return {
+        config: { coverage: { exclude: [] } }, projects: [],
+        async start(filters) {
+          assert.ok(filters.includes(${JSON.stringify(join(f.cwd, 'source.test.ts'))}));
+          writeFileSync(join(options.coverage.reportsDirectory, 'coverage-final.json'), ${JSON.stringify(JSON.stringify(f.report))});
+          console.log('coverage fixture output');
+        },
+        async exit() {},
+      };
+    }
   `);
   const result = await invoke(['source.ts', '--test', 'source.test.ts', '--project', 'custom-unit', '--json'], { cwd: f.cwd });
   assert.equal(result.code, 0, result.error);
@@ -283,13 +291,15 @@ test('copied skill needs no original checkout scripts to analyze another project
 test('fresh coverage selects supplied tests and removes temporary reports on success', async t => {
   const f = fixture(t);
   const testFile = join(f.cwd, 'source.test.ts');
+  const browserFile = join(f.cwd, 'source.e2e.ts');
   writeFileSync(testFile, '');
+  writeFileSync(browserFile, '');
   let temporary;
-  const result = await invoke(['source.ts', '--test', testFile, '--test', testFile, '--line', '2', '--json'], {
+  const result = await invoke(['source.ts', '--test', testFile, '--test', browserFile, '--line', '2', '--json'], {
     cwd: f.cwd,
     runTests(file, tests, directory, stderr) {
       assert.equal(file, f.file);
-      assert.deepEqual(tests, [testFile, testFile]);
+      assert.deepEqual(tests, [testFile, browserFile]);
       temporary = directory;
       stderr.write('test log\n');
       const report = join(directory, 'coverage-final.json');
