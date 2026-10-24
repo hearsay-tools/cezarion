@@ -92,6 +92,8 @@ Verification runs in eight parallel jobs. Seven use the current Node LTS; the bu
 
 The full Vitest suite runs once across the three LTS shards. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
 
+The legacy floor config, sequencer, reporter and duration manifest remain for PR compatibility. PR CI loads `ci.yml` from the target branch, whose old floor jobs still read these files from the PR checkout. The new workflow has no floor jobs and does not use these helpers. Remove the helpers only after the new workflow reaches the target branch.
+
 The required check keeps its name, **Unit, build, E2E, and package**. It succeeds only when the build/package job, all three Vitest shards, and all four cockpit browser shards succeed. Packaged CLI E2E and cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs remain on GitHub-hosted Ubuntu. Develop snapshot publishing still waits for this aggregate. Same-repository
 PRs instead run `prepare-pr-snapshot` after verification, packing snapshot
 archives without publishing credentials. `publish-pr-snapshot.yml` listens for
