@@ -1,6 +1,7 @@
 import { useMemo, type ReactNode } from 'react'
 import { TaskFileScope } from './task-file-scope'
 import { PermissionCard } from './permission-card'
+import { AskAnswers } from './ask-answers'
 
 import type { AgentInput, ApiRun } from '@open-mercato/cezar-api-client'
 
@@ -37,6 +38,7 @@ import { ConversationNavigation, type ConversationTarget } from './conversation-
 
 export interface TranscriptUserMessage {
   text: string
+  ask?: ThreadAsk
   imageCount?: number
   images?: readonly string[]
   /** When this message was sent — or, for a still-queued one, when it was queued (#941). */
@@ -141,6 +143,7 @@ export function mainTranscriptSections(
     .find((entry): entry is ThreadAsk => entry.kind === 'ask' && entry.id === pendingAskId && !entry.resolved)
   const currentPermissions = new Map(currentThread.turns.flatMap(turn => turn.items).filter((entry): entry is ThreadPermission => entry.kind === 'permission').map(entry => [entry.requestId, entry]))
   const visiblePermissions = new Set<string>()
+  const answeredAsks = new Set(thread.turns.map(turn => turn.userMessage?.ask?.id))
   const sections: TranscriptSection[] = []
   if (run.task) {
     sections.push({
@@ -173,6 +176,7 @@ export function mainTranscriptSections(
         ? {
             userMessage: {
               text: turn.userMessage.text,
+              ask: turn.userMessage.ask,
               imageCount: turn.userMessage.imageCount,
               images: turn.userMessage.images,
               ...(turn.userMessage.ts !== undefined ? { ts: turn.userMessage.ts } : {}),
@@ -182,6 +186,7 @@ export function mainTranscriptSections(
       ...(turn.startedAt !== undefined ? { startedAt: turn.startedAt } : {}),
       ...(turn.completed?.ts !== undefined ? { completedAt: turn.completed.ts } : {}),
       entries: overlayAgentInputNotes(run, turn.items.map(entry => {
+        if (entry.kind === 'ask' && answeredAsks.has(entry.id)) return { ...entry, placement: 'origin' as const }
         if (pendingAskId !== undefined && entry.kind === 'ask') return placeAsk(entry, pendingAskId, pinnedAsk)
         if (entry.kind !== 'permission') return entry
         visiblePermissions.add(entry.requestId)
@@ -428,7 +433,9 @@ function TranscriptUserBubble({
       onRemove={actions?.onRemove}
       editLabel={actions?.editLabel}
       removeLabel={actions?.removeLabel}
-    />
+    >
+      {message.ask ? <div data-slot="ask-card" data-resolved="true"><AskAnswers ask={message.ask} /></div> : undefined}
+    </UserBubble>
   )
 }
 

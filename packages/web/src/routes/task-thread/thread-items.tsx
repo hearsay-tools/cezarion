@@ -123,6 +123,7 @@ export function UserBubble({
   onRemove,
   editLabel = 'Edit message',
   removeLabel = 'Remove message',
+  children,
 }: {
   text: string
   imageCount?: number
@@ -133,6 +134,8 @@ export function UserBubble({
   onRemove?: () => Promise<void>
   editLabel?: string
   removeLabel?: string
+  /** Structured answer details replace the raw reply, keeping the same attachments and clock. */
+  children?: ReactNode
 }) {
   const missing = imageCount - images.length
   const [editing, setEditing] = useState(false)
@@ -252,7 +255,7 @@ export function UserBubble({
         </span>
       ) : null}
       {actionError ? <p role="alert" className="mb-1 text-xs text-danger">{actionError}</p> : null}
-      <Markdown breaks>{text}</Markdown>
+      {children ?? <Markdown breaks>{text}</Markdown>}
       {images.length > 0 ? (
         <span data-slot="user-images" className="mt-2 flex flex-wrap items-center justify-end gap-1.5">
           {/* One list carries both kinds (#950), so the NAME decides how each entry renders: an

@@ -1,5 +1,5 @@
 import { QueryClientProvider } from '@tanstack/react-query'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -82,6 +82,41 @@ const ask = (id: string, overrides: Partial<ThreadAsk> = {}): ThreadAsk => ({
 })
 
 const note = (id: string): ThreadEntry => ({ kind: 'message', id, role: 'assistant', text: `Later ${id}` })
+
+describe('answered questions in the transcript', () => {
+  const question = { header: 'Scope', question: 'Which rows?', options: [{ label: 'Visible', description: 'Keep filters.' }, { label: 'All' }] }
+  const events = [
+    { type: 'turn.started', turnId: 'first' },
+    { type: 'ask.requested', requestId: 'scope', context: 'Export proposal', questions: [question] },
+    { type: 'item.completed', item: { kind: 'message', id: 'update', role: 'assistant', text: 'An update before the answer.' } },
+    { type: 'user-message', text: 'Scope: Visible', images: ['/api/v1/report.pdf'], imageCount: 1 },
+  ]
+
+  it('replays the question at the answer, preserving its position, timestamp and attachments', () => {
+    const thread = reduceThread(asRunEvents(events))
+    const sections = mainTranscriptSections(run({ task: '' }), thread, thread, null)
+    expect(sections.flatMap(section => section.entries).find(entry => entry.kind === 'ask')).toMatchObject({ context: 'Export proposal', placement: 'origin' })
+    expect(sections.at(-1)?.userMessage?.ask).toMatchObject({ id: 'scope', answer: 'Scope: Visible' })
+    render(<MemoryRouter><SessionTranscript runId="r1" viewId="main" mode="document" sections={sections} /></MemoryRouter>)
+    const reply = document.querySelector<HTMLElement>('[data-slot="user-bubble"]')!
+    expect(within(reply).getByText('Which rows?')).toBeTruthy()
+    expect(within(reply).getByText('Keep filters.')).toBeTruthy()
+    expect(within(reply).getByText('Visible').closest('[data-selected]')?.getAttribute('data-selected')).toBe('true')
+    expect(within(reply).queryByText('Scope: Visible')).toBeNull()
+    expect(reply.querySelector('[data-slot="message-time"]')).not.toBeNull()
+    expect(within(reply).getByRole('link', { name: 'report.pdf' })).toBeTruthy()
+    expect(screen.getByText('An update before the answer.').compareDocumentPosition(reply) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+  })
+
+  it('does not attach an earlier question to later messages or to a page with no question', () => {
+    const thread = reduceThread(asRunEvents([...events, { type: 'user-message', text: 'A later message' }]))
+    expect(thread.turns.at(-1)?.userMessage?.ask).toBeUndefined()
+    const partial = reduceThread(asRunEvents([{ type: 'user-message', text: 'Scope: Visible' }]))
+    expect(partial.turns[0]?.userMessage?.ask).toBeUndefined()
+    render(<MemoryRouter><SessionTranscript runId="r1" viewId="partial" mode="document" sections={mainTranscriptSections(run({ task: '' }), partial)} /></MemoryRouter>)
+    expect(screen.getByText('Scope: Visible')).toBeTruthy()
+  })
+})
 
 describe('worker message body replay and live updates', () => {
   const parent = '11111111-1111-4111-8111-111111111111', worker = '22222222-2222-4222-8222-222222222222'

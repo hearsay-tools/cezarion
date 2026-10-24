@@ -238,10 +238,13 @@ describe('AskCard', () => {
     expect(mutateAsync).toHaveBeenCalledWith({ text: 'Sections: Profile, Billing' })
   })
 
-  it('a resolved ask collapses to a compact answered summary with no option buttons', () => {
+  it('a resolved ask keeps the question and options with no answer controls', () => {
     renderAsk({ ...singleAsk, resolved: true, answer: 'Library: date-fns' })
     expect(screen.getByText('Answered')).toBeTruthy()
-    expect(screen.getByText('Library: date-fns').className).toContain('break-words')
+    expect(screen.getByText(singleAsk.questions[0]!.question)).toBeTruthy()
+    expect(screen.getByText('date-fns').closest('[data-selected]')?.getAttribute('data-selected')).toBe('true')
+    expect(screen.getByText('Luxon')).toBeTruthy()
+    expect(screen.getByText('Tree-shakeable')).toBeTruthy()
     expect(screen.queryByRole('button', { name: /date-fns/ })).toBeNull()
   })
 
@@ -729,11 +732,12 @@ describe('AskCard voice proposals', () => {
 describe('AskCard context', () => {
   const context = 'The plan has **two** steps.\n\n- parse\n- render'
 
-  it('renders the context as Markdown in a focusable region before the first question', () => {
+  it('renders the full context in an agent response before the first question', () => {
     renderAsk({ ...singleAsk, context })
     const region = screen.getByRole('region', { name: 'Context' })
     expect(region.getAttribute('data-slot')).toBe('ask-context')
-    expect(region.tabIndex).toBe(0)
+    expect(region.closest('[data-role="agent"]')).not.toBeNull()
+    expect(region.className).not.toMatch(/max-block-size|overflow-y-auto|overscroll-contain/)
     expect(within(region).getByText('two').closest('[data-streamdown="strong"]')).not.toBeNull()
     expect(within(region).getAllByRole('listitem')).toHaveLength(2)
     const question = screen.getByText('Which date library should I standardize on?')
@@ -745,12 +749,47 @@ describe('AskCard context', () => {
     expect(within(screen.getByRole('region', { name: 'Context' })).getByText('two').closest('[data-streamdown="strong"]')).not.toBeNull()
   })
 
-  it('shows no context region for an ask without one, or once it is answered', () => {
+  it('keeps the context after answering and omits it only when absent', () => {
     renderAsk(singleAsk)
     expect(screen.queryByRole('region', { name: 'Context' })).toBeNull()
     expect(screen.getByText('Which date library should I standardize on?')).toBeTruthy()
     cleanup()
     renderAsk({ ...singleAsk, context, resolved: true, answer: 'Library: Luxon' })
-    expect(screen.queryByRole('region', { name: 'Context' })).toBeNull()
+    expect(screen.getByRole('region', { name: 'Context' })).toBeTruthy()
+    expect(screen.getByText('Luxon').closest('[data-selected]')?.getAttribute('data-selected')).toBe('true')
+  })
+})
+
+describe('answered question history', () => {
+  it.each([
+    ['Library: A custom library', 'A custom library'],
+    ['Library: First line\nSecond line', 'First line\nSecond line'],
+  ])('quotes Other replies: %s', (answer, text) => {
+    renderAsk({ ...singleAsk, resolved: true, answer })
+    expect(screen.getByText('Other')).toBeTruthy()
+    expect(document.querySelector('blockquote')?.textContent).toBe(text)
+    expect(screen.queryByRole('textbox')).toBeNull()
+  })
+
+  it('preserves multiple selections and matches whole labels containing commas', () => {
+    renderAsk({ ...multiAsk, resolved: true, answer: 'Sections: Billing, Profile' })
+    expect([...document.querySelectorAll('[data-selected="true"]')].map(row => row.textContent)).toEqual([
+      expect.stringContaining('Profile'), expect.stringContaining('Billing'),
+    ])
+    cleanup()
+    renderAsk({ ...multiAsk, questions: [{ ...multiAsk.questions[0]!, options: [{ label: 'A, B' }, { label: 'C' }] }], resolved: true, answer: 'Sections: A, B' })
+    expect(screen.getByText('A, B').closest('[data-selected]')?.getAttribute('data-selected')).toBe('true')
+  })
+
+  it('keeps open replies and unmatched multi-question replies without guessing selections', () => {
+    renderAsk({ ...singleAsk, questions: [{ header: 'Notes', question: 'Any notes?' }], resolved: true, answer: 'Notes: Keep the filters.' })
+    expect(document.querySelector('blockquote')?.textContent).toBe('Keep the filters.')
+    expect(screen.queryByText('Other')).toBeNull()
+    cleanup()
+    renderAsk({ ...twoQuestionAsk, resolved: true, answer: 'Please use the existing style.' })
+    expect(document.querySelector('blockquote')?.textContent).toBe('Please use the existing style.')
+    expect(document.querySelector('[data-selected="true"]')).toBeNull()
+    expect(screen.getByText('Which library?')).toBeTruthy()
+    expect(screen.getByText('Which style?')).toBeTruthy()
   })
 })

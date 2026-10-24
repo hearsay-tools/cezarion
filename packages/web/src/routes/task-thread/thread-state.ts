@@ -154,7 +154,7 @@ export interface ThreadTurn {
   /** The v1 `user-message` that opened this turn. The FIRST turn usually has none — the initial
    *  prompt is the run's `task`, which the view renders from the run record. `ts` is when that
    *  line was persisted (#941). */
-  userMessage?: { text: string; imageCount: number; images: string[]; ts?: string }
+  userMessage?: { text: string; imageCount: number; images: string[]; ts?: string; ask?: ThreadAsk }
   /** Wall clock of the event that OPENED this turn — the `user-message` line when there is one,
    *  otherwise `turn.started` (#941). First stamp wins, so the v1 line and the v2 event that
    *  follow each other for the same turn produce one coherent start rather than two. This is the
@@ -251,7 +251,7 @@ interface DraftEntry {
 interface DraftTurn {
   id: string
   turnId?: string
-  userMessage?: { text: string; imageCount: number; images: string[]; ts?: string }
+  userMessage?: ThreadTurn['userMessage']
   startedAt?: string
   entries: DraftEntry[]
   planEntries?: PlanEntry[]
@@ -663,6 +663,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
       }
       case 'user-message': {
         const text = str(event.text) ?? ''
+        const answeredAsk = pendingAsk
         // Client-side resolution of the pending AskUser card (#473): the reply
         // that follows an ask closes it and records the answer.
         if (pendingAsk && !pendingAsk.resolved) {
@@ -675,6 +676,7 @@ export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = 
         const ts = stamp(event.ts)
         turn.userMessage = {
           text,
+          ask: answeredAsk,
           imageCount: typeof event.imageCount === 'number' ? event.imageCount : 0,
           images: Array.isArray(event.images) ? event.images.filter((u): u is string => typeof u === 'string') : [],
           ...(ts !== undefined ? { ts } : {}),

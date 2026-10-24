@@ -19,19 +19,20 @@ const RUN_ID = 'abababab-1495-4222-8333-cdcdcdcdcdcd'
 const OTHER_ID = 'abababab-1495-4222-8333-efefefefefef'
 const now = '2026-10-23T10:00:00.000Z'
 const LATER_MESSAGES = 260
+const ASK_CONTEXT = Array.from({ length: 40 }, (_, index) => `Context paragraph ${index + 1}: keep the full proposal visible in the transcript.`).join('\n\n')
 
 const lines: Array<Record<string, unknown>> = [
   { type: 'step-start', stepId: 'task', name: 'Do the task', kind: 'agent', iteration: 1 },
   { type: 'session.started', sessionId: 'a0000000-0000-4000-8000-000000001495', backend: 'claude', stepId: 'task' },
   { type: 'turn.started', turnId: 'turn_1', stepId: 'task' },
-  { type: 'ask.requested', stepId: 'task', requestId: 'answered-question', questions: [{ header: 'Earlier', question: 'Which branch is the base?', options: [{ label: 'main' }, { label: 'develop' }] }] },
+  { type: 'ask.requested', stepId: 'task', requestId: 'answered-question', context: 'The earlier proposal stays visible.', questions: [{ header: 'Earlier', question: 'Which branch is the base?', options: [{ label: 'main' }, { label: 'develop' }] }, { header: 'Notes', question: 'Which notes should I keep?', options: [{ label: 'Default notes' }, { label: 'No notes' }] }] },
 ]
 const answeredSeq = lines.length
 lines.push(
   { type: 'human-input-delivered', stepId: 'task', askSeq: answeredSeq },
-  { type: 'user-message', stepId: 'task', text: 'main', imageCount: 0 },
+  { type: 'user-message', stepId: 'task', text: 'Earlier: main\nNotes: Keep the filters.\nKeep every column.', imageCount: 0 },
   { type: 'turn.started', turnId: 'turn_2', stepId: 'task' },
-  { type: 'ask.requested', stepId: 'task', requestId: 'pending-question', questions: [{ header: 'Approach', question: 'Which approach should I take?', options: [{ label: 'Minimal', description: 'Small change' }, { label: 'Expanded', description: 'Wider change' }] }] },
+  { type: 'ask.requested', stepId: 'task', requestId: 'pending-question', context: ASK_CONTEXT, questions: [{ header: 'Approach', question: 'Which approach should I take?', options: [{ label: 'Minimal', description: 'Small change' }, { label: 'Expanded', description: 'Wider change' }] }] },
 )
 const pendingSeq = lines.length
 for (let index = 1; index <= LATER_MESSAGES; index += 1) {
@@ -134,6 +135,32 @@ describe.each([
     // The origin is far above the newest page, so only the pinned copy is loaded.
     expect(browser.count('[data-slot="ask-origin"]')).toBe(0)
     expect(Number(browser.evaluate(cursorRequests))).toBe(0)
+  })
+
+  it('keeps long active context fully expanded and replays the earlier decision', () => {
+    openTask(width, height, query)
+    const context = browser.evaluate(`(() => {
+      const region = document.querySelector('[data-slot="ask-context"]')
+      const style = getComputedStyle(region)
+      return { height: region.clientHeight, content: region.scrollHeight, max: style.maxHeight, overflow: style.overflowY, agent: region.closest('[data-role="agent"]') !== null }
+    })()`)
+    expect(context).toMatchObject({ max: 'none', overflow: 'visible', agent: true })
+    expect((context as { height: number }).height).toBe((context as { content: number }).content)
+    expect((context as { height: number }).height).toBeGreaterThan(height)
+    browser.evaluate(`document.querySelector('[data-slot="ask-show-origin"]').click()`)
+    browser.waitForFunction(`document.querySelector('[data-slot="ask-answers"]') !== null`)
+    expect(browser.text('[data-slot="ask-answers"]')).toContain('Which branch is the base?')
+    expect(browser.text('[data-slot="ask-answers"]')).toContain('develop')
+    expect(browser.text('[data-slot="ask-answers"]')).toContain('Other')
+    expect(browser.text('[data-slot="ask-answers"] blockquote')).toBe('Keep the filters.\nKeep every column.')
+    expect(browser.evaluate(`document.querySelector('[data-slot="ask-answers"] [data-selected="true"]').textContent`)).toContain('main')
+    expect(browser.evaluate(`document.querySelectorAll('[data-slot="ask-answers"]').length`)).toBe(1)
+    expect(browser.evaluate(`document.querySelectorAll('[data-slot="user-bubble"]').length`)).toBeGreaterThan(0)
+    browser.evaluate(`(() => {
+      ${MAIN}.dispatchEvent(new WheelEvent('wheel', { deltaY: -120, bubbles: true }))
+      window.__cezThreadScrollTo(0)
+    })()`)
+    browser.waitForFunction(`document.body.textContent.includes('The earlier proposal stays visible.')`)
   })
 
   it('keyboard activation of the pill focuses the first answer chip', () => {
