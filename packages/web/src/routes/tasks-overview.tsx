@@ -120,7 +120,7 @@ export function TasksOverview({
   onArchivedSearch,
   origin: originProp,
   onOriginChange,
-  initialQuery = '',
+  urlQuery = '',
   onQueryChange,
   foldScope = 'project',
   automationName = () => undefined,
@@ -167,17 +167,16 @@ export function TasksOverview({
    *  Absent, the page keeps its own, starting at All. */
   origin?: TaskOrigin
   onOriginChange?: (origin: TaskOrigin) => void
-  /** The search text the URL restored, and the setter that writes it back. */
-  initialQuery?: string
+  /** The search text in the URL, and the setter that writes the typed text back. */
+  urlQuery?: string
   onQueryChange?: (query: string) => void
   /** Which saved fold preferences this list reads: `project:<id>`. */
   foldScope?: string
   /** An automation's display name, or undefined when it is unknown here. */
   automationName?: (automationId: string) => string | undefined
 }) {
-  const [query, setQuery] = React.useState(initialQuery)
+  const [query, setQuery] = useUrlQuery(urlQuery, onQueryChange)
   React.useEffect(() => { onArchivedSearch?.(query.trim()) }, [onArchivedSearch, query])
-  React.useEffect(() => { onQueryChange?.(query) }, [onQueryChange, query])
   const [origin, setOrigin] = useOriginOrOwn(originProp, onOriginChange)
   const [detailedTable, setDetailedTable] = React.useState(false)
   const headerRef = React.useRef<HTMLElement>(null)
@@ -280,6 +279,25 @@ export function TasksOverview({
       </div>
     </div>
   )
+}
+
+/**
+ * The search box's text. It starts from the URL's, follows the URL when something else changes
+ * it (a link, Back), and keeps what is being typed while the page's own debounced, trimmed write
+ * catches up.
+ */
+function useUrlQuery(urlQuery: string, onQueryChange: ((query: string) => void) | undefined) {
+  const [query, setQuery] = React.useState(urlQuery)
+  const written = React.useRef(urlQuery)
+  React.useEffect(() => {
+    if (urlQuery !== written.current) setQuery(urlQuery)
+    written.current = urlQuery
+  }, [urlQuery])
+  React.useEffect(() => {
+    written.current = query.trim()
+    onQueryChange?.(query)
+  }, [onQueryChange, query])
+  return [query, setQuery] as const
 }
 
 function TasksHeading({ projectName, detailedTable }: { projectName?: string; detailedTable: boolean }) {
@@ -1420,7 +1438,7 @@ export function TasksOverviewRoute() {
   const runs = useRuns()
   const health = useHealth()
   const metricVisibility = usageMetricVisibility(health.data)
-  const { view, setView, origin, setOrigin, initialQuery, writeQuery } = useTasksUrlState()
+  const { view, setView, origin, setOrigin, urlQuery, writeQuery } = useTasksUrlState()
   const queryClient = useQueryClient()
   const archived = useArchivedPages(runs.data, view)
   const archive = useMutation({
@@ -1484,7 +1502,7 @@ export function TasksOverviewRoute() {
         onViewChange={setView}
         origin={origin}
         onOriginChange={setOrigin}
-        initialQuery={initialQuery}
+        urlQuery={urlQuery}
         onQueryChange={writeQuery}
         foldScope={`project:${projectId ?? 'default'}`}
         automationName={automationName}
@@ -1533,7 +1551,7 @@ function useTasksUrlState() {
   // A URL changed from outside the page (a pasted link, a sidebar link) wins.
   React.useEffect(() => setViewState(urlView), [urlView])
   React.useEffect(() => setOriginState(urlOrigin), [urlOrigin])
-  const initialQuery = React.useRef(searchParams.get('q') ?? '').current
+  const urlQuery = searchParams.get('q') ?? ''
   const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   React.useEffect(() => {
     const pending = timer
@@ -1555,7 +1573,7 @@ function useTasksUrlState() {
       setOriginState(next)
       write(setParam('origin', next === 'all' ? null : next))
     },
-    initialQuery,
+    urlQuery,
     writeQuery,
   }
 }

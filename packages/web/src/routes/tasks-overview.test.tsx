@@ -1644,6 +1644,28 @@ describe('TasksOverview — status groups and origin (hearsay-tools/cezarion#161
     expect(caption().textContent).toBe('1 task matching “Needle”')
   })
 
+  it('follows a search the URL changes from outside, and keeps text being typed (hearsay-tools/cezarion#1616)', () => {
+    const props = { runs: [run({ title: 'Needle' }), run({ id: 'r2', title: 'Haystack' })], onQueryChange: vi.fn() }
+    const box = () => screen.getByRole('textbox', { name: 'Search tasks' }) as HTMLInputElement
+    const view = (query: string) => (
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter>
+          <TasksOverview {...props} urlQuery={query} view="active" now={NOW}
+            onViewChange={vi.fn()} onArchiveFinished={vi.fn()} onMarkAllRead={vi.fn()} onRename={vi.fn()} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    // One tree for every render, so React keeps the page mounted and only the URL's text changes.
+    const { rerender } = render(view('Needle'))
+    expect(box().value).toBe('Needle')
+    rerender(view('Haystack'))
+    expect(box().value).toBe('Haystack')
+    fireEvent.change(box(), { target: { value: 'Hay ' } })
+    // The page's own write lands in the URL trimmed; that must not rewrite the box.
+    rerender(view('Hay'))
+    expect(box().value).toBe('Hay ')
+  })
+
   it('scopes Mark all read to the origin', () => {
     const onMarkAllRead = vi.fn()
     renderOverview({ runs: [run({ finishedAt: ago(0) }), automated({ finishedAt: ago(0) })], onMarkAllRead, origin: 'direct' }, false)
