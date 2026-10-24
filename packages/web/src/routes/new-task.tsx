@@ -1329,11 +1329,10 @@ function SourcePill({
   )
 }
 
-/** The Base branch row of the run settings. It stays while `/repo` loads: it sits above
- *  Autonomous, so inserting it late moved that toggle under a pointer mid-click
- *  (hearsay-tools/cezarion#1605). */
+/** The Base branch row of the run settings. It stays while `/repo` loads and after it fails:
+ *  it sits above Autonomous, so inserting or removing it moved that toggle under a pointer
+ *  mid-click (hearsay-tools/cezarion#1605). Only the picker waits for the repo. */
 function BaseBranchRow({ repo }: { repo: ReturnType<typeof useRepo> }) {
-  if (!repo.data && !repo.isPending) return null
   return (
     <div data-slot="base-branch-row" className="new-task-base-branch flex items-center justify-between gap-2 text-xs text-muted-foreground">
       <span>Base branch</span>

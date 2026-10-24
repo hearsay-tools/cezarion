@@ -419,14 +419,19 @@ describe('the hero surface', () => {
 
   // hearsay-tools/cezarion#1605: Base branch sits above Autonomous. Inserting it when `/repo`
   // answered moved that toggle mid-click, so a browser's second click hit the Base branch row.
-  it('keeps the rows above Autonomous in place while the repo loads', async () => {
+  // Removing it when `/repo` failed moved the toggle the same way.
+  it.each([
+    { outcome: 'answers', status: 200 },
+    { outcome: 'fails', status: 404 },
+  ])('keeps the rows above Autonomous in place when the repo $outcome', async ({ status }) => {
     let answerRepo!: () => void
     serve({
       repo: () => new Promise<Response>((resolve) => {
-        answerRepo = () => resolve(new Response(JSON.stringify(REPO), { headers: { 'content-type': 'application/json' } }))
+        const body = status === 200 ? REPO : { error: 'no repo' }
+        answerRepo = () => resolve(new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }))
       }),
     })
-    renderNewTask()
+    const { client } = renderNewTask()
     await pillReady()
     const rowsAboveAutonomous = () => {
       const rows: Element[] = []
@@ -436,10 +441,14 @@ describe('the hero surface', () => {
     const pending = rowsAboveAutonomous()
     expect(pending[0]?.textContent).toContain('Base branch')
     answerRepo()
-    await waitFor(() => expect(document.querySelector('[data-slot="base-pill"]')).not.toBeNull())
-    const loaded = rowsAboveAutonomous()
-    expect(loaded).toHaveLength(pending.length)
-    expect(loaded.every((row, index) => row === pending[index])).toBe(true)
+    const repoStatus = () => client.getQueryCache().findAll().find((query) => query.queryKey.at(-1) === 'repo')?.state.status
+    await waitFor(() => {
+      expect(repoStatus()).toBe(status === 200 ? 'success' : 'error')
+      const settled = rowsAboveAutonomous()
+      expect(settled).toHaveLength(pending.length)
+      expect(settled.every((row, index) => row === pending[index])).toBe(true)
+    })
+    expect(document.querySelector('[data-slot="base-pill"]') !== null).toBe(status === 200)
   })
 
   it('keeps run options in a disclosure separate from prompt, agent selection, and submission', async () => {
