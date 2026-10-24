@@ -435,7 +435,16 @@ grep -lE "$P" packages/web/e2e/*.e2e.ts packages/cezar/test/e2e/*.test.ts
 
 Require passing results for these matches alongside the unit parity suites in
 [Runner regressions ship with shared coverage](#runner-regressions-ship-with-shared-coverage)
-(hearsay-tools/cezarion#1251). With Squeal validating, read and wait for the
+(hearsay-tools/cezarion#1251). A `mock-*.mjs` edit triggers this rule when it
+changes the frames that an existing `mock:<scenario>` sends, or where that
+scenario's turn ends, for the configuration a runner sends at shipped defaults.
+A new scenario does not trigger it. A branch that the shipped configuration never
+reaches does not trigger it either, for example a branch for a misconfigured
+runner or for a configuration no runner sends yet. In hearsay-tools/cezarion#1334,
+the Codex mock's new MCP tool gate asks only when cezar's own MCP server is not
+in `approve` mode, and the Codex runner sends `approve` whenever it registers
+that server. When a mock edit does not trigger this rule, the PR's Verification
+section says why. With Squeal validating, read and wait for the
 selected files through `squeal status --wait 60000 <files>`; if slow results are
 not current, use `squeal run --slow --wait 60000`. Without Squeal, run the browser
 matches with `npm run test:e2e -- <specs>` from the repo root. Packaged matches
