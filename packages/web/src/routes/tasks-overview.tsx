@@ -1475,7 +1475,8 @@ export function TasksOverviewRoute() {
   // child mounts would make the gate unmount us, then mount/retry forever offline.
   const projects = useProjects({ retryOnMount: false })
   const projectName = projects.data?.projects?.find((project) => project.id === projectId)?.name
-  const hasAutomationTasks = (runs.data ?? []).some((run) => run.automationId !== undefined)
+  // Older archived pages count too: a task found only there still needs its automation's name.
+  const hasAutomationTasks = [...(runs.data ?? []), ...(archived.pages?.runs ?? [])].some((run) => run.automationId !== undefined)
   const automationNameIn = useAutomationNames([undefined], health.data?.capabilities?.automations === true && hasAutomationTasks)
   const automationName = React.useCallback((automationId: string) => automationNameIn(undefined, automationId), [automationNameIn])
   const referenceRequests = React.useMemo(

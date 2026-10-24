@@ -1235,6 +1235,28 @@ describe('TasksOverviewRoute — wired to the app', () => {
     expect(screen.queryByRole('button', { name: 'Show older archived' })).toBeNull()
   })
 
+  it('names an automation whose task is only on an older archived page (hearsay-tools/cezarion#1616)', { timeout: 30_000 }, async () => {
+    const window = Array.from({ length: 200 }, (_, i) => run({ id: `win-${i}`, archived: true, createdAt: ago(1_000_000 + i * 1000) }))
+    const older = { ...run({ id: 'older-auto', archived: true, createdAt: ago(9_000_000) }), automationId: 'nightly' }
+    fetchMock.mockImplementation(async (input) => {
+      const url = String(input)
+      if (url === '/api/v1/health') return json({ capabilities: { automations: true } })
+      if (url === '/api/v1/run-summaries?archived=recent') return json(window)
+      if (url === '/api/v1/run-summaries/archived?limit=200') return json({ runs: [...window, older], nextCursor: null, total: 201 })
+      if (url.includes('/automations')) {
+        return json({ available: true, timeZone: 'UTC', scheduler: { state: 'idle' }, automations: [{ id: 'nightly', name: 'Nightly sweep', counts: {} }] })
+      }
+      return json([])
+    })
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter initialEntries={['/?archived=1']}><ListViewProvider><TasksOverviewRoute /></ListViewProvider></MemoryRouter>
+      </QueryClientProvider>,
+    )
+    await waitFor(() => expect(tableRow('older-auto')).not.toBeNull())
+    await waitFor(() => expect(tableRow('older-auto')!.textContent).toContain('Nightly sweep'))
+  })
+
   it('keeps a tab switched while the typed search is still on its way to the URL (hearsay-tools/cezarion#1616)', async () => {
     renderApp([run({ id: 'act', title: 'Needle act', status: 'running' }), run({ id: 'arc', title: 'Needle arc', status: 'done', archived: true })])
     await waitFor(() => expect(tableRow('act')).not.toBeNull())
