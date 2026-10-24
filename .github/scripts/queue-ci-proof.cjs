@@ -7,7 +7,6 @@ const REVIEW = 'Automated Code Review';
 const REQUIRED_QUEUE_JOBS = [
   'Classify pull request change surface', 'Classify PR shape', 'Typecheck, unit, build, and package',
   ...[1, 2, 3].map(n => `Vitest shard ${n}/3`),
-  ...[1, 2].map(n => `Node 24.15.0 floor, unit shard ${n}/2`),
   ...[1, 2, 3, 4].map(n => `Cockpit browser E2E shard ${n}/4`), VERIFY, REVIEW, 'Validate reviewed queue entry',
 ];
 const validSha = value => typeof value === 'string' && /^[a-f0-9]{40}$/.test(value);

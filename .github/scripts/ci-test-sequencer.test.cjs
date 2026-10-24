@@ -96,44 +96,22 @@ test('invalid reserved work cannot silently corrupt shard assignment', async () 
   }
 });
 
-test('floor sequencing reserves fixed work and includes every discovered specification once', async () => {
-  const { default: FloorSequencer } = await import('./node-floor-test-sequencer.mjs');
-  const specifications = [
-    { moduleId: '/repo/a.test.ts', project: { name: 'one' } },
-    { moduleId: '/repo/a.test.ts', project: { name: 'two' } },
-    { moduleId: '/repo/new.test.ts', project: { name: 'one' } },
-  ];
-  const selected = [];
-  for (const index of [1, 2]) {
-    const sequencer = new FloorSequencer({ config: { root: '/repo', maxWorkers: 4, shard: { index, count: 2 } } });
-    assert.equal(sequencer.shardCosts[0], 155000 * 4);
-    assert.equal(sequencer.shardCosts[1], 0);
-    assert.ok(sequencer.durations['packages/cezar/src/workflows/ci-wait-failure-parity.test.ts'] > 0);
-    selected.push(...await sequencer.shard(specifications));
-  }
-  assert.equal(selected.length, specifications.length);
-  assert.deepEqual(new Set(selected), new Set(specifications));
-  const invalid = new FloorSequencer({ config: { root: '/repo', maxWorkers: 0, shard: { index: 1, count: 2 } } });
-  assert.throws(() => invalid.shardCosts, /positive integer maxWorkers/);
-});
-
-test('the actual floor workflow command loads a sequencer constructor', async () => {
+test('the actual LTS workflow command loads all unit projects and a sequencer constructor', async () => {
   const { createVitest, parseCLI } = await import('vitest/node');
   const root = join(__dirname, '..', '..');
   const workflow = parse(readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8'));
-  const step = workflow.jobs['node-floor'].steps.find(step => step.name === 'Run server and cockpit unit suites');
+  const job = workflow.jobs.vitest;
+  const step = job.steps.find(step => step.name === 'Run server and cockpit unit suites');
   const npmTest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts.test;
-  for (const index of workflow.jobs['node-floor'].strategy.matrix.shard) {
+  for (const index of job.strategy.matrix.shard) {
     const command = step.run.replace('npm test --', npmTest).replaceAll('${{ matrix.shard }}', String(index));
     const { options } = parseCLI(command);
     const vitest = await createVitest('test', { ...options, root, watch: false });
     try {
       const Sequencer = vitest.config.sequence.sequencer;
       assert.equal(typeof Sequencer, 'function', 'Vitest must receive a constructor, not a CLI path string');
-      const sequencer = new Sequencer(vitest);
-      assert.deepEqual(sequencer.shardCosts, [155000 * 4, 0]);
-      assert.deepEqual(vitest.config.shard, { index, count: 2 });
-      assert.equal(vitest.projects.length, 4, 'the floor retains all four unit projects');
+      assert.deepEqual(vitest.config.shard, { index, count: 3 });
+      assert.equal(vitest.projects.length, 4, 'LTS retains all four unit projects');
     } finally {
       await vitest.close();
     }

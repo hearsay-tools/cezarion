@@ -25,7 +25,7 @@ your phone, working your backlog while you're away.
 [A look inside](#a-look-inside) · [What Cezarion does best](#what-cezarion-does-best-) · [What it solves](#what-it-solves) · [Who it's for](#who-its-for) · [Quick start](#quick-start) · [How it works](#how-it-works) · [Core concepts](#core-concepts) · [Cockpit tour](#cockpit-tour) · [Agent backends](#coding-agent-backends) · [Remote access](#remote-access-host-cezarion-on-a-server)
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-![Node 24.15+](https://img.shields.io/badge/Node-24.15%2B-339933)
+![Node 24.21.0+](https://img.shields.io/badge/Node-24.21.0%2B-339933)
 ![TypeScript 7.x](https://img.shields.io/badge/TypeScript-7.x-3178c6)
 ![Zero config](https://img.shields.io/badge/config-zero-success)
 ![Embedded SQLite](https://img.shields.io/badge/database-embedded%20SQLite-success)
@@ -183,7 +183,7 @@ and an orchestrator keeps a whole queue of them moving.
 
 ## Quick start
 
-**Prerequisites:** Node 24.15+, at least one logged-in agent CLI — the
+**Prerequisites:** Node 24.21.0+, at least one logged-in agent CLI — the
 [`claude` CLI](https://github.com/anthropics/claude-code) (Pro/Max subscription),
 the [`codex` CLI](https://github.com/openai/codex),
 [OpenCode](https://opencode.ai), the
@@ -1503,7 +1503,7 @@ hosted cockpit (`CEZ_REMOTE=1`) is read-only and never serves home-file contents
 End-to-end, from a fresh clone to a global `cez` command you can run in **any**
 repo on your machine — no npm publish required.
 
-**1. Prerequisites** — Node 24.15+ and `git` (plus at least one logged-in agent CLI,
+**1. Prerequisites** — Node 24.21.0+ and `git` (plus at least one logged-in agent CLI,
 as in [Quick start](#quick-start)).
 
 **2. Clone & install**
