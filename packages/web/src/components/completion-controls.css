@@ -16,3 +16,55 @@
 .completion-control:active {
   background: var(--muted);
 }
+
+[data-slot='completion-controls'][data-embedded] {
+  gap: 0;
+}
+
+[data-embedded] .completion-control {
+  align-items: start;
+  padding-block: 13px;
+  border-block-start: 1px solid var(--border);
+  border-radius: 0;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.completion-control-help {
+  display: block;
+  margin-block-start: 3px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 400;
+  line-height: 1.65;
+}
+
+[data-embedded] .completion-switch {
+  inline-size: 44px;
+  block-size: 44px;
+  margin-block-start: -7px;
+  background: transparent;
+}
+
+[data-embedded] .completion-switch::before {
+  content: '';
+  position: absolute;
+  inset-inline: 1px;
+  inset-block: 9px;
+  border-radius: inherit;
+  background: var(--input);
+}
+
+[data-embedded] .completion-switch[data-state='checked']::before {
+  background: var(--accent-strong);
+}
+
+[data-embedded] .completion-switch [data-slot='switch-thumb'] {
+  position: relative;
+  margin-inline-start: 1px;
+}
+
+[data-embedded] .completion-order-note {
+  padding-block: 12px;
+  border-block-start: 1px solid var(--border);
+}
