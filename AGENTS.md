@@ -110,6 +110,31 @@ names and hand-written default copies with different access implications. The
 table makes those cases explicit for design review; it does not decide which
 ones should share a policy.
 
+**Enumerate worktree cases before changing a running task's files.** A spec or
+plan that adds, replaces or removes files in a running task's worktree MUST carry
+a **Worktree cases** table, reviewed with the spec or plan before implementation
+starts. Skill copies from `packages/cezar/src/skills-provision.ts` and the
+personal config layer from `packages/cezar/src/agent-config/seed.ts` are such
+files. Use one row per case: **Case | Files written, kept or removed | Worktree
+state at the next step, Continue and restart**. State when a case cannot happen,
+and why.
+
+Cover all of these cases: a catalog or source that has not loaded yet; the same
+name from two sources; records written by an older cezar version; a crash between
+two writes (see *Commit an outcome with what it depends on, or after it*); edits
+the agent made to the files, including files it added; and the source removing
+the item.
+
+hearsay-tools/cezarion#1494 and hearsay-tools/cezarion#1539 are the worked
+example. The hearsay-tools/cezarion#1494 design enforced switched-off team skills
+in provisioning, but did not say what happens to copies already in a running
+task's worktree. Three fix rounds tried to remove them on Continue, and each
+review found a new case: an enabled copy deleted while its source was still
+loading, duplicate names across sources, older manifest entries with no recorded
+source, a crash between the removal and the replacement write, and agent edits
+lost to a full re-install. The code was reverted, and hearsay-tools/cezarion#1539
+now holds the five cases.
+
 **Commit an outcome with what it depends on, or after it.** A write that records
 an outcome (`delivered`, `charged`, `settled`, `answered`) must commit atomically
 with the write holding what that outcome needs, or after that write commits.
@@ -134,10 +159,24 @@ wake at the budget cap cancelled its timer without opening the budget wait.
 field.** `ActiveRun` is built in `execute` AND in `runContinuation`; open-mercato/cezar#811 populated
 `state.skills` in the first only, so registry `/skill` expansion worked on new tasks and
 silently failed on every Continue and every restart recovery. The same shape recurs in the
-two near-identical turn-end handlers in `workflows/run.ts` (streaming and non-streaming):
-a lifecycle change applied to one of them ships half a fix. When you add a field that a
-delivery path reads, add it everywhere in the same commit or route both sites through one
-helper.
+fresh step's and the Continue's turn-end handlers in `workflows/run.ts` (`runAgentStep` and
+`runContinuation`): a lifecycle change applied to one of them ships half a fix. When you add
+a field that a delivery path reads, add it everywhere in the same commit or route both sites
+through one helper.
+
+**List each handler's side effects, in order, before you merge handlers into one.** Each
+handler carries its own order of side effects, and the merged method can lose one step of
+that order while every test stays green. Before you merge several handlers into one method,
+list what each handler does, in order, for each entry and each case. Name its input
+delivery, the timers or waits it opens, the gates it calls and the heartbeat or note it
+writes. Pin each line with a test, or name the test row that already covers it, before you
+delete the handler. hearsay-tools/cezarion#1534 is the worked example: it merged the twin
+turn-end blocks, `applyTurnEnd`, `parkAtTurnEnd`, `refuseCompletion` and
+`takeCompletionRefusal` into `settleTurn`, and two review rounds each found a lost
+guarantee. `refuseCompletion` left a mid-turn refusal to the live turn end; the new `gate`
+entry settled it at once, so it skipped queued input and parked before the turn ended.
+`applyTurnEnd` opened the monitoring timer for a turn that also carried an ask line; the
+new method opened it only after the input step, which an ask skips.
 
 **A fail-open helper needs a populated-input guarantee, or it lies.**
 `expandRegistrySlashSkill` returning its input unchanged on no-match is right on its own —
@@ -256,7 +295,11 @@ a `*-cells.testkit.ts`, and add a guard that every runner has its file. Split a
 runner's file again by row group when one runner alone is too slow.
 `core/harness-parity-cells.testkit.ts` and
 `workflows/waits-parity-cells.testkit.ts` are the examples
-(hearsay-tools/cezarion#1288).
+(hearsay-tools/cezarion#1288). Vitest 4 fails a suite that registers no test,
+so the file that runs the guard and the single-runner cells must not register
+a `describe` whose body holds only runner cells; `describeRunners` in
+`core/harness-parity-cells.testkit.ts` is the example
+(hearsay-tools/cezarion#1375).
 
 Before opening a PR that changes `packages/cezar/src/workflows/run.ts`'s wait,
 turn-end, failure or step-settlement paths, verify every suite matching
@@ -369,7 +412,7 @@ Rules that follow from that:
 | Workflows (YAML chains, steps, retries)                                                                                                                                                                       | `packages/cezar/src/workflows/types.ts`, then `packages/cezar/src/workflows/load.ts`, `packages/cezar/src/workflows/run.ts`                                                                                                                                                                | A step is agent (`prompt`/`skill`) XOR check (`command`); a file has `steps` XOR the portable `skills` shorthand — both enforced by zod refinements. `onFail.retry` may only reference an _earlier_ step (`stepsIssue`). `{{task}}` is the substitution token. `quick-task` is the built-in zero-config workflow; built-ins always come back after delete.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Run search (project tasks, All tasks, archived pages and ⌘K) | `packages/web/src/lib/tasks-table.ts`, `packages/web/src/routes/tasks-overview.tsx`, `packages/web/src/lib/global-tasks.ts`, `packages/web/src/routes/global-tasks.tsx`, then `packages/cezar/src/runs/run-search.ts`, `packages/cezar/src/server/server.ts`, `packages/cezar/src/runs/store.ts`, `packages/cezar/src/runs/run-index.ts` | `filterRuns` (`tasks-table.ts`) filters the project task list in `tasks-overview.tsx`. `haystack`, `filterGlobalTasks` and `tasksExcludingFacet` (`global-tasks.ts`) feed the All tasks list and its facet counts in `global-tasks.tsx`. On the server, `matchesRunQuery` and `sqlPrefilterTokens` (`run-search.ts`) serve `GET /api/v1/run-summaries/archived` (`server.ts`), `RunStore.searchRunSummaries` (`store.ts`) and the cold reader `searchRunIndexFromDisk` (`run-index.ts`) for the ⌘K palette. A new search field must reach every reader, or the change must explain why a reader leaves it out. Preserve intentional differences: the palette excludes automation names because it shows no origin line, and the SQL prefilter must not discard a match the final predicate accepts. hearsay-tools/cezarion#1637 is the worked example: archived pages, All tasks facet counts and server archive search each needed a follow-up fix. |
 | Pending asks (`cezar_ask`, the ask card, a new field on the ask) | `packages/cezar/src/workflows/run.ts`, then `packages/cezar/src/runs/transcript-facts-fold.ts`, `packages/cezar/src/delegation/questions.ts`, `packages/web/src/routes/task-thread/thread-state.ts`, `packages/cezar/src/task-cli/projections.ts` | A pending ask has four kinds of reader. `workflows/run.ts` opens the human wait and emits the `ask.requested` event. `runs/transcript-facts-fold.ts` and `delegation/questions.ts` route a worker's question to its parent. `routes/task-thread/thread-state.ts` builds the cockpit ask card. `task-cli/projections.ts` (`projectStatus`, fed by `pendingQuestion` in `task-cli/cli.ts` and `runs/webhook.ts`) feeds `cez task status` and the task webhook; these read the `ask.requested` event, not the human wait, so a design that follows the wait misses them. A field added to the ask card must reach every reader, or the spec must say why a reader leaves it out. hearsay-tools/cezarion#1471 is the worked example: its `context` field missed the CLI and webhook projections until review round 1. |
-| Skills (Markdown playbooks, team repos)                                                                                                                                                                       | `packages/cezar/src/skills.ts`, `packages/cezar/src/skills-remote.ts`                                                                                                                                                                                                       | A skill is a `.md` file with optional YAML frontmatter (`name`, `description`); its body becomes the agent's extra system prompt. Discovery precedence is local-first: `.ai/cezar/skills` → `.ai/skills` → `.agents/skills` + agent mirrors → global → team repo. Missing dirs are fine; team-skill loading never blocks on the network (background cache in `~/.cache/cez/`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Skills (Markdown playbooks, team repos)                                                                                                                                                                       | `packages/cezar/src/skills.ts`, `packages/cezar/src/skills-remote.ts`, `packages/cezar/src/workflows/run.ts`, `packages/cezar/src/ui-state.ts`                                                                                                                                                                                                       | A skill is a `.md` file with optional YAML frontmatter (`name`, `description`); its body becomes the agent's extra system prompt. Discovery precedence is local-first: `.ai/cezar/skills` → `.ai/skills` → `.agents/skills` + agent mirrors → global → team repo. Missing dirs are fine; team-skill loading never blocks on the network (background cache in `~/.cache/cez/`). A skill list has two kinds of reader. Fresh discovery goes through `discoverSkills` (`skills.ts`), which applies the project's team-skill off-list (`disabledTeamSkills` in `ui-state.json`) itself. Its callers are the `GET /skills` and `POST /skills/refresh` routes, the planner (`planner.ts`), a worker's `--skill` lookup (`delegation/service.ts`) and auto-naming (`autoNameRun` in `workflows/run.ts`). `GET /skills/importable` returns the unfiltered team list on purpose, so the Skills catalog can switch a skill back on. The run's saved list, `state.skills` in `workflows/run.ts`, is discovered when the run starts or continues, so it can predate a change made during the run. Two methods read it and apply the off-list as it is at that moment. `provisionRunSkills` installs the step skill, a leading `/name` and their companions. `enabledSkills` feeds live `/name` expansion in `deliverMessage`, a later step's skill lookup and prompt in `runAgentStep`, and the Continue skill lookup and opening prompt in `runContinuation`. A change to which skills a run may use must reach every reader listed here, or the spec must say why a reader leaves it out. hearsay-tools/cezarion#1494 is the worked example: PR hearsay-tools/cezarion#1541 applied the off-list to provisioning first, and two review rounds then found the `state.skills` readers still sending a switched-off skill to the agent. A state file that a synchronous reader reads is written atomically: a temporary file, then a rename, as `writeProjectUiState` (`ui-state.ts`) does. `enabledSkills` reads `ui-state.json` synchronously (`readProjectUiStateSync`), and a write in place lets it see a partial file, which parses as `{}`: an empty off-list. |
 | Runs store / state persistence                                                                                                                                                                                | `packages/cezar/src/runs/store.ts`                                                                                                                                                                                                                           | One embedded SQLite file per project, `.ai/cezar/runs.db` (`node:sqlite`, WAL; Node 24.21.0 is the floor, verified by build/package CI), plus one append-only NDJSON event file per run. **Read first, in this order: `runs/run-database.ts` (the only SQL; schema, `transaction()`, claims, fenced writes), `runs/run-row.ts` (record to row: columns, summary, `isLiveRecord`), `runs/raw-record.ts` (keeps unknown fields across a write), `runs/store.ts` (`RunStore`, import, open), then `runs/run-index.ts` (read-only cold reader), `runs/legacy-index.ts` and `runs/store-open-error.ts`.** Each row holds the complete `RunRecord` JSON plus a stored `toRunSummary()` column and the few columns the store queries; `RunRecord` stays a zod schema, so new fields must still be optional or defaulted and rows written by an older cezar still parse. **Only the live set is in memory**: queued, running and waiting runs, runs a `RunManager` holds, pending wake timers and parents waiting on workers (`isLiveRecord`, plus `pin`). Finished runs load from the row on demand as fresh copies (frozen under vitest), so never keep or mutate one, and never rebuild a full scan of `runs`: add an indexed column. A delegation family is held, claimed and released as one unit (`run_claims`: session UUID, pid and start identity, checked inside the write transaction), so two processes on one project never both write a run. A foreign live run is readable and every control answers 409 `{ error }` (`requireRunControl`); `run_claims` and `run_conflicts` are private. `runs.json` is imported once on first open into `runs.db` (exact bytes kept in `runs.json.pre-sqlite.bak`, completion marker in the same transaction), never written again and never deleted; there is no dual-write, so an older cezar sees only history up to the import. **A store that cannot open never reads as empty**: `RunStore.open` throws a typed `RunStoreOpenError` (`corrupt`, `busy`, `permission`, `disk-full`, `unsupported-schema`, `legacy-writer`, `other`), a damaged file is left byte-for-byte alone, and `serve` answers 409 `{ error }` for that project's routes instead of treating it as no runs. Recovery steps live in `BACKWARD_COMPATIBILITY.md` section 3. Cold readers (`readRunIndexFromDisk`) open `runs.db` read-only and never build a context. Spec: `.ai/specs/2026-10-05-sqlite-run-store.md`. A **queued** run's prompt stays editable until the scheduler picks it up (open-mercato/cezar#472): `task` plus the optional `queuedMessages` stack are folded into `{{task}}` at dequeue, and that fold is read-only — never write it back to the record. The store is also the in-process event bus for SSE.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Task handoff journal (`CEZ_HANDOFF_FILE`, `.ai/cezar/runs/<runId>.handoff.md`) | `packages/cezar/src/handoff.ts`, then the two readers' files `packages/cezar/src/server/server.ts` and `packages/cezar/src/server/forge/github.ts` | A per-task journal at `.ai/cezar/runs/<runId>.handoff.md` (spec 007, `.ai/specs/007-handoff-file-todos.md`), outside the worktree so it survives worktree removal. `seedHandoffFile` writes the skeleton. The agent finds the file through `CEZ_HANDOFF_FILE` and the `HANDOFF_ONLY_INSTRUCTIONS` system-prompt fragment, and keeps `## Progress log` (newest at the top) and `## Resume notes`. **The top of `## Progress log` belongs to the agent.** Two features read its first lines as the agent's own summary: `handoffProgressExcerpt` (`handoff.ts`) feeds the variants compare column (`handoffExcerpt` in the `GET /groups/:groupId` route of `server/server.ts`, spec 010), and `buildPrBody` (`server/forge/github.ts`) writes the body of a draft PR opened from the cockpit (Goal plus the first lines of the Progress log). **cezar writes its own records to a cezar-owned section, never the Progress log**, as `## Autosave (cezar)` does since hearsay-tools/cezarion#1111: `appendHandoffAutosaveReport` and `recordHandoffPeriodicAutosave` write there, and the first report creates the section right before `## Progress log`. One exception exists on purpose: `appendHandoffHeartbeat`'s lifecycle lines (`turn complete — …` and `step "…" complete — …` from `workflows/run.ts`, plus `picked from N variants` in `server.ts`) go to the top of the Progress log as the fallback that keeps the journal current when the agent writes nothing. `handoffProgressExcerpt` skips the lifecycle lines (and `session idle-closed — …`) whenever the agent wrote a line of its own, because the no-wait nudge's extra turn writes more of them (hearsay-tools/cezarion#1234). A new cezar record does not join them. The first design of hearsay-tools/cezarion#1004 wrote the autosave report at the top of the Progress log, and only CI's cockpit E2E (`variants-compare.e2e.ts`) caught it. |
 | Web UI (cockpit)                                                                                                                                                                                              | `packages/web/src/app.tsx`, then `packages/web/src/routes.tsx`, `packages/web/src/api/`, and the affected component/route                                                                                                                                    | React 19 + Vite + Tailwind v4 + shadcn/ui; source lives in `packages/web/` (its own npm workspace, `@open-mercato/cezar-web`, with the React/Vite/Tailwind deps in ITS manifest, not the root's), build output in ignored `packages/cezar/web/dist/`. Anything the server and the cockpit BOTH speak — the v2 protocol types, the `/api/v1/p/:projectId` scope helpers, and (as it grows) the typed API client — lives in the third workspace `packages/api-client/` (`@open-mercato/cezar-api-client`), which must stay Node-free: no `node:*` import and no `@types/node`, because it is bundled into the browser AND imported by the Node service. Keep one global SSE connection and patch the TanStack Query cache in place; authoritative refetch happens on reconnect/visibility. Preserve light/dark/system theming, mobile safe areas, keyboard access, and unit coverage. The legacy vanilla web app was deleted in R7; when `packages/cezar/web/dist` is missing the server answers every shell route with a built-in "run `npm run build:web`" hint page (`packages/cezar/src/server/static-ui.ts`). **Query strings:** write query updates through `useSearchParamsWriter`, never the raw `useSearchParams` setter: render-bound setters can lose earlier writes before a transition renders, and unchanged late navigation can return the reader to a page they left. Read-only `useSearchParams` is valid. The sole approved exception is file selection in `routes/task-git/task-files.tsx`: it pushes history so Back restores the previous file; the writer always replaces history. `packages/web/src/test/search-params-discipline.test.ts` guards raw setter bindings (including aliases) against a reasoned baseline that may only shrink. **Virtualized lists (`virtua`):** `Virtualizer` wraps each child, so put row styling and flags on the rendered item element, never on `ul > li` or `li + li` selectors. The GitHub examples in hearsay-tools/cezarion#1189 (pending merge) are `gh-row-item` in `packages/web/src/routes/github/github.tsx` and `github-layout.css`. In jsdom unit tests, supply scroll-element geometry through a `ResizeObserver` stub and a non-null `offsetParent`; see `packages/web/src/routes/github/github-geometry.testkit.ts` in that PR. In browser specs, scroll and collect rows (`allRowNumbersJs` in `packages/web/e2e/github-sidebar.e2e.ts` in that PR), or wait for one row, never a total DOM row count. Before virtualizing a list, grep `packages/web/e2e/*.e2e.ts` for `> li` and the list's `data-slot`. Small text on card-2: follow the [measured token table and lint rule](packages/web/docs/card-2-contrast.md). |
@@ -435,7 +478,16 @@ grep -lE "$P" packages/web/e2e/*.e2e.ts packages/cezar/test/e2e/*.test.ts
 
 Require passing results for these matches alongside the unit parity suites in
 [Runner regressions ship with shared coverage](#runner-regressions-ship-with-shared-coverage)
-(hearsay-tools/cezarion#1251). With Squeal validating, read and wait for the
+(hearsay-tools/cezarion#1251). A `mock-*.mjs` edit triggers this rule when it
+changes the frames that an existing `mock:<scenario>` sends, or where that
+scenario's turn ends, for the configuration a runner sends at shipped defaults.
+A new scenario does not trigger it. A branch that the shipped configuration never
+reaches does not trigger it either, for example a branch for a misconfigured
+runner or for a configuration no runner sends yet. In hearsay-tools/cezarion#1334,
+the Codex mock's new MCP tool gate asks only when cezar's own MCP server is not
+in `approve` mode, and the Codex runner sends `approve` whenever it registers
+that server. When a mock edit does not trigger this rule, the PR's Verification
+section says why. With Squeal validating, read and wait for the
 selected files through `squeal status --wait 60000 <files>`; if slow results are
 not current, use `squeal run --slow --wait 60000`. Without Squeal, run the browser
 matches with `npm run test:e2e -- <specs>` from the repo root. Packaged matches
@@ -677,12 +729,33 @@ attempts, changed run metadata, GitHub's date-query cap, or the 1,500-request /
 repeat an incomplete scan. This evidence does not replace the reproduction or
 before/after verification required for a changed wait.
 
+**Cite a CI failure by run, attempt and job ID**, for example
+`run 39253390769 attempt 1, job 118062500873`. "Re-run failed jobs" adds an
+attempt to the same run, so a run ID alone can lead a reader to a passing
+rerun. `count-test-ci-failures.cjs` prints each failure in this form.
+
+`gh run view <run-id> --log` and `--log-failed` read the latest attempt unless
+you pass `--attempt <n>`. `--job <job-id>` does not select that job's attempt:
+`gh` reads the latest attempt and takes the job with the same name, so after a
+rerun it can show the passing log. Read a failed attempt that a rerun replaced
+by its job ID:
+
+```bash
+gh api --allow-escape-sequences repos/hearsay-tools/cezarion/actions/jobs/<job-id>/logs > job.log
+# List the job IDs of one attempt of a run:
+gh api repos/hearsay-tools/cezarion/actions/runs/<run-id>/attempts/<n>/jobs --jq '.jobs[] | {id, name, conclusion}'
+```
+
+Without `--allow-escape-sequences`, `gh api` exits 1 and writes no log.
+`gh run view <run-id> --attempt <n> --log-failed` also reads the failed attempt.
+
 **When filing a load-dependent test failure, preserve the diagnostic evidence.**
 Quote the full error line verbatim, with nothing cut, including any list after
 its `;`. Name the stack frame that throws the error, rather than an operation
 named in the message. Give the full log location: the originating repo's
-`.ai/cezar/runs/<runId>.ndjson` (or `.ndjson.br`), or `squeal why <check>`
-with the check identifier and its worktree path.
+`.ai/cezar/runs/<runId>.ndjson` (or `.ndjson.br`), `squeal why <check>`
+with the check identifier and its worktree path, or the CI run, attempt and
+job IDs.
 
 Plain text searches do not read Brotli-compressed `.ndjson.br` logs. To read one,
 replace `<file.ndjson.br>` with its path:

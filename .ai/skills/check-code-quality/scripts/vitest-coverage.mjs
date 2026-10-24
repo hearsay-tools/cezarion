@@ -21,9 +21,9 @@ export function resolveVitest(cwd) {
 }
 
 /** The argv for one coverage run in a child process. */
-export function vitestCoverageArguments({ cwd, files, tests, projects, testTimeout }, directory) {
+export function vitestCoverageArguments({ cwd, files, tests, projects, testTimeout }, directory, processCoverage) {
   resolveVitest(cwd);
-  return [fileURLToPath(import.meta.url), JSON.stringify({ files, tests, projects, testTimeout, directory })];
+  return [fileURLToPath(import.meta.url), JSON.stringify({ files, tests, projects, testTimeout, directory, processCoverage })];
 }
 
 // Vitest appends every test.include glob to coverage.exclude after it resolves the
@@ -35,8 +35,17 @@ export function includeTestFiles(vitest) {
   for (const config of configs) config.coverage.exclude = config.coverage.exclude.filter(glob => !globs.has(glob));
 }
 
+// Vitest copies test.env into each worker's process.env after the worker starts, so the
+// workers record no process coverage. The Node processes a test spawns inherit the variable
+// and write V8 coverage there, which coverage.mjs merges into Vitest's report.
+export function recordChildCoverage(vitest, directory) {
+  for (const config of [vitest.config, ...vitest.projects.map(project => project.config)]) {
+    config.env = { ...config.env, NODE_V8_COVERAGE: directory };
+  }
+}
+
 async function main([request]) {
-  const { files, tests, projects, testTimeout, directory } = JSON.parse(request);
+  const { files, tests, projects, testTimeout, directory, processCoverage } = JSON.parse(request);
   const { createVitest } = await import(pathToFileURL(resolveVitest(process.cwd())).href);
   // The Vitest CLI sets these before it loads the config.
   process.env.TEST = 'true';
@@ -51,6 +60,7 @@ async function main([request]) {
   });
   try {
     includeTestFiles(vitest);
+    recordChildCoverage(vitest, processCoverage);
     await vitest.start(tests);
   } catch (error) {
     process.exitCode = 1;
