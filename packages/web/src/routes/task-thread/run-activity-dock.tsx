@@ -29,13 +29,13 @@ import { AgentList } from './agents-dock'
 import { PlanList, planCounts } from './plan-dock'
 import { collectSubagents, subagentCounts } from './subagent-dock'
 import { StepRail, activeStepIndex, railVisual } from './step-rail'
-import { Cleanup, WorkerActivitySection, WorkerWaitDetails, hasCleanupDetails, hasWorkerWaitDetails, useWorkersVerdict } from './run-relationships'
+import { Cleanup, WorkerActivitySection, WorkerWaitDetails, hasCleanupDetails, hasWorkerWaitDetails, useWorkersVerdict, type WorkersVerdict } from './run-relationships'
 import { ActivityRow, meterText } from './run-activity-row'
 import { ActivitySummary, type SummaryItem } from './activity-summary'
 import { ActivityReferences } from './activity-references'
-import { useAgentIdentity } from './run-agent-identity'
+import { useAgentIdentity, type AgentIdentity } from './run-agent-identity'
 import { isSessionOpen, resumeHint, runActionFlags } from './run-actions'
-import { runStatusLine } from './run-status'
+import { runStatusLine, type RunStatusLine } from './run-status'
 import { RunWaitDetails, ciWaitReferences, hasWaitDetails } from './run-waits'
 import { BranchCopy, LinkedReferences, WorkspaceTools, useResumeInTerminal, useRunReferenceRequests } from './run-workspace'
 import { latestPlanEntries, type ThreadState } from './thread-state'
@@ -123,34 +123,8 @@ function SessionActivityCard({
   // and a reader opens the one they came for. Workers are the exception, open by default so
   // their task links stay directly reachable: they are navigation, not detail.
   const [sections, setSections] = useState<Record<string, boolean>>({})
-  const health = useHealth()
-  const metrics = usageMetricVisibility(health.data)
-  const runs = useRuns()
-  const queuePosition = run.status === 'queued' ? queuePositions(runs.data ?? []).get(run.id) : undefined
-  const line = runStatusLine(run, { queuePosition })
-  const conflicts = useConflictingPullRequests(prNumbers)
-  const sessionOpen = isSessionOpen(run)
-  const runIsTerminal = !sessionOpen && run.status !== 'queued'
-  const workflow = run.steps
-  const agents = useMemo(() => collectSubagents(currentThread.turns, runIsTerminal), [currentThread.turns, runIsTerminal])
-  const planEntries = latestPlanEntries(currentThread) ?? []
-  // Only roots own workers. A worker's parent link is always visible in the task header.
-  const hasWorkers = run.delegation?.role === 'root'
-  const cleanup = run.delegation?.role === 'worker' ? run.delegation.destroy : undefined
-  const workerWait = hasWorkerWaitDetails(run)
-  // Mounted for every run so the hook order never changes; it only fetches for a root.
-  const workers = useWorkersVerdict(run)
-  // Complete means SUCCEEDED, not merely settled: a failed or cancelled step keeps the green
-  // summary away, matching `subagentCounts` (which counts only `completed`) and the danger X
-  // the rail shows one click below. `skipped` stays complete — it never ran and never failed.
-  const workflowSucceeded =
-    workflow.length === 0 || workflow.every((step) => step.status === 'done' || step.status === 'skipped')
-  const agentCounts = subagentCounts(agents)
-  const planCountsValue = planCounts(planEntries)
-  const workflowName = workflowLabel(run)
-  const flags = runActionFlags(run)
+  const activity = useSessionActivity(run, currentThread, prNumbers)
   const resume = useResumeInTerminal(run)
-  const hasWorkspace = Boolean(run.branch || run.worktreePath || hasReferences || resumeHint(run) || hasCleanupDetails(cleanup))
 
   const isOpen = (key: SectionKey) => sections[key] ?? openSections.get(`${run.id}:${key}`) ?? key === 'workers'
   const toggle = (key: SectionKey) => {
@@ -158,7 +132,93 @@ function SessionActivityCard({
     openSections.set(`${run.id}:${key}`, next)
     setSections((state) => ({ ...state, [key]: next }))
   }
+  const disclosure = (key: SectionKey): SectionDisclosure => ({ open: isOpen(key), onToggle: () => toggle(key) })
 
+  return (
+    <section
+      data-slot="run-activity-dock"
+      ref={scrollFold.ref}
+      data-state={open ? 'open' : 'collapsed'}
+      className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-xs"
+    >
+      <ActivityHeader
+        run={run}
+        identity={identity}
+        activity={activity}
+        references={references}
+        open={open}
+        onToggle={() => {
+          openByRun.set(run.id, !open)
+          setChosen(!open)
+          scrollFold.chose(!open)
+        }}
+      />
+      {open ? (
+        <div className="flex min-w-0 flex-col border-t border-border">
+          <StatusSection run={run} activity={activity} {...disclosure('status')} />
+          <WorkflowSection run={run} desktop={desktop} automations={activity.automations} {...disclosure('workflow')} />
+          <SubagentsSection activity={activity} desktop={desktop} onOpenWorker={onOpenWorker} {...disclosure('subagents')} />
+          <WorkersSection run={run} {...disclosure('workers')} />
+          <PlanSection activity={activity} desktop={desktop} {...disclosure('plan')} />
+          <UsageSection run={run} identity={identity} activity={activity} {...disclosure('usage')} />
+          <WorkspaceSection
+            run={run}
+            references={references}
+            conflicts={activity.conflicts}
+            hasReferences={hasReferences}
+            onResume={() => resume.mutate()}
+            {...disclosure('workspace')}
+          />
+        </div>
+      ) : null}
+    </section>
+  )
+}
+
+/** One section row's open state and toggle, owned by the card so its memory survives a fold. */
+interface SectionDisclosure {
+  open: boolean
+  onToggle: () => void
+}
+
+type SessionActivity = ReturnType<typeof useSessionActivity>
+
+/** Everything the header and more than one section read, derived once per render. */
+function useSessionActivity(run: ApiRun, currentThread: ThreadState, prNumbers: number[]) {
+  const health = useHealth()
+  const metrics = usageMetricVisibility(health.data)
+  const runs = useRuns()
+  const queuePosition = run.status === 'queued' ? queuePositions(runs.data ?? []).get(run.id) : undefined
+  const line = runStatusLine(run, { queuePosition })
+  const conflicts = useConflictingPullRequests(prNumbers)
+  const runIsTerminal = !isSessionOpen(run) && run.status !== 'queued'
+  const agents = useMemo(() => collectSubagents(currentThread.turns, runIsTerminal), [currentThread.turns, runIsTerminal])
+  const planEntries = latestPlanEntries(currentThread) ?? []
+  // Mounted for every run so the hook order never changes; it only fetches for a root.
+  const workers = useWorkersVerdict(run)
+  const agentCounts = subagentCounts(agents)
+  const planCountsValue = planCounts(planEntries)
+  return {
+    line,
+    ...activityStatus(run, line, workers, agentCounts, planCountsValue),
+    ...usageValues(run, metrics),
+    conflicts,
+    waitReferences: ciWaitReferences(run),
+    agents,
+    agentCounts,
+    planEntries,
+    planCounts: planCountsValue,
+    automations: health.data?.capabilities?.automations === true,
+  }
+}
+
+type Counts = { done: number; total: number }
+
+function activityStatus(run: ApiRun, line: RunStatusLine, workers: WorkersVerdict, agentCounts: Counts, plan: Counts) {
+  // Complete means SUCCEEDED, not merely settled: a failed or cancelled step keeps the green
+  // summary away, matching `subagentCounts` (which counts only `completed`) and the danger X
+  // the rail shows one click below. `skipped` stays complete — it never ran and never failed.
+  const workflowSucceeded = run.steps.every((step) => step.status === 'done' || step.status === 'skipped')
   // Completeness is a claim about the RUN, not only about the rows on screen. A parent parked
   // on its workers carries no workflow, agent or plan rows at all, and a running run's visible
   // items settle between turns — both would otherwise read "All complete" mid-flight.
@@ -169,7 +229,7 @@ function SessionActivityCard({
     workflowSucceeded &&
     workers === 'complete' &&
     agentCounts.done === agentCounts.total &&
-    planCountsValue.done === planCountsValue.total
+    plan.done === plan.total
   // Withholding the green line is only half the job: a run that is OVER must never be
   // described as in progress (#402 feedback). Once the run is `done`, the only thing that can
   // still change is a worker the lookup has not settled — the thread's own rows are final, so
@@ -184,37 +244,104 @@ function SessionActivityCard({
         : workers === 'pending'
           ? 'In progress'
           : 'Incomplete'
-  const failed = line.attention.tone === 'danger' || run.status === 'cancelled'
+  return {
+    allComplete,
+    statusText,
+    failed: line.attention.tone === 'danger' || run.status === 'cancelled',
+    glyph: allComplete
+      ? <CircleCheckIcon aria-hidden className="size-3.5 shrink-0 text-success" />
+      : <StatusDot tone={line.attention.tone} shape={line.attention.shape} pulse={line.attention.pulse} />,
+  }
+}
+
+function usageValues(run: ApiRun, metrics: ReturnType<typeof usageMetricVisibility>) {
   const cost = metrics.cost && run.costUsd !== undefined ? formatCost(run.costUsd) : undefined
   const tokens = metrics.tokens && (run.inputTokens !== undefined || run.outputTokens !== undefined)
     ? <DirectionalUsage inputTokens={run.inputTokens} outputTokens={run.outputTokens} />
     : undefined
-  const glyph = allComplete
-    ? <CircleCheckIcon aria-hidden className="size-3.5 shrink-0 text-success" />
-    : <StatusDot tone={line.attention.tone} shape={line.attention.shape} pulse={line.attention.pulse} />
-  const conflictText = conflicts.length === 1 ? `PR #${conflicts[0]} conflicts` : `${conflicts.length} PRs conflict`
-  const waitReferences = ciWaitReferences(run)
-  const summaryReferences = [...new Map([...references, ...waitReferences].map(reference => [referenceKey(reference), reference])).values()]
-  // The saved canonical identity names the provider. The display helper can omit an identity
-  // that repeats the model, and a runner name does not identify who served the model.
-  const provider = run.modelIdentity?.includes('/') ? run.modelIdentity.split('/')[0] : undefined
-  const agentSummary: SummaryItem[] = [
-    ...(provider ? [{ id: 'provider', priority: 2, content: provider }] : []),
-    { id: 'model', priority: 4, content: identity.model },
-    { id: 'effort', priority: 3, content: identity.effort },
-    ...(cost ? [{ id: 'cost', priority: 1, content: cost }] : []),
-    ...(tokens ? [{ id: 'tokens', priority: 0, content: tokens }] : []),
-  ]
-  // The folded header names the step the Workflow row would show, through the same index and glyph,
-  // so the two can never disagree (hearsay-tools/cezarion#1478).
-  const activeStep = workflow.length > 0 ? workflow[activeStepIndex(workflow)]! : undefined
+  return { cost, tokens }
+}
+
+/** The status colour both the folded summary and the status row use. */
+function statusTone(activity: SessionActivity) {
+  return activity.allComplete ? 'text-success' : activity.failed && 'text-danger'
+}
+
+/** The workflow step the folded header names: the one the Workflow row would show, through the
+ *  same index and glyph, so the two can never disagree (hearsay-tools/cezarion#1478). */
+function activeWorkflowStep(steps: StepState[]) {
+  return steps.length > 0 ? steps[activeStepIndex(steps)]! : undefined
+}
+
+function ActivityHeader({
+  run,
+  identity,
+  activity,
+  references,
+  open,
+  onToggle,
+}: {
+  run: ApiRun
+  identity: AgentIdentity
+  activity: SessionActivity
+  references: TaskReference[]
+  open: boolean
+  onToggle: () => void
+}) {
+  const { cost } = activity
+  const summaryReferences = [...new Map([...references, ...activity.waitReferences].map(reference => [referenceKey(reference), reference])).values()]
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-label={activityLabel(run, identity, activity, summaryReferences, open)}
+      onClick={onToggle}
+      // Folded, the row holds five values; 8px gaps leave a phone's status whole beside the step.
+      className={cn('flex min-h-11 w-full min-w-0 items-center px-3.5 py-2 text-start text-[14px] hover:bg-muted/40 active:bg-muted focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring', open ? 'gap-2.5' : 'gap-2')}
+    >
+      <LayersIcon aria-hidden className="size-4 shrink-0 text-accent-text" />
+      {/* "Activity", not "Session activity": the whole page is the session, and the shorter
+          label leaves a phone room for the step. The accessible name keeps the full one. */}
+      <span className="shrink-0 font-semibold">Activity</span>
+      {open ? null : <FoldedSummary run={run} identity={identity} activity={activity} summaryReferences={summaryReferences} />}
+      {open && cost ? <span data-slot="run-activity-cost" className="ms-auto shrink-0 text-[13px] text-muted-foreground tabular-nums">{cost}</span> : null}
+      <ChevronDownIcon
+        aria-hidden
+        className={cn('size-4 shrink-0 text-soft-foreground motion-safe:transition-transform motion-reduce:transition-none', open && !cost && 'ms-auto', open && 'rotate-180')}
+      />
+    </button>
+  )
+}
+
+function activityLabel(run: ApiRun, identity: AgentIdentity, activity: SessionActivity, summaryReferences: TaskReference[], open: boolean) {
+  const { statusText, conflicts, cost } = activity
+  const head = `Session activity: ${statusText}${conflicts.length ? '; pull request conflicts' : ''}${cost ? `; cost ${cost}` : ''}`
+  if (open) return head
+  const activeStep = activeWorkflowStep(run.steps)
   const activeStepState = activeStep ? railVisual(activeStep.status) : undefined
   const stepLabel = activeStep ? `; step ${activeStep.name}, ${activeStepState === 'active' ? 'running' : activeStepState}` : ''
+  const referenceLabel = summaryReferences.length ? `; ${summaryReferences.map(reference => `${reference.kind} #${reference.number}`).join('; ')}` : ''
+  return `${head}${stepLabel}; runner ${identity.runner}; model ${identity.model}; effort ${identity.effort}${referenceLabel}`
+}
+
+function FoldedSummary({
+  run,
+  identity,
+  activity,
+  summaryReferences,
+}: {
+  run: ApiRun
+  identity: AgentIdentity
+  activity: SessionActivity
+  summaryReferences: TaskReference[]
+}) {
+  const { statusText, cost, conflicts } = activity
+  const activeStep = activeWorkflowStep(run.steps)
   // Status and step sit before the summary, outside its priority list, in priority order. The status
   // keeps its own width; the step grows from nothing up to its whole name; the summary grows only
   // into what the step leaves and drops its own items. When even that is too much, the status
   // shortens too. Each keeps its glyph and two characters, so the chevron never leaves the card.
-  const foldedSummary: SummaryItem[] = [
+  const items: SummaryItem[] = [
     { id: 'runner', priority: 2, content: identity.runner },
     { id: 'model', priority: 4, content: identity.model },
     { id: 'effort', priority: 3, content: identity.effort },
@@ -224,162 +351,201 @@ function SessionActivityCard({
       {conflicts.length > 0 ? <span data-slot="run-activity-conflict" className="inline-flex items-center gap-1 font-medium text-conflict"><TriangleAlertIcon aria-hidden className="size-3.5" />Conflicts</span> : null}
     </> }] : []),
   ]
-
   return (
-    <section
-      data-slot="run-activity-dock"
-      ref={scrollFold.ref}
-      data-state={open ? 'open' : 'collapsed'}
-      className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-xs"
-    >
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-label={`Session activity: ${statusText}${conflicts.length ? '; pull request conflicts' : ''}${cost ? `; cost ${cost}` : ''}${!open ? `${stepLabel}; runner ${identity.runner}; model ${identity.model}; effort ${identity.effort}${summaryReferences.length ? `; ${summaryReferences.map(reference => `${reference.kind} #${reference.number}`).join('; ')}` : ''}` : ''}`}
-        onClick={() => {
-          openByRun.set(run.id, !open)
-          setChosen(!open)
-          scrollFold.chose(!open)
-        }}
-        // Folded, the row holds five values; 8px gaps leave a phone's status whole beside the step.
-        className={cn('flex min-h-11 w-full min-w-0 items-center px-3.5 py-2 text-start text-[14px] hover:bg-muted/40 active:bg-muted focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring', open ? 'gap-2.5' : 'gap-2')}
-      >
-        <LayersIcon aria-hidden className="size-4 shrink-0 text-accent-text" />
-        {/* "Activity", not "Session activity": the whole page is the session, and the shorter
-            label leaves a phone room for the step. The accessible name keeps the full one. */}
-        <span className="shrink-0 font-semibold">Activity</span>
-        {open ? null : (
-          <>
-            <span data-slot="run-activity-status" title={statusText} className={cn('inline-flex min-w-[calc(0.875rem+3ch)] flex-[0_1_auto] items-center gap-1.5 text-[13px] whitespace-nowrap text-muted-foreground', allComplete ? 'text-success' : failed && 'text-danger')}>{glyph}<span data-slot="run-activity-status-label" className="min-w-0 truncate">{statusText}</span></span>
-            {activeStep ? (
-              <span data-slot="run-activity-step" className="flex max-w-max min-w-[calc(1.375rem+2ch)] flex-[1000_1_0] items-center gap-1.5 text-[13px] text-muted-foreground">
-                <WorkflowGlyph steps={workflow} decorative />
-                <span data-slot="run-activity-step-name" title={activeStep.name} className="min-w-0 truncate">{activeStep.name}</span>
-              </span>
-            ) : null}
-            {/* Grow 1 against the step's 1000: the step takes the free space first, up to its whole
-                name, and the summary then takes all that is left. Factors summing below 1 would
-                hand out only that fraction of it. A negative margin returns the row's 8px gap to the
-                status and step; the summary puts it back before its first shown value, so its own
-                width never depends on what it shows (hearsay-tools/cezarion#1537). */}
-            <span className="-ms-2 flex min-w-0 flex-[1_1_0]"><ActivitySummary items={foldedSummary} lead={8} /></span>
-          </>
-        )}
-        {open && cost ? <span data-slot="run-activity-cost" className="ms-auto shrink-0 text-[13px] text-muted-foreground tabular-nums">{cost}</span> : null}
-        <ChevronDownIcon
-          aria-hidden
-          className={cn('size-4 shrink-0 text-soft-foreground motion-safe:transition-transform motion-reduce:transition-none', open && !cost && 'ms-auto', open && 'rotate-180')}
-        />
-      </button>
-      {open ? (
-        <div className="flex min-w-0 flex-col border-t border-border">
-          <ActivityRow
-            slot="status-row"
-            icon={glyph}
-            // The same slot the folded summary used: the status text moves here, it is not a second copy.
-            // The next check is its own line, never a truncating meter: at 320px a one-line row
-            // cut the appointment off, and the phone has no other place that shows it.
-            title={
-              <span className="flex min-w-0 flex-col">
-                <span data-slot="run-activity-status" className={cn('truncate', allComplete ? 'text-success' : failed && 'text-danger')}>{statusText}</span>
-                {line.nextCheck ? (
-                  <span data-slot="run-activity-next-check" className="whitespace-normal text-[13px] font-normal text-muted-foreground">
-                    Next check <time dateTime={line.nextCheck.at}>{line.nextCheck.text}</time>
-                  </span>
-                ) : null}
-              </span>
-            }
-            summary={!isOpen('status') && waitReferences.length > 0 ? <ActivitySummary items={[
-              { id: 'chips', priority: 0, content: <ActivityReferences run={run} references={waitReferences} /> },
-            ]} /> : undefined}
-            open={isOpen('status')}
-            onToggle={hasWaitDetails(run) || workerWait ? () => toggle('status') : undefined}
-          >
-            <RunWaitDetails run={run} />
-            {workerWait ? <WorkerWaitDetails run={run} /> : null}
-          </ActivityRow>
-          {workflowName || workflow.length > 0 ? (
-            <ActivityRow
-              slot="workflow"
-              icon={workflow.length > 0 ? <WorkflowGlyph steps={workflow} /> : <WorkflowIcon className="size-4" />}
-              title={<>Workflow{workflowName ? <span className="font-normal text-muted-foreground"> · {workflowName}</span> : null}</>}
-              meta={workflow.length > 0
-                ? { drop: workflow[activeStepIndex(workflow)]!.name, keep: meterText(activeStepIndex(workflow) + 1, workflow.length, desktop, 'step') }
-                : undefined}
-              open={isOpen('workflow')}
-              onToggle={() => toggle('workflow')}
-            >
-              {workflow.length > 0 ? <StepRail steps={workflow} /> : null}
-              <AutomationOrigin run={run} available={health.data?.capabilities?.automations === true} />
-            </ActivityRow>
-          ) : null}
-          {agents.length > 0 ? (
-            <ActivityRow
-              slot="subagents"
-              icon={<BotIcon className="size-4" />}
-              title="Subagents"
-              meta={meterText(agentCounts.done, agentCounts.total, desktop)}
-              open={isOpen('subagents')}
-              onToggle={() => toggle('subagents')}
-            >
-              <AgentList agents={agents} onSelect={onOpenWorker} />
-            </ActivityRow>
-          ) : null}
-          {hasWorkers ? (
-            <WorkerActivitySection run={run} open={isOpen('workers')} onToggle={() => toggle('workers')} />
-          ) : null}
-          {planEntries.length > 0 ? (
-            <ActivityRow
-              slot="plan"
-              icon={<ListTodoIcon className="size-4" />}
-              title="Plan"
-              meta={meterText(planCountsValue.done, planCountsValue.total, desktop)}
-              open={isOpen('plan')}
-              onToggle={() => toggle('plan')}
-            >
-              <PlanList entries={planEntries} />
-            </ActivityRow>
-          ) : null}
-          <ActivityRow
-            slot="usage"
-            icon={<ChartColumnIcon className="size-4" />}
-            title="Usage & agent"
-            summary={<span data-slot="run-activity-meta" className="contents"><ActivitySummary items={agentSummary} /></span>}
-            open={isOpen('usage')}
-            onToggle={() => toggle('usage')}
-          >
-            <AgentDetails run={run} tokens={tokens} cost={cost} />
-          </ActivityRow>
-          {hasWorkspace ? (
-            <ActivityRow
-              slot="workspace"
-              icon={<GitBranchIcon className="size-4" />}
-              title="Workspace"
-              summary={!isOpen('workspace') && references.length > 0 ? <span data-slot="run-activity-meta" className="contents"><ActivitySummary items={[
-                ...(run.branch ? [{ id: 'branch', priority: 0, content: <span className="font-mono text-[12px]">{run.branch}</span> }] : []),
-                { id: 'chips', priority: 1, content: <ActivityReferences run={run} references={references} /> },
-                ...(conflicts.length > 0 ? [{ id: 'conflicts', priority: 2, content: <span className="font-medium text-conflict">{conflictText}</span> }] : []),
-              ]} /></span> : undefined}
-              meta={conflicts.length > 0
-                ? <span className="inline-flex items-center gap-1 font-medium text-conflict"><TriangleAlertIcon aria-hidden className="size-3.5" />{conflictText}</span>
-                : run.branch ? <span className="font-mono text-[12px]">{run.branch}</span> : undefined}
-              open={isOpen('workspace')}
-              onToggle={() => toggle('workspace')}
-            >
-              <div className="flex min-w-0 flex-col gap-3 text-[13px] text-muted-foreground">
-                {cleanup ? <Cleanup state={cleanup} /> : null}
-                <LinkedReferences run={run} />
-                {run.branch ? <DetailLine label="Branch"><BranchCopy branch={run.branch} /></DetailLine> : null}
-                {run.worktreePath ? (
-                  <DetailLine label="Worktree"><span className="min-w-0 break-all font-mono text-[12px] text-foreground">{run.worktreePath}</span></DetailLine>
-                ) : null}
-                <WorkspaceTools run={run} canResume={flags.terminal} onResume={() => resume.mutate()} />
-              </div>
-            </ActivityRow>
-          ) : null}
-        </div>
+    <>
+      <span data-slot="run-activity-status" title={statusText} className={cn('inline-flex min-w-[calc(0.875rem+3ch)] flex-[0_1_auto] items-center gap-1.5 text-[13px] whitespace-nowrap text-muted-foreground', statusTone(activity))}>{activity.glyph}<span data-slot="run-activity-status-label" className="min-w-0 truncate">{statusText}</span></span>
+      {activeStep ? (
+        <span data-slot="run-activity-step" className="flex max-w-max min-w-[calc(1.375rem+2ch)] flex-[1000_1_0] items-center gap-1.5 text-[13px] text-muted-foreground">
+          <WorkflowGlyph steps={run.steps} decorative />
+          <span data-slot="run-activity-step-name" title={activeStep.name} className="min-w-0 truncate">{activeStep.name}</span>
+        </span>
       ) : null}
-    </section>
+      {/* Grow 1 against the step's 1000: the step takes the free space first, up to its whole
+          name, and the summary then takes all that is left. Factors summing below 1 would
+          hand out only that fraction of it. A negative margin returns the row's 8px gap to the
+          status and step; the summary puts it back before its first shown value, so its own
+          width never depends on what it shows (hearsay-tools/cezarion#1537). */}
+      <span className="-ms-2 flex min-w-0 flex-[1_1_0]"><ActivitySummary items={items} lead={8} /></span>
+    </>
+  )
+}
+
+function StatusSection({ run, activity, open, onToggle }: { run: ApiRun; activity: SessionActivity } & SectionDisclosure) {
+  const { line, waitReferences } = activity
+  const workerWait = hasWorkerWaitDetails(run)
+  return (
+    <ActivityRow
+      slot="status-row"
+      icon={activity.glyph}
+      // The same slot the folded summary used: the status text moves here, it is not a second copy.
+      // The next check is its own line, never a truncating meter: at 320px a one-line row
+      // cut the appointment off, and the phone has no other place that shows it.
+      title={
+        <span className="flex min-w-0 flex-col">
+          <span data-slot="run-activity-status" className={cn('truncate', statusTone(activity))}>{activity.statusText}</span>
+          {line.nextCheck ? (
+            <span data-slot="run-activity-next-check" className="whitespace-normal text-[13px] font-normal text-muted-foreground">
+              Next check <time dateTime={line.nextCheck.at}>{line.nextCheck.text}</time>
+            </span>
+          ) : null}
+        </span>
+      }
+      summary={!open && waitReferences.length > 0 ? <ActivitySummary items={[
+        { id: 'chips', priority: 0, content: <ActivityReferences run={run} references={waitReferences} /> },
+      ]} /> : undefined}
+      open={open}
+      onToggle={hasWaitDetails(run) || workerWait ? onToggle : undefined}
+    >
+      <RunWaitDetails run={run} />
+      {workerWait ? <WorkerWaitDetails run={run} /> : null}
+    </ActivityRow>
+  )
+}
+
+function WorkflowSection({ run, desktop, automations, open, onToggle }: { run: ApiRun; desktop: boolean; automations: boolean } & SectionDisclosure) {
+  const workflow = run.steps
+  const workflowName = workflowLabel(run)
+  if (!workflowName && workflow.length === 0) return null
+  const activeStep = activeWorkflowStep(workflow)
+  return (
+    <ActivityRow
+      slot="workflow"
+      icon={workflow.length > 0 ? <WorkflowGlyph steps={workflow} /> : <WorkflowIcon className="size-4" />}
+      title={<>Workflow{workflowName ? <span className="font-normal text-muted-foreground"> · {workflowName}</span> : null}</>}
+      meta={activeStep
+        ? { drop: activeStep.name, keep: meterText(activeStepIndex(workflow) + 1, workflow.length, desktop, 'step') }
+        : undefined}
+      open={open}
+      onToggle={onToggle}
+    >
+      {workflow.length > 0 ? <StepRail steps={workflow} /> : null}
+      <AutomationOrigin run={run} available={automations} />
+    </ActivityRow>
+  )
+}
+
+function SubagentsSection({
+  activity,
+  desktop,
+  onOpenWorker,
+  open,
+  onToggle,
+}: { activity: SessionActivity; desktop: boolean; onOpenWorker?: (id: string) => void } & SectionDisclosure) {
+  const { agents, agentCounts } = activity
+  if (agents.length === 0) return null
+  return (
+    <ActivityRow
+      slot="subagents"
+      icon={<BotIcon className="size-4" />}
+      title="Subagents"
+      meta={meterText(agentCounts.done, agentCounts.total, desktop)}
+      open={open}
+      onToggle={onToggle}
+    >
+      <AgentList agents={agents} onSelect={onOpenWorker} />
+    </ActivityRow>
+  )
+}
+
+/** Only roots own workers. A worker's parent link is always visible in the task header. */
+function WorkersSection({ run, open, onToggle }: { run: ApiRun } & SectionDisclosure) {
+  if (run.delegation?.role !== 'root') return null
+  return <WorkerActivitySection run={run} open={open} onToggle={onToggle} />
+}
+
+function PlanSection({ activity, desktop, open, onToggle }: { activity: SessionActivity; desktop: boolean } & SectionDisclosure) {
+  const { planEntries, planCounts: counts } = activity
+  if (planEntries.length === 0) return null
+  return (
+    <ActivityRow
+      slot="plan"
+      icon={<ListTodoIcon className="size-4" />}
+      title="Plan"
+      meta={meterText(counts.done, counts.total, desktop)}
+      open={open}
+      onToggle={onToggle}
+    >
+      <PlanList entries={planEntries} />
+    </ActivityRow>
+  )
+}
+
+function UsageSection({
+  run,
+  identity,
+  activity,
+  open,
+  onToggle,
+}: { run: ApiRun; identity: AgentIdentity; activity: SessionActivity } & SectionDisclosure) {
+  const { cost, tokens } = activity
+  // The saved canonical identity names the provider. The display helper can omit an identity
+  // that repeats the model, and a runner name does not identify who served the model.
+  const provider = run.modelIdentity?.includes('/') ? run.modelIdentity.split('/')[0] : undefined
+  const items: SummaryItem[] = [
+    ...(provider ? [{ id: 'provider', priority: 2, content: provider }] : []),
+    { id: 'model', priority: 4, content: identity.model },
+    { id: 'effort', priority: 3, content: identity.effort },
+    ...(cost ? [{ id: 'cost', priority: 1, content: cost }] : []),
+    ...(tokens ? [{ id: 'tokens', priority: 0, content: tokens }] : []),
+  ]
+  return (
+    <ActivityRow
+      slot="usage"
+      icon={<ChartColumnIcon className="size-4" />}
+      title="Usage & agent"
+      summary={<span data-slot="run-activity-meta" className="contents"><ActivitySummary items={items} /></span>}
+      open={open}
+      onToggle={onToggle}
+    >
+      <AgentDetails run={run} tokens={tokens} cost={cost} />
+    </ActivityRow>
+  )
+}
+
+function WorkspaceSection({
+  run,
+  references,
+  conflicts,
+  hasReferences,
+  onResume,
+  open,
+  onToggle,
+}: {
+  run: ApiRun
+  references: TaskReference[]
+  conflicts: number[]
+  hasReferences: boolean
+  onResume: () => void
+} & SectionDisclosure) {
+  const cleanup = run.delegation?.role === 'worker' ? run.delegation.destroy : undefined
+  if (!(run.branch || run.worktreePath || hasReferences || resumeHint(run) || hasCleanupDetails(cleanup))) return null
+  const conflictText = conflicts.length === 1 ? `PR #${conflicts[0]} conflicts` : `${conflicts.length} PRs conflict`
+  return (
+    <ActivityRow
+      slot="workspace"
+      icon={<GitBranchIcon className="size-4" />}
+      title="Workspace"
+      summary={!open && references.length > 0 ? <span data-slot="run-activity-meta" className="contents"><ActivitySummary items={[
+        ...(run.branch ? [{ id: 'branch', priority: 0, content: <span className="font-mono text-[12px]">{run.branch}</span> }] : []),
+        { id: 'chips', priority: 1, content: <ActivityReferences run={run} references={references} /> },
+        ...(conflicts.length > 0 ? [{ id: 'conflicts', priority: 2, content: <span className="font-medium text-conflict">{conflictText}</span> }] : []),
+      ]} /></span> : undefined}
+      meta={conflicts.length > 0
+        ? <span className="inline-flex items-center gap-1 font-medium text-conflict"><TriangleAlertIcon aria-hidden className="size-3.5" />{conflictText}</span>
+        : run.branch ? <span className="font-mono text-[12px]">{run.branch}</span> : undefined}
+      open={open}
+      onToggle={onToggle}
+    >
+      <div className="flex min-w-0 flex-col gap-3 text-[13px] text-muted-foreground">
+        {cleanup ? <Cleanup state={cleanup} /> : null}
+        <LinkedReferences run={run} />
+        {run.branch ? <DetailLine label="Branch"><BranchCopy branch={run.branch} /></DetailLine> : null}
+        {run.worktreePath ? (
+          <DetailLine label="Worktree"><span className="min-w-0 break-all font-mono text-[12px] text-foreground">{run.worktreePath}</span></DetailLine>
+        ) : null}
+        <WorkspaceTools run={run} canResume={runActionFlags(run).terminal} onResume={onResume} />
+      </div>
+    </ActivityRow>
   )
 }
 
