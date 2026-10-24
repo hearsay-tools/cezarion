@@ -159,6 +159,43 @@ describe('useTeamSkillSwitches', () => {
     expect(view.client.getQueryState(['a', 'skills', 'importable'])?.isInvalidated).toBe(true)
     expect(view.client.getQueryState(['b', 'skills'])?.isInvalidated).toBe(false)
   })
+
+  // A group control (hearsay-tools/cezarion#1607) writes every child in one save.
+  it('setMany switches every ref off, then on, in one save each, and leaves other refs alone', async () => {
+    files.a = { disabledTeamSkills: [X_OTHER] }
+    const view = mount()
+    await waitFor(() => expect(view.result.current.isOn(X_OTHER)).toBe(false))
+    act(() => view.result.current.setMany([X, Y], false))
+    expect(view.result.current.isOn(X)).toBe(false)
+    expect(view.result.current.isOn(Y)).toBe(false)
+    await waitFor(() => expect(puts).toHaveLength(1))
+    expect(puts[0]!.body.disabledTeamSkills).toEqual([X_OTHER, X, Y])
+    act(() => view.result.current.setMany([X, Y], true))
+    await waitFor(() => expect(puts).toHaveLength(2))
+    expect(puts[1]!.body.disabledTeamSkills).toEqual([X_OTHER])
+    await waitFor(() => expect(view.result.current.pending).toBe(false))
+    expect(files.a!.disabledTeamSkills).toEqual([X_OTHER])
+  })
+
+  it('setMany adds no duplicate for a ref already off', async () => {
+    files.a = { disabledTeamSkills: [X] }
+    const view = mount()
+    await waitFor(() => expect(view.result.current.isOn(X)).toBe(false))
+    act(() => view.result.current.setMany([X, Y], false))
+    await waitFor(() => expect(puts).toHaveLength(1))
+    expect(puts[0]!.body.disabledTeamSkills).toEqual([X, Y])
+  })
+
+  it('a rejected setMany toasts and every switch goes back to the stored value', async () => {
+    const view = mount()
+    await loaded(view)
+    failWrites = 'disk full'
+    act(() => view.result.current.setMany([X, Y], false))
+    expect(view.result.current.isOn(X)).toBe(false)
+    await waitFor(() => expect(toastMock).toHaveBeenCalled())
+    await waitFor(() => expect(view.result.current.isOn(X)).toBe(true))
+    expect(view.result.current.isOn(Y)).toBe(true)
+  })
 })
 
 describe('teamSkillRows', () => {

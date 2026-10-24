@@ -121,7 +121,7 @@ function settledClick(selector: string): void {
   browser.click(selector)
 }
 
-/** Open the card (already open on this desktop viewport, collapsed on a phone) so the
+/** Open the card (folded by default on every viewport, hearsay-tools/cezarion#1601) so the
  *  Subagents row exists, and leave the section itself closed for the caller to toggle. */
 function revealSubagentSection(): void {
   browser.waitForFunction(`document.querySelector('${CARD} > button') !== null`)

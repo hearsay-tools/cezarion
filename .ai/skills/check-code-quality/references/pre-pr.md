@@ -14,10 +14,31 @@ node <skill>/scripts/check.mjs --base <target-ref> \
   --runner <vitest|node> --test <test-file> --output <report.md>
 ```
 
-Repeat `--test` for multiple files. With Vitest, select needed unit projects
-using repeatable `--project`. With Node, pass repository setup modules through
-repeatable `--node-import`. For an existing current Istanbul report, replace
-runner and test options with `--coverage <coverage-final.json>`.
+Repeat `--test` for multiple files. With Vitest, select every project that runs
+a selected test using repeatable `--project`: a unit test file needs its unit
+project, a `*.e2e.ts` browser spec needs its browser project. Vitest uses the
+repository's own configuration, setup files, aliases and environment. With Node,
+pass repository setup modules through repeatable `--node-import`. For an existing
+current Istanbul report, replace runner and test options with
+`--coverage <coverage-final.json>`.
+
+In this repository, a change with cockpit source, unit tests and browser specs
+takes one command. The `e2e` project's own global setup boots the test
+environment:
+
+```sh
+node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
+  --project web --project e2e \
+  --test packages/web/src/routes/new-task.test.tsx \
+  --test packages/web/e2e/completion-controls.e2e.ts \
+  --output .ai/qa/<issue>/code-quality.md
+```
+
+Server changes use `--project server`. Root `scripts/*.test.mjs` and
+`.github/scripts/*.test.cjs` files use `--runner node` with
+`--node-import scripts/test-git-env.mjs`. Do not write a wrapper Vitest
+configuration or test entry files: the collector measures changed test
+functions itself.
 
 The command pins a merge-base, scans committed, staged, unstaged and untracked
 JS/TS changes, collects coverage once, matches changed functions and checks source

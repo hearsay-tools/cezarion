@@ -1,21 +1,11 @@
 import { spawnSync } from 'node:child_process';
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parse } from '@babel/parser';
 import { mergeProcessCovs } from '@bcoe/v8-coverage';
 import convert from 'ast-v8-to-istanbul';
-
-function vitestArguments({ cwd, files, tests, projects }, directory) {
-  const require = createRequire(join(cwd, 'package.json'));
-  const cli = join(dirname(require.resolve('vitest/package.json')), 'vitest.mjs');
-  return [cli, 'run', ...projects.flatMap(name => ['--project', name]),
-    '--maxWorkers', '2', '--passWithNoTests=false',
-    '--coverage.enabled', '--coverage.provider', 'v8',
-    ...files.flatMap(file => ['--coverage.include', file]),
-    '--coverage.reporter', 'json', '--coverage.reportsDirectory', directory, ...tests];
-}
+import { vitestCoverageArguments } from './vitest-coverage.mjs';
 
 function execute(argv, { cwd, stderr }, env) {
   // A collector invoked by node:test must start a new test coordinator.
@@ -52,12 +42,13 @@ export async function collectCoverage(options, directory) {
   const { runner, files, tests, imports, cwd } = options;
   const output = join(directory, 'coverage-final.json');
   if (runner === 'vitest') {
-    const argv = vitestArguments(options, directory);
+    const argv = vitestCoverageArguments(options, directory);
     execute(argv, options, process.env);
     return { path: output, runner, command: [process.execPath, ...argv] };
   }
-  if (files.some(file => !/\.[cm]?js$/i.test(file))) {
-    throw new Error('Node coverage supports untransformed JavaScript. Use Vitest or --coverage for TypeScript/JSX.');
+  const transformed = files.filter(file => !/\.[cm]?js$/i.test(file));
+  if (transformed.length) {
+    throw new Error(`Node coverage supports untransformed JavaScript only, not ${transformed.join(', ')}. Use --runner vitest with the --project that runs these tests, or supply --coverage with an Istanbul report from another runner.`);
   }
   const raw = join(directory, 'raw');
   mkdirSync(raw);

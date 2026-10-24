@@ -171,28 +171,112 @@ test('failing Node tests produce no accepted scores and keep logs off JSON stdou
   assert.equal(result.report.summary.functions, 0);
 });
 
+// A package with an exports map hides same-named packages in ancestor directories, so a
+// stub without a `./node` export or provider entry stands for a missing install.
+function fakeVitest(f, node, coverageProvider = true) {
+  for (const [name, files] of [['vitest', { 'node.mjs': node ?? '' }], ['@vitest/coverage-v8', { 'index.mjs': '' }]]) {
+    const directory = join(f.cwd, 'node_modules', name);
+    mkdirSync(directory, { recursive: true });
+    const exports = name === 'vitest' ? { './package.json': './package.json', ...(node === undefined ? {} : { './node': './node.mjs' }) }
+      : coverageProvider ? { '.': './index.mjs' } : { './package.json': './package.json' };
+    writeFileSync(join(directory, 'package.json'), JSON.stringify({ name, version: '1.0.0', type: 'module', exports }));
+    for (const [file, content] of Object.entries(files)) writeFileSync(join(directory, file), content);
+  }
+}
+
 test('Vitest resolves in the target project and receives all files, tests and projects once', async t => {
   const f = fixture(t);
   f.write('second.mjs', 'export function second() { return 2; }');
-  const directory = join(f.cwd, 'node_modules/vitest');
-  mkdirSync(directory, { recursive: true });
-  writeFileSync(join(directory, 'package.json'), '{"name":"vitest","version":"1.0.0"}');
-  writeFileSync(join(directory, 'vitest.mjs'), `
+  fakeVitest(f, `
     import assert from 'node:assert/strict';
     import { writeFileSync } from 'node:fs';
     import { join } from 'node:path';
-    const args = process.argv.slice(2);
-    assert.equal(process.cwd(), ${JSON.stringify(f.cwd)});
-    assert.equal(args.filter(arg => arg === '--coverage.include').length, 2);
-    assert.equal(args[args.indexOf('--project') + 1], 'unit');
-    assert.equal(args.at(-1), ${JSON.stringify(join(f.cwd, 'source.test.mjs'))});
-    writeFileSync(join(args[args.indexOf('--coverage.reportsDirectory') + 1], 'coverage-final.json'), ${JSON.stringify(JSON.stringify({ ...coverage(f), ...coverage(f, 'second.mjs') }))});
-    console.log('fixture vitest log');
+    export async function createVitest(mode, options) {
+      assert.equal(mode, 'test');
+      assert.equal(process.cwd(), ${JSON.stringify(f.cwd)});
+      assert.equal(process.env.VITEST, 'true');
+      assert.deepEqual(options.project, ['unit']);
+      assert.deepEqual(options.coverage.include, ['second.mjs', 'source.mjs']);
+      const config = { include: ['**/*.test.mjs'], coverage: { exclude: ['**/*.test.mjs', 'custom/**'] } };
+      const project = { config: { include: ['**/*.e2e.ts'], coverage: { exclude: ['**/*.e2e.ts', '**/*.test.mjs'] } } };
+      return {
+        config, projects: [project],
+        async start(filters) {
+          // Only the globs Vitest adds from test.include leave the exclusions.
+          assert.deepEqual(config.coverage.exclude, ['custom/**']);
+          assert.deepEqual(project.config.coverage.exclude, []);
+          assert.deepEqual(filters, [${JSON.stringify(join(f.cwd, 'source.test.mjs'))}]);
+          writeFileSync(join(options.coverage.reportsDirectory, 'coverage-final.json'), ${JSON.stringify(JSON.stringify({ ...coverage(f), ...coverage(f, 'second.mjs') }))});
+          console.log('fixture vitest log');
+        },
+        async exit() {},
+      };
+    }
   `);
   const result = await invoke(f, ['--test', 'source.test.mjs', '--project', 'unit']);
-  assert.equal(result.code, 0, JSON.stringify(result.report));
+  assert.equal(result.code, 0, result.error + JSON.stringify(result.report));
   assert.match(result.error, /fixture vitest log/);
   assert.equal(result.report.measurement.runner, 'vitest');
+});
+
+test('missing Vitest packages and transformed Node sources name the next step', async t => {
+  const f = fixture(t);
+  fakeVitest(f);
+  const missing = await invoke(f, ['--test', 'source.test.mjs']);
+  assert.equal(missing.code, 2);
+  assert.match(missing.report.errors.join(' '), /Vitest is not installed .* Install vitest and @vitest\/coverage-v8/);
+  // Node caches package metadata per path, so each install shape needs its own fixture.
+  const g = fixture(t);
+  fakeVitest(g, 'export function createVitest() { throw new Error("must not start"); }', false);
+  const provider = await invoke(g, ['--test', 'source.test.mjs']);
+  assert.match(provider.report.errors.join(' '), /@vitest\/coverage-v8 is not installed/);
+  f.write('typed.ts', 'export function typed(x: string) { return x; }');
+  const node = await invoke(f, ['--runner', 'node', '--test', 'source.test.mjs']);
+  assert.match(node.report.errors.join(' '), /not typed\.ts\. Use --runner vitest with the --project/);
+});
+
+// A real Vitest run in a project shaped like this repository: unit and browser projects with
+// their own setup, alias and include globs. Vitest itself excludes every include glob from
+// coverage, so these tests prove the collector measures changed test functions anyway.
+function vitestFixture(t) {
+  const f = fixture(t);
+  symlinkSync(fileURLToPath(new URL('../node_modules', import.meta.url)), join(f.cwd, 'node_modules'), 'dir');
+  f.write('vitest.config.mjs', `import { fileURLToPath } from 'node:url';
+    import { defineConfig } from 'vitest/config';
+    const alias = { '#source': fileURLToPath(new URL('./source.mjs', import.meta.url)) };
+    export default defineConfig({ cacheDir: 'reports/vite', test: { projects: [
+      { resolve: { alias }, test: { name: 'unit', include: ['**/*.test.js'], setupFiles: ['./setup.js'] } },
+      { test: { name: 'e2e', include: ['**/*.e2e.ts'], environment: 'node' } },
+    ] } });`);
+  f.write('setup.js', 'globalThis.qualitySetup = true;');
+  f.write('choose.test.js', `import { expect, test } from 'vitest';
+    import { choose } from '#source';
+    function expectChoice(value, expected) { expect(choose(value)).toBe(expected); }
+    test('choose', () => { expect(globalThis.qualitySetup).toBe(true); expectChoice(true, 1); expectChoice(false, 2); });`);
+  f.write('flow.e2e.ts', `import { expect, test } from 'vitest';
+    import { choose } from './source.mjs';
+    const pick = (value: boolean): number => choose(value);
+    test('flow', () => { expect(pick(true)).toBe(1); expect(pick(false)).toBe(2); });`);
+  return f;
+}
+
+const measured = report => report.files.flatMap(file => file.functions.map(fn => `${file.file}:${fn.name}:${fn.coverage.percent}`));
+
+test('Vitest measures changed unit-test functions with the project setup and aliases', async t => {
+  const f = vitestFixture(t);
+  f.write('flow.e2e.ts', '');
+  const result = await invoke(f, ['--test', 'choose.test.js', '--project', 'unit']);
+  assert.equal(result.code, 0, result.error + JSON.stringify(result.report.errors));
+  assert.deepEqual(measured(result.report), ['choose.test.js:expectChoice:100', 'choose.test.js:anonymous@4:20:100', 'source.mjs:choose:100']);
+});
+
+test('Vitest selects .e2e.ts browser tests through their project and measures them', async t => {
+  const f = vitestFixture(t);
+  const result = await invoke(f, ['--test', 'choose.test.js', '--test', 'flow.e2e.ts', '--project', 'unit', '--project', 'e2e']);
+  assert.equal(result.code, 0, result.error + JSON.stringify(result.report.errors));
+  assert.deepEqual(measured(result.report).filter(name => name.startsWith('flow.e2e.ts')),
+    ['flow.e2e.ts:pick:100', 'flow.e2e.ts:anonymous@4:18:100']);
+  assert.equal(result.report.summary.functions, 5);
 });
 
 test('invalid runner arguments fail before starting tests', async t => {

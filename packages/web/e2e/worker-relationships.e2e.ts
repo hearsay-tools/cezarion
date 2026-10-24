@@ -292,7 +292,13 @@ it('retains known IDs during loading, request error and offline pause, then retr
       }
       return original(input, options);
     }; return true; })()`)
-  const navigate = (id: string) => browser.evaluate(`history.pushState({}, '', '${route(id)}'); window.dispatchEvent(new PopStateEvent('popstate')); true`)
+  // Each run's Activity card starts folded (hearsay-tools/cezarion#1601): open the destination's
+  // own card once its route has mounted, never the departing run's.
+  const navigate = (id: string) => {
+    browser.evaluate(`history.pushState({}, '', '${route(id)}'); window.dispatchEvent(new PopStateEvent('popstate')); true`)
+    browser.waitForFunction(`document.querySelector('[data-route="task-thread"][data-run-id="${id}"]') !== null`)
+    reveal()
+  }
   navigate(loadingId)
   browser.waitForFunction(`document.querySelector('${region}')?.textContent.includes('Loading relationships')`)
   expect(browser.evaluate(`[...document.querySelectorAll('${region} a')].some(a => a.getAttribute('aria-label')?.includes('${absentId}'))`)).toBe(true)

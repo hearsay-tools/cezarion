@@ -44,6 +44,22 @@ import {
  */
 const documentFocus = { viewKey: undefined as string | undefined, generation: 0 }
 
+/**
+ * The reader's own scroll direction, for chrome that yields to reading (hearsay-tools/cezarion#1601).
+ * `tail` means the transcript pinned to the live tail again, which ends a reading session.
+ */
+export type ReaderScrollEvent =
+  | { direction: 'up' | 'down'; distanceFromBottom: number }
+  | { direction: 'tail' }
+export type ReaderScrollListener = (event: ReaderScrollEvent) => void
+
+/** A scroll counts as the reader's within this window after a wheel, touch, key or scrollbar
+ *  gesture: smooth scrolling keeps moving after the last wheel event. */
+const READER_GESTURE_MS = 600
+/** Movement one way before it counts as a direction, so a small reversal inside one gesture
+ *  cannot fold and unfold the card again and again. */
+const READER_DIRECTION_SLOP_PX = 24
+
 /** One renderable thread row — a user bubble, a grouped block, whatever the view flattened. */
 export interface ThreadRow {
   key: string
@@ -73,6 +89,8 @@ export interface ThreadScrollControls {
   jumpToRow: (key: string, index: number, focusTarget?: (row: HTMLElement) => HTMLElement | null) => void
   /** Load one older page while preserving the current pixel anchor. */
   loadOlder: () => void
+  /** Subscribe to the reader's scroll direction; returns the unsubscribe. */
+  subscribeReaderScroll: (listener: ReaderScrollListener) => () => void
   /** Re-pin if stuck — the keyboard-settled hook (content height didn't change, but the
    *  visual viewport did, so the RO won't fire). */
   restickIfStuck: () => void
@@ -108,6 +126,16 @@ export function useThreadScroll(
 
   const stuckRef = useRef(true)
   const downIntentAtRef = useRef(0)
+  /** Last reader gesture (wheel, touch, nav key); scroll movement after it is the reader's. */
+  const readerGestureAtRef = useRef(0)
+  const readerListenersRef = useRef(new Set<ReaderScrollListener>())
+  const emitReaderScroll = useCallback((event: ReaderScrollEvent) => {
+    for (const listener of [...readerListenersRef.current]) listener(event)
+  }, [])
+  const subscribeReaderScroll = useCallback((listener: ReaderScrollListener) => {
+    readerListenersRef.current.add(listener)
+    return () => { readerListenersRef.current.delete(listener) }
+  }, [])
   /** A cached offset not yet reachable (content still replaying). Cleared by user intent. */
   const pendingRestoreRef = useRef<number | null>(null)
   // #795: reaching a pixel through fresh estimates is not reader intent. Keep the
@@ -347,6 +375,9 @@ export function useThreadScroll(
     historyRestoreGenerationRef.current += 1
     pendingHistoryRestoreRef.current = null
     stuckRef.current = true
+    // The pin that follows is this hook's movement, not the reader's.
+    readerGestureAtRef.current = 0
+    emitReaderScroll({ direction: 'tail' })
     // Refreshing paged history can remount the transcript before this promise settles.
     // Let its replacement restore the user's new tail intent, not the old reading offset.
     saveThreadScroll(viewKey, { top: scroller.scrollHeight - scroller.clientHeight, atBottom: true })
@@ -383,7 +414,7 @@ export function useThreadScroll(
         })
       })
     })
-  }, [onJumpToLatest, viewKey, toBottom, bumpFocus, ownsFocus])
+  }, [onJumpToLatest, viewKey, toBottom, bumpFocus, ownsFocus, emitReaderScroll])
 
   const lastRowKey = rowKeys.at(-1)
   const rowCount = rowKeys.length
@@ -440,6 +471,9 @@ export function useThreadScroll(
     let lastTouchY: number | null = null
     let pointerScrolling = false
     let previousScrollTop = scroller.scrollTop
+    let travelDirection: 'up' | 'down' | undefined
+    let travel = 0
+    const markGesture = () => { readerGestureAtRef.current = Date.now() }
     const unstick = () => {
       bumpFocus()
       pendingFocusRef.current?.disconnect()
@@ -458,6 +492,7 @@ export function useThreadScroll(
       downIntentAtRef.current = Date.now()
     }
     const onWheel = (event: WheelEvent) => {
+      markGesture()
       if (event.deltaY < 0) {
         unstick()
         const freshGesture = !wheelGestureActiveRef.current
@@ -471,6 +506,7 @@ export function useThreadScroll(
       else markDown()
     }
     const onKey = (event: KeyboardEvent) => {
+      if (['ArrowUp', 'PageUp', 'Home', 'ArrowDown', 'PageDown', 'End'].includes(event.key)) markGesture()
       if (['ArrowUp', 'PageUp', 'Home'].includes(event.key)) {
         unstick()
         if (!event.repeat && isNearHistoryStart(scroller)) loadOlder()
@@ -513,6 +549,7 @@ export function useThreadScroll(
     const onTouchMove = (event: TouchEvent) => {
       const y = event.touches[0]?.clientY
       if (y === undefined) return
+      markGesture()
       // Finger moving down pans the content up (away from the tail), and vice versa.
       if (lastTouchY !== null && y > lastTouchY + 1) {
         unstick()
@@ -524,7 +561,21 @@ export function useThreadScroll(
       else if (lastTouchY !== null && y < lastTouchY - 1) markDown()
       lastTouchY = y
     }
+    const readerMoved = (delta: number) => {
+      if (delta === 0 || (!pointerScrolling && Date.now() - readerGestureAtRef.current >= READER_GESTURE_MS)) return
+      const direction = delta < 0 ? 'up' : 'down'
+      if (direction !== travelDirection) {
+        travelDirection = direction
+        travel = 0
+      }
+      travel += Math.abs(delta)
+      if (travel >= READER_DIRECTION_SLOP_PX) {
+        emitReaderScroll({ direction, distanceFromBottom: scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop })
+      }
+    }
     const onScroll = () => {
+      const wasStuck = stuckRef.current
+      readerMoved(scroller.scrollTop - previousScrollTop)
       // Overlay scrollbars occupy the client box, so a gutter hit cannot identify
       // their grab. Actual movement during a primary scroller press is reader intent.
       if (pointerScrolling && scroller.scrollTop !== previousScrollTop) {
@@ -548,6 +599,7 @@ export function useThreadScroll(
       if (near && pendingRestoreRef.current === null) {
         if (stuckRef.current || Date.now() - downIntentAtRef.current < RESTICK_INTENT_MS) stuckRef.current = true
       }
+      if (!wasStuck && stuckRef.current) emitReaderScroll({ direction: 'tail' })
       setPillVisible(!near)
       // …and no overwriting the memory being restored, either — leaving again mid-restore
       // must find the parked position, not a replay artifact.
@@ -600,9 +652,9 @@ export function useThreadScroll(
       scroller.removeEventListener('keydown', onKey)
       observer?.disconnect()
     }
-  }, [viewKey, contentEl, loadOlder, setOffset, toBottom, ownsMeasurementRestore, bumpFocus])
+  }, [viewKey, contentEl, loadOlder, setOffset, toBottom, ownsMeasurementRestore, bumpFocus, emitReaderScroll])
 
-  return { attachContent, scrollElRef, virtualizerRef, restoreMeasurements, ownsMeasurementRestore, pillVisible, jumpToLatest, jumpToRow, loadOlder, restickIfStuck }
+  return { attachContent, scrollElRef, virtualizerRef, restoreMeasurements, ownsMeasurementRestore, pillVisible, jumpToLatest, jumpToRow, loadOlder, restickIfStuck, subscribeReaderScroll }
 }
 
 /**

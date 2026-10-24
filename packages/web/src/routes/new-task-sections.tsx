@@ -220,7 +220,7 @@ export function ExecutionSettings({
               onChange={(on) => update({ worktree: on })}
             />
           ) : null}
-          {repo ? <div className="new-task-base-branch flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>Base branch</span><BaseBranchPill repo={repo} /></div> : null}
+          <BaseBranchRow repo={repo} />
           <AutonomousToggle
             on={runMode.autonomous}
             disabled={draft.planFirst}
@@ -370,6 +370,18 @@ function NotifyWebhookToggle({
       <span className="min-w-0"><span className="block text-[13px] font-medium">Notify webhook</span><span data-slot="notify-webhook-subtitle" className="block truncate text-[12px] text-muted-foreground">Send status changes</span></span>
       <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
     </button>
+  )
+}
+
+/** The Base branch row of the run settings. It stays while `/repo` loads and after it fails:
+ *  it sits above Autonomous, so inserting or removing it moved that toggle under a pointer
+ *  mid-click (hearsay-tools/cezarion#1605). Only the picker waits for the repo. */
+function BaseBranchRow({ repo }: { repo: RepoResponse | undefined }) {
+  return (
+    <div data-slot="base-branch-row" className="new-task-base-branch flex items-center justify-between gap-2 text-xs text-muted-foreground">
+      <span>Base branch</span>
+      {repo ? <BaseBranchPill repo={repo} /> : null}
+    </div>
   )
 }
 

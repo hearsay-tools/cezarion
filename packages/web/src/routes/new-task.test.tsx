@@ -231,7 +231,8 @@ function serve(overrides: {
   models?: unknown
   skills?: Skill[]
   workflows?: WorkflowsResponse
-  repo?: RepoResponse
+  /** `GET /api/v1/repo` — a payload, or a handler for a delayed answer. */
+  repo?: RepoResponse | (() => Promise<Response>)
   uiState?: Record<string, unknown>
   /** Non-2xx `GET /api/v1/ui-state` answers (the query-errored path: `data` stays undefined). */
   uiStateStatus?: number
@@ -278,6 +279,8 @@ function serve(overrides: {
   let saves = 0
   const json = (payload: unknown, status = 200) =>
     new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
+  const answer = (payload: unknown) =>
+    typeof payload === 'function' ? (payload as () => Promise<Response>)() : json(payload)
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -305,7 +308,7 @@ function serve(overrides: {
       if (url === '/api/v1/plan' && method === 'POST') {
         return typeof data.plan === 'function' ? (data.plan as () => Promise<Response>)() : json(data.plan)
       }
-      if (url === '/api/v1/repo') return json(data.repo)
+      if (url === '/api/v1/repo') return answer(data.repo)
       if (url === '/api/v1/launch-key') return json({ key: data.launchKey })
       if (url === '/api/v1/ui-state' && method === 'GET') return json(data.uiState, data.uiStateStatus)
       if (url === '/api/v1/ui-state' && method === 'PUT') return json(body ?? {})
@@ -412,6 +415,40 @@ describe('the hero surface', () => {
     fireEvent.click(worktree)
     expect(worktree.textContent).toContain('Changes are made in the current working directory.')
     expect(worktree.nextElementSibling?.textContent).toContain('Base branch')
+  })
+
+  // hearsay-tools/cezarion#1605: Base branch sits above Autonomous. Inserting it when `/repo`
+  // answered moved that toggle mid-click, so a browser's second click hit the Base branch row.
+  // Removing it when `/repo` failed moved the toggle the same way.
+  it.each([
+    { outcome: 'answers', status: 200 },
+    { outcome: 'fails', status: 404 },
+  ])('keeps the rows above Autonomous in place when the repo $outcome', async ({ status }) => {
+    let answerRepo!: () => void
+    serve({
+      repo: () => new Promise<Response>((resolve) => {
+        const body = status === 200 ? REPO : { error: 'no repo' }
+        answerRepo = () => resolve(new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } }))
+      }),
+    })
+    const { client } = renderNewTask()
+    await pillReady()
+    const rowsAboveAutonomous = () => {
+      const rows: Element[] = []
+      for (let row = screen.getByRole('checkbox', { name: 'Autonomous' }).previousElementSibling; row; row = row.previousElementSibling) rows.push(row)
+      return rows
+    }
+    const pending = rowsAboveAutonomous()
+    expect(pending[0]?.textContent).toContain('Base branch')
+    answerRepo()
+    const repoStatus = () => client.getQueryCache().findAll().find((query) => query.queryKey.at(-1) === 'repo')?.state.status
+    await waitFor(() => {
+      expect(repoStatus()).toBe(status === 200 ? 'success' : 'error')
+      const settled = rowsAboveAutonomous()
+      expect(settled).toHaveLength(pending.length)
+      expect(settled.every((row, index) => row === pending[index])).toBe(true)
+    })
+    expect(document.querySelector('[data-slot="base-pill"]') !== null).toBe(status === 200)
   })
 
   it('keeps run options in a disclosure separate from prompt, agent selection, and submission', async () => {

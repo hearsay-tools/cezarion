@@ -8,7 +8,7 @@ import { seedTranscript } from './seed-transcript'
 import { settleVisual, visibilitySampleExpression, waitForSettledSample } from './visual-ready'
 import { expectEditorFitsViewport } from './session-layout'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { openSessionActivityRow, SESSION_ACTIVITY_SUMMARY } from './session-activity'
+import { openSessionActivity, openSessionActivityRow, SESSION_ACTIVITY_SUMMARY } from './session-activity'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import {
   applyContrastQaVariant,
@@ -392,7 +392,8 @@ describe('task thread', () => {
 
   it('the step rail maps the record steps to checklist rows over the progress bar', () => {
     // The rail lives in the Session activity card's workflow section now (#402), whose row is
-    // titled by the current step and opens the same checklist.
+    // titled by the current step and opens the same checklist. The card starts folded (#1601).
+    openSessionActivity(browser)
     expect(browser.text('[data-slot="run-activity-workflow"] > button')).toContain('Verify')
     browser.click('[data-slot="run-activity-workflow"] > button')
     browser.waitForFunction(`document.querySelector('[data-slot="step-progress"] > div') !== null`)

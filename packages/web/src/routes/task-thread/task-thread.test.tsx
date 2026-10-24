@@ -1063,7 +1063,9 @@ describe('ThreadView', () => {
     expect(dock.textContent).toContain('Activity')
     // The status is the same line the header pill reads (hearsay-tools/cezarion#1333).
     expect(dock.textContent).toContain('Running')
-    // The workflow row names the workflow and the step the run is on.
+    // The card starts folded (hearsay-tools/cezarion#1601); its workflow row names the workflow
+    // and the step the run is on.
+    fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
     expect(document.querySelector('[data-slot="run-activity-workflow"]')?.textContent).toContain('quick-task')
     expect(document.querySelector('[data-slot="run-activity-workflow"]')?.textContent).toContain('Do the task')
   })
@@ -1131,7 +1133,7 @@ describe('ThreadView', () => {
       <ThreadView run={run('running', { id: 'dock-run-a', steps } as Partial<ApiRun>)} thread={reduceThread(EVENTS)} />,
     )
     fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
-    expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('collapsed')
+    expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('open')
 
     // The route does not remount between tasks: only the run prop changes.
     rerender(
@@ -1141,7 +1143,7 @@ describe('ThreadView', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     )
-    expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('open')
+    expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('collapsed')
   })
 
   it('a plan in the stream → the dock above the composer area + the compact header mirror', () => {
@@ -1157,6 +1159,7 @@ describe('ThreadView', () => {
     ]
     renderView(<ThreadView run={run('running')} thread={reduceThread(withPlan)} />)
     expect(document.querySelector('[data-slot="run-activity-dock"]')).not.toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
     // The plan is a section of the one dock now — its own card is gone, its meter moved.
     expect(document.querySelector('[data-slot="plan-dock"]')).toBeNull()
     expect(
@@ -1186,6 +1189,7 @@ describe('ThreadView', () => {
     ]
     renderView(<ThreadView run={run('running')} thread={reduceThread(events)} />)
     expect(document.querySelector('[data-slot="tool-card"]')).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
     expect(document.querySelector('[data-slot="run-activity-plan"]')).not.toBeNull()
   })
 })

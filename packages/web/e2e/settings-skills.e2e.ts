@@ -119,7 +119,8 @@ describe('settings → skills against the live dry-run server', () => {
   })
 
   it('keeps selected and hovered skill descriptions AA-readable with visible keyboard focus', () => {
-    browser.goto(`${baseUrl}${scoped('/skills')}`)
+    // The grouped table opens no skill by default (hearsay-tools/cezarion#1607), so the URL selects ALPHA.
+    browser.goto(`${baseUrl}${scoped(`/skills?skill=${ALPHA}`)}`)
     browser.waitForFunction(`document.querySelector('${row(ALPHA)} > span:last-child') !== null`)
     try {
       for (const variant of contrastQaVariants) {
@@ -209,7 +210,7 @@ describe('settings → skills against the live dry-run server', () => {
     }
   })
 
-  it('a team skill switches off and back on by keyboard, and the project saves each change (#1494)', async () => {
+  it('a team skill and its repository group switch off and back on by keyboard, and the project saves each change (#1494, #1607)', async () => {
     // Dry-run configures no team source, so this case adds a local skills repo for its duration.
     const cezarDir = resolve(servedRoot(), '.ai/cezar')
     const configFile = resolve(cezarDir, 'config.json')
@@ -247,20 +248,26 @@ describe('settings → skills against the live dry-run server', () => {
         `document.querySelector(${JSON.stringify(`${toggle}:not([disabled])`)})?.getAttribute('aria-label') ?? null`,
         (value) => typeof value === 'string',
       )).toBe(`Enable ${name}`)
+      const checked = (selector: string) => `document.querySelector(${JSON.stringify(selector)})?.getAttribute('aria-checked') ?? null`
       focusWithKeyboard(browser, toggle)
       browser.press('Space')
-      expect(browser.waitForValue(
-        `document.querySelector('[data-slot="skills-group-available"] [data-slot="skill-row"][data-skill="${name}"]') !== null`,
-        (value) => value === true,
-      )).toBe(true)
+      // The row stays in its repository group (hearsay-tools/cezarion#1607); only its switch changes.
+      expect(browser.waitForValue(checked(toggle), (value) => value === 'false')).toBe('false')
       await saved(true)
-      // The row moved groups; its switch is a new element, so focus it again before the second press.
       focusWithKeyboard(browser, toggle)
       browser.press('Space')
-      expect(browser.waitForValue(
-        `document.querySelector(${JSON.stringify(toggle)})?.getAttribute('aria-checked') ?? null`,
-        (value) => value === 'true',
-      )).toBe('true')
+      expect(browser.waitForValue(checked(toggle), (value) => value === 'true')).toBe('true')
+      await saved(false)
+      // The repository's group control switches every child in one save, and back.
+      const group = `[data-slot="skill-group-row"][data-group=${JSON.stringify(source)}] [data-slot="skill-group-switch"]`
+      expect(browser.waitForValue(checked(group), (value) => value === 'true')).toBe('true')
+      focusWithKeyboard(browser, group)
+      browser.press('Space')
+      expect(browser.waitForValue(checked(toggle), (value) => value === 'false')).toBe('false')
+      await saved(true)
+      focusWithKeyboard(browser, group)
+      browser.press('Space')
+      expect(browser.waitForValue(checked(group), (value) => value === 'true')).toBe('true')
       await saved(false)
     } finally {
       if (savedConfig === null) rmSync(configFile, { force: true })
