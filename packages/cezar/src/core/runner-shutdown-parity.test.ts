@@ -1,8 +1,9 @@
 import { execFileSync, type ChildProcess } from 'node:child_process';
 import type { IncomingMessage } from 'node:http';
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
 // Capture the real child only to break its OS transport; native mock frames and
@@ -72,7 +73,7 @@ async function leftovers(cwd: string): Promise<{ group: number; session: number 
   }, { timeout: 5000 });
 }
 
-async function withChild(backend: RunnerId, check: (session: AgentSession, child: ChildProcess, events: AgentEvent[], settled: Promise<unknown>, cwd: string) => Promise<void>, scenario: 'no-progress' | 'no-progress-leftover' = 'no-progress') {
+async function withChild(backend: RunnerId, check: (session: AgentSession, child: ChildProcess, events: AgentEvent[], settled: Promise<unknown>, cwd: string) => Promise<void>, scenario: 'no-progress' | 'no-progress-leftover' | 'no-progress-ignore-term' = 'no-progress') {
   const adapter = HARNESS_ADAPTERS[backend];
   const cwd = mkdtempSync(join(tmpdir(), `cez-shutdown-${backend}-`));
   vi.stubEnv('CEZ_DRY_RUN', '');
@@ -230,6 +231,36 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
         await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 6000 });
         expect(alive(setsid)).toBe(true);
       }, 'no-progress-leftover');
+    }, 15_000);
+
+    // hearsay-tools/cezarion#1625: N5 signals as soon as `watchdog.pid` appears. A mock that
+    // published it before replacing its SIGTERM handler died from that SIGTERM.
+    it(`${backend} an ignore-term stall survives SIGTERM sent as soon as it publishes its pid`, async () => {
+      const preloadDir = mkdtempSync(join(tmpdir(), `cez-sigterm-gap-${backend}-`));
+      const preload = join(preloadDir, 'pause-signal-setup.mjs');
+      // Model preemption while the default SIGTERM action applies: before a handler
+      // install with no listener left. Readiness must not let the test signal in this gap.
+      writeFileSync(preload, `
+const on = process.on;
+process.on = function(event, listener) {
+  // bound: widen the handler-install gap well past the test's pid poll.
+  if (event === 'SIGTERM' && process.listenerCount('SIGTERM') === 0) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
+  return on.call(this, event, listener);
+};
+`);
+      vi.stubEnv('NODE_OPTIONS', `${process.env.NODE_OPTIONS ?? ''} --import=${pathToFileURL(preload).href}`.trim());
+      try {
+        await withChild(backend, async (_session, child) => {
+          child.kill('SIGTERM');
+          // bound: proves an exit did NOT happen; the default action kills within
+          // milliseconds, so this window can only miss a death, never invent one.
+          await new Promise(resolve => setTimeout(resolve, 300));
+          expect(child.signalCode).toBeNull();
+          expect(alive(child.pid!)).toBe(true);
+        }, 'no-progress-ignore-term');
+      } finally {
+        rmSync(preloadDir, { recursive: true, force: true });
+      }
     }, 15_000);
 
     if (backend === 'pi' || backend === 'claude') {

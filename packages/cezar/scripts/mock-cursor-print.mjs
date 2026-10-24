@@ -189,7 +189,6 @@ if (prompt.includes('mock:ci-wait') || process.env.CEZ_MOCK_CI_PR) {
   finish(response); process.exit(0);
 }
 if (prompt.includes('mock:no-progress')) {
-  watchdogWritePid('watchdog.pid', String(process.pid));
   if (prompt.includes('ignore-term')) process.on('SIGTERM', () => {});
   if (prompt.includes('held-pipe')) spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'],
     { stdio: ['ignore', process.stdout, process.stderr] });
@@ -198,6 +197,8 @@ if (prompt.includes('mock:no-progress')) {
     spawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
     spawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
   }
+  // Publish readiness after mode setup: another process may signal us as soon as it sees it.
+  watchdogWritePid('watchdog.pid', String(process.pid));
   setInterval(() => {}, 1000);
   await new Promise(() => {});
 }

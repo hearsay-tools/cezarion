@@ -7,7 +7,6 @@ import { renameSync as watchdogRename, writeFileSync as watchdogWrite } from 'no
 function watchdogWritePid(file, pid) { const tmp = `${file}.${process.pid}.tmp`; watchdogWrite(tmp, pid); watchdogRename(tmp, file); }
 function watchdogStall(prompt) {
   if (!prompt.includes('mock:no-progress')) return false;
-  watchdogWritePid('watchdog.pid', String(process.pid));
   if (prompt.includes('ignore-term')) {
     process.removeAllListeners('SIGTERM');
     process.on('SIGTERM', () => {});
@@ -24,6 +23,8 @@ function watchdogStall(prompt) {
     watchdogSpawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
     watchdogSpawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
   }
+  // Publish readiness after mode setup: another process may signal us as soon as it sees it.
+  watchdogWritePid('watchdog.pid', String(process.pid));
   return true;
 }
 
