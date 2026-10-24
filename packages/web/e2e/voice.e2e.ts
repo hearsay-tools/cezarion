@@ -221,12 +221,11 @@ describe('voice mode with the dry-run engine', () => {
     browser.fill(INPUT, 'yes, confirmed')
     browser.waitForFunction(`document.querySelector('${ROW}') !== null`)
     browser.press('Enter')
-    const resolved = browser.waitForValue<string>(
-      `document.querySelector('[data-slot="ask-card"][data-resolved="true"]')?.textContent ?? null`,
-      (text) => typeof text === 'string' && text.includes('Library: Vitest') && text.includes('Build: Webpack'),
+    const selected = browser.waitForValue<string[]>(
+      `[...document.querySelectorAll('[data-slot="ask-answers"] li[data-selected="true"]')].map(el => el.textContent)`,
+      (labels) => labels.length === 2,
     )
-    expect(resolved).toContain('Library: Vitest')
-    expect(resolved).toContain('Build: Webpack')
+    expect(selected).toEqual(['✓VitestSelected', '✓WebpackSelected'])
   }, 90_000)
 
   it('refuses to confirm an incomplete card', async () => {
