@@ -277,7 +277,8 @@ describe('selection and control states (#171)', () => {
         browser.screenshot(`${artifacts}/states-tasks-${variant.id}.png`, { viewport: true })
       }
 
-      browser.goto(`${baseUrl}/p/${project}/skills`)
+      // The grouped table opens no skill by default (hearsay-tools/cezarion#1607), so the URL opens one.
+      browser.goto(`${baseUrl}/p/${project}/skills?skill=review`)
       browser.waitForFunction(`document.querySelector('[data-slot="skill-row"][aria-current="page"]') !== null`)
       applyContrastQaVariant(browser, variant)
       const skill = '[data-slot="skill-row"][aria-current="page"]'
