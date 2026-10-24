@@ -11,6 +11,27 @@ If a bundled dependency is absent, install the bundled manifest:
 npm install --prefix <skill> --ignore-scripts --no-audit --no-fund
 ```
 
+## Tests
+
+The tests for the bundled scripts are in this repository's root `scripts/`
+directory, not in the skill:
+
+| Test file | Covers |
+| --- | --- |
+| `scripts/quality-check.test.mjs` | `check.mjs`, `coverage.mjs`, `vitest-coverage.mjs`, `quality-report.mjs`, and the parser in `code-metrics.mjs` |
+| `scripts/metrics.test.mjs` | `metrics.mjs`, its repository wrapper `scripts/metrics.mjs`, and the measurements in `code-metrics.mjs` |
+| `scripts/changed-functions.test.mjs` | `changed-functions.mjs` |
+
+A change to a bundled script updates its test file in the same change. Run
+the three files from the repository root:
+
+```sh
+node --import ./scripts/test-git-env.mjs --test scripts/quality-check.test.mjs \
+  scripts/metrics.test.mjs scripts/changed-functions.test.mjs
+```
+
+Squeal runs them in its `root:test:unit` project when it validates the worktree.
+
 ## Complete check
 
 `scripts/check.mjs --help` lists the command's flags and exit codes. The command
