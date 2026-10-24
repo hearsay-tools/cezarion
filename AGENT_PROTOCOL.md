@@ -93,6 +93,10 @@ interface InputDelivery {
   sections with the new flags (resend required — a resumed skill task lacks the playbook
   unless the caller sends it); OpenCode and Codex/Cursor carry it in the thread. OMP was
   not live-verified (not installed here) and is declared `resent` as the safe value.
+- Session-start context (hearsay-tools/cezarion#1584, `docs/context-injection.md`) rides in
+  `spec.userPrompt`, never `spec.systemPrompt`: every runner delivers the opening message, so
+  it needs no field-support declaration. A resumed Claude session keeps its first launch's
+  handoff instruction, so it can still be told to read the file that the prefix now carries.
   claude, pi and omp are `resent`; opencode, codex and cursor are `in-thread`. A backend
   switch with no `sessionId` still sends the skill. OpenCode Continue GETs `/session/{id}`;
   a 404 opens one fresh session with `resumeFallbackSystemPrompt` (the skill-inclusive

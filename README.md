@@ -1455,6 +1455,28 @@ root — live once in `~/.cezar/config.json`, alongside the
 in a repo's `.ai/cezar/config.json` is imported into the workspace file the
 first time Cezarion boots there, and ignored afterwards.
 
+### Session-start context
+
+Every session Cezarion launches — a fresh step, a retry, **Continue**, recovery, an owned
+worker — opens with the run's whole handoff file, so the agent has its notes without a tool
+call. Add your own context, such as a vision document, with an optional
+`.ai/cezar/context.yaml`:
+
+```yaml
+version: 1
+rules:
+  - id: project-vision
+    on: session_start
+    target: both          # parent · worker · both
+    template: |
+      Project vision:
+      {{file:docs/vision.md}}
+```
+
+The whole prefix is capped at 64 KiB, blocks that do not fit are skipped whole, and each launch
+logs which blocks it applied or skipped. See [docs/context-injection.md](docs/context-injection.md)
+for the variables, the limits and the error handling.
+
 ### Preparing new worktrees
 
 Every task and worker runs in a fresh worktree, and a fresh worktree has nothing installed. Give
