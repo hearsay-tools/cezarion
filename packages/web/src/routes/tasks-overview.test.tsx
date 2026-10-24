@@ -1530,6 +1530,23 @@ describe('archived pages past the window', () => {
     expect(archivedTab().textContent).toBe('Archived · 250')
   })
 
+  it('keeps an origin count open-ended while the plain archive has older pages, whatever a search says (hearsay-tools/cezarion#1616)', { timeout: 30_000 }, () => {
+    const window = archivedRuns(200).map((entry, i) => (i === 0 ? { ...entry, automationId: 'nightly' } : entry))
+    const searched = { runs: [], query: 'needle', hasMore: false, loading: false, onLoadMore: vi.fn() }
+    const { rerender } = renderOverview({ view: 'archived', runs: window, origin: 'automations', onOriginChange: vi.fn(), archivedPages: { ...searched, plainHasMore: true } })
+    expect(archivedTab().textContent).toBe('Archived · 1+')
+    rerender(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter>
+          <TasksOverview runs={window} view="archived" now={NOW} origin="automations" onOriginChange={vi.fn()}
+            archivedPages={{ ...searched, plainHasMore: false }}
+            onViewChange={vi.fn()} onArchiveFinished={vi.fn()} onMarkAllRead={vi.fn()} onRename={vi.fn()} />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    )
+    expect(archivedTab().textContent).toBe('Archived · 1')
+  })
+
   it('counts exactly below the window and offers no older page', () => {
     renderOverview({ view: 'archived', runs: archivedRuns(3) })
     expect(archivedTab().textContent).toBe('Archived · 3')

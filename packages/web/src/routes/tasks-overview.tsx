@@ -83,6 +83,9 @@ export type ArchivedPages = {
   onLoadMore: () => void
   /** The last page request failed: the tab still shows what it has and offers a retry. */
   failed?: boolean
+  /** Whether the unfiltered archive has an older page, whatever text these pages answer; absent
+   *  while no unfiltered page has loaded. */
+  plainHasMore?: boolean
 }
 
 /**
@@ -365,7 +368,8 @@ function useProjectTaskGroups({ all, view, query, origin, archivedPages, archive
 
 /**
  * The Archived tab's count. For All it is the server's total, or the window with a `+` while
- * none is known; for one origin it is what has loaded, with a `+` while older pages remain.
+ * none is known; for one origin it is what has loaded, with a `+` while the plain archive has
+ * older pages, or while that is unknown.
  */
 function archivedTabCount(
   all: readonly RunSummary[],
@@ -378,7 +382,8 @@ function archivedTabCount(
   const full = archived >= ARCHIVED_WINDOW
   if (origin === 'all') return archivedTotal ?? (full ? `${ARCHIVED_WINDOW}+` : archived)
   const loaded = originCounts(withPages, 'archived')[origin]
-  return full && archivedPages?.hasMore !== false ? `${loaded}+` : loaded
+  // Whether the plain archive has older pages; a search's own paging says nothing about that.
+  return full && archivedPages?.plainHasMore !== false ? `${loaded}+` : loaded
 }
 
 function resultCaption(count: number, incomplete: boolean, needle: string): string {
@@ -1621,5 +1626,6 @@ function useArchivedPages(runs: readonly RunSummary[] | undefined, view: ListVie
   const unfiltered = needle === ''
     ? loaded
     : queryClient.getQueryData<InfiniteData<ArchivedRunsResponse>>(queryKeys.runs.archived(''))?.pages
-  return { pages, total: unfiltered?.[0]?.total, search: setTyped }
+  const plainHasMore = unfiltered === undefined ? undefined : unfiltered.at(-1)?.nextCursor != null
+  return { pages: pages && { ...pages, plainHasMore }, total: unfiltered?.[0]?.total, search: setTyped }
 }
