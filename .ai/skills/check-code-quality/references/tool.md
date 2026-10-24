@@ -90,3 +90,46 @@ The change scanner compares function source, excluding nested bodies from the
 parent. Comments and whitespace inside a function count as edits. Renamed or
 moved functions may appear as added. Duplicate identities can have an unknown
 baseline. Inspect the diff and baseline for these cases before deciding origin.
+
+## Curried arrows and transformed coverage
+
+The matcher first uses exact function-body positions. For an arrow whose body
+is another arrow, it can also use an exact Istanbul declaration endpoint: the
+parsed arrow's start plus one column, with the same body end line. This handles
+source maps that move a returned arrow's body start into its parent's parameter
+list. Each coverage entry can belong to only one function. Names, entry order
+and nearby positions cannot resolve ambiguous matches.
+
+Called outer stages and uncalled returned stages keep separate call counters.
+The directly returned arrow's entire span is excluded from its parent's
+statement attribution, including mapped statements that drift into the returned
+arrow's signature. That parent has no independent body statements, so its own
+call counter determines 100% or 0%. The returned function keeps its own body
+statements, and the CRAP formula is unchanged. An absent counter is not evidence that a function was uncalled.
+
+Some transforms lose both exact anchors, including the middle stage of a
+multiline three-stage arrow in the tested Vitest V8 transform. Missing or
+ambiguous matches still produce unavailable coverage, null CRAP and exit 2;
+the report points here. Regenerating the same source map may repeat the failure.
+Rewrite the affected stage as a block-bodied function that returns the next
+arrow, then collect fresh coverage with the same `--test` and `--project` flags:
+
+```ts
+// Before
+const set = (key: string, value: string) => (current: URLSearchParams) => {
+  current.set(key, value);
+  return current;
+};
+
+// Explicit outer body gives the collector a separate body anchor.
+function set(key: string, value: string) {
+  return (current: URLSearchParams) => {
+    current.set(key, value);
+    return current;
+  };
+}
+```
+
+For a longer chain, give each unmatched stage its own explicit body. This is a
+mapping workaround, not a coverage exemption; every changed stage must still
+have a coverage result.

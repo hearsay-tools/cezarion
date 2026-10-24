@@ -344,3 +344,67 @@ test('copied skill runs the complete Node coverage check outside this checkout',
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(JSON.parse(result.stdout).summary.functions, 1);
 });
+
+function curriedVitestFixture(t) {
+  const f = vitestFixture(t);
+  f.write('flow.e2e.ts', '');
+  f.write('choose.test.js', '');
+  f.write('curried.test.js', `import { expect, test } from 'vitest';
+    import * as curry from './curried.ts';
+    test('curried stages', () => {
+      expect(curry.both('x', '1')(new URLSearchParams()).get('x')).toBe('1');
+      expect(curry.both('x', null)(new URLSearchParams('x=1')).has('x')).toBe(false);
+      expect(typeof curry.outer('x', '1')).toBe('function');
+      expect(typeof curry.neither).toBe('function');
+      expect(curry.expressionBoth('x', 1)({})).toEqual({x: 1});
+      expect(typeof curry.expressionOuter('x', 1)).toBe('function');
+      expect(typeof curry.expressionNeither).toBe('function');
+      expect(curry.tripleBoth(1)(2)(3)).toBe(6);
+      expect(typeof curry.tripleOuter(1)).toBe('function');
+      expect(typeof curry.tripleNeither).toBe('function');
+      expect(curry.cleanup({current: undefined})()).toBeUndefined();
+    });`);
+  return f;
+}
+
+function curriedSource() {
+  const block = `(key: string, value: string | null): Update => (current) => {
+    if (value === null) current.delete(key);
+    else current.set(key, value);
+    return current;
+  };`;
+  const expression = '(key: string, value: number) => (current: Record<string, number>) => ({...current, [key]: value});';
+  const triple = '(a: number) => (b: number) => (c: number) => a + b + c;';
+  return `type Update = (current: URLSearchParams) => URLSearchParams;\n`
+    + ['both', 'outer', 'neither'].map(name => `export const ${name} = ${block}`).join('\n') + '\n'
+    + ['Both', 'Outer', 'Neither'].map(name => `export const expression${name} = ${expression}`).join('\n') + '\n'
+    + ['Both', 'Outer', 'Neither'].map(name => `export const triple${name} = ${triple}`).join('\n') + '\n'
+    + 'export const cleanup = (timer: {current: undefined}) => () => clearTimeout(timer.current);\n';
+}
+
+test('real Vitest coverage distinguishes called and uncalled curried stages without rewriting', async t => {
+  const f = curriedVitestFixture(t);
+  f.write('curried.ts', curriedSource());
+  const result = await invoke(f, ['--test', 'curried.test.js', '--project', 'unit']);
+  assert.equal(result.code, 0, result.error + JSON.stringify(result.report));
+  const functions = result.report.files.find(file => file.file === 'curried.ts').functions;
+  assert.ok(functions.every(fn => fn.coverage.status === 'available'));
+  assert.deepEqual(functions.map(fn => fn.coverage.calls), [2, 2, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1]);
+  assert.deepEqual(functions.map(fn => fn.coverage.percent), [100, 100, 100, 0, 0, 0, 100, 100, 100, 0, 0, 0, 100, 100, 100, 100, 0, 0, 0, 0, 0, 100, 100]);
+});
+
+
+test('multiline curries without exact anchors stay incomplete and name the rewrite', async t => {
+  const f = vitestFixture(t);
+  f.write('flow.e2e.ts', '');
+  f.write('choose.test.js', `import { expect, test } from 'vitest';
+    import { triple } from './curried.ts';
+    test('triple', () => { expect(triple(1)(2)(3)).toBe(6); });`);
+  f.write('curried.ts', 'export const triple = (a: number) =>\n (b: number) =>\n (c: number) => a + b + c;');
+  const result = await invoke(f, ['--test', 'choose.test.js', '--project', 'unit']);
+  assert.equal(result.code, 2);
+  const functions = result.report.files.find(file => file.file === 'curried.ts').functions;
+  assert.equal(functions[1].coverage.status, 'unavailable');
+  assert.equal(functions[1].crap, null);
+  assert.match(markdownReport(result.report), /references\/tool\.md.*block-bodied rewrite/);
+});
