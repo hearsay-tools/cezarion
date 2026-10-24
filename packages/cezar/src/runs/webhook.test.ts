@@ -6,7 +6,7 @@ import { RunStore } from './store.ts';
 import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { registerProject } from '../workspace/projects.ts';
 import { WEBHOOK_TRIGGERS, type WebhookTrigger } from '@open-mercato/cezar-contract/attention';
-import { sendAgentReport, TaskWebhook, TaskWebhooks, WEBHOOK_ATTEMPTS, type TaskWebhookOptions } from './webhook.ts';
+import { sendAgentReport, TaskWebhook, TaskWebhooks, WEBHOOK_ATTEMPTS, type TaskWebhookOptions, type TaskWebhookTarget } from './webhook.ts';
 
 /** The task webhook (#589): what a store transition turns into on the wire, and what a failing
  *  endpoint is allowed to change (the record's `webhook` outcome and one thread event — never
@@ -371,6 +371,43 @@ describe('TaskWebhook', () => {
     release();
     await webhook.idle();
     expect(calls).toHaveLength(2);
+  });
+
+  /** A send queued behind a held one reads the webhook again when its turn comes (#1639 review):
+   *  `edit` changes the settings while the first send is held. */
+  async function queuedBehindHeld(edit: (webhooks: TaskWebhookTarget[]) => TaskWebhookTarget[]) {
+    let release!: () => void;
+    const held = new Promise<void>((done) => { release = done; });
+    const { calls, fetchImpl } = recorder(async (_call, index) => {
+      if (index === 0) await held;
+      return new Response(null, { status: 204 });
+    });
+    let webhooks: TaskWebhookTarget[] = [{ ...target, token: 'old-token', triggers: ['running', 'done'] }];
+    let resolved = 0;
+    const webhook = attach(fetchImpl, { resolveProject: async () => { resolved += 1; return { id: 'proj', webhooks }; } });
+    const run = optedIn();
+    store.updateRun(run.id, { status: 'running' });
+    // bound: the first POST starts and is held until released below.
+    await expect.poll(() => calls.length, { timeout: 10_000 }).toBe(1);
+    store.updateRun(run.id, { status: 'done' });
+    // bound: the second change is dispatched against the settings as they were, then queued.
+    await expect.poll(() => resolved, { timeout: 10_000 }).toBe(2);
+    webhooks = edit(webhooks);
+    release();
+    await webhook.idle();
+    return calls;
+  }
+
+  it('sends a queued delivery to the endpoint as edited while it waited', async () => {
+    const calls = await queuedBehindHeld(([first]) => [{ ...first!, url: 'https://new.example/hook', token: 'new-token' }]);
+    expect(calls.map((call) => call.url)).toEqual(['https://bot.example/hook', 'https://new.example/hook']);
+    expect(calls[1]!.headers.authorization).toBe('Bearer new-token');
+  });
+
+  it('drops a queued delivery once its webhook is removed or stops wanting that state', async () => {
+    expect(await queuedBehindHeld(() => [])).toHaveLength(1);
+    hook?.dispose();
+    expect(await queuedBehindHeld(([first]) => [{ ...first!, triggers: ['running'] }])).toHaveLength(1);
   });
 
   it('stops sending once the project webhook is removed', async () => {

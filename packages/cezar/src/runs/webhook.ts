@@ -244,11 +244,18 @@ export class TaskWebhook {
     // Removed since the run opted in: nothing to send to, and nobody to tell.
     if (!project) return;
     for (const target of project.webhooks) {
-      // Filtered here, against the selection as it is now, so a skipped change does not use up
-      // a `seq` number.
-      if (pending.state !== undefined && !(target.triggers ?? DEFAULT_WEBHOOK_TRIGGERS).includes(pending.state)) continue;
-      this.chain(this.queues, `${pending.run.id}\0${target.id}`, () => this.deliver(pending, project.id, target));
+      if (!wants(target, pending)) continue;
+      this.chain(this.queues, `${pending.run.id}\0${target.id}`, () => this.deliver(pending, target.id));
     }
+  }
+
+  /** The webhook as it is when its send reaches the head of its queue: a send that waited behind
+   *  a slow one never POSTs to a removed webhook, nor to an old URL or with an old token. Filtered
+   *  before the payload, so a skipped change does not use up a `seq` number. */
+  private async current(pending: Pending, webhookId: string): Promise<{ projectId: string; target: TaskWebhookTarget } | undefined> {
+    const project = await this.options.resolveProject().catch(() => undefined);
+    const target = project?.webhooks.find((webhook) => webhook.id === webhookId);
+    return project && target && wants(target, pending) ? { projectId: project.id, target } : undefined;
   }
 
   private async payload(pending: Pending, projectId: string, target: TaskWebhookTarget): Promise<TaskWebhookPayload> {
@@ -276,7 +283,10 @@ export class TaskWebhook {
     };
   }
 
-  private async deliver(pending: Pending, projectId: string, target: TaskWebhookTarget): Promise<void> {
+  private async deliver(pending: Pending, webhookId: string): Promise<void> {
+    const current = await this.current(pending, webhookId);
+    if (!current) return;
+    const { projectId, target } = current;
     const payload = await this.payload(pending, projectId, target);
     const runId = pending.run.id;
     if (this.options.dryRun ?? process.env.CEZ_DRY_RUN === '1') {
@@ -322,6 +332,11 @@ export class TaskWebhook {
       },
     });
   }
+}
+
+/** A status change goes only to a webhook that selected its state; the hand-off always does. */
+function wants(target: TaskWebhookTarget, pending: Pending): boolean {
+  return pending.state === undefined || (target.triggers ?? DEFAULT_WEBHOOK_TRIGGERS).includes(pending.state);
 }
 
 function threadUrl(origin: string | undefined, projectId: string, runId: string): string {
