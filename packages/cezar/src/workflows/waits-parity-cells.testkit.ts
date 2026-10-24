@@ -2740,7 +2740,9 @@ function singleRunnerCells(): void {
     const timer = waitOfKind(run.id, 'timer')!;
     fireTimer(timer.id);
     await until(() => settled(run.id, timer.id)?.phase === 'delivered' && store.getRun(run.id)?.status === 'waiting');
-    const owes = (record: RunRecord) => (manager as unknown as { owesWake(run: RunRecord): boolean }).owesWake(record);
+    const owes = (record: RunRecord) => {
+      return (manager as unknown as { owesWake(run: RunRecord): boolean }).owesWake(record);
+    };
     const replayed = { ...store.getRun(run.id)!, agentInputs: store.getRun(run.id)!.agentInputs!.map(input => input.id === timer.id ? { ...input, deliveredAt: undefined } : input) };
     expect(owes(replayed)).toBe(false);
     // A lifecycle input no wait names is still owed.
