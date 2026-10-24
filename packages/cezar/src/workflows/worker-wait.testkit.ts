@@ -83,9 +83,21 @@ let checkpoints: Array<{ phase: string; ms: number }> = [];
 let began = 0;
 let failureState: unknown;
 export function checkpoint(value: string) { phase = value; checkpoints.push({ phase, ms: Math.round(performance.now() - began) }); }
-export function captureState() { return { root, phase, checkpoints: checkpoints.map(entry => ({ ...entry })), elapsedMs: Math.round(performance.now() - began), busy: semaphore?.busy(),
+function fixtureEngine() {
+  return manager as unknown as {
+    starting: Set<string>; queue: string[];
+    active: Map<string, { sessionEverOpened?: boolean; cancelled: boolean; interrupt(): void; session?: AgentSession; agentInputFlight?: { inputIds: readonly string[] } }>;
+    executions: Map<string, { sessions: Set<unknown>; turns: Set<unknown>; deliveries: Set<unknown> }>;
+  };
+}
+export function captureState() { const engine = fixtureEngine(); return { root, phase, checkpoints: checkpoints.map(entry => ({ ...entry })), elapsedMs: Math.round(performance.now() - began), busy: semaphore?.busy(),
+  starting: [...engine.starting], queued: [...engine.queue],
+  executions: [...engine.executions].map(([id, entry]) => ({ id, sessions: entry.sessions.size, turns: entry.turns.size, deliveries: entry.deliveries.size })),
   runs: store?.listRunIds().flatMap(id => store!.getRun(id) ?? []).map(run => ({ id: run.id, status: run.status, error: run.error, step: run.currentStepId, wait: waitOf(run)?.phase,
-    events: store.readEvents(run.id).slice(-6).map(event => ({ type: event.type, seq: event.seq, ...('message' in event ? { message: String(event.message).slice(0, 256) } : {}) })) })),
+    active: manager.isActive(run.id), stopping: run.stopping, executionPhase: store.readWorkerExecution(run.id)?.phase,
+    session: (() => { const state = engine.active.get(run.id); return state ? { opened: state.sessionEverOpened, cancelled: state.cancelled,
+      pid: state.session?.pid, open: state.session?.open, flight: state.agentInputFlight?.inputIds } : undefined; })(),
+    events: formatTimeline(run.id, store.readEvents(run.id).slice(-6)), })),
 }; }
 export const bookkeeping: Promise<unknown>[] = [];
 export const executions: Promise<unknown>[] = [];
@@ -123,21 +135,42 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
     manager = new RunManager(store, root, { semaphore }); track();
   });
   afterEach(async () => {
-    failureState = captureState();
-    vi.useRealTimers();
-    // Cancellation during the dequeue/spawn gap is covered by Task 6's barrier;
-    // this fixture waits for its real runner handles before stopping processes.
-    await until(() => {
-      const engine = manager as unknown as { starting: Set<string>; active: Map<string, { sessionEverOpened?: boolean }> };
-      return engine.starting.size === 0 && [...engine.active.values()].every(state => state.sessionEverOpened);
-    });
-    for (const id of store.listRunIds()) manager.cancel(id);
-    await until(() => store.listRunIds().every(id => !manager.isActive(id)));
-    await Promise.all(executions.splice(0));
-    await Promise.all(bookkeeping.splice(0));
-    manager.dispose(); store.close();
-    rmSync(root, { recursive: true, force: true });
-    process.env = saved;
+    const errors: unknown[] = [];
+    const cleanup = (work: () => unknown) => { try { work(); } catch (error) { errors.push(error); } };
+    try {
+      failureState = captureState();
+      vi.useRealTimers(); checkpoint('teardown-handles');
+      // Cancellation during the dequeue/spawn gap is covered by Task 6's barrier;
+      // this fixture waits for its real runner handles before stopping processes.
+      await until(() => {
+        const engine = fixtureEngine();
+        return engine.starting.size === 0 && [...engine.active.values()].every(state => state.sessionEverOpened);
+      }, () => JSON.stringify(captureState()));
+      checkpoint('teardown-cancel');
+      for (const id of store.listRunIds()) cleanup(() => manager.cancel(id));
+      checkpoint('teardown-termination');
+      await until(() => store.listRunIds().every(id => !manager.isActive(id)), () => JSON.stringify(captureState()));
+    } catch (error) {
+      errors.push(error);
+      // Capture AFTER cancellation, while the active registry and store still exist.
+      cleanup(() => { failureState = captureState(); });
+    } finally {
+      // A failed assertion must not strand native sessions, skip disposal, or close the
+      // store beneath execution/bookkeeping. Keep every cleanup attempt independent.
+      const states = [...fixtureEngine().active.values()];
+      const sessions = states.flatMap(state => state.session ? [state.session] : []);
+      for (const state of states) cleanup(() => state.interrupt());
+      for (const session of sessions) cleanup(() => session.interrupt());
+      cleanup(() => manager.dispose());
+      await Promise.allSettled(sessions.map(session => session.result));
+      for (const pending of [executions, bookkeeping]) {
+        for (const result of await Promise.allSettled(pending.splice(0))) if (result.status === 'rejected') errors.push(result.reason);
+      }
+      cleanup(() => store.close());
+      cleanup(() => rmSync(root, { recursive: true, force: true }));
+      process.env = saved;
+    }
+    if (errors.length) throw errors[0];
   }, 30_000);
 }
 export function controlledWire(options: { firstResultGate?: string; humanAnswerGate?: string } = {}) {
