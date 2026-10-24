@@ -110,6 +110,31 @@ names and hand-written default copies with different access implications. The
 table makes those cases explicit for design review; it does not decide which
 ones should share a policy.
 
+**Enumerate worktree cases before changing a running task's files.** A spec or
+plan that adds, replaces or removes files in a running task's worktree MUST carry
+a **Worktree cases** table, reviewed with the spec or plan before implementation
+starts. Skill copies from `packages/cezar/src/skills-provision.ts` and the
+personal config layer from `packages/cezar/src/agent-config/seed.ts` are such
+files. Use one row per case: **Case | Files written, kept or removed | Worktree
+state at the next step, Continue and restart**. State when a case cannot happen,
+and why.
+
+Cover all of these cases: a catalog or source that has not loaded yet; the same
+name from two sources; records written by an older cezar version; a crash between
+two writes (see *Commit an outcome with what it depends on, or after it*); edits
+the agent made to the files, including files it added; and the source removing
+the item.
+
+hearsay-tools/cezarion#1494 and hearsay-tools/cezarion#1539 are the worked
+example. The hearsay-tools/cezarion#1494 design enforced switched-off team skills
+in provisioning, but did not say what happens to copies already in a running
+task's worktree. Three fix rounds tried to remove them on Continue, and each
+review found a new case: an enabled copy deleted while its source was still
+loading, duplicate names across sources, older manifest entries with no recorded
+source, a crash between the removal and the replacement write, and agent edits
+lost to a full re-install. The code was reverted, and hearsay-tools/cezarion#1539
+now holds the five cases.
+
 **Commit an outcome with what it depends on, or after it.** A write that records
 an outcome (`delivered`, `charged`, `settled`, `answered`) must commit atomically
 with the write holding what that outcome needs, or after that write commits.
