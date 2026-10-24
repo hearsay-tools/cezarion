@@ -120,6 +120,15 @@ describe('TasksOverview — mobile actions', () => {
     expect(onArchiveFinished).toHaveBeenCalledOnce()
   })
 
+  it('moves Mark all read into the phone menu, after Archive finished, scoped to the origin (hearsay-tools/cezarion#1616)', () => {
+    const { onMarkAllRead } = renderOverview({ runs: [run({ status: 'done', finishedAt: ago(0) })], origin: 'direct', onOriginChange: vi.fn() })
+    expect((document.querySelector('[data-slot="mark-all-read"]') as HTMLElement).className).toContain('hidden md:inline-flex')
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Task actions' }), { key: 'ArrowDown' })
+    expect(screen.getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Archive finished (1)', 'Mark all read (1)'])
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Mark all read (1)' }))
+    expect(onMarkAllRead).toHaveBeenCalledWith(false)
+  })
+
   it('disables the shared archive controls while a request is pending', () => {
     const { onArchiveFinished } = renderOverview({ runs: [run()], archivePending: true })
     const desktop = screen.getByRole('button', { name: /^Archive finished/ })
@@ -1624,6 +1633,15 @@ describe('TasksOverview — status groups and origin (hearsay-tools/cezarion#161
     fireEvent.click(chips.getByRole('button', { name: 'Direct tasks 1' }))
     expect(onOriginChange).toHaveBeenCalledWith('direct')
     void rerender
+  })
+
+  it('shows the plain count caption on phones only when it says more than the headings', () => {
+    const caption = () => document.querySelector('[data-slot="tasks-result-count"]') as HTMLElement
+    renderOverview({ runs: [run({ title: 'Needle' })] }, false)
+    expect(caption().className).toContain('max-md:hidden')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: 'Needle' } })
+    expect(caption().className).not.toContain('max-md:hidden')
+    expect(caption().textContent).toBe('1 task matching “Needle”')
   })
 
   it('scopes Mark all read to the origin', () => {

@@ -257,6 +257,7 @@ export function TasksOverview({
             origin={origin}
             onShowAll={() => { setQuery(''); setOrigin('all') }}
             caption={resultCaption(derived.visibleCount, derived.incomplete, needle)}
+            captionOnPhones={needle !== '' || derived.incomplete}
             groups={groups}
             folds={folds}
             grouped={{
@@ -367,8 +368,8 @@ function resultCaption(count: number, incomplete: boolean, needle: string): stri
 }
 
 /**
- * Mark all read and Archive finished, both scoped to the origin by the caller. Below `md` the
- * sweep moves into a menu.
+ * Mark all read and Archive finished, both scoped to the origin by the caller. Below `md` Mark
+ * all read moves into the actions menu, after Archive finished.
  */
 function BulkActions({ view, unread, finished, archivePending, headerRef, onMarkAllRead, onArchiveFinished }: {
   view: ListView
@@ -382,6 +383,7 @@ function BulkActions({ view, unread, finished, archivePending, headerRef, onMark
 }) {
   const archiveSelected = React.useRef(false)
   const [actionsOpen, setActionsOpen] = React.useState(false)
+  const sweepable = finished > 0 || archivePending
   // A CSS-hidden Radix menu would keep its modal focus trap after a desktop resize.
   React.useEffect(() => {
     const media = window.matchMedia?.('(min-width: 768px)')
@@ -427,7 +429,9 @@ function BulkActions({ view, unread, finished, archivePending, headerRef, onMark
           <span className="tabular-nums text-muted-foreground">{finished}</span>
         </Button>
       ) : null}
-      {view === 'active' && (finished > 0 || archivePending) ? (
+      {/* Below `md` both sweeps live here, so the first task stays above the fold
+          (hearsay-tools/cezarion#1616). */}
+      {view === 'active' && (sweepable || unread > 0) ? (
         <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
           <DropdownMenuTrigger asChild>
             <Button
@@ -454,16 +458,24 @@ function BulkActions({ view, unread, finished, archivePending, headerRef, onMark
               }
             }}
           >
-            <DropdownMenuItem
-              disabled={archivePending || finished === 0}
-              onSelect={() => {
-                archiveSelected.current = true
-                onArchiveFinished()
-              }}
-            >
-              <ArchiveIcon aria-hidden="true" />
-              {archivePending ? 'Archiving…' : `Archive finished (${finished})`}
-            </DropdownMenuItem>
+            {sweepable ? (
+              <DropdownMenuItem
+                disabled={archivePending || finished === 0}
+                onSelect={() => {
+                  archiveSelected.current = true
+                  onArchiveFinished()
+                }}
+              >
+                <ArchiveIcon aria-hidden="true" />
+                {archivePending ? 'Archiving…' : `Archive finished (${finished})`}
+              </DropdownMenuItem>
+            ) : null}
+            {unread > 0 ? (
+              <DropdownMenuItem onSelect={onMarkAllRead}>
+                <CheckCheckIcon aria-hidden="true" />
+                {`Mark all read (${unread})`}
+              </DropdownMenuItem>
+            ) : null}
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
@@ -493,12 +505,15 @@ function ColumnsPopover({ columns, expandedColumns, columnsPending, onToggleColu
  * What the loaded list leaves on screen: the empty state for how it got empty, or the result
  * caption and each status group with its rows.
  */
-function ProjectTaskResults({ view, query, origin, onShowAll, caption, groups, folds, grouped }: {
+function ProjectTaskResults({ view, query, origin, onShowAll, caption, captionOnPhones, groups, folds, grouped }: {
   view: ListView
   query: string
   origin: TaskOrigin
   onShowAll: () => void
   caption: string
+  /** Below `md` a plain count repeats the group headings, so the caption shows only when it says
+   *  more: a search's matches, or a list not fully loaded. */
+  captionOnPhones: boolean
   groups: TaskStatusGroup<RunSummary>[]
   folds: ReturnType<typeof useTaskListFolds>
   /** Everything each group's rows take besides the group itself. */
@@ -507,7 +522,7 @@ function ProjectTaskResults({ view, query, origin, onShowAll, caption, groups, f
   if (groups.length === 0) return <TasksEmptyState view={view} query={query} origin={origin} onShowAll={onShowAll} />
   return (
     <>
-      <p data-slot="tasks-result-count" className="mb-3 text-[12px] text-muted-foreground tabular-nums">{caption}</p>
+      <p data-slot="tasks-result-count" className={cn('mb-3 text-[12px] text-muted-foreground tabular-nums', !captionOnPhones && 'max-md:hidden')}>{caption}</p>
       <div className="flex flex-col gap-[22px]">
         {groups.map((group) => {
           const members = groupMembers(group)
