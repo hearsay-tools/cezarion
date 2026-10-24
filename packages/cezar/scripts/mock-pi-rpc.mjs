@@ -12,7 +12,6 @@ import { closeSync as watchdogCloseInput, renameSync as watchdogRename, writeFil
 function watchdogWritePid(file, pid) { const tmp = `${file}.${process.pid}.tmp`; watchdogWrite(tmp, pid); watchdogRename(tmp, file); }
 function watchdogStall(prompt) {
   if (!prompt.includes('mock:no-progress')) return false;
-  watchdogWritePid('watchdog.pid', String(process.pid));
   if (prompt.includes('input-closed')) {
     watchdogCloseInput(0);
     watchdogWritePid('input-closed.pid', String(process.pid));
@@ -36,11 +35,14 @@ function watchdogStall(prompt) {
     watchdogSpawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
     watchdogSpawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
   }
+  // Publish readiness after mode setup: another process may signal us as soon as it sees it.
+  watchdogWritePid('watchdog.pid', String(process.pid));
   return true;
 }
 
 import readline from 'node:readline';
 import { appendFileSync, existsSync as mockReleaseExists } from 'node:fs';
+import { rawMessage, stripCommandMessage } from './mock-session-context.mjs';
 // Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
 const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
@@ -122,7 +124,7 @@ const send = !delivery ? sendNow : (value) => {
  * queue pending until its frames are flushed: the next prompt's turn never starts inside it. */
 async function handleControlled(command) {
   if (delivery.rejects(command.message)) {
-    if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: command.message, imageCount: (command.images ?? []).length })}\n`);
+    if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: rawMessage(command), imageCount: (command.images ?? []).length })}\n`);
     write({ id: command.id, type: 'response', command: 'prompt', success: false, error: { message: 'owned turn rejected' } });
     return;
   }
@@ -167,14 +169,14 @@ function sendTurnEnd(usage = { input: 10, output: 5, cacheRead: 0, cacheWrite: 0
 const rl = readline.createInterface({ input: process.stdin });
 let queue = Promise.resolve();
 rl.on('line', (line) => {
-  const command = JSON.parse(line);
+  const command = stripCommandMessage(JSON.parse(line));
   // hearsay-tools/cezarion#1112: a late-ack steer is admitted into the running turn after its
   // last model call: pi acknowledges it now, with the turn open, and reads it as its next
   // prompt once that turn settles (the `mock:steer-late` ordering), starting that run late.
   if (command.type === 'prompt' && command.streamingBehavior === 'steer' && command.message.includes('mock:deferred-turn-start:late-ack')) {
     const admit = () => {
       if (!activeTurn) { setTimeout(admit, 5); return; }
-      if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: command.message, imageCount: 0, streamingBehavior: 'steer' })}\n`);
+      if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: rawMessage(command), imageCount: 0, streamingBehavior: 'steer' })}\n`);
       activeTurn.steers.push(command.message);
       activeTurn.late = true;
       write({ id: command.id, type: 'response', command: 'prompt', success: true });
@@ -186,7 +188,7 @@ rl.on('line', (line) => {
   // pi acknowledges it as its next prompt once that turn settles, with no turn open.
   if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn &&
     !command.message.includes('mock:deferred-turn-start')) {
-    if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: command.message, imageCount: 0, streamingBehavior: 'steer' })}\n`);
+    if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: rawMessage(command), imageCount: 0, streamingBehavior: 'steer' })}\n`);
     activeTurn.steers.push(command.message);
     write({ id: command.id, type: 'response', command: 'prompt', success: true });
     return;
@@ -203,7 +205,7 @@ async function handleCommand(command) {
   if (command.type === 'prompt' && (command.message.includes('mock:autonomous') || command.message.startsWith('Continue working autonomously until the task is fully complete.'))) {
     const { autonomousReply } = await import('./mock-autonomous.mjs');
     // Recorded like every other prompt, so a test can count the autonomous nudges pi received.
-    if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: command.message, imageCount: 0 })}\n`);
+    if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: rawMessage(command), imageCount: 0 })}\n`);
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' });
     send({ type: 'turn_start' });
@@ -261,7 +263,7 @@ async function handleCommand(command) {
   // runner actually wrote onto the RPC (harness parity's AgentRunSpec probes).
   if (command.type === 'prompt' && process.env.CEZ_MOCK_STDIN_FILE) {
     try {
-      appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: command.message, imageCount: (command.images ?? []).length })}\n`);
+      appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: rawMessage(command), imageCount: (command.images ?? []).length })}\n`);
     } catch {
       // best effort — never break the mock over the hook
     }

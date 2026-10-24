@@ -11,6 +11,19 @@ If a bundled dependency is absent, install the bundled manifest:
 npm install --prefix <skill> --ignore-scripts --no-audit --no-fund
 ```
 
+## Tests
+
+Each bundled script's tests sit beside it in `scripts/`, named
+`<script>.test.mjs` for the script they cover most. `quality-check.test.mjs`
+covers `check.mjs` and the modules it drives. A change to a bundled script
+updates its tests in the same change. The tests use `node:test` and need only
+the bundled dependencies, plus Vitest for the Vitest collection tests. Run them
+from the skill or any directory:
+
+```sh
+node --test <skill>/scripts/*.test.mjs
+```
+
 ## Complete check
 
 `scripts/check.mjs --help` lists the command's flags and exit codes. The command

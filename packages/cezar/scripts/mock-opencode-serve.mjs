@@ -74,6 +74,7 @@ if (failStarts > 0) {
 if (process.env.CEZ_MOCK_ARGS_FILE && process.env.OPENCODE_CONFIG_CONTENT) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, JSON.stringify({ type: 'runtime-config', config: JSON.parse(process.env.OPENCODE_CONFIG_CONTENT) }) + '\n');
 if (process.env.CEZ_MOCK_CI_PR) { const { probeCiTool } = await import('./mock-ci-tool.mjs'); await probeCiTool('opencode', JSON.parse(process.env.OPENCODE_CONFIG_CONTENT ?? '{}')); }
 import * as parityGateFs from 'node:fs';
+import { withoutSessionContextBody } from './mock-session-context.mjs';
 
 // #401: let the test observe the actual monitoring park before releasing late wire frames.
 async function afterParityPark(prompt) {
@@ -342,6 +343,7 @@ const server = createServer((req, res) => {
   req.on('end', async () => {
     if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify({ method: req.method, url, body: body ? JSON.parse(body) : undefined })}\n`);
     // The delivery control also reads the prompt Cezar sent, before a nudge's scripted answer replaces it.
+    if (req.method === 'POST' && /\/(prompt_async|message)$/.test(url)) body = withoutSessionContextBody(body);
     const received = body;
     if (req.method === 'POST' && /\/(prompt_async|message)$/.test(url)) body = answerNudgeBody(body);
     if (req.method === 'POST' && /^\/question\/[^/]+\/(reply|reject)$/.test(url)) {

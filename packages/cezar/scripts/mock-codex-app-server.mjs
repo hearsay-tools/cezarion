@@ -12,7 +12,6 @@ import { closeSync as watchdogCloseInput, renameSync as watchdogRename, writeFil
 function watchdogWritePid(file, pid) { const tmp = `${file}.${process.pid}.tmp`; watchdogWrite(tmp, pid); watchdogRename(tmp, file); }
 function watchdogStall(prompt) {
   if (!prompt.includes('mock:no-progress')) return false;
-  watchdogWritePid('watchdog.pid', String(process.pid));
   if (prompt.includes('input-closed')) {
     watchdogCloseInput(0);
     watchdogWritePid('input-closed.pid', String(process.pid));
@@ -34,6 +33,8 @@ function watchdogStall(prompt) {
     watchdogSpawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
     watchdogSpawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
   }
+  // Publish readiness after mode setup: another process may signal us as soon as it sees it.
+  watchdogWritePid('watchdog.pid', String(process.pid));
   return true;
 }
 
@@ -52,6 +53,7 @@ import { appendFileSync } from 'node:fs';
 const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 
 import * as parityGateFs from 'node:fs';
+import { withoutSessionContextParts } from './mock-session-context.mjs';
 
 // #401: let the test observe the actual monitoring park before releasing late wire frames.
 async function afterParityPark(prompt) {
@@ -159,6 +161,7 @@ rl.on('line', async (line) => {
     return;
   }
   if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(msg)}\n`);
+  if (Array.isArray(msg.params?.input)) msg.params.input = withoutSessionContextParts(msg.params.input);
   if (clientReplies.has(msg.id) && (msg.result || msg.error)) {
     const resolve = clientReplies.get(msg.id); clientReplies.delete(msg.id);
     emit({ method: 'serverRequest/resolved', params: { threadId: 'th_mock_1', requestId: msg.id } });

@@ -13,7 +13,6 @@ import { closeSync as watchdogCloseInput, renameSync as watchdogRename, writeFil
 function watchdogWritePid(file, pid) { const tmp = `${file}.${process.pid}.tmp`; watchdogWrite(tmp, pid); watchdogRename(tmp, file); }
 function watchdogStall(prompt) {
   if (!prompt.includes('mock:no-progress')) return false;
-  watchdogWritePid('watchdog.pid', String(process.pid));
   if (prompt.includes('input-closed')) {
     watchdogCloseInput(0);
     watchdogWritePid('input-closed.pid', String(process.pid));
@@ -35,6 +34,8 @@ function watchdogStall(prompt) {
     watchdogSpawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
     watchdogSpawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
   }
+  // Publish readiness after mode setup: another process may signal us as soon as it sees it.
+  watchdogWritePid('watchdog.pid', String(process.pid));
   return true;
 }
 
@@ -50,6 +51,7 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 
 import * as parityGateFs from 'node:fs';
+import { withoutSessionContext } from './mock-session-context.mjs';
 async function waitForMockRelease(fallbackMs) {
   const file = process.env.CEZ_MOCK_RELEASE_FILE;
   if (!file) { if (fallbackMs) await sleep(fallbackMs); return; }
@@ -915,7 +917,7 @@ rl.on('line', (line) => {
   // and never runs it). CEZ_MOCK_DROP_ONCE=1 drops only the first match.
   const drop = process.env.CEZ_MOCK_DROP_LINES;
   if (drop && userText.includes(drop) && !(process.env.CEZ_MOCK_DROP_ONCE === '1' && droppedOnce)) { droppedOnce = true; return; }
-  userText = answerNudge(userText);
+  userText = answerNudge(withoutSessionContext(userText));
   if (steering) { steering.push({ userText, uuid }); return; }
   queue = queue.then(() => respond(userText, imageCount, uuid));
 });

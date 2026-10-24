@@ -37,3 +37,35 @@ One issue can cover functions that require the same refactor. Keep unrelated
 refactors in separate issues. Record the returned URL for every deferred finding.
 After an ambiguous create failure, search again before retrying so that a lost
 response does not create a duplicate. Remove temporary body files after filing.
+
+## Dependency on this task's unmerged work
+
+The pre-PR check runs before this task's work merges. Decide whether the new
+issue depends on that work: its baseline, the behavior it must preserve or the
+tests it names include changes from this task's branch. An issue whose text
+holds only code already on the default branch does not depend on it. File that
+issue as above, with no dependency line and no relation.
+
+When the issue depends on the unmerged work, record the dependency in two
+places, so that a later run finds it in pre-flight:
+
+- In the body, add the line `Depends on #<ticket>`, where `<ticket>` is the
+  issue this task works on. Say which of this task's changes the issue
+  expects.
+- After the issue exists, add a GitHub `blocked-by` relation from the new issue
+  to that ticket. The REST API takes the blocking issue's database ID, not its
+  number:
+
+  ```sh
+  blocking_id=$(gh api repos/<owner>/<repo>/issues/<ticket> --jq .id)
+  gh api -X POST repos/<owner>/<repo>/issues/<new issue>/dependencies/blocked_by \
+    -F issue_id="$blocking_id"
+  ```
+
+  Confirm it with
+  `gh api repos/<owner>/<repo>/issues/<new issue>/dependencies/blocked_by --jq '.[].number'`.
+
+When you reuse an issue and add text to it that depends on the unmerged work,
+add the same line in a comment and the same relation. When the task has no
+ticket, write `Depends on` with the branch name and add no relation. A failure
+to add the relation is a filing failure.

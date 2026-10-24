@@ -11,6 +11,7 @@ const delivery = process.env.CEZ_MOCK_DELIVERY_CONTROL === undefined ? undefined
 import readline from 'node:readline';
 import { spawn } from 'node:child_process';
 import { appendFileSync, closeSync, existsSync, renameSync, writeFileSync } from 'node:fs';
+import { rawMessage, stripCommandMessage } from './mock-session-context.mjs';
 // Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
 const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 // Publish a pid atomically (temporary sibling, then rename): a test reading it sees no
@@ -139,7 +140,6 @@ let resumeAfterAsk = false;
 
 /** Same as mock-pi-rpc.mjs `watchdogStall`: a turn that never progresses (no-progress rows). */
 function watchdogStall(message) {
-  watchdogWritePid('watchdog.pid', String(process.pid));
   if (message.includes('input-closed')) {
     closeSync(0);
     watchdogWritePid('input-closed.pid', String(process.pid));
@@ -161,6 +161,8 @@ function watchdogStall(message) {
     spawn(process.execPath, ['-e', leftover('leftover-group.pid')], { stdio: 'ignore' });
     spawn(process.execPath, ['-e', leftover('leftover-session.pid')], { stdio: 'ignore', detached: true }).unref();
   }
+  // Publish readiness after mode setup: another process may signal us as soon as it sees it.
+  watchdogWritePid('watchdog.pid', String(process.pid));
 }
 
 /** #401: hold late wire frames until the test has observed the park (as the codex mock). */
@@ -264,14 +266,14 @@ let queue = Promise.resolve();
 rl.on('line', (line) => {
   // Every raw command, in arrival order, for tests that pin what the runner wrote.
   if (process.env.CEZ_MOCK_OMP_COMMANDS_FILE) appendFileSync(process.env.CEZ_MOCK_OMP_COMMANDS_FILE, `${line}\n`);
-  const command = JSON.parse(line);
+  const command = stripCommandMessage(JSON.parse(line));
   // hearsay-tools/cezarion#1112: a late-ack steer is admitted after the turn's last model call.
   // OMP acknowledges it now and, never settling with a queued message, reads it in a further
   // run before `session_settled` (the endTurn `late` path).
   if (command.type === 'prompt' && command.streamingBehavior === 'steer' && command.message.includes('mock:deferred-turn-start:late-ack')) {
     const admit = () => {
       if (!activeTurn) { setTimeout(admit, 5); return; }
-      record({ userText: command.message, imageCount: (command.images ?? []).length, streamingBehavior: 'steer' });
+      record({ userText: rawMessage(command), imageCount: (command.images ?? []).length, streamingBehavior: 'steer' });
       activeTurn.steers.push({ id: command.id, message: command.message });
       activeTurn.late = true;
       respond(command);
@@ -283,7 +285,7 @@ rl.on('line', (line) => {
   // OMP acknowledges it as its next prompt once that turn settles, with no turn open.
   if (command.type === 'prompt' && command.streamingBehavior === 'steer' && activeTurn &&
     !command.message.includes('mock:deferred-turn-start')) {
-    record({ userText: command.message, imageCount: (command.images ?? []).length, streamingBehavior: 'steer' });
+    record({ userText: rawMessage(command), imageCount: (command.images ?? []).length, streamingBehavior: 'steer' });
     // Steers OMP never hands to the running agent: none of them may end its turn.
     if (command.message.includes('mock:steer-rejected')) {
       // Rejected before admission: the error response only, the ticket is discarded.
@@ -348,7 +350,7 @@ async function handle(command) {
       respond(command);
       return;
     case 'prompt':
-      record({ userText: command.message, imageCount: (command.images ?? []).length });
+      record({ userText: rawMessage(command), imageCount: (command.images ?? []).length });
       // The delivery control reads both the prompt Cezar sent and a nudge's scripted answer.
       { const answered = answerNudge(command.message);
         return prompt({ ...command, message: answered }, answered === command.message ? answered : `${command.message}\n${answered}`); }
