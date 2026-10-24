@@ -167,7 +167,7 @@
     {
       "name": "root:test:unit",
       "argv": ["--import", "./scripts/test-git-env.mjs"],
-      "include": [".github/scripts/*.test.cjs", "scripts/*.test.mjs"]
+      "include": [".github/scripts/*.test.cjs", "scripts/*.test.mjs", ".ai/skills/*/scripts/*.test.mjs"]
     }
   ],
   "slow": {

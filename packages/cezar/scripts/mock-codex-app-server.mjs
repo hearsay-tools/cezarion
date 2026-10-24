@@ -53,6 +53,7 @@ import { appendFileSync } from 'node:fs';
 const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 
 import * as parityGateFs from 'node:fs';
+import { withoutSessionContextParts } from './mock-session-context.mjs';
 
 // #401: let the test observe the actual monitoring park before releasing late wire frames.
 async function afterParityPark(prompt) {
@@ -160,6 +161,7 @@ rl.on('line', async (line) => {
     return;
   }
   if (process.env.CEZ_MOCK_ARGS_FILE) appendFileSync(process.env.CEZ_MOCK_ARGS_FILE, `${JSON.stringify(msg)}\n`);
+  if (Array.isArray(msg.params?.input)) msg.params.input = withoutSessionContextParts(msg.params.input);
   if (clientReplies.has(msg.id) && (msg.result || msg.error)) {
     const resolve = clientReplies.get(msg.id); clientReplies.delete(msg.id);
     emit({ method: 'serverRequest/resolved', params: { threadId: 'th_mock_1', requestId: msg.id } });

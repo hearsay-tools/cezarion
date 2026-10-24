@@ -11,6 +11,7 @@ import { workspaceConfigPath } from '../paths.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp, startServer, type ServerDeps } from './server.ts';
 import { TaskWebhooks } from '../runs/webhook.ts';
+import { taskWebhooks } from '../workspace/webhooks.ts';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { seedRuns } from '../runs/run-store.testkit.ts';
@@ -74,6 +75,13 @@ describe('task webhook API', () => {
   };
 
   const setWebhook = (webhook: unknown) => send(`/api/v1/projects/${projectId}`, 'PATCH', { webhook });
+  /** The stored task webhook's URL, token and triggers, whichever key holds it (#1576). */
+  const storedTaskWebhook = async () => {
+    const entry = (await loadWorkspaceConfig()).projects.find((p) => p.id === projectId);
+    const first = taskWebhooks(entry)[0];
+    if (!first) return undefined;
+    return { url: first.url, ...(first.token ? { token: first.token } : {}), ...(first.triggers === undefined ? {} : { triggers: first.triggers }) };
+  };
 
   describe('the registry field', () => {
     it('stores the token and never answers it — only tokenSet', async () => {
@@ -94,13 +102,11 @@ describe('task webhook API', () => {
     it('keeps the stored token when a PATCH changes only the URL, and clears it on an empty token', async () => {
       await setWebhook({ url: 'https://bot.example/hook', token: 'secret-token' });
       await setWebhook({ url: 'https://bot.example/other' });
-      let entry = (await loadWorkspaceConfig()).projects.find((p) => p.id === projectId)!;
-      expect(entry.webhook).toEqual({ url: 'https://bot.example/other', token: 'secret-token' });
+      expect(await storedTaskWebhook()).toEqual({ url: 'https://bot.example/other', token: 'secret-token' });
 
       const cleared = await setWebhook({ url: 'https://bot.example/other', token: '' });
       expect(cleared.body.project).toMatchObject({ webhook: { tokenSet: false } });
-      entry = (await loadWorkspaceConfig()).projects.find((p) => p.id === projectId)!;
-      expect(entry.webhook).toEqual({ url: 'https://bot.example/other' });
+      expect(await storedTaskWebhook()).toEqual({ url: 'https://bot.example/other' });
     });
 
     // hearsay-tools/cezarion#1356: the state selection is stored only when named, and a URL or
@@ -112,13 +118,11 @@ describe('task webhook API', () => {
       const saved = await setWebhook({ url: 'https://bot.example/hook', triggers: ['waiting-ci', 'done'] });
       expect(saved.body.project).toMatchObject({ webhook: { triggers: ['waiting-ci', 'done'], tokenSet: true } });
       await setWebhook({ url: 'https://bot.example/other', token: 'new-token' });
-      let entry = (await loadWorkspaceConfig()).projects.find((p) => p.id === projectId)!;
-      expect(entry.webhook).toEqual({ url: 'https://bot.example/other', token: 'new-token', triggers: ['waiting-ci', 'done'] });
+      expect(await storedTaskWebhook()).toEqual({ url: 'https://bot.example/other', token: 'new-token', triggers: ['waiting-ci', 'done'] });
 
       const none = await setWebhook({ url: 'https://bot.example/other', triggers: [] });
       expect(none.body.project).toMatchObject({ webhook: { triggers: [] } });
-      entry = (await loadWorkspaceConfig()).projects.find((p) => p.id === projectId)!;
-      expect(entry.webhook?.triggers).toEqual([]);
+      expect((await storedTaskWebhook())?.triggers).toEqual([]);
       const listed = await send('/api/v1/projects', 'GET');
       expect((listed.body.projects as Array<Record<string, unknown>>)[0]!.webhook).toEqual({ url: 'https://bot.example/other', tokenSet: true, triggers: [] });
     });
@@ -131,10 +135,9 @@ describe('task webhook API', () => {
     it('drops an unknown stored trigger on its own and keeps the rest', async () => {
       await setWebhook({ url: 'https://bot.example/hook' });
       await mergeWriteWorkspaceConfig((config) => {
-        (config.projects.find((p) => p.id === projectId)!.webhook as { triggers?: unknown }).triggers = ['done', 'from-a-newer-cezar', 'failed'];
+        (config.projects.find((p) => p.id === projectId)!.webhooks![0] as { triggers?: unknown }).triggers = ['done', 'from-a-newer-cezar', 'failed'];
       });
-      const entry = (await loadWorkspaceConfig()).projects.find((p) => p.id === projectId)!;
-      expect(entry.webhook?.triggers).toEqual(['done', 'failed']);
+      expect((await storedTaskWebhook())?.triggers).toEqual(['done', 'failed']);
     });
 
     it('removes the webhook on null and refuses a non-http URL', async () => {
@@ -160,6 +163,7 @@ describe('task webhook API', () => {
       const res = await start({ notify: true });
       expect(res.status).toBe(400);
       expect(String(res.body.error)).toContain('no task webhook');
+      expect(String(res.body.error)).toContain('Settings → General → Webhooks');
       expect(started).toEqual([]);
     });
 

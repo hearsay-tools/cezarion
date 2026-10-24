@@ -2,9 +2,14 @@ import { WEBHOOK_TRIGGERS } from './attention.ts';
 import { checkoutProgressEventSchema } from './events.ts';
 import { z } from 'zod';
 import {
+  AGENT_REPORT_MESSAGE_MAX_LENGTH,
+  AGENT_REPORT_TITLE_MAX_LENGTH,
   PROJECT_NAME_PATTERN,
   PROJECT_TAG_MAX_LENGTH,
   PROJECT_TAGS_MAX,
+  PROJECT_WEBHOOK_DESCRIPTION_MAX_LENGTH,
+  PROJECT_WEBHOOK_ID_PATTERN,
+  PROJECT_WEBHOOK_NAME_MAX_LENGTH,
   PROJECT_WEBHOOK_TOKEN_MAX_LENGTH,
   PROJECT_WEBHOOK_URL_MAX_LENGTH,
 } from './project-limits.ts';
@@ -18,6 +23,24 @@ import {
 
 /** One task state a project webhook sends deliveries for (hearsay-tools/cezarion#1356). */
 export const webhookTriggerSchema = z.enum(WEBHOOK_TRIGGERS);
+
+/**
+ * One project webhook as it leaves the server (hearsay-tools/cezarion#1576). The token is
+ * write-only: the wire says only whether one is set. `tasks` turns task notifications on: runs
+ * with `notify` on POST here when they enter a state in `triggers` (absent means
+ * `DEFAULT_WEBHOOK_TRIGGERS`, `[]` none). `agent` lets agents in the project send reports here.
+ */
+export const projectWebhookSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+  url: z.string(),
+  tokenSet: z.boolean(),
+  tasks: z.boolean(),
+  triggers: z.array(webhookTriggerSchema).optional(),
+  agent: z.boolean(),
+});
+export type ProjectWebhook = z.infer<typeof projectWebhookSchema>;
 
 /**
  * Closed registry response including absolute root. Keep it distinct from CORS-open health’s
@@ -67,6 +90,10 @@ export const projectListEntrySchema = z.object({
    *  `triggers` is the stored state selection (hearsay-tools/cezarion#1356); absent means
    *  `DEFAULT_WEBHOOK_TRIGGERS`, and `[]` means no state sends. */
   webhook: z.object({ url: z.string(), tokenSet: z.boolean(), triggers: z.array(webhookTriggerSchema).optional() }).optional(),
+  /** Every project webhook, in the order they were added (hearsay-tools/cezarion#1576). Omitted
+   *  when the project has none. `webhook` above stays the first one with task notifications on,
+   *  for clients that know one webhook only. */
+  webhooks: z.array(projectWebhookSchema).optional(),
 });
 export type ProjectListEntry = z.infer<typeof projectListEntrySchema>;
 
@@ -132,6 +159,92 @@ export const projectWebhookInputSchema = z.object({
     .optional(),
 });
 export type ProjectWebhookInput = z.infer<typeof projectWebhookInputSchema>;
+
+const webhookTriggersInputSchema = z
+  .array(webhookTriggerSchema)
+  .refine((values) => new Set(values).size === values.length, 'webhook triggers must not repeat');
+export const projectWebhookNameSchema = z.string().trim().min(1, 'webhook name is required').max(PROJECT_WEBHOOK_NAME_MAX_LENGTH);
+const projectWebhookDescriptionSchema = z.string().trim().max(PROJECT_WEBHOOK_DESCRIPTION_MAX_LENGTH);
+const projectWebhookTokenSchema = z.string().trim().max(PROJECT_WEBHOOK_TOKEN_MAX_LENGTH);
+
+/** `POST /api/v1/projects/:projectId/webhooks` (hearsay-tools/cezarion#1576). `tasks` and `agent`
+ *  default to off; an omitted `triggers` stores none, which means the default selection. */
+export const createProjectWebhookInputSchema = z.object({
+  name: projectWebhookNameSchema,
+  description: projectWebhookDescriptionSchema.optional(),
+  url: projectWebhookUrlSchema,
+  token: projectWebhookTokenSchema.optional(),
+  tasks: z.boolean().optional(),
+  triggers: webhookTriggersInputSchema.optional(),
+  agent: z.boolean().optional(),
+});
+export type CreateProjectWebhookInput = z.infer<typeof createProjectWebhookInputSchema>;
+
+/** `PATCH /api/v1/projects/:projectId/webhooks/:webhookId`: each key applies only when named. An
+ *  omitted `token` keeps the stored one and `''` clears it; `''` clears the description too. */
+export const updateProjectWebhookInputSchema = z
+  .object({
+    name: projectWebhookNameSchema.optional(),
+    description: projectWebhookDescriptionSchema.optional(),
+    url: projectWebhookUrlSchema.optional(),
+    token: projectWebhookTokenSchema.optional(),
+    tasks: z.boolean().optional(),
+    triggers: webhookTriggersInputSchema.optional(),
+    agent: z.boolean().optional(),
+  })
+  .refine((body) => Object.values(body).some((value) => value !== undefined), 'specify at least one webhook field');
+export type UpdateProjectWebhookInput = z.infer<typeof updateProjectWebhookInputSchema>;
+
+export const projectWebhookParamsSchema = z.object({
+  projectId: z.string(),
+  webhookId: z.string().regex(PROJECT_WEBHOOK_ID_PATTERN, 'unknown webhook'),
+});
+
+/** The create and edit answer: the whole project entry, and the webhook the request touched. */
+export const projectWebhookResponseSchema = z.object({
+  project: projectListEntrySchema,
+  webhook: projectWebhookSchema,
+});
+export type ProjectWebhookResponse = z.infer<typeof projectWebhookResponseSchema>;
+
+/** One webhook an agent may send reports to: what it is for, never where it points. */
+export const agentWebhookSchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  description: z.string().optional(),
+});
+export type AgentWebhook = z.infer<typeof agentWebhookSchema>;
+
+/** `GET /api/v1/projects/:projectId/agent-webhooks` — the webhooks exposed to agents. */
+export const agentWebhooksResponseSchema = z.object({ webhooks: z.array(agentWebhookSchema) });
+export type AgentWebhooksResponse = z.infer<typeof agentWebhooksResponseSchema>;
+
+export const agentWebhookParamsSchema = z.object({
+  projectId: z.string(),
+  /** The webhook's id, or its name (case-insensitive). */
+  webhook: z.string().min(1).max(PROJECT_WEBHOOK_NAME_MAX_LENGTH),
+});
+
+/** `POST /api/v1/projects/:projectId/agent-webhooks/:webhook` — one `agent.report` delivery.
+ *  `message` is Markdown; `data` is any JSON object the receiving service understands. */
+export const sendAgentReportInputSchema = z.object({
+  runId: z.string().min(1).max(128).optional(),
+  title: z.string().trim().min(1).max(AGENT_REPORT_TITLE_MAX_LENGTH).optional(),
+  message: z.string().trim().min(1, 'message is required').max(AGENT_REPORT_MESSAGE_MAX_LENGTH),
+  data: z.record(z.string(), z.unknown()).optional(),
+});
+export type SendAgentReportInput = z.infer<typeof sendAgentReportInputSchema>;
+
+export const sendAgentReportResponseSchema = z.object({
+  ok: z.boolean(),
+  webhook: agentWebhookSchema.pick({ id: true, name: true }),
+  deliveryId: z.string(),
+  attempts: z.number(),
+  status: z.number().optional(),
+  error: z.string().optional(),
+  dryRun: z.boolean().optional(),
+});
+export type SendAgentReportResponse = z.infer<typeof sendAgentReportResponseSchema>;
 
 /** `POST /api/v1/projects/:projectId/webhook/test` (#589) — one `task.test` delivery, sent now
  *  with the same timeout the real deliveries use. `status` is the endpoint's HTTP status. */

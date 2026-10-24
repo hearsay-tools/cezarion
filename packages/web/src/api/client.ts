@@ -97,6 +97,9 @@ import type {
   UpdateProjectResponse,
   NotifyRunInput,
   TestProjectWebhookResponse,
+  CreateProjectWebhookInput,
+  UpdateProjectWebhookInput,
+  ProjectWebhookResponse,
   RepoBranchResponse,
   RepoPullBranchesResponse,
   RepoPullConfirmation,
@@ -1125,6 +1128,18 @@ export function getRunHandoff(id: string, opts?: ReadOptions): Promise<string> {
   return requestText(runPath(id, '/handoff'), { method: 'GET', signal: opts?.signal })
 }
 
+/** Another project's handoff journal, for a row of All tasks (hearsay-tools/cezarion#1616): the
+ *  project is named explicitly, since `queryScope()` is the boot project there. */
+export async function getProjectRunHandoff(projectId: string, id: string, opts?: ReadOptions): Promise<string> {
+  const res = await cez.api.v1.p[':projectId'].runs[':id'].handoff.$get(
+    { param: { projectId, id: encodeURIComponent(id) } },
+    { init: { signal: opts?.signal }, headers: { accept: 'text/plain' } },
+  )
+  const body = await res.text()
+  if (!res.ok) throw errorFor(res.status, res.statusText, body)
+  return body
+}
+
 /** The run's structured working-directory-vs-base diff (R5): per-file status/±/patch + the
  *  aggregate stat. Worktree-off runs read the repo checkout they executed in. */
 export async function getRunChanges(id: string, opts?: ReadOptions): Promise<ChangesPayload> {
@@ -1368,6 +1383,51 @@ export async function testProjectWebhook(projectId: string): Promise<TestProject
   )
 }
 
+/** Add one project webhook (hearsay-tools/cezarion#1576). 409 on a duplicate name or a full list. */
+export async function createProjectWebhook(projectId: string, input: CreateProjectWebhookInput): Promise<ProjectWebhookResponse> {
+  return unwrap(
+    await cez.api.v1.projects[':projectId'].webhooks.$post({
+      param: { projectId: encodeURIComponent(projectId) },
+      json: input,
+    }),
+    `/projects/${encodeURIComponent(projectId)}/webhooks`,
+  )
+}
+
+/** Edit one project webhook: each key applies only when named; an omitted token keeps it. */
+export async function updateProjectWebhook(
+  projectId: string,
+  webhookId: string,
+  input: UpdateProjectWebhookInput,
+): Promise<ProjectWebhookResponse> {
+  return unwrap(
+    await cez.api.v1.projects[':projectId'].webhooks[':webhookId'].$patch({
+      param: { projectId: encodeURIComponent(projectId), webhookId: encodeURIComponent(webhookId) },
+      json: input,
+    }),
+    `/projects/${encodeURIComponent(projectId)}/webhooks/${encodeURIComponent(webhookId)}`,
+  )
+}
+
+export async function removeProjectWebhook(projectId: string, webhookId: string): Promise<UpdateProjectResponse> {
+  return unwrap(
+    await cez.api.v1.projects[':projectId'].webhooks[':webhookId'].$delete({
+      param: { projectId: encodeURIComponent(projectId), webhookId: encodeURIComponent(webhookId) },
+    }),
+    `/projects/${encodeURIComponent(projectId)}/webhooks/${encodeURIComponent(webhookId)}`,
+  )
+}
+
+/** "Send test" for one webhook: one `task.test` delivery, answered with the endpoint's status. */
+export async function testOneProjectWebhook(projectId: string, webhookId: string): Promise<TestProjectWebhookResponse> {
+  return unwrap(
+    await cez.api.v1.projects[':projectId'].webhooks[':webhookId'].test.$post({
+      param: { projectId: encodeURIComponent(projectId), webhookId: encodeURIComponent(webhookId) },
+    }),
+    `/projects/${encodeURIComponent(projectId)}/webhooks/${encodeURIComponent(webhookId)}/test`,
+  )
+}
+
 // ---- run mutations ------------------------------------------------------------------------
 
 /** Hand a task to the project webhook, or stop notifying it (#589). The note goes to the
@@ -1558,10 +1618,12 @@ export async function markRunUnseen(id: string): Promise<RunRecord> {
 }
 
 /** "Mark all read": stamp every currently-unread finished run in one call. */
-export async function markAllRunsSeen(): Promise<MarkAllReadResponse> {
+export async function markAllRunsSeen(automation?: boolean): Promise<MarkAllReadResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs['read-all'].$post({
       param: { projectId: queryScope() },
+      // `automation` narrows the sweep to one origin (hearsay-tools/cezarion#1616); absent is all.
+      json: automation !== undefined ? { automation } : {},
     }),
     '/runs/read-all',
   )

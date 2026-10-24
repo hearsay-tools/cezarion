@@ -51,6 +51,7 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 
 import * as parityGateFs from 'node:fs';
+import { withoutSessionContext } from './mock-session-context.mjs';
 async function waitForMockRelease(fallbackMs) {
   const file = process.env.CEZ_MOCK_RELEASE_FILE;
   if (!file) { if (fallbackMs) await sleep(fallbackMs); return; }
@@ -918,7 +919,7 @@ rl.on('line', (line) => {
   // and never runs it). CEZ_MOCK_DROP_ONCE=1 drops only the first match.
   const drop = process.env.CEZ_MOCK_DROP_LINES;
   if (drop && userText.includes(drop) && !(process.env.CEZ_MOCK_DROP_ONCE === '1' && droppedOnce)) { droppedOnce = true; return; }
-  userText = answerNudge(userText);
+  userText = answerNudge(withoutSessionContext(userText));
   if (steering) { steering.push({ userText, uuid }); return; }
   queue = queue.then(() => respond(userText, imageCount, uuid));
 });

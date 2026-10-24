@@ -1,10 +1,11 @@
+import './test-support.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { compareFunctions, exceededMetrics, runChangedFunctions, scanChanges } from '../.ai/skills/check-code-quality/scripts/changed-functions.mjs';
+import { compareFunctions, exceededMetrics, runChangedFunctions, scanChanges } from './changed-functions.mjs';
 
 test('limits flag either score strictly above the threshold and preserve missing CRAP', () => {
   assert.deepEqual(exceededMetrics({ complexity: 20, crap: 30 }), []);
@@ -119,7 +120,7 @@ test('the real scanner runs from a different repository and returns machine-read
   const f = repo(t);
   mkdirSync(join(f.cwd, 'src'));
   f.write('src/added.ts', 'export const added = () => 1;');
-  const script = new URL('../.ai/skills/check-code-quality/scripts/changed-functions.mjs', import.meta.url);
+  const script = new URL('./changed-functions.mjs', import.meta.url);
   const result = JSON.parse(execFileSync(process.execPath, [script.pathname, '--base', f.base], { cwd: f.cwd, encoding: 'utf8' }));
   assert.equal(result.root, f.cwd);
   assert.equal(result.files[0].functions[0].name, 'added');
@@ -143,7 +144,7 @@ test('every Git call after baseline resolution uses its pinned attribute source'
     process.exit(result.status ?? 1);
   `);
   chmodSync(shim, 0o755);
-  const script = new URL('../.ai/skills/check-code-quality/scripts/changed-functions.mjs', import.meta.url);
+  const script = new URL('./changed-functions.mjs', import.meta.url);
   execFileSync(process.execPath, [script.pathname, '--base', f.base], {
     cwd: f.cwd, encoding: 'utf8', env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
   });

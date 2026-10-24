@@ -59,6 +59,8 @@ import {
   getArtifact,
   getArtifacts,
   getRunHandoff,
+  getProjectRunHandoff,
+  getAutomations,
   getRuns,
   getRunsIndex,
   getArchivedRuns,
@@ -80,6 +82,10 @@ import {
   pinRun,
   notifyRun,
   testProjectWebhook,
+  createProjectWebhook,
+  updateProjectWebhook,
+  removeProjectWebhook,
+  testOneProjectWebhook,
   removeQueuedMessage,
   registerProject,
   openAgentAccountFile,
@@ -125,6 +131,8 @@ import type {
   UpdateAgentProfileInput,
   UpdateProjectInput,
   NotifyRunInput,
+  CreateProjectWebhookInput,
+  UpdateProjectWebhookInput,
 } from '@open-mercato/cezar-api-client'
 import { liveRefetchInterval } from '@/lib/live-refetch'
 import {
@@ -612,6 +620,57 @@ function applyProjectPatch(
 /** "Send test" (#589) — the answer is the result; nothing cached changes. */
 export function useTestProjectWebhook() {
   return useMutation({ mutationFn: (projectId: string) => testProjectWebhook(projectId), retry: false })
+}
+
+/**
+ * The project-webhook mutations (hearsay-tools/cezarion#1576). Not optimistic: each form keeps
+ * its own draft, so nothing reads the cache between the click and the answer. The answer's
+ * `project` replaces the cached entry, and the invalidate re-reads the registry.
+ */
+function useProjectWebhookMutation<TVariables, TResult extends { project: ProjectListEntry }>(
+  mutationFn: (variables: TVariables) => Promise<TResult>,
+) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn,
+    retry: false,
+    onSuccess: ({ project: updated }) => {
+      queryClient.setQueryData<ProjectsResponse>(workspaceQueryKeys.projects, (current) =>
+        current === undefined
+          ? current
+          : { ...current, projects: current.projects.map((project) => (project.id === updated.id ? updated : project)) },
+      )
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: workspaceQueryKeys.projects }),
+  })
+}
+
+export function useCreateProjectWebhook() {
+  return useProjectWebhookMutation((variables: { projectId: string } & CreateProjectWebhookInput) => {
+    const { projectId, ...input } = variables
+    return createProjectWebhook(projectId, input)
+  })
+}
+
+export function useUpdateProjectWebhook() {
+  return useProjectWebhookMutation((variables: { projectId: string; webhookId: string } & UpdateProjectWebhookInput) => {
+    const { projectId, webhookId, ...input } = variables
+    return updateProjectWebhook(projectId, webhookId, input)
+  })
+}
+
+export function useRemoveProjectWebhook() {
+  return useProjectWebhookMutation(({ projectId, webhookId }: { projectId: string; webhookId: string }) =>
+    removeProjectWebhook(projectId, webhookId),
+  )
+}
+
+/** "Send test" for one webhook — the answer is the result; nothing cached changes. */
+export function useTestOneProjectWebhook() {
+  return useMutation({
+    mutationFn: ({ projectId, webhookId }: { projectId: string; webhookId: string }) => testOneProjectWebhook(projectId, webhookId),
+    retry: false,
+  })
 }
 
 /**
@@ -1158,6 +1217,54 @@ export function useRunHandoff(id: string | undefined, enabled = true) {
     queryFn: ({ signal }) => getRunHandoff(id as string, { signal }),
     enabled: Boolean(id) && enabled,
   })
+}
+
+/** A Tasks row's inline preview (hearsay-tools/cezarion#1616): the same journal, read when the row
+ *  opens. `projectId` names another project's run (All tasks); absent reads the active scope, under
+ *  the Notes panel's own key so the two share one fetch. */
+export function useTaskPreviewHandoff(projectId: string | undefined, id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: projectId === undefined ? queryKeys.runs.handoff(id) : [projectId, 'runs', 'handoff', id] as const,
+    queryFn: ({ signal }) => projectId === undefined ? getRunHandoff(id, { signal }) : getProjectRunHandoff(projectId, id, { signal }),
+    enabled,
+    staleTime: 15_000,
+  })
+}
+
+/**
+ * Automation names for the Tasks pages' origin line (hearsay-tools/cezarion#1616), one read per
+ * project that shows automation tasks, archived definitions included. Off when the server has
+ * automations off (`capabilities.automations`), and on any failure: the row then shows the recorded
+ * automation id, so provenance never depends on the definition still existing.
+ *
+ * `projectIds` holds `undefined` for the active scope. The answer is a lookup, keyed the same way.
+ */
+export function useAutomationNames(projectIds: readonly (string | undefined)[], enabled: boolean) {
+  const unique = [...new Set(projectIds)]
+  const results = useQueries({
+    queries: unique.map((projectId) => ({
+      queryKey: [projectId ?? queryScope(), 'automations', 'names'] as const,
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
+        getAutomations({ signal, archived: 'include', ...(projectId === undefined ? {} : { projectId }) }),
+      enabled,
+      staleTime: 60_000,
+      retry: false,
+    })),
+  })
+  // One stable lookup per set of answers, so callers can memoize on it.
+  const answers = results.map((result) => result.data)
+  const version = JSON.stringify([unique, results.map((result) => result.dataUpdatedAt)])
+  return useMemo(() => {
+    const names = new Map<string, string>()
+    answers.forEach((data, index) => {
+      if (!data?.available) return
+      for (const automation of data.automations) names.set(JSON.stringify([unique[index] ?? null, automation.id]), automation.name)
+    })
+    return (projectId: string | undefined, automationId: string): string | undefined =>
+      names.get(JSON.stringify([projectId ?? null, automationId]))
+    // `version` changes exactly when an answer or the project set does.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [version])
 }
 
 export function useWorkflows() {

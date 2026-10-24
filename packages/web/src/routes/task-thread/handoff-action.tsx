@@ -24,7 +24,7 @@ import {
 import { Textarea } from '@/components/ui/textarea'
 import { toast } from '@/components/ui/toaster'
 import { useActiveProjectId } from '@/lib/project-router'
-import { webhookLabel } from '@/lib/webhook'
+import { taskWebhooks, webhookLabel, webhookNames, type TaskWebhookTarget } from '@/lib/webhook'
 
 /**
  * "Hand off" (#589, spec 2026-09-25-task-webhook-handoff): give the rest of a task to the bot
@@ -34,30 +34,36 @@ import { webhookLabel } from '@/lib/webhook'
  *
  * The note goes to the webhook only, never into the agent session, and the dialog says so: a
  * user who wants the agent to know something writes to the agent. Rendered only when there is
- * somewhere to notify — the project has a webhook, or this run is already notifying one that has
- * since been removed, so it can still be switched off.
+ * somewhere to notify — the project has a webhook with task notifications on, or this run is
+ * already notifying one that has since been removed, so it can still be switched off. Every task
+ * webhook gets the hand-off (hearsay-tools/cezarion#1576); there is no per-run pick, so the dialog
+ * and the menu name them all.
  */
-/** The project's task webhook URL, if it has one. */
-function useWebhookUrl(): string | undefined {
+/** The project's webhooks with task notifications on. */
+function useTaskWebhooks(): TaskWebhookTarget[] {
   const projectId = useActiveProjectId()
   const projects = useProjects()
-  const entry = projects.data?.projects?.find((project) => project.id === (projectId ?? projects.data?.bootProject))
-  return entry?.webhook?.url
+  return taskWebhooks(projects.data?.projects?.find((project) => project.id === (projectId ?? projects.data?.bootProject)))
 }
+
+/** Host and path of every target, one per line — the secondary text a tooltip carries. */
+const destinations = (targets: readonly TaskWebhookTarget[]) =>
+  targets.map((target) => `${target.name}: ${webhookLabel(target.url)}`).join('\n')
 
 /** Whether `HandoffAction` renders anything for this run — for a container that should not
  *  render an empty row around it (the phone actions row, hearsay-tools/cezarion#1333). */
 export function useHandoffActionVisible(run: ApiRun): boolean {
-  return Boolean(useWebhookUrl()) || run.notify === true
+  return useTaskWebhooks().length > 0 || run.notify === true
 }
 
 export function HandoffAction({ run }: { run: ApiRun }) {
-  const url = useWebhookUrl()
+  const targets = useTaskWebhooks()
+  const reachable = targets.length > 0
   const notify = useNotifyRun(run.id)
   const [dialog, setDialog] = useState<'handoff' | 'note' | null>(null)
 
   const notifying = run.notify === true
-  if (!url && !notifying) return null
+  if (!reachable && !notifying) return null
 
   const stop = () =>
     notify.mutate(
@@ -78,8 +84,8 @@ export function HandoffAction({ run }: { run: ApiRun }) {
               size="sm"
               data-slot="notifying-chip"
               className="h-11 gap-1.5 md:h-[30px]"
-              aria-label={url ? `Notifying ${webhookLabel(url)} — webhook actions` : 'Notifying — webhook actions'}
-              title={url ? webhookLabel(url) : undefined}
+              aria-label={reachable ? `Notifying ${webhookNames(targets)} — webhook actions` : 'Notifying — webhook actions'}
+              title={reachable ? destinations(targets) : undefined}
             >
               <StatusDot tone="success" />
               <span>Notifying</span>
@@ -87,12 +93,16 @@ export function HandoffAction({ run }: { run: ApiRun }) {
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" data-slot="notifying-menu" className="w-[240px] max-w-[calc(100vw-2rem)] p-2">
-            {url ? (
-              <DropdownMenuLabel className="truncate px-2 py-1.5 text-[11px] font-normal text-muted-foreground">
-                <span title={webhookLabel(url)}>Task webhook</span>
+            {reachable ? (
+              <DropdownMenuLabel data-slot="notifying-targets" className="flex flex-col gap-0.5 px-2 py-1.5 text-[11px] font-normal text-muted-foreground">
+                {targets.map((target) => (
+                  <span key={target.id} data-webhook-target={target.id} className="truncate" title={webhookLabel(target.url)}>
+                    {target.name}
+                  </span>
+                ))}
               </DropdownMenuLabel>
             ) : null}
-            {url ? (
+            {reachable ? (
               <DropdownMenuItem className="min-h-11" onSelect={() => setDialog('note')}>
                 <MessageSquareIcon aria-hidden="true" /> Send a note…
               </DropdownMenuItem>
@@ -115,10 +125,10 @@ export function HandoffAction({ run }: { run: ApiRun }) {
           <span className="max-md:sr-only">Hand off</span>
         </Button>
       )}
-      {url ? (
+      {reachable ? (
         <HandoffDialog
           mode={dialog}
-          url={url}
+          targets={targets}
           pending={notify.isPending}
           onOpenChange={(open) => !open && setDialog(null)}
           onSubmit={(message) =>
@@ -147,13 +157,13 @@ export function HandoffAction({ run }: { run: ApiRun }) {
  */
 function HandoffDialog({
   mode,
-  url,
+  targets,
   pending,
   onOpenChange,
   onSubmit,
 }: {
   mode: 'handoff' | 'note' | null
-  url: string
+  targets: readonly TaskWebhookTarget[]
   pending: boolean
   onOpenChange: (open: boolean) => void
   onSubmit: (message: string) => void
@@ -166,7 +176,7 @@ function HandoffDialog({
     if (mode !== null) setNote('')
   }, [mode])
   const isNote = mode === 'note'
-  const label = webhookLabel(url)
+  const names = webhookNames(targets)
 
   return (
     <Dialog
@@ -188,12 +198,12 @@ function HandoffDialog({
           }}
         >
           <DialogHeader className="text-left">
-            <DialogTitle>{isNote ? 'Send a note to the webhook' : 'Hand off to webhook'}</DialogTitle>
+            <DialogTitle>{isNote ? `Send a note to ${targets.length === 1 ? 'the webhook' : 'the webhooks'}` : 'Hand off to webhook'}</DialogTitle>
             <DialogDescription>
-              <span data-webhook-destination="" title={label}>
+              <span data-webhook-destination="" title={destinations(targets)}>
                 {isNote
-                  ? "The bot gets this note with the task's current status."
-                  : "The webhook will start receiving this task's status updates. Add a note for it (optional)."}
+                  ? `${names} ${targets.length === 1 ? 'gets' : 'get'} this note with the task's current status.`
+                  : `${names} will start receiving this task's status updates. Add a note (optional).`}
               </span>
             </DialogDescription>
           </DialogHeader>

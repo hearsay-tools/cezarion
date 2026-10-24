@@ -6,11 +6,13 @@ import { RunStore } from './store.ts';
 import { mergeWriteWorkspaceConfig } from '../workspace/config.ts';
 import { registerProject } from '../workspace/projects.ts';
 import { WEBHOOK_TRIGGERS, type WebhookTrigger } from '@open-mercato/cezar-contract/attention';
-import { TaskWebhook, TaskWebhooks, WEBHOOK_ATTEMPTS, type TaskWebhookOptions } from './webhook.ts';
+import { sendAgentReport, TaskWebhook, TaskWebhooks, WEBHOOK_ATTEMPTS, type TaskWebhookOptions, type TaskWebhookTarget } from './webhook.ts';
 
 /** The task webhook (#589): what a store transition turns into on the wire, and what a failing
  *  endpoint is allowed to change (the record's `webhook` outcome and one thread event — never
  *  the run's status). */
+
+const target = { id: 'bot', name: 'Bot', url: 'https://bot.example/hook' };
 
 interface Call { url: string; headers: Record<string, string>; body: Record<string, unknown> }
 
@@ -50,7 +52,7 @@ describe('TaskWebhook', () => {
     hook = new TaskWebhook(store, {
       resolveProject: async () => ({
         id: 'proj',
-        webhook: { url: 'https://bot.example/hook', token: 'secret-token', ...(triggers === undefined ? {} : { triggers }) },
+        webhooks: [{ ...target, token: 'secret-token', ...(triggers === undefined ? {} : { triggers }) }],
       }),
       origin: () => 'http://127.0.0.1:4321',
       dataDir,
@@ -179,7 +181,7 @@ describe('TaskWebhook', () => {
     const { calls, fetchImpl } = recorder();
     let triggers: WebhookTrigger[] = ['done'];
     const webhook = attach(fetchImpl, {
-      resolveProject: async () => ({ id: 'proj', webhook: { url: 'https://bot.example/hook', triggers } }),
+      resolveProject: async () => ({ id: 'proj', webhooks: [{ ...target, triggers }] }),
     });
     const first = optedIn();
     store.updateRun(first.id, { status: 'running' });
@@ -249,7 +251,7 @@ describe('TaskWebhook', () => {
     expect(new Set(calls.map((call) => call.body.deliveryId)).size).toBe(1);
     const after = store.getRun(run.id)!;
     expect(after.status).toBe('done');
-    expect(after.webhook?.lastError).toBe('HTTP 503');
+    expect(after.webhook?.lastError).toBe('Bot: HTTP 503');
     const failed = store.readEvents(run.id).filter((event) => event.type === 'webhook.failed');
     expect(failed).toHaveLength(1);
     expect(failed[0]).toMatchObject({ event: 'task.status', attempts: 3, status: 503 });
@@ -269,7 +271,7 @@ describe('TaskWebhook', () => {
     store.updateRun(run.id, { status: 'done' });
     await webhook.idle();
     expect(calls).toHaveLength(WEBHOOK_ATTEMPTS);
-    expect(store.getRun(run.id)?.webhook?.lastError).toBe('timed out');
+    expect(store.getRun(run.id)?.webhook?.lastError).toBe('Bot: timed out');
     expect(store.getRun(run.id)?.status).toBe('done');
   });
 
@@ -280,7 +282,7 @@ describe('TaskWebhook', () => {
     store.updateRun(run.id, { status: 'done' });
     await webhook.idle();
     expect(calls).toHaveLength(1);
-    expect(store.getRun(run.id)?.webhook?.lastError).toBe('HTTP 401');
+    expect(store.getRun(run.id)?.webhook?.lastError).toBe('Bot: HTTP 401');
   });
 
   it('under dry run sends nothing and logs the payload as a run event', async () => {
@@ -296,9 +298,121 @@ describe('TaskWebhook', () => {
     expect(JSON.stringify(logged[0])).not.toContain('secret-token');
   });
 
+  // hearsay-tools/cezarion#1576: several webhooks, each with its own selection and queue.
+  it('sends each webhook only its own selected states, with its own seq and name', async () => {
+    const { calls, fetchImpl } = recorder();
+    const webhook = attach(fetchImpl, {
+      resolveProject: async () => ({
+        id: 'proj',
+        webhooks: [
+          { id: 'a', name: 'Done bot', url: 'https://a.example/hook', triggers: ['done'] },
+          { id: 'b', name: 'Run bot', url: 'https://b.example/hook', triggers: ['running', 'done'] },
+        ],
+      }),
+    });
+    const run = optedIn();
+    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: 'done' });
+    await webhook.idle();
+    const sent = (url: string) => calls.filter((call) => call.url === url).map((call) => [call.body.state, call.body.seq, call.body.webhook]);
+    expect(sent('https://a.example/hook')).toEqual([['done', 1, { id: 'a', name: 'Done bot' }]]);
+    expect(sent('https://b.example/hook')).toEqual([
+      ['running', 1, { id: 'b', name: 'Run bot' }],
+      ['done', 2, { id: 'b', name: 'Run bot' }],
+    ]);
+  });
+
+  it('keeps delivering to other webhooks when one fails, and names the failed one', async () => {
+    const { calls, fetchImpl } = recorder((call) => new Response(null, { status: call.url.startsWith('https://a.') ? 500 : 204 }));
+    const webhook = attach(fetchImpl, {
+      resolveProject: async () => ({
+        id: 'proj',
+        webhooks: [
+          { id: 'a', name: 'Broken bot', url: 'https://a.example/hook', triggers: ['done'] },
+          { id: 'b', name: 'Good bot', url: 'https://b.example/hook', triggers: ['done'] },
+        ],
+      }),
+    });
+    const run = optedIn();
+    store.updateRun(run.id, { status: 'running' });
+    store.updateRun(run.id, { status: 'done' });
+    await webhook.idle();
+    expect(calls.filter((call) => call.url.startsWith('https://a.'))).toHaveLength(WEBHOOK_ATTEMPTS);
+    expect(calls.filter((call) => call.url.startsWith('https://b.'))).toHaveLength(1);
+    const after = store.getRun(run.id)!;
+    expect(after.status).toBe('done');
+    // B's success does not hide A's failure.
+    expect(after.webhook).toMatchObject({ lastError: 'Broken bot: HTTP 500', lastErrorWebhookId: 'a' });
+    expect(after.webhook?.lastDeliveredAt).toBeDefined();
+    const failed = store.readEvents(run.id).filter((event) => event.type === 'webhook.failed');
+    expect(failed).toEqual([expect.objectContaining({ webhookId: 'a', webhookName: 'Broken bot', status: 500 })]);
+  });
+
+  it('does not let a slow webhook hold up another', async () => {
+    let release!: () => void;
+    const held = new Promise<void>((done) => { release = done; });
+    const { calls, fetchImpl } = recorder(async (call) => {
+      if (call.url.startsWith('https://a.')) await held;
+      return new Response(null, { status: 204 });
+    });
+    const webhook = attach(fetchImpl, {
+      resolveProject: async () => ({
+        id: 'proj',
+        webhooks: [
+          { id: 'a', name: 'Slow', url: 'https://a.example/hook', triggers: ['done'] },
+          { id: 'b', name: 'Fast', url: 'https://b.example/hook', triggers: ['done'] },
+        ],
+      }),
+    });
+    const run = optedIn();
+    store.updateRun(run.id, { status: 'done' });
+    // bound: the fast webhook's one POST; the slow one stays held until released below.
+    await expect.poll(() => calls.filter((call) => call.url.startsWith('https://b.')).length, { timeout: 10_000 }).toBe(1);
+    release();
+    await webhook.idle();
+    expect(calls).toHaveLength(2);
+  });
+
+  /** A send queued behind a held one reads the webhook again when its turn comes (#1639 review):
+   *  `edit` changes the settings while the first send is held. */
+  async function queuedBehindHeld(edit: (webhooks: TaskWebhookTarget[]) => TaskWebhookTarget[]) {
+    let release!: () => void;
+    const held = new Promise<void>((done) => { release = done; });
+    const { calls, fetchImpl } = recorder(async (_call, index) => {
+      if (index === 0) await held;
+      return new Response(null, { status: 204 });
+    });
+    let webhooks: TaskWebhookTarget[] = [{ ...target, token: 'old-token', triggers: ['running', 'done'] }];
+    let resolved = 0;
+    const webhook = attach(fetchImpl, { resolveProject: async () => { resolved += 1; return { id: 'proj', webhooks }; } });
+    const run = optedIn();
+    store.updateRun(run.id, { status: 'running' });
+    // bound: the first POST starts and is held until released below.
+    await expect.poll(() => calls.length, { timeout: 10_000 }).toBe(1);
+    store.updateRun(run.id, { status: 'done' });
+    // bound: the second change is dispatched against the settings as they were, then queued.
+    await expect.poll(() => resolved, { timeout: 10_000 }).toBe(2);
+    webhooks = edit(webhooks);
+    release();
+    await webhook.idle();
+    return calls;
+  }
+
+  it('sends a queued delivery to the endpoint as edited while it waited', async () => {
+    const calls = await queuedBehindHeld(([first]) => [{ ...first!, url: 'https://new.example/hook', token: 'new-token' }]);
+    expect(calls.map((call) => call.url)).toEqual(['https://bot.example/hook', 'https://new.example/hook']);
+    expect(calls[1]!.headers.authorization).toBe('Bearer new-token');
+  });
+
+  it('drops a queued delivery once its webhook is removed or stops wanting that state', async () => {
+    expect(await queuedBehindHeld(() => [])).toHaveLength(1);
+    hook?.dispose();
+    expect(await queuedBehindHeld(([first]) => [{ ...first!, triggers: ['running'] }])).toHaveLength(1);
+  });
+
   it('stops sending once the project webhook is removed', async () => {
     const { calls, fetchImpl } = recorder();
-    const webhook = attach(fetchImpl, { resolveProject: async () => ({ id: 'proj' }) });
+    const webhook = attach(fetchImpl, { resolveProject: async () => ({ id: 'proj', webhooks: [] }) });
     const run = create(true);
     store.updateRun(run.id, { status: 'running' });
     await webhook.idle();
@@ -353,5 +467,77 @@ describe('TaskWebhooks', () => {
     expect(calls[1]!.body).toMatchObject({ projectId: entry.id, url: `http://127.0.0.1:4321/p/${entry.id}/tasks/${run.id}` });
     hook.dispose();
     store.flush();
+  });
+});
+
+describe('sendAgentReport', () => {
+  let dataDir: string;
+  let store: RunStore;
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'cez-agent-report-'));
+    store = RunStore.open(dataDir);
+  });
+  afterEach(() => {
+    store.flush();
+    rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  const report = { id: 'friction', name: 'Friction reports', url: 'https://bot.example/friction', token: 'secret-token' };
+
+  it('POSTs an agent.report with the run link and records it on the thread', async () => {
+    const run = store.createRun({ title: 't', workflow: 'quick-task', task: 'do it', steps: [] });
+    const { calls, fetchImpl } = recorder();
+    const result = await sendAgentReport({
+      projectId: 'proj',
+      webhook: report,
+      input: { runId: run.id, title: 'Squeal denied an edit', message: '## What happened\n…', data: { severity: 'low' } },
+      store,
+      origin: 'http://127.0.0.1:4321',
+      dryRun: false,
+      fetch: fetchImpl,
+      sleep: async () => undefined,
+    });
+    expect(result).toMatchObject({ ok: true, attempts: 1, status: 204 });
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.headers.authorization).toBe('Bearer secret-token');
+    expect(calls[0]!.body).toMatchObject({
+      event: 'agent.report',
+      deliveryId: result.deliveryId,
+      projectId: 'proj',
+      webhook: { id: 'friction', name: 'Friction reports' },
+      runId: run.id,
+      url: `http://127.0.0.1:4321/p/proj/tasks/${run.id}`,
+      title: 'Squeal denied an edit',
+      message: '## What happened\n…',
+      data: { severity: 'low' },
+      task: expect.objectContaining({ id: run.id }),
+    });
+    expect(store.readEvents(run.id).filter((event) => event.type === 'webhook.report')).toEqual([
+      expect.objectContaining({ webhookId: 'friction', webhookName: 'Friction reports', ok: true, title: 'Squeal denied an edit' }),
+    ]);
+    expect(store.getRun(run.id)!.status).toBe('queued');
+  });
+
+  it('reports a failure after the retries without touching the run status', async () => {
+    const run = store.createRun({ title: 't', workflow: 'quick-task', task: 'do it', steps: [] });
+    const { calls, fetchImpl } = recorder(() => new Response(null, { status: 503 }));
+    const result = await sendAgentReport({
+      projectId: 'proj', webhook: report, input: { runId: run.id, message: 'm' }, store, dryRun: false, fetch: fetchImpl, sleep: async () => undefined,
+    });
+    expect(result).toMatchObject({ ok: false, attempts: WEBHOOK_ATTEMPTS, status: 503, error: 'HTTP 503' });
+    expect(calls).toHaveLength(WEBHOOK_ATTEMPTS);
+    expect(store.readEvents(run.id).filter((event) => event.type === 'webhook.report')).toEqual([
+      expect.objectContaining({ ok: false, error: 'HTTP 503', webhookName: 'Friction reports' }),
+    ]);
+    expect(store.getRun(run.id)!.status).toBe('queued');
+  });
+
+  it('sends nothing under dry run and never logs the token', async () => {
+    const run = store.createRun({ title: 't', workflow: 'quick-task', task: 'do it', steps: [] });
+    const { calls, fetchImpl } = recorder();
+    const result = await sendAgentReport({ projectId: 'proj', webhook: report, input: { runId: run.id, message: 'm' }, store, dryRun: true, fetch: fetchImpl });
+    expect(result).toMatchObject({ ok: true, dryRun: true, attempts: 0 });
+    expect(calls).toEqual([]);
+    expect(JSON.stringify(store.readEvents(run.id))).not.toContain('secret-token');
   });
 });

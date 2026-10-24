@@ -151,7 +151,9 @@ describe('worktree setup on task start (#917)', () => {
     const id = await runToEnd(f, 'do the thing');
     expect(f.store.getRun(id)?.worktreeSetup).toBeUndefined();
     expect(messages(f, id).some((m) => m.includes('worktree setup'))).toBe(false);
-    expect(openingMessages(f)[0]).toBe('do the thing mock:done');
+    // The session-context prefix (hearsay-tools/cezarion#1584) comes first; setup adds nothing after it.
+    const opening = openingMessages(f)[0]!;
+    expect(opening.slice(opening.lastIndexOf('\n\n---\n\n') + '\n\n---\n\n'.length)).toBe('do the thing mock:done');
   }, 60_000);
 
   it('an in-place run never runs setup', async () => {

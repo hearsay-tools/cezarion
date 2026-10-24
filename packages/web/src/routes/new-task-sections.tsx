@@ -14,7 +14,7 @@ import { CompletionControls } from '@/components/completion-controls'
 import { PickerPill, PickerPillGroup, RunnerPill } from '@/components/picker-pill'
 import { toast } from '@/components/ui/toaster'
 import { submitShortcutHint } from '@/lib/use-submit-shortcut'
-import { webhookLabel } from '@/lib/webhook'
+import { webhookLabel, webhookNames, type TaskWebhookTarget } from '@/lib/webhook'
 import { cn } from '@/lib/utils'
 
 import type { useAccountSelection, useEngineSelection } from './new-task-controller'
@@ -193,7 +193,7 @@ export function ExecutionSettings({
   repo: RepoResponse | undefined
   hasGit: boolean
   runMode: { worktree: boolean; autonomous: boolean }
-  webhook: { url: string | undefined; on: boolean; onChange: (on: boolean) => void }
+  webhook: { targets: readonly TaskWebhookTarget[]; on: boolean; onChange: (on: boolean) => void }
   interactiveSkill: boolean
   completionDisabled: boolean
 }) {
@@ -226,8 +226,8 @@ export function ExecutionSettings({
             disabled={draft.planFirst}
             onChange={(on) => update({ autonomous: on })}
           />
-          {webhook.url !== undefined ? (
-            <NotifyWebhookToggle on={webhook.on} url={webhook.url} onChange={webhook.onChange} />
+          {webhook.targets.length > 0 ? (
+            <NotifyWebhookToggle on={webhook.on} targets={webhook.targets} onChange={webhook.onChange} />
           ) : null}
           {interactiveSkill && (draft.autonomous === null || draft.worktree === null) ? (
             <p className="basis-full text-xs text-muted-foreground" data-slot="interactive-skill-hint">
@@ -345,15 +345,16 @@ function AutonomousToggle({
   )
 }
 
-/** Notify webhook toggle (#589): checked = the project's task webhook receives this task's
- *  status changes from the start. Rendered only when the project has a webhook. */
+/** Notify webhook toggle (#589): checked = the project's task webhooks receive this task's
+ *  status changes from the start. Rendered only when the project has one (#1576: every webhook
+ *  with task notifications on; the tooltip names them). */
 function NotifyWebhookToggle({
   on,
-  url,
+  targets,
   onChange,
 }: {
   on: boolean
-  url: string
+  targets: readonly TaskWebhookTarget[]
   onChange: (on: boolean) => void
 }) {
   return (
@@ -364,7 +365,7 @@ function NotifyWebhookToggle({
       aria-label="Notify webhook"
       data-slot="notify-webhook-toggle"
       onClick={() => onChange(!on)}
-      title={on ? `Status changes go to ${webhookLabel(url)}` : `Check to send this task's status changes to ${webhookLabel(url)}`}
+      title={`${on ? 'Status changes go to' : "Check to send this task's status changes to"} ${webhookNames(targets)} (${targets.map((target) => webhookLabel(target.url)).join(', ')})`}
       className="flex min-h-11 items-center justify-between gap-3 px-0 py-3 text-left"
     >
       <span className="min-w-0"><span className="block text-[13px] font-medium">Notify webhook</span><span data-slot="notify-webhook-subtitle" className="block truncate text-[12px] text-muted-foreground">Send status changes</span></span>

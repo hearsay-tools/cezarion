@@ -4,7 +4,7 @@ import { MemoryRouter, Route, Routes } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
-import type { ApiRun } from '@open-mercato/cezar-api-client'
+import type { ApiRun, ProjectWebhook } from '@open-mercato/cezar-api-client'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
 
 import { RunHeader } from './run-header'
@@ -34,7 +34,9 @@ const run = (extra: Partial<ApiRun> = {}): ApiRun => ({
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
 
-function serve(webhook?: { url: string; tokenSet: boolean }, notifyAnswer: (body: unknown) => Response = (body) => json({ ...run(), notify: (body as { notify: boolean }).notify })) {
+type Registry = { webhook?: { url: string; tokenSet: boolean }; webhooks?: ProjectWebhook[] }
+
+function serve(registry?: Registry, notifyAnswer: (body: unknown) => Response = (body) => json({ ...run(), notify: (body as { notify: boolean }).notify })) {
   const sent: Array<{ path: string; method: string; body: unknown }> = []
   vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
     const path = String(input).replace('?archived=recent', '')
@@ -43,7 +45,7 @@ function serve(webhook?: { url: string; tokenSet: boolean }, notifyAnswer: (body
     sent.push({ path, method, body })
     if (path === '/api/v1/projects') {
       return json({
-        projects: [{ id: 'demo', name: 'demo', root: '/repo', addedAt: '', lastOpenedAt: '', source: 'local', status: 'ok', ...(webhook ? { webhook } : {}) }],
+        projects: [{ id: 'demo', name: 'demo', root: '/repo', addedAt: '', lastOpenedAt: '', source: 'local', status: 'ok', ...registry }],
         bootProject: 'demo',
         projectsDir: '~/cezar/projects',
       })
@@ -68,7 +70,18 @@ function renderHeader(record: ApiRun) {
   )
 }
 
-const WEBHOOK = { url: 'https://bot.example/hooks/cez?key=secret', tokenSet: true }
+const hook = (id: string, name: string, url: string, extra: Partial<ProjectWebhook> = {}): ProjectWebhook => ({
+  id, name, url, tokenSet: true, tasks: true, agent: false, ...extra,
+})
+const WEBHOOK: Registry = { webhooks: [hook('w1', 'Team bot', 'https://bot.example/hooks/cez?key=secret')] }
+/** Two task webhooks and one that only takes agent reports (hearsay-tools/cezarion#1576). */
+const SEVERAL: Registry = {
+  webhooks: [
+    hook('w1', 'Team bot', 'https://bot.example/hooks/cez?key=secret'),
+    hook('w2', 'Reports', 'https://reports.example/in', { tasks: false, agent: true }),
+    hook('w3', 'Ops pager', 'https://ops.example/page'),
+  ],
+}
 
 describe('Hand off', () => {
   it('is not offered when the project has no webhook', async () => {
@@ -131,7 +144,7 @@ describe('Hand off', () => {
 
 describe('Notifying chip', () => {
   const openMenu = async () => {
-    fireEvent.pointerDown(await screen.findByRole('button', { name: /^Notifying bot\.example\/hooks\/cez/ }), { button: 0 })
+    fireEvent.pointerDown(await screen.findByRole('button', { name: /^Notifying Team bot/ }), { button: 0 })
     return within(await screen.findByRole('menu'))
   }
 
@@ -140,7 +153,7 @@ describe('Notifying chip', () => {
     renderHeader(run({ notify: true }))
     const menu = await openMenu()
     expect(screen.queryByRole('button', { name: 'Hand off to webhook' })).toBeNull()
-    const destination = menu.getByText('Task webhook')
+    const destination = menu.getByText('Team bot')
     expect(destination.textContent).not.toContain('bot.example')
     expect(destination.getAttribute('title')).toContain('bot.example/hooks/cez')
   })
@@ -184,6 +197,33 @@ describe('Notifying chip', () => {
     await waitFor(() => {
       expect(sent.find((r) => r.method === 'POST' && r.path.endsWith('/notify'))?.body).toEqual({ notify: false })
     })
+  })
+
+  it('names every task webhook it reaches, and no agent-only one', async () => {
+    serve(SEVERAL)
+    renderHeader(run({ notify: true }))
+    const chip = await screen.findByRole('button', { name: 'Notifying Team bot and Ops pager — webhook actions' })
+    expect(chip.getAttribute('title')).toBe('Team bot: bot.example/hooks/cez\nOps pager: ops.example/page')
+    fireEvent.pointerDown(chip, { button: 0 })
+    const menu = within(await screen.findByRole('menu'))
+    expect(menu.getByText('Ops pager').getAttribute('title')).toBe('ops.example/page')
+    expect(menu.queryByText('Reports')).toBeNull()
+    fireEvent.click(menu.getByRole('menuitem', { name: /Send a note/ }))
+    await screen.findByRole('dialog')
+    expect(document.querySelector('[data-slot="dialog-description"]')?.textContent).toContain('Team bot and Ops pager get this note')
+  })
+
+  it('is not offered when every webhook is agent-only', async () => {
+    const sent = serve({ webhooks: [hook('w2', 'Reports', 'https://reports.example/in', { tasks: false, agent: true })] })
+    renderHeader(run())
+    await waitFor(() => expect(sent.some((r) => r.path === '/api/v1/projects')).toBe(true))
+    expect(screen.queryByRole('button', { name: 'Hand off to webhook' })).toBeNull()
+  })
+
+  it('still reads a server that knows one webhook only', async () => {
+    serve({ webhook: { url: 'https://bot.example/hooks/cez', tokenSet: true } })
+    renderHeader(run({ notify: true }))
+    expect(await screen.findByRole('button', { name: 'Notifying Task webhook — webhook actions' })).toBeTruthy()
   })
 
   it('still lets a run stop notifying after the project webhook was removed', async () => {

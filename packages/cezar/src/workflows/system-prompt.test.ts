@@ -22,7 +22,8 @@ import {
 // full prompt assertions below must still pin the unchanged handoff contract.
 const HANDOFF_INSTRUCTIONS = composeSystemPrompt(artifactInstructions('available'), BASE_HANDOFF);
 // hearsay-tools/cezarion#1234: the sessions below have cezar's tools, so they are taught the tools.
-const SESSION_HANDOFF = composeSystemPrompt(artifactInstructions('available'), handoffInstructions({ tools: true }));
+// hearsay-tools/cezarion#1584: their opening message carries the handoff, so step 1 points there.
+const SESSION_HANDOFF = composeSystemPrompt(artifactInstructions('available'), handoffInstructions({ tools: true, handoffInjected: true }));
 const run = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 const TERMINAL = new Set(['done', 'review', 'failed', 'cancelled']);
