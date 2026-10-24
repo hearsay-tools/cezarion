@@ -409,7 +409,7 @@ test('the engines floor is proven on exactly the minimum Node, and verify requir
 test('a stalled floor Node setup times out and retries once inside the job budget (#1214)', () => {
   const { runInNewContext } = require('node:vm');
   const job = workflow().jobs['node-floor'];
-  assert.equal(job['timeout-minutes'], 20);
+  assert.equal(job['timeout-minutes'], 30);
   const setups = job.steps.filter(s => s.uses?.startsWith('actions/setup-node@'));
   assert.equal(setups.length, 2, 'one setup and exactly one retry');
   const [setup, retry] = setups;
