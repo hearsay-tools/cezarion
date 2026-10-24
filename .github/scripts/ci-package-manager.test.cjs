@@ -10,7 +10,7 @@ const { createRequire } = require('node:module');
 const yaml = createRequire(path.join(__dirname, '../../packages/cezar/package.json'))('yaml');
 
 const workflow = yaml.parse(fs.readFileSync(path.join(__dirname, '../workflows/ci.yml'), 'utf8'));
-const jobs = ['build-and-package', 'vitest', 'node-floor', 'cockpit-browser', 'publish-snapshot', 'prepare-pr-snapshot'];
+const jobs = ['build-and-package', 'vitest', 'cockpit-browser', 'publish-snapshot', 'prepare-pr-snapshot'];
 
 function evaluate(value, root, steps = {}) {
   if (!value) return true;

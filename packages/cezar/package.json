@@ -20,7 +20,7 @@
     "README.md"
   ],
   "engines": {
-    "node": ">=24.15.0"
+    "node": ">=24.21.0"
   },
   "scripts": {
     "prebuild": "node scripts/sync-readme.mjs",

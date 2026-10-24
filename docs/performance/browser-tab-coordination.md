@@ -98,7 +98,7 @@ The real [preview test](../../packages/web/e2e/live-preview.e2e.ts) receives and
 
 ## Reproduce
 
-Use Node 24.15+ and the repository's configured `agent-browser` provider. The normal browser setup is documented in [the E2E guide](../../packages/web/e2e/README.md). Do not set `VITE_CEZ_E2E=1`: that intentionally disables periodic queries. `TMPDIR=/tmp` avoids Chrome's Unix-socket path limit when running inside a deeply nested task worktree.
+Use Node 24.21.0+ and the repository's configured `agent-browser` provider. The normal browser setup is documented in [the E2E guide](../../packages/web/e2e/README.md). Do not set `VITE_CEZ_E2E=1`: that intentionally disables periodic queries. `TMPDIR=/tmp` avoids Chrome's Unix-socket path limit when running inside a deeply nested task worktree.
 
 ```sh
 npm ci
