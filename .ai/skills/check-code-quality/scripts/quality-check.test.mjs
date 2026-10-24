@@ -1,3 +1,4 @@
+import { nodeModulesWith } from './test-support.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
@@ -5,11 +6,11 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { analyzeSource } from '../.ai/skills/check-code-quality/scripts/code-metrics.mjs';
-import { runCheck } from '../.ai/skills/check-code-quality/scripts/check.mjs';
-import { convertNodeCoverage } from '../.ai/skills/check-code-quality/scripts/coverage.mjs';
-import { finishReport, markdownReport } from '../.ai/skills/check-code-quality/scripts/quality-report.mjs';
-import { thresholds } from '../.ai/skills/check-code-quality/scripts/changed-functions.mjs';
+import { analyzeSource } from './code-metrics.mjs';
+import { runCheck } from './check.mjs';
+import { convertNodeCoverage } from './coverage.mjs';
+import { finishReport, markdownReport } from './quality-report.mjs';
+import { thresholds } from './changed-functions.mjs';
 
 function fixture(t) {
   const cwd = mkdtempSync(join(tmpdir(), 'quality-check-'));
@@ -79,7 +80,7 @@ test('groups Node tests, converts process coverage, matches changed functions an
 
 test('pass, exceeded and incomplete are distinct process exit codes', async t => {
   const f = fixture(t);
-  const cli = fileURLToPath(new URL('../.ai/skills/check-code-quality/scripts/check.mjs', import.meta.url));
+  const cli = fileURLToPath(new URL('./check.mjs', import.meta.url));
   for (const [decisions, expected] of [[19, 0], [20, 1]]) {
     f.write('source.mjs', `export function choose(x) { ${'if (x) x--; '.repeat(decisions)} return x; }`);
     f.write('coverage.json', JSON.stringify(coverage(f)));
@@ -240,7 +241,7 @@ test('missing Vitest packages and transformed Node sources name the next step', 
 // coverage, so these tests prove the collector measures changed test functions anyway.
 function vitestFixture(t) {
   const f = fixture(t);
-  symlinkSync(fileURLToPath(new URL('../node_modules', import.meta.url)), join(f.cwd, 'node_modules'), 'dir');
+  symlinkSync(nodeModulesWith('vitest'), join(f.cwd, 'node_modules'), 'dir');
   f.write('vitest.config.mjs', `import { fileURLToPath } from 'node:url';
     import { defineConfig } from 'vitest/config';
     const alias = { '#source': fileURLToPath(new URL('./source.mjs', import.meta.url)) };
@@ -334,10 +335,10 @@ test('copied skill runs the complete Node coverage check outside this checkout',
   const skill = join(f.cwd, 'node_modules/copied-skill');
   mkdirSync(join(f.cwd, 'node_modules'));
   // A skill-local dependency install must not collide with the fixture's dependency link.
-  cpSync(fileURLToPath(new URL('../.ai/skills/check-code-quality', import.meta.url)), skill, {
+  cpSync(fileURLToPath(new URL('..', import.meta.url)), skill, {
     recursive: true, filter: source => basename(source) !== 'node_modules',
   });
-  symlinkSync(fileURLToPath(new URL('../node_modules', import.meta.url)), join(skill, 'node_modules'), 'dir');
+  symlinkSync(nodeModulesWith('@babel/parser'), join(skill, 'node_modules'), 'dir');
   const result = spawnSync(process.execPath, [join(skill, 'scripts/check.mjs'), '--base', f.base,
     '--runner', 'node', '--test', 'source.test.mjs', '--json'], { cwd: f.cwd, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stdout + result.stderr);
