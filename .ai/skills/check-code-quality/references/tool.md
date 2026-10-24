@@ -21,8 +21,15 @@ is available with `--json`; test output goes to stderr. Temporary coverage is
 removed on success and failure. Reports preserve source hashes and commands.
 
 For Vitest, the target project needs Vitest and its matching
-`@vitest/coverage-v8` installed through its package manager. Use the existing test
-configuration and select unit projects in a multi-project repository. For Node,
+`@vitest/coverage-v8` installed through its package manager; a missing package
+stops the check with an install instruction. The collector runs
+`scripts/vitest-coverage.mjs` in a child process, which starts Vitest through its
+Node API with the project's own configuration. Select every project that runs a
+selected test in a multi-project repository. Vitest always excludes its
+`test.include` globs from coverage; the runner removes only those globs, so
+changed test functions are measured, and `coverage.include` still limits the
+report to the changed files. Test files end in `.test`, `.spec` or `.e2e` and a
+JavaScript or TypeScript extension. For Node,
 the skill bundles the V8 merger and Istanbul converter; no Vitest dependency is
 needed. Node collection supports untransformed JavaScript. For transformed
 TypeScript/JSX or another runner, collect Istanbul coverage through that runner
@@ -41,8 +48,10 @@ Collection has a ten-minute bound. Failed tests produce exit 2 and no accepted
 verdict. Missing, stale or unmatched function coverage remains incomplete. A
 source edit, new changed function or HEAD change during measurement also produces
 exit 2. The tool checks source hashes and rescans against the pinned baseline.
-Changed test functions stay in scope. A runner report that excludes them produces
-exit 2; passing source scores alone cannot complete that check.
+Changed test functions stay in scope. A file missing from the report, such as a
+test that no selected `--project` runs, or one a project's own `coverage.exclude`
+removes, produces exit 2 and names the missing file; passing source scores alone
+cannot complete that check.
 An external Istanbul report has an mtime check but no source-provenance proof;
 collect fresh coverage when its provenance is uncertain.
 

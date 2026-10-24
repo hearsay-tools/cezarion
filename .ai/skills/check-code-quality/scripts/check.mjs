@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { scanChanges, thresholds } from './changed-functions.mjs';
 import { collectCoverage } from './coverage.mjs';
+import { testFilePattern } from './vitest-coverage.mjs';
 import { finishReport, markdownReport, measureFile } from './quality-report.mjs';
 
 const HELP = `Usage: node <skill>/scripts/check.mjs --base <PR-target-ref> [options]
@@ -13,7 +14,7 @@ const HELP = `Usage: node <skill>/scripts/check.mjs --base <PR-target-ref> [opti
 Scan changed JS/TS functions, collect coverage once, measure and report.
   --coverage <path>     Read current Istanbul coverage instead of running tests
   --runner <node|vitest> Collect fresh coverage with --test (default: vitest)
-  --test <path>         Relevant test file; repeatable, run once as a group
+  --test <path>         Relevant test file (*.test, *.spec, *.e2e); repeatable, run once as a group
   --project <name>      Vitest project; repeatable
   --node-import <path>  Node test setup module; repeatable
   --output <path.md>    Save Markdown and a sibling .json report
@@ -53,7 +54,7 @@ function parseInput(args, cwd) {
   validateRunner(values, runner);
   if (values.output && !values.output.endsWith('.md')) throw new Error('--output must end in .md.');
   const tests = (values.test ?? []).map(file => localFile(file, cwd));
-  if (tests.some(file => !/\.(?:test|spec)\.[cm]?[jt]sx?$/i.test(file))) throw new Error('--test must name a test file.');
+  if (tests.some(file => !testFilePattern.test(file))) throw new Error('--test must name a test file (*.test, *.spec or *.e2e).');
   const imports = (values['node-import'] ?? []).map(file => localFile(file, cwd));
   return { ...values, runner, tests, imports, projects: values.project ?? [] };
 }
