@@ -33,6 +33,9 @@ import {
 } from './global-tasks'
 import { allProjectTags } from './project-tags'
 
+/** No automation names known: a task's automation contributes nothing to a search. */
+const noName = () => undefined
+
 /**
  * The global Tasks page's behavior, as a table. What matters here and nowhere else:
  * tags belong to PROJECTS (so grouping by tag fans a task out across every tag its repo
@@ -158,7 +161,7 @@ describe('filterGlobalTasks', () => {
     expect(ids(filterGlobalTasks(tasks, state.filters, 'active'))).toEqual(['a1'])
     expect(urlStateToSearchParams(state).getAll('project')).toEqual(['api', 'infra'])
     expect(resetCount(state)).toBe(4)
-    expect(ids(tasksExcludingFacet(tasks, state.filters, 'active', 'projects'))).toEqual(['a1', 'w1'])
+    expect(ids(tasksExcludingFacet(tasks, state.filters, 'active', 'projects', noName))).toEqual(['a1', 'w1'])
   })
 
   it('ANDs across facets', () => {
@@ -248,7 +251,7 @@ describe('facet counts', () => {
     // no storefront work says 0 instead of promising rows that are not there.
     const current = filters({ tags: ['storefront'] })
     const counts = facetCounts(
-      tasksExcludingFacet(tasks, current, 'active', 'workflows'),
+      tasksExcludingFacet(tasks, current, 'active', 'workflows', noName),
       (task) => [task.run.workflow],
     )
     expect(counts.get('plan-first')).toBe(1)
@@ -266,7 +269,7 @@ describe('facet counts', () => {
   it('excludes only the named facet, keeping the rest applied', () => {
     const current = filters({ statuses: ['done'], tags: [UNTAGGED] })
     // Dropping the status facet leaves the tag one in force.
-    expect(ids(tasksExcludingFacet(tasks, current, 'active', 'statuses'))).toEqual(['l1'])
+    expect(ids(tasksExcludingFacet(tasks, current, 'active', 'statuses', noName))).toEqual(['l1'])
   })
 })
 

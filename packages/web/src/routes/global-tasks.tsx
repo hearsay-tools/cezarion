@@ -56,6 +56,7 @@ import {
   toggleGroupBy,
   withOrigin,
   truncatedProjectNames,
+  type AutomationNameOf,
   type FacetId,
   type GlobalTask,
   type GlobalTaskFilters,
@@ -354,6 +355,7 @@ export function GlobalTasksRoute() {
           projects={registry}
           tasks={tasks}
           view={view}
+          automationName={nameOf}
         />
 
         <TruncatedNotice projects={truncated} perProjectLimit={index.data?.perProjectLimit} />
@@ -643,6 +645,7 @@ function FilterBar({
   projects,
   tasks,
   view,
+  automationName,
 }: {
   filters: GlobalTaskFilters
   onToggle: (facet: FacetId, value: string) => void
@@ -653,6 +656,8 @@ function FilterBar({
   projects: readonly ProjectListEntry[]
   tasks: readonly GlobalTask[]
   view: ListView
+  /** The list's automation-name lookup, so a name match counts in every facet. */
+  automationName: AutomationNameOf
 }) {
   const tags = React.useMemo(() => allProjectTags(projects), [projects])
 
@@ -660,14 +665,14 @@ function FilterBar({
   // facet's own ticks, or unticking a value would promise fewer rows than it delivers.
   const counts = React.useMemo(() => {
     const per = (facet: FacetId, valueOf: (task: GlobalTask) => readonly string[]) =>
-      facetCounts(tasksExcludingFacet(tasks, filters, view, facet), valueOf)
+      facetCounts(tasksExcludingFacet(tasks, filters, view, facet, automationName), valueOf)
     return {
       projects: per('projects', (task) => [task.run.projectId]),
       tags: per('tags', tagValuesOf),
       statuses: per('statuses', (task) => [task.run.status]),
       workflows: per('workflows', (task) => [task.run.workflow]),
     }
-  }, [tasks, filters, view])
+  }, [tasks, filters, view, automationName])
 
   const withCount = (map: Map<string, number>) => (option: { value: string; label: string }) => ({
     ...option,

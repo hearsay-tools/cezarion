@@ -1251,6 +1251,21 @@ describe('global tasks — status groups and origin (hearsay-tools/cezarion#1616
     await waitFor(() => expect(origins()[0]).toMatch(/·Daily project health$/))
     fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks across projects' }), { target: { value: 'daily project' } })
     await waitFor(() => expect(rowIds()).toEqual(['nightly-run']))
+    // The facet counts read the same match as the list. The menu measures itself and scrolls its
+    // selection into view (cmdk); jsdom has neither.
+    vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+    Element.prototype.scrollIntoView = vi.fn()
+    try {
+      fireEvent.click(document.querySelector('[data-slot="facet-project"]') as HTMLElement)
+      const option = await waitFor(() => {
+        const found = document.querySelector('[data-testid="facet-project-menu"] [data-slot="facet-option"][data-value="web"]')
+        expect(found).not.toBeNull()
+        return found as HTMLElement
+      })
+      expect(option.textContent).toMatch(/1$/)
+    } finally {
+      delete (Element.prototype as { scrollIntoView?: unknown }).scrollIntoView
+    }
   })
 
   it('keeps tasks with equal ids from two projects apart', async () => {

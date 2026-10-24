@@ -283,7 +283,8 @@ export function tasksExcludingFacet(
   filters: GlobalTaskFilters,
   view: 'active' | 'archived',
   except: FacetId | 'origin',
-  automationName?: AutomationNameOf,
+  /** Required, so every count reads the same search match as the list it counts. */
+  automationName: AutomationNameOf,
 ): GlobalTask[] {
   return filterGlobalTasks(tasks, except === 'origin' ? { ...filters, origin: 'all' } : { ...filters, [except]: [] }, view, automationName)
 }
