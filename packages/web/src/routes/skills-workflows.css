@@ -91,16 +91,8 @@
 [data-slot="wb-import-panel"] [data-slot="dialog-title"] { line-height: 1.6; }
 [data-slot="wb-add-dialog"] [data-slot="dialog-header"] { text-align: start; }
 
-/* Pen strokes overlay the frame; CSS borders consume one pixel of its padding. */
-[data-slot="skills-detail"] > div { padding: 19px; }
-
-/* Match the approved frame's overlay strokes without shrinking its text columns. */
-[data-slot="skills-list"] { padding: 11px; }
-[data-slot="skill-row"] { border-block-end-width: 0; box-shadow: inset 0 -1px var(--border); }
-[data-slot="skill-row"]:is([aria-current="page"], [data-highlighted]) { box-shadow: none; }
+/* The grouped table (hearsay-tools/cezarion#1607) draws its row borders on the table rows. */
 [data-slot="skills-section"] > header a { padding-inline: 11px; }
-[data-slot="skills-back"] { padding-inline: 11px; border-radius: 8px; }
-[data-slot="skills-back"] svg { width: 16px; height: 16px; }
 [data-slot="skill-body"] .thread-markdown :is(h1,h2,h3) { line-height: 1.5; }
 [data-slot="skill-body"] .thread-markdown :is(p,ul,ol) { line-height: 1.6; }
 [data-slot="skill-body"] .thread-markdown ul { padding-inline-start: 0; list-style-position: inside; }
