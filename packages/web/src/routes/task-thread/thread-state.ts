@@ -3,31 +3,22 @@ import type {
   RunStatus,
   ConversationMessage,
   PlanEntry,
-  PlanStatus,
   RequestOutcome,
   StopReason,
   UiAskQuestion,
   UiItem,
   UiPermissionRequestedEvent,
-  UiToolItem,
 } from '@open-mercato/cezar-api-client'
-import { toolDisplay } from '@open-mercato/cezar-api-client/protocol/tool-display'
-import {
-  agentInputEventSchema,
-  conversationMessageEventSchema,
-  requestOutcomeEventSchema,
-} from '@open-mercato/cezar-api-client/contract/events'
-import {
-  previewServerSchema,
-  previewServerStateSchema,
-  type PreviewServer,
-  type PreviewServerState,
-} from '@open-mercato/cezar-api-client/contract/preview'
+import type { PreviewServer, PreviewServerState } from '@open-mercato/cezar-api-client/contract/preview'
+
+import { applyThreadEvent } from './thread-fold-reducers'
+import { createFoldState, type DraftEntry, type DraftTurn, type FoldState } from './thread-fold-state'
 
 /**
  * Pure, total fold of ordered v1 and v2 events into turns. Prefer v2 tools; preserve v1-only
  * content. Deduplicate message twins by normalized text only when matching v2 prose exists.
- * Malformed events must not break the transcript.
+ * Malformed events must not break the transcript. Each event family has its own reducer in
+ * `thread-fold-reducers.ts`, over the explicit state in `thread-fold-state.ts`.
  */
 
 /** A dim/danger transcript line (v1 note/lifecycle/error, v2 non-fatal session.error). */
@@ -44,8 +35,6 @@ export interface ThreadNote {
 }
 
 export type ThreadConversationDelivery = 'queued' | 'delivered' | 'consumed' | 'not-delivered'
-/** Delivery only moves forward: a later, lower projection never downgrades it (#505). */
-const DELIVERY_RANK: Record<ThreadConversationDelivery, number> = { 'not-delivered': 0, queued: 1, delivered: 2, consumed: 3 }
 
 /** A parent/worker conversation envelope, with its request outcome folded onto the request. */
 export interface ThreadConversationMessage {
@@ -239,61 +228,7 @@ export function threadFooter(status: RunStatus, error?: string): ThreadFooter {
   }
 }
 
-// ---- internals ----------------------------------------------------------------------------
-
-/** `origin` is fold-internal: it is what lets the mixed-file rule drop exactly the v1-derived
- *  items and nothing else when a turn turns out to be v2-covered. */
-interface DraftEntry {
-  origin: 'v1' | 'v2' | 'meta'
-  entry: ThreadEntry
-}
-
-interface DraftTurn {
-  id: string
-  turnId?: string
-  userMessage?: ThreadTurn['userMessage']
-  startedAt?: string
-  entries: DraftEntry[]
-  planEntries?: PlanEntry[]
-  completed?: { stopReason: StopReason; costUsd?: number; ts?: string }
-  /** True once any v2 `item.*` event landed in this turn — the dedup latch. */
-  v2Items: boolean
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
-}
-
-/** ` · 14:02` in the reader's locale, or nothing for an unparseable stamp. */
-function clockTime(ts: unknown): string {
-  const at = typeof ts === 'string' ? new Date(ts) : undefined
-  if (!at || Number.isNaN(at.getTime())) return ''
-  return ` · ${at.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}`
-}
-
-function str(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined
-}
-
-/**
- * A wall-clock stamp the thread is willing to render (#941). `ts` is required on the wire and
- * has always been written, but `runEventSchema` is deliberately loose and NDJSON transcripts are
- * plain files people edit — so an absent, non-string or unparseable stamp becomes `undefined`
- * here, and the turn renders exactly as it did before rather than printing `Invalid Date`.
- *
- * `parse()` in `thread-time.tsx` applies the same test at the render layer and returns the `Date`;
- * this one keeps the string, because the reduced thread carries stamps rather than formats them.
- */
-function stamp(value: unknown): string | undefined {
-  if (typeof value !== 'string' || value === '') return undefined
-  return Number.isFinite(new Date(value).getTime()) ? value : undefined
-}
-
-function providerId(value: unknown): ThreadProviderAuthRequired['provider'] | undefined {
-  return value === 'claude' || value === 'codex' || value === 'opencode' || value === 'pi' || value === 'cursor' || value === 'omp'
-    ? value
-    : undefined
-}
+// ---- the fold -----------------------------------------------------------------------------
 
 /** The engine's turn-end markers (`CEZ:DONE`, `CEZ:MONITORING` from #490) plus the in-band
  *  task-reference marker lines (`CEZ:PR=` / `CEZ:ISSUE=` / `CEZ:TITLE=`, spec
@@ -377,721 +312,70 @@ function dropLegacyDeltaRuns(draft: DraftTurn): void {
   draft.entries = kept
 }
 
-/** v1 tool results are strings today; anything else is rendered as JSON rather than dropped. */
-function resultText(value: unknown): string {
-  if (typeof value === 'string') return value
-  if (value === undefined || value === null) return ''
-  try {
-    return JSON.stringify(value)
-  } catch {
-    return String(value)
+/** Deduplicate v1 prose only when this turn contains a matching v2 message. Compare
+ *  marker-stripped, trimmed text; unmatched v1-only prose must remain visible. */
+function dropTwinnedV1Messages(draft: DraftTurn): void {
+  const v2Texts = new Set<string>()
+  for (const { origin, entry } of draft.entries) {
+    // stripAsk: true — dedup equality must ignore the marker on both sides (see norm()).
+    if (origin === 'v2' && entry.kind === 'message') v2Texts.add(stripDoneMarker(entry.text, true).trim())
   }
+  if (v2Texts.size === 0) return
+  draft.entries = draft.entries.filter(
+    (e) =>
+      !(e.origin === 'v1' && e.entry.kind === 'message' && v2Texts.has(stripDoneMarker(e.entry.text, true).trim())),
+  )
+  dropLegacyDeltaRuns(draft)
 }
-
-const isUiItem = (entry: ThreadEntry): entry is UiItem =>
-  entry.kind === 'message' || entry.kind === 'reasoning' || entry.kind === 'tool' || entry.kind === 'hook'
-
-/** Every `PlanStatus`, so an unrecognized status is the only thing that falls back to
- *  `pending` below. `Set<PlanStatus>` accepts a subset without complaint, so this list
- *  has to be kept honest by hand when the union grows. */
-const PLAN_STATUSES: ReadonlySet<string> = new Set<PlanStatus>(['pending', 'in_progress', 'completed', 'cancelled'])
 
 /**
- * Pre-v2 transcripts carry the plan only as TodoWrite input (`{todos: [{content, status,
- * activeForm}]}` — the documented Claude wire shape). Recovered so old runs get the dock too;
- * v2-covered turns never need this (their mappers emit `plan.updated`). All-or-nothing: one
- * malformed entry means the input is not the shape we claim to understand.
+ * Only a request the engine actually enqueued can still settle: `delegation/service.ts`
+ * enqueues when the recipient is neither destroyed nor resumable, and gives only those
+ * requests a deadline. A `continuation-required`/`destroyed` request has no obligation and
+ * no future outcome, so synthesizing "pending" for it would promise a reply nobody owes.
  */
-function planFromTodos(input: unknown): PlanEntry[] | undefined {
-  if (!isRecord(input) || !Array.isArray(input.todos)) return undefined
-  const entries: PlanEntry[] = []
-  for (const todo of input.todos) {
-    if (!isRecord(todo) || typeof todo.content !== 'string') return undefined
-    entries.push({
-      content: todo.content,
-      status: PLAN_STATUSES.has(todo.status as string) ? (todo.status as PlanStatus) : 'pending',
-      ...(typeof todo.activeForm === 'string' ? { activeForm: todo.activeForm } : {}),
-    })
-  }
-  return entries
-}
-
-export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = {}): ThreadState {
-  const turns: DraftTurn[] = []
-  /** stepId:itemId → live item. Runner sessions restart ids at `item_1`, while every current
-   *  persisted event is stamped with its workflow step. Old recordings without a step id keep
-   *  the historical bare-id lookup semantics. */
-  const itemsById = new Map<string, { turn: DraftTurn; entry: DraftEntry }>()
-  let sessionEnded: ThreadState['sessionEnded']
-  let turnSeq = 0
-  /** The latest unresolved AskUser card (#473). The next `user-message` resolves
-   *  it client-side (only one ask is ever pending — the agent asks once, then
-   *  parks `waiting` until the user answers). */
-  let pendingAsk: ThreadAsk | undefined
-  const permissions = new Map<string, ThreadPermission>()
-  const expirePermissions = () => {
-    for (const permission of permissions.values()) {
-      if (permission.status === 'pending') permission.status = 'expired'
-    }
-  }
-
-  const newTurn = (sourceSeq?: number): DraftTurn => {
-    turnSeq += 1
-    const turn: DraftTurn = {
-      id: sourceSeq === undefined ? `turn-fallback-${turnSeq}` : `turn-seq-${sourceSeq}`,
-      entries: [],
-      v2Items: false,
-    }
-    turns.push(turn)
-    return turn
-  }
-  const currentTurn = (): DraftTurn => turns.at(-1) ?? newTurn()
-
-  const itemKey = (event: RunEvent, itemId: string) => {
-    const stepId = str(event.stepId)
-    return stepId === undefined ? itemId : `${stepId}:${itemId}`
-  }
-
-  const upsertV2 = (turn: DraftTurn, raw: UiItem, key: string, ts?: string) => {
-    // Clone: deltas append in place, and the event object off the wire must stay untouched.
-    // Assistant (and rare in-stream user) messages carry the completing event's clock (#435).
-    const item = raw.kind === 'message' && ts !== undefined ? { ...raw, ts } : { ...raw }
-    // A hook (#961) is no evidence of v2 tool coverage, and a Claude SessionStart hook lands
-    // before `turn.started`, which must still attach to the prompt's turn.
-    if (!turn.v2Items && item.kind !== 'hook') {
-      // The dedup latch flips: this turn is v2-covered, so every v1-synthesized TOOL in it is
-      // a duplicate of something v2 already describes (or is about to). Tools can be dropped
-      // sight-unseen because v2 tool coverage is total across backends and ids are shared —
-      // `tool-call`'s own `turn.v2Items` guard already suppresses the rest.
-      //
-      // v1 MESSAGES are deliberately NOT dropped here (#agent-log-vanishing-text): a turn being
-      // v2-covered for tools does NOT prove its prose has a v2 twin. Claude's result fallback
-      // (claude-cli-runner.ts emits a v1 `text` from `msg.result`) had no v2 counterpart, so
-      // this blanket drop deleted the agent's only message a moment after it rendered. The
-      // twinned ones are removed by text at the end of the fold, where the evidence exists.
-      turn.v2Items = true
-      for (const dropped of turn.entries) {
-        if (dropped.origin === 'v1' && dropped.entry.kind === 'tool') itemsById.delete(dropped.entry.id)
-      }
-      turn.entries = turn.entries.filter((e) => !(e.origin === 'v1' && e.entry.kind === 'tool'))
-    }
-    const existing = itemsById.get(key)
-    if (existing && existing.turn === turn) {
-      existing.entry.entry = item
-      itemsById.set(key, existing)
-      return
-    }
-    const draft: DraftEntry = { origin: 'v2', entry: item }
-    turn.entries.push(draft)
-    itemsById.set(key, { turn, entry: draft })
-  }
-
-  const conversationEntries = new Map<string, ThreadConversationMessage>()
-  const outcomesByRequest = new Map<string, RequestOutcome>()
-  const seenInputs = new Set<string>()
-  const attachOutcome = (entry: ThreadConversationMessage) => {
-    if (entry.messageKind !== 'request') return
-    const outcome = outcomesByRequest.get(entry.messageId)
-    if (outcome) {
-      entry.outcome = { status: outcome.status, ...(outcome.replyId !== undefined ? { replyId: outcome.replyId } : {}), observedAt: outcome.observedAt }
-    }
-  }
-  const upsertConversation = (
-    message: {
-      id: string
-      text: string
-      senderRunId: string
-      recipientRunId: string
-      kind: ConversationMessage['kind']
-      requestId?: string
-      state?: ConversationMessage['state']
-      createdAt?: string
-      requestHash?: string
-      deadline?: string
-      instruction?: string
-      resumed?: true
-    },
-    delivery: ThreadConversationDelivery,
-    timing?: { deliveredAt?: string; consumedAt?: string; recordedAt?: string },
-  ): ThreadConversationMessage => {
-    const existing = conversationEntries.get(message.id)
-    if (existing) {
-      if (DELIVERY_RANK[existing.delivery] < DELIVERY_RANK.delivered || DELIVERY_RANK[delivery] > DELIVERY_RANK[existing.delivery]) existing.delivery = delivery
-      if (message.text !== '') existing.text = message.text
-      if (message.state !== undefined) existing.state = message.state
-      if (message.createdAt !== undefined) existing.createdAt = message.createdAt
-      if (message.requestHash !== undefined) existing.requestHash = message.requestHash
-      if (message.deadline !== undefined) existing.deadline = message.deadline
-      if (message.requestId !== undefined) existing.requestId = message.requestId
-      if (message.instruction !== undefined) existing.instruction = message.instruction
-      if (message.resumed !== undefined) existing.resumed = message.resumed
-      if (timing?.deliveredAt !== undefined) existing.deliveredAt = timing.deliveredAt
-      if (timing?.consumedAt !== undefined) existing.consumedAt = timing.consumedAt
-      if (timing?.recordedAt !== undefined && (delivery === 'delivered' || existing.delivery !== 'delivered')) existing.recordedAt = timing.recordedAt
-      attachOutcome(existing)
-      return existing
-    }
-    const entry: ThreadConversationMessage = {
-      kind: 'conversation',
-      id: `conversation-message:${message.id}`,
-      messageId: message.id,
-      text: message.text,
-      senderRunId: message.senderRunId,
-      recipientRunId: message.recipientRunId,
-      messageKind: message.kind,
-      delivery,
-      ...timing,
-      ...(message.instruction !== undefined ? { instruction: message.instruction } : {}),
-      ...(message.resumed !== undefined ? { resumed: message.resumed } : {}),
-      ...(message.requestId !== undefined ? { requestId: message.requestId } : {}),
-      ...(message.state !== undefined ? { state: message.state } : {}),
-      ...(message.createdAt !== undefined ? { createdAt: message.createdAt } : {}),
-      ...(message.requestHash !== undefined ? { requestHash: message.requestHash } : {}),
-      ...(message.deadline !== undefined ? { deadline: message.deadline } : {}),
-    }
-    attachOutcome(entry)
-    conversationEntries.set(message.id, entry)
-    currentTurn().entries.push({ origin: 'meta', entry })
-    return entry
-  }
-  /** The live card per registered port (#781): state events mutate it, a re-registration replaces it. */
-  const previewByPort = new Map<number, { turn: DraftTurn; draft: DraftEntry }>()
-  /** Whether a `handoff` event already turned notify on, so a later one reads as a note (#589). */
-  let handedOff = false
-  for (const event of events) {
-    switch (event.type) {
-      // ---- task webhook (#589) --------------------------------------------------------
-      case 'handoff': {
-        const at = clockTime(event.ts)
-        const message = str(event.message)
-        const text = event.notify === false
-          ? `Stopped notifying the webhook${at}`
-          : `${handedOff ? 'Note sent to webhook' : 'Handed off to webhook'}${at}${message ? ` — ${message}` : ''}`
-        handedOff = event.notify !== false
-        currentTurn().entries.push({
-          origin: 'meta',
-          entry: { kind: 'note', id: `v1:${event.seq}`, text, tone: 'dim', icon: 'handoff' },
-        })
-        break
-      }
-      case 'webhook.failed': {
-        const attempts = typeof event.attempts === 'number' ? event.attempts : undefined
-        const text = `Webhook delivery failed${str(event.event) ? ` (${str(event.event)})` : ''}${
-          attempts ? ` after ${attempts} attempt${attempts === 1 ? '' : 's'}` : ''
-        }: ${str(event.error) ?? 'unknown error'}`
-        currentTurn().entries.push({ origin: 'meta', entry: { kind: 'note', id: `v1:${event.seq}`, text, tone: 'danger' } })
-        break
-      }
-      case 'webhook.dry-run': {
-        const payload = (event.payload ?? {}) as { status?: unknown }
-        const text = `Webhook (dry run, nothing sent): ${str(event.event) ?? 'delivery'}${str(payload.status) ? ` · ${str(payload.status)}` : ''}`
-        currentTurn().entries.push({ origin: 'meta', entry: { kind: 'note', id: `v1:${event.seq}`, text, tone: 'dim' } })
-        break
-      }
-      // ---- live preview (#781) ----------------------------------------------------------
-      case 'preview.server-registered': {
-        const server = previewServerSchema.safeParse(event.server)
-        if (!server.success) break
-        const previous = previewByPort.get(server.data.port)
-        if (previous) previous.turn.entries = previous.turn.entries.filter((e) => e !== previous.draft)
-        const turn = currentTurn()
-        const draft: DraftEntry = {
-          origin: 'meta',
-          entry: {
-            kind: 'preview-server',
-            id: `preview-server:${server.data.port}`,
-            server: server.data,
-            state: 'registered',
-            stateAt: event.ts,
-          },
-        }
-        turn.entries.push(draft)
-        previewByPort.set(server.data.port, { turn, draft })
-        break
-      }
-      case 'preview.server-state': {
-        const state = previewServerStateSchema.safeParse(event.state)
-        const live = typeof event.port === 'number' ? previewByPort.get(event.port) : undefined
-        if (!state.success || !live || live.draft.entry.kind !== 'preview-server') break
-        const { server, id } = live.draft.entry
-        // Rebuilt, not patched: a field of the old state (an exit code) must not outlive it.
-        live.draft.entry = {
-          kind: 'preview-server',
-          id,
-          server,
-          state: state.data,
-          stateAt: event.ts,
-          ...(typeof event.exitCode === 'number' ? { exitCode: event.exitCode } : {}),
-          ...(event.reason === 'user' || event.reason === 'idle' ? { reason: event.reason } : {}),
-        }
-        break
-      }
-      // ---- turn boundaries ------------------------------------------------------------
-      case 'conversation-message': {
-        const parsed = conversationMessageEventSchema.safeParse(event)
-        if (!parsed.success) break
-        upsertConversation(parsed.data.message, parsed.data.delivery, { deliveredAt: parsed.data.deliveredAt, consumedAt: parsed.data.consumedAt, recordedAt: parsed.data.ts })
-        break
-      }
-      case 'request-outcome': {
-        const parsed = requestOutcomeEventSchema.safeParse(event)
-        if (!parsed.success) break
-        const { outcome } = parsed.data
-        const previous = outcomesByRequest.get(outcome.requestId)
-        if (previous && !(previous.status === 'timed-out' && outcome.status === 'replied-late')) break
-        outcomesByRequest.set(outcome.requestId, outcome)
-        const existing = conversationEntries.get(outcome.requestId)
-        if (existing) attachOutcome(existing)
-        break
-      }
-      case 'agent-input': {
-        const parsed = agentInputEventSchema.safeParse(event)
-        if (!parsed.success) break
-        const { input } = parsed.data
-        if (seenInputs.has(input.id)) break
-        seenInputs.add(input.id)
-        if (input.conversation) {
-          upsertConversation({ id: input.id, text: input.text, createdAt: input.createdAt, ...input.conversation }, 'delivered', { deliveredAt: input.deliveredAt, recordedAt: parsed.data.ts })
-          break
-        }
-        currentTurn().entries.push({ origin: 'meta', entry: {
-          kind: 'note', id: `agent-input:${input.id}`, text: input.text, tone: 'dim',
-          attribution: { source: input.source, parentRunId: input.parentRunId },
-        } })
-        // This context is never a human turn or an ask acknowledgement.
-        break
-      }
-      case 'user-message': {
-        const text = str(event.text) ?? ''
-        const answeredAsk = pendingAsk
-        // Client-side resolution of the pending AskUser card (#473): the reply
-        // that follows an ask closes it and records the answer.
-        if (pendingAsk && !pendingAsk.resolved) {
-          pendingAsk.resolved = true
-          pendingAsk.answeredBy = 'human'
-          if (text !== '') pendingAsk.answer = text
-          pendingAsk = undefined
-        }
-        const turn = newTurn(event.seq)
-        const ts = stamp(event.ts)
-        turn.userMessage = {
-          text,
-          ask: answeredAsk,
-          imageCount: typeof event.imageCount === 'number' ? event.imageCount : 0,
-          images: Array.isArray(event.images) ? event.images.filter((u): u is string => typeof u === 'string') : [],
-          ...(ts !== undefined ? { ts } : {}),
-        }
-        if (ts !== undefined) turn.startedAt = ts
-        break
-      }
-      case 'turn.started': {
-        const turnId = str(event.turnId)
-        const current = turns.at(-1)
-        // A v1 `user-message` line precedes the v2 turn.started for the same turn (observed
-        // wire order) — attach rather than opening a duplicate. A turn that already has a v2
-        // identity or v2 items is someone else's; open fresh.
-        const attached = current && current.turnId === undefined && !current.v2Items ? current : newTurn(event.seq)
-        attached.turnId = turnId
-        // First stamp wins: when the v1 line opened this turn a moment ago, when the user sent
-        // it is the honest start — and the two must not disagree on one turn.
-        const startedAt = stamp(event.ts)
-        if (attached.startedAt === undefined && startedAt !== undefined) attached.startedAt = startedAt
-        break
-      }
-      case 'turn.completed': {
-        expirePermissions()
-        const turnId = str(event.turnId)
-        // Newest match first (lib is ES2022, so no findLast): per-session turn ids repeat
-        // across steps, and a completion always belongs to the most recent turn wearing it.
-        let matched: DraftTurn | undefined
-        for (let i = turns.length - 1; i >= 0 && !matched; i -= 1) {
-          if (turns[i]!.turnId === turnId) matched = turns[i]
-        }
-        const turn = matched ?? turns.at(-1)
-        if (turn) {
-          const ts = stamp(event.ts)
-          turn.completed = {
-            stopReason: (str(event.stopReason) ?? 'end_turn') as StopReason,
-            ...(typeof event.costUsd === 'number' ? { costUsd: event.costUsd } : {}),
-            ...(ts !== undefined ? { ts } : {}),
-          }
-        }
-        break
-      }
-
-      // ---- v2 items ---------------------------------------------------------------------
-      case 'item.started':
-      case 'item.updated':
-      case 'item.completed': {
-        // Validate the discriminant AND the id before trusting the cast: an unknown `kind` would
-        // render a blank row, and a missing `id` would key every such item to the same
-        // `${turn}:undefined` (duplicate React keys) — #minor-item-ingress-guard.
-        if (!isRecord(event.item)) break
-        const kind = event.item.kind
-        const id = event.item.id
-        if (
-          (kind !== 'message' && kind !== 'reasoning' && kind !== 'tool' && kind !== 'hook') ||
-          typeof id !== 'string' ||
-          id === ''
-        ) {
-          break
-        }
-        const item = event.item as unknown as UiItem
-        const key = itemKey(event, item.id)
-        const located = itemsById.get(key)
-        upsertV2(
-          located?.turn ?? currentTurn(),
-          item,
-          key,
-          event.type === 'item.completed' ? stamp(event.ts) : undefined,
-        )
-        break
-      }
-      case 'item.delta': {
-        const itemId = str(event.itemId) ?? ''
-        const located = itemsById.get(itemKey(event, itemId))
-        const delta = str(event.delta) ?? ''
-        if (!located || delta === '' || !isUiItem(located.entry.entry)) break
-        const item = located.entry.entry
-        if (event.field === 'output' && item.kind === 'tool') {
-          item.output = (item.output ?? '') + delta
-        } else if (event.field !== 'output' && (item.kind === 'message' || item.kind === 'reasoning')) {
-          item.text += delta
-        }
-        break
-      }
-
-      // ---- v1 fallback items (skipped once the turn is v2-covered) -----------------------
-      case 'text': {
-        // No `v2Items` guard, unlike `tool-call` below: whether this line has a v2 twin is
-        // decided by TEXT at the end of the fold, not by the latch. Suppressing it here would
-        // lose any prose v2 never described (claude's `msg.result` fallback).
-        const turn = currentTurn()
-        const text = str(event.text) ?? ''
-        if (text === '') break
-        const ts = stamp(event.ts)
-        turn.entries.push({
-          origin: 'v1',
-          entry: {
-            kind: 'message',
-            id: `v1:${event.seq}`,
-            role: 'assistant',
-            text,
-            ...(ts !== undefined ? { ts } : {}),
-          },
-        })
-        break
-      }
-      case 'tool-call': {
-        const turn = currentTurn()
-        if (turn.v2Items) break
-        const name = str(event.tool) ?? 'Tool'
-        // Codex collaboration bookkeeping has no user-facing meaning. Protocol
-        // v2 normalizes it into task rows and parented child tools; old/mixed
-        // recordings can still carry a receiver-less v1 wait in a child turn.
-        if (CODEX_COLLAB_BOOKKEEPING.has(name)) break
-        const display = toolDisplay(name, event.input)
-        if (display.toolKind === 'plan') {
-          // v1-only fallback: the dock's data lives in the TodoWrite input on old transcripts.
-          const plan = planFromTodos(event.input)
-          if (plan !== undefined) turn.planEntries = plan
-        }
-        const item: UiToolItem = {
-          kind: 'tool',
-          id: str(event.id) ?? `v1:${event.seq}`,
-          name,
-          toolKind: display.toolKind,
-          title: display.title,
-          status: 'running',
-          input: event.input,
-        }
-        const draft: DraftEntry = { origin: 'v1', entry: item }
-        turn.entries.push(draft)
-        itemsById.set(item.id, { turn, entry: draft })
-        break
-      }
-      case 'tool-result': {
-        const located = itemsById.get(str(event.toolCallId) ?? '')
-        if (!located || located.turn.v2Items || located.entry.origin !== 'v1') break
-        const item = located.entry.entry
-        if (item.kind !== 'tool') break
-        item.status = 'completed'
-        item.output = resultText(event.result)
-        break
-      }
-
-      // ---- lines that always render -------------------------------------------------------
-      case 'note':
-      case 'lifecycle': {
-        const text = str(event.message) ?? ''
-        if (text === '') break
-        // Notes are dim by default — they are commentary. A note may opt into
-        // `tone: 'danger'` when it reports something the user actually lost, so
-        // it does not render as the dimmest line in the thread (#936). Events
-        // written before that field exists carry no `tone` and stay dim.
-        const tone = event.tone === 'danger' ? 'danger' : 'dim'
-        currentTurn().entries.push({
-          origin: 'meta',
-          entry: { kind: 'note', id: `v1:${event.seq}`, text, tone },
-        })
-        break
-      }
-      case 'error': {
-        const text = str(event.message) ?? ''
-        if (text === '') break
-        currentTurn().entries.push({
-          origin: 'meta',
-          entry: { kind: 'note', id: `v1:${event.seq}`, text, tone: 'danger' },
-        })
-        break
-      }
-      case 'session.error': {
-        const text = str(event.message) ?? ''
-        if (text === '') break
-        currentTurn().entries.push({
-          origin: 'meta',
-          entry: { kind: 'note', id: `v2:${event.seq}`, text, tone: 'danger' },
-        })
-        break
-      }
-      case 'step-end': {
-        // Steps stay out of the thread (they are header material) except the one thing the
-        // transcript must not hide: a step that failed — mirroring the legacy renderer.
-        if (event.status !== 'failed') break
-        const suffix = str(event.error) ? ` — ${str(event.error)}` : ''
-        currentTurn().entries.push({
-          origin: 'meta',
-          entry: { kind: 'note', id: `v1:${event.seq}`, text: `step ${str(event.stepId) ?? '?'} failed${suffix}`, tone: 'danger' },
-        })
-        break
-      }
-      case 'check-output': {
-        // A check step's command run (`src/workflows/run.ts` — v1-only: check steps spawn no
-        // agent session, so no v2 twin exists). Rendered as an execute tool card so the
-        // pass/fail verdict rides the exit-code pill; origin `meta` because it is not an
-        // agent item and must survive the mixed-file dedup.
-        const command = str(event.command) ?? 'check'
-        const exitCode = typeof event.exitCode === 'number' ? event.exitCode : -1
-        const item: UiToolItem = {
-          kind: 'tool',
-          id: `v1:${event.seq}`,
-          name: 'check',
-          toolKind: 'execute',
-          title: `Ran ${command}`,
-          status: exitCode === 0 ? 'completed' : 'failed',
-          output: str(event.text) ?? '',
-          exitCode,
-        }
-        currentTurn().entries.push({ origin: 'meta', entry: item })
-        break
-      }
-      case 'provider-auth-required': {
-        // Cezar-owned persisted metadata: accept only the closed provider set and an opaque,
-        // bounded incident id. A malformed historical/future line costs itself, never a turn.
-        const provider = providerId(event.provider)
-        const authFailureId = str(event.authFailureId)
-        if (provider === undefined || authFailureId === undefined || authFailureId.length < 1 || authFailureId.length > 128) break
-        currentTurn().entries.push({
-          origin: 'meta',
-          entry: { kind: 'provider-auth-required', id: `v1:${event.seq}`, provider, authFailureId },
-        })
-        break
-      }
-      case 'image': {
-        // Only the v1 line carries a served URL; the v2 twin is raw base64 and is dropped by
-        // the sink before persistence anyway. No URL → nothing honest to render.
-        const url = str(event.url)
-        if (url === undefined) break
-        const entry: ThreadImage = { kind: 'image', id: `v1:${event.seq}`, url }
-        const name = str(event.name)
-        if (name !== undefined) entry.name = name
-        currentTurn().entries.push({ origin: 'meta', entry })
-        break
-      }
-
-      // ---- session-level --------------------------------------------------------------------
-      case 'plan.updated': {
-        if (Array.isArray(event.entries)) {
-          currentTurn().planEntries = event.entries as PlanEntry[]
-        }
-        break
-      }
-      case 'session.started': {
-        expirePermissions()
-        break
-      }
-      case 'session.ended': {
-        expirePermissions()
-        sessionEnded = {
-          reason: (str(event.reason) ?? 'end_turn') as StopReason,
-          ...(str(event.message) !== undefined ? { message: str(event.message) } : {}),
-        }
-        break
-      }
-      case 'permission.requested': {
-        const requestId = str(event.requestId)
-        const title = str(event.title)
-        if (!requestId || !title || permissions.has(requestId) || !Array.isArray(event.options) || event.options.length === 0) break
-        const options = event.options
-        if (!options.every((option): option is UiPermissionRequestedEvent['options'][number] =>
-          isRecord(option) && typeof option.id === 'string' && option.id !== '' && typeof option.label === 'string' && option.label !== '' &&
-          ['allow_once', 'allow_always', 'reject_once', 'reject_always'].includes(String(option.kind)),
-        )) break
-        if (new Set(options.map(option => option.id)).size !== options.length) break
-        const permission: ThreadPermission = {
-          kind: 'permission', id: `permission:${requestId}`, requestId, title,
-          options: options.map(option => ({ ...option })), status: 'pending',
-          ...(str(event.itemId) !== undefined ? { itemId: str(event.itemId) } : {}),
-          ...(str(event.details) !== undefined ? { details: str(event.details) } : {}),
-        }
-        permissions.set(requestId, permission)
-        currentTurn().entries.push({ origin: 'meta', entry: permission })
-        break
-      }
-      case 'permission.resolved': {
-        const permission = permissions.get(str(event.requestId) ?? '')
-        if (!permission || permission.status !== 'pending') break
-        const optionId = str(event.optionId)
-        if (optionId !== undefined && permission.options.some(option => option.id === optionId)) {
-          permission.status = 'resolved'
-          permission.optionId = optionId
-        } else {
-          permission.status = 'expired'
-        }
-        const reason = str(event.reason)
-        if (reason !== undefined) permission.reason = reason
-        break
-      }
-      case 'ask.requested': {
-        // A structured question (#473) — render it as an ask card in the current
-        // turn. Guard the payload (a bad line costs one event, never a throw). A question
-        // without options is open (hearsay-tools/cezarion#1234): the user types its answer.
-        const requestId = str(event.requestId)
-        if (requestId === undefined || !Array.isArray(event.questions)) break
-        const questions = (event.questions as unknown[]).filter(
-          (q): q is UiAskQuestion =>
-            isRecord(q) && typeof q.header === 'string' && (q.options === undefined || Array.isArray(q.options)),
-        )
-        if (questions.length === 0) break
-        const context = typeof event.context === 'string' && event.context !== '' ? event.context : undefined
-        const ask: ThreadAsk = { kind: 'ask', id: requestId, questions, ...(context ? { context } : {}), resolved: false, askSeq: event.seq }
-        currentTurn().entries.push({ origin: 'meta', entry: ask })
-        pendingAsk = ask
-        break
-      }
-      // #505: a worker's question travels to its parent; the parent's reply answers it, and a
-      // parent that can no longer answer hands it back to the human (the card's chips return).
-      case 'worker-question-routed': {
-        if (pendingAsk && !pendingAsk.resolved && pendingAsk.askSeq === event.askSeq) {
-          pendingAsk.routedToParent = true
-          const parentRunId = str(event.parentRunId)
-          if (parentRunId !== undefined) pendingAsk.parentRunId = parentRunId
-        }
-        break
-      }
-      case 'worker-question-fallback': {
-        if (pendingAsk && !pendingAsk.resolved && pendingAsk.askSeq === event.askSeq) pendingAsk.routedToParent = false
-        break
-      }
-      case 'human-ask-closed': {
-        if ((event.reason === 'finish' || event.reason === 'superseded') && pendingAsk && !pendingAsk.resolved && pendingAsk.askSeq === event.askSeq) {
-          pendingAsk.resolved = true
-          pendingAsk.closed = event.reason
-          pendingAsk = undefined
-        }
-        break
-      }
-      case 'human-input-delivered': {
-        // A human answer resolves on its `user-message`; only the parent's answer has none.
-        if (event.source === 'parent' && pendingAsk && !pendingAsk.resolved && pendingAsk.askSeq === event.askSeq) {
-          pendingAsk.resolved = true
-          pendingAsk.answeredBy = 'parent'
-          pendingAsk = undefined
-        }
-        break
-      }
-
-      // ---- THE v1 VOCABULARY SWEEP (cezar-code-map §3.2) — deliberate suppressions ---------
-      // Every persisted v1 type is either rendered above or named here with the surface that
-      // owns it instead, so an old transcript reads complete without transcript noise:
-      //  - `step-start` / non-failed `step-end`: the run header's step rail (step-rail.tsx)
-      //    is the steps surface, same as the legacy divider-free design choice for step ends.
-      //  - `token-usage` / `cost`: the header meta line renders the RECORD's running totals;
-      //    per-event ticks in the body would just repaint the same numbers.
-      //  - `turn-end` / `done`: pure engine control flow — completion already reads from the
-      //    run status footer (and `done` is always shadowed by a `lifecycle` line).
-      //  - `session`: the backend's session id, surfaced by the header's take-over hint via
-      //    the record's `sessionId` — an id line in the transcript helps no one.
-      case 'step-start':
-      case 'token-usage':
-      case 'cost':
-      case 'turn-end':
-      case 'done':
-      case 'session':
-        break
-
-      // session.started, usage.updated and anything future: header/telemetry
-      // material or not yet rendered — never guessed at in the thread body. (Deliberate
-      // divergence from the legacy raw-JSON-note fallback: an unknown type renders as
-      // nothing rather than as debug output.)
-      default:
-        break
-    }
-  }
-
-  // Deduplicate v1 prose only when this turn contains a matching v2 message.
-  // Compare marker-stripped, trimmed text; unmatched v1-only prose must remain visible.
-  for (const draft of turns) {
-    if (!draft.v2Items) continue
-    const v2Texts = new Set<string>()
-    for (const { origin, entry } of draft.entries) {
-      // stripAsk: true — dedup equality must ignore the marker on both sides (see norm()).
-      if (origin === 'v2' && entry.kind === 'message') v2Texts.add(stripDoneMarker(entry.text, true).trim())
-    }
-    if (v2Texts.size === 0) continue
-    draft.entries = draft.entries.filter(
-      (e) =>
-        !(e.origin === 'v1' && e.entry.kind === 'message' && v2Texts.has(stripDoneMarker(e.entry.text, true).trim())),
-    )
-    dropLegacyDeltaRuns(draft)
-  }
-
-  // Only a request the engine actually enqueued can still settle: `delegation/service.ts`
-  // enqueues when the recipient is neither destroyed nor resumable, and gives only those
-  // requests a deadline. A `continuation-required`/`destroyed` request has no obligation and
-  // no future outcome, so synthesizing "pending" for it would promise a reply nobody owes.
-  for (const entry of conversationEntries.values()) {
+function markPendingRequests(fold: FoldState): void {
+  for (const entry of fold.conversationEntries.values()) {
     if (entry.messageKind !== 'request' || entry.outcome !== undefined) continue
     if (entry.delivery === 'not-delivered') continue
     if (entry.state !== undefined && entry.state !== 'accepted') continue
     entry.outcome = { status: 'pending' }
   }
+}
 
+/** A draft turn as the view reads it, with protocol markers stripped from assistant prose. */
+function finishTurn(draft: DraftTurn, provisionalAsk: boolean): ThreadTurn {
+  // The ask card renders the questions, so only then is the marker redundant (#473).
+  const stripAsk = provisionalAsk || draft.entries.some(({ entry }) => entry.kind === 'ask')
   return {
-    turns: turns.map((draft, index) => {
-      // The ask card renders the questions, so only then is the marker redundant (#473).
-      const hasAskCard = draft.entries.some(({ entry }) => entry.kind === 'ask')
-      // A completed v2 assistant item lands before the v1 turn-end handler can
-      // parse the marker and emit ask.requested. Hide that provisional transport
-      // block only on the live latest turn. Once the run leaves `running`, a
-      // hard-invalid marker returns as readable fallback (#671).
-      const provisionalAsk = options.activeTurn === true && index === turns.length - 1
-      return {
-        id: draft.id,
-        ...(draft.turnId !== undefined ? { turnId: draft.turnId } : {}),
-        ...(draft.userMessage !== undefined ? { userMessage: draft.userMessage } : {}),
-        ...(draft.startedAt !== undefined ? { startedAt: draft.startedAt } : {}),
-        ...(draft.planEntries !== undefined ? { planEntries: draft.planEntries } : {}),
-        ...(draft.completed !== undefined ? { completed: draft.completed } : {}),
-        items: draft.entries.map(({ entry }) =>
-          entry.kind === 'message' && entry.role === 'assistant'
-            ? { ...entry, text: stripDoneMarker(entry.text, hasAskCard || provisionalAsk) }
-            : entry,
-        ),
-      }
-    }),
-    ...(sessionEnded !== undefined ? { sessionEnded } : {}),
+    id: draft.id,
+    ...(draft.turnId !== undefined ? { turnId: draft.turnId } : {}),
+    ...(draft.userMessage !== undefined ? { userMessage: draft.userMessage } : {}),
+    ...(draft.startedAt !== undefined ? { startedAt: draft.startedAt } : {}),
+    ...(draft.planEntries !== undefined ? { planEntries: draft.planEntries } : {}),
+    ...(draft.completed !== undefined ? { completed: draft.completed } : {}),
+    items: draft.entries.map(({ entry }) =>
+      entry.kind === 'message' && entry.role === 'assistant'
+        ? { ...entry, text: stripDoneMarker(entry.text, stripAsk) }
+        : entry,
+    ),
   }
 }
 
-const CODEX_COLLAB_BOOKKEEPING = new Set(['subAgentActivity', 'collabAgentToolCall', 'collabToolCall'])
+export function reduceThread(events: RunEvent[], options: ThreadReduceOptions = {}): ThreadState {
+  const fold = createFoldState()
+  for (const event of events) applyThreadEvent(fold, event)
+  for (const draft of fold.turns) {
+    if (draft.v2Items) dropTwinnedV1Messages(draft)
+  }
+  markPendingRequests(fold)
+  const lastIndex = fold.turns.length - 1
+  return {
+    // A completed v2 assistant item lands before the v1 turn-end handler can
+    // parse the marker and emit ask.requested. Hide that provisional transport
+    // block only on the live latest turn. Once the run leaves `running`, a
+    // hard-invalid marker returns as readable fallback (#671).
+    turns: fold.turns.map((draft, index) => finishTurn(draft, options.activeTurn === true && index === lastIndex)),
+    ...(fold.sessionEnded !== undefined ? { sessionEnded: fold.sessionEnded } : {}),
+  }
+}
