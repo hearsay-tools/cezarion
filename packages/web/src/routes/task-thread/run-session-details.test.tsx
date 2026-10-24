@@ -97,9 +97,13 @@ function renderCard(record: ApiRun) {
 
 const row = (key: string) => document.querySelector<HTMLElement>(`[data-slot="run-activity-${key}"]`)
 /** Opens the card, then the named row; both are no-ops when memory already holds them open. */
-function openRow(key: 'workflow' | 'usage' | 'workspace'): HTMLElement {
+/** The card starts folded on every viewport (hearsay-tools/cezarion#1601). */
+function openCard(): void {
   const summary = screen.getByRole('button', { name: /^Session activity/ })
   if (summary.getAttribute('aria-expanded') !== 'true') fireEvent.click(summary)
+}
+function openRow(key: 'workflow' | 'usage' | 'workspace'): HTMLElement {
+  openCard()
   const head = row(key)!.querySelector<HTMLButtonElement>(':scope > button')!
   if (head.getAttribute('aria-expanded') !== 'true') fireEvent.click(head)
   return row(key)!
@@ -413,6 +417,7 @@ describe('Usage & agent — metrics', () => {
   it('includes both cost and tokens in the usage summary', () => {
     stubFetch()
     renderCard(run('done', { id: freshId(), costUsd: 0.04 }))
+    openCard()
     const meta = row('usage')!.querySelector('[data-slot="run-activity-meta"]')!
     expect(meta.querySelector('[data-summary-item="cost"]')?.textContent).toBe('$0.04')
     expect(meta.querySelector('[data-summary-item="tokens"]')?.textContent).toContain('IN 24.6k · OUT 2.4k')
@@ -421,6 +426,7 @@ describe('Usage & agent — metrics', () => {
   it('keeps the tokens when the run reported no cost', () => {
     stubFetch()
     renderCard(run('done', { id: freshId(), costUsd: undefined }))
+    openCard()
     const meta = row('usage')!.querySelector('[data-slot="run-activity-meta"]')!
     expect(meta.querySelector('[data-summary-item="tokens"]')?.textContent).toBe('IN 24.6k · OUT 2.4k')
     expect(meta.querySelector('[data-summary-item="cost"]')).toBeNull()

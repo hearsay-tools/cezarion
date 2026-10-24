@@ -7,7 +7,7 @@ import { act, cleanup, fireEvent, render, renderHook } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { clearThreadScrollCaches, readThreadScroll, saveThreadScroll, saveThreadMeasurements } from './thread-scroll'
-import { JumpToLatestPill, ThreadRows, useThreadScroll, type ThreadRow } from './thread-scroller'
+import { JumpToLatestPill, ThreadRows, useThreadScroll, type ReaderScrollEvent, type ThreadRow } from './thread-scroller'
 
 const isCockpitE2e = vi.hoisted(() => vi.fn(() => false))
 vi.mock('@/lib/e2e-mode', () => ({ isCockpitE2e: () => isCockpitE2e() }))
@@ -1332,5 +1332,92 @@ describe('#795 compatible measurement replay with the real virtua handle', () =>
     const partial = replay(full.slice(0, 350))
     partial.commit(full.slice(0, 399))
     expect(partial.controls().virtualizerRef.current!.getItemSize(123)).not.toBe(180)
+  })
+})
+
+// hearsay-tools/cezarion#1601: Session activity folds while the reader scrolls up and restores on
+// the way down. Only the reader's own movement counts, so a pinned replay never folds it.
+describe('useThreadScroll — reader scroll signals (#1601)', () => {
+  function readerScroller() {
+    const scroller = document.createElement('main')
+    scroller.dataset.slot = 'main'
+    Object.defineProperties(scroller, {
+      // Arrival pins to the tail at 1600, with room to read up and down away from it.
+      scrollTop: { value: 0, writable: true },
+      clientHeight: { value: 400 },
+      scrollHeight: { value: 2_000 },
+    })
+    const content = document.createElement('div')
+    scroller.append(content)
+    const hook = renderHook(() => useThreadScroll('reader-run'))
+    act(() => hook.result.current.attachContent(content))
+    const events: ReaderScrollEvent[] = []
+    const unsubscribe = hook.result.current.subscribeReaderScroll((event) => events.push(event))
+    const moveTo = (top: number) => {
+      scroller.scrollTop = top
+      fireEvent.scroll(scroller)
+    }
+    return { scroller, hook, events, unsubscribe, moveTo }
+  }
+
+  it('reports an upward reader scroll with its distance from the bottom', () => {
+    const { scroller, events, moveTo } = readerScroller()
+    fireEvent.wheel(scroller, { deltaY: -120 })
+    moveTo(1480)
+    expect(events).toEqual([{ direction: 'up', distanceFromBottom: 120 }])
+  })
+
+  it('ignores movement without a reader gesture', () => {
+    const { events, moveTo } = readerScroller()
+    moveTo(1300)
+    moveTo(1600)
+    expect(events).toEqual([])
+  })
+
+  it('reports a direction only after it has travelled past the slop, and restarts on a reversal', () => {
+    const { scroller, events, moveTo } = readerScroller()
+    fireEvent.wheel(scroller, { deltaY: -10 })
+    moveTo(1590)
+    expect(events).toEqual([])
+    moveTo(1000)
+    expect(events.map((event) => event.direction)).toEqual(['up'])
+    fireEvent.wheel(scroller, { deltaY: 10 })
+    moveTo(1010)
+    moveTo(1020)
+    expect(events).toHaveLength(1)
+    // The reversal restarts the count: 10 px back up is still inside the slop.
+    fireEvent.wheel(scroller, { deltaY: -10 })
+    moveTo(1010)
+    expect(events).toHaveLength(1)
+    moveTo(990)
+    expect(events.map((event) => event.direction)).toEqual(['up', 'up'])
+  })
+
+  it('reports down, then tail, when the reader scrolls back to the live tail', () => {
+    const { scroller, events, moveTo } = readerScroller()
+    fireEvent.wheel(scroller, { deltaY: -200 })
+    moveTo(1400)
+    fireEvent.wheel(scroller, { deltaY: 200 })
+    moveTo(1600)
+    expect(events.map((event) => event.direction)).toEqual(['up', 'down', 'tail'])
+  })
+
+  it('reports tail for Jump to latest', async () => {
+    const { scroller, hook, events, moveTo } = readerScroller()
+    fireEvent.wheel(scroller, { deltaY: -200 })
+    moveTo(1400)
+    await act(async () => {
+      hook.result.current.jumpToLatest()
+      await Promise.resolve()
+    })
+    expect(events.at(-1)).toEqual({ direction: 'tail' })
+  })
+
+  it('stops reporting after unsubscribe', () => {
+    const { scroller, events, unsubscribe, moveTo } = readerScroller()
+    unsubscribe()
+    fireEvent.wheel(scroller, { deltaY: -120 })
+    moveTo(1480)
+    expect(events).toEqual([])
   })
 })

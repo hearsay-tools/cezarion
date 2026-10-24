@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ChartColumnIcon, LoaderCircleIcon } from 'lucide-react'
 import {
   BotIcon,
@@ -39,6 +39,7 @@ import { runStatusLine } from './run-status'
 import { RunWaitDetails, ciWaitReferences, hasWaitDetails } from './run-waits'
 import { BranchCopy, LinkedReferences, WorkspaceTools, useResumeInTerminal, useRunReferenceRequests } from './run-workspace'
 import { latestPlanEntries, type ThreadState } from './thread-state'
+import type { ReaderScrollListener } from './thread-scroller'
 
 /**
  * **Session activity** (#402, hearsay-tools/cezarion#1333) — the single card above the composer
@@ -50,6 +51,11 @@ import { latestPlanEntries, type ThreadState } from './thread-state'
  * Folded it is exactly one line, on desktop and phone alike: the transcript keeps the screen and
  * the run's state is still a glance away. The card always renders, because the status and the
  * relocated header metadata always need a home; sections with nothing to show omit themselves.
+ *
+ * It starts folded on every viewport (hearsay-tools/cezarion#1601). While the dock is sticky, an
+ * open card also folds for as long as the reader scrolls up, and comes back on the way down. That
+ * fold is temporary: it never writes the remembered choice. A manual unfold during the reading
+ * session wins until the transcript pins to the live tail again, which ends the session.
  */
 
 /** Collapse memory per run — the module-level map every dock this replaced kept, for the same
@@ -72,6 +78,8 @@ export function RunActivityDock(props: {
   run: ApiRun
   currentThread: ThreadState
   onOpenWorker?: (id: string) => void
+  /** The transcript's reader scroll signals (`useThreadScroll().subscribeReaderScroll`). */
+  readerScroll?: (listener: ReaderScrollListener) => () => void
 }) {
   // Own provider for the Workspace chips and the conflict roll-up. The app root's registry unions
   // its requests with the header's, so it costs no extra request.
@@ -92,6 +100,7 @@ function SessionActivityCard({
   run,
   currentThread,
   onOpenWorker,
+  readerScroll,
   prNumbers,
   hasReferences,
   references,
@@ -99,13 +108,17 @@ function SessionActivityCard({
   run: ApiRun
   currentThread: ThreadState
   onOpenWorker?: (id: string) => void
+  readerScroll?: (listener: ReaderScrollListener) => () => void
   prNumbers: number[]
   hasReferences: boolean
   references: TaskReference[]
 }) {
   const desktop = useIsDesktop()
   const identity = useAgentIdentity(run)
-  const [open, setOpen] = useState(() => openByRun.get(run.id) ?? desktop)
+  // `chosen` is the reader's choice; `open` is what shows, after a temporary fold for reading.
+  const [chosen, setChosen] = useState(() => openByRun.get(run.id) ?? false)
+  const scrollFold = useReaderScrollFold(readerScroll, chosen)
+  const open = chosen && !scrollFold.folded
   // Nested rows start closed on every viewport — the expanded card is a list of section heads,
   // and a reader opens the one they came for. Workers are the exception, open by default so
   // their task links stay directly reachable: they are navigation, not detail.
@@ -215,6 +228,7 @@ function SessionActivityCard({
   return (
     <section
       data-slot="run-activity-dock"
+      ref={scrollFold.ref}
       data-state={open ? 'open' : 'collapsed'}
       className="min-w-0 overflow-hidden rounded-xl border border-border bg-card shadow-xs"
     >
@@ -224,7 +238,8 @@ function SessionActivityCard({
         aria-label={`Session activity: ${statusText}${conflicts.length ? '; pull request conflicts' : ''}${cost ? `; cost ${cost}` : ''}${!open ? `${stepLabel}; runner ${identity.runner}; model ${identity.model}; effort ${identity.effort}${summaryReferences.length ? `; ${summaryReferences.map(reference => `${reference.kind} #${reference.number}`).join('; ')}` : ''}` : ''}`}
         onClick={() => {
           openByRun.set(run.id, !open)
-          setOpen(!open)
+          setChosen(!open)
+          scrollFold.chose(!open)
         }}
         // Folded, the row holds five values; 8px gaps leave a phone's status whole beside the step.
         className={cn('flex min-h-11 w-full min-w-0 items-center px-3.5 py-2 text-start text-[14px] hover:bg-muted/40 active:bg-muted focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-ring', open ? 'gap-2.5' : 'gap-2')}
@@ -366,6 +381,48 @@ function SessionActivityCard({
       ) : null}
     </section>
   )
+}
+
+/**
+ * The temporary fold for reading (hearsay-tools/cezarion#1601). A session starts at the first
+ * upward reader scroll and ends when the transcript pins to the live tail. Up folds a chosen-open
+ * card, down restores it, and a manual unfold during the session wins until it ends. The fold
+ * waits until the reader is farther from the bottom than the dock is tall: a fold nearer the tail
+ * would clip the scroll position and move the text under the reader.
+ */
+function useReaderScrollFold(subscribe: ((listener: ReaderScrollListener) => () => void) | undefined, chosen: boolean) {
+  const ref = useRef<HTMLElement>(null)
+  const [folded, setFolded] = useState(false)
+  const chosenRef = useRef(chosen)
+  chosenRef.current = chosen
+  const session = useRef({ active: false, override: false })
+  useEffect(() => subscribe?.((event) => {
+    if (event.direction === 'tail') {
+      session.current = { active: false, override: false }
+      setFolded(false)
+      return
+    }
+    if (event.direction === 'down') {
+      setFolded(false)
+      return
+    }
+    session.current.active = true
+    if (session.current.override || !chosenRef.current) return
+    // Only a sticky dock covers the transcript; on a phone it scrolls away with it.
+    const dock = ref.current?.closest<HTMLElement>('[data-slot="thread-dock"]')
+    if (!dock || getComputedStyle(dock).position !== 'sticky') return
+    if (event.distanceFromBottom <= dock.getBoundingClientRect().height) return
+    setFolded(true)
+  }), [subscribe])
+  return {
+    ref,
+    folded,
+    /** The reader toggled the card: their choice replaces any temporary fold. */
+    chose: (next: boolean) => {
+      setFolded(false)
+      if (next && session.current.active) session.current.override = true
+    },
+  }
 }
 
 function DetailLine({ label, children }: { label: string; children: ReactNode }) {

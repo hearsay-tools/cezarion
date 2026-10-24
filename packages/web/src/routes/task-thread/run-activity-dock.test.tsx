@@ -9,6 +9,7 @@ import type { ApiRun, RunEvent, StepState, WorkerInspection } from '@open-mercat
 
 import { RunActivityDock, resetActivityDisclosureForTests } from './run-activity-dock'
 import { reduceThread } from './thread-state'
+import type { ReaderScrollEvent, ReaderScrollListener } from './thread-scroller'
 
 /**
  * The unified Session activity accordion (#402, mockups `pasted-1..3.png`): ONE card above the
@@ -88,6 +89,12 @@ function renderDock(
   linked: WorkerInspection[] = workers,
   relationships: 'ok' | 'error' = 'ok',
   overrides: Record<string, () => Response> = {},
+  // Activity starts folded (hearsay-tools/cezarion#1601); most cases read the open card.
+  { open = true, readerScroll, sticky = false }: {
+    open?: boolean
+    readerScroll?: (listener: ReaderScrollListener) => () => void
+    sticky?: boolean
+  } = {},
 ) {
   vi.stubGlobal(
     'fetch',
@@ -113,12 +120,16 @@ function renderDock(
     <QueryClientProvider client={client}>
       <ProjectScopeProvider projectId="sample">
         <MemoryRouter initialEntries={[`/p/sample/tasks/${record.id}`]}>
-          <RunActivityDock run={current} currentThread={reduceThread(events)} />
+          <div data-slot="thread-dock" style={sticky ? { position: 'sticky' } : undefined}>
+            <RunActivityDock run={current} currentThread={reduceThread(events)} readerScroll={readerScroll} />
+          </div>
         </MemoryRouter>
       </ProjectScopeProvider>
     </QueryClientProvider>
   )
   const result = render(tree(record))
+  const card = screen.getByRole('button', { name: /^Session activity/ })
+  if (open && card.getAttribute('aria-expanded') !== 'true') fireEvent.click(card)
   return { ...result, rerenderRun: (next: ApiRun) => result.rerender(tree(next)) }
 }
 
@@ -199,9 +210,10 @@ describe('RunActivityDock — open rows never leak into the next test', () => {
     expect(dockState()).toBe('collapsed')
   })
 
-  it('starts the next test with the card open and the workflow row closed', () => {
-    renderDock(run())
-    expect(dockState()).toBe('open')
+  it('starts the next test with the card folded and the workflow row closed', () => {
+    renderDock(run(), EVENTS, workers, 'ok', {}, { open: false })
+    expect(dockState()).toBe('collapsed')
+    fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
     expect(sectionHead('workflow').getAttribute('aria-expanded')).toBe('false')
   })
 })
@@ -288,7 +300,7 @@ describe('RunActivityDock — the workers section', () => {
     ['ordinary', undefined],
     ['invalid delegation', { role: 'invalid' }],
   ] as const)('never mounts or fetches workers for an %s run', async (_label, delegation) => {
-    await act(async () => { renderDock(run({ delegation })) })
+    await act(async () => { renderDock(run({ delegation }), EVENTS, workers, 'ok', {}, { open: false }) })
     expect(section('workers')).toBeNull()
     expect(vi.mocked(fetch).mock.calls.filter(([input]) => String(input).replace('?archived=recent', '').endsWith('/relationships'))).toEqual([])
   })
@@ -300,7 +312,7 @@ describe('RunActivityDock — narrow viewports', () => {
 
   it('collapses to the single status row the phone mockup shows', () => {
     narrow()
-    renderDock(run())
+    renderDock(run(), EVENTS, workers, 'ok', {}, { open: false })
     expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('collapsed')
     expect(document.querySelector('[data-slot="run-activity-status"]')?.textContent).toBe('Running')
     expect(section('workflow')).toBeNull()
@@ -308,7 +320,7 @@ describe('RunActivityDock — narrow viewports', () => {
 
   it('shortens each row meta to the odometer once expanded', () => {
     narrow()
-    renderDock(run())
+    renderDock(run(), EVENTS, workers, 'ok', {}, { open: false })
     fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
     expect(metaOf('workflow')).toBe('Do the task · 1 / 2')
     expect(metaOf('subagents')).toBe('1 / 2')
@@ -317,7 +329,7 @@ describe('RunActivityDock — narrow viewports', () => {
 
   it('keeps the step meter whole and lets the step name drop when the row runs out of room', () => {
     narrow()
-    renderDock(run())
+    renderDock(run(), EVENTS, workers, 'ok', {}, { open: false })
     fireEvent.click(screen.getByRole('button', { name: /^Session activity/ }))
     const meta = section('workflow')!.querySelector('[data-slot="run-activity-meta"]')!
     expect(meta.querySelector('[data-slot="run-activity-meta-keep"]')?.textContent).toBe('1 / 2')
@@ -756,5 +768,132 @@ describe('Session activity — folded workflow step (#1478)', () => {
     expect(summary().getAttribute('aria-expanded')).toBe('true')
     expect(slot()).toBeNull()
     expect(summary().getAttribute('aria-label')).not.toContain('; step')
+  })
+})
+
+// hearsay-tools/cezarion#1601: Activity starts folded, and while the dock is sticky it yields to
+// an upward read without losing the reader's own choice.
+describe('Session activity — folded by default, folded while reading up (#1601)', () => {
+  let seq = 0
+  const fresh = () => run({ id: `10000000-0000-4000-8000-1601${String(++seq).padStart(8, '0')}` })
+  const summary = () => screen.getByRole('button', { name: /^Session activity/ })
+  const expanded = () => summary().getAttribute('aria-expanded')
+  function scrollFeed() {
+    const listeners = new Set<ReaderScrollListener>()
+    return {
+      subscribe: (listener: ReaderScrollListener) => {
+        listeners.add(listener)
+        return () => { listeners.delete(listener) }
+      },
+      emit: (event: ReaderScrollEvent) => act(() => { for (const listener of listeners) listener(event) }),
+      size: () => listeners.size,
+    }
+  }
+  const up = { direction: 'up', distanceFromBottom: 500 } as const
+  const down = { direction: 'down', distanceFromBottom: 400 } as const
+  const tail = { direction: 'tail' } as const
+
+  it('starts folded on desktop', () => {
+    renderDock(fresh(), [], workers, 'ok', {}, { open: false })
+    expect(expanded()).toBe('false')
+  })
+
+  it('starts folded on a phone', () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: false, addEventListener() {}, removeEventListener() {} })))
+    renderDock(fresh(), [], workers, 'ok', {}, { open: false })
+    expect(expanded()).toBe('false')
+  })
+
+  it('folds an open card while the reader scrolls up, and restores it on the way down', () => {
+    const feed = scrollFeed()
+    renderDock(fresh(), [], workers, 'ok', {}, { readerScroll: feed.subscribe, sticky: true })
+    expect(expanded()).toBe('true')
+    feed.emit(up)
+    expect(expanded()).toBe('false')
+    expect(document.querySelector('[data-slot="run-activity-dock"]')?.getAttribute('data-state')).toBe('collapsed')
+    feed.emit(down)
+    expect(expanded()).toBe('true')
+    feed.emit(up)
+    expect(expanded()).toBe('false')
+    feed.emit(tail)
+    expect(expanded()).toBe('true')
+  })
+
+  it('keeps a folded card folded when the reader scrolls back down', () => {
+    const feed = scrollFeed()
+    renderDock(fresh(), [], workers, 'ok', {}, { open: false, readerScroll: feed.subscribe, sticky: true })
+    feed.emit(up)
+    feed.emit(down)
+    expect(expanded()).toBe('false')
+    feed.emit(tail)
+    expect(expanded()).toBe('false')
+  })
+
+  it('keeps a manual unfold open for the rest of the scrolling session', () => {
+    const feed = scrollFeed()
+    renderDock(fresh(), [], workers, 'ok', {}, { readerScroll: feed.subscribe, sticky: true })
+    feed.emit(up)
+    fireEvent.click(summary())
+    expect(expanded()).toBe('true')
+    feed.emit(up)
+    feed.emit(down)
+    feed.emit(up)
+    expect(expanded()).toBe('true')
+    // The session ends at the live tail; the next upward read folds again.
+    feed.emit(tail)
+    feed.emit(up)
+    expect(expanded()).toBe('false')
+  })
+
+  it('treats a manual unfold of a card folded before scrolling as an override too', () => {
+    const feed = scrollFeed()
+    renderDock(fresh(), [], workers, 'ok', {}, { open: false, readerScroll: feed.subscribe, sticky: true })
+    feed.emit(up)
+    fireEvent.click(summary())
+    feed.emit(up)
+    expect(expanded()).toBe('true')
+  })
+
+  it('keeps the explicit choice and nested sections through a temporary fold', () => {
+    const feed = scrollFeed()
+    const record = fresh()
+    const first = renderDock(record, [], workers, 'ok', {}, { readerScroll: feed.subscribe, sticky: true })
+    fireEvent.click(sectionHead('workflow'))
+    feed.emit(up)
+    expect(expanded()).toBe('false')
+    feed.emit(down)
+    expect(sectionHead('workflow').getAttribute('aria-expanded')).toBe('true')
+    feed.emit(up)
+    // A remount mid-fold reads the remembered choice, not the temporary fold.
+    first.unmount()
+    renderDock(record, [], workers, 'ok', {}, { open: false })
+    expect(expanded()).toBe('true')
+    expect(sectionHead('workflow').getAttribute('aria-expanded')).toBe('true')
+  })
+
+  it('does not fold while the dock is not sticky', () => {
+    const feed = scrollFeed()
+    renderDock(fresh(), [], workers, 'ok', {}, { readerScroll: feed.subscribe })
+    feed.emit(up)
+    expect(expanded()).toBe('true')
+  })
+
+  it('does not fold while the reader is within the dock height of the bottom', () => {
+    const feed = scrollFeed()
+    renderDock(fresh(), [], workers, 'ok', {}, { readerScroll: feed.subscribe, sticky: true })
+    const dock = document.querySelector<HTMLElement>('[data-slot="thread-dock"]')!
+    dock.getBoundingClientRect = () => ({ height: 300 }) as DOMRect
+    feed.emit({ direction: 'up', distanceFromBottom: 200 })
+    expect(expanded()).toBe('true')
+    feed.emit({ direction: 'up', distanceFromBottom: 301 })
+    expect(expanded()).toBe('false')
+  })
+
+  it('unsubscribes on unmount', () => {
+    const feed = scrollFeed()
+    const view = renderDock(fresh(), [], workers, 'ok', {}, { readerScroll: feed.subscribe, sticky: true })
+    expect(feed.size()).toBe(1)
+    view.unmount()
+    expect(feed.size()).toBe(0)
   })
 })

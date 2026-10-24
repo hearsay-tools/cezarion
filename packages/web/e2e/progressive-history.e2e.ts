@@ -301,6 +301,10 @@ beforeAll(async () => {
   // (hearsay-tools/cezarion#1333); establish that completed layout before measuring a paging
   // anchor, including when the preceding tail-paint test is filtered out.
   await waitForStatus(baseUrl, RUN_ID, ['waiting'])
+  // The card starts folded (hearsay-tools/cezarion#1601). A programmatic toggle, for the same
+  // reason as the plan toggle below: the thread is still settling into follow-tail.
+  browser.waitForFunction(`document.querySelector('[data-slot="run-activity-dock"] > button') !== null`)
+  browser.evaluate(`document.querySelector('[data-slot="run-activity-dock"] > button[aria-expanded="false"]')?.click()`)
   browser.waitForFunction(`document.querySelector('[data-slot="run-activity-workspace"]') !== null &&
     !/^(Running|Queued)/.test(document.querySelector('[data-slot="run-header"] [data-slot="pill"]')?.textContent ?? 'Running')`)
   waitUntilCockpitIdle()
