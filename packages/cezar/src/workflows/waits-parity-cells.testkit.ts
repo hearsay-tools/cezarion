@@ -303,6 +303,8 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
+
+      singleRunnerCells();
     }
 
     for (const runner of runnersFor('base')) {
@@ -2696,109 +2698,113 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         await until(() => store.getRun(run.id)?.status === 'waiting');
       });
     }
+  });
+}
 
-    if (scope !== 'once') return;
-    // hearsay-tools/cezarion#1301: a run owes at most one refusal. A gate that refuses the done again
-    // while the queued copy waits out a failed delivery's backoff adds no second copy and no charge.
-    it('a done blocked again while its queued refusal is owed queues no second copy', async () => {
-      const { p, w } = await parentWithWorker('claude');
-      const refusal = `Workers are still live: ${w.id}.`;
-      const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
-      let closing = true;
-      const closeAtTurnEnd = ({ runId, event }: { runId: string; event: { type: string } }) => {
-        if (runId === p.id && event.type === 'turn-end' && closing && refusals().some(input => !input.deliveredAt)) engine().active.get(p.id)?.session.end();
-      };
-      store.on('event', closeAtTurnEnd);
-      try {
-        engine().active.get(p.id)!.session.end();
-        await until(() => store.getRun(p.id)?.waitDeliveryFailures === 1 && !manager.isActive(p.id) && engine().wakeBackoffs.has(p.id));
-        closing = false;
-        const wakes = store.getRun(p.id)?.automaticWakes;
-        expect((manager as unknown as { deferParentCompletion(id: string): boolean }).deferParentCompletion(p.id)).toBe(true);
-        expect(refusals()).toHaveLength(1);
-        expect(refusals()[0]!.deliveredAt).toBeUndefined();
-        expect(nudgeNotes(p.id)).toHaveLength(1);
-        expect(store.getRun(p.id)?.automaticWakes).toBe(wakes);
-      } finally {
-        store.off('event', closeAtTurnEnd);
-      }
-    });
+// hearsay-tools/cezarion#1531: the single-runner cells run once, on the claude wire, from
+// `waits-parity.test.ts`. They sit outside `describeWaitParity`, so `runnersFor` is out of scope here:
+// a cell for every runner goes in a `runnersFor(...)` block there, which the per-runner files run.
+function singleRunnerCells(): void {
+  // hearsay-tools/cezarion#1301: a run owes at most one refusal. A gate that refuses the done again
+  // while the queued copy waits out a failed delivery's backoff adds no second copy and no charge.
+  it('a done blocked again while its queued refusal is owed queues no second copy', async () => {
+    const { p, w } = await parentWithWorker('claude');
+    const refusal = `Workers are still live: ${w.id}.`;
+    const refusals = () => store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
+    let closing = true;
+    const closeAtTurnEnd = ({ runId, event }: { runId: string; event: { type: string } }) => {
+      if (runId === p.id && event.type === 'turn-end' && closing && refusals().some(input => !input.deliveredAt)) engine().active.get(p.id)?.session.end();
+    };
+    store.on('event', closeAtTurnEnd);
+    try {
+      engine().active.get(p.id)!.session.end();
+      await until(() => store.getRun(p.id)?.waitDeliveryFailures === 1 && !manager.isActive(p.id) && engine().wakeBackoffs.has(p.id));
+      closing = false;
+      const wakes = store.getRun(p.id)?.automaticWakes;
+      expect((manager as unknown as { deferParentCompletion(id: string): boolean }).deferParentCompletion(p.id)).toBe(true);
+      expect(refusals()).toHaveLength(1);
+      expect(refusals()[0]!.deliveredAt).toBeUndefined();
+      expect(nudgeNotes(p.id)).toHaveLength(1);
+      expect(store.getRun(p.id)?.automaticWakes).toBe(wakes);
+    } finally {
+      store.off('event', closeAtTurnEnd);
+    }
+  });
 
-    // hearsay-tools/cezarion#1301: a wait's lifecycle input is that wait's. Once the wait is
-    // delivered, the same input undelivered again (a replay) is not a fresh wake.
-    it('a delivered wait\'s lifecycle input is never owed again', async () => {
-      nativeWire('claude');
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'timer', seconds: 60, note: 'reowed' }), runner: 'claude' });
-      await until(() => parkedOn(run.id, waitOfKind(run.id, 'timer')));
-      const timer = waitOfKind(run.id, 'timer')!;
-      fireTimer(timer.id);
-      await until(() => settled(run.id, timer.id)?.phase === 'delivered' && store.getRun(run.id)?.status === 'waiting');
-      const owes = (record: RunRecord) => (manager as unknown as { owesWake(run: RunRecord): boolean }).owesWake(record);
-      const replayed = { ...store.getRun(run.id)!, agentInputs: store.getRun(run.id)!.agentInputs!.map(input => input.id === timer.id ? { ...input, deliveredAt: undefined } : input) };
-      expect(owes(replayed)).toBe(false);
-      // A lifecycle input no wait names is still owed.
-      const orphan: AgentInput = { id: randomUUID(), parentRunId: run.id, source: 'lifecycle', text: 'orphan', createdAt: new Date().toISOString() };
-      expect(owes({ ...replayed, agentInputs: [...replayed.agentInputs, orphan] })).toBe(true);
-    });
+  // hearsay-tools/cezarion#1301: a wait's lifecycle input is that wait's. Once the wait is
+  // delivered, the same input undelivered again (a replay) is not a fresh wake.
+  it('a delivered wait\'s lifecycle input is never owed again', async () => {
+    nativeWire('claude');
+    const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_wait', { kind: 'timer', seconds: 60, note: 'reowed' }), runner: 'claude' });
+    await until(() => parkedOn(run.id, waitOfKind(run.id, 'timer')));
+    const timer = waitOfKind(run.id, 'timer')!;
+    fireTimer(timer.id);
+    await until(() => settled(run.id, timer.id)?.phase === 'delivered' && store.getRun(run.id)?.status === 'waiting');
+    const owes = (record: RunRecord) => (manager as unknown as { owesWake(run: RunRecord): boolean }).owesWake(record);
+    const replayed = { ...store.getRun(run.id)!, agentInputs: store.getRun(run.id)!.agentInputs!.map(input => input.id === timer.id ? { ...input, deliveredAt: undefined } : input) };
+    expect(owes(replayed)).toBe(false);
+    // A lifecycle input no wait names is still owed.
+    const orphan: AgentInput = { id: randomUUID(), parentRunId: run.id, source: 'lifecycle', text: 'orphan', createdAt: new Date().toISOString() };
+    expect(owes({ ...replayed, agentInputs: [...replayed.agentInputs, orphan] })).toBe(true);
+  });
 
-    // hearsay-tools/cezarion#1301: a refused done is not a done and cancels no wait. With a wait open
-    // at that turn end there is no nudge: the run parks on the wait, and the refusal is a note.
-    it('a blocked done with an open wait parks on that wait without a nudge', async () => {
-      const { p, w } = await parentWithWorker('claude');
-      const turns = turnEnds(p.id);
-      expect(manager.sendMessage(p.id, [{ type: 'text', text: `${toolCall('cezar_wait', { kind: 'timer', seconds: 60, note: 'u20 timer' })} ${thenSay('All done.\nCEZ:DONE')}` }])).toBe(true);
-      await until(() => turnEnds(p.id) > turns && parkedOn(p.id, waitOfKind(p.id, 'timer')));
-      const refusal = `Workers are still live: ${w.id}.`;
-      expect(store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).includes(refusal))).toHaveLength(1);
-      expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE))).toBe(false);
-      expect(prompted('claude', refusal)).toEqual([]);
-      expect(waitOf(store.getRun(p.id))).toBeUndefined();
-      expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
-      expect(agentWaits(p.id)).toEqual([expect.objectContaining({ kind: 'timer', phase: 'open' })]);
-    });
+  // hearsay-tools/cezarion#1301: a refused done is not a done and cancels no wait. With a wait open
+  // at that turn end there is no nudge: the run parks on the wait, and the refusal is a note.
+  it('a blocked done with an open wait parks on that wait without a nudge', async () => {
+    const { p, w } = await parentWithWorker('claude');
+    const turns = turnEnds(p.id);
+    expect(manager.sendMessage(p.id, [{ type: 'text', text: `${toolCall('cezar_wait', { kind: 'timer', seconds: 60, note: 'u20 timer' })} ${thenSay('All done.\nCEZ:DONE')}` }])).toBe(true);
+    await until(() => turnEnds(p.id) > turns && parkedOn(p.id, waitOfKind(p.id, 'timer')));
+    const refusal = `Workers are still live: ${w.id}.`;
+    expect(store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).includes(refusal))).toHaveLength(1);
+    expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE))).toBe(false);
+    expect(prompted('claude', refusal)).toEqual([]);
+    expect(waitOf(store.getRun(p.id))).toBeUndefined();
+    expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
+    expect(agentWaits(p.id)).toEqual([expect.objectContaining({ kind: 'timer', phase: 'open' })]);
+  });
 
-    // hearsay-tools/cezarion#1301: only a done line or an accepted cezar_done in the nudge's reply turn
-    // takes the second step. A cezar_done refused mid-turn is no done: the turn ended with no wait.
-    it('a tool-refused done in the nudge\'s reply turn takes the no-wait rule', async () => {
-      process.env.CEZ_MOCK_COMPLETION_REPLY = `${toolCall('cezar_done', {})} ${thenSay('I will collect it next.')}`;
-      const { p, w } = await parentWithWorker('claude');
-      // Uncollected only: with live workers the ordinary rule would open the implicit re-check timer.
-      manager.requestWorkerStop(w.id);
-      expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
-      expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt('claude', ['All done.\nCEZ:DONE']) }])).toBe(true);
-      await until(() => prompted('claude', NO_WAIT_NUDGE).length > 0 && humanOpen(p.id)[0]?.via === 'no-wait' && gated(p.id));
-      expect(prompted('claude', `Collect each (\`worker collect ${w.id}\`)`)).toHaveLength(1);
-      expect(workerWaits(p.id)).toEqual([]);
-      expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
-    });
+  // hearsay-tools/cezarion#1301: only a done line or an accepted cezar_done in the nudge's reply turn
+  // takes the second step. A cezar_done refused mid-turn is no done: the turn ended with no wait.
+  it('a tool-refused done in the nudge\'s reply turn takes the no-wait rule', async () => {
+    process.env.CEZ_MOCK_COMPLETION_REPLY = `${toolCall('cezar_done', {})} ${thenSay('I will collect it next.')}`;
+    const { p, w } = await parentWithWorker('claude');
+    // Uncollected only: with live workers the ordinary rule would open the implicit re-check timer.
+    manager.requestWorkerStop(w.id);
+    expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
+    expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt('claude', ['All done.\nCEZ:DONE']) }])).toBe(true);
+    await until(() => prompted('claude', NO_WAIT_NUDGE).length > 0 && humanOpen(p.id)[0]?.via === 'no-wait' && gated(p.id));
+    expect(prompted('claude', `Collect each (\`worker collect ${w.id}\`)`)).toHaveLength(1);
+    expect(workerWaits(p.id)).toEqual([]);
+    expect(humanOpen(p.id)).toEqual([expect.objectContaining({ source: 'cezar', via: 'no-wait' })]);
+  });
 
-    it('workers settled during the nudge turn let the done finish', async () => {
-      const release = join(root, 'release-u21');
-      process.env.CEZ_MOCK_RELEASE_FILE = release;
-      process.env.CEZ_MOCK_COMPLETION_REPLY = 'mock:hold-done';
-      const { p, w } = await parentWithWorker('claude');
-      expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt('claude', ['All done.\nCEZ:DONE']) }])).toBe(true);
-      await until(() => prompted('claude', `Workers are still live: ${w.id}.`).length > 0);
-      // While the reply turn is held, the worker settles and its result is collected.
-      manager.requestWorkerStop(w.id);
-      expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
-      await collect(w.id);
-      writeFileSync(release, '');
-      await until(() => terminal.includes(store.getRun(p.id)?.status ?? ''));
-      expect(store.getRun(p.id)?.status).not.toBe('failed');
-      expect(workerWaits(p.id)).toEqual([]);
-      expect([...store.getRun(p.id)?.waits ?? [], ...store.getRun(p.id)?.lastWaits ?? []].filter(wait => wait.via === 'completion')).toEqual([]);
-    });
+  it('workers settled during the nudge turn let the done finish', async () => {
+    const release = join(root, 'release-u21');
+    process.env.CEZ_MOCK_RELEASE_FILE = release;
+    process.env.CEZ_MOCK_COMPLETION_REPLY = 'mock:hold-done';
+    const { p, w } = await parentWithWorker('claude');
+    expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt('claude', ['All done.\nCEZ:DONE']) }])).toBe(true);
+    await until(() => prompted('claude', `Workers are still live: ${w.id}.`).length > 0);
+    // While the reply turn is held, the worker settles and its result is collected.
+    manager.requestWorkerStop(w.id);
+    expect(await manager.awaitRunTermination(w.id, 15_000)).toBe(true);
+    await collect(w.id);
+    writeFileSync(release, '');
+    await until(() => terminal.includes(store.getRun(p.id)?.status ?? ''));
+    expect(store.getRun(p.id)?.status).not.toBe('failed');
+    expect(workerWaits(p.id)).toEqual([]);
+    expect([...store.getRun(p.id)?.waits ?? [], ...store.getRun(p.id)?.lastWaits ?? []].filter(wait => wait.via === 'completion')).toEqual([]);
+  });
 
-    it('the completion wait names only live workers', async () => {
-      process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt('claude', ['Still done.\nCEZ:DONE']);
-      const { p, w: live } = await parentWithWorker('claude');
-      const stopped = await worker(p.id);
-      manager.requestWorkerStop(stopped.id);
-      expect(await manager.awaitRunTermination(stopped.id, 15_000)).toBe(true);
-      const entry = await ignoreRefusal('claude', p.id, `Workers are still live: ${live.id}.`, () => workerWaits(p.id)[0]?.phase === 'open');
-      expect(entry.workerIds).toEqual([live.id]);
-      expect(entry.revisions).toEqual([{ workerId: live.id, revision: expect.any(Number) }]);
-    });
+  it('the completion wait names only live workers', async () => {
+    process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt('claude', ['Still done.\nCEZ:DONE']);
+    const { p, w: live } = await parentWithWorker('claude');
+    const stopped = await worker(p.id);
+    manager.requestWorkerStop(stopped.id);
+    expect(await manager.awaitRunTermination(stopped.id, 15_000)).toBe(true);
+    const entry = await ignoreRefusal('claude', p.id, `Workers are still live: ${live.id}.`, () => workerWaits(p.id)[0]?.phase === 'open');
+    expect(entry.workerIds).toEqual([live.id]);
+    expect(entry.revisions).toEqual([{ workerId: live.id, revision: expect.any(Number) }]);
   });
 }
