@@ -1,6 +1,6 @@
 import { QueryClientProvider } from '@tanstack/react-query'
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router'
+import { MemoryRouter, Route, Routes, useNavigate } from 'react-router'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
@@ -99,10 +99,16 @@ function stubFetch(overrides: Record<string, () => Response> = {}): string[] {
   return sent
 }
 
+function HistoryBack() {
+  const navigate = useNavigate()
+  return <button onClick={() => void navigate(-1)}>History Back</button>
+}
+
 function renderFilesRoute(search = '') {
   render(
     <QueryClientProvider client={createQueryClient()}>
       <MemoryRouter initialEntries={[`/tasks/r1/files${search}`]}>
+        <HistoryBack />
         <Routes>
           <Route path="/tasks/:id/files" element={<TaskFilesRoute />} />
         </Routes>
@@ -122,6 +128,17 @@ async function openFile(path: string) {
 // ---- the route -------------------------------------------------------------------------------
 
 describe('the Files tab route', () => {
+  it('Back restores the previous file selection', async () => {
+    stubFetch()
+    renderFilesRoute('?path=hello.ts')
+    await screen.findByRole('textbox', { name: 'File path in the worktree' })
+    await openFile('logo.png')
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-image"]')).not.toBeNull())
+    fireEvent.click(screen.getByRole('button', { name: 'History Back' }))
+    await waitFor(() => expect(document.querySelector('[data-slot="file-preview-code"]')?.textContent).toContain("export const hi = 'world'"))
+    expect((screen.getByRole('textbox', { name: 'File path in the worktree' }) as HTMLInputElement).value).toBe('hello.ts')
+  })
+
   it('opens a bookmarked file selection without searching the tree', async () => {
     stubFetch()
     renderFilesRoute('?path=hello.ts')

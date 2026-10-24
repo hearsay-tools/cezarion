@@ -13,7 +13,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from 'react'
-import { useParams, useSearchParams } from 'react-router'
+import { useParams } from 'react-router'
 import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 
 import { Link, Navigate } from '@/lib/project-router'
@@ -46,6 +46,7 @@ import {
 } from '@/lib/github-list-width'
 import { githubTaskPrompt } from '@/lib/github-task'
 import { cn } from '@/lib/utils'
+import { useSearchParamsWriter } from '@/lib/use-search-params-writer'
 
 import { IssueLinkedTasks } from './issue-linked-tasks'
 import { IssueFilters } from './issue-filters'
@@ -206,17 +207,17 @@ export function GithubRoute({
   // The sidebar list's state (#622) lives in the URL: `?filter=` names one of the view's filters.
   // Absent = the legacy unfiltered list; present (even `all`) also means "the list, not the phone's
   // filter screen, and not the remembered-tab redirect".
-  const [searchParams, setSearchParams] = useSearchParams()
+  const [searchParams, writeSearchParams] = useSearchParamsWriter()
   const isDesktop = useIsDesktop()
   const rawFilterParam = searchParams.get('filter')
   const filter: GithubFilter | null = parseGithubFilter(view, rawFilterParam)
   const activeFilter: GithubFilter = filter ?? 'all'
-  const setFilterParam = (value: GithubFilter | null) => setSearchParams((prev) => {
+  const setFilterParam = (value: GithubFilter | null) => writeSearchParams((prev) => {
     const next = new URLSearchParams(prev)
     if (value === null) next.delete('filter')
     else next.set('filter', value)
     return next
-  }, { replace: true })
+  })
   // Paged (hearsay-tools/cezarion#1183): `list` is the infinite query, `gh` every loaded page.
   const { pages: list, data: gh } = useGithubPages(GITHUB_PAGE_SIZE)
   // #801: automations are opt-in, so the cross-link into them exists exactly while the server

@@ -1,0 +1,10 @@
+{
+  "$comment": "Approved raw-setter exceptions for hearsay-tools/cezarion#1649. Only shrink this list when removing an exception; new exceptions require a separately approved design.",
+  "sites": [
+    {
+      "file": "routes/task-git/task-files.tsx",
+      "site": "[query, setQuery] = useSearchParams()",
+      "reason": "File selection pushes history so Back restores the previous file. useSearchParamsWriter always replaces history; migrating this site would change that contract."
+    }
+  ]
+}
