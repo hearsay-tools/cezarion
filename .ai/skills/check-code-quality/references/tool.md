@@ -42,7 +42,29 @@ selected test in a multi-project repository. Vitest always excludes its
 `test.include` globs from coverage; the runner removes only those globs, so
 changed test functions are measured, and `coverage.include` still limits the
 report to the changed files. Test files end in `.test`, `.spec` or `.e2e` and a
-JavaScript or TypeScript extension. For Node,
+JavaScript or TypeScript extension.
+
+The Vitest collector also measures Node child processes that the selected tests
+start, such as a runner mock that a test runs as the runner's native binary. It
+adds `NODE_V8_COVERAGE` to each project's `test.env`. Vitest copies that
+environment into its workers after they start, so the workers record nothing,
+and every Node process a test spawns inherits the variable. The collector
+converts that process coverage for changed untransformed JavaScript
+(`.js`, `.mjs`, `.cjs`) and adds it to Vitest's report. Counters at the same
+source location are summed, so the report keeps one entry per file. These
+child processes are not measured:
+
+- Processes of a non-Node binary, and the Node processes they start without the
+  inherited environment.
+- A spawn with an explicit environment that leaves out `NODE_V8_COVERAGE`.
+- Transformed sources in a child, such as TypeScript run through `tsx`: their
+  offsets do not match the file on disk.
+- A process that a signal ends without a handler, such as `SIGKILL` or an
+  unhandled `SIGTERM`. Node writes process coverage only when the process exits.
+- A copy of a changed file at another path: only the changed file's own path is
+  matched.
+
+For Node,
 the skill bundles the V8 merger and Istanbul converter; no Vitest dependency is
 needed. Node collection supports untransformed JavaScript. For transformed
 TypeScript/JSX or another runner, collect Istanbul coverage through that runner

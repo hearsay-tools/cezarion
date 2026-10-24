@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { parse } from '@babel/parser';
@@ -21,36 +21,91 @@ function execute(argv, { cwd, stderr }, env) {
   if (result.status !== 0) throw new Error(`Coverage tests failed (exit ${result.status ?? result.signal}).`);
 }
 
-export async function convertNodeCoverage(raw, files, cwd, output) {
+const untransformed = file => /\.[cm]?js$/i.test(file);
+
+async function nodeCoverageReport(raw, files, cwd) {
   const selected = new Set(files.map(file => pathToFileURL(resolve(cwd, file)).href));
   const inputs = readdirSync(raw).filter(file => file.endsWith('.json')).map(file => {
     const data = JSON.parse(readFileSync(join(raw, file), 'utf8'));
     return { result: data.result.filter(script => selected.has(script.url)) };
   });
-  if (!inputs.length) throw new Error('Node produced no V8 coverage reports.');
   const report = {};
-  for (const coverage of mergeProcessCovs(inputs).result) {
+  for (const coverage of inputs.length ? mergeProcessCovs(inputs).result : []) {
     const code = readFileSync(new URL(coverage.url), 'utf8');
     const ast = parse(code, { sourceType: 'unambiguous', plugins: ['estree'], ranges: true }).program;
     Object.assign(report, await convert({ code, ast, coverage }));
   }
+  return { report, processes: inputs.length };
+}
+
+export async function convertNodeCoverage(raw, files, cwd, output) {
+  const { report, processes } = await nodeCoverageReport(raw, files, cwd);
+  if (!processes) throw new Error('Node produced no V8 coverage reports.');
   writeFileSync(output, JSON.stringify(report));
+}
+
+const location = ({ start, end }) => `${start.line}:${start.column}-${end.line}:${end.column}`;
+
+// Sum the counters of one map ('statementMap' with 's', ...) by source location.
+// A location only one report has keeps its own counter.
+function mergeCounters(target, source, map, counts, add) {
+  const ids = new Map(Object.entries(target[map]).map(([id, item]) => [location(item.loc ?? item), id]));
+  let next = Object.keys(target[map]).length;
+  for (const [id, item] of Object.entries(source[map])) {
+    const match = ids.get(location(item.loc ?? item));
+    if (match === undefined) {
+      target[map][next] = item;
+      target[counts][next++] = source[counts][id];
+    } else target[counts][match] = add(target[counts][match], source[counts][id]);
+  }
+}
+
+/** Add the counters of an Istanbul report to another, keeping one entry per file. */
+export function mergeIstanbulReports(target, source) {
+  const entries = new Map(Object.values(target).map(entry => [resolve(entry.path), entry]));
+  for (const entry of Object.values(source)) {
+    const current = entries.get(resolve(entry.path));
+    if (!current) {
+      target[entry.path] = entry;
+      continue;
+    }
+    mergeCounters(current, entry, 'statementMap', 's', (a, b) => a + b);
+    mergeCounters(current, entry, 'fnMap', 'f', (a, b) => a + b);
+    mergeCounters(current, entry, 'branchMap', 'b', (a, b) => a.length === b.length ? a.map((n, i) => n + b[i]) : a);
+  }
+  return target;
+}
+
+// Node writes process coverage only for untransformed JavaScript the child loads itself;
+// its offsets for transformed sources would not match the files on disk.
+async function addChildCoverage(raw, files, cwd, output) {
+  const children = files.filter(untransformed);
+  if (!children.length || !existsSync(raw)) return;
+  const { report } = await nodeCoverageReport(raw, children, cwd);
+  // Compare locations as a written report holds them: an open end column is null there.
+  const merged = mergeIstanbulReports(JSON.parse(readFileSync(output, 'utf8')), JSON.parse(JSON.stringify(report)));
+  writeFileSync(output, JSON.stringify(merged));
 }
 
 /** One bounded test run covers all changed files. Test output stays on stderr. */
 export async function collectCoverage(options, directory) {
   const { runner, files, tests, imports, cwd } = options;
   const output = join(directory, 'coverage-final.json');
+  const raw = join(directory, 'raw');
   if (runner === 'vitest') {
-    const argv = vitestCoverageArguments(options, directory);
+    // Vitest empties its reports directory before the run, so process coverage stays outside it.
+    const reports = join(directory, 'vitest');
+    mkdirSync(reports);
+    const argv = vitestCoverageArguments(options, reports, raw);
     execute(argv, options, process.env);
-    return { path: output, runner, command: [process.execPath, ...argv] };
+    renameSync(join(reports, 'coverage-final.json'), output);
+    await addChildCoverage(raw, files, cwd, output);
+    return { path: output, runner, command: [process.execPath, ...argv], childProcessCoverage: '<temporary-directory>/raw' };
   }
-  const transformed = files.filter(file => !/\.[cm]?js$/i.test(file));
+  const transformed = files.filter(file => !untransformed(file));
   if (transformed.length) {
     throw new Error(`Node coverage supports untransformed JavaScript only, not ${transformed.join(', ')}. Use --runner vitest with the --project that runs these tests, or supply --coverage with an Istanbul report from another runner.`);
   }
-  const raw = join(directory, 'raw');
   mkdirSync(raw);
   const argv = [...imports.flatMap(file => ['--import', file]), '--test', ...tests];
   execute(argv, options, { ...process.env, NODE_V8_COVERAGE: raw });
