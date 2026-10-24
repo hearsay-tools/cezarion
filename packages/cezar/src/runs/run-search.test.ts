@@ -66,6 +66,16 @@ describe('matchesRunQuery', () => {
   it('matches nothing for a blank query', () => {
     expect(matchesRunQuery(summary(), '   ')).toBe(false);
   });
+
+  it('matches an automation by its name, or its id when unnamed, only when given the names (hearsay-tools/cezarion#1616)', () => {
+    const launched = summary({ automationId: 'auto-7f3' });
+    const names = new Map([['auto-7f3', 'Dependency bump']]);
+    expect(matchesRunQuery(launched, 'dependency login', names)).toBe(true);
+    expect(matchesRunQuery(launched, 'auto-7f3', new Map())).toBe(true);
+    // The palette passes no names: it shows no origin line, so the automation is not searched.
+    expect(matchesRunQuery(launched, 'auto-7f3')).toBe(false);
+    expect(matchesRunQuery(summary(), 'dependency', names)).toBe(false);
+  });
 });
 
 describe('searchTokens / sqlPrefilterTokens', () => {
@@ -79,6 +89,10 @@ describe('searchTokens / sqlPrefilterTokens', () => {
 
   it('leaves out tokens JSON escapes, which instr over the stored summary would miss', () => {
     expect(sqlPrefilterTokens('"quoted" back\\slash fix')).toEqual(['fix']);
+  });
+
+  it('leaves out a token inside an automation name, which the stored summary does not hold (hearsay-tools/cezarion#1616)', () => {
+    expect(sqlPrefilterTokens('Bump login', new Map([['auto-7f3', 'Dependency bump']]))).toEqual(['login']);
   });
 
   it('drops a token that is only #', () => {

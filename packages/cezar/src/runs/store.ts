@@ -37,7 +37,7 @@ import {
   WAIT_LIMIT,
 } from '@open-mercato/cezar-contract/waits';
 import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, PrWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry, WorkerWait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
-import { matchesRunQuery, sqlPrefilterTokens } from './run-search.ts';
+import { matchesRunQuery, sqlPrefilterTokens, type AutomationNames } from './run-search.ts';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { HistoryCompressor } from './history-compressor.ts';
 import { LiveItemSnapshots } from './live-item-snapshots.ts';
@@ -2272,12 +2272,14 @@ export class RunStore extends EventEmitter {
    * One page of archived ROOT runs, newest first (#864): `GET /run-summaries/archived`, the
    * archived runs past the window. Held runs list by their record, as in `listRunSummaries`.
    * `before` is the previous page's `nextCursor`; with `q`, only runs `matchesRunQuery` keeps, and
-   * `total` counts those. A cursor this store did not write answers `{ error }`.
+   * `total` counts those. `automationNames` lets `q` match a task by its automation's name, as the
+   * list's origin line shows it (hearsay-tools/cezarion#1616). A cursor this store did not write
+   * answers `{ error }`.
    *
    * Ranking reads every archived root's key (id, created_at, seq: no record, no summary), so the
    * page and `total` agree with the held overlay; only the page's own rows are read in full.
    */
-  listArchivedRuns(options: { before?: string; limit: number; q?: string }): ArchivedRunsResponse | { error: string } {
+  listArchivedRuns(options: { before?: string; limit: number; q?: string; automationNames?: AutomationNames }): ArchivedRunsResponse | { error: string } {
     let after: ListOrder | undefined;
     if (options.before !== undefined) {
       after = decodeArchivedCursor(options.before);
@@ -2289,16 +2291,16 @@ export class RunStore extends EventEmitter {
     if (q === '') {
       for (const key of this.db?.listKeysWhere(ARCHIVED_ROOT) ?? []) if (!skipped(key.id)) ranked.set(key.id, key);
     } else {
-      for (const row of this.db?.searchRootSummaries(sqlPrefilterTokens(q)) ?? []) {
+      for (const row of this.db?.searchRootSummaries(sqlPrefilterTokens(q, options.automationNames)) ?? []) {
         if (skipped(row.id)) continue;
         const summary = parseStoredSummary(row.summary) ?? this.coldSummary(row.id);
-        if (summary?.archived && matchesRunQuery(summary, q)) ranked.set(row.id, { ...row, summary });
+        if (summary?.archived && matchesRunQuery(summary, q, options.automationNames)) ranked.set(row.id, { ...row, summary });
       }
     }
     for (const [id, run] of this.held) {
       if (!run.archived || run.delegation?.role === 'worker') continue;
       const summary = toRunSummary(run);
-      if (q === '' || matchesRunQuery(summary, q)) ranked.set(id, { ...this.listOrder(run), summary });
+      if (q === '' || matchesRunQuery(summary, q, options.automationNames)) ranked.set(id, { ...this.listOrder(run), summary });
     }
     const ordered = [...ranked.entries()].sort(([, a], [, b]) => newestFirst(a, b));
     const rest = after ? ordered.filter(([, key]) => newestFirst(key, after) > 0) : ordered;
@@ -3802,9 +3804,10 @@ export class RunStore extends EventEmitter {
   /**
    * Stamp unread finished runs in bulk and return the count. Keep the rule aligned with cockpit
    * isUnread: done/failed, finished since seen, not archived; cancelled and usage-limit waiting
-   * runs are excluded.
+   * runs are excluded. `automation` narrows it to one origin, as in `archiveFinished`
+   * (hearsay-tools/cezarion#1616); absent stamps both.
    */
-  markAllRead(): number {
+  markAllRead(automation?: boolean): number {
     const now = new Date().toISOString();
     let count = 0;
     // Runs not in memory are picked by the same rule over their stored summary, then re-checked
@@ -3824,6 +3827,7 @@ export class RunStore extends EventEmitter {
         run.finishedAt !== undefined &&
         (run.seenAt === undefined || run.seenAt < run.finishedAt);
       if (!unread) continue;
+      if (automation !== undefined && (automationIdOf(run) !== undefined) !== automation) continue;
       run.seenAt = now;
       this.touch(run);
       count++;

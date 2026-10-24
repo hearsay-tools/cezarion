@@ -81,6 +81,7 @@ import { repoPullInputSchema, deleteBranchesInputSchema } from '@open-mercato/ce
 import {
   pinRunInputSchema,
   archiveFinishedRequestSchema,
+  markAllReadRequestSchema,
   notifyRunInputSchema,
   type GroupResponse,
   type GroupVariant,
@@ -3814,8 +3815,14 @@ export function createApp(deps: ServerDeps) {
     // The archived roots past that window, a page at a time, newest first (#864).
     .get('/run-summaries/archived', queryZodValidator(archivedRunsQuerySchema), (c) => {
       const { before, limit, q } = c.req.valid('query');
-      const page = c.get('project').store.listArchivedRuns({
+      const project = c.get('project');
+      // The page shows each task's origin line, so `q` matches what it names: the automation's
+      // name, or its recorded id while automations are off, as the cockpit's filter does (#1616).
+      const automationNames = new Map(capabilities().automations
+        ? project.automationStore.list().map((automation) => [automation.id, automation.name] as const) : []);
+      const page = project.store.listArchivedRuns({
         limit: limit ?? ARCHIVED_RUNS_PAGE_DEFAULT,
+        automationNames,
         ...(before !== undefined ? { before } : {}),
         ...(q !== undefined ? { q } : {}),
       });
@@ -3873,7 +3880,8 @@ export function createApp(deps: ServerDeps) {
 
     // The read-receipt sweep (#unread-done-items) — the mark-read twin of the archive
     // sweep above, and under the same registration-order guard.
-    .post('/runs/read-all', (c) => c.json({ read: c.get('project').store.markAllRead() }))
+    .post('/runs/read-all', jsonZodValidator(markAllReadRequestSchema, { absent: {}, malformed: null }), (c) =>
+      c.json({ read: c.get('project').store.markAllRead(c.req.valid('json').automation) }))
 
     .post('/runs/:id/archive', jsonZodValidator(archiveSchema, { absent: ({}) }), async (c) => {
       const { store } = c.get('project');

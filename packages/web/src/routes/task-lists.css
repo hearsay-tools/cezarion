@@ -20,9 +20,6 @@
   [data-slot="global-task-row"] [data-action] { min-height: 44px; }
   [data-slot="task-card"] { overflow-wrap: anywhere; }
 }
-@media (max-width: 767px) {
-  [data-slot="mark-all-read"] { display: inline-flex; }
-}
 
 /* Frame 5 is the ungrouped summary; frame 26 exposes grouped run-action cards. */
 [data-slot="global-summary-head"] { display: none; }

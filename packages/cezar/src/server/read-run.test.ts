@@ -42,6 +42,8 @@ describe('read receipts (#unread-done-items)', () => {
   }
 
   const post = (path: string) => apiRequest(app, path, { method: 'POST' });
+  const postJson = (path: string, body: unknown) =>
+    apiRequest(app, path, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
 
   describe('POST /api/v1/runs/:id/read', () => {
     it('stamps seenAt, answers the record, and persists', async () => {
@@ -78,6 +80,34 @@ describe('read receipts (#unread-done-items)', () => {
     it('is a no-op zero when nothing is unread', async () => {
       const res = await post('/api/v1/runs/read-all');
       expect((await res.json()) as { read: number }).toEqual({ read: 0 });
+    });
+
+    it('narrows the sweep to the origin the Tasks filter names (hearsay-tools/cezarion#1616)', async () => {
+      const direct = finished('done');
+      const automated = finished('done');
+      store.updateRun(automated, {
+        automationTrigger: { automationId: 'nightly', automationRevision: 1, receiptId: 'r1', trigger: 'schedule', occurrenceAt: '2026-08-01T09:00:00.000Z' },
+      });
+      // A direct autonomous task stays direct: origin is the recorded provenance, not the flag.
+      const autonomous = finished('failed');
+      store.updateRun(autonomous, { autonomous: true });
+
+      const automations = await postJson('/api/v1/runs/read-all', { automation: true });
+      expect((await automations.json()) as { read: number }).toEqual({ read: 1 });
+      expect(store.getRun(automated)?.seenAt).toBeDefined();
+      expect(store.getRun(direct)?.seenAt).toBeUndefined();
+      expect(store.getRun(autonomous)?.seenAt).toBeUndefined();
+
+      const directOnly = await postJson('/api/v1/runs/read-all', { automation: false });
+      expect((await directOnly.json()) as { read: number }).toEqual({ read: 2 });
+      expect(store.getRun(direct)?.seenAt).toBeDefined();
+    });
+
+    it('refuses a wrong-typed origin rather than sweeping everything', async () => {
+      const id = finished('done');
+      const res = await postJson('/api/v1/runs/read-all', { automation: 'yes' });
+      expect(res.status).toBe(400);
+      expect(store.getRun(id)?.seenAt).toBeUndefined();
     });
   });
 
