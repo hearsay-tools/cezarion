@@ -11,9 +11,10 @@ import { cn } from '@/lib/utils'
 import { Markdown } from '@/routes/task-thread/markdown'
 
 /**
- * The ONE skill detail rendering (R6 Step 1.4, spec §"Skills, Workflows, Inbox"): the
- * Settings → Skills catalog pane and the read-only "View skill" preview the pickers open
- * (GitHub tab, /new composer) both render THIS component — the two surfaces can never drift.
+ * The ONE skill detail rendering (R6 Step 1.4, spec §"Skills, Workflows, Inbox"): the Skills
+ * table's inline details (hearsay-tools/cezarion#1607) and the read-only "View skill" preview
+ * the pickers open (GitHub tab, /new composer) both render THIS component — the two surfaces
+ * can never drift.
  *
  * Body is markdown (the redesign upgrade over the legacy `<pre>`), through the same
  * Streamdown/Shiki path the thread uses.

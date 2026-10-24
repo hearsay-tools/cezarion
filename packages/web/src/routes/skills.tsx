@@ -501,7 +501,7 @@ function GroupRow({
       data-level={depth}
       className={cn('border-b border-border', depth === 0 && 'bg-muted/40')}
     >
-      <th scope="row" colSpan={2} className="min-w-0 p-0 text-left font-normal">
+      <th scope="row" className="min-w-0 p-0 text-left font-normal">
         <span className="flex min-w-0" style={indent(depth)}>
           <button
             type="button"
@@ -518,6 +518,8 @@ function GroupRow({
           </button>
         </span>
       </th>
+      {/* Every row has the same three cells, so the fixed layout keeps its column widths. */}
+      <td aria-hidden="true" className="hidden @min-[520px]:table-cell" />
       <td className="px-1 py-0 text-right">
         <span className="inline-flex items-center justify-end gap-1">
           <span data-slot="skill-group-count" className="text-[12px] tabular-nums text-muted-foreground">
