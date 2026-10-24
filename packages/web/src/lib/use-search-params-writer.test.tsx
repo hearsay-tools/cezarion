@@ -13,12 +13,14 @@ function set(key: string, value: string | null): SearchParamsUpdate {
 }
 
 function renderWriter(initial = '/p/x/') {
-  const handle: { write?: (update: SearchParamsUpdate) => void; search?: string; params?: string } = {}
+  const handle: { write?: (update: SearchParamsUpdate) => void; search?: string; params?: string; key?: string } = {}
   function Probe() {
     const [params, write] = useSearchParamsWriter()
     handle.write = write
     handle.params = params.toString()
-    handle.search = useLocation().search
+    const location = useLocation()
+    handle.search = location.search
+    handle.key = location.key
     return null
   }
   render(<MemoryRouter initialEntries={[initial]}><Probe /></MemoryRouter>)
@@ -33,6 +35,17 @@ describe('useSearchParamsWriter (hearsay-tools/cezarion#1616)', () => {
       probe.write!(set('q', 'Needle'))
     })
     expect(new URLSearchParams(probe.search)).toEqual(new URLSearchParams('origin=direct&archived=1&q=Needle'))
+  })
+
+  it('does not navigate for a write that changes nothing', () => {
+    const probe = renderWriter('/p/x/?origin=direct')
+    const before = probe.key
+    act(() => probe.write!(set('q', null)))
+    act(() => probe.write!(set('origin', 'direct')))
+    // A navigation, even to the same URL, could land after the reader left the page and take
+    // them back to it.
+    expect(probe.key).toBe(before)
+    expect(probe.search).toBe('?origin=direct')
   })
 
   it('starts from the rendered URL again once the router has caught up', () => {

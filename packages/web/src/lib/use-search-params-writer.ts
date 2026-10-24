@@ -12,7 +12,7 @@ export type SearchParamsUpdate = (current: URLSearchParams) => URLSearchParams
  * router applies each navigation in a transition. A second write before the first renders (a
  * tab click, then the search debounce) then starts from the old params and silently undoes the
  * first. This writer starts from the last params it wrote until the router renders a newer URL,
- * and every write is a `replace`, so Back leaves the page.
+ * skips a write that changes nothing, and makes every write a `replace`, so Back leaves the page.
  */
 export function useSearchParamsWriter(): [URLSearchParams, (update: SearchParamsUpdate) => void] {
   const [searchParams] = useSearchParams()
@@ -23,6 +23,9 @@ export function useSearchParamsWriter(): [URLSearchParams, (update: SearchParams
   }, [searchParams])
   const write = React.useCallback((update: SearchParamsUpdate) => {
     const next = update(new URLSearchParams(pending.current.next))
+    // A write that changes nothing navigates nowhere. Even a same-URL navigation can land after
+    // the reader opened another page, and take them back to this one.
+    if (next.toString() === pending.current.next.toString()) return
     pending.current = { ...pending.current, next }
     void navigate({ search: `?${next}` }, { replace: true })
   }, [navigate])
