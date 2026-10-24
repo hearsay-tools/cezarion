@@ -47,10 +47,26 @@ function reduceHandoff(fold: FoldState, event: RunEvent): void {
 
 function reduceWebhookFailed(fold: FoldState, event: RunEvent): void {
   const attempts = typeof event.attempts === 'number' ? event.attempts : undefined
-  const text = `Webhook delivery failed${str(event.event) ? ` (${str(event.event)})` : ''}${
+  // Several webhooks per project (hearsay-tools/cezarion#1576): name the one that failed.
+  const name = str(event.webhookName)
+  const text = `${name ? `Delivery to ${name} failed` : 'Webhook delivery failed'}${str(event.event) ? ` (${str(event.event)})` : ''}${
     attempts ? ` after ${attempts} attempt${attempts === 1 ? '' : 's'}` : ''
   }: ${str(event.error) ?? 'unknown error'}`
   pushMeta(fold, { kind: 'note', id: `v1:${event.seq}`, text, tone: 'danger' })
+}
+
+/** An agent sent a report to a project webhook (hearsay-tools/cezarion#1576). */
+function reduceWebhookReport(fold: FoldState, event: RunEvent): void {
+  const name = str(event.webhookName) ?? 'webhook'
+  const title = str(event.title)
+  const id = `v1:${event.seq}`
+  if (event.ok === false) {
+    pushMeta(fold, { kind: 'note', id, text: `Report to ${name} failed: ${str(event.error) ?? 'unknown error'}`, tone: 'danger' })
+    return
+  }
+  const sent = event.dryRun === true ? `Report to ${name} (dry run, nothing sent)` : `Sent report to ${name}`
+  const text = `${sent}${clockTime(event.ts)}${title ? ` — ${title}` : ''}`
+  pushMeta(fold, event.dryRun === true ? { kind: 'note', id, text, tone: 'dim' } : { kind: 'note', id, text, tone: 'dim', icon: 'handoff' })
 }
 
 function reduceWebhookDryRun(fold: FoldState, event: RunEvent): void {
@@ -516,6 +532,7 @@ const THREAD_EVENT_REDUCERS: ReadonlyMap<string, EventReducer> = new Map<string,
   ['handoff', reduceHandoff],
   ['webhook.failed', reduceWebhookFailed],
   ['webhook.dry-run', reduceWebhookDryRun],
+  ['webhook.report', reduceWebhookReport],
   ['preview.server-registered', reducePreviewRegistered],
   ['preview.server-state', reducePreviewState],
   ['conversation-message', reduceConversationMessage],

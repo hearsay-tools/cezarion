@@ -934,9 +934,10 @@ now takes the same `--until` with the same `attention` default, judged by the sa
 final line, which is now `{"id", "status", "attention", "attentionLabel", "until", "timedOut"}`. A
 bot that tails to terminal state adds `--until settled`. `log` without `--follow` is unchanged.
 
-**A bot that lives behind an HTTP endpoint** does not have to poll. Set a **Task webhook** (URL
-and an optional Bearer token) in the project's **Settings → General**, and every task that opts
-in POSTs one delivery each time it enters a state you selected there: **Needs you**, **Failed**,
+**A bot that lives behind an HTTP endpoint** does not have to poll. Add a webhook (a name, a
+description, a URL and an optional Bearer token) under **Webhooks** in the project's **Settings →
+General** and turn on **Task notifications**. Every task that opts in then POSTs one delivery to
+each such webhook when it enters a state that webhook selects: **Needs you**, **Failed**,
 **Done** and **Cancelled** by default, plus **Running**, **Waiting for agents**, **Waiting on CI**,
 **Waiting** (a timer) and **Any other wait** when you tick them. A question that puts the task in
 Needs you is `task.question`; every other entry is `task.status`, and the body's `state` names the
@@ -950,6 +951,27 @@ has a **Notify webhook** toggle; and a running task's **Hand off** button (or
 the webhook only, never to the agent. Delivery is best-effort: 10 s timeout, 3 attempts, and a
 failure shows in the thread without touching the task. The token is stored in `~/.cezar` and never
 sent back to a browser. Under `CEZ_DRY_RUN=1` nothing is sent; the payload is logged in the thread.
+
+A project can hold several webhooks, each with its own states, and each body names the webhook it
+went to under `webhook`. One failing webhook never delays or stops another.
+
+### Reports from agents: `cez webhook`
+
+Turn on **Let agents send reports** for a webhook, and agents in that project can send it a report
+on demand: a friction report to a triage bot instead of a new GitHub issue, for example. Agents see
+each such webhook's name and description in their system prompt, so write the description as
+instructions ("Send friction you hit with tools here instead of filing a GitHub issue"). A webhook
+without that switch cannot be reached this way.
+
+```sh
+cez webhook list                                         # the webhooks open to agents
+cez webhook send 'Friction reports' --message-file report.md --title 'Squeal skipped an edit'
+cez webhook send <name|id> --message 'Short report' [--data '{"severity":"low"}']
+```
+
+The body is `event: "agent.report"` with `webhook`, `title`, the Markdown `message`, your `data`,
+and the reporting task's `runId`, thread `url` and `task` projection. The command prints the
+outcome as JSON and exits 0 delivered, 1 not delivered, 2 refused or no cockpit, 64 usage.
 
 ### Automations from a task: `cez automation`
 

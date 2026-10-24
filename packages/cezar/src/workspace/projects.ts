@@ -2,7 +2,8 @@ import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
 import { PROJECT_TAGS_MAX, PROJECT_TAG_MAX_LENGTH } from '@open-mercato/cezar-contract/project-limits';
-import type { WebhookTrigger } from '@open-mercato/cezar-contract';
+import type { ProjectWebhook, WebhookTrigger } from '@open-mercato/cezar-contract';
+import { projectWebhooks, redactWebhook } from './webhooks.ts';
 import { forgeKindOfRemote, forgeWebRoot, type ForgeKind } from '../server/forge/index.ts';
 import { getRepoInfo } from '../server/git.ts';
 import {
@@ -177,13 +178,16 @@ export type ProjectStatus = 'ok' | 'missing' | 'not-git';
 /** `Omit` would collapse the registry's passthrough index signature and drop every known key;
  *  a key-remapped homomorphic type keeps them. */
 type WorkspaceProjectWithoutWebhook = {
-  [K in keyof WorkspaceProject as K extends 'webhook' ? never : K]: WorkspaceProject[K];
+  [K in keyof WorkspaceProject as K extends 'webhook' | 'webhooks' ? never : K]: WorkspaceProject[K];
 };
 
 export interface ProjectListEntry extends WorkspaceProjectWithoutWebhook {
   /** The task webhook (#589), token redacted: the wire only says whether one is set. `triggers`
    *  only when stored (hearsay-tools/cezarion#1356). */
   webhook?: { url: string; tokenSet: boolean; triggers?: WebhookTrigger[] };
+  /** Every project webhook, tokens redacted (hearsay-tools/cezarion#1576). `webhook` above is the
+   *  first of them with task notifications on. */
+  webhooks?: ProjectWebhook[];
   /** `missing` = root gone/unreadable; `not-git` = exists but no `.git`. */
   status: ProjectStatus;
   /** Current branch when cheaply available (omitted e.g. on an unborn HEAD). */
@@ -213,19 +217,22 @@ export interface RootProbe {
  * `.passthrough()`, so spreading a raw entry onto the wire is how a secret would leak.
  */
 export function toProjectListEntry(project: WorkspaceProject, probe: RootProbe): ProjectListEntry {
-  const { webhook, ...rest } = project;
+  const { webhook: _legacy, webhooks: _stored, ...rest } = project;
+  const webhooks = projectWebhooks(project);
+  const task = webhooks.find((entry) => entry.tasks);
   return {
     ...rest,
     ...probe,
-    ...(webhook
+    ...(task
       ? {
           webhook: {
-            url: webhook.url,
-            tokenSet: Boolean(webhook.token),
-            ...(webhook.triggers === undefined ? {} : { triggers: webhook.triggers }),
+            url: task.url,
+            tokenSet: Boolean(task.token),
+            ...(task.triggers === undefined ? {} : { triggers: task.triggers }),
           },
         }
       : {}),
+    ...(webhooks.length > 0 ? { webhooks: webhooks.map(redactWebhook) } : {}),
   };
 }
 

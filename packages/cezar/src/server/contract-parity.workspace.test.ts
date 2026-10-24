@@ -16,6 +16,10 @@ import type {
   removeAgentProfileResponseSchema,
 } from '@open-mercato/cezar-contract';
 import type {
+  agentWebhooksResponseSchema,
+  projectWebhookResponseSchema,
+  sendAgentReportResponseSchema,
+  testProjectWebhookResponseSchema,
   fsBrowseResponseSchema,
   launchKeyResponseSchema,
   projectsResponseSchema,
@@ -90,6 +94,13 @@ describe('src/contract projects/workspace schemas match the routes exactly', () 
   type GithubOwners200 = InferResponseType<(typeof client.api.v1.projects)['github-owners']['$get'], 200>;
   type UpdateProject200 = InferResponseType<(typeof client.api.v1.projects)[':projectId']['$patch'], 200>;
   type RemoveProject200 = InferResponseType<(typeof client.api.v1.projects)[':projectId']['$delete'], 200>;
+  // the project webhooks and the agent interface (hearsay-tools/cezarion#1576)
+  type CreateWebhook201 = InferResponseType<(typeof client.api.v1.projects)[':projectId']['webhooks']['$post'], 201>;
+  type UpdateWebhook200 = InferResponseType<(typeof client.api.v1.projects)[':projectId']['webhooks'][':webhookId']['$patch'], 200>;
+  type RemoveWebhook200 = InferResponseType<(typeof client.api.v1.projects)[':projectId']['webhooks'][':webhookId']['$delete'], 200>;
+  type TestWebhook200 = InferResponseType<(typeof client.api.v1.projects)[':projectId']['webhooks'][':webhookId']['test']['$post'], 200>;
+  type AgentWebhooks200 = InferResponseType<(typeof client.api.v1)['agent-webhooks']['$get'], 200>;
+  type SendAgentReport200 = InferResponseType<(typeof client.api.v1)['agent-webhooks'][':webhook']['$post'], 200>;
   type FsBrowse200 = InferResponseType<typeof client.api.v1.fs.browse.$get, 200>;
   type LaunchKey200 = InferResponseType<(typeof client.api.v1)['launch-key']['$get'], 200>;
 
@@ -174,6 +185,12 @@ describe('src/contract projects/workspace schemas match the routes exactly', () 
     Assert<Exact<GithubOwnersResponse, GithubOwners200>>,
     Assert<Exact<z.infer<typeof updateProjectResponseSchema>, UpdateProject200>>,
     Assert<Exact<z.infer<typeof removeProjectResponseSchema>, RemoveProject200>>,
+    Assert<Exact<z.infer<typeof projectWebhookResponseSchema>, CreateWebhook201>>,
+    Assert<Exact<z.infer<typeof projectWebhookResponseSchema>, UpdateWebhook200>>,
+    Assert<Exact<z.infer<typeof updateProjectResponseSchema>, RemoveWebhook200>>,
+    Assert<Exact<z.infer<typeof testProjectWebhookResponseSchema>, TestWebhook200>>,
+    Assert<Exact<z.infer<typeof agentWebhooksResponseSchema>, AgentWebhooks200>>,
+    Assert<Exact<z.infer<typeof sendAgentReportResponseSchema>, SendAgentReport200>>,
     Assert<Exact<z.infer<typeof fsBrowseResponseSchema>, FsBrowse200>>,
     Assert<Exact<z.infer<typeof launchKeyResponseSchema>, LaunchKey200>>,
     // workspace settings + prefs

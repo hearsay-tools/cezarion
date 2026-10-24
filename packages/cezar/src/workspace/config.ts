@@ -9,7 +9,11 @@ import { z } from 'zod';
 import {
   PROJECT_TAGS_MAX,
   PROJECT_TAG_MAX_LENGTH,
+  PROJECT_WEBHOOK_DESCRIPTION_MAX_LENGTH,
+  PROJECT_WEBHOOK_ID_PATTERN,
+  PROJECT_WEBHOOK_NAME_MAX_LENGTH,
   PROJECT_WEBHOOK_TOKEN_MAX_LENGTH,
+  PROJECT_WEBHOOKS_MAX,
 } from '@open-mercato/cezar-contract/project-limits';
 import { WEBHOOK_TRIGGERS, type WebhookTrigger } from '@open-mercato/cezar-contract/attention';
 import { projectWebhookUrlSchema } from '@open-mercato/cezar-contract/projects';
@@ -35,6 +39,52 @@ import { assertCezarHomeWriteIsSandboxed, workspaceConfigPath } from '../paths.t
 
 /** `id` slug rule — mirrors the spec: `^[a-z0-9][a-z0-9-]{0,63}$`. */
 export const PROJECT_ID_RE = /^[a-z0-9][a-z0-9-]{0,63}$/;
+
+/** The states that send a delivery (hearsay-tools/cezarion#1356). Absent means the default; `[]`
+ *  stays `[]`. An unknown value (a newer cezar's option) is dropped on its own and the rest of the
+ *  list kept, so one value never resets the selection. */
+const storedTriggersSchema = z
+  .array(z.unknown())
+  .transform((values) => [...new Set(values.filter(isWebhookTrigger))])
+  .optional()
+  .catch(undefined);
+
+/** The single task webhook a project stored before hearsay-tools/cezarion#1576 (#589). */
+const legacyWebhookSchema = z
+  .object({
+    url: projectWebhookUrlSchema,
+    token: z.string().max(PROJECT_WEBHOOK_TOKEN_MAX_LENGTH).optional().catch(undefined),
+    triggers: storedTriggersSchema,
+  })
+  .passthrough();
+
+/** One project webhook (hearsay-tools/cezarion#1576). The token lives here, in the per-user 0600
+ *  registry, and never leaves the server: `toProjectListEntry` (projects.ts) swaps it for
+ *  `tokenSet`. Bounds mirror the create and edit bodies, so a stored value is never caught away. */
+const storedWebhookSchema = z
+  .object({
+    id: z.string().regex(PROJECT_WEBHOOK_ID_PATTERN),
+    name: z.string().trim().min(1).max(PROJECT_WEBHOOK_NAME_MAX_LENGTH),
+    description: z.string().max(PROJECT_WEBHOOK_DESCRIPTION_MAX_LENGTH).optional().catch(undefined),
+    url: projectWebhookUrlSchema,
+    token: z.string().max(PROJECT_WEBHOOK_TOKEN_MAX_LENGTH).optional().catch(undefined),
+    tasks: z.boolean().catch(false),
+    triggers: storedTriggersSchema,
+    agent: z.boolean().catch(false),
+  })
+  .passthrough();
+
+/** Keep every entry that parses, at most `PROJECT_WEBHOOKS_MAX`, and the first of a repeated id. */
+function salvageWebhooks(values: unknown[]): StoredProjectWebhook[] {
+  const kept: StoredProjectWebhook[] = [];
+  for (const value of values) {
+    const parsed = storedWebhookSchema.safeParse(value);
+    if (!parsed.success || kept.some((entry) => entry.id === parsed.data.id)) continue;
+    kept.push(parsed.data);
+    if (kept.length === PROJECT_WEBHOOKS_MAX) break;
+  }
+  return kept;
+}
 
 /**
  * One registry entry. `id` + `root` are load-bearing (an entry without them is
@@ -72,26 +122,20 @@ const workspaceProjectSchema = z
      *  and the Bearer token they send. The token lives here, in the per-user 0600 registry, and
      *  never in the repo's own `.ai/cezar/config.json`, which some teams commit. It never leaves
      *  the server either: `redactProjectEntry` (projects.ts) swaps it for `tokenSet`. */
-    webhook: z
-      .object({
-        url: projectWebhookUrlSchema,
-        token: z.string().max(PROJECT_WEBHOOK_TOKEN_MAX_LENGTH).optional().catch(undefined),
-        /** The states that send a delivery (hearsay-tools/cezarion#1356). Absent means the
-         *  default; `[]` stays `[]`. An unknown value (a newer cezar's option) is dropped on its
-         *  own and the rest of the list kept, so one value never resets the selection. */
-        triggers: z
-          .array(z.unknown())
-          .transform((values) => [...new Set(values.filter(isWebhookTrigger))])
-          .optional()
-          .catch(undefined),
-      })
-      .passthrough()
+    webhook: legacyWebhookSchema.optional().catch(undefined),
+    /** The project webhooks (hearsay-tools/cezarion#1576), in the order they were added. When
+     *  present it replaces `webhook`, which a write through the webhook routes deletes; read both
+     *  through `projectWebhooks` (workspace/webhooks.ts). One bad entry is dropped on its own. */
+    webhooks: z
+      .array(z.unknown())
+      .transform((values) => salvageWebhooks(values))
       .optional()
       .catch(undefined),
   })
   .passthrough();
 
 export type WorkspaceProject = z.infer<typeof workspaceProjectSchema>;
+export type StoredProjectWebhook = z.infer<typeof storedWebhookSchema>;
 
 function isWebhookTrigger(value: unknown): value is WebhookTrigger {
   return (WEBHOOK_TRIGGERS as readonly unknown[]).includes(value);

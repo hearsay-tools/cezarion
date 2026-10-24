@@ -10,8 +10,8 @@ import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, getJson } from 
 import { applyContrastQaVariant, contrastSampleExpression, restoreContrastQaDefaults, type ContrastSample } from './contrast'
 // fixture-server starts: 1
 
-// "Hand off" (#589) against the real server: the project webhook is set through the same PATCH
-// the settings page sends, the thread's button opens the dialog (a bottom sheet at 360px), and
+// "Hand off" (#589) against the real server: the project webhook is created through the same
+// POST the settings page sends (hearsay-tools/cezarion#1576), the thread's button opens the dialog (a bottom sheet at 360px), and
 // the hand-off lands as `notify: true` plus a thread line. CEZ_DRY_RUN=1 (fixtureServeEnv) means
 // the delivery is logged as a run event and nothing leaves the machine.
 let browser: AgentBrowser
@@ -40,12 +40,12 @@ beforeAll(async () => {
   })
   baseUrl = await waitForFixtureServer(server)
   project = await bootProjectId(baseUrl)
-  const saved = await fetch(`${baseUrl}/api/v1/projects/${project}`, {
-    method: 'PATCH',
+  const saved = await fetch(`${baseUrl}/api/v1/projects/${project}/webhooks`, {
+    method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ webhook: { url: 'https://bot.example/hooks/cez', token: 'e2e-token' } }),
+    body: JSON.stringify({ name: 'Team bot', url: 'https://bot.example/hooks/cez', token: 'e2e-token', tasks: true }),
   })
-  if (!saved.ok) throw new Error(`webhook PATCH answered ${saved.status}`)
+  if (!saved.ok) throw new Error(`webhook POST answered ${saved.status}`)
   browser = AgentBrowser.open(`handoff-${process.pid}`)
 })
 
@@ -82,6 +82,7 @@ describe('Hand off to webhook', () => {
     browser.waitForFunction(`document.querySelector(${JSON.stringify(dialog)}) !== null`)
     const text = browser.waitForValue(`document.querySelector(${JSON.stringify(dialog)})?.textContent || null`) as string
     expect(text).not.toContain('bot.example/hooks/cez')
+    expect(text).toContain('Team bot will start receiving')
     const tip = browser.waitForValue(`document.querySelector(${JSON.stringify('[data-webhook-destination]')})?.getAttribute('title') || null`) as string
     expect(tip).toContain('bot.example/hooks/cez')
     expect(text).toContain('The note goes to the webhook only, not to the agent.')
@@ -251,12 +252,21 @@ describe('Hand off to webhook', () => {
   it('shows the stored webhook in project settings without its token', () => {
     browser.setViewport(360, 640)
     browser.goto(`${baseUrl}/p/${project}/settings`)
-    const placeholder = browser.waitForValue(`document.querySelector('[data-slot="task-webhook-token"]')?.getAttribute('placeholder') || null`) as string
+    const card = '[data-slot="webhook-card"]'
+    const summary = browser.waitForValue(`document.querySelector(${JSON.stringify(card)})?.textContent || null`) as string
+    expect(summary).toContain('Team bot')
+    expect(summary).toContain('bot.example/hooks/cez')
+    expect(summary).toContain('Task notifications')
+    const toggle = box(`${card} [data-action="webhook-toggle"]`)
+    expect(toggle.height).toBeGreaterThanOrEqual(44)
+    browser.click(`${card} [data-action="webhook-toggle"]`)
+    const placeholder = browser.waitForValue(`document.querySelector('[data-slot="webhook-token"]')?.getAttribute('placeholder') || null`) as string
     expect(placeholder).toContain('Token set')
-    const url = browser.waitForValue(`document.querySelector('[data-slot="task-webhook-url"]')?.value || null`) as string
+    const url = browser.waitForValue(`document.querySelector('[data-slot="webhook-url"]')?.value || null`) as string
     expect(url).toBe('https://bot.example/hooks/cez')
     expect(browser.evaluate(`document.body.innerHTML.includes('e2e-token')`)).toBe(false)
-    browser.evaluate(`document.querySelector('[data-slot="task-webhook"]').scrollIntoView({ block: 'center' })`)
+    expect(browser.evaluate(`document.documentElement.scrollWidth <= window.innerWidth + 1`)).toBe(true)
+    browser.evaluate(`document.querySelector('[data-slot="webhook-form"]').scrollIntoView({ block: 'center' })`)
     settledShot('mobile-settings.png')
   })
 
