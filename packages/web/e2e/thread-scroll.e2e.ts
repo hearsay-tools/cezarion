@@ -365,6 +365,92 @@ describe('thread virtualization on a 1,000-row transcript', () => {
   }, 90_000)
 })
 
+// hearsay-tools/cezarion#1601: the desktop dock is sticky, so an open Activity card covers the
+// transcript. It starts folded, folds while the reader scrolls up, and comes back on the way down.
+describe('Activity folds while reading up (#1601)', () => {
+  const SUMMARY = '[data-slot="run-activity-dock"] > button'
+  const expanded = `document.querySelector('${SUMMARY}')?.getAttribute('aria-expanded')`
+  /** Like parkAt, with the gesture's direction: positive `deltaY` reads down. The target is
+   *  resolved once, so a relative target does not move on with each retry. */
+  function readTo(target: string, deltaY: number) {
+    const top = Number(browser.evaluate(`(() => { const m = ${MAIN}; return Math.round(${target}) })()`))
+    browser.evaluate(`${MAIN}.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true }))`)
+    browser.waitForFunction(`(() => {
+      const m = ${MAIN}
+      const target = ${top}
+      if (Math.abs(m.scrollTop - target) > 50) {
+        m.dispatchEvent(new WheelEvent('wheel', { deltaY: ${deltaY}, bubbles: true }))
+        m.scrollTop = target
+        return false
+      }
+      return true
+    })()`)
+  }
+  /** The first transcript row under the sticky header, and where it sits. */
+  const anchor = `(() => {
+    const top = document.querySelector('[data-slot="run-header"]').getBoundingClientRect().bottom
+    const row = [...document.querySelectorAll('[data-slot="thread-row"]')].find(row => row.getBoundingClientRect().bottom > top)
+    return row ? row.dataset.rowKey + '@' + Math.round(row.getBoundingClientRect().top) : null
+  })()`
+  const toggle = (state: 'true' | 'false') => {
+    browser.click(SUMMARY)
+    browser.waitForFunction(`${expanded} === '${state}'`)
+  }
+
+  it('starts folded on desktop, folds an open card while reading up and restores it reading down', () => {
+    browser.setViewport(1280, 900)
+    openThread()
+    expect(browser.waitForValue(`${expanded} ?? null`)).toBe('false')
+    toggle('true')
+
+    readTo('m.scrollHeight - m.clientHeight - 3000', -120)
+    browser.waitForFunction(`${expanded} === 'false'`)
+    // Still sticky at the bottom of the viewport, and the text under the reader did not move.
+    const folded = waitForSettledSample<{ sticky: boolean; atBottom: boolean; anchor: string }>(browser, `(() => {
+      const dock = document.querySelector('[data-slot="thread-dock"]').getBoundingClientRect()
+      return { sticky: getComputedStyle(document.querySelector('[data-slot="thread-dock"]')).position === 'sticky',
+        atBottom: Math.abs(dock.bottom - ${MAIN}.getBoundingClientRect().bottom) < 2, anchor: ${anchor} }
+    })()`)
+    expect(folded).toMatchObject({ sticky: true, atBottom: true })
+
+    readTo('m.scrollTop + 600', 120)
+    browser.waitForFunction(`${expanded} === 'true'`)
+    const restoredAt = waitForSettledSample<string>(browser, anchor)
+    // The restore grows the sticky dock over the transcript; the rows themselves stay put.
+    readTo('m.scrollTop - 600', -120)
+    browser.waitForFunction(`${expanded} === 'false'`)
+    expect(waitForSettledSample<string>(browser, anchor)).toBe(folded.anchor)
+    expect(restoredAt).not.toBeNull()
+  }, 90_000)
+
+  it('keeps a manual unfold open for the rest of the reading session', () => {
+    expect(browser.waitForValue(`${expanded} ?? null`)).toBe('false')
+    toggle('true')
+    readTo('m.scrollTop - 600', -120)
+    readTo('m.scrollTop + 300', 120)
+    readTo('m.scrollTop - 600', -120)
+    expect(waitForSettledSample<string | null>(browser, `${expanded} ?? null`)).toBe('true')
+
+    // Jump to latest ends the session; the next upward read folds again.
+    browser.click('[data-slot="jump-to-latest"]')
+    browser.waitForFunction(nearBottom)
+    browser.waitForFunction(`document.querySelector('[data-slot="jump-to-latest"]') === null`)
+    expect(waitForSettledSample<string | null>(browser, `${expanded} ?? null`)).toBe('true')
+    readTo('m.scrollHeight - m.clientHeight - 3000', -120)
+    browser.waitForFunction(`${expanded} === 'false'`)
+  }, 90_000)
+
+  it('keeps a card folded before the read folded on the way back down', () => {
+    readTo('m.scrollTop + 600', 120)
+    browser.waitForFunction(`${expanded} === 'true'`)
+    toggle('false')
+    readTo('m.scrollTop - 600', -120)
+    readTo('m.scrollTop + 600', 120)
+    expect(waitForSettledSample<string | null>(browser, `${expanded} ?? null`)).toBe('false')
+    browser.setViewport(1440, 900)
+  }, 90_000)
+})
+
 describe('phone viewports', () => {
   it('keeps the composer at the document tail without overlaying history when the keyboard inset changes', () => {
     browser.setViewport(390, 844)
