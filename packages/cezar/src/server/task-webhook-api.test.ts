@@ -163,6 +163,7 @@ describe('task webhook API', () => {
       const res = await start({ notify: true });
       expect(res.status).toBe(400);
       expect(String(res.body.error)).toContain('no task webhook');
+      expect(String(res.body.error)).toContain('Settings → General → Webhooks');
       expect(started).toEqual([]);
     });
 

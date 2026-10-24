@@ -6145,7 +6145,7 @@ export function cockpitOriginFor(bindHost: string | undefined, port: number): st
 const webhookNameTakenError = (name: string) => `this project already has a webhook named "${name.trim()}" — pick another name`;
 
 const NO_WEBHOOK_ERROR =
-  'this project has no task webhook — set one in Settings → General → Task webhook, or start without notify';
+  'this project has no task webhook — add a webhook with Task notifications on in Settings → General → Webhooks, or start without notify';
 
 export function startServer(deps: ServerDeps, port: number, listener?: Server): ServerType & { shutdownForRestart: () => Promise<void> } {
   const workspaceEvents = deps.workspaceEvents ?? new WorkspaceEventBus();
