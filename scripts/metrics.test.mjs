@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { analyzeSource, functionResults, measureCoverage, selectFunctions } from '../.ai/skills/check-code-quality/scripts/code-metrics.mjs';
@@ -270,7 +270,10 @@ test('coverage resolves Vitest from the target project and keeps its output off 
 test('copied skill needs no original checkout scripts to analyze another project', t => {
   const f = fixture(t);
   const skill = join(f.cwd, 'copied-skill');
-  cpSync(fileURLToPath(new URL('../.ai/skills/check-code-quality', import.meta.url)), skill, { recursive: true });
+  // A skill-local dependency install must not collide with the fixture's dependency link.
+  cpSync(fileURLToPath(new URL('../.ai/skills/check-code-quality', import.meta.url)), skill, {
+    recursive: true, filter: source => basename(source) !== 'node_modules',
+  });
   // Supply only the dependency tree. Every tool source must come from the copy.
   symlinkSync(fileURLToPath(new URL('../node_modules', import.meta.url)), join(skill, 'node_modules'), 'dir');
   const output = execFileSync(process.execPath, [join(skill, 'scripts/metrics.mjs'), f.file, '--json'], { cwd: f.cwd, encoding: 'utf8' });
