@@ -11,6 +11,9 @@
   "baseline": {
     "onStart": "lookup-only"
   },
+  "complexity": {
+    "enabled": true
+  },
   "inputs": {
     "packages/cezar/src/contract-import-boundaries.test.ts": [
       "packages/cezar/src/**/*.ts",
