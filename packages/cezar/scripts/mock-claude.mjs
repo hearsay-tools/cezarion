@@ -773,8 +773,9 @@ async function respond(userText, imageCount, uuid) {
     // Leave a visible trace in the cwd (the task worktree under spec 006) so
     // the Diff view has something real to show in dry runs. Exactly one line
     // per spawned session: tests read this file back as a per-step trace, so
-    // a multi-line prompt must not become multiple lines here.
-    try {
+    // a multi-line prompt must not become multiple lines here. CEZ_MOCK_NOTES=0 leaves the
+    // worktree clean, so a suite that never reads it pays no autosave commit (hearsay-tools/cezarion#1665).
+    if (process.env.CEZ_MOCK_NOTES !== '0') try {
       const head = userText.replace(/\s+/g, ' ').trim().slice(0, 400);
       appendFileSync('notes.md', `mock notes — ${new Date().toISOString()}: ${head}\n`);
     } catch {
