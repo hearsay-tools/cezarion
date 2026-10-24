@@ -799,6 +799,30 @@ describe('the v1 vocabulary sweep (cezar-code-map §3.2) — every persisted typ
     ])
   })
 
+  it('session.error → a danger line keyed to the v2 stream; an empty message renders nothing', () => {
+    expect(allItems([
+      line(1, 'session.error', { message: 'rate limited, retrying' }),
+      line(2, 'session.error', { message: '' }),
+    ])).toEqual([
+      { kind: 'note', id: 'v2:1', text: 'rate limited, retrying', tone: 'danger' },
+    ])
+  })
+
+  const circular: Record<string, unknown> = {}
+  circular.self = circular
+  it.each([
+    ['an object', { files: 2 }, '{"files":2}'],
+    ['no result', undefined, ''],
+    ['a null result', null, ''],
+    ['an unserializable result', circular, '[object Object]'],
+  ])('tool-result with %s → output text, never a dropped card', (_label, result, output) => {
+    const items = allItems([
+      line(1, 'tool-call', { id: 't1', tool: 'Bash', input: { command: 'ls' } }),
+      line(2, 'tool-result', { toolCallId: 't1', result }),
+    ])
+    expect(items[0]).toMatchObject({ kind: 'tool', status: 'completed', output })
+  })
+
   it('user-message → opens a turn with the bubble', () => {
     const { turns } = reduceThread([line(1, 'user-message', { text: 'do it', imageCount: 1 })])
     expect(turns).toHaveLength(1)
@@ -857,6 +881,12 @@ describe('the v1 vocabulary sweep (cezar-code-map §3.2) — every persisted typ
 
   it('unknown future types → nothing, never a guessed rendering (divergence from the legacy raw-JSON note, on purpose)', () => {
     expect(allItems([line(1, 'telemetry.fancy', { whatever: true })])).toEqual([])
+  })
+
+  // The reducer table is keyed by event type: a type that names an Object.prototype member
+  // must not resolve to it (hearsay-tools/cezarion#1597).
+  it.each(['constructor', 'toString', '__proto__', 'hasOwnProperty'])('%s → nothing, the fold stays total', (type) => {
+    expect(reduceThread([line(1, type, { message: 'x' })]).turns).toEqual([])
   })
 })
 
