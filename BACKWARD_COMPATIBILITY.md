@@ -320,7 +320,7 @@ This is the one deliberate exception to "run state never migrates" (section 9). 
   - A newer cezar started again ignores `runs.json`. Runs the older cezar made or changed in between are not in `runs.db`. They are not lost: they stay in `runs.json`, and the section below merges them by hand.
   - Per-run NDJSON logs, handoff files and images under `runs/` are shared by every version and are untouched by the move.
 - **Stop older cezar before upgrading.** The import refuses to run while a live older cockpit is serving the project (it names the pid and URL) or while `runs.json` changes during the import. Some older writers hold no lock: `serve` up to 0.15.0 and any older `cez run`. One of those that saves nothing during the import window (milliseconds up to about 1.2 s) cannot be seen, and whatever it writes later is a divergent legacy write that is never imported. Stop every cezar process of the project, upgrade, start the new one.
-- **Node 24.15 or newer** is supported (section 6). 24.15 is the first release where `node:sqlite` is a release candidate (stability 1.2) and the floor CI tests. `node:sqlite` loads unflagged from Node 22.13, but cezar has no startup version check and npm only warns about `engines`, so a Node between 22.13 and 24.14 may start untested; before 22.13 cezar fails at start.
+- **Node 24.21.0 or newer** is supported (section 6). The SQLite migration originally required 24.15, the first release where `node:sqlite` is a release candidate (stability 1.2). The minimum is now 24.21.0; CI builds and tests the packaged CLI on exactly that version. `node:sqlite` loads unflagged from Node 22.13, but cezar has no startup version check and npm only warns about `engines`, so an older Node may start outside the supported range; before 22.13 cezar fails at start.
 - **Corrupt, busy, unreadable or newer files are never repaired automatically.** A damaged `runs.db`, `-wal` and `-shm` stay where they are, and cezar never restores a stale `runs.json` over them or starts empty. The project answers with the cause instead (table below).
 
 #### Recovering run history
@@ -333,7 +333,7 @@ Every step needs every cezar process of the project stopped: `serve`, a headless
    1. Move `runs.db`, `runs.db-wal` and `runs.db-shm` aside. If you want the newer runs back later, keep the set and use step 4 on it.
    2. Move `.ai/cezar/runs.json` aside, then copy `.ai/cezar/runs.json.pre-sqlite.bak` to `.ai/cezar/runs.json`. Moving only the database makes the next start import whatever `runs.json` holds, which may be a file an older cezar changed.
    3. Start cezar. It imports the file once and writes a fresh `runs.db`.
-4. **Export `runs.db` as `runs.json`** (read the new history, or hand it to an older cezar). With Node 24.15 or newer:
+4. **Export `runs.db` as `runs.json`** (read the new history, or hand it to an older cezar). With Node 24.21.0 or newer:
 
    ```bash
    node --input-type=module -e "import { DatabaseSync } from 'node:sqlite'; import { writeFileSync } from 'node:fs'; const db = new DatabaseSync('.ai/cezar/runs.db', { readOnly: true }); const rows = db.prepare('SELECT data FROM runs ORDER BY created_at, id').all(); writeFileSync('runs.export.json', '[' + rows.map((row) => row.data).join(',') + ']'); console.log(rows.length + ' runs')"
@@ -456,7 +456,7 @@ Each team skill has a per-project switch, stored in the project's `.ai/cezar/ui-
 
 ## 6. npm package surface (`package.json`)
 
-- Name `@wjarka/cezarion` (plus the unscoped `cezarion` npx alias documented in the README); `bin` entries `cezarion` + `cez`; published `files`: `dist`, `packages/cezar/web/dist`, `scripts`, `README.md`; `engines.node >= 24.15.0` (raised from `>= 20` by hearsay-tools/cezarion#779, which stores runs in `node:sqlite`; the floor is the first Node release line this store is verified on, and CI runs the unit gate on exactly Node 24.15.0); `"type": "module"`.
+- Name `@wjarka/cezarion` (plus the unscoped `cezarion` npx alias documented in the README); `bin` entries `cezarion` + `cez`; published `files`: `dist`, `packages/cezar/web/dist`, `scripts`, `README.md`; `engines.node >= 24.21.0` (raised with owner approval for the next minor, 0.17; previously `>=24.15.0` since the SQLite migration in hearsay-tools/cezarion#779). CI runs typecheck, Node unit tests, the build and packaged CLI E2E on exactly Node 24.21.0. The complete Vitest suite runs once on current LTS; `"type": "module"`.
 - There is **no** `exports`/library API — the package is CLI-only. Keep it that way deliberately: adding one creates a new compatibility surface; if it happens, this document gains a section first.
 - `dist/index.js` must remain the bin entry, and `web/` must stay resolvable relative to `dist/server` (`resolveWebDir` walks `../../web`; the built cockpit lives at `packages/cezar/web/dist`).
 - The tarball MUST contain the built UI (`packages/cezar/web/dist/index.html` + hashed `packages/cezar/web/dist/assets/*`) — `npm run check:pack` (`packages/cezar/scripts/check-pack.mjs`, run as the last leg of `npm run build`, hence by `prepublishOnly`) enforces this; do not remove it from the build chain.

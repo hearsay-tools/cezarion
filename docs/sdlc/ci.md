@@ -84,16 +84,17 @@ intentionally trading single-run latency for lower concurrency on a shared host.
 
 ### CI verification
 
-Verification runs in ten parallel jobs. Eight use the current Node LTS; the two Node floor shards use exactly the `engines.node` minimum (Node 24.15.0):
+Verification runs in eight parallel jobs. Seven use the current Node LTS; the build/package job uses exactly the `engines.node` minimum (Node 24.21.0):
 
 - Three Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/3 --maxWorkers=4` for N=1..3.
-- Two Node floor shards on `ubuntu-24.04` (`node-floor`) run on exactly Node 24.15.0, the root `engines.node` minimum, so a Node API newer than the floor (such as a `node:sqlite` call) fails here instead of on a user's machine. Both install dependencies, build the server and run `npm test -- --shard=N/2 --maxWorkers=4`; shard 1 also runs `npm run typecheck` and `npm run test:unit`. Their Node setup has a three-minute step timeout and one retry, so a stalled Node download costs minutes instead of the job's 30-minute budget (hearsay-tools/cezarion#1214).
-- The build/package job on `ubuntu-24.04` runs typechecking, Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing.
+- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It runs typechecking, Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
 - Four cockpit browser E2E shards on `ubuntu-latest` each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
-The floor config (`.github/scripts/node-floor-vitest.config.mjs`) loads the sequencer as a constructor and inherits the root unit projects. The floor sequencer uses `.github/node-floor-test-durations.json`, measured on Node 24.15.0, and reserves shard 1’s fixed typecheck and Node suite work before assigning Vitest files. The reservation converts sequential wall time to module-worker time using `maxWorkers`. Ordinary LTS shards keep their existing weights and allocation. New files still use the median fallback and every discovered file remains included. The floor job has a 30-minute hang limit: run [40077543858](https://github.com/hearsay-tools/cezarion/actions/runs/40077543858) passed all recorded tests but reached the previous 20-minute limit during final Node cleanup. Individual test timeouts remain unchanged.
+The full Vitest suite runs once across the three LTS shards. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
 
-The required check keeps its name, **Unit, build, E2E, and package**. It succeeds only when the build/package job, all three Vitest shards, both Node floor shards, and all four cockpit browser shards succeed. Packaged CLI E2E and cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs remain on GitHub-hosted Ubuntu. Develop snapshot publishing still waits for this aggregate. Same-repository
+The legacy floor config, sequencer, reporter and duration manifest remain for PR compatibility. PR CI loads `ci.yml` from the target branch, whose old floor jobs still read these files from the PR checkout. The new workflow has no floor jobs and does not use these helpers. Remove the helpers only after the new workflow reaches the target branch.
+
+The required check keeps its name, **Unit, build, E2E, and package**. It succeeds only when the build/package job, all three Vitest shards, and all four cockpit browser shards succeed. Packaged CLI E2E and cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs remain on GitHub-hosted Ubuntu. Develop snapshot publishing still waits for this aggregate. Same-repository
 PRs instead run `prepare-pr-snapshot` after verification, packing snapshot
 archives without publishing credentials. `publish-pr-snapshot.yml` listens for
 completed CI, validates the current open PR head, authoritative run/attempt,
@@ -325,8 +326,8 @@ target workflow before opening PRs against it.
 ## Merge queue and exact-commit reuse
 
 CI accepts `merge_group: checks_requested` for `main`. It tests the immutable
-combined commit with all ten verification jobs, including Node floor and browser
-E2E. Queue runs never use docs/infra or release-bump exemptions. They have no
+combined commit with all eight verification jobs, including the minimum-version
+build/package job and browser E2E. Queue runs never use docs/infra or release-bump exemptions. They have no
 model keys, npm credentials, publishing jobs or OIDC permission.
 
 The required `Automated Code Review` check verifies existing PR-head review

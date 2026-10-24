@@ -1,0 +1,1247 @@
+{
+  "repository": "hearsay-tools/cezarion",
+  "sourceRevision": "e2882a245c449ff0960458a8e4ab8f47889e4373",
+  "capturedAt": "2026-10-24T14:16:40+00:00",
+  "method": {
+    "selection": "20 successful main push runs; two each on selected dates, six on Oct 24. Latest job records; one run had reruns. Not a random sample.",
+    "jobSeconds": "completed_at minus started_at; excludes queue time",
+    "cases": "Vitest summary totals, including skipped cases; excludes node:test counts",
+    "moduleSeconds": "sum of passed per-file Vitest summary durations across the two floor jobs; concurrent module time, not billed CPU or pipeline wall time",
+    "suiteGroupTuple": [
+      "summedModuleSeconds",
+      "caseCount",
+      "fileCount"
+    ],
+    "sourceAccess": [
+      "gh api repos/hearsay-tools/cezarion/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100&page=N",
+      "gh api repos/hearsay-tools/cezarion/actions/runs/RUN/jobs?per_page=100",
+      "gh api repos/hearsay-tools/cezarion/actions/jobs/JOB/logs --allow-escape-sequences",
+      "gh api repos/hearsay-tools/cezarion/actions/runs/RUN/artifacts?per_page=100"
+    ],
+    "localEvidence": "43 job logs and 32 extracted floor artifact JSON files in ignored .ai/qa/node-floor-investigation/"
+  },
+  "runSamples": [
+    {
+      "run": 37538571501,
+      "date": "2026-10-06",
+      "sha": "83e48ed93fe2a58cc53ea703ed4ec0e1e377fb4b",
+      "floorWallSeconds": [
+        440.0,
+        690.0
+      ],
+      "vitestSeconds": [
+        422.0,
+        565.0
+      ],
+      "floorCriticalSeconds": 690.0,
+      "fixedWorkSeconds": 93.0,
+      "files": 624,
+      "cases": 14382,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/37538571501",
+      "title": "fix(delegation): skip unreadable destroy holders another user launche\u2026",
+      "jobs": [
+        {
+          "id": 112525718715,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/37538571501/job/112525718715",
+          "startedAt": "2026-10-06T22:07:52Z",
+          "completedAt": "2026-10-06T22:15:12Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 112525718778,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/37538571501/job/112525718778",
+          "startedAt": "2026-10-06T22:09:00Z",
+          "completedAt": "2026-10-06T22:20:30Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 37513225272,
+      "date": "2026-10-06",
+      "sha": "d3099313c9b50e8fa56175ef36b06a14af288dca",
+      "floorWallSeconds": [
+        553.0,
+        652.0
+      ],
+      "vitestSeconds": [
+        529.0,
+        533.0
+      ],
+      "floorCriticalSeconds": 652.0,
+      "fixedWorkSeconds": 91.0,
+      "files": 624,
+      "cases": 14377,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/37513225272",
+      "title": "fix(workflows): nudge turns that end without a final message (#869)",
+      "jobs": [
+        {
+          "id": 112439563594,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/37513225272/job/112439563594",
+          "startedAt": "2026-10-06T18:41:39Z",
+          "completedAt": "2026-10-06T18:50:52Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 112439563600,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/37513225272/job/112439563600",
+          "startedAt": "2026-10-06T18:41:38Z",
+          "completedAt": "2026-10-06T18:52:30Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 38176546350,
+      "date": "2026-10-11",
+      "sha": "05d87f3e0b32453c38a36f472fc3c25905c410d3",
+      "floorWallSeconds": [
+        601.0,
+        922.0
+      ],
+      "vitestSeconds": [
+        571.0,
+        810.0
+      ],
+      "floorCriticalSeconds": 922.0,
+      "fixedWorkSeconds": 81.0,
+      "files": 670,
+      "cases": 15274,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38176546350",
+      "title": "feat(task-cli): end log --follow when the task needs its caller (#947)",
+      "jobs": [
+        {
+          "id": 114580089163,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38176546350/job/114580089163",
+          "startedAt": "2026-10-11T21:29:16Z",
+          "completedAt": "2026-10-11T21:39:17Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 114580089262,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38176546350/job/114580089262",
+          "startedAt": "2026-10-11T21:29:17Z",
+          "completedAt": "2026-10-11T21:44:39Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 38150621206,
+      "date": "2026-10-11",
+      "sha": "125e42159703ec3d52bf148062bd3ac862622ed4",
+      "floorWallSeconds": [
+        590.0,
+        911.0
+      ],
+      "vitestSeconds": [
+        563.0,
+        792.0
+      ],
+      "floorCriticalSeconds": 911.0,
+      "fixedWorkSeconds": 91.0,
+      "files": 670,
+      "cases": 15254,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38150621206",
+      "title": "ci: prepare trusted workflows for pnpm lockfile migration (#957)",
+      "jobs": [
+        {
+          "id": 114503177279,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38150621206/job/114503177279",
+          "startedAt": "2026-10-11T15:17:10Z",
+          "completedAt": "2026-10-11T15:27:00Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 114503177303,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38150621206/job/114503177303",
+          "startedAt": "2026-10-11T15:17:10Z",
+          "completedAt": "2026-10-11T15:32:21Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 38460026183,
+      "date": "2026-10-13",
+      "sha": "46c252a639f599dce225aec1fb6d8c147d78d469",
+      "floorWallSeconds": [
+        735.0,
+        699.0
+      ],
+      "vitestSeconds": [
+        703.0,
+        601.0
+      ],
+      "floorCriticalSeconds": 735.0,
+      "fixedWorkSeconds": 67.0,
+      "files": 681,
+      "cases": 15550,
+      "runAttempt": 4,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38460026183",
+      "title": "feat(web): drag projects in the rail into a server-stored order (#999)",
+      "jobs": [
+        {
+          "id": 115819961462,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38460026183/job/115819961462",
+          "startedAt": "2026-10-14T11:09:12Z",
+          "completedAt": "2026-10-14T11:21:27Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 115819997127,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38460026183/job/115819997127",
+          "startedAt": "2026-10-14T10:43:56Z",
+          "completedAt": "2026-10-14T10:55:35Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 38454769120,
+      "date": "2026-10-13",
+      "sha": "fe030bc17d44882b19f960b00b6c3c4066fea9e4",
+      "floorWallSeconds": [
+        813.0,
+        693.0
+      ],
+      "vitestSeconds": [
+        781.0,
+        591.0
+      ],
+      "floorCriticalSeconds": 813.0,
+      "fixedWorkSeconds": 71.0,
+      "files": 678,
+      "cases": 15507,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38454769120",
+      "title": "cezar autosave (turn end) (#1015)",
+      "jobs": [
+        {
+          "id": 115494616244,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38454769120/job/115494616244",
+          "startedAt": "2026-10-13T19:26:07Z",
+          "completedAt": "2026-10-13T19:39:40Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 115494616455,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38454769120/job/115494616455",
+          "startedAt": "2026-10-13T19:30:06Z",
+          "completedAt": "2026-10-13T19:41:39Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 38980075740,
+      "date": "2026-10-16",
+      "sha": "69886ca14ba5f8244134882b787a77c5389f1ab1",
+      "floorWallSeconds": [
+        836.0,
+        595.0
+      ],
+      "vitestSeconds": [
+        695.0,
+        572.0
+      ],
+      "floorCriticalSeconds": 836.0,
+      "fixedWorkSeconds": 110.0,
+      "files": 718,
+      "cases": 16255,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38980075740",
+      "title": "feat(ci): migrate issue intake to Jev and filter duplicate candidates\u2026",
+      "jobs": [
+        {
+          "id": 117240459300,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38980075740/job/117240459300",
+          "startedAt": "2026-10-16T23:21:29Z",
+          "completedAt": "2026-10-16T23:35:25Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 117240459424,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38980075740/job/117240459424",
+          "startedAt": "2026-10-16T23:24:10Z",
+          "completedAt": "2026-10-16T23:34:05Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 38976544883,
+      "date": "2026-10-16",
+      "sha": "0b261de954788a31d45c23d6255908ce4b41c966",
+      "floorWallSeconds": [
+        835.0,
+        704.0
+      ],
+      "vitestSeconds": [
+        689.0,
+        676.0
+      ],
+      "floorCriticalSeconds": 835.0,
+      "fixedWorkSeconds": 112.0,
+      "files": 718,
+      "cases": 16255,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38976544883",
+      "title": "feat(tasks): archive settled tasks after all PRs merge (#1185)",
+      "jobs": [
+        {
+          "id": 117227296307,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38976544883/job/117227296307",
+          "startedAt": "2026-10-16T22:34:31Z",
+          "completedAt": "2026-10-16T22:48:26Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 117227296448,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/38976544883/job/117227296448",
+          "startedAt": "2026-10-16T22:34:31Z",
+          "completedAt": "2026-10-16T22:46:15Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 39315315450,
+      "date": "2026-10-19",
+      "sha": "342251979fd8d638ecde4704dabc0dc55ffa9681",
+      "floorWallSeconds": [
+        953.0,
+        775.0
+      ],
+      "vitestSeconds": [
+        810.0,
+        751.0
+      ],
+      "floorCriticalSeconds": 953.0,
+      "fixedWorkSeconds": 114.0,
+      "files": 739,
+      "cases": 16924,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/39315315450",
+      "title": "test(workflows): hold the resumed-steer opening turn until its later \u2026",
+      "jobs": [
+        {
+          "id": 118275222674,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/39315315450/job/118275222674",
+          "startedAt": "2026-10-19T19:58:02Z",
+          "completedAt": "2026-10-19T20:13:55Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 118275222706,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/39315315450/job/118275222706",
+          "startedAt": "2026-10-19T19:58:02Z",
+          "completedAt": "2026-10-19T20:10:57Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 39248586858,
+      "date": "2026-10-19",
+      "sha": "8c767eccfc8ce66c27c30219cffd67c77660c0e9",
+      "floorWallSeconds": [
+        751.0,
+        768.0
+      ],
+      "vitestSeconds": [
+        721.0,
+        629.0
+      ],
+      "floorCriticalSeconds": 768.0,
+      "fixedWorkSeconds": 99.0,
+      "files": 738,
+      "cases": 16909,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/39248586858",
+      "title": "CI",
+      "jobs": [
+        {
+          "id": 118046963575,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/39248586858/job/118046963575",
+          "startedAt": "2026-10-19T12:00:25Z",
+          "completedAt": "2026-10-19T12:12:56Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 118046963672,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/39248586858/job/118046963672",
+          "startedAt": "2026-10-19T12:00:25Z",
+          "completedAt": "2026-10-19T12:13:13Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 39687988868,
+      "date": "2026-10-21",
+      "sha": "baa95ab7c5baa494bbdb95fb3606dc2ad7418f5e",
+      "floorWallSeconds": [
+        1037.0,
+        899.0
+      ],
+      "vitestSeconds": [
+        880.0,
+        874.0
+      ],
+      "floorCriticalSeconds": 1037.0,
+      "fixedWorkSeconds": 134.0,
+      "files": 787,
+      "cases": 18004,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/39687988868",
+      "title": "fix(ci): ignore failures caused by a run's cancellation (#1444)",
+      "jobs": [
+        {
+          "id": 119527435816,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/39687988868/job/119527435816",
+          "startedAt": "2026-10-21T22:40:27Z",
+          "completedAt": "2026-10-21T22:57:44Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 119527435974,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/39687988868/job/119527435974",
+          "startedAt": "2026-10-21T22:40:27Z",
+          "completedAt": "2026-10-21T22:55:26Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 39684680519,
+      "date": "2026-10-21",
+      "sha": "5d82c859ccffe74158f21ddc54af83aaa3766220",
+      "floorWallSeconds": [
+        1081.0,
+        947.0
+      ],
+      "vitestSeconds": [
+        920.0,
+        918.0
+      ],
+      "floorCriticalSeconds": 1081.0,
+      "fixedWorkSeconds": 134.0,
+      "files": 786,
+      "cases": 17982,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/39684680519",
+      "title": "feat(skills): provision task skills and unify the skills browser (#1424)",
+      "jobs": [
+        {
+          "id": 119515695975,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/39684680519/job/119515695975",
+          "startedAt": "2026-10-21T22:11:55Z",
+          "completedAt": "2026-10-21T22:29:56Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 119515696036,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/39684680519/job/119515696036",
+          "startedAt": "2026-10-21T22:11:56Z",
+          "completedAt": "2026-10-21T22:27:43Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 40037761457,
+      "date": "2026-10-23",
+      "sha": "d1ac04b15643686543c5a1b65cc3e6d04cab9dc3",
+      "floorWallSeconds": [
+        1186.0,
+        1010.0
+      ],
+      "vitestSeconds": [
+        985.0,
+        986.0
+      ],
+      "floorCriticalSeconds": 1186.0,
+      "fixedWorkSeconds": 171.0,
+      "files": 837,
+      "cases": 19028,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40037761457",
+      "title": "test(workflows): observe park before recovery expiry (#1559)",
+      "jobs": [
+        {
+          "id": 120701562273,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40037761457/job/120701562273",
+          "startedAt": "2026-10-23T23:07:33Z",
+          "completedAt": "2026-10-23T23:27:19Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 120701562301,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40037761457/job/120701562301",
+          "startedAt": "2026-10-23T23:07:33Z",
+          "completedAt": "2026-10-23T23:24:23Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 40024754555,
+      "date": "2026-10-23",
+      "sha": "9c8caa3586ec879632964aa05e945bcd5543e97b",
+      "floorWallSeconds": [
+        990.0,
+        969.0
+      ],
+      "vitestSeconds": [
+        954.0,
+        793.0
+      ],
+      "floorCriticalSeconds": 990.0,
+      "fixedWorkSeconds": 140.0,
+      "files": 840,
+      "cases": 19149,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40024754555",
+      "title": "docs: record architecture decisions and shorten source rationale (#1563)",
+      "jobs": [
+        {
+          "id": 120658394804,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40024754555/job/120658394804",
+          "startedAt": "2026-10-23T21:11:03Z",
+          "completedAt": "2026-10-23T21:27:33Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 120658394933,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40024754555/job/120658394933",
+          "startedAt": "2026-10-23T21:11:33Z",
+          "completedAt": "2026-10-23T21:27:42Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 40099749213,
+      "date": "2026-10-24",
+      "sha": "e2882a245c449ff0960458a8e4ab8f47889e4373",
+      "floorWallSeconds": [
+        1096.0,
+        860.0
+      ],
+      "vitestSeconds": [
+        1065.0,
+        697.0
+      ],
+      "floorCriticalSeconds": 1096.0,
+      "fixedWorkSeconds": 135.0,
+      "files": 838,
+      "cases": 19102,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40099749213",
+      "title": "fix(skills): measure changed test functions in quality coverage (#1609)",
+      "jobs": [
+        {
+          "id": 120889346062,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40099749213/job/120889346062",
+          "startedAt": "2026-10-24T13:49:12Z",
+          "completedAt": "2026-10-24T14:07:28Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 120889346070,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40099749213/job/120889346070",
+          "startedAt": "2026-10-24T13:49:12Z",
+          "completedAt": "2026-10-24T14:03:32Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 40096636107,
+      "date": "2026-10-24",
+      "sha": "870101bc21d4b01ff74ecada1a96cbb48069aafd",
+      "floorWallSeconds": [
+        1127.0,
+        890.0
+      ],
+      "vitestSeconds": [
+        935.0,
+        864.0
+      ],
+      "floorCriticalSeconds": 1127.0,
+      "fixedWorkSeconds": 168.0,
+      "files": 838,
+      "cases": 19093,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40096636107",
+      "title": "feat(web): fold Activity by default and while reading up (#1613)",
+      "jobs": [
+        {
+          "id": 120880192535,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40096636107/job/120880192535",
+          "startedAt": "2026-10-24T13:05:31Z",
+          "completedAt": "2026-10-24T13:24:18Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 120880192580,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40096636107/job/120880192580",
+          "startedAt": "2026-10-24T13:05:31Z",
+          "completedAt": "2026-10-24T13:20:21Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 40087198342,
+      "date": "2026-10-24",
+      "sha": "cf9df51a9d6afcae39a098e09b46ffe29dd6d332",
+      "floorWallSeconds": [
+        1110.0,
+        1097.0
+      ],
+      "vitestSeconds": [
+        1085.0,
+        900.0
+      ],
+      "floorCriticalSeconds": 1110.0,
+      "fixedWorkSeconds": 167.0,
+      "files": 837,
+      "cases": 19036,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40087198342",
+      "title": "fix(web): preserve ask context and answer details (#1600)",
+      "jobs": [
+        {
+          "id": 120852708460,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40087198342/job/120852708460",
+          "startedAt": "2026-10-24T10:47:17Z",
+          "completedAt": "2026-10-24T11:05:47Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 120852708629,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40087198342/job/120852708629",
+          "startedAt": "2026-10-24T10:47:18Z",
+          "completedAt": "2026-10-24T11:05:35Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 40084808572,
+      "date": "2026-10-24",
+      "sha": "57fdde72246bf55e316f646f86269d976b66e323",
+      "floorWallSeconds": [
+        937.0,
+        1173.0
+      ],
+      "vitestSeconds": [
+        912.0,
+        967.0
+      ],
+      "floorCriticalSeconds": 1173.0,
+      "fixedWorkSeconds": 174.0,
+      "files": 837,
+      "cases": 19030,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40084808572",
+      "title": "fix(ci): balance Node floor work and allow job headroom (#1595)",
+      "jobs": [
+        {
+          "id": 120845483826,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40084808572/job/120845483826",
+          "startedAt": "2026-10-24T10:10:00Z",
+          "completedAt": "2026-10-24T10:25:37Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 120845483865,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40084808572/job/120845483865",
+          "startedAt": "2026-10-24T10:10:01Z",
+          "completedAt": "2026-10-24T10:29:34Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 40074497220,
+      "date": "2026-10-24",
+      "sha": "ef3bc826f008265dd43f11cc17b664571bac6d8c",
+      "floorWallSeconds": [
+        995.0,
+        1074.0
+      ],
+      "vitestSeconds": [
+        964.0,
+        889.0
+      ],
+      "floorCriticalSeconds": 1074.0,
+      "fixedWorkSeconds": 155.0,
+      "files": 837,
+      "cases": 19028,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40074497220",
+      "title": "chore: enable complexity checks and fix skill-copy tests (#1593)",
+      "jobs": [
+        {
+          "id": 120814882574,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40074497220/job/120814882574",
+          "startedAt": "2026-10-24T07:32:00Z",
+          "completedAt": "2026-10-24T07:48:35Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 120814882633,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40074497220/job/120814882633",
+          "startedAt": "2026-10-24T07:32:00Z",
+          "completedAt": "2026-10-24T07:49:54Z",
+          "conclusion": "success"
+        }
+      ]
+    },
+    {
+      "run": 40072997381,
+      "date": "2026-10-24",
+      "sha": "7530e6ba2f15d116c8fffac8bf377dbbcbaf4cba",
+      "floorWallSeconds": [
+        805.0,
+        1185.0
+      ],
+      "vitestSeconds": [
+        778.0,
+        985.0
+      ],
+      "floorCriticalSeconds": 1185.0,
+      "fixedWorkSeconds": 169.0,
+      "files": 837,
+      "cases": 19028,
+      "runAttempt": 1,
+      "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40072997381",
+      "title": "test(workflows): separate timer parity startup phases (#1560)",
+      "jobs": [
+        {
+          "id": 120810328326,
+          "name": "Node 24.15.0 floor, unit shard 2/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40072997381/job/120810328326",
+          "startedAt": "2026-10-24T07:09:18Z",
+          "completedAt": "2026-10-24T07:22:43Z",
+          "conclusion": "success"
+        },
+        {
+          "id": 120810328542,
+          "name": "Node 24.15.0 floor, unit shard 1/2",
+          "url": "https://github.com/hearsay-tools/cezarion/actions/runs/40072997381/job/120810328542",
+          "startedAt": "2026-10-24T07:09:19Z",
+          "completedAt": "2026-10-24T07:29:04Z",
+          "conclusion": "success"
+        }
+      ]
+    }
+  ],
+  "suiteGroupsByRun": {
+    "37538571501": {
+      "other": [
+        1946.1229999999994,
+        12934,
+        607
+      ],
+      "other parity": [
+        538.6,
+        541,
+        14
+      ],
+      "monitoring matrices": [
+        471.9,
+        331,
+        2
+      ],
+      "harness parity": [
+        451.827,
+        576,
+        1
+      ]
+    },
+    "38176546350": {
+      "other": [
+        2830.962999999998,
+        13739,
+        651
+      ],
+      "other parity": [
+        777.614,
+        611,
+        16
+      ],
+      "monitoring matrices": [
+        637.726,
+        331,
+        2
+      ],
+      "harness parity": [
+        613.239,
+        593,
+        1
+      ]
+    },
+    "38460026183": {
+      "other": [
+        2642.3850000000016,
+        13967,
+        661
+      ],
+      "other parity": [
+        719.105,
+        611,
+        16
+      ],
+      "CI failure parity": [
+        125.197,
+        48,
+        1
+      ],
+      "monitoring matrices": [
+        572.931,
+        331,
+        2
+      ],
+      "harness parity": [
+        546.737,
+        593,
+        1
+      ]
+    },
+    "38980075740": {
+      "other": [
+        2488.4780000000032,
+        14629,
+        698
+      ],
+      "other parity": [
+        746.203,
+        641,
+        16
+      ],
+      "CI failure parity": [
+        145.5,
+        48,
+        1
+      ],
+      "harness parity": [
+        527.69,
+        606,
+        1
+      ],
+      "monitoring matrices": [
+        535.298,
+        331,
+        2
+      ]
+    },
+    "39315315450": {
+      "other": [
+        2927.023000000002,
+        15087,
+        718
+      ],
+      "waits parity": [
+        377.355,
+        247,
+        1
+      ],
+      "other parity": [
+        888.5889999999999,
+        641,
+        16
+      ],
+      "harness parity": [
+        539.499,
+        606,
+        1
+      ],
+      "CI failure parity": [
+        139.678,
+        48,
+        1
+      ],
+      "monitoring matrices": [
+        581.481,
+        295,
+        2
+      ]
+    },
+    "39687988868": {
+      "other": [
+        2997.4949999999985,
+        15703,
+        741
+      ],
+      "other parity": [
+        1100.016,
+        786,
+        22
+      ],
+      "monitoring matrices": [
+        544.824,
+        283,
+        2
+      ],
+      "harness parity": [
+        526.968,
+        678,
+        8
+      ],
+      "waits parity": [
+        1008.0749999999999,
+        506,
+        13
+      ],
+      "CI failure parity": [
+        124.465,
+        48,
+        1
+      ]
+    },
+    "40037761457": {
+      "other": [
+        3256.6719999999996,
+        16541,
+        777
+      ],
+      "other parity": [
+        1195.8879999999995,
+        822,
+        24
+      ],
+      "CI failure parity": [
+        123.088,
+        48,
+        1
+      ],
+      "monitoring matrices": [
+        567.418,
+        283,
+        2
+      ],
+      "harness parity": [
+        532.042,
+        678,
+        8
+      ],
+      "waits parity": [
+        1335.6960000000001,
+        656,
+        25
+      ]
+    },
+    "40099749213": {
+      "other": [
+        2934.193000000003,
+        16615,
+        778
+      ],
+      "other parity": [
+        1035.141,
+        822,
+        24
+      ],
+      "CI failure parity": [
+        127.754,
+        48,
+        1
+      ],
+      "monitoring matrices": [
+        573.2429999999999,
+        283,
+        2
+      ],
+      "harness parity": [
+        528.194,
+        678,
+        8
+      ],
+      "waits parity": [
+        1175.6499999999999,
+        656,
+        25
+      ]
+    }
+  },
+  "latestSourceMatchedComparison": {
+    "run": 40099749213,
+    "floorNode": "24.15.0",
+    "ltsNode": "24.21.0",
+    "files": 838,
+    "cases": 19102,
+    "floorModuleSeconds": 6374.186534528,
+    "ltsModuleSeconds": 6591.608,
+    "floorJobs": 2,
+    "ltsJobs": 3,
+    "workersPerJob": 4,
+    "floorLongestJobSeconds": 1096,
+    "ltsLongestJobSeconds": 750,
+    "floorLongestVitestSeconds": 1065.05,
+    "ltsLongestVitestSeconds": 726.78,
+    "matchedFileMedianFloorLtsRatioWhenLtsAtLeast1Second": 0.9725191645538933,
+    "ltsJobIds": [
+      120889346075,
+      120889346100,
+      120889346158
+    ]
+  },
+  "latestSlowestFiles": [
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/monitoring-turn.test.ts",
+      "state": "passed",
+      "durationMs": 354540.981963,
+      "cases": 222
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/monitoring-channel-order.test.ts",
+      "state": "passed",
+      "durationMs": 218702.318104,
+      "cases": 61
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/core/harness-claude-parity.test.ts",
+      "state": "passed",
+      "durationMs": 206560.252295,
+      "cases": 107
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "state": "passed",
+      "durationMs": 193679.795087,
+      "cases": 170
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/worker-parent-attention.test.ts",
+      "state": "passed",
+      "durationMs": 193087.959363,
+      "cases": 85
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/waits-claude-workers-parity.test.ts",
+      "state": "passed",
+      "durationMs": 187307.150991,
+      "cases": 37
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
+      "state": "passed",
+      "durationMs": 164371.46002199998,
+      "cases": 41
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/waits-claude-parity.test.ts",
+      "state": "passed",
+      "durationMs": 156480.190273,
+      "cases": 51
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/core/workflow-autonomous-parity.test.ts",
+      "state": "passed",
+      "durationMs": 145085.548872,
+      "cases": 96
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/ci-wait-failure-parity.test.ts",
+      "state": "passed",
+      "durationMs": 127753.535126,
+      "cases": 48
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/core/skill-resume-parity.test.ts",
+      "state": "passed",
+      "durationMs": 121287.093093,
+      "cases": 47
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/core/workflow-final-message-parity.test.ts",
+      "state": "passed",
+      "durationMs": 109017.288149,
+      "cases": 108
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/waits-cursor-parity.test.ts",
+      "state": "passed",
+      "durationMs": 97673.124548,
+      "cases": 51
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/waits-cursor-workers-parity.test.ts",
+      "state": "passed",
+      "durationMs": 97438.036119,
+      "cases": 37
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/core/harness-autosave-settlement.test.ts",
+      "state": "passed",
+      "durationMs": 94218.951703,
+      "cases": 48
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/waits-opencode-parity.test.ts",
+      "state": "passed",
+      "durationMs": 92987.679746,
+      "cases": 51
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/worker-wait-durability.test.ts",
+      "state": "passed",
+      "durationMs": 90338.236087,
+      "cases": 48
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/core/workflow-followup-parity.test.ts",
+      "state": "passed",
+      "durationMs": 88283.85741499999,
+      "cases": 57
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/core/harness-opencode-parity.test.ts",
+      "state": "passed",
+      "durationMs": 87584.59393,
+      "cases": 109
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/core/harness-codex-parity.test.ts",
+      "state": "passed",
+      "durationMs": 86230.465715,
+      "cases": 109
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/worker-wait-capacity.test.ts",
+      "state": "passed",
+      "durationMs": 84713.687775,
+      "cases": 37
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/waits-opencode-workers-parity.test.ts",
+      "state": "passed",
+      "durationMs": 80073.136804,
+      "cases": 37
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/core/ci-tools.test.ts",
+      "state": "passed",
+      "durationMs": 77567.310402,
+      "cases": 93
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/worker-wait-conversations.test.ts",
+      "state": "passed",
+      "durationMs": 72132.756532,
+      "cases": 29
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/waits-codex-parity.test.ts",
+      "state": "passed",
+      "durationMs": 71190.14833000001,
+      "cases": 51
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/core/harness-cursor-parity.test.ts",
+      "state": "passed",
+      "durationMs": 66194.38668499999,
+      "cases": 107
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/core/workflow-ask-parity.test.ts",
+      "state": "passed",
+      "durationMs": 65037.939056999996,
+      "cases": 66
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/ci-wait.test.ts",
+      "state": "passed",
+      "durationMs": 63509.243993,
+      "cases": 53
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/core/skill-provision-parity.test.ts",
+      "state": "passed",
+      "durationMs": 62425.006924,
+      "cases": 30
+    },
+    {
+      "project": "server",
+      "file": "packages/cezar/src/workflows/ci-wait-conflict-parity.test.ts",
+      "state": "passed",
+      "durationMs": 59120.333291999996,
+      "cases": 24
+    }
+  ]
+}

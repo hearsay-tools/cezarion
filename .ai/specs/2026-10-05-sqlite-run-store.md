@@ -12,6 +12,10 @@ Store runs in one `node:sqlite` file per project, `.ai/cezar/runs.db`. Move only
 
 SQLite ships inside Node, so the zero-config rule holds: no server, no install, no setting. The price is a higher Node floor: `engines.node` is `>=24.15.0`, the first release where `node:sqlite` is a release candidate (stability 1.2), and CI runs the unit gate on exactly 24.15.0 (`node-floor` job).
 
+### Runtime support update, 2026-10-24
+
+The owner approved Node 24.21.0 as the new minimum for 0.17. CI now verifies the exact minimum in the existing build/package job, including packaged CLI startup and SQLite persistence. The full Vitest suite runs once on current LTS. The original floor matrix described above is retired.
+
 ## Design
 
 - **Rows.** One row per run: the complete `RunRecord` JSON (`data`), its `toRunSummary()` JSON (`summary`) and a few columns copied from the record for queries (`created_at`, `finished_at`, `status`, `archived`, `live`, `parent_run_id`, `client_request_id`, `group_id`, `worktree_path`, `branch`, `base_branch`, `revision`). The zod `RunRecord` schema is unchanged. `runs/run-database.ts` is the only code that writes SQL and never parses `data`; `runs/run-row.ts` computes columns and the summary.

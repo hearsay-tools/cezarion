@@ -42,7 +42,29 @@ selected test in a multi-project repository. Vitest always excludes its
 `test.include` globs from coverage; the runner removes only those globs, so
 changed test functions are measured, and `coverage.include` still limits the
 report to the changed files. Test files end in `.test`, `.spec` or `.e2e` and a
-JavaScript or TypeScript extension. For Node,
+JavaScript or TypeScript extension.
+
+The Vitest collector also measures Node child processes that the selected tests
+start, such as a runner mock that a test runs as the runner's native binary. It
+adds `NODE_V8_COVERAGE` to each project's `test.env`. Vitest copies that
+environment into its workers after they start, so the workers record nothing,
+and every Node process a test spawns inherits the variable. The collector
+converts that process coverage for changed untransformed JavaScript
+(`.js`, `.mjs`, `.cjs`) and adds it to Vitest's report. Counters at the same
+source location are summed, so the report keeps one entry per file. These
+child processes are not measured:
+
+- Processes of a non-Node binary, and the Node processes they start without the
+  inherited environment.
+- A spawn with an explicit environment that leaves out `NODE_V8_COVERAGE`.
+- Transformed sources in a child, such as TypeScript run through `tsx`: their
+  offsets do not match the file on disk.
+- A process that a signal ends without a handler, such as `SIGKILL` or an
+  unhandled `SIGTERM`. Node writes process coverage only when the process exits.
+- A copy of a changed file at another path: only the changed file's own path is
+  matched.
+
+For Node,
 the skill bundles the V8 merger and Istanbul converter; no Vitest dependency is
 needed. Node collection supports untransformed JavaScript. For transformed
 TypeScript/JSX or another runner, collect Istanbul coverage through that runner
@@ -58,7 +80,10 @@ node <skill>/scripts/check.mjs --base origin/main \
 ```
 
 Collection has a ten-minute bound. Failed tests produce exit 2 and no accepted
-verdict. Missing, stale or unmatched function coverage remains incomplete. A
+verdict. `--test-timeout <ms>` sets the per-test timeout of the coverage run.
+With Vitest it replaces the `testTimeout` of every selected project; hook
+timeouts keep their configured values. With Node it passes `--test-timeout` to
+`node --test`. Use it when tests time out under host load but pass alone. Missing, stale or unmatched function coverage remains incomplete. A
 source edit, new changed function or HEAD change during measurement also produces
 exit 2. The tool checks source hashes and rescans against the pinned baseline.
 Changed test functions stay in scope. A file missing from the report, such as a
@@ -90,3 +115,46 @@ The change scanner compares function source, excluding nested bodies from the
 parent. Comments and whitespace inside a function count as edits. Renamed or
 moved functions may appear as added. Duplicate identities can have an unknown
 baseline. Inspect the diff and baseline for these cases before deciding origin.
+
+## Curried arrows and transformed coverage
+
+The matcher first uses exact function-body positions. For an arrow whose body
+is another arrow, it can also use an exact Istanbul declaration endpoint: the
+parsed arrow's start plus one column, with the same body end line. This handles
+source maps that move a returned arrow's body start into its parent's parameter
+list. Each coverage entry can belong to only one function. Names, entry order
+and nearby positions cannot resolve ambiguous matches.
+
+Called outer stages and uncalled returned stages keep separate call counters.
+The directly returned arrow's entire span is excluded from its parent's
+statement attribution, including mapped statements that drift into the returned
+arrow's signature. That parent has no independent body statements, so its own
+call counter determines 100% or 0%. The returned function keeps its own body
+statements, and the CRAP formula is unchanged. An absent counter is not evidence that a function was uncalled.
+
+Some transforms lose both exact anchors, including the middle stage of a
+multiline three-stage arrow in the tested Vitest V8 transform. Missing or
+ambiguous matches still produce unavailable coverage, null CRAP and exit 2;
+the report points here. Regenerating the same source map may repeat the failure.
+Rewrite the affected stage as a block-bodied function that returns the next
+arrow, then collect fresh coverage with the same `--test` and `--project` flags:
+
+```ts
+// Before
+const set = (key: string, value: string) => (current: URLSearchParams) => {
+  current.set(key, value);
+  return current;
+};
+
+// Explicit outer body gives the collector a separate body anchor.
+function set(key: string, value: string) {
+  return (current: URLSearchParams) => {
+    current.set(key, value);
+    return current;
+  };
+}
+```
+
+For a longer chain, give each unmatched stage its own explicit body. This is a
+mapping workaround, not a coverage exemption; every changed stage must still
+have a coverage result.

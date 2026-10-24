@@ -1,10 +1,8 @@
 const { test } = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
-const os = require('node:os');
 const path = require('node:path');
 const { spawnSync } = require('node:child_process');
-const yaml = require('yaml');
 
 const root = path.resolve(__dirname, '../..');
 const reporter = path.join(__dirname, 'node-floor-reporter.mjs');
@@ -64,27 +62,4 @@ test('floor measurements retain native test durations, timeout budgets and failu
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
-});
-
-test('floor CI keeps its failure exit and uploads timing evidence even when Vitest fails', () => {
-  const ci = yaml.parse(fs.readFileSync(path.join(root, '.github/workflows/ci.yml'), 'utf8'));
-  const job = ci.jobs['node-floor'];
-  const step = job.steps.find(s => s.name === 'Run server and cockpit unit suites');
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cez-floor-workflow-'));
-  try {
-    const argsFile = path.join(dir, 'args');
-    fs.writeFileSync(path.join(dir, 'npm'), '#!/bin/sh\nprintf "%s\\n" "$@" > "$ARGS_FILE"\nexit 7\n', { mode: 0o755 });
-    const result = spawnSync('bash', ['-e', '-c', step.run.replaceAll('${{ matrix.shard }}', '2')], {
-      encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, ARGS_FILE: argsFile },
-    });
-    assert.equal(result.status, 7, 'measurement must not turn a failed suite green');
-    const args = fs.readFileSync(argsFile, 'utf8').trim().split('\n');
-    assert.ok(args.includes('--shard=2/2'));
-    assert.ok(args.includes('--maxWorkers=4'));
-    assert.ok(args.includes('--reporter=./.github/scripts/node-floor-reporter.mjs'));
-    assert.equal(args.filter(a => a === '--reporter=github-actions').length, 1);
-    const upload = job.steps.find(s => s.name === 'Upload floor measurements');
-    assert.equal(upload.if, 'always()');
-    assert.equal(upload.with.path, '${{ runner.temp }}/node-floor-shard-${{ matrix.shard }}.json');
-  } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 });

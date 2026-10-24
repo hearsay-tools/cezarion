@@ -335,3 +335,71 @@ test('failed test runs and source changes produce no scores and clean temporary 
     assert.equal(existsSync(temporary), false);
   }
 });
+
+function curriedCoverage() {
+  const source = 'const set = (key: string) => (current: string) => current + key;';
+  const functions = analyzeSource(source, 'curry.ts');
+  const entry = coverageFor(source, functions, []);
+  // Source maps can move the outer body into its parameter list. The
+  // declaration endpoint still marks the original arrow's start + 1.
+  entry.fnMap[0].loc.start.column = 20;
+  entry.fnMap[0].decl = { end: { line: functions[0].line, column: functions[0].column } };
+  return { source, functions, entry };
+}
+
+test('curried arrows use an exact declaration endpoint when body mapping drifts', () => {
+  const { source, functions, entry } = curriedCoverage();
+  for (const calls of [[1, 1], [1, 0], [0, 0]]) {
+    entry.f = { 0: calls[0], 1: calls[1] };
+    const results = functionResults(functions, measureCoverage(source, functions, entry));
+    assert.deepEqual(results.map(fn => fn.coverage.calls), calls);
+    assert.deepEqual(results.map(fn => fn.coverage.percent), calls.map(count => count * 100));
+  }
+});
+
+test('curried anchor matching rejects missing, duplicate, shifted and conflicting evidence', () => {
+  const mutations = [
+    ({ entry }) => { delete entry.fnMap[0].decl; },
+    ({ entry }) => { entry.fnMap[0].decl.end.column++; },
+    ({ entry }) => { entry.fnMap[0].decl.end.line++; },
+    ({ entry }) => { entry.fnMap[0].loc.end.line++; },
+    ({ entry }) => { entry.fnMap[2] = structuredClone(entry.fnMap[0]); entry.f[2] = 0; },
+    ({ entry }) => { entry.fnMap[1].decl = entry.fnMap[0].decl; },
+    ({ entry }) => {
+      // The fallback cannot steal an entry claimed by an exact body match.
+      entry.fnMap[0].loc = structuredClone(entry.fnMap[1].loc);
+      delete entry.fnMap[1];
+    },
+  ];
+  for (const mutate of mutations) {
+    const fixture = curriedCoverage();
+    mutate(fixture);
+    const { source, functions, entry } = fixture;
+    const result = measureCoverage(source, functions, entry).get(functions[0]);
+    assert.equal(result.coverage.status, 'unavailable', mutate.toString());
+    assert.equal(result.crap, null);
+  }
+});
+
+test('declaration fallback does not admit ordinary arrows or replace ambiguous exact matches', () => {
+  const source = 'const ordinary = (x: string) => x;';
+  const functions = analyzeSource(source, 'ordinary.ts');
+  const entry = coverageFor(source, functions, []);
+  entry.fnMap[0].decl = { end: { line: functions[0].line, column: functions[0].column } };
+  entry.fnMap[0].loc.start.column--;
+  assert.equal(measureCoverage(source, functions, entry).get(functions[0]).crap, null);
+  const curry = curriedCoverage();
+  curry.entry.fnMap[0].loc.start = { ...curry.functions[0].bodyLoc };
+  curry.entry.fnMap[2] = structuredClone(curry.entry.fnMap[0]);
+  assert.equal(measureCoverage(curry.source, curry.functions, curry.entry).get(curry.functions[0]).crap, null);
+});
+
+test('returned-arrow syntax cannot charge an uncalled nested stage to its called parent', () => {
+  const source = 'const triple = (a: number) => (b: number) => (c: number) => a + b + c;';
+  const functions = analyzeSource(source, 'triple.ts');
+  const entry = coverageFor(source, functions, [['b: number', 0], ['c: number', 0], ['a + b + c', 0]]);
+  entry.f = { 0: 1, 1: 0, 2: 0 };
+  const results = functionResults(functions, measureCoverage(source, functions, entry));
+  assert.deepEqual(results.map(fn => fn.coverage.percent), [100, 0, 0]);
+  assert.deepEqual(results.map(fn => fn.coverage.executableLines), [0, 0, 1]);
+});

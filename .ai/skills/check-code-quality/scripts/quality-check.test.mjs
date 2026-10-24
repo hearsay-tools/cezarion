@@ -197,6 +197,7 @@ test('Vitest resolves in the target project and receives all files, tests and pr
       assert.equal(process.cwd(), ${JSON.stringify(f.cwd)});
       assert.equal(process.env.VITEST, 'true');
       assert.deepEqual(options.project, ['unit']);
+      assert.equal(options.testTimeout, 30000);
       assert.deepEqual(options.coverage.include, ['second.mjs', 'source.mjs']);
       const config = { include: ['**/*.test.mjs'], coverage: { exclude: ['**/*.test.mjs', 'custom/**'] } };
       const project = { config: { include: ['**/*.e2e.ts'], coverage: { exclude: ['**/*.e2e.ts', '**/*.test.mjs'] } } };
@@ -206,6 +207,8 @@ test('Vitest resolves in the target project and receives all files, tests and pr
           // Only the globs Vitest adds from test.include leave the exclusions.
           assert.deepEqual(config.coverage.exclude, ['custom/**']);
           assert.deepEqual(project.config.coverage.exclude, []);
+          // Spawned Node processes inherit the worker environment and record process coverage.
+          for (const { env } of [config, project.config]) assert.match(env.NODE_V8_COVERAGE, /raw$/);
           assert.deepEqual(filters, [${JSON.stringify(join(f.cwd, 'source.test.mjs'))}]);
           writeFileSync(join(options.coverage.reportsDirectory, 'coverage-final.json'), ${JSON.stringify(JSON.stringify({ ...coverage(f), ...coverage(f, 'second.mjs') }))});
           console.log('fixture vitest log');
@@ -214,7 +217,7 @@ test('Vitest resolves in the target project and receives all files, tests and pr
       };
     }
   `);
-  const result = await invoke(f, ['--test', 'source.test.mjs', '--project', 'unit']);
+  const result = await invoke(f, ['--test', 'source.test.mjs', '--project', 'unit', '--test-timeout', '30000']);
   assert.equal(result.code, 0, result.error + JSON.stringify(result.report));
   assert.match(result.error, /fixture vitest log/);
   assert.equal(result.report.measurement.runner, 'vitest');
@@ -246,7 +249,7 @@ function vitestFixture(t) {
     import { defineConfig } from 'vitest/config';
     const alias = { '#source': fileURLToPath(new URL('./source.mjs', import.meta.url)) };
     export default defineConfig({ cacheDir: 'reports/vite', test: { projects: [
-      { resolve: { alias }, test: { name: 'unit', include: ['**/*.test.js'], setupFiles: ['./setup.js'] } },
+      { resolve: { alias }, test: { name: 'unit', include: ['**/*.test.js'], setupFiles: ['./setup.js'], testTimeout: 30000 } },
       { test: { name: 'e2e', include: ['**/*.e2e.ts'], environment: 'node' } },
     ] } });`);
   f.write('setup.js', 'globalThis.qualitySetup = true;');
@@ -280,6 +283,69 @@ test('Vitest selects .e2e.ts browser tests through their project and measures th
   assert.equal(result.report.summary.functions, 5);
 });
 
+// A runner mock is such a script: the selected test starts it as a separate `node` process.
+test('Vitest measures functions that run only in spawned node children and merges in-process counts', async t => {
+  const f = vitestFixture(t);
+  f.git('checkout', '--', 'source.mjs');
+  f.write('flow.e2e.ts', '');
+  f.write('choose.test.js', '');
+  const main = 'process.argv[1] === fileURLToPath(import.meta.url)';
+  f.write('child.mjs', `import { fileURLToPath } from 'node:url';
+function viaChild(value) {
+  if (value) return 1;
+  return 2;
+}
+if (${main}) process.stdout.write(String(viaChild(process.argv[2] === 'yes')));`);
+  f.write('both.mjs', `import { fileURLToPath } from 'node:url';
+export function twice(value) {
+  if (value) return 'in-process';
+  return 'child';
+}
+if (${main}) process.stdout.write(twice(false));`);
+  f.write('spawn.test.js', `import { execFileSync } from 'node:child_process';
+    import { expect, test } from 'vitest';
+    import { twice } from './both.mjs';
+    const run = (...args) => execFileSync(process.execPath, args, { encoding: 'utf8' });
+    test('children', () => {
+      expect(run('child.mjs', 'yes') + run('child.mjs', 'no')).toBe('12');
+      expect(run('both.mjs')).toBe('child');
+      expect(twice(true)).toBe('in-process');
+    });`);
+  const result = await invoke(f, ['--test', 'spawn.test.js', '--project', 'unit']);
+  assert.equal(result.code, 0, result.error + JSON.stringify(result.report.errors));
+  assert.deepEqual(measured(result.report).filter(name => !name.startsWith('spawn.test.js')),
+    ['both.mjs:twice:100', 'child.mjs:viaChild:100']);
+});
+
+// The flag must replace a project's own testTimeout, as this repository's server project sets one.
+test('--test-timeout overrides the Vitest project timeout for the coverage run', async t => {
+  const f = vitestFixture(t);
+  f.write('flow.e2e.ts', '');
+  f.write('choose.test.js', `import { expect, test } from 'vitest';
+    import { choose } from '#source';
+    test('choose', async () => { await new Promise(done => setTimeout(done, 300)); expect(choose(true)).toBe(1); expect(choose(false)).toBe(2); });`);
+  const args = ['--test', 'choose.test.js', '--project', 'unit'];
+  const project = await invoke(f, args);
+  assert.equal(project.code, 0, project.error + JSON.stringify(project.report.errors));
+  const short = await invoke(f, [...args, '--test-timeout', '50']);
+  assert.equal(short.code, 2);
+  assert.match(short.report.errors.join(' '), /Coverage tests failed/);
+  assert.match(short.error, /timed out in 50ms/);
+});
+
+test('--test-timeout reaches the Node test runner', async t => {
+  const f = fixture(t);
+  f.write('source.test.mjs', `import test from 'node:test';
+    import { choose } from './source.mjs';
+    test('choose', async () => { await new Promise(done => setTimeout(done, 300)); choose(true); choose(false); });`);
+  const short = await invoke(f, ['--runner', 'node', '--test', 'source.test.mjs', '--test-timeout', '50']);
+  assert.equal(short.code, 2);
+  assert.match(short.error, /timed out after 50ms/);
+  const long = await invoke(f, ['--runner', 'node', '--test', 'source.test.mjs', '--test-timeout', '30000']);
+  assert.equal(long.code, 0, long.error + JSON.stringify(long.report.errors));
+  assert.ok(long.report.measurement.command.includes('--test-timeout=30000'));
+});
+
 test('invalid runner arguments fail before starting tests', async t => {
   const f = fixture(t);
   for (const args of [['--runner', 'unknown'], ['--runner', 'node'],
@@ -287,7 +353,8 @@ test('invalid runner arguments fail before starting tests', async t => {
     ['--runner', 'node', '--test', 'source.test.mjs', '--project', 'unit'],
     ['--test', 'source.test.mjs', '--node-import', 'source.test.mjs'],
     ['--test', 'source.test.mjs', '--project', ''], ['--output', 'source.mjs'],
-    ['--test', 'source.mjs']]) {
+    ['--test', 'source.mjs'], ['--test-timeout', '30000'],
+    ...['0', '-1', '1.5', '30s', ''].map(ms => ['--test', 'source.test.mjs', '--test-timeout', ms])]) {
     const result = await invoke(f, args, { collect: () => assert.fail('must not run tests') });
     assert.equal(result.code, 2, JSON.stringify(args));
     assert.equal(result.report.status, 'incomplete');
@@ -343,4 +410,68 @@ test('copied skill runs the complete Node coverage check outside this checkout',
     '--runner', 'node', '--test', 'source.test.mjs', '--json'], { cwd: f.cwd, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.equal(JSON.parse(result.stdout).summary.functions, 1);
+});
+
+function curriedVitestFixture(t) {
+  const f = vitestFixture(t);
+  f.write('flow.e2e.ts', '');
+  f.write('choose.test.js', '');
+  f.write('curried.test.js', `import { expect, test } from 'vitest';
+    import * as curry from './curried.ts';
+    test('curried stages', () => {
+      expect(curry.both('x', '1')(new URLSearchParams()).get('x')).toBe('1');
+      expect(curry.both('x', null)(new URLSearchParams('x=1')).has('x')).toBe(false);
+      expect(typeof curry.outer('x', '1')).toBe('function');
+      expect(typeof curry.neither).toBe('function');
+      expect(curry.expressionBoth('x', 1)({})).toEqual({x: 1});
+      expect(typeof curry.expressionOuter('x', 1)).toBe('function');
+      expect(typeof curry.expressionNeither).toBe('function');
+      expect(curry.tripleBoth(1)(2)(3)).toBe(6);
+      expect(typeof curry.tripleOuter(1)).toBe('function');
+      expect(typeof curry.tripleNeither).toBe('function');
+      expect(curry.cleanup({current: undefined})()).toBeUndefined();
+    });`);
+  return f;
+}
+
+function curriedSource() {
+  const block = `(key: string, value: string | null): Update => (current) => {
+    if (value === null) current.delete(key);
+    else current.set(key, value);
+    return current;
+  };`;
+  const expression = '(key: string, value: number) => (current: Record<string, number>) => ({...current, [key]: value});';
+  const triple = '(a: number) => (b: number) => (c: number) => a + b + c;';
+  return `type Update = (current: URLSearchParams) => URLSearchParams;\n`
+    + ['both', 'outer', 'neither'].map(name => `export const ${name} = ${block}`).join('\n') + '\n'
+    + ['Both', 'Outer', 'Neither'].map(name => `export const expression${name} = ${expression}`).join('\n') + '\n'
+    + ['Both', 'Outer', 'Neither'].map(name => `export const triple${name} = ${triple}`).join('\n') + '\n'
+    + 'export const cleanup = (timer: {current: undefined}) => () => clearTimeout(timer.current);\n';
+}
+
+test('real Vitest coverage distinguishes called and uncalled curried stages without rewriting', async t => {
+  const f = curriedVitestFixture(t);
+  f.write('curried.ts', curriedSource());
+  const result = await invoke(f, ['--test', 'curried.test.js', '--project', 'unit']);
+  assert.equal(result.code, 0, result.error + JSON.stringify(result.report));
+  const functions = result.report.files.find(file => file.file === 'curried.ts').functions;
+  assert.ok(functions.every(fn => fn.coverage.status === 'available'));
+  assert.deepEqual(functions.map(fn => fn.coverage.calls), [2, 2, 1, 0, 0, 0, 1, 1, 1, 0, 0, 0, 1, 1, 1, 1, 0, 0, 0, 0, 0, 1, 1]);
+  assert.deepEqual(functions.map(fn => fn.coverage.percent), [100, 100, 100, 0, 0, 0, 100, 100, 100, 0, 0, 0, 100, 100, 100, 100, 0, 0, 0, 0, 0, 100, 100]);
+});
+
+
+test('multiline curries without exact anchors stay incomplete and name the rewrite', async t => {
+  const f = vitestFixture(t);
+  f.write('flow.e2e.ts', '');
+  f.write('choose.test.js', `import { expect, test } from 'vitest';
+    import { triple } from './curried.ts';
+    test('triple', () => { expect(triple(1)(2)(3)).toBe(6); });`);
+  f.write('curried.ts', 'export const triple = (a: number) =>\n (b: number) =>\n (c: number) => a + b + c;');
+  const result = await invoke(f, ['--test', 'choose.test.js', '--project', 'unit']);
+  assert.equal(result.code, 2);
+  const functions = result.report.files.find(file => file.file === 'curried.ts').functions;
+  assert.equal(functions[1].coverage.status, 'unavailable');
+  assert.equal(functions[1].crap, null);
+  assert.match(markdownReport(result.report), /references\/tool\.md.*block-bodied rewrite/);
 });

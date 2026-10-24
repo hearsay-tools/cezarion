@@ -987,7 +987,7 @@ test('ci.yml starts the review after verify and owns the required Automated Code
       failure: () => before.includes('failure'),
     });
   };
-  const shards = ['vitest', 'node-floor', 'cockpit-browser'];
+  const shards = ['vitest', 'cockpit-browser'];
   const outcome = (shardResult, verifyResult) => Object.fromEntries(Object.keys(ci.jobs).map(job => [job,
     job === 'verify' ? verifyResult : shards.includes(job) ? shardResult : 'success']));
   for (const [context, expected] of routing) {
