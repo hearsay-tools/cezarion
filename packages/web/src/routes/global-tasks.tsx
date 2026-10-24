@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { ArchiveRestoreIcon, EyeIcon, EyeOffIcon, ListChecksIcon, SearchXIcon } from 'lucide-react'
 import { ArchiveIcon, LayersIcon, PlusIcon, SearchIcon, SlidersHorizontalIcon, XIcon } from '@/components/design-icons'
 import * as React from 'react'
-import { Link, useSearchParams } from 'react-router'
+import { Link } from 'react-router'
 
 import { archiveProjectRun, setProjectRunRead } from '@/api/client'
 import {
@@ -22,7 +22,7 @@ import { Pill } from '@/components/pill'
 import { ReferenceList } from '@/components/reference-overflow'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { StatusDot } from '@/components/status-dot'
-import { GroupFoldControls, OriginFilter, StatusGroupSection, TaskOriginLine, TaskPreview } from '@/components/task-status-groups'
+import { StatusGroupSection, TaskOriginRow, TaskOriginLine, TaskPreview } from '@/components/task-status-groups'
 import { Button } from '@/components/ui/button'
 import { toast } from '@/components/ui/toaster'
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip'
@@ -54,18 +54,21 @@ import {
   toGlobalTasks,
   toggleFacetValue,
   toggleGroupBy,
+  withOrigin,
   truncatedProjectNames,
   type FacetId,
   type GlobalTask,
   type GlobalTaskFilters,
   type GlobalTasksUrlState,
   type GroupBy,
+  type TaskGroup,
 } from '@/lib/global-tasks'
 import { scopeTo } from '@/lib/project-router'
 import { allProjectTags } from '@/lib/project-tags'
 import { canBeUnread, isReadDoneItem, isUnread, unreadMarkerTone } from '@/lib/read-state'
 import { runTitle, type BucketLabel, type ListView } from '@/lib/task-groups'
-import { groupIndexedTasks, groupMembers, groupTone, originCounts, rowTasks, type TaskOrigin } from '@/lib/task-origin'
+import { groupIndexedTasks, groupMembers, groupTone, originCounts, rowTasks, type TaskOrigin, type TaskStatusGroup } from '@/lib/task-origin'
+import { useSearchParamsWriter } from '@/lib/use-search-params-writer'
 import { useTaskListFolds } from '@/lib/use-task-list-folds'
 import { usageMetricVisibility } from '@/lib/token-metrics'
 import { useNow } from '@/lib/use-now'
@@ -223,7 +226,7 @@ export function GlobalTasksRoute() {
   // The URL is the state, not a mirror of it: read here, written by the setters below. One
   // source of truth means a refresh, a pasted link and the Back button all land on the same
   // filtered view, with no effect syncing two copies that can disagree.
-  const [searchParams, setSearchParams] = useSearchParams()
+  const [searchParams, writeSearchParams] = useSearchParamsWriter()
   const { filters, groupBy, view } = React.useMemo(
     () => urlStateFromSearchParams(searchParams),
     [searchParams],
@@ -235,49 +238,19 @@ export function GlobalTasksRoute() {
    * turn Back into "undo one chip" instead of "leave this page".
    *
    * The whole state is re-decoded from the params INSIDE the updater rather than read from this
-   * render's closure, so two changes landing in one tick compose instead of the second silently
-   * reverting the first.
+   * render's closure, and `useSearchParamsWriter` hands the updater the params of every earlier
+   * write, rendered or not, so two changes landing in one tick compose instead of the second
+   * silently reverting the first.
    */
   const commit = (next: (current: GlobalTasksUrlState) => GlobalTasksUrlState) =>
-    setSearchParams((current) => urlStateToSearchParams(next(urlStateFromSearchParams(current))), {
-      replace: true,
-    })
+    writeSearchParams((current) => urlStateToSearchParams(next(urlStateFromSearchParams(current))))
   const setFilters = (next: (current: GlobalTaskFilters) => GlobalTaskFilters) =>
     commit((state) => ({ ...state, filters: next(state.filters) }))
   const setGroupBy = (groupBy: GroupBy) => commit((state) => ({ ...state, groupBy }))
   const setView = (nextView: ListView) => commit((state) => ({ ...state, view: nextView }))
 
-  /**
-   * The search box types locally and reaches the URL on a delay.
-   *
-   * Every other control writes the URL on the click that changed it, which is exactly right for
-   * a discrete gesture. A text field is not discrete: writing per keystroke means a
-   * `history.replaceState` per keystroke, and browsers rate-limit that (Safari drops calls past
-   * ~100 in 30s) — so a fast typist's URL would silently stop tracking the box.
-   *
-   * The guard is what keeps two copies of one string honest: the URL is adopted back into the
-   * draft only when it changed for a reason that is NOT this input — Back, a pasted link, Clear
-   * filters — never when it is simply catching up to what was typed. Without it, a flush landing
-   * mid-word would overwrite the characters typed since.
-   */
   const [filterDetailsOpen, setFilterDetailsOpen] = React.useState(groupBy !== 'none' || filters.tags.length > 0)
-  const [queryDraft, setQueryDraft] = React.useState(filters.query)
-  const sentQuery = React.useRef(filters.query)
-  React.useEffect(() => {
-    if (filters.query !== sentQuery.current) setQueryDraft(filters.query)
-    sentQuery.current = filters.query
-  }, [filters.query])
-  React.useEffect(() => {
-    if (queryDraft === sentQuery.current) return
-    const timer = setTimeout(() => {
-      sentQuery.current = queryDraft
-      setFilters((current) => ({ ...current, query: queryDraft }))
-    }, QUERY_DEBOUNCE_MS)
-    return () => clearTimeout(timer)
-    // `setFilters` is re-created every render (it closes over `setSearchParams` only, which is
-    // stable) — depending on it would restart the timer on every render and never fire.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [queryDraft])
+  const [queryDraft, setQueryDraft] = useQueryDraft(filters.query, (query) => setFilters((current) => ({ ...current, query })))
 
   // Statuses the server already had, riding along with the rows that carry the references — so
   // the chips are coloured in the SAME paint as the table rather than a round trip later. Cold
@@ -287,28 +260,14 @@ export function GlobalTasksRoute() {
     if (indexedStatuses) rememberReferenceStatuses(indexedStatuses)
   }, [indexedStatuses])
   const registry = React.useMemo(() => projects.data?.projects ?? [], [projects.data])
-  const tasks = React.useMemo(
-    () => toGlobalTasks(index.data?.runs ?? [], registry),
-    [index.data, registry],
-  )
-  // Automation names for the origin line and search, read only for projects that show automation
-  // tasks; without them a row shows the recorded automation id (hearsay-tools/cezarion#1616).
-  const automationProjects = React.useMemo(
-    () => [...new Set(tasks.filter((task) => task.run.automationId !== undefined).map((task) => task.run.projectId))],
-    [tasks],
-  )
-  const automationNameIn = useAutomationNames(automationProjects, health.data?.automations === true && automationProjects.length > 0)
-  const nameOf = React.useCallback((task: GlobalTask) =>
-    task.run.automationId === undefined ? undefined : automationNameIn(task.run.projectId, task.run.automationId), [automationNameIn])
-  const visible = React.useMemo(() => filterGlobalTasks(tasks, filters, view, nameOf), [tasks, filters, view, nameOf])
-  const originTotals = originCounts(tasksExcludingFacet(tasks, filters, view, 'origin', nameOf).map((task) => task.run), view)
+  const indexRuns = React.useMemo(() => index.data?.runs ?? [], [index.data])
+  const tasks = React.useMemo(() => toGlobalTasks(indexRuns, registry), [indexRuns, registry])
+  const { nameOf, visible, originTotals, statusGroups, folds } = useStatusGroups({
+    tasks, filters, view, groupBy, index: indexRuns, automationsOn: health.data?.capabilities?.automations === true,
+  })
   const groups = React.useMemo(() => groupGlobalTasks(visible, groupBy), [visible, groupBy])
-  // No alternative grouping picked: the sidebar's status groups, with queue numbers from each
-  // project's full queue in the index.
-  const statusGroups = groupBy === 'none' ? groupIndexedTasks(visible, view, index.data?.runs ?? []) : []
-  const revealed = new Set<BucketLabel>(filters.query.trim() !== '' ? statusGroups.map((group) => group.label) : [])
-  const folds = useTaskListFolds('global', view, revealed)
-  const setOrigin = (origin: TaskOrigin) => setFilters(({ origin: _previous, ...current }) => (origin === 'all' ? current : { ...current, origin }))
+  const origin = filters.origin ?? 'all'
+  const setOrigin = (next: TaskOrigin) => setFilters((current) => withOrigin(current, next))
   /**
    * Every tracker reference on screen, asked about ONCE.
    *
@@ -337,19 +296,8 @@ export function GlobalTasksRoute() {
   const archive = useArchiveIndexedRun()
   const setRead = useReadIndexedRun()
 
-  if (index.isError || projects.isError) {
-    return (
-      <div data-route="global-tasks" data-presentation={groupBy === 'none' ? 'summary' : 'cards'} data-filter-details={filterDetailsOpen} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
-        <CenteredState
-          icon={<LayersIcon />}
-          tone="danger"
-          title="Tasks across projects did not load"
-          subtitle={(index.error ?? projects.error)?.message}
-          actions={<Button variant="outline" onClick={() => { void index.refetch(); void projects.refetch() }}>Retry</Button>}
-        />
-      </div>
-    )
-  }
+  const loadError = index.error ?? projects.error
+  if (loadError) return <GlobalTasksLoadError groupBy={groupBy} filterDetailsOpen={filterDetailsOpen} message={loadError.message} onRetry={() => { void index.refetch(); void projects.refetch() }} />
 
   const search = (
     <div className="relative w-full">
@@ -388,10 +336,7 @@ export function GlobalTasksRoute() {
           <Button variant="outline" aria-expanded={filterDetailsOpen} onClick={() => setFilterDetailsOpen((open) => !open)}><SlidersHorizontalIcon aria-hidden="true" />Filters</Button>
           <Button asChild className="min-h-11"><Link to={scopeTo(projects.data?.bootProject ?? 'default', '/new')}><PlusIcon aria-hidden="true" />New task</Link></Button>
         </div>
-        <div data-slot="task-origin-row" className="flex flex-wrap items-center gap-2.5">
-          <OriginFilter origin={filters.origin ?? 'all'} counts={originTotals} onChange={setOrigin} />
-          {statusGroups.length > 0 ? <GroupFoldControls onExpand={() => folds.setAll(statusGroups.map((group) => group.label), false)} onCollapse={() => folds.setAll(statusGroups.map((group) => group.label), true)} /> : null}
-        </div>
+        <TaskOriginRow origin={origin} counts={originTotals} onChange={setOrigin} labels={statusGroups.map((group) => group.label)} onSetAll={folds.setAll} />
       </header>
 
       <div className="flex min-w-0 flex-1 flex-col gap-[22px]">
@@ -411,93 +356,232 @@ export function GlobalTasksRoute() {
           view={view}
         />
 
-        {truncated.length > 0 ? (
-          <p data-slot="global-tasks-truncated" className="text-[11px] text-soft-foreground">
-            Showing every active task and the newest {index.data?.perProjectLimit} archived tasks per project — older archived tasks in{' '}
-            {truncated.join(', ')} are in that project&rsquo;s own Tasks page.
-          </p>
-        ) : null}
+        <TruncatedNotice projects={truncated} perProjectLimit={index.data?.perProjectLimit} />
 
-        {index.data === undefined ? <div role="status" className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Loading tasks…</div> : visible.length === 0 ? (
-          <GlobalTasksEmptyState view={view} filtered={hasActiveFilters(filters)} />
+        {index.data === undefined ? (
+          <div role="status" className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Loading tasks…</div>
         ) : (
-          // No `projectId` on the provider, uniquely on this page: every chip under it names its
-          // own, because the rows next to each other belong to different repositories.
-          <ReferenceStatusProvider requests={referenceRequests}>
-            {groupBy === 'none' ? statusGroups.map((group) => {
-              const members = groupMembers(group)
-              return (
-                <StatusGroupSection
-                  key={group.label}
-                  id={`global-group-${view}-${group.label.replaceAll(' ', '-')}`}
-                  label={group.label}
-                  count={members.length}
-                  tone={groupTone(group.label, members.map((task) => task.run))}
-                  folded={folds.isFolded(group.label)}
-                  collapsed={folds.isCollapsed(group.label)}
-                  onToggle={() => folds.toggle(group.label)}
-                >
-                  <TaskList
-                    tasks={group.rows.flatMap(rowTasks)}
-                    now={now}
-                    showProject
-                    onArchive={(task, archived) => archive.mutate({ task, archived })}
-                    onSetRead={(task, read) => setRead.mutate({ task, read })}
-                    busy={archive.isPending || setRead.isPending}
-                    showCost={metrics.cost}
-                    automationName={nameOf}
-                  />
-                </StatusGroupSection>
-              )
-            }) : groups.map((group) => (
-              <section key={group.key} data-slot="task-group" data-group-key={group.key}>
-                {groupBy === 'none' ? null : (
-                  <h2 className="mb-1.5 flex items-center gap-2 text-[12px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
-                    {/* A project heading is a DOOR, not a label: that project's own Tasks page is
-                        the better version of "just this project" (live SSE, the full column set,
-                        the composer), which is why there is no project filter here at all. */}
-                    {groupBy === 'project' ? (
-                      <Link
-                        to={scopeTo(group.key, '/')}
-                        data-slot="group-project-link"
-                        className="hover:text-foreground hover:underline"
-                      >
-                        {group.label}
-                      </Link>
-                    ) : (
-                      group.label
-                    )}
-                    <span className="font-mono text-[11px] font-medium tabular-nums">
-                      {group.tasks.length}
-                    </span>
-                  </h2>
-                )}
-                <TaskList
-                  tasks={group.tasks}
-                  now={now}
-                  showProject={groupBy !== 'project'}
-                  onArchive={(task, archived) => archive.mutate({ task, archived })}
-                  onSetRead={(task, read) => setRead.mutate({ task, read })}
-                  busy={archive.isPending || setRead.isPending}
-                  showCost={metrics.cost}
-                  automationName={nameOf}
-                />
-              </section>
-            ))}
-          </ReferenceStatusProvider>
+          <GlobalTaskResults
+            view={view}
+            filtered={hasActiveFilters(filters)}
+            visibleCount={visible.length}
+            referenceRequests={referenceRequests}
+            lists={{
+              groupBy,
+              view,
+              statusGroups,
+              groups,
+              folds,
+              row: {
+                now,
+                onArchive: (task, archived) => archive.mutate({ task, archived }),
+                onSetRead: (task, read) => setRead.mutate({ task, read }),
+                busy: archive.isPending || setRead.isPending,
+                showCost: metrics.cost,
+                automationName: nameOf,
+              },
+            }}
+          />
         )}
-        {groupBy === 'none' && visible.length > 0 ? <p className="text-[11px] text-muted-foreground">Resource details—including tokens, cost, CPU and peak memory—are available when a task row is expanded.</p> : null}
-        {registry.length > 1 ? <section data-slot="other-projects" className="rounded-lg border border-border bg-card p-5">
-          <h2 className="text-base font-semibold">Other projects</h2>
-          <div className="mt-3 flex flex-col divide-y divide-border">{registry.map((project) => <div key={project.id} className="flex min-h-14 items-center justify-between gap-3">
-            <span className="min-w-0 truncate text-[13px]">{project.name}</span>
-            <Link to={scopeTo(project.id, '/')} className="inline-flex min-h-11 shrink-0 items-center rounded-md px-3 text-xs text-accent-text hover:bg-accent-strong/10">View tasks<span className="sr-only"> for {project.name}</span></Link>
-          </div>)}</div>
-        </section> : null}
+        <OtherProjects registry={registry} />
 
       </div>
     </div>
   )
+}
+
+/** The page when the index or the registry did not load: the reason, and Retry. */
+function GlobalTasksLoadError({ groupBy, filterDetailsOpen, message, onRetry }: {
+  groupBy: GroupBy
+  filterDetailsOpen: boolean
+  message: string
+  onRetry: () => void
+}) {
+  return (
+    <div data-route="global-tasks" data-presentation={groupBy === 'none' ? 'summary' : 'cards'} data-filter-details={filterDetailsOpen} className="flex min-h-full flex-col gap-[22px] px-[18px] pt-6 pb-[calc(90px+env(safe-area-inset-bottom))] md:p-9">
+      <CenteredState
+        icon={<LayersIcon />}
+        tone="danger"
+        title="Tasks across projects did not load"
+        subtitle={message}
+        actions={<Button variant="outline" onClick={onRetry}>Retry</Button>}
+      />
+    </div>
+  )
+}
+
+/** What the loaded index leaves on screen: the empty state, or the lists and their footnote. */
+function GlobalTaskResults({ view, filtered, visibleCount, referenceRequests, lists }: {
+  view: ListView
+  filtered: boolean
+  visibleCount: number
+  referenceRequests: React.ComponentProps<typeof ReferenceStatusProvider>['requests']
+  lists: React.ComponentProps<typeof GroupedTaskLists>
+}) {
+  if (visibleCount === 0) return <GlobalTasksEmptyState view={view} filtered={filtered} />
+  return (
+    <>
+      {/* No `projectId` on the provider, uniquely on this page: every chip under it names its
+          own, because the rows next to each other belong to different repositories. */}
+      <ReferenceStatusProvider requests={referenceRequests}>
+        <GroupedTaskLists {...lists} />
+      </ReferenceStatusProvider>
+      {lists.groupBy === 'none' ? <p className="text-[11px] text-muted-foreground">Resource details—including tokens, cost, CPU and peak memory—are available when a task row is expanded.</p> : null}
+    </>
+  )
+}
+
+/** Projects whose older archived tasks the index left out, and where to find them. */
+function TruncatedNotice({ projects, perProjectLimit }: { projects: readonly string[]; perProjectLimit: number | undefined }) {
+  if (projects.length === 0) return null
+  return (
+    <p data-slot="global-tasks-truncated" className="text-[11px] text-soft-foreground">
+      Showing every active task and the newest {perProjectLimit} archived tasks per project — older archived tasks in{' '}
+      {projects.join(', ')} are in that project&rsquo;s own Tasks page.
+    </p>
+  )
+}
+
+/** A door to each registered project's own Tasks page, once there is more than one. */
+function OtherProjects({ registry }: { registry: readonly { id: string; name: string }[] }) {
+  if (registry.length <= 1) return null
+  return (
+    <section data-slot="other-projects" className="rounded-lg border border-border bg-card p-5">
+      <h2 className="text-base font-semibold">Other projects</h2>
+      <div className="mt-3 flex flex-col divide-y divide-border">{registry.map((project) => <div key={project.id} className="flex min-h-14 items-center justify-between gap-3">
+        <span className="min-w-0 truncate text-[13px]">{project.name}</span>
+        <Link to={scopeTo(project.id, '/')} className="inline-flex min-h-11 shrink-0 items-center rounded-md px-3 text-xs text-accent-text hover:bg-accent-strong/10">View tasks<span className="sr-only"> for {project.name}</span></Link>
+      </div>)}</div>
+    </section>
+  )
+}
+
+/** The rows any grouped list passes through, unchanged, to every `TaskList`. */
+type TaskListRowProps = Omit<React.ComponentProps<typeof TaskList>, 'tasks' | 'showProject'>
+
+/**
+ * The list body: the sidebar's status groups when no alternative grouping is picked
+ * (hearsay-tools/cezarion#1616), otherwise the picked grouping's plain sections.
+ */
+function GroupedTaskLists({ groupBy, view, statusGroups, groups, folds, row }: {
+  groupBy: GroupBy
+  view: ListView
+  statusGroups: TaskStatusGroup<GlobalTask>[]
+  groups: readonly TaskGroup[]
+  folds: ReturnType<typeof useTaskListFolds>
+  row: TaskListRowProps
+}) {
+  return (
+    <>
+      {groupBy === 'none' ? statusGroups.map((group) => {
+        const members = groupMembers(group)
+        return (
+          <StatusGroupSection
+            key={group.label}
+            id={`global-group-${view}-${group.label.replaceAll(' ', '-')}`}
+            label={group.label}
+            count={members.length}
+            tone={groupTone(group.label, members.map((task) => task.run))}
+            folded={folds.isFolded(group.label)}
+            collapsed={folds.isCollapsed(group.label)}
+            onToggle={() => folds.toggle(group.label)}
+          >
+            <TaskList tasks={group.rows.flatMap(rowTasks)} showProject {...row} />
+          </StatusGroupSection>
+        )
+      }) : groups.map((group) => (
+        <section key={group.key} data-slot="task-group" data-group-key={group.key}>
+          <h2 className="mb-1.5 flex items-center gap-2 text-[12px] font-semibold tracking-[0.04em] text-soft-foreground uppercase">
+              {/* A project heading is a DOOR, not a label: that project's own Tasks page is
+                  the better version of "just this project" (live SSE, the full column set,
+                  the composer). */}
+              {groupBy === 'project' ? (
+                <Link
+                  to={scopeTo(group.key, '/')}
+                  data-slot="group-project-link"
+                  className="hover:text-foreground hover:underline"
+                >
+                  {group.label}
+                </Link>
+              ) : (
+                group.label
+              )}
+              <span className="font-mono text-[11px] font-medium tabular-nums">
+                {group.tasks.length}
+              </span>
+            </h2>
+          <TaskList tasks={group.tasks} showProject={groupBy !== 'project'} {...row} />
+        </section>
+      ))}
+    </>
+  )
+}
+
+/**
+ * The search box types locally and reaches the URL on a delay.
+ *
+ * Every other control writes the URL on the click that changed it, which is exactly right for
+ * a discrete gesture. A text field is not discrete: writing per keystroke means a
+ * `history.replaceState` per keystroke, and browsers rate-limit that (Safari drops calls past
+ * ~100 in 30s) — so a fast typist's URL would silently stop tracking the box.
+ *
+ * The guard is what keeps two copies of one string honest: the URL is adopted back into the
+ * draft only when it changed for a reason that is NOT this input — Back, a pasted link, Clear
+ * filters — never when it is simply catching up to what was typed. Without it, a flush landing
+ * mid-word would overwrite the characters typed since.
+ */
+function useQueryDraft(query: string, send: (query: string) => void) {
+  const [queryDraft, setQueryDraft] = React.useState(query)
+  const sentQuery = React.useRef(query)
+  React.useEffect(() => {
+    if (query !== sentQuery.current) setQueryDraft(query)
+    sentQuery.current = query
+  }, [query])
+  React.useEffect(() => {
+    if (queryDraft === sentQuery.current) return
+    const timer = setTimeout(() => {
+      sentQuery.current = queryDraft
+      send(queryDraft)
+    }, QUERY_DEBOUNCE_MS)
+    return () => clearTimeout(timer)
+    // `send` is re-created every render — depending on it would restart the timer on every
+    // render and never fire. A stale `send` is safe: it writes through `useSearchParamsWriter`,
+    // which starts from the newest params, not the ones `send` saw.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryDraft])
+  return [queryDraft, setQueryDraft] as const
+}
+
+/**
+ * The list the filters leave, and its status groups (hearsay-tools/cezarion#1616).
+ *
+ * Automation names feed the origin line and the search. They are read only for projects that
+ * show automation tasks, and only while the host has automations on; otherwise a row shows the
+ * recorded automation id. With no alternative grouping picked, the page shows the sidebar's status
+ * groups, with queue numbers from each project's full queue in the index.
+ */
+function useStatusGroups({ tasks, filters, view, groupBy, index, automationsOn }: {
+  tasks: readonly GlobalTask[]
+  filters: GlobalTaskFilters
+  view: ListView
+  groupBy: GroupBy
+  index: readonly RunIndexEntry[]
+  automationsOn: boolean
+}) {
+  const automationProjects = React.useMemo(
+    () => [...new Set(tasks.filter((task) => task.run.automationId !== undefined).map((task) => task.run.projectId))],
+    [tasks],
+  )
+  const automationNameIn = useAutomationNames(automationProjects, automationsOn && automationProjects.length > 0)
+  const nameOf = React.useCallback((task: GlobalTask) =>
+    task.run.automationId === undefined ? undefined : automationNameIn(task.run.projectId, task.run.automationId), [automationNameIn])
+  const visible = React.useMemo(() => filterGlobalTasks(tasks, filters, view, nameOf), [tasks, filters, view, nameOf])
+  const originTotals = originCounts(tasksExcludingFacet(tasks, filters, view, 'origin', nameOf).map((task) => task.run), view)
+  const statusGroups = groupBy === 'none' ? groupIndexedTasks(visible, view, index) : []
+  // A search shows every group holding a match, folded or not, without saving that choice.
+  const revealed = new Set<BucketLabel>(filters.query.trim() !== '' ? statusGroups.map((group) => group.label) : [])
+  const folds = useTaskListFolds('global', view, revealed)
+  return { nameOf, visible, originTotals, statusGroups, folds }
 }
 
 function ViewTab({

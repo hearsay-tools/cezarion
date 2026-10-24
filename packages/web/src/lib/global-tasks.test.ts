@@ -25,6 +25,7 @@ import {
   urlStateToSearchParams,
   toGlobalTasks,
   toggleFacetValue,
+  withOrigin,
   toggleGroupBy,
   truncatedProjectNames,
   type GlobalTaskFilters,
@@ -288,6 +289,12 @@ describe('group-by is a toggle, not a radio', () => {
 })
 
 describe('filter state helpers', () => {
+  it('sets an origin, and drops the key for All (hearsay-tools/cezarion#1616)', () => {
+    expect(withOrigin(NO_FILTERS, 'automations')).toEqual({ ...NO_FILTERS, origin: 'automations' })
+    expect(withOrigin({ ...NO_FILTERS, origin: 'direct' }, 'all')).toEqual(NO_FILTERS)
+    expect('origin' in withOrigin({ ...NO_FILTERS, origin: 'direct' }, 'all')).toBe(false)
+  })
+
   it('toggles a value in and out without mutating', () => {
     const before = ['a']
     expect(toggleFacetValue(before, 'b')).toEqual(['a', 'b'])

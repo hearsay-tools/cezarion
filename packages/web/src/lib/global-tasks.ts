@@ -104,6 +104,12 @@ export const NO_FILTERS: GlobalTaskFilters = {
   workflows: [],
 }
 
+/** The filters with another origin. All is the absent key, so the URL stays clean. */
+export function withOrigin(filters: GlobalTaskFilters, origin: TaskOrigin): GlobalTaskFilters {
+  const { origin: _previous, ...rest } = filters
+  return origin === 'all' ? rest : { ...rest, origin }
+}
+
 /** Add or remove one value from a facet — what every chip click and checkbox does. Returns a new
  *  array, so it composes with `setState` without a mutation nobody can see. */
 export function toggleFacetValue(

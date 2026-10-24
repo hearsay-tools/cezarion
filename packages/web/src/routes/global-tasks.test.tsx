@@ -159,9 +159,6 @@ function stubFetch({
         path,
         body: init.body === undefined ? undefined : JSON.parse(String(init.body)),
       })
-      if (path === '/api/v1/providers/status') {
-        return jsonResponse({ providers: [{ provider: 'claude', status: 'connected', enabled: true }] })
-      }
       // The FULL record, which this page's index row deliberately is not: the conflict panel's
       // action fetches it (per project, on open) to learn whether the task can be spoken to.
       const detail = /^\/api\/v1\/p\/([^/]+)\/runs\/([^/]+)$/.exec(path)
@@ -171,20 +168,10 @@ function stubFetch({
         if (!found) return jsonResponse({ error: 'not found' }, 404)
         return jsonResponse({ ...found, task: found.title, tokensUsed: 0, steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'sess-1' }] })
       }
-      const journal = /^\/api\/v1\/p\/([^/]+)\/runs\/([^/]+)\/handoff$/.exec(path)
-      if (journal && method === 'GET') return new Response(handoff, { status: 200, headers: { 'content-type': 'text/plain' } })
-      const definitions = /^\/api\/v1\/p\/([^/]+)\/automations(?:\?|$)/.exec(path)
-      if (definitions && method === 'GET') {
-        const list = automations?.[definitions[1]!]
-        if (!list) return jsonResponse({ error: 'automations are off' }, 409)
-        return jsonResponse({ available: true, timeZone: 'UTC', scheduler: { state: 'idle' }, automations: list.map((entry) => ({ ...entry, counts: {} })) })
-      }
+      const fixed = originFixture(method, path, automations, handoff) ?? hostFixture(path, costMetrics, automations !== undefined)
+      if (fixed) return fixed
       const message = /^\/api\/v1\/p\/([^/]+)\/runs\/([^/]+)\/(messages|continue)$/.exec(path)
       if (message && method === 'POST') return jsonResponse({ ok: true })
-      if (path === '/api/v1/health') {
-        // Only the slice `usageMetricVisibility` reads — the host's cost/token gate.
-        return jsonResponse({ capabilities: { costMetrics, tokenUsageMetrics: true }, automations: automations !== undefined })
-      }
       if (path === '/api/v1/projects') {
         return jsonResponse({ projects, bootProject: 'api', projectsDir: '/repos' })
       }
@@ -238,6 +225,28 @@ function stubFetch({
       return jsonResponse({ error: `unexpected ${path}` }, 404)
     }),
   )
+}
+
+/** The two reads the origin line and the preview add (#1616): automation definitions per
+ *  project (409 while a project has none, as with automations off) and the handoff journal. */
+/** The host's own answers: its connected provider, and the capability slice this page reads. */
+function hostFixture(path: string, costMetrics: boolean, automations: boolean): Response | undefined {
+  if (path === '/api/v1/providers/status') {
+    return jsonResponse({ providers: [{ provider: 'claude', status: 'connected', enabled: true }] })
+  }
+  // Only the slices `usageMetricVisibility` and the automation-name lookup read.
+  if (path === '/api/v1/health') return jsonResponse({ capabilities: { costMetrics, tokenUsageMetrics: true, automations } })
+  return undefined
+}
+
+function originFixture(method: string, path: string, automations: Record<string, { id: string; name: string }[]> | undefined, handoff: string): Response | undefined {
+  if (method !== 'GET') return undefined
+  if (/^\/api\/v1\/p\/[^/]+\/runs\/[^/]+\/handoff$/.test(path)) return new Response(handoff, { status: 200, headers: { 'content-type': 'text/plain' } })
+  const definitions = /^\/api\/v1\/p\/([^/]+)\/automations(?:\?|$)/.exec(path)
+  if (!definitions) return undefined
+  const list = automations?.[definitions[1]!]
+  if (!list) return jsonResponse({ error: 'automations are off' }, 409)
+  return jsonResponse({ available: true, timeZone: 'UTC', scheduler: { state: 'idle' }, automations: list.map((entry) => ({ ...entry, counts: {} })) })
 }
 
 function renderPage(client = createQueryClient(), entry = '/tasks') {

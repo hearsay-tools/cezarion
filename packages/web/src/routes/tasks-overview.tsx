@@ -3,7 +3,6 @@ import { useMutation, useQueryClient, type InfiniteData } from '@tanstack/react-
 import { CheckCheckIcon, ChevronsLeftIcon, ChevronsRightIcon, Clock3Icon, CoinsIcon, DollarSignIcon, ListChecksIcon, LinkIcon, MemoryStickIcon, MoreHorizontalIcon, PencilIcon, SearchXIcon } from 'lucide-react'
 import { ArchiveIcon, CpuIcon, FileDiffIcon, GitBranchIcon, PlusIcon, SearchIcon, WorkflowIcon } from '@/components/design-icons'
 import * as React from 'react'
-import { useSearchParams } from 'react-router'
 import { Link, useNavigate } from '@/lib/project-router'
 
 import { archiveFinished, markAllRunsSeen, patchRun } from '@/api/client'
@@ -20,7 +19,7 @@ import { PinToggle } from '@/components/pin-toggle'
 import { TaskReferenceChip } from '@/components/reference-conflict-action'
 import { ReferenceStatusProvider } from '@/components/reference-status'
 import { StatusDot } from '@/components/status-dot'
-import { GroupFoldControls, OriginFilter, StatusGroupSection, TaskOriginLine, TaskPreview } from '@/components/task-status-groups'
+import { StatusGroupSection, TaskOriginLine, TaskOriginRow, TaskPreview } from '@/components/task-status-groups'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -55,6 +54,7 @@ import {
   type TaskOrigin,
   type TaskStatusGroup,
 } from '@/lib/task-origin'
+import { useSearchParamsWriter, type SearchParamsUpdate } from '@/lib/use-search-params-writer'
 import { useTaskListFolds } from '@/lib/use-task-list-folds'
 import {
   filterRuns,
@@ -178,57 +178,14 @@ export function TasksOverview({
   const [query, setQuery] = React.useState(initialQuery)
   React.useEffect(() => { onArchivedSearch?.(query.trim()) }, [onArchivedSearch, query])
   React.useEffect(() => { onQueryChange?.(query) }, [onQueryChange, query])
-  const [localOrigin, setLocalOrigin] = React.useState<TaskOrigin>('all')
-  const origin = originProp ?? localOrigin
-  const setOrigin = onOriginChange ?? setLocalOrigin
+  const [origin, setOrigin] = useOriginOrOwn(originProp, onOriginChange)
   const [detailedTable, setDetailedTable] = React.useState(false)
   const headerRef = React.useRef<HTMLElement>(null)
   const archiveSelected = React.useRef(false)
-  const [actionsOpen, setActionsOpen] = React.useState(false)
-  // A CSS-hidden Radix menu would keep its modal focus trap after a desktop resize.
-  React.useEffect(() => {
-    const media = window.matchMedia?.('(min-width: 768px)')
-    if (!media) return
-    const closeOnDesktop = () => { if (media.matches) setActionsOpen(false) }
-    closeOnDesktop()
-    media.addEventListener('change', closeOnDesktop)
-    return () => media.removeEventListener('change', closeOnDesktop)
-  }, [])
   const all = runs ?? []
-  const counts = listCounts(all)
-  const nameOf = (run: RunSummary) => (run.automationId === undefined ? '' : automationName(run.automationId) ?? run.automationId)
-  // Pages that answer this search already matched the server's rule, which also reads ids, URLs
-  // and PR/issue numbers, so the local filter (titles, branches, workflows) must not drop them
-  // again — neither an older paged row nor a list row the server matched. Pages answering other
-  // text (the plain pages, or a search still debouncing) widen nothing.
-  const answered = archivedPages !== undefined && archivedPages.query === query.trim()
-  const matched = new Set(answered ? archivedPages.runs.map((run) => run.id) : [])
-  const paged = withArchivedPages(all, answered || query.trim() === '' ? archivedPages?.runs ?? [] : []).slice(all.length)
-  const listed = filterRuns(all, query, nameOf)
-  const listedIds = new Set(listed.map((run) => run.id))
-  const serverMatched = filterRuns(all.filter((run) => matched.has(run.id) && !listedIds.has(run.id)), '')
-  // Origin narrows the list, its older archived pages and the server's archived matches alike.
-  const inOrigin = (run: RunSummary) => matchesOrigin(run, origin)
-  // Queue positions come from the full list inside `groupProjectRuns`, never the filtered one: a
-  // search must not renumber the queue the engine is actually going to drain.
-  const groups = groupProjectRuns([...listed, ...serverMatched, ...filterRuns(paged, '')].filter(inOrigin), view, all)
-  const visibleCount = groups.reduce((total, group) => total + groupMembers(group).length, 0)
-  const withPages = withArchivedPages(all, archivedPages?.query === '' ? archivedPages.runs : [])
-  const originTotals = originCounts(withPages, view)
-  const archivedLoaded = originCounts(withPages, 'archived')[origin]
-  const archivedFull = counts.archived >= ARCHIVED_WINDOW
-  const archivedCount = origin === 'all'
-    ? archivedTotal ?? (archivedFull ? `${ARCHIVED_WINDOW}+` : counts.archived)
-    : archivedFull && archivedPages?.hasMore !== false ? `${archivedLoaded}+` : archivedLoaded
-  // Older archived history the list has not loaded yet: the caption says "loaded", not a total.
-  const incomplete = view === 'archived' && archivedFull && archivedPages?.hasMore !== false
-  // Bulk actions follow the origin, never the search or the folds: what they would touch is
-  // every finished (or unread) task the origin names.
-  const scoped = all.filter(inOrigin)
-  const finished = finishedRunCount(scoped)
+  const derived = useProjectTaskGroups({ all, view, query, origin, archivedPages, archivedTotal, automationName })
+  const { groups, needle } = derived
   const columns = taskColumnsForCapabilities({ tokens: showTokens, cost: showCost })
-  const unread = unreadDoneCount(scoped)
-  const needle = query.trim()
   // A search shows every group holding a match, folded or not, without saving that choice.
   const revealed = new Set<BucketLabel>(needle ? groups.map((group) => group.label) : [])
   const folds = useTaskListFolds(foldScope, view, revealed)
@@ -244,90 +201,25 @@ export function TasksOverview({
       {/* One set of search/view controls across breakpoints keeps query and selection intact.
           Mobile places search above the list filters; the shell already supplies its title. */}
       <header ref={headerRef} className="flex shrink-0 flex-col gap-[22px]">
-        <div className="flex flex-col gap-2"><h1 className="text-[30px] font-semibold tracking-tight">Project tasks</h1><p className="text-[13px] text-muted-foreground">{projectName ? `${projectName} · ` : ''}{detailedTable ? 'Every resource column shown. Fold columns without losing the saved view.' : 'Review runs, pull requests and resource usage.'}</p></div>
+        <TasksHeading projectName={projectName} detailedTable={detailedTable} />
         <div className="flex gap-6 border-b border-border">
-          <OverviewTab view="active" current={view} onSelect={onViewChange} count={originCounts(all, 'active')[origin]}>
+          <OverviewTab view="active" current={view} onSelect={onViewChange} count={derived.activeCount}>
             Active
           </OverviewTab>
-          <OverviewTab view="archived" current={view} onSelect={onViewChange} count={archivedCount}>
+          <OverviewTab view="archived" current={view} onSelect={onViewChange} count={derived.archivedCount}>
             Archived
           </OverviewTab>
         </div>
         <div data-slot="tasks-toolbar" className="flex flex-wrap items-center gap-2.5">
-        {/* Count-gated, like the broom beside it: offered only while there is unread history to
-            clear (#unread-done-items). Archived runs are never unread, so this only ever lights
-            on the Active tab in practice — no need to also gate on `view`. */}
-        {unread > 0 ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            data-slot="mark-all-read"
-            className="hidden md:inline-flex"
-            onClick={() => onMarkAllRead(originAutomationFlag(origin))}
-          >
-            <CheckCheckIcon className="size-3.5" aria-hidden="true" />
-            Mark all read{' '}
-            <span className="tabular-nums text-muted-foreground">{unread}</span>
-          </Button>
-        ) : null}
-        {/* Only when there is something to sweep, like the legacy header's count-gated broom. */}
-        {view === 'active' && finished > 0 ? (
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            data-slot="archive-finished"
-            className="inline-flex"
-            disabled={archivePending}
-            aria-busy={archivePending}
-            onClick={() => onArchiveFinished(originAutomationFlag(origin))}
-          >
-            <ArchiveIcon className="size-3.5" aria-hidden="true" />
-            Archive finished{' '}
-            <span className="tabular-nums text-muted-foreground">{finished}</span>
-          </Button>
-        ) : null}
-        {view === 'active' && (finished > 0 || archivePending) ? (
-          <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
-            <DropdownMenuTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="md:hidden"
-                aria-label="Task actions"
-                aria-busy={archivePending}
-              >
-                <MoreHorizontalIcon aria-hidden="true" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent
-              align="end"
-              className="md:hidden"
-              onCloseAutoFocus={(event) => {
-                // The successful mutation removes its trigger. Return to the stable filter,
-                // without focusing search and summoning the phone keyboard.
-                if (archiveSelected.current || window.matchMedia?.('(min-width: 768px)').matches) {
-                  event.preventDefault()
-                  archiveSelected.current = false
-                  headerRef.current?.querySelector<HTMLButtonElement>('[data-view="active"]')?.focus()
-                }
-              }}
-            >
-              <DropdownMenuItem
-                disabled={archivePending || finished === 0}
-                onSelect={() => {
-                  archiveSelected.current = true
-                  onArchiveFinished(originAutomationFlag(origin))
-                }}
-              >
-                <ArchiveIcon aria-hidden="true" />
-                {archivePending ? 'Archiving…' : `Archive finished (${finished})`}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        ) : null}
+        <BulkActions
+          view={view}
+          unread={derived.unread}
+          finished={derived.finished}
+          archivePending={archivePending}
+          headerRef={headerRef}
+          onMarkAllRead={() => onMarkAllRead(originAutomationFlag(origin))}
+          onArchiveFinished={() => onArchiveFinished(originAutomationFlag(origin))}
+        />
         <div className="relative order-first w-full md:w-auto md:flex-1">
           <SearchIcon
             className="pointer-events-none absolute top-1/2 left-2.5 size-3.5 -translate-y-1/2 text-soft-foreground"
@@ -342,83 +234,333 @@ export function TasksOverview({
             className="h-11 w-full rounded-md border border-input bg-card pr-3 pl-8 text-[13px] text-foreground outline-none placeholder:text-soft-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50"
           />
         </div>
-        <Popover><PopoverTrigger asChild><Button data-slot="task-columns-trigger" variant="outline" className="hidden min-h-11 md:inline-flex">Columns</Button></PopoverTrigger><PopoverContent align="end" className="w-72">
-          <h2 className="mb-2 text-base font-medium">Visible columns</h2><p className="mb-4 text-xs text-muted-foreground">Status and Task · Always visible</p>
-          <div className="grid grid-cols-2 gap-3">{columns.filter((column) => column.canFold).map((column) => <label key={column.id} className="flex items-center gap-2 text-xs"><input data-column-toggle={column.id} type="checkbox" checked={isColumnExpanded(column.id, expandedColumns)} disabled={columnsPending} onChange={() => onToggleColumn(column.id)} />{column.id === 'diff' ? 'Diff' : column.id === 'reference' ? 'Reference' : column.id === 'memory' ? 'Memory' : column.label}</label>)}</div>
-          <p className="mt-4 text-xs text-muted-foreground">Saved automatically. Tokens and cost appear only when supported.</p>
-          <Button variant="outline" className="mt-4" onClick={() => setDetailedTable((value) => !value)}>{detailedTable ? 'Summary view' : 'Resource columns'}</Button>
-        </PopoverContent></Popover>
+        <ColumnsPopover
+          columns={columns}
+          expandedColumns={expandedColumns}
+          columnsPending={columnsPending}
+          onToggleColumn={onToggleColumn}
+          detailedTable={detailedTable}
+          onToggleDetailed={() => setDetailedTable((value) => !value)}
+        />
         <Button asChild data-slot="new-task-inline" className="min-h-11 inline-flex max-md:hidden"><Link to="/new"><PlusIcon aria-hidden="true" />New task</Link></Button>
         </div>
-        <div data-slot="task-origin-row" className="flex flex-wrap items-center gap-2.5">
-          <OriginFilter origin={origin} counts={originTotals} onChange={setOrigin} />
-          {groups.length > 0 ? <GroupFoldControls onExpand={() => folds.setAll(groups.map((group) => group.label), false)} onCollapse={() => folds.setAll(groups.map((group) => group.label), true)} /> : null}
-        </div>
+        <TaskOriginRow origin={origin} counts={derived.originTotals} onChange={setOrigin} labels={groups.map((group) => group.label)} onSetAll={folds.setAll} />
       </header>
 
       <div className="flex min-w-0 flex-1 flex-col">
-        {runs === undefined ? error ? <div role="alert" className="rounded-xl border border-border bg-card p-6"><h2 className="text-lg">Could not load tasks</h2><p className="mt-2 text-sm text-muted-foreground">{error}</p><Button variant="outline" className="mt-4" onClick={onRetry}>Retry</Button></div> : <div role="status" aria-label="Loading tasks" className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Loading tasks…</div> : groups.length === 0 ? (
-          <TasksEmptyState view={view} query={query} origin={origin} onShowAll={() => { setQuery(''); setOrigin('all') }} />
+        {runs === undefined ? (
+          <TasksLoading error={error} onRetry={onRetry} />
         ) : (
-          <>
-            <p data-slot="tasks-result-count" className="mb-3 text-[12px] text-muted-foreground tabular-nums">
-              {visibleCount} {visibleCount === 1 ? 'task' : 'tasks'}{incomplete ? ' loaded' : ''}{needle ? ` matching “${needle}”` : ''}
-            </p>
-            <div className="flex flex-col gap-[22px]">
-              {groups.map((group) => {
-                const members = groupMembers(group)
-                const id = `tasks-group-${view}-${group.label.replaceAll(' ', '-')}`
-                return (
-                  <StatusGroupSection
-                    key={group.label}
-                    id={id}
-                    label={group.label}
-                    count={members.length}
-                    tone={groupTone(group.label, members)}
-                    folded={folds.isFolded(group.label)}
-                    collapsed={folds.isCollapsed(group.label)}
-                    onToggle={() => folds.toggle(group.label)}
-                  >
-                    <GroupedTasks
-                      group={group}
-                      detailedTable={detailedTable}
-                      columns={columns}
-                      expandedColumns={expandedColumns}
-                      onToggleColumn={onToggleColumn}
-                      columnsPending={columnsPending}
-                      onRename={onRename}
-                      onTogglePin={pinToggle}
-                      now={now}
-                      showTokens={showTokens}
-                      showCost={showCost}
-                      automationName={automationName}
-                    />
-                  </StatusGroupSection>
-                )
-              })}
-            </div>
-            <p className="mt-[22px] text-[11px] text-muted-foreground">Resource details—including tokens, cost, CPU and peak memory—are available when a task row is expanded.</p>
-          </>
+          <ProjectTaskResults
+            view={view}
+            query={query}
+            origin={origin}
+            onShowAll={() => { setQuery(''); setOrigin('all') }}
+            caption={resultCaption(derived.visibleCount, derived.incomplete, needle)}
+            groups={groups}
+            folds={folds}
+            grouped={{
+              detailedTable,
+              columns,
+              expandedColumns,
+              onToggleColumn,
+              columnsPending,
+              onRename,
+              onTogglePin: pinToggle,
+              now,
+              showTokens,
+              showCost,
+              automationName,
+            }}
+          />
         )}
 
-        {view === 'archived' && archivedPages?.failed ? (
-          <p role="alert" data-slot="archived-older-error" className="mt-3.5 flex items-center justify-center gap-2.5 text-[13px] text-muted-foreground">
-            Could not load older archived tasks.
-            <Button variant="outline" className="min-h-11" onClick={archivedPages.onLoadMore}>Retry</Button>
-          </p>
-        ) : view === 'archived' && archivedPages?.hasMore ? (
-          <Button
-            data-slot="archived-older"
-            variant="outline"
-            className="mt-3.5 min-h-11 self-center"
-            disabled={archivedPages.loading}
-            onClick={archivedPages.onLoadMore}
-          >
-            {archivedPages.loading ? 'Loading older archived…' : 'Show older archived'}
-          </Button>
-        ) : null}
+        {view === 'archived' && archivedPages ? <ArchivedOlder pages={archivedPages} /> : null}
       </div>
     </div>
+  )
+}
+
+function TasksHeading({ projectName, detailedTable }: { projectName?: string; detailedTable: boolean }) {
+  return (
+    <div className="flex flex-col gap-2"><h1 className="text-[30px] font-semibold tracking-tight">Project tasks</h1><p className="text-[13px] text-muted-foreground">{projectName ? `${projectName} · ` : ''}{detailedTable ? 'Every resource column shown. Fold columns without losing the saved view.' : 'Review runs, pull requests and resource usage.'}</p></div>
+  )
+}
+
+/** The caller's origin when it holds one (the route keeps it in the URL); otherwise the page's
+ *  own, starting at All. */
+function useOriginOrOwn(origin: TaskOrigin | undefined, onChange: ((origin: TaskOrigin) => void) | undefined) {
+  const [own, setOwn] = React.useState<TaskOrigin>('all')
+  return [origin ?? own, onChange ?? setOwn] as const
+}
+
+/**
+ * The list's derived state: what the filters leave in each status group, and the counts the
+ * tabs, chips, caption and bulk actions show. Pure arithmetic over the props, kept out of the
+ * markup.
+ */
+function useProjectTaskGroups({ all, view, query, origin, archivedPages, archivedTotal, automationName }: {
+  all: readonly RunSummary[]
+  view: ListView
+  query: string
+  origin: TaskOrigin
+  archivedPages: ArchivedPages | undefined
+  archivedTotal: number | undefined
+  automationName: (automationId: string) => string | undefined
+}) {
+  const needle = query.trim()
+  const nameOf = (run: RunSummary) => (run.automationId === undefined ? '' : automationName(run.automationId) ?? run.automationId)
+  // Pages that answer this search already matched the server's rule, which also reads ids, URLs
+  // and PR/issue numbers, so the local filter (titles, branches, workflows) must not drop them
+  // again — neither an older paged row nor a list row the server matched. Pages answering other
+  // text (the plain pages, or a search still debouncing) widen nothing.
+  const answered = archivedPages?.query === needle
+  const matched = new Set(answered ? archivedPages.runs.map((run) => run.id) : [])
+  const paged = withArchivedPages(all, answered || needle === '' ? archivedPages?.runs ?? [] : []).slice(all.length)
+  const listed = filterRuns(all, query, nameOf)
+  const listedIds = new Set(listed.map((run) => run.id))
+  const serverMatched = filterRuns(all.filter((run) => matched.has(run.id) && !listedIds.has(run.id)), '')
+  // Origin narrows the list, its older archived pages and the server's archived matches alike.
+  const inOrigin = (run: RunSummary) => matchesOrigin(run, origin)
+  // Queue positions come from the full list inside `groupProjectRuns`, never the filtered one: a
+  // search must not renumber the queue the engine is actually going to drain.
+  const groups = groupProjectRuns([...listed, ...serverMatched, ...filterRuns(paged, '')].filter(inOrigin), view, all)
+  const withPages = withArchivedPages(all, archivedPages?.query === '' ? archivedPages.runs : [])
+  const archivedFull = listCounts(all).archived >= ARCHIVED_WINDOW
+  // Bulk actions follow the origin, never the search or the folds: what they would touch is
+  // every finished (or unread) task the origin names.
+  const scoped = all.filter(inOrigin)
+  return {
+    groups,
+    needle,
+    visibleCount: groups.reduce((total, group) => total + groupMembers(group).length, 0),
+    originTotals: originCounts(withPages, view),
+    activeCount: originCounts(all, 'active')[origin],
+    archivedCount: archivedTabCount(all, withPages, origin, archivedPages, archivedTotal),
+    // Older archived history the list has not loaded yet: the caption says "loaded", not a total.
+    incomplete: view === 'archived' && archivedFull && archivedPages?.hasMore !== false,
+    finished: finishedRunCount(scoped),
+    unread: unreadDoneCount(scoped),
+  }
+}
+
+/**
+ * The Archived tab's count. For All it is the server's total, or the window with a `+` while
+ * none is known; for one origin it is what has loaded, with a `+` while older pages remain.
+ */
+function archivedTabCount(
+  all: readonly RunSummary[],
+  withPages: readonly RunSummary[],
+  origin: TaskOrigin,
+  archivedPages: ArchivedPages | undefined,
+  archivedTotal: number | undefined,
+): number | string {
+  const archived = listCounts(all).archived
+  const full = archived >= ARCHIVED_WINDOW
+  if (origin === 'all') return archivedTotal ?? (full ? `${ARCHIVED_WINDOW}+` : archived)
+  const loaded = originCounts(withPages, 'archived')[origin]
+  return full && archivedPages?.hasMore !== false ? `${loaded}+` : loaded
+}
+
+function resultCaption(count: number, incomplete: boolean, needle: string): string {
+  return `${count} ${count === 1 ? 'task' : 'tasks'}${incomplete ? ' loaded' : ''}${needle ? ` matching “${needle}”` : ''}`
+}
+
+/**
+ * Mark all read and Archive finished, both scoped to the origin by the caller. Below `md` the
+ * sweep moves into a menu.
+ */
+function BulkActions({ view, unread, finished, archivePending, headerRef, onMarkAllRead, onArchiveFinished }: {
+  view: ListView
+  unread: number
+  finished: number
+  archivePending: boolean
+  /** Where focus returns once the menu's sweep removes its own trigger. */
+  headerRef: React.RefObject<HTMLElement | null>
+  onMarkAllRead: () => void
+  onArchiveFinished: () => void
+}) {
+  const archiveSelected = React.useRef(false)
+  const [actionsOpen, setActionsOpen] = React.useState(false)
+  // A CSS-hidden Radix menu would keep its modal focus trap after a desktop resize.
+  React.useEffect(() => {
+    const media = window.matchMedia?.('(min-width: 768px)')
+    if (!media) return
+    const closeOnDesktop = () => { if (media.matches) setActionsOpen(false) }
+    closeOnDesktop()
+    media.addEventListener('change', closeOnDesktop)
+    return () => media.removeEventListener('change', closeOnDesktop)
+  }, [])
+  return (
+    <>
+      {/* Count-gated, like the broom beside it: offered only while there is unread history to
+          clear (#unread-done-items). Archived runs are never unread, so this only ever lights
+          on the Active tab in practice — no need to also gate on `view`. */}
+      {unread > 0 ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          data-slot="mark-all-read"
+          className="hidden md:inline-flex"
+          onClick={onMarkAllRead}
+        >
+          <CheckCheckIcon className="size-3.5" aria-hidden="true" />
+          Mark all read{' '}
+          <span className="tabular-nums text-muted-foreground">{unread}</span>
+        </Button>
+      ) : null}
+      {/* Only when there is something to sweep, like the legacy header's count-gated broom. */}
+      {view === 'active' && finished > 0 ? (
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          data-slot="archive-finished"
+          className="inline-flex"
+          disabled={archivePending}
+          aria-busy={archivePending}
+          onClick={onArchiveFinished}
+        >
+          <ArchiveIcon className="size-3.5" aria-hidden="true" />
+          Archive finished{' '}
+          <span className="tabular-nums text-muted-foreground">{finished}</span>
+        </Button>
+      ) : null}
+      {view === 'active' && (finished > 0 || archivePending) ? (
+        <DropdownMenu open={actionsOpen} onOpenChange={setActionsOpen}>
+          <DropdownMenuTrigger asChild>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="md:hidden"
+              aria-label="Task actions"
+              aria-busy={archivePending}
+            >
+              <MoreHorizontalIcon aria-hidden="true" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent
+            align="end"
+            className="md:hidden"
+            onCloseAutoFocus={(event) => {
+              // The successful mutation removes its trigger. Return to the stable filter,
+              // without focusing search and summoning the phone keyboard.
+              if (archiveSelected.current || window.matchMedia?.('(min-width: 768px)').matches) {
+                event.preventDefault()
+                archiveSelected.current = false
+                headerRef.current?.querySelector<HTMLButtonElement>('[data-view="active"]')?.focus()
+              }
+            }}
+          >
+            <DropdownMenuItem
+              disabled={archivePending || finished === 0}
+              onSelect={() => {
+                archiveSelected.current = true
+                onArchiveFinished()
+              }}
+            >
+              <ArchiveIcon aria-hidden="true" />
+              {archivePending ? 'Archiving…' : `Archive finished (${finished})`}
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      ) : null}
+    </>
+  )
+}
+
+function ColumnsPopover({ columns, expandedColumns, columnsPending, onToggleColumn, detailedTable, onToggleDetailed }: {
+  columns: ReturnType<typeof taskColumnsForCapabilities>
+  expandedColumns: NormalizedExpandedColumns
+  columnsPending: boolean
+  onToggleColumn: (id: TaskColumnId) => void
+  detailedTable: boolean
+  onToggleDetailed: () => void
+}) {
+  return (
+  <Popover><PopoverTrigger asChild><Button data-slot="task-columns-trigger" variant="outline" className="hidden min-h-11 md:inline-flex">Columns</Button></PopoverTrigger><PopoverContent align="end" className="w-72">
+    <h2 className="mb-2 text-base font-medium">Visible columns</h2><p className="mb-4 text-xs text-muted-foreground">Status and Task · Always visible</p>
+    <div className="grid grid-cols-2 gap-3">{columns.filter((column) => column.canFold).map((column) => <label key={column.id} className="flex items-center gap-2 text-xs"><input data-column-toggle={column.id} type="checkbox" checked={isColumnExpanded(column.id, expandedColumns)} disabled={columnsPending} onChange={() => onToggleColumn(column.id)} />{column.id === 'diff' ? 'Diff' : column.id === 'reference' ? 'Reference' : column.id === 'memory' ? 'Memory' : column.label}</label>)}</div>
+    <p className="mt-4 text-xs text-muted-foreground">Saved automatically. Tokens and cost appear only when supported.</p>
+    <Button variant="outline" className="mt-4" onClick={onToggleDetailed}>{detailedTable ? 'Summary view' : 'Resource columns'}</Button>
+  </PopoverContent></Popover>
+  )
+}
+
+/**
+ * What the loaded list leaves on screen: the empty state for how it got empty, or the result
+ * caption and each status group with its rows.
+ */
+function ProjectTaskResults({ view, query, origin, onShowAll, caption, groups, folds, grouped }: {
+  view: ListView
+  query: string
+  origin: TaskOrigin
+  onShowAll: () => void
+  caption: string
+  groups: TaskStatusGroup<RunSummary>[]
+  folds: ReturnType<typeof useTaskListFolds>
+  /** Everything each group's rows take besides the group itself. */
+  grouped: Omit<React.ComponentProps<typeof GroupedTasks>, 'group'>
+}) {
+  if (groups.length === 0) return <TasksEmptyState view={view} query={query} origin={origin} onShowAll={onShowAll} />
+  return (
+    <>
+      <p data-slot="tasks-result-count" className="mb-3 text-[12px] text-muted-foreground tabular-nums">{caption}</p>
+      <div className="flex flex-col gap-[22px]">
+        {groups.map((group) => {
+          const members = groupMembers(group)
+          return (
+            <StatusGroupSection
+              key={group.label}
+              id={`tasks-group-${view}-${group.label.replaceAll(' ', '-')}`}
+              label={group.label}
+              count={members.length}
+              tone={groupTone(group.label, members)}
+              folded={folds.isFolded(group.label)}
+              collapsed={folds.isCollapsed(group.label)}
+              onToggle={() => folds.toggle(group.label)}
+            >
+              <GroupedTasks group={group} {...grouped} />
+            </StatusGroupSection>
+          )
+        })}
+      </div>
+      <p className="mt-[22px] text-[11px] text-muted-foreground">Resource details—including tokens, cost, CPU and peak memory—are available when a task row is expanded.</p>
+    </>
+  )
+}
+
+function TasksLoading({ error, onRetry }: { error?: string; onRetry?: () => void }) {
+  return error ? (
+    <div role="alert" className="rounded-xl border border-border bg-card p-6"><h2 className="text-lg">Could not load tasks</h2><p className="mt-2 text-sm text-muted-foreground">{error}</p><Button variant="outline" className="mt-4" onClick={onRetry}>Retry</Button></div>
+  ) : (
+    <div role="status" aria-label="Loading tasks" className="rounded-xl border border-border bg-card p-6 text-sm text-muted-foreground">Loading tasks…</div>
+  )
+}
+
+/** Older archived history below the list: a retry after a failed page, or the next page. */
+function ArchivedOlder({ pages }: { pages: ArchivedPages }) {
+  if (pages.failed) {
+    return (
+      <p role="alert" data-slot="archived-older-error" className="mt-3.5 flex items-center justify-center gap-2.5 text-[13px] text-muted-foreground">
+        Could not load older archived tasks.
+        <Button variant="outline" className="min-h-11" onClick={pages.onLoadMore}>Retry</Button>
+      </p>
+    )
+  }
+  if (!pages.hasMore) return null
+  return (
+    <Button
+      data-slot="archived-older"
+      variant="outline"
+      className="mt-3.5 min-h-11 self-center"
+      disabled={pages.loading}
+      onClick={pages.onLoadMore}
+    >
+      {pages.loading ? 'Loading older archived…' : 'Show older archived'}
+    </Button>
   )
 }
 
@@ -498,7 +640,7 @@ function SummaryTasksTable({ rows, onRename, onTogglePin, now, showTokens, showC
           <tr data-status={run.status} data-slot="task-summary-row" className="group/row border-b border-border last:border-0">
             <td className="py-5 pr-4 align-top">
               <TitleCell run={run} to={`/tasks/${run.id}`} onRename={onRename} onTogglePin={onTogglePin} />
-              <div className="mt-1"><TaskOriginLine automationId={run.automationId} automationName={run.automationId === undefined ? undefined : automationName(run.automationId)} /></div>
+              <div className="mt-1"><RunOriginLine run={run} automationName={automationName} /></div>
               <div className="mt-2 flex flex-wrap items-center gap-2">
                 <button type="button" aria-label={`${open ? 'Hide' : 'Show'} resources for ${runTitle(run)}`} aria-expanded={open} aria-controls={detailId} aria-describedby={`summary-status-${run.id}`} onClick={() => setExpanded((current) => { const next = new Set(current); if (open) next.delete(run.id); else next.add(run.id); return next })} className="inline-flex min-h-[26px] items-center gap-1 rounded-md p-0 text-[11px] text-muted-foreground hover:bg-muted focus-visible:outline-2 focus-visible:outline-ring"><Pill id={`summary-status-${run.id}`} dot={attention.tone} shape={attention.shape} pulse={attention.pulse}>{attention.label}{scheduled ? ` ${scheduled.label}` : ''}</Pill></button>
                 {run.status === 'queued' && queuePosition !== null ? <span className="text-xs text-muted-foreground">#{queuePosition} in queue</span> : null}
@@ -906,7 +1048,7 @@ function TaskTableCell({
       return (
         <td data-column-id={column.id} className={cn(TD_BASE, 'min-w-[320px] max-w-0 whitespace-normal')}>
           <TitleCell run={run} to={to} onRename={onRename} onTogglePin={onTogglePin} />
-          <div className="mt-1"><TaskOriginLine automationId={run.automationId} automationName={run.automationId === undefined ? undefined : automationName(run.automationId)} /></div>
+          <div className="mt-1"><RunOriginLine run={run} automationName={automationName} /></div>
         </td>
       )
     case 'workflow':
@@ -964,10 +1106,15 @@ function TaskTableCell({
           {shortAge(run.startedAt ?? run.createdAt, now)}
         </td>
       )
-    case 'cpu':
-    case 'memory':
+    default:
+      // CPU and Memory render as one pair (`UsageTds`), never as a cell of their own.
       return null
   }
+}
+
+/** A project row's origin line: Direct task, or the automation's name or recorded id. */
+function RunOriginLine({ run, automationName }: { run: RunSummary; automationName: (automationId: string) => string | undefined }) {
+  return <TaskOriginLine automationId={run.automationId} automationName={run.automationId === undefined ? undefined : automationName(run.automationId)} />
 }
 
 function FoldedTd({ column }: { column: TaskColumnId }) {
@@ -1187,7 +1334,7 @@ function TaskCard({
             className="mt-1.5 shrink-0"
           />
         ) : null}
-        <div className="order-first w-full"><TaskOriginLine automationId={run.automationId} automationName={run.automationId === undefined ? undefined : automationName(run.automationId)} /></div>
+        <div className="order-first w-full"><RunOriginLine run={run} automationName={automationName} /></div>
         {/* Always visible here, not hover-revealed: a card has no hover to speak of on the
             device it exists for, and it is the only place a pin can be set or seen on mobile. */}
         {onTogglePin ? (
@@ -1258,29 +1405,7 @@ export function TasksOverviewRoute() {
   const runs = useRuns()
   const health = useHealth()
   const metricVisibility = usageMetricVisibility(health.data)
-  // View, origin and search live in the URL (hearsay-tools/cezarion#1616), so a reload or a
-  // pasted link restores the list. Every write is a `replace`: Back leaves the page.
-  const [searchParams, setSearchParams] = useSearchParams()
-  const view: ListView = searchParams.get('archived') === '1' ? 'archived' : 'active'
-  const origin = parseOrigin(searchParams.get('origin'))
-  const setParam = React.useCallback((key: string, value: string | null) =>
-    setSearchParams((current) => {
-      const next = new URLSearchParams(current)
-      if (value === null) next.delete(key)
-      else next.set(key, value)
-      return next
-    }, { replace: true }), [setSearchParams])
-  const setView = (next: ListView) => setParam('archived', next === 'archived' ? '1' : null)
-  const setOrigin = (next: TaskOrigin) => setParam('origin', next === 'all' ? null : next)
-  const initialQuery = React.useRef(searchParams.get('q') ?? '').current
-  const writeQuery = React.useMemo(() => {
-    let timer: ReturnType<typeof setTimeout> | undefined
-    return (query: string) => {
-      clearTimeout(timer)
-      const trimmed = query.trim()
-      timer = setTimeout(() => setParam('q', trimmed === '' ? null : trimmed), QUERY_DEBOUNCE_MS)
-    }
-  }, [setParam])
+  const { view, setView, origin, setOrigin, initialQuery, writeQuery } = useTasksUrlState()
   const queryClient = useQueryClient()
   const archived = useArchivedPages(runs.data, view)
   const archive = useMutation({
@@ -1318,7 +1443,7 @@ export function TasksOverviewRoute() {
   const projects = useProjects({ retryOnMount: false })
   const projectName = projects.data?.projects?.find((project) => project.id === projectId)?.name
   const hasAutomationTasks = (runs.data ?? []).some((run) => run.automationId !== undefined)
-  const automationNameIn = useAutomationNames([undefined], health.data?.automations === true && hasAutomationTasks)
+  const automationNameIn = useAutomationNames([undefined], health.data?.capabilities?.automations === true && hasAutomationTasks)
   const automationName = React.useCallback((automationId: string) => automationNameIn(undefined, automationId), [automationNameIn])
   const referenceRequests = React.useMemo(
     () =>
@@ -1370,6 +1495,51 @@ export function TasksOverviewRoute() {
 }
 
 /** How long the search box waits before writing `q` to the URL: one history write per word. */
+const setParam = (key: string, value: string | null): SearchParamsUpdate => (current) => {
+  if (value === null) current.delete(key)
+  else current.set(key, value)
+  return current
+}
+
+/**
+ * View, origin and search, kept in the URL (hearsay-tools/cezarion#1616) so a reload or a pasted
+ * link restores the list. View and origin are also state: the router renders each navigation in
+ * a transition, and a tab must switch on the click, not when that transition lands. The search
+ * reaches the URL after a short pause in typing.
+ */
+function useTasksUrlState() {
+  const [searchParams, write] = useSearchParamsWriter()
+  const urlView: ListView = searchParams.get('archived') === '1' ? 'archived' : 'active'
+  const urlOrigin = parseOrigin(searchParams.get('origin'))
+  const [view, setViewState] = React.useState(urlView)
+  const [origin, setOriginState] = React.useState(urlOrigin)
+  // A URL changed from outside the page (a pasted link, a sidebar link) wins.
+  React.useEffect(() => setViewState(urlView), [urlView])
+  React.useEffect(() => setOriginState(urlOrigin), [urlOrigin])
+  const initialQuery = React.useRef(searchParams.get('q') ?? '').current
+  const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  React.useEffect(() => () => clearTimeout(timer.current), [])
+  const writeQuery = React.useCallback((query: string) => {
+    clearTimeout(timer.current)
+    const trimmed = query.trim()
+    timer.current = setTimeout(() => write(setParam('q', trimmed === '' ? null : trimmed)), QUERY_DEBOUNCE_MS)
+  }, [write])
+  return {
+    view,
+    setView: (next: ListView) => {
+      setViewState(next)
+      write(setParam('archived', next === 'archived' ? '1' : null))
+    },
+    origin,
+    setOrigin: (next: TaskOrigin) => {
+      setOriginState(next)
+      write(setParam('origin', next === 'all' ? null : next))
+    },
+    initialQuery,
+    writeQuery,
+  }
+}
+
 const QUERY_DEBOUNCE_MS = 250
 
 /** How long the Archived tab waits after a keystroke before it asks the server to search. */

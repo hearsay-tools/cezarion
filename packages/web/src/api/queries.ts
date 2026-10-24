@@ -1177,7 +1177,7 @@ export function useTaskPreviewHandoff(projectId: string | undefined, id: string,
 /**
  * Automation names for the Tasks pages' origin line (hearsay-tools/cezarion#1616), one read per
  * project that shows automation tasks, archived definitions included. Off when the server has
- * automations off (`health.automations`), and on any failure: the row then shows the recorded
+ * automations off (`capabilities.automations`), and on any failure: the row then shows the recorded
  * automation id, so provenance never depends on the definition still existing.
  *
  * `projectIds` holds `undefined` for the active scope. The answer is a lookup, keyed the same way.

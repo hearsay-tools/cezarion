@@ -118,13 +118,13 @@ export function groupIndexedTasks<T extends { run: RunIndexEntry }>(
     const { run } = task
     const id = qualified(run.projectId, run.id)
     byKey.set(id, task)
-    const parentRunId = run.delegation?.parentRunId
+    const delegation = run.delegation
     return {
       ...run,
       id,
       ...(run.groupId === undefined ? {} : { groupId: qualified(run.projectId, run.groupId) }),
-      ...(run.delegation && parentRunId !== undefined
-        ? { delegation: { ...run.delegation, parentRunId: qualified(run.projectId, parentRunId) } }
+      ...(delegation && 'parentRunId' in delegation
+        ? { delegation: { ...delegation, parentRunId: qualified(run.projectId, delegation.parentRunId) } }
         : {}),
     }
   })

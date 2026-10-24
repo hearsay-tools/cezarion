@@ -1226,6 +1226,24 @@ describe('TasksOverviewRoute — wired to the app', () => {
     expect(screen.queryByRole('button', { name: 'Show older archived' })).toBeNull()
   })
 
+  it('keeps a tab switched while the typed search is still on its way to the URL (hearsay-tools/cezarion#1616)', async () => {
+    renderApp([run({ id: 'act', title: 'Needle act', status: 'running' }), run({ id: 'arc', title: 'Needle arc', status: 'done', archived: true })])
+    await waitFor(() => expect(tableRow('act')).not.toBeNull())
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: 'Needle' } })
+    fireEvent.click(overviewTab('archived'))
+    expect(overviewTab('archived').getAttribute('aria-pressed')).toBe('true')
+    // The search reaches the URL after its debounce; that write must not restore the old view,
+    // not even for one render.
+    const seen: (string | null)[] = []
+    const observer = new MutationObserver(() => seen.push(overviewTab('archived').getAttribute('aria-pressed')))
+    observer.observe(document.body, { subtree: true, attributes: true, attributeFilter: ['aria-pressed'] })
+    await act(() => new Promise((resolve) => setTimeout(resolve, 800))) // bound: several 250 ms search debounces
+    observer.disconnect()
+    expect(seen.filter((pressed) => pressed !== 'true')).toEqual([])
+    expect(overviewTab('archived').getAttribute('aria-pressed')).toBe('true')
+    expect(tableRow('arc')).not.toBeNull()
+  })
+
   it('keeps the sidebar Active/Automations tabs and the table Active/Archived tabs independent (#1332)', async () => {
     renderApp([
       run({ id: 'act', status: 'running' }),

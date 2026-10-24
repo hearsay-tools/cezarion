@@ -28,7 +28,7 @@ export function OriginFilter({
   onChange: (origin: TaskOrigin) => void
 }) {
   return (
-    <div role="group" aria-label="Task origin" data-slot="origin-filter" className="flex flex-wrap items-center gap-2">
+    <div role="group" aria-label="Task origin" data-slot="origin-filter" className="flex flex-wrap items-center gap-1.5">
       {TASK_ORIGINS.map((option) => {
         const pressed = option.value === origin
         return (
@@ -39,7 +39,7 @@ export function OriginFilter({
             aria-pressed={pressed}
             onClick={() => onChange(option.value)}
             className={cn(
-              'inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border px-3.5 text-[13px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
+              'inline-flex min-h-11 items-center gap-1.5 rounded-full border border-border px-3 text-[13px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-link-foreground',
               pressed && 'border-accent-strong bg-accent-strong/10 text-accent-text',
             )}
           >
@@ -52,12 +52,36 @@ export function OriginFilter({
   )
 }
 
-/** Expand groups / Collapse groups: visibility only. Neither changes what the list holds. */
+/**
+ * Expand groups / Collapse groups: visibility only. Neither changes what the list holds. Shown
+ * from `md`: on a phone each heading toggles its own group, and the first task stays above the
+ * fold.
+ */
 export function GroupFoldControls({ onExpand, onCollapse }: { onExpand: () => void; onCollapse: () => void }) {
   return (
-    <div data-slot="group-fold-controls" className="flex flex-wrap items-center gap-2 md:ml-auto">
+    <div data-slot="group-fold-controls" className="hidden flex-wrap items-center gap-2 md:ml-auto md:flex">
       <Button type="button" variant="ghost" className="min-h-11" data-action="expand-groups" onClick={onExpand}>Expand groups</Button>
       <Button type="button" variant="ghost" className="min-h-11" data-action="collapse-groups" onClick={onCollapse}>Collapse groups</Button>
+    </div>
+  )
+}
+
+/**
+ * The row under the toolbar: the origin chips, and the fold controls while there are groups to
+ * fold.
+ */
+export function TaskOriginRow({ origin, counts, onChange, labels, onSetAll }: {
+  origin: TaskOrigin
+  counts: Record<TaskOrigin, number>
+  onChange: (origin: TaskOrigin) => void
+  /** The groups on screen, which the fold controls open or close together. */
+  labels: readonly BucketLabel[]
+  onSetAll: (labels: readonly BucketLabel[], folded: boolean) => void
+}) {
+  return (
+    <div data-slot="task-origin-row" className="flex flex-wrap items-center gap-2.5">
+      <OriginFilter origin={origin} counts={counts} onChange={onChange} />
+      {labels.length > 0 ? <GroupFoldControls onExpand={() => onSetAll(labels, false)} onCollapse={() => onSetAll(labels, true)} /> : null}
     </div>
   )
 }
