@@ -57,7 +57,11 @@ export function analyzeSource(source, filename) {
         bodyStart: node.body.start, bodyEnd: node.body.end,
         bodyLoc: node.body.loc.start, bodyEndLine: node.body.loc.end.line,
         excludedRanges: [],
+        curriedArrow: node.type === 'ArrowFunctionExpression' && node.body.type === 'ArrowFunctionExpression',
       };
+      // A directly returned arrow is nested function syntax, not independent
+      // parent statements. Mapped statements can drift into its signature.
+      if (owner.curriedArrow) owner.excludedRanges.push([node.body.start, node.body.end]);
       functions.push(owner);
     } else if (classInitializers.has(node.type)) {
       // Initializers run outside the surrounding function. Still visit any functions inside them.
@@ -97,6 +101,31 @@ export function selectFunctions(functions, { name, line } = {}) {
 const unavailable = reason => ({ coverage: { status: 'unavailable', reason }, crap: null });
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
 
+/** Exact body matches take precedence; declaration endpoints rescue mapped curries.
+ * Every candidate reserves its entry, including ambiguous exact matches, so a
+ * fallback cannot borrow another function's counter. Never break ties by order.
+ */
+function matchCoverageFunctions(functions, fnMap) {
+  const entries = Object.entries(fnMap);
+  const candidates = new Map(functions.map(fn => {
+    const exact = entries.filter(([, item]) => item?.loc?.start?.line === fn.bodyLoc.line
+      && item.loc.start.column === fn.bodyLoc.column && item.loc.end?.line === fn.bodyEndLine);
+    if (exact.length || !fn.curriedArrow) return [fn, exact];
+    const anchored = entries.filter(([, item]) => item?.decl?.end?.line === fn.line
+      && item.decl.end.column === fn.column && item.loc?.end?.line === fn.bodyEndLine);
+    return [fn, anchored];
+  }));
+  const claims = new Map();
+  for (const matches of candidates.values()) {
+    for (const [id] of matches) claims.set(id, (claims.get(id) ?? 0) + 1);
+  }
+  return new Map(functions.map(fn => {
+    const matches = candidates.get(fn);
+    const id = matches.length === 1 ? matches[0][0] : undefined;
+    return [fn, claims.get(id) === 1 ? id : undefined];
+  }));
+}
+
 /** Attribute statements before combining line hits, so nested/inline functions stay separate. */
 export function measureCoverage(source, functions, entry) {
   if (!isRecord(entry) || !['fnMap', 'f', 'statementMap', 's'].every(key => isRecord(entry[key]))) {
@@ -125,11 +154,11 @@ export function measureCoverage(source, functions, entry) {
       lines.set(statement.start.line, Math.max(lines.get(statement.start.line) ?? 0, count));
     }
   }
+  const matches = matchCoverageFunctions(functions, entry.fnMap);
   return new Map(functions.map(fn => {
-    const matches = Object.entries(entry.fnMap).filter(([, item]) => item?.loc?.start?.line === fn.bodyLoc.line
-      && item.loc.start.column === fn.bodyLoc.column && item.loc.end?.line === fn.bodyEndLine);
-    if (matches.length !== 1) return [fn, unavailable('Function does not match the coverage source positions. Regenerate coverage.')];
-    const calls = entry.f[matches[0][0]];
+    const id = matches.get(fn);
+    if (id === undefined) return [fn, unavailable('Function does not match the coverage source positions. Regenerate coverage; for curried arrows, see references/tool.md for the block-bodied rewrite.')];
+    const calls = entry.f[id];
     if (!Number.isFinite(calls) || calls < 0) throw new Error('Invalid function counter in coverage report.');
     const lines = hits.get(fn);
     const covered = [...lines.values()].filter(count => count > 0).length;
