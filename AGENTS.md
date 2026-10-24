@@ -434,10 +434,12 @@ A fresh task worktree (`.ai/cezar/worktrees/<runId>`) has no `node_modules`. Run
 **If Squeal is installed and validating this worktree, use it for iteration.**
 Read the `SQUEAL` reports and follow its installed skill. `squeal.config.json`
 covers the four unit Vitest projects, both fast `node:test` groups from
-`npm run test:unit`, and both E2E suites in its slow tier: packaged CLI
-(`npm run test:package`) and cockpit browser (`npm run test:e2e`).
+`npm run test:unit`, and the cockpit browser suite (`npm run test:e2e`) in its
+slow tier. It does not cover packaged CLI E2E (`npm run test:package`,
+`packages/cezar/test/e2e/*.test.ts`): run those tests yourself, with or without
+Squeal (hearsay-tools/cezarion#1281 removed them from the config).
 Do not duplicate those background runs with `npm test`,
-`npm run test:unit`, `npm run test:package`, `npm run test:e2e`, or `npm run test:changed`.
+`npm run test:unit`, `npm run test:e2e`, or `npm run test:changed`.
 Use `squeal why <check>` for failure details and, when a result is needed,
 `squeal status --wait 60000`.
 Lease messages show executable and interpreter script names, with other arguments
@@ -455,11 +457,11 @@ Squeal is optional. If it is absent, no daemon is validating, or a needed result
 is unknown, run affected test files/test names through npm. Inspect
 `npm run test:changed -- --plan` before using `npm run test:changed`; if the plan
 falls back to a full run, choose focused checks and leave the full gate to CI.
-Packaged CLI E2E exercises built output: run `npm run build` after relevant source
-changes before relying on its results. The config declares the server and cockpit
-build artifacts as inputs. The browser project's globalSetup uses the existing
-test environment bootstrap to prepare or reuse the app and Chrome; a missing
-browser is an error in a Squeal run. `npm test` and `npm run test:watch` select
+Packaged CLI E2E exercises built output, and Squeal never runs it: run
+`npm run build` after relevant source changes, then run the packaged tests by
+hand before relying on their results. The browser project's globalSetup uses
+the existing test environment bootstrap to prepare or reuse the app and Chrome;
+a missing browser is an error in a Squeal run. `npm test` and `npm run test:watch` select
 only the four unit projects. Typecheck and build remain separate checks;
 run them when the change needs them. When Squeal is unavailable, use focused
 browser specs for affected UI flows, e.g.
@@ -488,9 +490,12 @@ the Codex mock's new MCP tool gate asks only when cezar's own MCP server is not
 in `approve` mode, and the Codex runner sends `approve` whenever it registers
 that server. When a mock edit does not trigger this rule, the PR's Verification
 section says why. With Squeal validating, read and wait for the
-selected files through `squeal status --wait 60000 <files>`; if slow results are
-not current, use `squeal run --slow --wait 60000`. Without Squeal, run the browser
-matches with `npm run test:e2e -- <specs>` from the repo root. Packaged matches
+selected browser files through `squeal status --wait 60000 <files>`; if slow
+results are not current, use `squeal run --slow --wait 60000`. Without Squeal,
+run the browser matches with `npm run test:e2e -- <specs>` from the repo root.
+Squeal does not run packaged CLI E2E, so run every packaged match by hand, with
+or without Squeal. Do not pass packaged paths to `squeal status`: it gives them
+no result and no warning (hearsay-tools/squeal#83). Packaged matches
 require `npm run build` from the repo root first; then, from `packages/cezar`, run
 `node --import ../../scripts/test-git-env.mjs --import tsx --test <files>` with
 those packaged paths relative to that directory (e.g. `test/e2e/task-cli.test.ts`).
@@ -506,9 +511,10 @@ rg -l -F -e 'delegation.wait' -e 'waits' packages/cezar/test/e2e/*.test.ts packa
 
 Inspect the matches to identify fixtures that read the changed field; common
 names can also match unrelated text. Require passing results for the affected
-fixtures through the Squeal or focused npm paths above. Run `npm run build`
-from the repo root before validating matching packaged fixtures, including with
-Squeal, so they exercise the current built output. This selection supplements
+fixtures: browser fixtures through the Squeal or focused npm paths above, and
+packaged fixtures by hand, as above. Run `npm run build` from the repo root
+before running matching packaged fixtures, so they exercise the current built
+output. This selection supplements
 the dry-run park-fixture and runner-parity requirements above
 (hearsay-tools/cezarion#1300).
 
@@ -527,10 +533,10 @@ unknown must be updated to test its intended constraint. In
 hearsay-tools/cezarion#1504, a deadline test still used `ci` after the kind became
 `pr`, so it could pass without checking the deadline requirement.
 
-In an unbuilt worktree, only a `Cannot find module` error naming a missing
-`dist/` module is the known Squeal limitation. An assertion failure in
-`test:package` is a real failure that needs investigation; do not dismiss it
-alongside missing-`dist` errors.
+In an unbuilt worktree, packaged CLI tests fail with a `Cannot find module`
+error naming a missing `dist/` module: run `npm run build` first. An assertion
+failure in `test:package` is a real failure that needs investigation; do not
+dismiss it alongside missing-`dist` errors.
 
 No tool maps a cockpit source change to the browser specs it affects, with or
 without Squeal: `npm run test:changed` runs `npm test`, whose four unit projects
