@@ -1,40 +1,15 @@
-import { Button } from '@/components/ui/button'
-import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { EyeIcon } from 'lucide-react'
-import { CheckIcon, ChevronDownIcon, CircleSlashIcon, CpuIcon, GaugeIcon, TerminalIcon, SlidersHorizontalIcon, FolderOpenIcon, SparklesIcon, WorkflowIcon, XIcon } from '@/components/design-icons'
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { CheckIcon, CircleSlashIcon, FolderOpenIcon, SparklesIcon, WorkflowIcon, XIcon } from '@/components/design-icons'
+import { useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'react-router'
 
 import { Link, useNavigate } from '@/lib/project-router'
 
-import { createRun, getLaunchKey, postPlan, putConfig, putUiState } from '@/api/client'
 import { useProjectScope } from '@/api/project-scope-context'
-import { hasAccountChoice, useAgentAccounts } from '@/api/agent-accounts'
-import {
-  queryKeys,
-  useConfig,
-  useHealth,
-  useProviderStatus,
-  useProjects,
-  useRepo,
-  useRunnerModels,
-  useSkills,
-  useUiState,
-  useWorkspaceConfig,
-  useWorkflows,
-} from '@/api/queries'
-import type {
-  AttachmentInput,
-  ProjectListEntry,
-  RepoResponse,
-  Runner,
-  Skill,
-  WorkflowDef,
-} from '@open-mercato/cezar-api-client'
-import { TwinkleBackdrop } from '@/components/centered-state'
+import { useConfig, useRepo, useUiState, useWorkspaceConfig } from '@/api/queries'
+import type { ProjectListEntry, Skill, WorkflowDef } from '@open-mercato/cezar-api-client'
 import { Composer, type ComposerHandle } from '@/components/composer/composer'
-import { CompletionControls } from '@/components/completion-controls'
-import { PickerPill, PickerPillGroup, RunnerPill, chevron, chipClass } from '@/components/picker-pill'
+import { chevron, chipClass } from '@/components/picker-pill'
 import { PromptTemplateMenu } from '@/components/prompt-template-menu'
 import { SkillPreviewDialog } from '@/components/skill-detail'
 import {
@@ -46,62 +21,62 @@ import {
   CommandList,
 } from '@/components/ui/command'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { toast } from '@/components/ui/toaster'
+import type { PromptTemplate } from '@/lib/prompt-templates'
 import {
-  autoApplyText,
-  normalizePromptTemplates,
-  resolveAutoApply,
-  templatesForCapabilities,
-} from '@/lib/prompt-templates'
-import {
-  bumpSkillUsage,
   isProjectSkill,
-  orderSkillsByUsage,
   queryScore,
   searchSkillsForDisplay,
   searchWorkflows,
   skillKeywords,
 } from '@/lib/skills'
 import { submitShortcutHint } from '@/lib/use-submit-shortcut'
-import { webhookLabel } from '@/lib/webhook'
 import { cn } from '@/lib/utils'
-import { usableRunners } from '@/lib/provider-status'
 
 import {
-  bookmarkletRunBody,
-  deepLinkToast,
-  unknownSkillPrefillText,
-  type DeepLinkNotice,
-} from './new-task-autostart'
-import {
-  clearStartedDraft,
-  draftRevision,
-  composerRunModeNote,
-  readDraft,
-  resolveComposerRunMode,
-  writeDraft,
-  type NewTaskDraft,
-} from './new-task-draft'
-import {
-  buildCreateRunBody,
-  withNotify,
-  effortOptionsForModel,
-  modelsForRunner,
-  modelCatalogStatus,
-  pushRecentSource,
-  QUICK_TASK,
-  RUNNERS,
-  resolveEffort,
-  resolveModel,
-  resolveRunner,
-  resolveSource,
-  startedRunPath,
-  type TaskSource,
-} from './new-task-form'
+  providerUnavailableReason,
+  routeRunMode,
+  useAccountSelection,
+  useBookmarkletDeepLink,
+  useCompactAgentOptions,
+  useEngineSelection,
+  useNewTaskDraft,
+  useNewTaskSubmit,
+  useNotifyWebhook,
+  usePromptTemplates,
+  useProviderReadyFocus,
+  useSourceSelection,
+} from './new-task-controller'
+import { composerRunModeNote } from './new-task-draft'
+import { QUICK_TASK, type TaskSource } from './new-task-form'
 import { parseNewTaskParams } from './new-task-params'
-import { buildPlannedRunBody, pendingPlanOf, type PendingPlan } from './new-task-plan'
+import {
+  AgentOptions,
+  AutoStartingSurface,
+  ComposerFooterEnd,
+  ExecutionSettings,
+  NewTaskHeader,
+  RetiredVariantsNotice,
+} from './new-task-sections'
 import { PlanReview } from './plan-review'
 import './new-task.css'
+
+/** What the composer says and does in each run mode (`Start | Plan first`, #383). */
+const COMPOSER_MODE = {
+  start: {
+    note: 'Start immediately with the selected configuration.',
+    pendingLabel: 'Starting task…',
+    failureHint: undefined,
+    clearOnSuccess: true,
+    sendAriaLabel: 'Start task',
+  },
+  plan: {
+    note: 'Review the plan before starting the task.',
+    pendingLabel: 'Planning task…',
+    failureHint: 'Could not create the plan. Your draft is kept. Please retry.',
+    clearOnSuccess: false,
+    sendAriaLabel: 'Plan task',
+  },
+} as const
 
 /**
  * `/new` — Start from design.pen 1A–1D: page intro, editor + model/effort, then the 330px
@@ -113,15 +88,14 @@ import './new-task.css'
  * a full document load of `/new?skill=&ref=&auto=1&key=` auto-starts a run unattended when the
  * key matches `GET /api/launch-key`, and only prefills otherwise — `handleDeepLink()` in
  * web/app.js, verbatim (see new-task-autostart.ts for the verified semantics).
+ *
+ * State and effects live in new-task-controller.ts, layout sections in new-task-sections.tsx.
  */
 export function NewTaskRoute() {
   const [search] = useSearchParams()
-  const navigate = useNavigate()
-  const queryClient = useQueryClient()
   const agentOptionsRef = useRef<HTMLDivElement>(null)
-  const [compactAgentOptions, setCompactAgentOptions] = useState(() =>
-    typeof window !== 'undefined' && window.innerWidth <= 767,
-  )
+  const composerRef = useRef<ComposerHandle>(null)
+  const draftPanelRef = useRef<HTMLDivElement>(null)
 
   // The composer's project (multi-project spec, step 3.4). TWO ids, deliberately:
   //  - `urlProjectId` is what the URL names — always a real project, boot included. It is the
@@ -133,16 +107,12 @@ export function NewTaskRoute() {
   // test), and everything below degrades to exactly the single-project behavior.
   const { projectId: urlProjectId } = useParams()
   const draftProjectId = useProjectScope().projectId
-  const projects = useProjects()
 
-  // The deep-link params, captured ONCE: the mount effect below strips them from the URL
+  // The deep-link params, captured ONCE: the bookmarklet hook strips them from the URL
   // (legacy's `history.replaceState` — the launch key must not survive in history or survive
   // a reload to re-trigger), so live search params would vanish under us.
   const [deepLink] = useState(() => parseNewTaskParams(search))
 
-  const health = useHealth()
-  const workflows = useWorkflows()
-  const skills = useSkills()
   const repo = useRepo()
   const uiState = useUiState()
   // Settings → Agents runner/model policy for this project. `/api/health` is boot-bound and
@@ -150,479 +120,39 @@ export function NewTaskRoute() {
   const config = useConfig()
   const workspaceConfig = useWorkspaceConfig()
 
-  // The draft survives navigation (module store); explicit deep-link params beat it — a
-  // pasted `/new?skill=&ref=` link states intent, a leftover draft only remembers it.
-  const [draft, setDraft] = useState<NewTaskDraft>(() => {
-    const stored = readDraft(draftProjectId)
-    return {
-      ...stored,
-      ...(deepLink.ref !== '' ? { text: deepLink.ref } : {}),
-      ...(deepLink.skill !== ''
-        ? { source: { source: 'skill', ref: deepLink.skill } as TaskSource }
-        : {}),
-    }
-  })
-  const currentDraft = useRef(draft)
-  useEffect(() => {
-    // Claim this mounted draft even when its text matches the previous visit.
-    writeDraft(currentDraft.current, draftProjectId)
-  }, [draftProjectId])
-  const submissionPending = useRef(false)
-  const mounted = useRef(true)
-  useEffect(() => {
-    mounted.current = true
-    return () => { mounted.current = false }
-  }, [])
-  const update = (patch: Partial<NewTaskDraft>) => {
-    if (!mounted.current || submissionPending.current) return
-    const next = { ...currentDraft.current, ...patch }
-    currentDraft.current = next
-    // Dictation can edit and submit in one event. Persist before submit captures its revision.
-    writeDraft(next, draftProjectId)
-    setDraft(next)
-  }
-
-  // ---- effective picker values (rules in new-task-form.ts, mirrored from legacy) -----------
-  const recentSources = uiState.data?.recentSources
-  // Memoized so the picker gets a STABLE array identity across renders that don't actually
-  // change the catalog or the usage stats (#408 — a raw `orderSkillsByUsage(...)` call here
-  // would create a new array on EVERY render, including ones unrelated to skills/usage).
-  const skillsData = skills.data
-  const skillUsage = uiState.data?.skillUsage
-  const skillList = useMemo(
-    () => orderSkillsByUsage(skillsData ?? [], skillUsage),
-    [skillsData, skillUsage],
-  )
-  const workflowList = workflows.data?.workflows ?? []
-  // The registry the project pill offers. Empty while it loads or when it errors — the pill
-  // simply does not render, which is the honest state: there is no second project to offer.
-  const projectList = projects.data?.projects ?? []
-  // Task webhook (#589): the toggle exists only where there is somewhere to notify. Off by default
-  // and not remembered — a hand-off is a per-task decision, and the thread's "Hand off" covers
-  // turning it on later.
-  const webhookProject = projectList.find((entry) => entry.id === (urlProjectId ?? projects.data?.bootProject))
-  const webhookUrl = webhookProject?.webhook?.url
-  const [notifyChoice, setNotifyChoice] = useState(false)
-  const notifyOn = webhookUrl !== undefined && notifyChoice
-  const sourcesReady =
-    skills.data !== undefined && workflows.data !== undefined && !uiState.isPending
-  // The draft's pick alone — a fresh `/new` selects nothing (see `resolveSource` for what the
-  // persisted `lastTask` preselection was load-bearing for, and why it is gone).
-  const source = resolveSource(draft.source, skillList, workflowList)
-  const selectedSkill = source?.source === 'skill'
-    ? skillList.find((skill) => skill.name === source.ref)
-    : undefined
-
-  // ---- prompt templates (#413 follow-up) ----------------------------------------------------
-  // The same list the GitHub hand-over composer reads. Two ways in here: the footer's
-  // icon trigger inserts one by hand at the caret, and a skill whose templates are assigned to it
-  // applies them on selection — but only into a box the user has not typed in (`resolveAutoApply`).
-  const composerRef = useRef<ComposerHandle>(null)
-  const draftPanelRef = useRef<HTMLDivElement>(null)
-  const templates = useMemo(
-    () => templatesForCapabilities(normalizePromptTemplates(uiState.data?.promptTemplates), { automations: health.data?.capabilities.automations === true }),
-    [uiState.data?.promptTemplates, health.data?.capabilities.automations],
-  )
-  const autoText = autoApplyText(templates, source?.source === 'skill' ? [source.ref] : [])
-  const draftTextRef = useRef(draft.text)
-  draftTextRef.current = draft.text
-  const autoAppliedRef = useRef('')
-  useEffect(() => {
-    // Wait for the pickers' data: before it lands `source` is still a provisional guess, and
-    // auto-applying against it would flash text in for a skill the user may not end up on.
-    if (!sourcesReady || submissionPending.current) return
-    const resolved = resolveAutoApply(draftTextRef.current, autoAppliedRef.current, autoText)
-    autoAppliedRef.current = resolved.applied
-    if (resolved.text !== draftTextRef.current) update({ text: resolved.text })
-    // `autoText` is a derived STRING — this fires when the assigned set changes, not every render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [autoText, sourcesReady])
-
-  const providers = useProviderStatus()
-  const runners = usableRunners(providers.data)
-  const defaultRunner = config.data?.defaultRunner
-  const preferredRunner = defaultRunner ?? 'claude'
-  const runner = runners.length > 0 ? resolveRunner(draft.runner, runners, preferredRunner) : null
-  const displayRunner = runner ?? preferredRunner
-  const providersReady = providers.isSuccess && runners.length > 0
-  const catalog = useRunnerModels(displayRunner)
-  const modelsLocked = config.data?.modelsLocked === true
-  const models = runner === null
-    ? []
-    : modelsForRunner(runner, catalog.data, [draft.model, config.data?.defaultModels?.[runner]])
-  const model = runner === null
-    ? ''
-    : resolveModel(modelsLocked ? null : draft.model, runner, config.data?.defaultModels, catalog.data)
-  const effortOptions = effortOptionsForModel(displayRunner, model, catalog.data)
-  const effort = modelsLocked ? '' : resolveEffort(draft.effort, effortOptions)
-  // Agent accounts (spec 2026-07-29-agent-profiles). These are rows of the RUNNER pill rather than
-  // a pill of their own — `claude · Default` / `claude · Klaudiusz` / `codex` — so what will run is
-  // readable at a glance instead of assembled from two controls. An agent with a single login stays
-  // a single row, which is why a host with no extra accounts sees the list it always saw.
-  const { accounts: accountChoices, repoAccount } = useAgentAccounts()
-  // A draft account belonging to ANOTHER runner is ignored rather than sent: switching runner must
-  // not silently carry a foreign account along.
-  const agentProfile = accountChoices.some(
-    (choice) => choice.provider === displayRunner && choice.id === draft.agentProfile,
-  )
-    ? draft.agentProfile
-    : null
-
-  // A cold /new load mounts the textarea disabled while provider status is checked. Restore
-  // the route's autofocus contract once that check enables the form, but never steal focus if
-  // the user already moved elsewhere while it was pending.
-  const providersWereReady = useRef(false)
-  useEffect(() => {
-    const becameReady = providersReady && !providersWereReady.current
-    providersWereReady.current = providersReady
-    if (becameReady && document.activeElement === document.body) {
-      document
-        .querySelector<HTMLTextAreaElement>('textarea[aria-label="Describe a task for the agent"]')
-        ?.focus()
-    }
-  }, [providersReady])
+  const { draft, update, submissionPending, mounted } = useNewTaskDraft(draftProjectId, deepLink)
+  const sources = useSourceSelection(draft.source, uiState)
+  const { source, sourcesReady, skillList } = sources
+  const webhook = useNotifyWebhook(urlProjectId)
+  const templates = usePromptTemplates({ uiState, source, sourcesReady, draftText: draft.text, submissionPending, update })
+  const engine = useEngineSelection(draft, config)
+  const accounts = useAccountSelection(engine.displayRunner, draft.agentProfile)
+  useProviderReadyFocus(engine.providersReady)
 
   const hasGit = repo.data === undefined || repo.data.info !== null
-
-  // Worktree opt-out (#worktree-toggle): any ordinary run in a git repo may use the current
-  // checkout. Workflows may run in place when the user opts out.
-  const worktreeToggleShown = hasGit
-
-  // Plan-first forces it OFF (and disables the toggle): planning is inherently interactive, so
-  // the run must be able to hand the ball back.
-  const runMode = resolveComposerRunMode({
-    hasGit,
-    planFirst: draft.planFirst,
-    explicitAutonomous: draft.autonomous,
-    explicitWorktree: draft.worktree,
-    interactive: selectedSkill?.interactive,
-    configuredAutonomous:
-      workspaceConfig.data?.composerDefaults?.autonomous
-      ?? workspaceConfig.data?.composerDefaults?.inheritedAutonomous
-      ?? 'source-dependent',
-    configuredWorktree:
-      workspaceConfig.data?.composerDefaults?.worktree
-      ?? workspaceConfig.data?.composerDefaults?.inheritedWorktree
-      ?? true,
-    // Nothing picked runs the plain built-in workflow, and the 'source-dependent' autonomy
-    // default keys off exactly that: skills default autonomous, everything else does not.
-    source: source?.source ?? 'workflow',
+  const runMode = routeRunMode({ hasGit, draft, selectedSkill: sources.selectedSkill, workspaceConfig, source })
+  const { plan, setPlan, planning, starting, submit, startPlanned } = useNewTaskSubmit({
+    draft,
+    draftProjectId,
+    engine,
+    agentProfile: accounts.agentProfile,
+    sourcesReady,
+    source,
+    runMode,
+    notifyOn: webhook.notifyOn,
+    uiState,
+    mounted,
   })
-  const worktreeOn = runMode.worktree
-  const autonomousOn = runMode.autonomous
+  const autoStarting = useBookmarkletDeepLink({
+    deepLink, search, engine, config, draftProjectId, mounted, sourcesReady, skillList, update,
+  })
+  const compactAgentOptions = useCompactAgentOptions(agentOptionsRef, autoStarting)
 
-  // ---- plan mode (#383 + spec 008) ----------------------------------------------------------
-  const [plan, setPlan] = useState<PendingPlan | null>(null)
-  const [planning, setPlanning] = useState(false)
-  const [starting, setStarting] = useState(false)
+  if (autoStarting) return <AutoStartingSurface />
 
-  // ---- bookmarklet deep-link (spec 011 — legacy handleDeepLink, verbatim) -------------------
-  // `auto=1` with a ref arms the unattended start; the composer stays hidden behind a
-  // "Starting…" surface until the key check + POST settle (or fail into the prefill path).
-  const [autoStarting, setAutoStarting] = useState(() => deepLink.auto && deepLink.ref !== '')
-  // Keep keyboard order aligned with the compact visual order, including a wide sidebar
-  // on a desktop viewport. CSS uses the same 550px group-width boundary.
-  useLayoutEffect(() => {
-    const group = agentOptionsRef.current
-    if (!group) return
-    const measure = () => setCompactAgentOptions(window.innerWidth <= 767 || group.getBoundingClientRect().width < 550)
-    measure()
-    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure)
-    observer?.observe(group)
-    window.addEventListener('resize', measure)
-    return () => {
-      observer?.disconnect()
-      window.removeEventListener('resize', measure)
-    }
-  }, [autoStarting])
-  const [notice, setNotice] = useState<DeepLinkNotice | null>(() =>
-    !deepLink.auto && deepLink.ref !== '' ? { kind: 'prefill' } : null,
-  )
-  const deepLinkUrlCleaned = useRef(false)
-  const deepLinkHandled = useRef(false)
-  useEffect(() => {
-    if (deepLinkUrlCleaned.current) return
-    deepLinkUrlCleaned.current = true
-    // Legacy cleans the URL FIRST (`history.replaceState({}, '', '/')` — before anything
-    // async): the launch key never lingers in the address bar or history, and a reload can
-    // never re-trigger the start. Same move here, staying on this route. (The router's own
-    // search, not window.location — MemoryRouter under test never touches the window.)
-    if (search.toString() !== '') void navigate('/new', { replace: true })
-    // mount-only: search is intentionally the initial URL, captured before the replace
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (deepLinkHandled.current) return
-    if (!deepLink.auto || deepLink.ref === '') return
-    if (providers.isPending) return
-    if (!providersReady || runner === null) {
-      deepLinkHandled.current = true
-      // Authentication could not be established: keep the deep-link intent in the disabled
-      // composer and let the provider gate explain whether this is an error or missing setup.
-      setNotice({ kind: 'prefill' })
-      setAutoStarting(false)
-      return
-    }
-    // Provider status often resolves before project config on a cold load. The protected
-    // bookmarklet body may omit runner only against that scoped authoritative default, never
-    // our display fallback; a failed config read degrades to the prefilled composer.
-    if (config.isPending) return
-    deepLinkHandled.current = true
-    if (defaultRunner === undefined) {
-      setNotice({ kind: 'prefill' })
-      setAutoStarting(false)
-      return
-    }
-    const submittedRevision = draftRevision(draftProjectId)
-    void (async () => {
-      let launchKey = ''
-      try {
-        launchKey = (await getLaunchKey()).key
-      } catch {
-        // key endpoint unreachable → the blocked path, exactly like legacy
-      }
-      if (launchKey !== '' && deepLink.key === launchKey) {
-        try {
-          const created = await createRun(bookmarkletRunBody(deepLink, runner, defaultRunner))
-          clearStartedDraft(draftProjectId, submittedRevision)
-          void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
-          if (mounted.current) void navigate(startedRunPath(created))
-          return
-        } catch (error) {
-          setNotice({
-            kind: 'failed',
-            message: error instanceof Error ? error.message : String(error),
-          })
-        }
-      } else {
-        // Wrong or missing key: a drive-by page guessing the URL gets a form, never a run.
-        setNotice({ kind: 'blocked' })
-      }
-      setAutoStarting(false)
-    })()
-  }, [config.isPending, defaultRunner, providers.isPending, providersReady, runner]) // eslint-disable-line react-hooks/exhaustive-deps
-  // The prefill toast waits for the pickers' data: whether the skill exists decides the
-  // wording, and the unknown-skill case rewrites the draft the way legacy did (intent into
-  // the text, quick-task as the source — its planner resolves skills from prose).
-  useEffect(() => {
-    if (notice === null || !sourcesReady) return
-    setNotice(null)
-    const unknownSkill =
-      deepLink.skill !== '' && !skillList.some((s) => s.name === deepLink.skill)
-        ? deepLink.skill
-        : ''
-    if (unknownSkill !== '') {
-      // Legacy put the intent into the text and ran quick-task; `null` IS that run now, and
-      // needs no catalog lookup to say so.
-      update({ text: unknownSkillPrefillText(deepLink.skill, deepLink.ref), source: null })
-    }
-    const { message, tone } = deepLinkToast(notice, unknownSkill)
-    toast(message, { tone })
-    // Legacy focused the Run button so a bare Enter submits the reviewed form.
-    document
-      .querySelector<HTMLButtonElement>(
-        '[data-slot="composer"] button[aria-label="Start task"], [data-slot="composer"] button[aria-label="Plan task"]',
-      )
-      ?.focus()
-  }, [notice, sourcesReady]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  const submit = async (text: string, images: AttachmentInput[]) => {
-    const submittedRevision = draftRevision(draftProjectId)
-    if (draft.retiredVariants) throw new Error('Parallel variants are removed. Choose Use one task before starting this saved draft.')
-    if (!providersReady || runner === null) {
-      throw new Error(
-        providers.isPending
-          ? 'Checking agent providers…'
-          : providers.isError
-            ? 'Provider authentication could not be verified.'
-            : 'Connect an agent provider before starting a task.',
-      )
-    }
-    if (!sourcesReady) {
-      // Rejection restores the draft — nothing typed is lost to a race with the pickers.
-      throw new Error('Still loading workflows and skills — try again in a second.')
-    }
-    if (draft.planFirst) {
-      // Keep the original draft while planning so Discard returns to it unchanged.
-      setPlanning(true)
-      try {
-        const planned = await postPlan(text)
-        if (mounted.current) setPlan(pendingPlanOf(text, images, planned))
-      } finally {
-        setPlanning(false)
-      }
-      return
-    }
-    const created = await createRun(withNotify(
-      buildCreateRunBody({
-        task: text,
-        source,
-        model,
-        modelsLocked,
-        effort,
-        runner,
-        runnerExplicit: draft.runner !== null,
-        agentProfile,
-        defaultRunner,
-        images,
-        worktree: worktreeOn,
-        autonomous: autonomousOn,
-        archiveWhenDone: draft.archiveWhenDone,
-        autoMergePr: draft.autoMergePr,
-      }),
-      notifyOn,
-    ))
-    // Remember what was actually run so the next visit preselects it (legacy
-    // `saveLastTaskSource`) and float it to the top of the picker next time
-    // (recency sort) — fire-and-forget: a failed write only costs the convenience.
-    void putUiState({
-      // `null` when nothing was picked — an honest record of a plain run, and the value that
-      // stops an older cockpit (which still preselects `lastTask`) restoring a stale skill.
-      lastTask: source,
-      // Recency is a list of PICKS: a task that chose nothing did not pick quick-task, and
-      // filling the list with the default would push real choices out of it.
-      ...(source ? { recentSources: pushRecentSource(recentSources, source) } : {}),
-      // Frequency sort (#408): only a SKILL pick counts — the map is keyed by skill name, and a
-      // workflow choice here doesn't select one directly. Gated on the CURRENT map being known:
-      // the PUT merge is shallow, so bumping off an errored ui-state query (`sourcesReady` only
-      // rules out `isPending`, not a failed fetch) would send a one-entry map and wipe every
-      // accumulated count.
-      ...(source?.source === 'skill' && uiState.data !== undefined
-        ? { skillUsage: bumpSkillUsage(uiState.data.skillUsage, source.ref) }
-        : {}),
-    })
-      .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.uiState }))
-      .catch(() => {})
-    clearStartedDraft(draftProjectId, submittedRevision)
-    void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
-    if (mounted.current) navigate(startedRunPath(created))
-  }
-
-  /** ▶ Start on the reviewed plan: the (possibly edited) steps go INLINE, with the composer's
-   *  current picker choices — legacy `startPlannedRun` semantics on the new surface. */
-  const startPlanned = async () => {
-    if (plan === null || plan.steps.length === 0 || starting || !providersReady || runner === null) return
-    const submittedRevision = draftRevision(draftProjectId)
-    setStarting(true)
-    try {
-      const created = await createRun(withNotify(
-        buildPlannedRunBody({
-          task: plan.task,
-          steps: plan.steps,
-          model,
-          modelsLocked,
-          effort,
-          runner,
-          runnerExplicit: draft.runner !== null,
-          defaultRunner,
-          images: plan.images,
-          archiveWhenDone: draft.archiveWhenDone,
-          autoMergePr: draft.autoMergePr,
-        }),
-        notifyOn,
-      ))
-      clearStartedDraft(draftProjectId, submittedRevision)
-      setPlan(null)
-      void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
-      if (mounted.current) navigate(startedRunPath(created))
-    } catch (error) {
-      toast(error instanceof Error ? error.message : String(error), { tone: 'danger' })
-    } finally {
-      setStarting(false)
-    }
-  }
-
-  // The unattended bookmarklet start in flight: no composer, no params echoed anywhere —
-  // just an honest "working on it" until the POST answers (success navigates to the thread;
-  // failure drops back to the prefilled composer with a toast).
-  if (autoStarting) {
-    return (
-      <div
-        data-route="new"
-        className="relative isolate flex min-h-full flex-col items-center justify-center overflow-x-clip px-6"
-      >
-        <TwinkleBackdrop />
-        <div data-slot="auto-starting" role="status" className="text-center">
-          <h1 className="animate-pulse text-lg font-semibold tracking-tight">Starting task…</h1>
-          <p className="mt-1.5 text-[14px] text-muted-foreground">
-            Launched from a bookmarklet — taking you to the run.
-          </p>
-        </div>
-      </div>
-    )
-  }
-
-  const showRunnerPill = runners.length > 1 || runners.some((id) => hasAccountChoice(accountChoices, id))
-  const runnerPill = showRunnerPill ? (
-    <RunnerPill
-      key="runner"
-      icon={<TerminalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
-      fieldLabel
-      runners={runners}
-      value={displayRunner}
-      accounts={accountChoices}
-      account={agentProfile}
-      repoAccount={repoAccount}
-      onPick={(next, picked) =>
-        update({
-          runner: next,
-          agentProfile: picked,
-          ...(next === displayRunner ? {} : { model: null }),
-        })
-      }
-      disabled={!providersReady}
-    />
-  ) : null
-  const modelPill = (
-    <PickerPill
-      key="model"
-      icon={<CpuIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
-      fieldLabel
-      slot="model-pill"
-      ariaLabel="Model"
-      label={models.find((m) => m.id === model)?.label ?? 'auto'}
-      value={model}
-      disabled={!providersReady}
-      readOnly={modelsLocked}
-      disabledHint={
-        modelsLocked
-          ? 'Model selection is locked to native coding-agent settings.'
-          : undefined
-      }
-      onPick={(next) => {
-        const nextOptions = effortOptionsForModel(displayRunner, next, catalog.data)
-        update({
-          model: next,
-          effort: draft.effort === null ? null : resolveEffort(draft.effort, nextOptions),
-        })
-      }}
-      options={models.map((m) => ({ value: m.id, label: m.label, desc: m.desc }))}
-      status={modelCatalogStatus(displayRunner, catalog.data, catalog.isError, catalog.isFetching)}
-    />
-  )
-  const effortPill = (
-    <PickerPill
-      key="effort"
-      icon={<GaugeIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />}
-      fieldLabel
-      slot="effort-pill"
-      ariaLabel="Effort"
-      label={effortOptions.find((option) => option.value === effort)?.label ?? 'auto'}
-      value={effort}
-      disabled={!providersReady}
-      readOnly={modelsLocked}
-      disabledHint={
-        modelsLocked
-          ? 'Effort selection is locked to native coding-agent settings.'
-          : undefined
-      }
-      onPick={(next) => update({ effort: next })}
-      options={effortOptions.map((option) => ({
-        value: option.value,
-        label: option.label,
-        desc: option.desc,
-      }))}
-    />
-  )
+  const { providers, providersReady } = engine
+  const mode = draft.planFirst ? COMPOSER_MODE.plan : COMPOSER_MODE.start
+  const unavailableReason = providerUnavailableReason(providers)
 
   return (
     <div
@@ -632,24 +162,9 @@ export function NewTaskRoute() {
     >
 
       <div data-slot="new-task-layout" ref={draftPanelRef} style={plan !== null ? { display: 'none' } : undefined} className="relative z-[1] mx-auto w-full max-w-none px-11 pt-12 max-md:px-[18px] max-md:pt-[22px]">
-        <header className="mb-7 max-md:mb-5">
-          <p data-slot="page-eyebrow" className="mb-2 text-[11px] font-semibold tracking-[0.16em] text-[var(--accent-text)] uppercase">
-            NEW TASK
-          </p>
-          <h1 className="text-[30px] leading-[normal] font-semibold tracking-[-0.9px] max-md:text-[22px] max-md:leading-[29px] max-md:tracking-[-0.6px]">
-            What should the agent work on?
-          </h1>
-          <p data-slot="page-description" className="mt-2 hidden text-[13px] text-muted-foreground md:block">
-            Describe the outcome. Configure the run. Review everything before it lands.
-          </p>
-        </header>
+        <NewTaskHeader />
 
-        {draft.retiredVariants ? (
-          <section role="alert" className="flex flex-col items-start gap-3 rounded-xl border border-border bg-card p-4">
-            <p>Parallel variants are removed. This saved draft requested multiple candidates. Use owned workers to compare approaches, or start one task.</p>
-            <Button variant="outline" className="min-h-11" onClick={() => update({ retiredVariants: false })}>Use one task</Button>
-          </section>
-        ) : null}
+        {draft.retiredVariants ? <RetiredVariantsNotice onUseOneTask={() => update({ retiredVariants: false })} /> : null}
 
         <Composer
           ref={composerRef}
@@ -657,135 +172,67 @@ export function NewTaskRoute() {
           retainDraftUntilSuccess
           idleFeedback={
             <div data-slot="new-task-mode-note" className="flex items-center justify-between gap-3 text-[11px] text-muted-foreground">
-              <span>{draft.planFirst ? 'Review the plan before starting the task.' : 'Start immediately with the selected configuration.'}</span>
+              <span>{mode.note}</span>
               <kbd className="hidden font-sans md:inline">{submitShortcutHint()}</kbd>
             </div>
           }
-          pendingLabel={draft.planFirst ? 'Planning task…' : 'Starting task…'}
-          failureHint={draft.planFirst ? 'Could not create the plan. Your draft is kept. Please retry.' : undefined}
-          clearOnSuccess={!draft.planFirst}
+          pendingLabel={mode.pendingLabel}
+          failureHint={mode.failureHint}
+          clearOnSuccess={mode.clearOnSuccess}
           onPendingChange={(pending) => { submissionPending.current = pending }}
           value={draft.text}
           onValueChange={(text) => update({ text })}
           autoFocus
           placeholder="Describe a task for the agent — / for skills…"
           ariaLabel="Describe a task for the agent"
-          sendAriaLabel={draft.planFirst ? 'Plan task' : 'Start task'}
+          sendAriaLabel={mode.sendAriaLabel}
           disabled={!providersReady || starting}
-          disabledReason={
-            providers.isPending
-              ? 'Checking agent providers…'
-              : providers.isError
-                ? 'Provider authentication could not be verified.'
-                : 'Connect an agent provider before starting a task.'
-          }
+          disabledReason={unavailableReason}
           autocompleteSkills
           footerStart={
-            <>
-              {/* The project pill LEADS the row (mockup new-task-project.html): everything to
-                  its right is resolved against it, so it reads left-to-right as "in this
-                  project, run this skill, with this model". Rendered only once the workspace
-                  actually holds more than one project — with a single one the control offers
-                  nothing and the composer keeps the shape it has always had, the same rule the
-                  sidebar's project groups follow. */}
-              {projectList.length > 1 && urlProjectId !== undefined ? (
-                <ProjectPill
-                  projects={projectList}
-                  projectId={urlProjectId}
-                  // An explicit `/p/<id>` target: the scoped navigate wrapper passes already
-                  // scoped paths through untouched, so this is a genuine cross-project jump.
-                  onPick={(next) => navigate(`/p/${encodeURIComponent(next)}/new`, { replace: true })}
-                />
-              ) : null}
-              <PromptTemplateMenu
-                label="Template"
-                templates={templates}
-                onInsert={(text) => composerRef.current?.insertAtCaret(text)}
-              />
-              <SourcePill
-                source={source}
-                ready={sourcesReady}
-                skills={skillList}
-                skillUsage={skillUsage}
-                workflows={workflowList}
-                onPick={(next) => update({ source: next })}
-              />
-
-            </>
+            <ComposerFooterStart
+              projects={webhook.projectList}
+              urlProjectId={urlProjectId}
+              templates={templates}
+              onInsertTemplate={(text) => composerRef.current?.insertAtCaret(text)}
+              sources={sources}
+              onPickSource={(next) => update({ source: next })}
+            />
           }
           agentOptions={
-            <div ref={agentOptionsRef} data-slot="agent-options" role="group" aria-label="Agent settings" className="new-task-agent-options">
-              {/* Controls stay with the editor; responsive DOM order follows their visual order. */}
-              <PickerPillGroup>
-                {compactAgentOptions ? [runnerPill, effortPill, modelPill] : [runnerPill, modelPill, effortPill]}
-              </PickerPillGroup>
-            </div>
+            <AgentOptions
+              groupRef={agentOptionsRef}
+              compact={compactAgentOptions}
+              engine={engine}
+              accounts={accounts}
+              draftEffort={draft.effort}
+              update={update}
+            />
           }
           executionOptions={
-            <details data-slot="execution-options" open className="group rounded-xl border border-border bg-card xl:self-start">
-              <summary className="flex min-h-[44px] cursor-pointer list-none flex-wrap items-center gap-x-2 gap-y-1 px-3 py-2 text-xs text-muted-foreground pointer-hover:bg-muted/50 active:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-foreground [&::-webkit-details-marker]:hidden">
-                <SlidersHorizontalIcon aria-hidden="true" className="size-[18px] shrink-0 text-accent-text" />
-                <span className="font-medium text-foreground">Execution settings</span>
-                <span data-slot="execution-summary" hidden className="min-w-0 basis-full truncate pl-5 xl:ml-auto xl:basis-auto xl:pl-0">
-                  {RUNNERS.find((runner) => runner.id === displayRunner)?.label ?? displayRunner}
-                  {' · '}{models.find((item) => item.id === model)?.label ?? 'auto'}
-                </span>
-                <ChevronDownIcon aria-hidden="true" className="new-task-settings-chevron size-4 shrink-0" />
-              </summary>
-              <div className="new-task-settings-body">
-                <p className="new-task-settings-description">Control this run and what happens after Done.</p>
-                <div role="group" aria-label="Run settings" className="new-task-run-settings">
-                  {worktreeToggleShown ? (
-                    <WorktreeToggle
-                      on={worktreeOn}
-                      onChange={(on) => update({ worktree: on })}
-                    />
-                  ) : null}
-                  {repo.data ? <div className="new-task-base-branch flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>Base branch</span><BaseBranchPill repo={repo.data} /></div> : null}
-                  <AutonomousToggle
-                    on={autonomousOn}
-                    disabled={draft.planFirst}
-                    onChange={(on) => update({ autonomous: on })}
-                  />
-                  {webhookUrl !== undefined ? (
-                    <NotifyWebhookToggle on={notifyOn} url={webhookUrl} onChange={setNotifyChoice} />
-                  ) : null}
-                  {selectedSkill?.interactive && (draft.autonomous === null || draft.worktree === null) ? (
-                    <p className="basis-full text-xs text-muted-foreground" data-slot="interactive-skill-hint">
-                      This skill recommends an interactive run in the current checkout. You can change either setting.
-                    </p>
-                  ) : null}
-                </div>
-                <CompletionControls embedded archiveWhenDone={draft.archiveWhenDone} autoMergePr={draft.autoMergePr} onChange={update} disabled={starting || planning} />
-              </div>
-            </details>
+            <ExecutionSettings
+              engine={engine}
+              draft={draft}
+              update={update}
+              repo={repo.data}
+              hasGit={hasGit}
+              runMode={runMode}
+              webhook={{ url: webhook.webhookUrl, on: webhook.notifyOn, onChange: webhook.setNotifyChoice }}
+              interactiveSkill={sources.selectedSkill?.interactive === true}
+              completionDisabled={starting || planning}
+            />
           }
           footerEnd={
-            <>
-              {!providersReady && !providers.isPending ? (
-                <Link
-                  to="/settings/agents#providers"
-                  className="text-xs font-medium text-foreground underline underline-offset-4"
-                >
-                  Configure providers
-                </Link>
-              ) : null}
-              <ModeSegment
-                planFirst={draft.planFirst}
-                planning={planning}
-                onModeChange={(planFirst) => update({ planFirst })}
-              />
-              <kbd
-                aria-hidden="true"
-                className="hidden rounded-[5px] border border-b-2 border-border bg-card px-[5px] py-px font-mono text-[11px] font-medium text-muted-foreground md:inline"
-              >
-                {submitShortcutHint()}
-              </kbd>
-            </>
+            <ComposerFooterEnd
+              showConfigureProviders={!providersReady && !providers.isPending}
+              planFirst={draft.planFirst}
+              planning={planning}
+              onModeChange={(planFirst) => update({ planFirst })}
+            />
           }
         />
         <p data-slot="run-mode-note" className="mt-2.5 text-[13px] text-muted-foreground">
-          {composerRunModeNote({ worktree: worktreeOn, hasGit })}
+          {composerRunModeNote({ worktree: runMode.worktree, hasGit })}
         </p>
 
       </div>
@@ -795,13 +242,7 @@ export function NewTaskRoute() {
           plan={plan}
           starting={starting}
           startAvailable={providersReady}
-          startUnavailableReason={
-            providers.isPending
-              ? 'Checking agent providers…'
-              : providers.isError
-                ? 'Provider authentication could not be verified.'
-                : 'Connect an agent provider before starting a task.'
-          }
+          startUnavailableReason={unavailableReason}
           startUnavailableAction={
             !providers.isPending ? (
               <Link to="/settings/agents#providers">Configure providers</Link>
@@ -819,103 +260,50 @@ export function NewTaskRoute() {
   )
 }
 
-/** Worktree opt-out toggle (#worktree-toggle): a checkbox-style chip for ordinary runs.
- *  Checked = isolated worktree (the default); unchecked = run in the repo working tree. */
-function WorktreeToggle({
-  on,
-  disabled,
-  disabledReason,
-  onChange,
+/** Project, template and source pickers at the head of the composer footer. */
+function ComposerFooterStart({
+  projects,
+  urlProjectId,
+  templates,
+  onInsertTemplate,
+  sources,
+  onPickSource,
 }: {
-  on: boolean
-  disabled?: boolean
-  disabledReason?: string
-  onChange: (on: boolean) => void
+  projects: readonly ProjectListEntry[]
+  urlProjectId: string | undefined
+  templates: readonly PromptTemplate[]
+  onInsertTemplate: (text: string) => void
+  sources: ReturnType<typeof useSourceSelection>
+  onPickSource: (source: TaskSource | null) => void
 }) {
+  const navigate = useNavigate()
   return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={on}
-      disabled={disabled}
-      aria-label="Worktree"
-      data-slot="worktree-toggle"
-      onClick={() => onChange(!on)}
-      title={
-        disabled
-          ? disabledReason
-          : on
-          ? 'Runs in an isolated worktree — uncheck to run in the repo working tree'
-          : 'Runs in the repo working tree — check to isolate in a worktree'
-      }
-      className="flex items-center justify-between gap-3 px-0 py-3 text-left"
-    >
-      <span><span className="block text-[13px] font-medium">Worktree</span><span className="block text-[12px] text-muted-foreground">{on ? 'Changes stay in a separate working copy.' : 'Changes are made in the current working directory.'}</span></span>
-      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
-    </button>
-  )
-}
-
-/** Autonomous toggle (#autonomous): checked = the run never pauses for you, auto-continuing
- *  until the agent is done. No "needs you" is ever raised. */
-function AutonomousToggle({
-  on,
-  disabled,
-  onChange,
-}: {
-  on: boolean
-  disabled?: boolean
-  onChange: (on: boolean) => void
-}) {
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={on}
-      disabled={disabled}
-      aria-label="Autonomous"
-      data-slot="autonomous-toggle"
-      onClick={() => onChange(!on)}
-      title={
-        disabled
-          ? 'Plan-first runs are interactive — autonomous is unavailable'
-          : on
-            ? 'Autonomous — the agent runs to completion without pausing for you'
-            : 'Runs interactively — check to let the agent finish without pausing for you'
-      }
-      className="flex items-center justify-between gap-3 px-0 py-3 text-left disabled:opacity-50"
-    >
-      <span><span className="block text-[13px] font-medium">Autonomous</span><span className="block text-[12px] text-muted-foreground">Let the agent proceed without prompts</span></span>
-      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
-    </button>
-  )
-}
-
-/** Notify webhook toggle (#589): checked = the project's task webhook receives this task's
- *  status changes from the start. Rendered only when the project has a webhook. */
-function NotifyWebhookToggle({
-  on,
-  url,
-  onChange,
-}: {
-  on: boolean
-  url: string
-  onChange: (on: boolean) => void
-}) {
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={on}
-      aria-label="Notify webhook"
-      data-slot="notify-webhook-toggle"
-      onClick={() => onChange(!on)}
-      title={on ? `Status changes go to ${webhookLabel(url)}` : `Check to send this task's status changes to ${webhookLabel(url)}`}
-      className="flex min-h-11 items-center justify-between gap-3 px-0 py-3 text-left"
-    >
-      <span className="min-w-0"><span className="block text-[13px] font-medium">Notify webhook</span><span data-slot="notify-webhook-subtitle" className="block truncate text-[12px] text-muted-foreground">Send status changes</span></span>
-      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
-    </button>
+    <>
+      {/* The project pill LEADS the row (mockup new-task-project.html): everything to
+          its right is resolved against it, so it reads left-to-right as "in this
+          project, run this skill, with this model". Rendered only once the workspace
+          actually holds more than one project — with a single one the control offers
+          nothing and the composer keeps the shape it has always had, the same rule the
+          sidebar's project groups follow. */}
+      {projects.length > 1 && urlProjectId !== undefined ? (
+        <ProjectPill
+          projects={projects}
+          projectId={urlProjectId}
+          // An explicit `/p/<id>` target: the scoped navigate wrapper passes already
+          // scoped paths through untouched, so this is a genuine cross-project jump.
+          onPick={(next) => navigate(`/p/${encodeURIComponent(next)}/new`, { replace: true })}
+        />
+      ) : null}
+      <PromptTemplateMenu label="Template" templates={templates} onInsert={onInsertTemplate} />
+      <SourcePill
+        source={sources.source}
+        ready={sources.sourcesReady}
+        skills={sources.skillList}
+        skillUsage={sources.skillUsage}
+        workflows={sources.workflowList}
+        onPick={onPickSource}
+      />
+    </>
   )
 }
 
@@ -1329,93 +717,3 @@ function SourcePill({
   )
 }
 
-/** Base-branch picker: worktrees fork from it and PRs target it. It is repo-level CONFIG
- *  (`PUT /api/config`, exactly the legacy Repo tab's picker), not a per-run flag — so it
- *  mutates the server and refetches, rather than living in the draft. Hidden without git. */
-function BaseBranchPill({ repo }: { repo: RepoResponse }) {
-  const queryClient = useQueryClient()
-  const mutation = useMutation({
-    mutationFn: (baseBranch: string | null) => putConfig({ baseBranch }),
-    onSuccess: (result) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.repo })
-      toast(
-        result.baseBranch
-          ? `New tasks will branch off "${result.baseBranch}" (PRs target it too).`
-          : 'Base branch cleared — new tasks fork from the checked-out branch.',
-      )
-    },
-    onError: (error: Error) => toast(error.message, { tone: 'danger' }),
-  })
-  if (!repo.info) return null
-  const current = repo.baseBranch ?? repo.info.branch
-  return (
-    <PickerPill
-      searchPlaceholder="Search branches…"
-      slot="base-pill"
-      ariaLabel="Base branch"
-      label={<span className="text-[11px]">{current}</span>}
-      value={repo.baseBranch ?? ''}
-      onPick={(value) => mutation.mutate(value === '' ? null : value)}
-      options={[
-        { value: '', label: `follow checked-out branch (${repo.info.branch})`, desc: 'New task worktrees fork from whatever branch is checked out' },
-        ...repo.branches.map((branch) => ({ value: branch, label: branch })),
-      ]}
-    />
-  )
-}
-
-/** The `Start | Plan first` segment (#383): a real toggle with an UNMISTAKABLE selected state.
- *  "Start" selected keeps the quiet card fill; "Plan first" selected takes the mockup's
- *  contrast fill + focus ring (`.seg .plan-active`) — plan mode must never be ambient. The
- *  active plan segment doubles as the busy indicator while `POST /api/plan` is in flight. */
-function ModeSegment({
-  planFirst,
-  planning,
-  onModeChange,
-}: {
-  planFirst: boolean
-  planning: boolean
-  onModeChange: (planFirst: boolean) => void
-}) {
-  return (
-    <div
-      data-slot="mode-seg"
-      role="radiogroup"
-      aria-label="Run mode"
-      className="inline-flex items-center gap-0.5 rounded-lg bg-muted p-[3px]"
-    >
-      <button
-        type="button"
-        role="radio"
-        aria-checked={!planFirst}
-        onClick={() => onModeChange(false)}
-        className={cn(
-          'h-6 rounded-md px-2 text-xs transition-colors',
-          !planFirst
-            ? 'bg-card font-semibold text-foreground shadow-xs'
-            : 'font-medium text-muted-foreground hover:text-foreground',
-        )}
-      >
-        {!planFirst ? <CheckIcon aria-hidden="true" className="size-3.5" /> : null}
-        Start
-      </button>
-      <button
-        type="button"
-        role="radio"
-        aria-checked={planFirst}
-        aria-busy={planning || undefined}
-        data-slot="mode-plan"
-        onClick={() => onModeChange(true)}
-        className={cn(
-          'h-6 rounded-md px-2 text-xs transition-colors',
-          planFirst
-            ? 'bg-contrast font-semibold text-contrast-foreground ring-2 ring-ring/55'
-            : 'font-medium text-muted-foreground hover:text-foreground',
-          planning && 'animate-pulse',
-        )}
-      >
-        {planning ? 'Planning…' : 'Plan first'}
-      </button>
-    </div>
-  )
-}
