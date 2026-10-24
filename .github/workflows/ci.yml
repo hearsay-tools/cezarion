@@ -482,7 +482,7 @@ jobs:
       - name: Run server and cockpit unit suites
         # Keep four workers and both ordinary reporters; retain host load and each
         # test's measured duration/budget to diagnose hearsay-tools/cezarion#974.
-        run: npm test -- --shard=${{ matrix.shard }}/2 --maxWorkers=4 --sequence.sequencer=./.github/scripts/node-floor-test-sequencer.mjs --reporter=default --reporter=github-actions --reporter=./.github/scripts/node-floor-reporter.mjs
+        run: npm test -- --shard=${{ matrix.shard }}/2 --maxWorkers=4 --config=./.github/scripts/node-floor-vitest.config.mjs --reporter=default --reporter=github-actions --reporter=./.github/scripts/node-floor-reporter.mjs
 
       - name: Upload floor measurements
         if: always()

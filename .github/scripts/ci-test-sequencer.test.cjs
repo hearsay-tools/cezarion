@@ -2,6 +2,8 @@ const assert = require('node:assert/strict');
 const { test } = require('node:test');
 const { pathToFileURL } = require('node:url');
 const { join } = require('node:path');
+const { readFileSync } = require('node:fs');
+const { parse } = require('yaml');
 
 const moduleUrl = pathToFileURL(join(__dirname, 'ci-test-sequencer.mjs')).href;
 
@@ -113,6 +115,29 @@ test('floor sequencing reserves fixed work and includes every discovered specifi
   assert.deepEqual(new Set(selected), new Set(specifications));
   const invalid = new FloorSequencer({ config: { root: '/repo', maxWorkers: 0, shard: { index: 1, count: 2 } } });
   assert.throws(() => invalid.shardCosts, /positive integer maxWorkers/);
+});
+
+test('the actual floor workflow command loads a sequencer constructor', async () => {
+  const { createVitest, parseCLI } = await import('vitest/node');
+  const root = join(__dirname, '..', '..');
+  const workflow = parse(readFileSync(join(root, '.github/workflows/ci.yml'), 'utf8'));
+  const step = workflow.jobs['node-floor'].steps.find(step => step.name === 'Run server and cockpit unit suites');
+  const npmTest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts.test;
+  for (const index of workflow.jobs['node-floor'].strategy.matrix.shard) {
+    const command = step.run.replace('npm test --', npmTest).replaceAll('${{ matrix.shard }}', String(index));
+    const { options } = parseCLI(command);
+    const vitest = await createVitest('test', { ...options, root, watch: false });
+    try {
+      const Sequencer = vitest.config.sequence.sequencer;
+      assert.equal(typeof Sequencer, 'function', 'Vitest must receive a constructor, not a CLI path string');
+      const sequencer = new Sequencer(vitest);
+      assert.deepEqual(sequencer.shardCosts, [155000 * 4, 0]);
+      assert.deepEqual(vitest.config.shard, { index, count: 2 });
+      assert.equal(vitest.projects.length, 4, 'the floor retains all four unit projects');
+    } finally {
+      await vitest.close();
+    }
+  }
 });
 
 test('sequencer shards cover every specification including duplicate module ids', async () => {
