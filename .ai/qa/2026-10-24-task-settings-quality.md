@@ -78,8 +78,8 @@ SHA-256: `92499ef7852365025d94692a74314a6f4965aac47cf154463cc43732576c3800`.
 `NewTaskRoute` already had complexity 90 at the pinned baseline. Its current complexity
 and CRAP are 88. CRAP cannot be lower than complexity, so the baseline exceeded both
 limits even with perfect coverage. The layout fix removes decisions and introduces
-no new uncovered branches. A wider route refactor needs a separate issue; approval
-for that issue is pending. The other six changed functions pass. CSS is outside
+no new uncovered branches. A wider route refactor is tracked in
+[hearsay-tools/cezarion#1598](https://github.com/hearsay-tools/cezarion/issues/1598). The other six changed functions pass. CSS is outside
 this tool's supported languages and was checked in the browser.
 
 ## Coverage collection
