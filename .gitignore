@@ -17,7 +17,10 @@ dist/
 /packages/cezar/README.md
 
 # cezar runtime state in this repo (runs, worktrees, launch-key)
-.ai/cezar/
+# Cezar's run data stays out; a shared session-context rule file may be committed (#1584).
+/.ai/cezar/*
+!/.ai/cezar/context.yaml
+/*/**/.ai/cezar/
 
 # locally installed agent skills (per-machine installs, not repo content)
 .agents/

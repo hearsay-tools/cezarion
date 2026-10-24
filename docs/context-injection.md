@@ -32,7 +32,14 @@ The agent still has to keep the Progress log and the Resume notes up to date in 
 
 Add project context with an optional `.ai/cezar/context.yaml` in the project root. Cezarion reads
 it from the project root (the checkout Cezarion runs in), not from the task worktree. A missing
-file means no custom rules, with no warning. The file is not git-ignored, so you can commit it.
+file means no custom rules, with no warning. Cezarion's own `.ai/cezar/.gitignore` does not list
+it, so you can commit it. When your repository ignores the whole `.ai/cezar/` directory, ignore its
+contents instead and re-include the file; Git cannot re-include a file inside an ignored directory:
+
+```gitignore
+/.ai/cezar/*
+!/.ai/cezar/context.yaml
+```
 
 ```yaml
 version: 1
