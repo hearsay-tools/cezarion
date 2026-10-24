@@ -1510,10 +1510,12 @@ export function TasksOverviewRoute() {
 }
 
 /** How long the search box waits before writing `q` to the URL: one history write per word. */
-const setParam = (key: string, value: string | null): SearchParamsUpdate => (current) => {
-  if (value === null) current.delete(key)
-  else current.set(key, value)
-  return current
+function setParam(key: string, value: string | null): SearchParamsUpdate {
+  return (current) => {
+    if (value === null) current.delete(key)
+    else current.set(key, value)
+    return current
+  }
 }
 
 /**
@@ -1533,7 +1535,10 @@ function useTasksUrlState() {
   React.useEffect(() => setOriginState(urlOrigin), [urlOrigin])
   const initialQuery = React.useRef(searchParams.get('q') ?? '').current
   const timer = React.useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  React.useEffect(() => () => clearTimeout(timer.current), [])
+  React.useEffect(() => {
+    const pending = timer
+    return () => clearTimeout(pending.current)
+  }, [])
   const writeQuery = React.useCallback((query: string) => {
     clearTimeout(timer.current)
     const trimmed = query.trim()

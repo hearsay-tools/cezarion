@@ -4,10 +4,12 @@ import { describe, expect, it } from 'vitest'
 
 import { useSearchParamsWriter, type SearchParamsUpdate } from '@/lib/use-search-params-writer'
 
-const set = (key: string, value: string | null): SearchParamsUpdate => (current) => {
-  if (value === null) current.delete(key)
-  else current.set(key, value)
-  return current
+function set(key: string, value: string | null): SearchParamsUpdate {
+  return (current) => {
+    if (value === null) current.delete(key)
+    else current.set(key, value)
+    return current
+  }
 }
 
 function renderWriter(initial = '/p/x/') {
