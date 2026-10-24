@@ -85,6 +85,21 @@ function serve({
   const global: Record<string, unknown> = { ...workspaceUiState }
   const json = (payload: unknown) =>
     new Response(JSON.stringify(payload), { status: 200, headers: { 'content-type': 'application/json' } })
+  const importableAnswer = () => {
+    if (holdImportable) return new Promise<never>(() => {})
+    return importableError
+      ? // 409 is what a project whose run store cannot open answers; a 4xx is not retried.
+        new Response(JSON.stringify({ error: 'store busy' }), { status: 409, headers: { 'content-type': 'application/json' } })
+      : json(offered)
+  }
+  const projectUiState = (method: string, body: unknown) => {
+    if (method !== 'PUT') return json(project)
+    if (failUiStateWrites) {
+      return new Response(JSON.stringify({ error: 'disk full' }), { status: 500, headers: { 'content-type': 'application/json' } })
+    }
+    project = { ...project, ...(body as Record<string, unknown>) }
+    return json(project)
+  }
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -100,23 +115,10 @@ function serve({
         return json(refreshed)
       }
       // Both the fast read and the ?wait=1 convergence read hit this endpoint.
-      if (url.startsWith('/api/v1/skills/importable')) {
-        if (holdImportable) return new Promise<never>(() => {})
-        return importableError
-          ? // 409 is what a project whose run store cannot open answers; a 4xx is not retried.
-            new Response(JSON.stringify({ error: 'store busy' }), { status: 409, headers: { 'content-type': 'application/json' } })
-          : json(offered)
-      }
+      if (url.startsWith('/api/v1/skills/importable')) return importableAnswer()
       if (url === '/api/v1/workflows') return json(WORKFLOWS)
       if (url === '/api/v1/launch-key') return json({ key: 'sekret' })
-      if (url === '/api/v1/ui-state' && method === 'GET') return json(project)
-      if (url === '/api/v1/ui-state' && method === 'PUT') {
-        if (failUiStateWrites) {
-          return new Response(JSON.stringify({ error: 'disk full' }), { status: 500, headers: { 'content-type': 'application/json' } })
-        }
-        project = { ...project, ...(body as Record<string, unknown>) }
-        return json(project)
-      }
+      if (url === '/api/v1/ui-state') return projectUiState(method, body)
       if (url === '/api/v1/workspace/ui-state' && method === 'GET') return json(global)
       if (url === '/api/v1/workspace/ui-state' && method === 'PUT') return json({ ...global, ...(body as Record<string, unknown>) })
       return new Promise<never>(() => {})
