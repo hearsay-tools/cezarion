@@ -759,6 +759,12 @@ export const archiveFinishedResponseSchema = z.object({
 export type ArchiveFinishedResponse = z.infer<typeof archiveFinishedResponseSchema>;
 
 /** `POST /runs/read-all` — how many unread finished runs the sweep marked read. */
+/** `POST /runs/read-all` body — optional, an absent body stamps every origin. `automation` narrows
+ *  the sweep the same way `archiveFinishedRequestSchema` does: the Tasks pages' origin filter
+ *  (hearsay-tools/cezarion#1616). */
+export const markAllReadRequestSchema = z.object({ automation: z.boolean().optional() });
+export type MarkAllReadRequest = z.infer<typeof markAllReadRequestSchema>;
+
 export const markAllReadResponseSchema = z.object({ read: z.number() });
 export type MarkAllReadResponse = z.infer<typeof markAllReadResponseSchema>;
 

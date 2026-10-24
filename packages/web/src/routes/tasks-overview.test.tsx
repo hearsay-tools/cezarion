@@ -116,13 +116,13 @@ describe('TasksOverview — mobile actions', () => {
   it('opens the keyboard actions menu and uses the existing archive handler', () => {
     const { onArchiveFinished } = renderOverview({ runs: [run({ status: 'done' })] })
     fireEvent.keyDown(screen.getByRole('button', { name: 'Task actions' }), { key: 'ArrowDown' })
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Archive finished' }))
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Archive finished (1)' }))
     expect(onArchiveFinished).toHaveBeenCalledOnce()
   })
 
   it('disables the shared archive controls while a request is pending', () => {
     const { onArchiveFinished } = renderOverview({ runs: [run()], archivePending: true })
-    const desktop = screen.getByRole('button', { name: 'Archive finished' })
+    const desktop = screen.getByRole('button', { name: /^Archive finished/ })
     expect(desktop.hasAttribute('disabled')).toBe(true)
     fireEvent.keyDown(screen.getByRole('button', { name: 'Task actions' }), { key: 'ArrowDown' })
     const pending = screen.getByRole('menuitem', { name: 'Archiving…' })
@@ -186,7 +186,7 @@ describe('TasksOverview — the table', () => {
     expect(onToggleColumn).not.toHaveBeenCalled()
   })
 
-  it('renders one row per run, in the sidebar order (needs-you first, then recency)', () => {
+  it('renders one row per run, in the sidebar order (Needs you, Finished, Working)', () => {
     renderOverview({
       runs: [
         run({ id: 'done1', title: 'Old done', createdAt: ago(3 * 3_600_000) }),
@@ -197,7 +197,7 @@ describe('TasksOverview — the table', () => {
     const ids = [...document.querySelectorAll('[data-slot="task-table-row"]')].map((el) =>
       el.getAttribute('data-run-id')
     )
-    expect(ids).toEqual(['rev1', 'run1', 'done1'])
+    expect(ids).toEqual(['rev1', 'done1', 'run1'])
   })
 
   it('gives long desktop task titles a two-line readable region without changing their link', () => {
@@ -336,7 +336,7 @@ describe('TasksOverview — the table', () => {
     // Status | Task | Workflow | Branch | ± | PR | IN/OUT | Cost | CPU | Mem | Started
     expect(cellsOf('full')).toEqual([
       'needs review',
-      'Structured changes endpoint',
+      'Structured changes endpointDirect task',
       'feat',
       'cez/8f31ab02',
       '+128 −14', // the ± column (R2 #389) — adds and dels, the mockup's pair
@@ -350,7 +350,7 @@ describe('TasksOverview — the table', () => {
     // No branch, no PR, no diff recorded, no cost yet — dashes, not zeros (a pre-R2 record has
     // no diffStat, and `+0 −0` would claim a measurement that never happened). Started falls
     // back to createdAt.
-    expect(cellsOf('bare')).toEqual(['needs you', 'Bare minimum', 'default', '—', '—', '—', '— / —', '—', '—', '—', '26m'])
+    expect(cellsOf('bare')).toEqual(['needs you', 'Bare minimumDirect task', 'default', '—', '—', '—', '— / —', '—', '—', '—', '26m'])
     // The pair is two colored halves, not one string — green adds, red dels (design tokens).
     const diff = tableRow('full')?.querySelector('[data-slot="diff-stat"]')
     expect(diff?.querySelector('.text-success')?.textContent).toBe('+128')
@@ -393,13 +393,13 @@ describe('TasksOverview — the table', () => {
       ],
     })
 
-    const headers = [...document.querySelectorAll('[data-slot="tasks-table"] th')].map(
+    const headers = [...document.querySelector('[data-slot="tasks-table"]')!.querySelectorAll('th')].map(
       (cell) => cell.textContent,
     )
     expect(headers).toEqual(['Status', 'Task', 'Workflow', 'Branch', '±', 'Ref', 'CPU', 'Mem', 'Started'])
     expect(cellsOf('hidden')).toEqual([
       'done',
-      'Hidden metrics',
+      'Hidden metricsDirect task',
       'default',
       '—',
       '—',
@@ -454,7 +454,7 @@ describe('TasksOverview — the table', () => {
       ],
     })
 
-    const headerIds = [...document.querySelectorAll('[data-slot="tasks-table"] th')].map((header) =>
+    const headerIds = [...document.querySelector('[data-slot="tasks-table"]')!.querySelectorAll('th')].map((header) =>
       header.getAttribute('data-column-id'),
     )
     const logicalRowIds = (id: string) =>
@@ -476,7 +476,7 @@ describe('TasksOverview — the table', () => {
     expect(screen.getByRole('button', { name: 'Expand Workflow column', pressed: false })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Fold Branch column', pressed: true })).not.toBeNull()
     expect(screen.getByRole('button', { name: 'Fold CPU column', pressed: true })).not.toBeNull()
-    expect(document.querySelectorAll('[data-slot="tasks-table"] thead button')).toHaveLength(9)
+    expect(document.querySelector('[data-slot="tasks-table"]')!.querySelectorAll('thead button')).toHaveLength(9)
     expect(document.querySelector('th[data-column-id="status"]')?.textContent).toBe('Status')
     expect(document.querySelector('th[data-column-id="task"]')?.textContent).toBe('Task')
   })
@@ -531,7 +531,7 @@ describe('TasksOverview — the table', () => {
       ],
     })
 
-    const allHeaders = [...document.querySelectorAll('[data-slot="tasks-table"] th')].map(
+    const allHeaders = [...document.querySelector('[data-slot="tasks-table"]')!.querySelectorAll('th')].map(
       (cell) => cell.textContent,
     )
     expect(allHeaders.filter((header) => header === 'IN / OUT' || header === 'Cost')).toEqual(headers)
@@ -696,12 +696,13 @@ describe('TasksOverview — inline rename from the table (spec step 15)', () => 
 })
 
 describe('TasksOverview — pinned tasks (#935)', () => {
-  it('sorts pinned rows to the top, whatever their status says', () => {
+  it('sorts pinned rows to the top of their status group, as the sidebar does (#811)', () => {
     const onTogglePin = vi.fn()
     renderOverview({
       runs: [
         run({ id: 'waiting', status: 'waiting' }),
-        run({ id: 'kept', status: 'done', pinned: true }),
+        run({ id: 'newer', status: 'done' }),
+        run({ id: 'kept', status: 'done', pinned: true, createdAt: ago(3 * 3_600_000) }),
         run({ id: 'running', status: 'running' }),
       ],
       onTogglePin,
@@ -709,7 +710,7 @@ describe('TasksOverview — pinned tasks (#935)', () => {
     const order = [...document.querySelectorAll('[data-slot="task-table-row"]')].map((el) =>
       el.getAttribute('data-run-id'),
     )
-    expect(order).toEqual(['kept', 'waiting', 'running'])
+    expect(order).toEqual(['waiting', 'kept', 'newer', 'running'])
   })
 
   it('toggles from the row and from the card, reporting the state asked for', () => {
@@ -865,7 +866,7 @@ describe('TasksOverview — header', () => {
       runs: [run({ status: 'running' }), run({ status: 'done' }), run({ status: 'done', archived: true })],
     })
     const active = screen.getByRole('button', { name: /^Active/ })
-    const archived = screen.getByRole('button', { name: /^Archived/ })
+    const archived = document.querySelector('[data-slot="overview-tab"][data-view="archived"]') as HTMLElement
     expect(active.textContent).toBe('Active · 2')
     expect(archived.textContent).toBe('Archived · 1')
     expect(active.getAttribute('aria-pressed')).toBe('true')
@@ -1353,11 +1354,11 @@ describe('TasksOverviewRoute — wired to the app', () => {
     fetchMock.mockImplementation(async input => String(input).replace('?archived=recent', '').endsWith('archive-finished')
       ? json({ error: 'Archive unavailable. Try again.' }, 503)
       : json([]))
-    fireEvent.click(screen.getByRole('button', { name: 'Archive finished' }))
+    fireEvent.click(screen.getByRole('button', { name: 'Archive finished 1' }))
     expect(await screen.findByText('Archive unavailable. Try again.')).not.toBeNull()
     expect(tableRow('failure')).not.toBeNull()
     expect((screen.getByRole('textbox', { name: 'Search tasks' }) as HTMLInputElement).value).toBe('Keep')
-    await waitFor(() => expect(screen.getByRole('button', { name: 'Archive finished' }).hasAttribute('disabled')).toBe(false))
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Archive finished 1' }).hasAttribute('disabled')).toBe(false))
   })
 
   it('PATCHes a table rename to /api/v1/runs/:id and refetches the authoritative list', async () => {
@@ -1463,7 +1464,7 @@ it('offers explicit save and cancel for an inline table rename', () => {
 describe('archived pages past the window', () => {
   const archivedRuns = (count: number) => Array.from({ length: count }, (_, i) =>
     run({ id: `win-${i}`, archived: true, createdAt: ago(1_000_000 + i * 1000) }))
-  const archivedTab = () => screen.getByRole('button', { name: /^Archived/ })
+  const archivedTab = () => document.querySelector('[data-slot="overview-tab"][data-view="archived"]') as HTMLElement
 
   // Two renders of a full 200-row window: slow on a loaded suite, not a wait on anything.
   it('says 200+ while the window is full and the total is unknown, then the total', { timeout: 30_000 }, () => {
@@ -1572,5 +1573,130 @@ describe('archived pages past the window', () => {
     fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: '#864' } })
     expect(onArchivedSearch).toHaveBeenLastCalledWith('#864')
     expect(tableRow('by-issue')).not.toBeNull()
+  })
+})
+
+describe('TasksOverview — status groups and origin (hearsay-tools/cezarion#1616)', () => {
+  beforeEach(() => localStorage.clear())
+  afterEach(() => vi.unstubAllGlobals())
+
+  const automated = (over: Partial<RunRecord> = {}) =>
+    // The summary's `automationId`, as `toRunSummary` derives it from `automationTrigger`.
+    ({ ...run(over), automationId: 'nightly' })
+  const heading = (label: string) => document.querySelector(`[data-slot="task-status-group"][data-bucket="${label}"]`) as HTMLElement
+  const rowIds = () => [...document.querySelectorAll('[data-slot="task-summary-row"]')].map((row) => row.querySelector('a')?.getAttribute('href'))
+
+  it('filters by recorded origin with counts, and scopes the bulk actions to it', () => {
+    const onArchiveFinished = vi.fn()
+    const onOriginChange = vi.fn()
+    const runs = [
+      run({ id: 'direct', autonomous: true }),
+      automated({ id: 'auto-done' }),
+      automated({ id: 'auto-running', status: 'running' }),
+    ]
+    const { rerender } = renderOverview({ runs, onArchiveFinished, origin: 'automations', onOriginChange }, false)
+    const chips = within(document.querySelector('[data-slot="origin-filter"]') as HTMLElement)
+    expect(chips.getByRole('button', { name: 'All 3' }).getAttribute('aria-pressed')).toBe('false')
+    expect(chips.getByRole('button', { name: 'Direct tasks 1' })).toBeTruthy()
+    expect(chips.getByRole('button', { name: 'Automations 2' }).getAttribute('aria-pressed')).toBe('true')
+    expect(rowIds()).toEqual(['/tasks/auto-done', '/tasks/auto-running'])
+    // The sweep names the origin and how many it will archive.
+    fireEvent.click(screen.getByRole('button', { name: 'Archive finished 1' }))
+    expect(onArchiveFinished).toHaveBeenCalledWith(true)
+    fireEvent.click(chips.getByRole('button', { name: 'Direct tasks 1' }))
+    expect(onOriginChange).toHaveBeenCalledWith('direct')
+    void rerender
+  })
+
+  it('scopes Mark all read to the origin', () => {
+    const onMarkAllRead = vi.fn()
+    renderOverview({ runs: [run({ finishedAt: ago(0) }), automated({ finishedAt: ago(0) })], onMarkAllRead, origin: 'direct' }, false)
+    fireEvent.click(screen.getByRole('button', { name: 'Mark all read 1' }))
+    expect(onMarkAllRead).toHaveBeenCalledWith(false)
+  })
+
+  it('heads each group with its name, count and dot, and turns Finished red on a failure', () => {
+    renderOverview({ runs: [run({ status: 'review' }), run(), run({ status: 'failed' }), run({ status: 'running' })] }, false)
+    expect([...document.querySelectorAll('[data-slot="task-status-group"]')].map((group) => group.getAttribute('data-bucket')))
+      .toEqual(['Needs you', 'Finished', 'Working'])
+    expect(within(heading('Finished')).getByRole('button', { name: /Finished 2/ }).getAttribute('aria-expanded')).toBe('true')
+    expect(heading('Needs you').getAttribute('data-tone')).toBe('pending')
+    expect(heading('Finished').getAttribute('data-tone')).toBe('danger')
+    expect(within(heading('Finished')).getByRole('img', { name: 'contains failed tasks' })).toBeTruthy()
+    expect(heading('Working').getAttribute('data-tone')).toBe('running')
+  })
+
+  it('shows one neutral Archived group for history', () => {
+    renderOverview({ view: 'archived', runs: [run({ archived: true, status: 'failed' }), run({ archived: true })] }, false)
+    expect([...document.querySelectorAll('[data-slot="task-status-group"]')].map((group) => group.getAttribute('data-tone'))).toEqual(['neutral'])
+  })
+
+  it('folds a group, keeps its heading, reveals matches during a search and restores the fold after', () => {
+    renderOverview({ runs: [run({ id: 'a', title: 'Alpha report' }), run({ id: 'b', title: 'Beta report' })] }, false)
+    const toggle = within(heading('Finished')).getByRole('button', { name: /Finished 2/ })
+    fireEvent.click(toggle)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    expect(rowIds()).toEqual([])
+    expect(heading('Finished').textContent).toContain('2')
+
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: 'Alpha' } })
+    expect(rowIds()).toEqual(['/tasks/a'])
+    expect(heading('Finished').getAttribute('data-folded')).toBe('true')
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: '' } })
+    expect(rowIds()).toEqual([])
+
+    cleanup()
+    renderOverview({ runs: [run({ id: 'c' })] }, false)
+    expect(within(heading('Finished')).getByRole('button', { name: /Finished 1/ }).getAttribute('aria-expanded')).toBe('false')
+    fireEvent.click(screen.getByRole('button', { name: 'Expand groups' }))
+    expect(rowIds()).toEqual(['/tasks/c'])
+  })
+
+  it('keeps Active and Archived folds apart', () => {
+    renderOverview({ runs: [run()] }, false)
+    fireEvent.click(screen.getByRole('button', { name: 'Collapse groups' }))
+    cleanup()
+    renderOverview({ view: 'archived', runs: [run({ id: 'old', archived: true })] }, false)
+    expect(rowIds()).toEqual(['/tasks/old'])
+  })
+
+  it('names the origin under each title, falling back to the recorded automation id', () => {
+    renderOverview({ runs: [run({ id: 'mine' }), automated({ id: 'named' })], automationName: () => undefined }, false)
+    const origins = [...document.querySelectorAll('[data-slot="task-summary-row"] [data-slot="task-origin"]')].map((line) => line.textContent)
+    expect(origins).toContain('Direct task')
+    expect(origins).toContain('nightly')
+    cleanup()
+    renderOverview({ runs: [automated()], automationName: (id) => (id === 'nightly' ? 'Nightly health' : undefined) }, false)
+    expect(document.querySelector('[data-slot="task-origin"]')?.textContent).toBe('Nightly health')
+  })
+
+  it('finds a task by its automation name', () => {
+    renderOverview({ runs: [run({ id: 'mine' }), automated({ id: 'auto' })], automationName: () => 'Nightly health' }, false)
+    fireEvent.change(screen.getByRole('textbox', { name: 'Search tasks' }), { target: { value: 'nightly' } })
+    expect(rowIds()).toEqual(['/tasks/auto'])
+  })
+
+  it('previews the latest progress inline with Open task, and says when it cannot', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('# Handoff\n\n## Progress log\n\n- 10:02 — tests pass\n', { status: 200 })))
+    renderOverview({ runs: [run({ id: 'p', title: 'Preview me', status: 'failed', error: 'exit 1' })] }, false)
+    fireEvent.click(screen.getByRole('button', { name: 'Show resources for Preview me' }))
+    const preview = document.querySelector('[data-slot="task-preview"]') as HTMLElement
+    expect(within(preview).getByRole('status').textContent).toBe('Loading latest progress…')
+    expect(await within(preview).findByText('10:02 — tests pass')).toBeTruthy()
+    expect(within(preview).getByText('exit 1')).toBeTruthy()
+    expect(within(preview).getByRole('link', { name: 'Open task: Preview me' }).getAttribute('href')).toBe('/tasks/p')
+
+    cleanup()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('gone', { status: 404 })))
+    renderOverview({ runs: [run({ id: 'q', title: 'No journal' })] }, false)
+    fireEvent.click(screen.getByRole('button', { name: 'Show resources for No journal' }))
+    expect(await screen.findByText('Latest progress is unavailable.')).toBeTruthy()
+  })
+
+  it('offers a way back when an origin leaves nothing to show', () => {
+    const onOriginChange = vi.fn()
+    renderOverview({ runs: [run()], origin: 'automations', onOriginChange }, false)
+    fireEvent.click(screen.getByRole('button', { name: 'Show all tasks' }))
+    expect(onOriginChange).toHaveBeenCalledWith('all')
   })
 })

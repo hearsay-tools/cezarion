@@ -75,6 +75,7 @@ import { repoPullInputSchema, deleteBranchesInputSchema } from '@open-mercato/ce
 import {
   pinRunInputSchema,
   archiveFinishedRequestSchema,
+  markAllReadRequestSchema,
   notifyRunInputSchema,
   type GroupResponse,
   type GroupVariant,
@@ -3742,7 +3743,8 @@ export function createApp(deps: ServerDeps) {
 
     // The read-receipt sweep (#unread-done-items) — the mark-read twin of the archive
     // sweep above, and under the same registration-order guard.
-    .post('/runs/read-all', (c) => c.json({ read: c.get('project').store.markAllRead() }))
+    .post('/runs/read-all', jsonZodValidator(markAllReadRequestSchema, { absent: {}, malformed: null }), (c) =>
+      c.json({ read: c.get('project').store.markAllRead(c.req.valid('json').automation) }))
 
     .post('/runs/:id/archive', jsonZodValidator(archiveSchema, { absent: ({}) }), async (c) => {
       const { store } = c.get('project');

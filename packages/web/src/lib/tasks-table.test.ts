@@ -168,6 +168,12 @@ describe('filterRuns', () => {
     expect(ids('e5f6')).toEqual(['b'])
   })
 
+  it('matches the extra text the row shows, such as its automation name (#1616)', () => {
+    const named = (run: { id: string }) => (run.id === 'b' ? 'Nightly health check' : '')
+    expect(filterRuns(runs, 'nightly', named).map((r) => r.id)).toEqual(['b'])
+    expect(filterRuns(runs, 'nightly')).toEqual([])
+  })
+
   it('matches the workflow — including the label the column actually prints', () => {
     expect(ids('plan-then')).toEqual(['b'])
     // '(inbox)' renders as its agent step's name, so that name must be searchable.

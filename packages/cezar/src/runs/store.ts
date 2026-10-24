@@ -3802,9 +3802,10 @@ export class RunStore extends EventEmitter {
   /**
    * Stamp unread finished runs in bulk and return the count. Keep the rule aligned with cockpit
    * isUnread: done/failed, finished since seen, not archived; cancelled and usage-limit waiting
-   * runs are excluded.
+   * runs are excluded. `automation` narrows it to one origin, as in `archiveFinished`
+   * (hearsay-tools/cezarion#1616); absent stamps both.
    */
-  markAllRead(): number {
+  markAllRead(automation?: boolean): number {
     const now = new Date().toISOString();
     let count = 0;
     // Runs not in memory are picked by the same rule over their stored summary, then re-checked
@@ -3824,6 +3825,7 @@ export class RunStore extends EventEmitter {
         run.finishedAt !== undefined &&
         (run.seenAt === undefined || run.seenAt < run.finishedAt);
       if (!unread) continue;
+      if (automation !== undefined && (automationIdOf(run) !== undefined) !== automation) continue;
       run.seenAt = now;
       this.touch(run);
       count++;

@@ -59,6 +59,8 @@ import {
   getArtifact,
   getArtifacts,
   getRunHandoff,
+  getProjectRunHandoff,
+  getAutomations,
   getRuns,
   getRunsIndex,
   getArchivedRuns,
@@ -1158,6 +1160,47 @@ export function useRunHandoff(id: string | undefined, enabled = true) {
     queryFn: ({ signal }) => getRunHandoff(id as string, { signal }),
     enabled: Boolean(id) && enabled,
   })
+}
+
+/** A Tasks row's inline preview (hearsay-tools/cezarion#1616): the same journal, read when the row
+ *  opens. `projectId` names another project's run (All tasks); absent reads the active scope, under
+ *  the Notes panel's own key so the two share one fetch. */
+export function useTaskPreviewHandoff(projectId: string | undefined, id: string, enabled: boolean) {
+  return useQuery({
+    queryKey: projectId === undefined ? queryKeys.runs.handoff(id) : [projectId, 'runs', 'handoff', id] as const,
+    queryFn: ({ signal }) => projectId === undefined ? getRunHandoff(id, { signal }) : getProjectRunHandoff(projectId, id, { signal }),
+    enabled,
+    staleTime: 15_000,
+  })
+}
+
+/**
+ * Automation names for the Tasks pages' origin line (hearsay-tools/cezarion#1616), one read per
+ * project that shows automation tasks, archived definitions included. Off when the server has
+ * automations off (`health.automations`), and on any failure: the row then shows the recorded
+ * automation id, so provenance never depends on the definition still existing.
+ *
+ * `projectIds` holds `undefined` for the active scope. The answer is a lookup, keyed the same way.
+ */
+export function useAutomationNames(projectIds: readonly (string | undefined)[], enabled: boolean) {
+  const unique = [...new Set(projectIds)]
+  const results = useQueries({
+    queries: unique.map((projectId) => ({
+      queryKey: [projectId ?? queryScope(), 'automations', 'names'] as const,
+      queryFn: ({ signal }: { signal: AbortSignal }) =>
+        getAutomations({ signal, archived: 'include', ...(projectId === undefined ? {} : { projectId }) }),
+      enabled,
+      staleTime: 60_000,
+      retry: false,
+    })),
+  })
+  const names = new Map<string, string>()
+  results.forEach((result, index) => {
+    if (!result.data?.available) return
+    for (const automation of result.data.automations) names.set(JSON.stringify([unique[index] ?? null, automation.id]), automation.name)
+  })
+  return (projectId: string | undefined, automationId: string): string | undefined =>
+    names.get(JSON.stringify([projectId ?? null, automationId]))
 }
 
 export function useWorkflows() {
