@@ -138,9 +138,25 @@ pre-PR check is incomplete.
 
 ## 3. Report before opening the PR
 
-Link the generated report from the PR's validation section. State its verdict,
-checked function count and any measurement limits. For exit 1, add an action and
-issue link for every deferred finding; open the PR only when all findings qualify
-for the inherited-refactor exception above. Exit 2 blocks opening the PR.
+Make the report available from the PR's validation section. An ignored path such
+as `.ai/qa/<issue>/code-quality.md` is not a report link a reviewer can open.
+
+- In a Cezar task, publish the generated report with the session-provided
+  task-artifact command: `… artifact publish <report.md>` (or
+  `cez artifact publish <report.md>` when `cez` is on PATH). It uses the task's
+  `CEZ_ARTIFACTS_DIR` and `CEZ_TASK_ID`. Copy the returned JSON's `markdown`
+  or `link` into the validation section; do not construct the URL. This is a
+  local cockpit link, not a public GitHub attachment: reviewers need access to
+  that cockpit. The snapshot survives worktree cleanup until task history is
+  deleted.
+- When the artifact command or task context is unavailable, put the verdict,
+  checked function count, measurement limits and every flagged report row in
+  the PR's validation section, with each row's action and any applicable issue
+  link. This keeps the review evidence available without a cockpit link.
+
+In either case, state the verdict, checked function count and any measurement
+limits in the validation section. For exit 1, add an action and issue link for
+every deferred finding; open the PR only when all findings qualify for the
+inherited-refactor exception above. Exit 2 blocks opening the PR.
 These issues are follow-up work; use `Refs`, rather than a closing keyword,
 when linking them from the current PR.
