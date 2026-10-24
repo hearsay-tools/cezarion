@@ -26,6 +26,7 @@ import { RunStore } from './runs/store.ts';
 import { RunStoreOpenError } from './runs/store-open-error.ts';
 import { ensureDataGitignore } from './data-gitignore.ts';
 import { TaskWebhooks } from './runs/webhook.ts';
+import { runSubcommand } from './subcommands.ts';
 import { RunManager } from './workflows/run.ts';
 import { loadWorkflows } from './workflows/load.ts';
 import { cockpitOriginFor, startServer, WorkspaceEventBus } from './server/server.ts';
@@ -99,26 +100,11 @@ Skills live in .ai/skills/, .ai/cezar/skills/ and your team skills repos
 (team skills come from "skillsRepos" in .ai/cezar/config.json; none by default);
 workflows in .ai/cezar/workflows/.`;
 
-type SubcommandRunner = (argv: string[], env: NodeJS.ProcessEnv) => Promise<number>;
-
-/**
- * Subcommands with flags of their own, dispatched before the global parseArgs: their flags are
- * not cockpit flags (#504, #774, #1576). Each module loads only when its command runs.
- */
-const SUBCOMMANDS: Record<string, () => Promise<SubcommandRunner>> = {
-  discover: async () => (await import('./discovery/cli.ts')).runDiscoverCommand,
-  artifact: async () => (await import('./artifacts/cli.ts')).runArtifactCommand,
-  task: async () => (await import('./task-cli/cli.ts')).runTaskCommand,
-  automation: async () => (await import('./automations/automation-cli.ts')).runAutomationCommand,
-  webhook: async () => (await import('./webhooks/cli.ts')).runWebhookCommand,
-  worker: async () => (await import('./delegation/cli.ts')).runWorkerCommand,
-};
-
 async function main(): Promise<void> {
-  const subcommand = process.argv[2];
-  if (subcommand !== undefined && Object.hasOwn(SUBCOMMANDS, subcommand)) {
-    const run = await SUBCOMMANDS[subcommand]!();
-    process.exitCode = await run(process.argv.slice(3), process.env);
+  // Subcommands with flags of their own run before the global parseArgs (#504, #774, #1576).
+  const subcommandExit = await runSubcommand(process.argv.slice(2), process.env);
+  if (subcommandExit !== undefined) {
+    process.exitCode = subcommandExit;
     return;
   }
   const { values, positionals } = parseArgs({

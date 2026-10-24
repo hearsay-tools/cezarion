@@ -60,8 +60,14 @@ describe('project webhooks API', () => {
     return { status: res.status, body: (await res.json()) as Record<string, unknown> };
   };
   const create = (body: Record<string, unknown>) => send(`/api/v1/projects/${projectId}/webhooks`, 'POST', body);
-  const webhooksOf = (body: Record<string, unknown>) => (body.project as { webhooks?: Array<Record<string, unknown>> }).webhooks ?? [];
-  const stored = async () => (await loadWorkspaceConfig()).projects.find((p) => p.id === projectId)!;
+  function webhooksOf(body: Record<string, unknown>): Array<Record<string, unknown>> {
+    const project = body.project as { webhooks?: Array<Record<string, unknown>> };
+    return project.webhooks ?? [];
+  }
+  async function stored() {
+    const config = await loadWorkspaceConfig();
+    return config.projects.find((p) => p.id === projectId)!;
+  }
 
   const friction = {
     name: 'Friction reports',
