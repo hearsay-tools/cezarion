@@ -505,6 +505,20 @@ lists that spec:
 grep -lF 'Automations' packages/web/e2e/*.e2e.ts
 ```
 
+When a cockpit change renames or removes a control, also search server and
+contract sources for its old label and the navigation text that led to it.
+Review the matches and update messages that tell users where to find the
+control, including API errors, CLI output and agent prompts. Preserve valid
+compatibility names, fixtures and historical references; do not replace every
+match blindly. In hearsay-tools/cezarion#1639, the cockpit replaced "Task webhook"
+with "Webhooks", but the server's `NO_WEBHOOK_ERROR` still directed users to the
+removed control until review caught it. Run this search from the repo root,
+substituting the affected label and navigation text:
+
+```bash
+rg -n -F -e 'Task webhook' -e 'Settings → General →' packages/cezar/src packages/contract/src
+```
+
 ### One-CPU load reproduction
 
 For a failure that appears under CPU contention, use this optional diagnostic

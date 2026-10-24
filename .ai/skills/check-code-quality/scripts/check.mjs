@@ -17,6 +17,7 @@ Scan changed JS/TS functions, collect coverage once, measure and report.
   --test <path>         Relevant test file (*.test, *.spec, *.e2e); repeatable, run once as a group
   --project <name>      Vitest project; repeatable
   --node-import <path>  Node test setup module; repeatable
+  --test-timeout <ms>   Per-test timeout for the coverage run; replaces the project's own
   --output <path.md>    Save Markdown and a sibling .json report
   --json               Print JSON instead of Markdown
   -h, --help           Show this help
@@ -34,7 +35,12 @@ function localFile(file, cwd) {
 
 function validateRunner(values, runner) {
   if (!['node', 'vitest'].includes(runner)) throw new Error('Choose --runner node or vitest.');
-  if ((values.runner || values.project || values['node-import']) && !values.test) throw new Error('Runner options require --test.');
+  if ((values.runner || values.project || values['node-import'] || values['test-timeout'] !== undefined) && !values.test) {
+    throw new Error('Runner options require --test.');
+  }
+  if (values['test-timeout'] !== undefined && !/^[1-9]\d*$/.test(values['test-timeout'])) {
+    throw new Error('--test-timeout must be a positive whole number of milliseconds.');
+  }
   if (values.project && runner !== 'vitest') throw new Error('--project requires Vitest.');
   if (values['node-import'] && runner !== 'node') throw new Error('--node-import requires Node.');
   if (values.project?.some(name => !name.trim())) throw new Error('--project must be nonempty.');
@@ -44,7 +50,7 @@ function parseInput(args, cwd) {
   const { values, positionals } = parseArgs({ args, options: {
     base: { type: 'string' }, coverage: { type: 'string' }, runner: { type: 'string' },
     test: { type: 'string', multiple: true }, project: { type: 'string', multiple: true },
-    'node-import': { type: 'string', multiple: true }, output: { type: 'string' },
+    'node-import': { type: 'string', multiple: true }, 'test-timeout': { type: 'string' }, output: { type: 'string' },
     json: { type: 'boolean' }, help: { type: 'boolean', short: 'h' },
   } });
   if (values.help) return values;
@@ -56,7 +62,8 @@ function parseInput(args, cwd) {
   const tests = (values.test ?? []).map(file => localFile(file, cwd));
   if (tests.some(file => !testFilePattern.test(file))) throw new Error('--test must name a test file (*.test, *.spec or *.e2e).');
   const imports = (values['node-import'] ?? []).map(file => localFile(file, cwd));
-  return { ...values, runner, tests, imports, projects: values.project ?? [] };
+  const testTimeout = values['test-timeout'] && Number(values['test-timeout']);
+  return { ...values, runner, tests, imports, testTimeout, projects: values.project ?? [] };
 }
 
 function verifySnapshot(scan, cwd) {

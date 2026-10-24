@@ -197,6 +197,7 @@ test('Vitest resolves in the target project and receives all files, tests and pr
       assert.equal(process.cwd(), ${JSON.stringify(f.cwd)});
       assert.equal(process.env.VITEST, 'true');
       assert.deepEqual(options.project, ['unit']);
+      assert.equal(options.testTimeout, 30000);
       assert.deepEqual(options.coverage.include, ['second.mjs', 'source.mjs']);
       const config = { include: ['**/*.test.mjs'], coverage: { exclude: ['**/*.test.mjs', 'custom/**'] } };
       const project = { config: { include: ['**/*.e2e.ts'], coverage: { exclude: ['**/*.e2e.ts', '**/*.test.mjs'] } } };
@@ -214,7 +215,7 @@ test('Vitest resolves in the target project and receives all files, tests and pr
       };
     }
   `);
-  const result = await invoke(f, ['--test', 'source.test.mjs', '--project', 'unit']);
+  const result = await invoke(f, ['--test', 'source.test.mjs', '--project', 'unit', '--test-timeout', '30000']);
   assert.equal(result.code, 0, result.error + JSON.stringify(result.report));
   assert.match(result.error, /fixture vitest log/);
   assert.equal(result.report.measurement.runner, 'vitest');
@@ -246,7 +247,7 @@ function vitestFixture(t) {
     import { defineConfig } from 'vitest/config';
     const alias = { '#source': fileURLToPath(new URL('./source.mjs', import.meta.url)) };
     export default defineConfig({ cacheDir: 'reports/vite', test: { projects: [
-      { resolve: { alias }, test: { name: 'unit', include: ['**/*.test.js'], setupFiles: ['./setup.js'] } },
+      { resolve: { alias }, test: { name: 'unit', include: ['**/*.test.js'], setupFiles: ['./setup.js'], testTimeout: 30000 } },
       { test: { name: 'e2e', include: ['**/*.e2e.ts'], environment: 'node' } },
     ] } });`);
   f.write('setup.js', 'globalThis.qualitySetup = true;');
@@ -280,6 +281,35 @@ test('Vitest selects .e2e.ts browser tests through their project and measures th
   assert.equal(result.report.summary.functions, 5);
 });
 
+// The flag must replace a project's own testTimeout, as this repository's server project sets one.
+test('--test-timeout overrides the Vitest project timeout for the coverage run', async t => {
+  const f = vitestFixture(t);
+  f.write('flow.e2e.ts', '');
+  f.write('choose.test.js', `import { expect, test } from 'vitest';
+    import { choose } from '#source';
+    test('choose', async () => { await new Promise(done => setTimeout(done, 300)); expect(choose(true)).toBe(1); expect(choose(false)).toBe(2); });`);
+  const args = ['--test', 'choose.test.js', '--project', 'unit'];
+  const project = await invoke(f, args);
+  assert.equal(project.code, 0, project.error + JSON.stringify(project.report.errors));
+  const short = await invoke(f, [...args, '--test-timeout', '50']);
+  assert.equal(short.code, 2);
+  assert.match(short.report.errors.join(' '), /Coverage tests failed/);
+  assert.match(short.error, /timed out in 50ms/);
+});
+
+test('--test-timeout reaches the Node test runner', async t => {
+  const f = fixture(t);
+  f.write('source.test.mjs', `import test from 'node:test';
+    import { choose } from './source.mjs';
+    test('choose', async () => { await new Promise(done => setTimeout(done, 300)); choose(true); choose(false); });`);
+  const short = await invoke(f, ['--runner', 'node', '--test', 'source.test.mjs', '--test-timeout', '50']);
+  assert.equal(short.code, 2);
+  assert.match(short.error, /timed out after 50ms/);
+  const long = await invoke(f, ['--runner', 'node', '--test', 'source.test.mjs', '--test-timeout', '30000']);
+  assert.equal(long.code, 0, long.error + JSON.stringify(long.report.errors));
+  assert.ok(long.report.measurement.command.includes('--test-timeout=30000'));
+});
+
 test('invalid runner arguments fail before starting tests', async t => {
   const f = fixture(t);
   for (const args of [['--runner', 'unknown'], ['--runner', 'node'],
@@ -287,7 +317,8 @@ test('invalid runner arguments fail before starting tests', async t => {
     ['--runner', 'node', '--test', 'source.test.mjs', '--project', 'unit'],
     ['--test', 'source.test.mjs', '--node-import', 'source.test.mjs'],
     ['--test', 'source.test.mjs', '--project', ''], ['--output', 'source.mjs'],
-    ['--test', 'source.mjs']]) {
+    ['--test', 'source.mjs'], ['--test-timeout', '30000'],
+    ...['0', '-1', '1.5', '30s', ''].map(ms => ['--test', 'source.test.mjs', '--test-timeout', ms])]) {
     const result = await invoke(f, args, { collect: () => assert.fail('must not run tests') });
     assert.equal(result.code, 2, JSON.stringify(args));
     assert.equal(result.report.status, 'incomplete');
