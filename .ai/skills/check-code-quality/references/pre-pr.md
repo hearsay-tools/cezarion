@@ -144,12 +144,18 @@ as `.ai/qa/<issue>/code-quality.md` is not a report link a reviewer can open.
 - In a Cezar task, publish the generated report with the session-provided
   task-artifact command: `… artifact publish <report.md>` (or
   `cez artifact publish <report.md>` when `cez` is on PATH). It uses the task's
-  `CEZ_ARTIFACTS_DIR` and `CEZ_TASK_ID`. Copy the returned JSON's `markdown`
-  or `link` into the validation section; do not construct the URL. This is a
-  local cockpit link, not a public GitHub attachment: reviewers need access to
-  that cockpit. The snapshot survives worktree cleanup until task history is
-  deleted.
-- When the artifact command or task context is unavailable, put the verdict,
+  `CEZ_ARTIFACTS_DIR` and `CEZ_TASK_ID`. The returned JSON's `link` is a
+  root-relative cockpit path. In a GitHub PR, prefix that exact path with the
+  verified cockpit origin that reviewers can access; for example, an origin
+  `https://cockpit.example` and returned `/p/…/files?artifact=…` form
+  `https://cockpit.example/p/…/files?artifact=…`. Use that absolute URL as the
+  report link in the validation section. Do not invent an origin or reconstruct
+  the artifact path. Pasting the returned `markdown` unchanged into GitHub
+  resolves its path under github.com and does not reach the cockpit. This is a
+  local snapshot, not a public GitHub attachment. It survives worktree cleanup
+  until task history is deleted.
+- When the artifact command, task context or a reviewer-accessible cockpit
+  origin is unavailable, put the verdict,
   checked function count, measurement limits and every flagged report row in
   the PR's validation section, with each row's action and any applicable issue
   link. This keeps the review evidence available without a cockpit link.
