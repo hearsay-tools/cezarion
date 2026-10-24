@@ -207,6 +207,8 @@ test('Vitest resolves in the target project and receives all files, tests and pr
           // Only the globs Vitest adds from test.include leave the exclusions.
           assert.deepEqual(config.coverage.exclude, ['custom/**']);
           assert.deepEqual(project.config.coverage.exclude, []);
+          // Spawned Node processes inherit the worker environment and record process coverage.
+          for (const { env } of [config, project.config]) assert.match(env.NODE_V8_COVERAGE, /raw$/);
           assert.deepEqual(filters, [${JSON.stringify(join(f.cwd, 'source.test.mjs'))}]);
           writeFileSync(join(options.coverage.reportsDirectory, 'coverage-final.json'), ${JSON.stringify(JSON.stringify({ ...coverage(f), ...coverage(f, 'second.mjs') }))});
           console.log('fixture vitest log');
@@ -279,6 +281,40 @@ test('Vitest selects .e2e.ts browser tests through their project and measures th
   assert.deepEqual(measured(result.report).filter(name => name.startsWith('flow.e2e.ts')),
     ['flow.e2e.ts:pick:100', 'flow.e2e.ts:anonymous@4:18:100']);
   assert.equal(result.report.summary.functions, 5);
+});
+
+// A runner mock is such a script: the selected test starts it as a separate `node` process.
+test('Vitest measures functions that run only in spawned node children and merges in-process counts', async t => {
+  const f = vitestFixture(t);
+  f.git('checkout', '--', 'source.mjs');
+  f.write('flow.e2e.ts', '');
+  f.write('choose.test.js', '');
+  const main = 'process.argv[1] === fileURLToPath(import.meta.url)';
+  f.write('child.mjs', `import { fileURLToPath } from 'node:url';
+function viaChild(value) {
+  if (value) return 1;
+  return 2;
+}
+if (${main}) process.stdout.write(String(viaChild(process.argv[2] === 'yes')));`);
+  f.write('both.mjs', `import { fileURLToPath } from 'node:url';
+export function twice(value) {
+  if (value) return 'in-process';
+  return 'child';
+}
+if (${main}) process.stdout.write(twice(false));`);
+  f.write('spawn.test.js', `import { execFileSync } from 'node:child_process';
+    import { expect, test } from 'vitest';
+    import { twice } from './both.mjs';
+    const run = (...args) => execFileSync(process.execPath, args, { encoding: 'utf8' });
+    test('children', () => {
+      expect(run('child.mjs', 'yes') + run('child.mjs', 'no')).toBe('12');
+      expect(run('both.mjs')).toBe('child');
+      expect(twice(true)).toBe('in-process');
+    });`);
+  const result = await invoke(f, ['--test', 'spawn.test.js', '--project', 'unit']);
+  assert.equal(result.code, 0, result.error + JSON.stringify(result.report.errors));
+  assert.deepEqual(measured(result.report).filter(name => !name.startsWith('spawn.test.js')),
+    ['both.mjs:twice:100', 'child.mjs:viaChild:100']);
 });
 
 // The flag must replace a project's own testTimeout, as this repository's server project sets one.
