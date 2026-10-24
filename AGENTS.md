@@ -690,12 +690,33 @@ attempts, changed run metadata, GitHub's date-query cap, or the 1,500-request /
 repeat an incomplete scan. This evidence does not replace the reproduction or
 before/after verification required for a changed wait.
 
+**Cite a CI failure by run, attempt and job ID**, for example
+`run 39253390769 attempt 1, job 118062500873`. "Re-run failed jobs" adds an
+attempt to the same run, so a run ID alone can lead a reader to a passing
+rerun. `count-test-ci-failures.cjs` prints each failure in this form.
+
+`gh run view <run-id> --log` and `--log-failed` read the latest attempt unless
+you pass `--attempt <n>`. `--job <job-id>` does not select that job's attempt:
+`gh` reads the latest attempt and takes the job with the same name, so after a
+rerun it can show the passing log. Read a failed attempt that a rerun replaced
+by its job ID:
+
+```bash
+gh api --allow-escape-sequences repos/hearsay-tools/cezarion/actions/jobs/<job-id>/logs > job.log
+# List the job IDs of one attempt of a run:
+gh api repos/hearsay-tools/cezarion/actions/runs/<run-id>/attempts/<n>/jobs --jq '.jobs[] | {id, name, conclusion}'
+```
+
+Without `--allow-escape-sequences`, `gh api` exits 1 and writes no log.
+`gh run view <run-id> --attempt <n> --log-failed` also reads the failed attempt.
+
 **When filing a load-dependent test failure, preserve the diagnostic evidence.**
 Quote the full error line verbatim, with nothing cut, including any list after
 its `;`. Name the stack frame that throws the error, rather than an operation
 named in the message. Give the full log location: the originating repo's
-`.ai/cezar/runs/<runId>.ndjson` (or `.ndjson.br`), or `squeal why <check>`
-with the check identifier and its worktree path.
+`.ai/cezar/runs/<runId>.ndjson` (or `.ndjson.br`), `squeal why <check>`
+with the check identifier and its worktree path, or the CI run, attempt and
+job IDs.
 
 Plain text searches do not read Brotli-compressed `.ndjson.br` logs. To read one,
 replace `<file.ndjson.br>` with its path:
