@@ -3,8 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import type { ProjectListEntry, WebhookTrigger } from '@open-mercato/cezar-api-client'
-import { WEBHOOK_TRIGGERS } from '@open-mercato/cezar-api-client/contract/attention'
+import type { ProjectListEntry } from '@open-mercato/cezar-api-client'
 import { queryKeys, workspaceQueryKeys } from '@/api/queries'
 import { createQueryClient } from '@/api/query-client'
 import { ListViewProvider } from '@/components/list-view'
@@ -23,9 +22,6 @@ const ROOT = '/Users/me/code/demo-project'
 const BOOT_ROOT = '/Users/me/code/cezar'
 
 let requests: Array<{ method: string; url: string; body?: unknown }> = []
-/** When set, `GET /api/v1/projects` answers it and a webhook PATCH updates it — the refetch the
- *  registry mutation awaits on settle would otherwise never answer. */
-let liveRegistry: ProjectListEntry[] | null = null
 
 function serve() {
   requests = []
@@ -42,23 +38,6 @@ function serve() {
       if (url.endsWith('/config')) return json({ archiveOnMerge: null, effectiveArchiveOnMerge: false, archiveOnMergeSource: 'default' })
       if (url.startsWith('/api/v1/projects/') && method === 'DELETE') {
         return json({ removed: true, id: url.split('/').pop() })
-      }
-      if (url.endsWith('/webhook/test') && method === 'POST') return json({ ok: true, status: 204 })
-      if (liveRegistry && url === '/api/v1/projects' && method === 'GET') {
-        return json({ projects: liveRegistry, bootProject: 'boot', projectsDir: '~/cezar/projects' })
-      }
-      if (liveRegistry && url.startsWith('/api/v1/projects/') && method === 'PATCH') {
-        const webhook = (body as { webhook: { url: string; token?: string; triggers?: WebhookTrigger[] } | null }).webhook
-        const current = liveRegistry.find((entry) => entry.id === 'demo')!
-        const { webhook: previous, ...rest } = current
-        const tokenSet = webhook ? (webhook.token === undefined ? previous?.tokenSet ?? false : webhook.token !== '') : false
-        const triggers = webhook?.triggers ?? previous?.triggers
-        const next: ProjectListEntry = {
-          ...rest,
-          ...(webhook ? { webhook: { url: webhook.url, tokenSet, ...(triggers === undefined ? {} : { triggers }) } } : {}),
-        }
-        liveRegistry = liveRegistry.map((entry) => (entry.id === 'demo' ? next : entry))
-        return json({ project: next })
       }
       if (url.startsWith('/api/v1/projects/') && method === 'PATCH') {
         return json({ project: { ...project('demo'), maxParallel: 3 } })
@@ -151,7 +130,6 @@ const general = () => document.querySelector('[data-slot="project-general"]')
 beforeEach(() => serve())
 
 afterEach(() => {
-  liveRegistry = null
   cleanup()
   vi.unstubAllGlobals()
 })
@@ -195,72 +173,10 @@ describe('the General page', () => {
     })
   })
 
-  it('saves the task webhook URL and token, then sends a test (#589)', async () => {
-    liveRegistry = [project('boot'), project('demo')]
-    renderAt('/p/demo/settings', { registry: liveRegistry })
-    const url = await screen.findByLabelText('URL')
-    fireEvent.change(url, { target: { value: 'https://bot.example/hooks/cez' } })
-    fireEvent.change(screen.getByLabelText('Token'), { target: { value: 'secret-token' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-
-    await waitFor(() => {
-      const patch = requests.find((r) => r.method === 'PATCH')
-      expect(patch?.body).toEqual({ webhook: { url: 'https://bot.example/hooks/cez', token: 'secret-token' } })
-    })
-    // The token field empties once saved: it is write-only, and says so instead of echoing it.
-    await waitFor(() => expect((screen.getByLabelText('Token') as HTMLInputElement).value).toBe(''))
-    expect(screen.getByLabelText('Token').getAttribute('placeholder')).toContain('Token set')
-
-    fireEvent.click(screen.getByRole('button', { name: 'Send test' }))
-    await waitFor(() => expect(requests.some((r) => r.method === 'POST' && r.url === '/api/v1/projects/demo/webhook/test')).toBe(true))
-    expect((await screen.findByRole('status')).textContent).toContain('Delivered (HTTP 204)')
-  })
-
-  it('keeps the stored token when only the URL changes, and removes the webhook', async () => {
-    liveRegistry = [project('boot'), { ...project('demo'), webhook: { url: 'https://bot.example/a', tokenSet: true } }]
-    renderAt('/p/demo/settings', { registry: liveRegistry })
-    const url = await screen.findByLabelText('URL')
-    expect((url as HTMLInputElement).value).toBe('https://bot.example/a')
-    fireEvent.change(url, { target: { value: 'https://bot.example/b' } })
-    fireEvent.click(screen.getByRole('button', { name: 'Save' }))
-    await waitFor(() => {
-      expect(requests.find((r) => r.method === 'PATCH')?.body).toEqual({ webhook: { url: 'https://bot.example/b' } })
-    })
-    const remove = screen.getByRole('button', { name: 'Remove' })
-    await waitFor(() => expect(remove.hasAttribute('disabled')).toBe(false))
-    fireEvent.click(remove)
-    await waitFor(() => {
-      expect(requests.filter((r) => r.method === 'PATCH').at(-1)?.body).toEqual({ webhook: null })
-    })
-  })
-
-  // hearsay-tools/cezarion#1356
-  it('shows one checkbox per state, starting from the default, and saves the selection', async () => {
-    liveRegistry = [project('boot'), { ...project('demo'), webhook: { url: 'https://bot.example/a', tokenSet: false } }]
-    renderAt('/p/demo/settings', { registry: liveRegistry })
-    await screen.findByLabelText('URL')
-    const boxes = Array.from(document.querySelectorAll<HTMLInputElement>('[data-slot="task-webhook-triggers"] input[type="checkbox"]'))
-    expect(boxes.map((box) => box.dataset.trigger)).toEqual([...WEBHOOK_TRIGGERS])
-    expect(boxes.filter((box) => box.checked).map((box) => box.dataset.trigger)).toEqual(['needs-you', 'failed', 'done', 'cancelled'])
-    const save = screen.getByRole('button', { name: 'Save' })
-    expect(save.hasAttribute('disabled')).toBe(true)
-
-    fireEvent.click(screen.getByRole('checkbox', { name: /Waiting on CI/ }))
-    fireEvent.click(screen.getByRole('checkbox', { name: /^Done/ }))
-    expect(save.hasAttribute('disabled')).toBe(false)
-    fireEvent.click(save)
-    await waitFor(() => {
-      expect(requests.find((r) => r.method === 'PATCH')?.body).toEqual({
-        webhook: { url: 'https://bot.example/a', triggers: ['needs-you', 'failed', 'cancelled', 'waiting-ci'] },
-      })
-    })
-  })
-
-  it('starts from the stored selection, including an empty one', async () => {
-    liveRegistry = [project('boot'), { ...project('demo'), webhook: { url: 'https://bot.example/a', tokenSet: false, triggers: [] } }]
-    renderAt('/p/demo/settings', { registry: liveRegistry })
-    await screen.findByLabelText('URL')
-    expect(screen.getAllByRole('checkbox').filter((box) => (box as HTMLInputElement).checked && box.closest('[data-slot="task-webhook-triggers"]'))).toEqual([])
+  it('renders the Webhooks section, empty until one is added (hearsay-tools/cezarion#1576)', async () => {
+    renderAt('/p/demo/settings')
+    expect((await screen.findByText(/^No webhooks yet\./)).closest('[data-slot="project-webhooks"]')).not.toBeNull()
+    expect(screen.getByRole('button', { name: 'Add webhook' })).toBeTruthy()
   })
 
   it('removes the project after a confirm, then leaves the URL that just stopped resolving', async () => {

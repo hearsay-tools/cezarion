@@ -25,6 +25,7 @@ import {
 } from '@/lib/prompt-templates'
 import { bumpSkillUsage, orderSkillsByUsage } from '@/lib/skills'
 import { usableRunners } from '@/lib/provider-status'
+import { taskWebhooks } from '@/lib/webhook'
 import { useNavigate } from '@/lib/project-router'
 
 import {
@@ -269,7 +270,8 @@ export function routeRunMode(input: {
 }
 
 /**
- * Task webhook (#589): the toggle exists only where there is somewhere to notify. Off by default
+ * Task webhook (#589): the toggle exists only where there is somewhere to notify — a webhook with
+ * task notifications on (hearsay-tools/cezarion#1576); notify reaches all of them. Off by default
  * and not remembered — a hand-off is a per-task decision, and the thread's "Hand off" covers
  * turning it on later.
  */
@@ -279,9 +281,9 @@ export function useNotifyWebhook(urlProjectId: string | undefined) {
   // simply does not render, which is the honest state: there is no second project to offer.
   const projectList = projects.data?.projects ?? []
   const webhookProjectId = urlProjectId ?? projects.data?.bootProject
-  const webhookUrl = projectList.find((entry) => entry.id === webhookProjectId)?.webhook?.url
+  const webhookTargets = taskWebhooks(projectList.find((entry) => entry.id === webhookProjectId))
   const [notifyChoice, setNotifyChoice] = useState(false)
-  return { projectList, webhookUrl, notifyOn: webhookUrl !== undefined && notifyChoice, setNotifyChoice }
+  return { projectList, webhookTargets, notifyOn: webhookTargets.length > 0 && notifyChoice, setNotifyChoice }
 }
 
 /**

@@ -86,6 +86,9 @@ import { readProjectUiState, readProjectUiStateSync } from '../ui-state.ts';
 import { discoverSkills, filterDisabledTeamSkills, readDisabledTeamSkills, type Skill } from '../skills.ts';
 import { resolveCapabilities } from '../server/capabilities.ts';
 import { automationCliCommand, automationsPrompt } from '../automations/prompts.ts';
+import { registryEntry } from '../runs/webhook.ts';
+import { agentWebhooksPrompt, webhookCliCommand } from '../webhooks/prompt.ts';
+import { agentWebhooks } from '../workspace/webhooks.ts';
 import { createAutomationSkill } from '../automations/builtin-skill.ts';
 import { getTeamSkillsCached, materializeSkillToCache, TEAM_SKILL_AGENT_DIRS, waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { MAX_SKILL_CLOSURE, provisionSkills } from '../skills-provision.ts';
@@ -1864,6 +1867,14 @@ export class RunManager {
   /** The automations part of every session's system prompt, or nothing. */
   private automationsPart(): string | undefined {
     return this.automationsReachable() ? automationsPrompt(automationCliCommand()) : undefined;
+  }
+  /** The "Project webhooks" part (#1576): the webhooks this project exposes to agents, read from
+   *  the registry when a session starts. Needs a cockpit to send through; nothing exposed, or an
+   *  unreadable registry, adds nothing. */
+  private async agentWebhooksPart(): Promise<string | undefined> {
+    if (!this.cockpit) return undefined;
+    const entry = await registryEntry(this.cockpit.projectId, this.repoRoot).catch(() => undefined);
+    return agentWebhooksPrompt(webhookCliCommand(), agentWebhooks(entry));
   }
   /**
    * One launch's session-start context (hearsay-tools/cezarion#1584): the run's own handoff,
@@ -7282,6 +7293,8 @@ export class RunManager {
     let session: AgentSession | undefined;
     if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
     const delegation = this.provisionSession(runId, state);
+    // Read before the cancellation checks below, which also cover this await (#1576).
+    const webhooksPart = await this.agentWebhooksPart();
     const ciTools = await this.provisionCiSession(runId, state);
     // Stop/Finish can arrive while the local tool controller is starting.
     const launchRun = this.store.getRun(runId);
@@ -7312,6 +7325,7 @@ export class RunManager {
       record?.systemPrompt,
       delegation?.instructions,
       this.automationsPart(),
+      webhooksPart,
       artifactInstructions(continueProfile.env.CEZ_ARTIFACTS_DIR),
       handoffInstructions({ tools: !!ciTools, handoffInjected: sessionContext.handoffInjected }),
     );
@@ -8148,6 +8162,8 @@ export class RunManager {
     state.currentStepId = step.id;
     this.beginUsageInvocation(runId, state, step.id);
     const delegation = this.provisionSession(runId, state);
+    // Read before the cancellation checks below, which also cover this await (#1576).
+    const webhooksPart = await this.agentWebhooksPart();
     const ciTools = await this.provisionCiSession(runId, state);
     // Revalidate after provisioning, then let execute settle cancellation or
     // requeue a Finish-held step through its existing no-session paths.
@@ -8178,6 +8194,7 @@ export class RunManager {
             extraSystemPrompt,
             delegation?.instructions,
             this.automationsPart(),
+            webhooksPart,
             artifactInstructions(stepProfile.env.CEZ_ARTIFACTS_DIR),
             handoffInstructions({ tools: !!ciTools, handoffInjected: sessionContext.handoffInjected }),
           ),

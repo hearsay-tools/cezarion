@@ -23,3 +23,16 @@ export const PROJECT_WEBHOOK_TOKEN_MAX_LENGTH = 1024;
  * handler then rejects.
  */
 export const PROJECT_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+
+/** Bounds for the project webhook list (hearsay-tools/cezarion#1576): the create and edit bodies,
+ *  the registry schema and the settings form share them. */
+export const PROJECT_WEBHOOKS_MAX = 16;
+export const PROJECT_WEBHOOK_NAME_MAX_LENGTH = 80;
+export const PROJECT_WEBHOOK_DESCRIPTION_MAX_LENGTH = 1000;
+/** A webhook's stable id: generated on create, never edited. `task-webhook` names the entry read
+ *  from the single `webhook` key a project stored before #1576. */
+export const PROJECT_WEBHOOK_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** Bounds of one agent report (hearsay-tools/cezarion#1576). */
+export const AGENT_REPORT_TITLE_MAX_LENGTH = 200;
+export const AGENT_REPORT_MESSAGE_MAX_LENGTH = 64 * 1024;

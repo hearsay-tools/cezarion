@@ -62,7 +62,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
       const calls: TaskWebhookPayload[] = [];
       const hook = new TaskWebhook(store, { dataDir: join(root, '.ai/cezar'), dryRun: false,
         // Every state: these rows pin what a delivery says, not which states send one (#1356).
-        resolveProject: async () => ({ id: 'project', webhook: { url: 'https://example.test/hook', triggers: WEBHOOK_TRIGGERS } }), origin: () => 'http://localhost',
+        resolveProject: async () => ({ id: 'project', webhooks: [{ id: 'hook', name: 'Hook', url: 'https://example.test/hook', triggers: WEBHOOK_TRIGGERS }] }), origin: () => 'http://localhost',
         fetch: (async (_url, init) => { calls.push(JSON.parse(String(init?.body))); return new Response(null, { status: 204 }); }) as typeof fetch,
       });
       store.updateRun(p.id, { notify: true });

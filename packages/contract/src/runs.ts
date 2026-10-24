@@ -164,11 +164,14 @@ export const processUsageSchema = z.object({
 });
 export type ProcessUsage = z.infer<typeof processUsageSchema>;
 
-/** What the last task-webhook delivery did (#589). A success clears `lastError`; a failure after
- *  every attempt keeps `lastDeliveredAt` from the last one that worked. */
+/** What the last task-webhook delivery did (#589). A failure after every attempt keeps
+ *  `lastDeliveredAt` from the last one that worked. With several webhooks
+ *  (hearsay-tools/cezarion#1576), `lastError` starts with the failed webhook's name and
+ *  `lastErrorWebhookId` names it; only a later success to that webhook clears it. */
 export const runWebhookOutcomeSchema = z.object({
   lastDeliveredAt: z.string().optional(),
-  lastError: z.string().max(512).optional(),
+  lastError: z.string().max(1024).optional(),
+  lastErrorWebhookId: z.string().optional(),
 });
 export type RunWebhookOutcome = z.infer<typeof runWebhookOutcomeSchema>;
 
