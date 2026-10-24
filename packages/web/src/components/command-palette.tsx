@@ -545,7 +545,6 @@ function PaletteContent({
     ...(multiProject ? [{ label: 'All tasks', to: '/tasks', icon: LayersIcon, global: true }] : []),
     ...visibleNavItems({
       forge: health.data?.forge?.available === true,
-      inbox: health.data?.capabilities.followups === true,
       automations: health.data?.capabilities.automations === true,
     }).map((item) => ({ label: item.label, to: item.to, icon: item.icon, global: false })),
   ]

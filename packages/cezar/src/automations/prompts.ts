@@ -1,17 +1,7 @@
 /**
- * What a task is told about automations, and the playbook the built-in
- * `create-cezarion-automation` skill runs under (#774, port of upstream #985; design
- * `.ai/specs/2026-10-02-scheduled-automations.md` stage 2).
- *
- * Two texts, one mechanism. `automationsPrompt` is the SHORT part composed into every task's
- * system prompt while automations are on and the cockpit's address is in the agent's env — enough
- * for an agent to read "do X whenever Y" as an automation rather than a one-off, and to know the
- * CLI that creates one. `createAutomationSkillBody` is the full playbook, used only when the user
- * picks the skill. Neither is composed for a headless `cez run` or with `CEZ_AUTOMATIONS` unset: an
- * agent told about a CLI whose every call is refused reads the refusal as an instruction.
- *
- * Both take the CLI as an absolute command, never `cez` on PATH: an older install there may lack
- * the command, and nothing here may suggest an agent start a cockpit (owner, 2026-10-02).
+ * Short task instructions and the full automation playbook, composed only for reachable
+ * automations. Use the current absolute CLI command; do not substitute another automation
+ * mechanism.
  */
 import { fileURLToPath } from 'node:url';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
@@ -45,10 +35,8 @@ A GitHub poll:
   "task": {
     "prompt": "Review pull request #{{github.number}} ({{github.title}}) at {{github.url}}: read the diff, run the tests, and post your findings as a review.",
     "workflow": "quick-task",
-    "variants": 1,
     "worktree": true,
-    "autonomous": true,
-    "generateFollowups": false
+    "autonomous": true
   }
 }
 
@@ -92,10 +80,12 @@ Top-level keys:
 - "prompt": required, the prompt template.
 - "workflow": a workflow name. OR "steps", never both. To run a skill, use one agent step naming it: "steps": [{ "id": "task", "skill": "some-skill", "prompt": "{{task}}" }].
 - "runner": ${RUNNER_IDS.join(' | ')}. "model" and "effort": optional overrides.
-- "variants": 1 | 2 | 3 competing runs per match.
+- Legacy "variants" counts above 1 are refused: parallel variants are removed. Use owned workers for explicit comparisons.
 - "worktree": isolate each run in its own git worktree (recommended: true).
 - "autonomous": never park to ask; an automation has no one watching (recommended: true).
-- "generateFollowups": true or false. "systemPrompt": extra guidance for every launched run.
+- "archiveWhenDone": boolean (default false). Archive each launched task after Done. Without a PR, archive on Done even when autoMergePr is true.
+- "autoMergePr": boolean (default false). After Done, merge the task's PR only when current-head CI and GitHub rules pass. This may mark a draft ready. With archiveWhenDone, merge before archive. Pending or blocked actions show a reason on the task. These settings apply to future tasks; editing the automation does not change tasks it already launched.
+- "systemPrompt": extra guidance for every launched run.
 
 For a GitHub poll, name, events and task are required; for a schedule, name, kind, schedule and task.
 
@@ -112,7 +102,7 @@ The CLI is ${command}. Every command prints one JSON object:
 
   ${command} schema                                   the definition shape, every key, every bound, the prompt placeholders
   ${command} create --file <def.json> [--enable]      create one from JSON (paused unless --enable); --json '<json>' or stdin work too
-  ${command} add --name <n> (--cron "0 4 * * *" | --on <event> --every 5m) --prompt <p> [--workflow w] [--runner r] [--model m] [--no-autonomous] [--label l] [--author a] [--changed-label l] [--include-existing] [--enable]
+  ${command} add --name <n> (--cron "0 4 * * *" | --on <event> --every 5m) --prompt <p> [--workflow w] [--runner r] [--model m] [--no-autonomous] [--archive-when-done] [--auto-merge-pr] [--label l] [--author a] [--changed-label l] [--include-existing] [--enable]
   ${command} check <id> [--execute]                   GitHub poll: preview what the filter matches right now (launches nothing without --execute)
   ${command} add --name <n> (--at <YYYY-MM-DDTHH:MM> --tz <zone> | --in <30m|6h|7d>) [--latest-start 6h] --prompt <p> [--enable]
                                                       a one-time schedule: one task at that time, then archived
@@ -122,6 +112,8 @@ The CLI is ${command}. Every command prints one JSON object:
                                                       (update replaces each key given; "task" merges key by key, null removes one)
 
 When work must start much later (tomorrow, next week) as a new task, create a one-time schedule (add --at or --in) instead of keeping this session waiting on repeated timers; enable it only when the user asked for the work to run later.
+
+Completion controls are off by default. Use --archive-when-done or task.archiveWhenDone only when the user asks to archive completed tasks. Use --auto-merge-pr or task.autoMergePr only when the user asks to merge their PRs. Both act after Done; auto merge may mark a draft ready and still requires current-head CI and GitHub rules. With both on, merge before archive; without a PR, archive on Done. Changes affect future tasks only.
 
 Read the schema first. Create the automation PAUSED. A paused automation is the finished state of this task, not a step awaiting confirmation: enable it only when the user's own request explicitly asks for it to be switched on. An instruction to continue autonomously, not to ask for confirmation, or to make reasonable assumptions is not that request. For a GitHub poll, run a preview check so the user sees what it would match; for a schedule, report its next occurrence. Put the "url" the command prints in your final message. If the command exits non-zero or is refused, stop and report that automations are unavailable on this cockpit, quoting its error: do not write a cron job, a GitHub Action or a polling script as a substitute.`;
 }
@@ -142,6 +134,8 @@ Every automation answers two questions. Find both in the user's message before w
 - **Task**: what the launched task must do for each match, as a prompt template. Write it the way you would brief a colleague who sees only that text plus the item's number, title, URL, author and labels: the goal, the checks to run, how to finish (a review comment, a draft PR, a report). Use the placeholders the schema lists.
 
 If the user named a skill, workflow, runner or model for the launched tasks, use it (a skill is one inline step: \`"steps": [{ "id": "task", "skill": "<name>", "prompt": "{{task}}" }]\`). Otherwise leave those keys out so the cockpit's defaults apply. Keep \`"worktree": true\` and \`"autonomous": true\`: an automation runs unattended, so a task that parks to ask a question waits forever. For a poll, pick an interval that matches how urgent a match is (300 seconds is the default; an hourly triage needs 3600). If the request leaves the trigger or the task genuinely open, ask one precise question and stop; do not guess a filter that could launch tasks on the wrong items.
+
+Leave \`task.archiveWhenDone\` and \`task.autoMergePr\` off unless the user asks for the matching completion action. Autonomy and enabling an automation do not enable either control. They act only after Done. Auto merge may mark a draft ready; current-head CI and GitHub rules must pass. With both on, merge before archive; without a PR, archive on Done. Editing these settings affects future tasks only.
 
 ## 2. Create it
 

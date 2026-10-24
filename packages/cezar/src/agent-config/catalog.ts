@@ -2,20 +2,9 @@ import { join } from 'node:path';
 import type { RunnerId } from '../core/agent-runner.ts';
 
 /**
- * The catalog of coding-agent config files cezar can surface and edit (spec
- * `.ai/specs/2026-07-16-agent-config-files.md`). This file is the ONLY place
- * vendor knowledge lives: where each agent keeps its files, at which scope, in
- * what format, and — the load-bearing part — the vendor's OWN documented
- * precedence, quoted so a UI label never claims a merge cezar does not perform.
- *
- * Hardcoding is the design. cezar's value here is knowing where the files are
- * and what the docs say; an unknown file is not shown rather than guessed at.
- * A raw editor cannot drift on a vendor's *schema*; it can drift on *paths and
- * precedence strings*, so every entry carries a `docsUrl` and this table is the
- * single maintenance surface. Facts verified against primary docs 2026-07-16;
- * the Pi entries against Pi's README and docs/settings.md on 2026-09-15 (#322);
- * the OMP entries against OMP's docs/config-usage.md and docs/mcp-config.md at
- * main @ 7318a70cf4ed on 2026-10-05 (#595).
+ * Maintained catalog of native config-file paths, formats, precedence descriptions and
+ * documentation URLs. Unknown files are not guessed. Account relocation and identity readers own
+ * their separate native-file knowledge.
  */
 
 export type ConfigFormat = 'json' | 'jsonc' | 'toml' | 'yaml' | 'markdown';

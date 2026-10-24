@@ -4,7 +4,6 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  HANDOFF_INSTRUCTIONS,
   HANDOFF_ONLY_INSTRUCTIONS,
   appendHandoffAutosaveReport,
   appendHandoffHeartbeat,
@@ -14,32 +13,6 @@ import {
   recordHandoffPeriodicAutosave,
   seedHandoffFile,
 } from './handoff.ts';
-import { todoSchema } from './todos.ts';
-
-/**
- * HANDOFF_INSTRUCTIONS is the only thing that tells an agent what to append to todos.json,
- * so a field can be added to todoSchema and still never be written by anyone. `runnable`
- * shipped exactly that way. This pins the contract instead of the prose: every agent-writable
- * schema field has to appear in the instructions.
- */
-describe('HANDOFF_INSTRUCTIONS', () => {
-  /** The server assigns these on read/start — an agent never writes them. */
-  const SERVER_MANAGED = new Set(['id', 'startedTaskId']);
-
-  it('documents every agent-writable field of todoSchema', () => {
-    const undocumented = Object.keys(todoSchema.shape)
-      .filter((field) => !SERVER_MANAGED.has(field))
-      .filter((field) => !HANDOFF_INSTRUCTIONS.includes(`"${field}"`));
-
-    expect(undocumented).toEqual([]);
-  });
-
-  it('tells the agent which way to set runnable, so notes are acknowledged and not run', () => {
-    expect(HANDOFF_INSTRUCTIONS).toContain('"runnable": false');
-    expect(HANDOFF_INSTRUCTIONS).toContain('"runnable": true');
-    expect(HANDOFF_INSTRUCTIONS).toContain('Acknowledge');
-  });
-});
 
 /**
  * hearsay-tools/cezarion#1004: the autosave report lives in its own section, so
@@ -326,26 +299,23 @@ describe('recordHandoffPeriodicAutosave', () => {
 // markers; a session without them keeps today's prompt.
 describe('handoffInstructions', () => {
   it('the tool variant teaches cezar_done, cezar_ask and cezar_wait and no lifecycle marker', () => {
-    for (const followups of [false, true]) {
-      const text = handoffInstructions({ tools: true, followups });
-      expect(text).toContain('Lifecycle tools (cezar): End every turn with a cezar tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.');
-      expect(text).toContain('When a user decision or missing input is needed, call cezar_ask with the complete decision context and short questions. Put the full draft, findings, evidence and option meanings in context. Cezar shows context as Markdown above the card. Reasoning and rejected calls are hidden. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer. Once the call accepts the context and questions, end the turn and wait for the user.');
-      expect(text).toContain('call cezar_wait with kind "pr" for a pull request\'s checks or its merge, or kind "timer" to re-check later');
-      expect(text).not.toContain('kind "human"');
-      // A reply settles the question; only CI waits and timers wait for a result or a cancel.
-      expect(text).toContain("A human message or any resolved wait wakes you. The user's reply answers your question; PR waits and timers stay open until they resolve or you cancel them with cezar_cancel_wait.");
-      expect(text).toContain('Never call cezar_done while anything is unfinished or unverified.');
-      for (const marker of ['CEZ:DONE', 'CEZ:MONITORING', 'CEZ:ASK']) expect(text).not.toContain(marker);
-      expect(text).toContain('CEZ:PR=');
-      expect(text).toContain('## Pasted attachments');
-      expect(text).toMatch(/"## Autosave \(cezar\)" section[^\n]*leave it in place/);
-      expect(text.includes('## Follow-ups (cezar)')).toBe(followups);
-    }
+    const text = handoffInstructions({ tools: true });
+    expect(text).toContain('Lifecycle tools (cezar): End every turn with a cezar tool call that says what happens next. When the goal is fully achieved and verified and you have no question for the user, call cezar_done, then end your turn.');
+    expect(text).toContain('When a user decision or missing input is needed, call cezar_ask with the complete decision context and short questions. Put the full draft, findings, evidence and option meanings in context. Cezar shows context as Markdown above the card. Reasoning and rejected calls are hidden. Give a question 2–4 options to show them as choices, or leave its options out and the user types the answer. Once the call accepts the context and questions, end the turn and wait for the user.');
+    expect(text).toContain('call cezar_wait with kind "pr" for a pull request\'s checks or its merge, or kind "timer" to re-check later');
+    expect(text).not.toContain('kind "human"');
+    // A reply settles the question; only CI waits and timers wait for a result or a cancel.
+    expect(text).toContain("A human message or any resolved wait wakes you. The user's reply answers your question; PR waits and timers stay open until they resolve or you cancel them with cezar_cancel_wait.");
+    expect(text).toContain('Never call cezar_done while anything is unfinished or unverified.');
+    for (const marker of ['CEZ:DONE', 'CEZ:MONITORING', 'CEZ:ASK']) expect(text).not.toContain(marker);
+    expect(text).toContain('CEZ:PR=');
+    expect(text).toContain('## Pasted attachments');
+    expect(text).toMatch(/"## Autosave \(cezar\)" section[^\n]*leave it in place/);
+    expect(text).not.toContain('CEZ_TODOS_FILE');
   });
 
   it('the marker variant is unchanged', () => {
-    expect(handoffInstructions({ tools: false, followups: false })).toBe(HANDOFF_ONLY_INSTRUCTIONS);
-    expect(handoffInstructions({ tools: false, followups: true })).toBe(HANDOFF_INSTRUCTIONS);
+    expect(handoffInstructions({ tools: false })).toBe(HANDOFF_ONLY_INSTRUCTIONS);
   });
 
   // hearsay-tools/cezarion#1428: agents asked about drafts and findings they never sent, once
@@ -353,14 +323,12 @@ describe('handoffInstructions', () => {
   // hearsay-tools/cezarion#1458: on Claude, assistant text between tool calls may never arrive, so
   // the tool variant puts the content in context; the marker's own message text still arrives.
   it('the tool variant puts the decision context in the call, the marker variant in the message', () => {
-    for (const followups of [false, true]) {
-      const tools = handoffInstructions({ tools: true, followups });
-      expect(tools).not.toContain('as assistant text');
-      expect(tools).toContain('Put the full draft, findings, evidence and option meanings in context.');
-      const markers = handoffInstructions({ tools: false, followups });
-      expect(markers).toContain('Before the CEZ:ASK line, send everything the decision depends on (the full draft, every finding, what each option means) as ordinary text in the same message.');
-      expect(markers).toContain('The user sees only your message text and the chips. Your reasoning never reaches them, so never call content "above" unless you sent it as message text.');
-      expect(markers).toContain('plus an optional "context" of up to 20000 characters of Markdown shown above the chips');
-    }
+    const tools = handoffInstructions({ tools: true });
+    expect(tools).not.toContain('as assistant text');
+    expect(tools).toContain('Put the full draft, findings, evidence and option meanings in context.');
+    const markers = handoffInstructions({ tools: false });
+    expect(markers).toContain('Before the CEZ:ASK line, send everything the decision depends on (the full draft, every finding, what each option means) as ordinary text in the same message.');
+    expect(markers).toContain('The user sees only your message text and the chips. Your reasoning never reaches them, so never call content "above" unless you sent it as message text.');
+    expect(markers).toContain('plus an optional "context" of up to 20000 characters of Markdown shown above the chips');
   });
 });

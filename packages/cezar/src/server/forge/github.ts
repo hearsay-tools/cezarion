@@ -1,5 +1,7 @@
-import { mergedPullRequestSchema, type ArchivePullRequestIdentity, type MergedPullRequest } from '@open-mercato/cezar-contract/runs';
-import { archivePullRequests, pullRequestKey } from '../../runs/pull-requests.ts';
+import { activeWorkflowRunsArgs, parseActiveWorkflowRuns } from '../../ci-wait/github.ts';
+import type { ArchivePullRequestIdentity, MergedPullRequest } from '@open-mercato/cezar-contract/runs';
+import { pullRequestKey } from '../../runs/pull-requests.ts';
+import { matchesGithubPullRequest, mergedPullRequestObservations } from '../../merge-observations.ts';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -215,6 +217,7 @@ const ghPrViewSchema = z.object({
   number: z.number(),
   url: z.string(),
   state: z.string().default('OPEN'),
+  mergedAt: z.unknown().optional(),
   isDraft: z.boolean().default(false),
   statusCheckRollup: ghStatusCheckRollup,
 });
@@ -233,6 +236,7 @@ const mergePrSchema = z.object({
   title: z.string(),
   url: z.string(),
   state: z.string(),
+  mergedAt: z.unknown().optional(),
   isDraft: z.boolean().default(false),
   headRefName: z.string(),
   baseRefName: z.string(),
@@ -308,11 +312,7 @@ export function parseOwnerName(nameWithOwner: string): { owner: string; name: st
   return owner && name && rest.length === 0 ? { owner, name } : null;
 }
 
-// ---- the paged open list (hearsay-tools/cezarion#1183) ----------------------
-// One GraphQL request per connection per page, both connections and the viewer in parallel.
-// Comment counts are deliberately absent: they were about 0.4 s of a 50-row page on a real repo,
-// so rows ship `comments: 0` with `commentsDeferred` and the counts route hydrates them after
-// paint. `body` stays (deprecated, still sent) — it measured no cost at all.
+// Paged open lists defer comment counts; hydrate them through the counts route after paint.
 
 /** GitHub GraphQL rejects `first` above 100 (EXCESSIVE_PAGINATION); larger limits walk pages. */
 export const GH_GRAPHQL_PAGE_MAX = 100;
@@ -650,14 +650,7 @@ function firstLine(s: string): string {
   return s.split('\n').find((l) => l.trim().length > 0)?.trim() ?? 'gh failed';
 }
 
-// ---- search across states (#730) -------------------------------------------
-// `fetchGithub` above lists the OPEN set only (`gh issue/pr list` defaults to `--state open`),
-// and the tab's search is an in-memory filter over exactly that payload — so a closed or merged
-// item is not "past the window", it was never fetched at all and no amount of scrolling reaches
-// it. This tier asks GitHub instead of re-filtering what we already hold. It is deliberately a
-// SECOND, on-demand path rather than widening the list to `--state all`: the list is the tab's
-// hot path, and making every load pay for hundreds of closed rows to serve an occasional lookup
-// would trade a search bug for a performance one.
+// On-demand cross-state search stays separate from the hot open list.
 
 /** Hits per search. `gh search`'s own default is 30; 50 matches the page size the incremental-
  *  loading spec settled on and keeps one search to a single `gh` round-trip. */
@@ -693,6 +686,8 @@ const ghSearchHitSchema = ghIssueSchema.extend({
 /** `gh {issue,pr} view <n> --json …` — the exact-number path. Shares `ghIssueSchema`'s core;
  *  `isDraft`/`additions`/`deletions` are PR-only and default harmlessly for issues. */
 const ghViewHitSchema = ghIssueSchema.extend({
+  state: z.string().optional(),
+  mergedAt: z.unknown().optional(),
   assignees: z.array(z.object({ login: z.string() })).optional(),
   isDraft: z.boolean().default(false),
   additions: z.number().default(0),
@@ -753,9 +748,14 @@ async function viewGithubHit(
       'view',
       String(number),
       '--json',
-      kind === 'pr' ? `${SEARCH_FIELDS},isDraft,additions,deletions` : `${SEARCH_FIELDS},assignees`,
+      kind === 'pr' ? `${SEARCH_FIELDS},isDraft,additions,deletions,state,mergedAt` : `${SEARCH_FIELDS},assignees`,
     ]);
-    return ghViewHitSchema.parse(JSON.parse(out));
+    const hit = ghViewHitSchema.parse(JSON.parse(out));
+    if (kind === 'pr' && hit.state === 'MERGED') {
+      const handle = await resolveRepoHandle(repoRoot);
+      if (handle) mergedPullRequestObservations.observe({ owner: handle.owner, repo: handle.name, number }, hit);
+    }
+    return hit;
   } catch (err) {
     if (MISSING_ITEM_RE.test(err instanceof Error ? err.message : String(err))) return null;
     throw err;
@@ -792,22 +792,8 @@ export async function viewGithubItem(
 }
 
 /**
- * Find issues/PRs in ANY state (#730).
- *
- * Two query shapes, because they want different GitHub calls:
- *  - **A bare number** (`4507`, `#4507`) is a lookup, not a search: `gh {pr,issue} view <n>` is
- *    one cheap, state-agnostic call that finds a PR merged two years ago as readily as one opened
- *    today. GitHub's search index cannot be relied on to surface an exact number at all.
- *  - **Anything else** is a text search: `gh search {prs,issues} <query> --repo owner/name`, with
- *    `--state` deliberately OMITTED — the flag only accepts `open|closed`, and leaving it off is
- *    what searches every state.
- *
- * A numeric query that resolves to nothing (wrong repo, deleted, or simply a number the user meant
- * as text) falls through to the text path rather than reporting "not found" — `4507` should still
- * find a PR whose title contains it.
- *
- * Never throws: every failure lands on `{available: false, reason}`, the same quiet degrade the
- * rest of the tab uses. Exported for unit tests.
+ * Search any state: exact numbers try a direct lookup, then text fallback; text search omits
+ * state restriction. Return availability and a reason on failure instead of throwing.
  */
 export async function searchGithubItems(
   repoRoot: string,
@@ -1595,12 +1581,7 @@ export async function fetchCommitChecks(
   return out;
 }
 
-// ---- lazy PR checks hydration (#664) ---------------------------------------
-// The list call (`fetchGithub`) no longer fetches `statusCheckRollup` — the dominant cost on
-// repos with many open PRs — so the tab paints fast even at a high limit. Each PR row's checks
-// glyph is hydrated afterwards, on demand, for the on-screen rows only, through this batched
-// query. Mirrors `fetchCommentCounts` / `fetchCommitChecks`: aliased so N PRs cost one
-// subprocess, and any failure degrades to absent glyphs rather than failing the tab.
+// Hydrate checks on demand in a batched query; failure leaves absent glyphs without failing the list.
 
 /** The single enum a PR row's checks glyph renders (never `undefined` on the wire). */
 export type ChecksGlyph = 'passing' | 'failing' | 'pending' | null;
@@ -1913,6 +1894,8 @@ function reviewerKey(ref: z.infer<typeof reviewerRefSchema>): string | null {
 const ghRefStatusPrSchema = z
   .object({
     state: z.string(),
+    url: z.unknown().optional(),
+    mergedAt: z.unknown().optional(),
     isDraft: z.boolean().nullish(),
     reviewDecision: z.string().nullish(),
     /** `MERGEABLE` | `CONFLICTING` | `UNKNOWN` — GitHub computes it in the background, so
@@ -2001,89 +1984,23 @@ const ghRefStatusIssueSchema = z.object({ state: z.string(), stateReason: z.stri
 const ghRefStatusSchema = z.record(z.string(), z.unknown());
 
 /**
- * One alias per NUMBER, asking `issueOrPullRequest` rather than `pullRequest`/`issue`.
- *
- * Issues and pull requests share one numbering space in a repository, so a number is exactly one
- * of the two and asking which is a question the forge can answer — where asking `issue(number:)`
- * about a pull request is a question with no answer, and GitHub says so with a NOT_FOUND *error*
- * rather than a null. That mattered far more than it looks: `gh api graphql` exits non-zero the
- * moment a response carries an `errors` array, so one mis-guessed kind used to fail the whole
- * batch and report every reference in it as "not found" (see `refStatusGraphql`).
- *
- * It also fixes the reference whose kind the cockpit guessed wrong — `taskReferences` infers it
- * from which field carried the number, and a bare `#774` can land in either — because the answer
- * carries `__typename` and is filed under what the number REALLY is.
- *
- * `committedDate`, the head commit's `parents.totalCount` (`first: 0` — the COUNT is the whole
- * question, so no parent is fetched) and the last CHANGES_REQUESTED review's `submittedAt` cost
- * nothing extra, riding the same node, and are what let the precedence tell a review the author has
- * already responded to from one still about the code on screen. The last `ReviewRequestedEvent` is
- * asked for the same reason: `reviewRequests` says only THAT someone is on the hook, never since
- * when, and the difference between a request made before the review and one made after it is the
- * difference between a reviewer who has not looked yet and an author who has answered.
- *
- * `mergeable` rides it too, and is the reason the batch can answer "this one conflicts" without
- * the per-PR probe `prMergeState` runs for the merge box. It is NOT folded into the status: see
- * `conflicts` in the contract for why the two stay separate axes.
+ * Query issueOrPullRequest once per number and use __typename for the actual kind. Include
+ * branch-work and review timestamps for freshness decisions.
  */
 function refStatusQuery(numbers: number[]): string {
   const aliases = numbers
     .map(
       (n, i) =>
-        `    r${i}: issueOrPullRequest(number: ${n}) { __typename ... on PullRequest { state isDraft reviewDecision mergeable commits(last: 1) { nodes { commit { committedDate parents(first: 1) { totalCount nodes { committedDate } } statusCheckRollup { state } } } } reviews(last: 1, states: CHANGES_REQUESTED) { nodes { submittedAt } } reviewRequests(first: 20) { totalCount nodes { requestedReviewer { __typename ... on User { login } ... on Bot { login } ... on Team { slug } } } } timelineItems(last: 20, itemTypes: [REVIEW_REQUESTED_EVENT]) { nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { __typename ... on User { login } ... on Bot { login } ... on Team { slug } } } } } } ... on Issue { state stateReason } }`,
+        `    r${i}: issueOrPullRequest(number: ${n}) { __typename ... on PullRequest { url mergedAt state isDraft reviewDecision mergeable commits(last: 1) { nodes { commit { committedDate parents(first: 1) { totalCount nodes { committedDate } } statusCheckRollup { state } } } } reviews(last: 1, states: CHANGES_REQUESTED) { nodes { submittedAt } } reviewRequests(first: 20) { totalCount nodes { requestedReviewer { __typename ... on User { login } ... on Bot { login } ... on Team { slug } } } } timelineItems(last: 20, itemTypes: [REVIEW_REQUESTED_EVENT]) { nodes { ... on ReviewRequestedEvent { createdAt requestedReviewer { __typename ... on User { login } ... on Bot { login } ... on Team { slug } } } } } } ... on Issue { state stateReason } }`,
     )
     .join('\n');
-  return `query ($owner: String!, $name: String!) {\n  repository(owner: $owner, name: $name) {\n${aliases}\n  }\n}`;
+  return `query ($owner: String!, $name: String!) {\n  repository(owner: $owner, name: $name) {\nnameWithOwner\n${aliases}\n  }\n}`;
 }
 
 /**
- * The one place a PR's signals collapse into a single word.
- *
- * The question the chip answers is "what is this waiting on RIGHT NOW", so the ranking is by
- * freshness of the signal, not by how heavy a blocker it is:
- *
- * Read the ranking as **whose move is it**, which is the question a table is scanned for:
- *
- *  1. `merged` / `closed` — nobody's. Terminal, whatever checks or reviews say.
- *  2. `draft` — the author's, and they have said so themselves.
- *  3. `checks-pending` — the machine's. CI running means a commit was JUST pushed, the newest
- *     thing that has happened to this PR, so it outranks a requested change unconditionally.
- *  4. `changes-requested` — the AUTHOR's, and only while that is still true: the review must be
- *     about the code that is there now, with no re-review already asked for.
- *  5. `checks-failing` — the author's again. A reviewer cannot approve a red PR anyway.
- *  6. `review-required` — the REVIEWER's: they have been asked, or the author has answered and
- *     the merge is now blocked on someone coming back to look.
- *  7. `ready` — open, not a draft, nothing failing, nothing running, nobody waited on.
- *
- * The subtle one is (4) → (6), and it is not a preference but a data finding. `reviewDecision`
- * stays `CHANGES_REQUESTED` after the author has responded — GitHub does not clear it until a
- * reviewer submits again — so on its own it points at the author forever. Two signals say the ball
- * has moved back:
- *
- *  - **a review request made AFTER the review**, which is the author clicking re-request.
- *    Authoritative, and observed live alongside a stale `CHANGES_REQUESTED` and an EMPTY
- *    `latestReviews` — the case that has no other tell.
- *  - **a non-merge commit newer than the review**, the fallback for an author who pushed without
- *    clicking anything. Merges are excluded because GitHub's "Update branch" button writes one,
- *    dated now, that answers nothing — the reflexive click on a stale PR must not clear a
- *    rejection.
- *
- * The "after" in the first one is load-bearing, and its absence was a reported bug. A request that
- * PREDATES the review is a reviewer who has not looked yet, and on a PR where several people were
- * asked and one of them rejected it the others stay listed forever — so a bare
- * `reviewRequests.totalCount > 0` reads a live "changes requested" as answered and hides it behind
- * "waiting for review" (observed live: three reviewers asked at 10:28, changes requested
- * the next day, one reviewer still pending).
- *
- * Either way the words change from "you owe edits" to "they owe a look", and so does the colour:
- * danger is the author's move, info is the reviewer's.
- *
- * Both timestamps are optional and their ABSENCE is conservative: with no dates to compare and no
- * re-request, a review counts as current, and the chip keeps pointing at the author.
- *
- * `reviewDecision` is null on a repo with no review policy, which is exactly why `ready` is not
- * spelled "approved": on such a repo a green PR IS ready, and no approval will ever arrive — but a
- * requested reviewer still moves it to `review-required`, because someone was explicitly asked.
+ * Derive whose action is pending: terminal, draft, pending checks, current requested changes,
+ * failing checks, review, then ready. Use dated review/work evidence; mergeability remains a
+ * separate axis.
  */
 export function derivePrReferenceStatus(pr: {
   state: string;
@@ -2261,6 +2178,7 @@ export async function fetchRefStatuses(
     try {
       const raw = JSON.parse(await runGraphql(refStatusQuery(chunk), { owner, name })) as {
         data?: { repository?: unknown };
+        errors?: unknown;
       };
       const repository = ghRefStatusSchema.parse(raw?.data?.repository ?? {});
       chunk.forEach((number, index) => {
@@ -2271,6 +2189,10 @@ export async function fetchRefStatuses(
         if (node.__typename === 'PullRequest') {
           const pr = ghRefStatusPrSchema.parse(node);
           if (!pr) return;
+          if ((!raw.errors || (Array.isArray(raw.errors) && raw.errors.length === 0)) &&
+            typeof repository.nameWithOwner === 'string' && repository.nameWithOwner.toLowerCase() === `${owner}/${name}`.toLowerCase()) {
+            mergedPullRequestObservations.observe({ owner, repo: name, number }, { ...pr, number });
+          }
           const head = pr.commits?.nodes[0]?.commit;
           const rollup = head?.statusCheckRollup;
           const mergeability = mergeabilityOf(pr.state, pr.mergeable);
@@ -2349,19 +2271,8 @@ export function __seedRefStatusCacheForTests(
 }
 
 /**
- * Forget what we knew about one reference, so the next read asks GitHub again.
- *
- * Called where cezar itself CHANGES a pull request — it merges one, it opens one — because those
- * are the only forge changes this process can know about without asking. Everything else has to
- * be polled (GitHub cannot push to a cockpit with no public endpoint), but waiting out a TTL to
- * notice our own merge is a self-inflicted staleness: for up to a minute every chip would keep
- * showing the pre-merge status of a pull request the user watched this server merge.
- *
- * Deleting rather than overwriting with a guessed `merged`: the forge is the authority on what a
- * reference is, and a mutation that reports success is still not the same as having read the
- * result. The next reader pays one query and gets the truth — after which the answer is `merged`,
- * `recheckAfterMs` goes null, and the cockpit stops polling that batch entirely. Invalidating here
- * therefore REDUCES long-run traffic rather than adding to it.
+ * Invalidate one reference after a known mutation. Let the next forge read establish status
+ * rather than caching a guessed result.
  */
 export function forgetRefStatus(repoRoot: string, number: number): void {
   refStatusCache.delete(refStatusKey(repoRoot, number));
@@ -2483,22 +2394,8 @@ const MERGEABILITY_UNKNOWN_WINDOW_MS = 60_000;
 const REF_STATUS_RETRY_MS = 5 * 60_000;
 
 /**
- * GraphQL through `gh`, tolerating a PARTIALLY failed response.
- *
- * `gh api graphql` exits non-zero whenever the reply carries an `errors` array — even when `data`
- * is fully populated for every alias that DID resolve. With one alias per reference that is not an
- * edge case, it is the normal case: a single number that no longer exists (or never did, having
- * been scraped from a transcript that named another repository) makes GitHub answer
- * `{data: {...everything else...}, errors: [NOT_FOUND]}` and `gh` exit 1.
- *
- * `execFile` rejects on a non-zero exit, so that used to throw away a whole batch's worth of
- * perfectly good statuses and report every reference in it as "not found" — including, in the bug
- * that produced this function, an open pull request in the project's own repository.
- *
- * So: a non-zero exit whose stdout still carries a usable `data.repository` is a partial success
- * and is used as-is. Anything else — no stdout, unparseable stdout, or a null `repository`, which
- * means the repo handle itself did not resolve — rethrows, so a real failure still degrades to
- * `{available: false}` instead of masquerading as "none of these exist".
+ * Use failed gh GraphQL stdout only when it contains usable data.repository. Preserve successful
+ * aliases in partial responses; rethrow malformed or unresolved-repository failures.
  */
 function refStatusGraphql(repoRoot: string, context = githubContext(repoRoot)): GraphqlRunner {
   return async (query, variables) => {
@@ -3356,9 +3253,11 @@ async function fetchPrMergeState(
   try {
     const prOut = await gh(repoRoot, [
       'pr', 'view', String(number), '--json',
-      'number,title,url,state,isDraft,headRefName,baseRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup',
+      'number,title,url,state,isDraft,headRefName,baseRefName,headRefOid,mergeable,mergeStateStatus,reviewDecision,statusCheckRollup,mergedAt',
     ]);
     const parsedPr = mergePrSchema.parse(JSON.parse(prOut));
+    if (!matchesGithubPullRequest({ ...repoRef, number }, parsedPr)) return { available: false, reason: 'GitHub returned a different pull request.' };
+    mergedPullRequestObservations.observe({ ...repoRef, number }, parsedPr);
     const [policyOut, requirements] = await Promise.all([
       gh(repoRoot, ['api', `repos/${repoRef.owner}/${repoRef.repo}`]),
       fetchGithubMergeRequirements((args) => gh(repoRoot, args), repoRef.owner, repoRef.repo, parsedPr.baseRefName, number),
@@ -3404,27 +3303,45 @@ async function mergePullRequest(
   if (mergeInflight.has(key)) return { merged: false, status: 409, error: 'A merge is already in progress.', code: 'concurrent' };
   mergeInflight.add(key);
   try {
+    if (input.canProceed?.() === false) return { merged: false, status: 409, error: 'Automatic merging was cancelled.', code: 'cancelled' };
     const fresh = await fetchPrMergeState(repoRoot, repoRef, number, true);
+    if (input.canProceed?.() === false) return { merged: false, status: 409, error: 'Automatic merging was cancelled.', code: 'cancelled' };
     if (!fresh.available) return { merged: false, status: 502, error: fresh.reason };
     const current = fresh.mergeState;
     if (current.headSha !== input.expectedHeadSha) {
       return { merged: false, status: 409, error: 'The pull request head changed. Review the new commits before merging.', code: 'stale-head', current };
     }
+    if (input.expectedHeadRef !== undefined && current.headRef !== input.expectedHeadRef) {
+      return { merged: false, status: 409, error: 'The pull request branch changed.', code: 'stale-branch', current };
+    }
+    if (input.requirePassingChecks && (current.checks.length === 0 || current.checks.some(check => check.state !== 'passing'))) {
+      return { merged: false, status: 409, error: 'Automatic merging requires at least one check and every current-head check passing.', code: 'checks-not-passing', current };
+    }
     if (!current.methods.includes(input.method)) {
       return { merged: false, status: 409, error: 'That merge method is no longer enabled.', code: 'disabled-method', current };
     }
-    if (!mergePreflightAllowed(current, input.overrideRules)) {
+    if (!mergePreflightAllowed(current, !input.requirePassingChecks && input.overrideRules)) {
       return { merged: false, status: 409, error: current.blockers[0]?.message ?? 'The pull request is not eligible to merge.', code: current.eligibility, current };
+    }
+    if (input.requirePassingChecks && process.env.CEZ_DRY_RUN !== '1') {
+      if (!repoRef) return { merged: false, status: 404, error: 'GitHub repository not found.' };
+      const active = parseActiveWorkflowRuns(await gh(repoRoot, activeWorkflowRunsArgs({
+        repository: `${repoRef.owner}/${repoRef.repo}`, headSha: current.headSha,
+      })));
+      if (input.canProceed?.() === false) return { merged: false, status: 409, error: 'Automatic merging was cancelled.', code: 'cancelled' };
+      if (active) return { merged: false, status: 409, error: 'Waiting for active CI workflows on the current PR head.', code: 'checks-active', current };
     }
     if (process.env.CEZ_DRY_RUN === '1') {
       evictGithubProjectCaches(repoRoot);
       return { merged: true, number, url: current.url, method: input.method, mergeCommitSha: 'abcdef0123456789abcdef0123456789abcdef01' };
     }
     if (!repoRef) return { merged: false, status: 404, error: 'GitHub repository not found.' };
+    if (input.canProceed?.() === false) return { merged: false, status: 409, error: 'Automatic merging was cancelled.', code: 'cancelled' };
     const out = await gh(repoRoot, [
       'api', '--method', 'PUT', `repos/${repoRef.owner}/${repoRef.repo}/pulls/${number}/merge`,
       '-f', `merge_method=${input.method}`, '-f', `sha=${input.expectedHeadSha}`,
     ]);
+    // Once GitHub accepted the mutation, report its real outcome even if intent changed in flight.
     const result = ghMergeResultSchema.parse(JSON.parse(out));
     if (!result.merged) return { merged: false, status: 409, error: result.message ?? 'GitHub refused the merge.', code: 'github-blocked', current };
     evictGithubProjectCaches(repoRoot);
@@ -3440,6 +3357,52 @@ async function mergePullRequest(
 
 export function mergePreflightAllowed(current: ForgePrMergeState, overrideRules = false): boolean {
   return current.canMerge || (overrideRules && current.canOverride);
+}
+
+/** gh has no compare-and-swap ready operation. Check ownership immediately before marking ready,
+ * then refresh again; the later merge has its own head guard and GitHub's atomic SHA check. */
+async function readyPullRequest(
+  repoRoot: string,
+  repoRef: GithubRepoRef | null,
+  number: number,
+  input: { expectedHeadSha: string; expectedHeadRef: string; canProceed?: () => boolean },
+): Promise<ForgePrMergeStateResult> {
+  if (!Number.isSafeInteger(number) || number < 1 || !/^[0-9a-f]{40}$/.test(input.expectedHeadSha) || !input.expectedHeadRef) {
+    return { available: false, reason: 'A valid pull request, head SHA and task branch are required.' };
+  }
+  const key = `${repoRoot}:${number}`;
+  if (mergeInflight.has(key)) return { available: false, reason: 'A pull request mutation is already in progress.' };
+  mergeInflight.add(key);
+  try {
+    if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
+    const dryRun = process.env.CEZ_DRY_RUN === '1';
+    if (!dryRun) {
+      if (!repoRef) return { available: false, reason: 'GitHub remote could not be resolved' };
+      const pr = mergePrSchema.pick({ number: true, url: true, state: true, isDraft: true, headRefName: true, headRefOid: true }).parse(JSON.parse(await gh(repoRoot, [
+        'pr', 'view', String(number), '--json', 'number,url,state,isDraft,headRefName,headRefOid',
+      ])));
+      if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
+      if (!matchesGithubPullRequest({ ...repoRef, number }, pr)) return { available: false, reason: 'GitHub returned a different pull request.' };
+      if (pr.headRefOid !== input.expectedHeadSha) return { available: false, reason: 'The pull request head changed.' };
+      if (pr.headRefName !== input.expectedHeadRef) return { available: false, reason: 'The pull request branch changed.' };
+      if (pr.state !== 'OPEN') return { available: false, reason: 'The pull request is no longer open.' };
+      if (pr.isDraft) {
+        if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
+        await gh(repoRoot, ['pr', 'ready', String(number), '--repo', `github.com/${repoRef.owner}/${repoRef.repo}`]);
+        evictGithubProjectCaches(repoRoot);
+        if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
+      }
+    }
+    const fresh = await fetchPrMergeState(repoRoot, repoRef, number, true);
+    if (input.canProceed?.() === false) return { available: false, reason: 'Marking the pull request ready was cancelled.' };
+    if (fresh.available && fresh.mergeState.headSha !== input.expectedHeadSha) return { available: false, reason: 'The pull request head changed.' };
+    if (fresh.available && fresh.mergeState.headRef !== input.expectedHeadRef) return { available: false, reason: 'The pull request branch changed.' };
+    return fresh;
+  } catch {
+    return { available: false, reason: 'GitHub could not mark the pull request ready for review.' };
+  } finally {
+    mergeInflight.delete(key);
+  }
 }
 
 /** owner/repo parsed out of the origin remote — feeds `viewUrl`. */
@@ -3479,8 +3442,9 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
     prStatus: async (branch) => {
       if (process.env.CEZ_DRY_RUN === '1') return null;
       try {
-        const out = await gh(repoRoot, ['pr', 'view', branch, '--json', 'number,url,state,isDraft,statusCheckRollup']);
+        const out = await gh(repoRoot, ['pr', 'view', branch, '--json', 'number,url,state,isDraft,statusCheckRollup,mergedAt']);
         const pr = ghPrViewSchema.parse(JSON.parse(out));
+        if (repoRef) mergedPullRequestObservations.observe({ ...repoRef, number: pr.number }, pr);
         return {
           number: pr.number,
           url: pr.url,
@@ -3494,6 +3458,8 @@ export function createGithubDriver(repoRoot: string, repoRef: GithubRepoRef | nu
     },
 
     prMergeState: (number, opts) => fetchPrMergeState(repoRoot, repoRef, number, opts?.refresh),
+
+    readyPR: (number, input) => readyPullRequest(repoRoot, repoRef, number, input),
 
     mergePR: (number, input) => mergePullRequest(repoRoot, repoRef, number, input),
 
@@ -3569,22 +3535,26 @@ export async function fetchMergedPullRequests(runGraphql: GraphqlRunner, identit
       const parsed = z.object({ errors: z.array(z.unknown()).optional(), data: z.object({ repository: z.object({ nameWithOwner: z.string() }).passthrough().nullable() }) }).safeParse(response);
       if (!parsed.success || parsed.data.errors?.length || parsed.data.data.repository?.nameWithOwner.toLowerCase() !== repository.toLowerCase()) continue;
       for (const pr of chunk) {
-        const node = z.object({ number: z.number(), url: z.string(), state: z.literal('MERGED'), mergedAt: z.string().datetime() }).safeParse(parsed.data.data.repository[`pr${pr.number}`]);
-        if (!node.success || node.data.number !== pr.number) continue;
-        const actual = archivePullRequests([{ pullRequests: [{ number: node.data.number, url: node.data.url, source: 'created' }] }]);
-        if (actual?.length !== 1 || pullRequestKey(actual[0]!) !== pullRequestKey(pr)) continue;
-        merged.push(mergedPullRequestSchema.parse({ ...pr, mergedAt: node.data.mergedAt }));
+        const fact = mergedPullRequestObservations.observe(pr, parsed.data.data.repository[`pr${pr.number}`]);
+        if (fact) merged.push(fact);
       }
     }
   }
   return merged;
 }
 
-export function lookupMergedPullRequests(repoRoot: string, identities: ArchivePullRequestIdentity[], signal: AbortSignal): Promise<MergedPullRequest[]> {
+export async function lookupMergedPullRequests(repoRoot: string, identities: ArchivePullRequestIdentity[], signal: AbortSignal): Promise<MergedPullRequest[]> {
+  signal.throwIfAborted();
+  if (process.env.CEZ_DRY_RUN === '1') return [];
+  const unique = [...new Map(identities.map(pr => [pullRequestKey(pr), pr])).values()];
+  const known = unique.flatMap(pr => mergedPullRequestObservations.get(pr) ?? []);
+  const missing = unique.filter(pr => !mergedPullRequestObservations.get(pr));
+  if (missing.length === 0) return known;
   const context = githubContext(repoRoot);
-  return fetchMergedPullRequests(async (query, variables) => {
+  const fetched = await fetchMergedPullRequests(async (query, variables) => {
     const args = ['api', 'graphql', '--hostname', 'github.com', '-f', `query=${query}`];
     for (const [key, value] of Object.entries(variables)) args.push('-f', `${key}=${value}`);
     return gh(repoRoot, args, 15_000, signal, context);
-  }, identities);
+  }, missing);
+  return [...known, ...fetched];
 }

@@ -11,9 +11,8 @@ import type {
   HealthResponse,
   ProviderStatusResponse,
   RunRecord,
-  SkillsUpdateState,
 } from '@open-mercato/cezar-api-client'
-import { AppShellContainer, repoChipOf, skillsUpdateMarkerOf } from '@/components/app-shell-container'
+import { AppShellContainer, repoChipOf } from '@/components/app-shell-container'
 import { ThemeProvider } from '@/components/theme-provider'
 
 const fetchMock = vi.fn<typeof fetch>()
@@ -45,7 +44,7 @@ const HEALTH: HealthResponse = {
   checks: [],
   defaultRunner: 'claude',
   forge: null,
-  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: true, singleProject: false, automations: false, preview: false, voice: false },
+  capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, singleProject: false, automations: false, preview: false, voice: false },
 }
 
 /** One registered project — the degenerate workspace every existing install upgrades into. */
@@ -59,11 +58,6 @@ const PROJECT = {
   status: 'ok' as const,
   branch: 'main',
 }
-
-const TODOS = [
-  { id: 't1', summary: 'Review the PR' },
-  { id: 't2', summary: 'Rebase the branch' },
-]
 
 const PROVIDERS: ProviderStatusResponse = {
   providers: [
@@ -150,27 +144,9 @@ describe('repoChipOf', () => {
   })
 })
 
-const UPDATE: SkillsUpdateState = {
-  status: 'available', available: true, autoUpdateEnabled: true, inherited: true,
-  checkedAt: '2026-07-22T00:00:00.000Z', updatedAt: null, scopes: [], needsUpgradeNotes: false,
-}
-
-describe('skillsUpdateMarkerOf', () => {
-  it.each([
-    ['loading', undefined, false],
-    ['available', UPDATE, true],
-    ['proven available with an error', { ...UPDATE, status: 'error' as const }, true],
-    ['current', { ...UPDATE, status: 'current' as const, available: false }, false],
-    ['unavailable', { ...UPDATE, status: 'unavailable' as const, available: false }, false],
-    ['updating', { ...UPDATE, status: 'updating' as const }, false],
-  ])('%s → %s', (_name, state, expected) => {
-    expect(skillsUpdateMarkerOf(state)).toBe(expected)
-  })
-})
-
 describe('sidebar wiring', () => {
   it('renders the repo and version chips from /api/v1/health', async () => {
-    serve({ '/api/v1/health': HEALTH, '/api/v1/todos': [] })
+    serve({ '/api/v1/health': HEALTH })
     renderShell()
 
     await waitFor(() => expect(repoChip()?.textContent).toBe('cezar'))
@@ -179,44 +155,7 @@ describe('sidebar wiring', () => {
     expect(versionChip()?.textContent).toBe('v0.1.3')
   })
 
-  it('renders the inbox badge from /api/v1/todos', async () => {
-    serve({ '/api/v1/health': HEALTH, '/api/v1/todos': TODOS })
-    renderShell()
-
-    await waitFor(() => expect(navBadge()).not.toBeNull())
-    fireEvent.keyDown(screen.getByRole('button', { name: 'More views' }), { key: 'Enter' })
-    expect((await screen.findByRole('menuitem', { name: /Inbox/ })).textContent).toBe('Inbox2')
-  })
-
   // #471 — the global inbox is opt-in; the shell must not offer what the server cannot fill.
-  it('drops the Inbox nav item and its badge when the server has follow-ups off', async () => {
-    serve({
-      '/api/v1/health': { ...HEALTH, capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: false } },
-      '/api/v1/todos': TODOS,
-    })
-    renderShell()
-
-    await waitFor(() => expect(versionChip()).not.toBeNull())
-    expect(screen.queryByRole('link', { name: /Inbox/ })).toBeNull()
-    expect(navBadge()).toBeNull()
-    // Every other view is untouched — the gate owns exactly one item.
-    expect(inSidebar().getByRole('link', { name: /Tasks/ })).toBeTruthy()
-    expect(inSidebar().getByRole('link', { name: /Settings/ })).toBeTruthy()
-  })
-
-  it('never asks for todos on a server with the inbox off', async () => {
-    serve({
-      '/api/v1/health': { ...HEALTH, capabilities: { localHandoff: true, tokenMetrics: true, tokenUsageMetrics: true, costMetrics: true, followups: false } },
-      '/api/v1/todos': TODOS,
-    })
-    renderShell()
-
-    await waitFor(() => expect(versionChip()).not.toBeNull())
-    // The badge query is keyed on the capability, so it never runs — unlike the /inbox route,
-    // nothing here needs the list before health has spoken.
-    const asked = fetchMock.mock.calls.map((call) => String(call[0]))
-    expect(asked).not.toContain('/api/v1/todos')
-  })
 
   // #801 — the same honesty rule for the opt-in automations capability. Both cases carry a
   // reachable forge, so the ONLY thing deciding the Automations item here is the capability:
@@ -224,7 +163,7 @@ describe('sidebar wiring', () => {
   const WITH_FORGE = { ...HEALTH, forge: { kind: 'github' as const, available: true } }
 
   it('drops the Automations nav item when the server has automations off', async () => {
-    serve({ '/api/v1/health': WITH_FORGE, '/api/v1/todos': [] })
+    serve({ '/api/v1/health': WITH_FORGE })
     renderShell()
 
     await waitFor(() => expect(versionChip()).not.toBeNull())
@@ -236,23 +175,12 @@ describe('sidebar wiring', () => {
   it('shows the Automations nav item once health reports the capability', async () => {
     serve({
       '/api/v1/health': { ...WITH_FORGE, capabilities: { ...HEALTH.capabilities, automations: true } },
-      '/api/v1/todos': [],
     })
     renderShell()
 
     await waitFor(() => expect(versionChip()).not.toBeNull())
     fireEvent.keyDown(screen.getByRole('button', { name: 'More views' }), { key: 'Enter' })
     expect(await screen.findByRole('menuitem', { name: 'Automations' })).toBeTruthy()
-  })
-
-  it('renders no badge for an empty inbox', async () => {
-    serve({ '/api/v1/health': HEALTH, '/api/v1/todos': [] })
-    renderShell()
-
-    await waitFor(() => expect(versionChip()).not.toBeNull())
-    // Zero follow-ups is not "0 follow-ups" — a badge reading 0 is noise the spec's chrome
-    // rules do not want.
-    expect(navBadge()).toBeNull()
   })
 
   it('shows no chips at all while health has not answered', () => {
@@ -290,7 +218,6 @@ describe('sidebar wiring', () => {
         ...HEALTH,
         capabilities: { ...HEALTH.capabilities, singleProject: true },
       },
-      '/api/v1/todos': [],
       '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
       '/api/v1/run-summaries': [],
     })
@@ -307,7 +234,6 @@ describe('sidebar wiring', () => {
         ...HEALTH,
         capabilities: { ...HEALTH.capabilities, singleProject: true },
       },
-      '/api/v1/todos': [],
       '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
       '/api/v1/run-summaries': [],
     })
@@ -322,7 +248,6 @@ describe('sidebar wiring', () => {
   it('renders one current-project sidebar with both projects on the rail', async () => {
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/projects': {
         projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' }],
         bootProject: 'cezar',
@@ -343,9 +268,8 @@ describe('sidebar wiring', () => {
     serve({
       '/api/v1/health': {
         ...HEALTH,
-        capabilities: { ...HEALTH.capabilities, followups: true, automations: true },
+        capabilities: { ...HEALTH.capabilities, automations: true },
       },
-      '/api/v1/todos': TODOS,
       '/api/v1/projects': { projects: [{ ...PROJECT, forge: 'github' }], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
       '/api/v1/run-summaries': [],
     })
@@ -353,17 +277,16 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(repoChip()?.textContent).toBe('cezar'))
     expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull()
     fireEvent.keyDown(screen.getByRole('button', { name: 'More views' }), { key: 'Enter' })
-    expect((await screen.findByRole('menuitem', { name: /Inbox/ })).getAttribute('href')).toBe('/p/cezar/inbox')
-    expect(screen.getByRole('menuitem', { name: 'Automations' }).getAttribute('href')).toBe('/p/cezar/automations')
+    expect((await screen.findByRole('menuitem', { name: 'Automations' })).getAttribute('href')).toBe('/p/cezar/automations')
+    expect(screen.queryByRole('menuitem', { name: /Inbox/ })).toBeNull()
   })
 
   it('scopes overflow views to the current project in a workspace', async () => {
     serve({
       '/api/v1/health': {
         ...HEALTH,
-        capabilities: { ...HEALTH.capabilities, followups: true, automations: true },
+        capabilities: { ...HEALTH.capabilities, automations: true },
       },
-      '/api/v1/todos': TODOS,
       '/api/v1/projects': {
         projects: [
           { ...PROJECT, forge: 'github' },
@@ -379,16 +302,14 @@ describe('sidebar wiring', () => {
     await waitFor(() => expect(repoChip()?.textContent).toBe('cezar'))
     expect(screen.queryByRole('navigation', { name: 'Workspace' })).toBeNull()
     fireEvent.keyDown(screen.getByRole('button', { name: 'More views' }), { key: 'Enter' })
-    expect((await screen.findByRole('menuitem', { name: /Inbox/ })).getAttribute('href')).toBe('/p/cezar/inbox')
-    expect(screen.getByRole('menuitem', { name: 'Automations' }).getAttribute('href')).toBe('/p/cezar/automations')
+    expect((await screen.findByRole('menuitem', { name: 'Automations' })).getAttribute('href')).toBe('/p/cezar/automations')
+    expect(screen.queryByRole('menuitem', { name: /Inbox/ })).toBeNull()
   })
 
   it('keeps confirmed overflow capabilities while a new project health cache is pending', async () => {
     const health = { ...HEALTH, capabilities: { ...HEALTH.capabilities, automations: true } }
     serve({
       '/api/v1/health': health,
-      '/api/v1/todos': [],
-      '/api/v1/p/shop/todos': [],
       '/api/v1/projects': {
         projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'shop' }],
         bootProject: 'cezar', projectsDir: '/projects',
@@ -424,13 +345,13 @@ describe('sidebar wiring', () => {
     expect(client.getQueryData(['shop', 'health'])).toBeUndefined()
     expect(inSidebar().getByRole('button', { name: 'More views' })).toBeTruthy()
     fireEvent.keyDown(inSidebar().getByRole('button', { name: 'More views' }), { key: 'Enter' })
-    expect((await screen.findByRole('menuitem', { name: /Inbox/ })).getAttribute('href')).toBe('/p/shop/inbox')
-    expect(screen.getByRole('menuitem', { name: 'Automations' }).getAttribute('href')).toBe('/p/shop/automations')
+    expect((await screen.findByRole('menuitem', { name: 'Automations' })).getAttribute('href')).toBe('/p/shop/automations')
+    expect(screen.queryByRole('menuitem', { name: /Inbox/ })).toBeNull()
 
     // A new authoritative response still wins, including explicit capability removal.
     await act(async () => {
       releaseHealth(new Response(JSON.stringify({ ...health, capabilities: {
-        ...health.capabilities, followups: false, automations: false,
+        ...health.capabilities, automations: false,
       } })))
     })
     await waitFor(() => expect(inSidebar().queryByRole('button', { name: 'More views' })).toBeNull())
@@ -441,7 +362,6 @@ describe('sidebar wiring', () => {
     const archived = { ...run({ id: 'archived-session', titleSummary: 'Nightly sweep', status: 'done' }), automationId: 'auto-1' }
     serve({
       '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
-      '/api/v1/todos': [],
       '/api/v1/projects': {
         projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'shop' }],
         bootProject: 'cezar', projectsDir: '/projects',
@@ -468,7 +388,6 @@ describe('sidebar wiring', () => {
     const shopWaiting = run({ id: 'shop-wait', titleSummary: 'Shop waiting', status: 'waiting' })
     serve({
       '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
-      '/api/v1/todos': [],
       '/api/v1/projects': {
         projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'shop', lastOpenedAt: '2026-07-19T00:00:00.000Z' }],
         bootProject: 'cezar',
@@ -489,7 +408,7 @@ describe('sidebar wiring', () => {
   })
 
   it('shows the version chip even outside a git repo', async () => {
-    serve({ '/api/v1/health': { ...HEALTH, repo: null }, '/api/v1/todos': [] })
+    serve({ '/api/v1/health': { ...HEALTH, repo: null } })
     renderShell()
 
     // Running cezar outside a repo is supported: no repo chip, but the rest of the chrome is
@@ -502,7 +421,6 @@ describe('sidebar wiring', () => {
   it('wires the provider query into the AppShell banner slot', async () => {
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/providers/status': {
         providers: [
           { provider: 'claude', status: 'disconnected', enabled: true },
@@ -521,7 +439,6 @@ describe('sidebar wiring', () => {
   it('shows a runtime authentication incident in the global banner slot', async () => {
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/providers/status': {
         providers: [
           { provider: 'claude', status: 'disconnected', enabled: true },
@@ -542,7 +459,6 @@ describe('sidebar wiring', () => {
   it('keeps the shell and route content when provider status fails', async () => {
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/providers/status': new Response(JSON.stringify({ error: 'unavailable' }), { status: 500 }),
     })
     const client = createQueryClient()
@@ -563,7 +479,6 @@ describe('sidebar wiring', () => {
     const secret = 'unexpected-provider-payload'
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/providers/status': { providers: [null, { provider: 'future', status: secret }] },
     })
     const client = createQueryClient()
@@ -593,7 +508,6 @@ describe('document title wiring', () => {
   it('combines the selected project with scoped page context', async () => {
     serve({
       '/api/v1/health': HEALTH_WITH_BOOT,
-      '/api/v1/todos': [],
       '/api/v1/projects': {
         ...REGISTRY,
         projects: [{ ...PROJECT, id: 'shop', name: 'Storefront' }],
@@ -606,7 +520,7 @@ describe('document title wiring', () => {
   })
 
   it('falls back to the boot repository name when the registry is unavailable', async () => {
-    serve({ '/api/v1/health': HEALTH_WITH_BOOT, '/api/v1/todos': [], '/api/v1/run-summaries': [] })
+    serve({ '/api/v1/health': HEALTH_WITH_BOOT, '/api/v1/run-summaries': [] })
     renderShell('/p/cezar/')
 
     await waitFor(() => expect(document.title).toBe('cezar — Tasks · cezar'))
@@ -615,7 +529,6 @@ describe('document title wiring', () => {
   it('keeps global settings and a no-repo task route free of invented project context', async () => {
     serve({
       '/api/v1/health': { ...HEALTH_WITH_BOOT, repo: null },
-      '/api/v1/todos': [],
       '/api/v1/projects': REGISTRY,
       '/api/v1/run-summaries': [],
     })
@@ -631,7 +544,6 @@ describe('document title wiring', () => {
   it('updates after in-app navigation without remounting the shell', async () => {
     serve({
       '/api/v1/health': HEALTH_WITH_BOOT,
-      '/api/v1/todos': [],
       '/api/v1/projects': REGISTRY,
       '/api/v1/run-summaries': [],
     })
@@ -646,7 +558,6 @@ describe('document title wiring', () => {
     const initialRun = run()
     serve({
       '/api/v1/health': HEALTH_WITH_BOOT,
-      '/api/v1/todos': [],
       '/api/v1/projects': {
         ...REGISTRY,
         projects: [{ ...PROJECT, id: 'shop', name: 'Storefront' }],
@@ -706,7 +617,6 @@ describe('project rail wiring', () => {
     localStorage.setItem('cez-sidebar-collapsed', JSON.stringify({ cezar: false, shop: true, third: false }))
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/projects': { ...TWO_PROJECTS, projects: [...TWO_PROJECTS.projects, { ...PROJECT, id: 'third', name: 'third' }] },
       '/api/v1/workspace/runs-index': railIndex([]),
       '/api/v1/run-summaries': [],
@@ -731,7 +641,6 @@ describe('project rail wiring', () => {
       localStorage.setItem('cez-sidebar-collapsed', JSON.stringify({ cezar: false, shop: true }))
       serve({
         '/api/v1/health': HEALTH,
-        '/api/v1/todos': [],
         '/api/v1/projects': TWO_PROJECTS,
         '/api/v1/workspace/runs-index': railIndex([]),
         '/api/v1/run-summaries': [],
@@ -752,7 +661,6 @@ describe('project rail wiring', () => {
   it('lights the top pill of a non-current project that has a run waiting on you', async () => {
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([indexRow({ projectId: 'shop', id: 's1', status: 'waiting' })]),
@@ -775,7 +683,6 @@ describe('project rail wiring', () => {
     const done = indexRow({ id: 'd1', status: 'done', finishedAt: '2026-07-21T13:00:00.000Z' })
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([done]),
@@ -797,7 +704,6 @@ describe('project rail wiring', () => {
   it('never says recent runs only, even for a project whose archived runs the index capped (#864)', async () => {
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([], ['shop']),
@@ -822,7 +728,6 @@ describe('project rail wiring', () => {
     const pending = new Promise<Response>((resolve) => { answer = resolve })
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/workspace/ui-state': {},
       '/api/v1/run-summaries': [],
       '/api/v1/p/cezar/run-summaries': [],
@@ -844,7 +749,6 @@ describe('project rail wiring', () => {
   it('holds no rail column once the registry request has failed', async () => {
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/projects': new Response(JSON.stringify({ error: 'boom' }), { status: 500 }),
       '/api/v1/run-summaries': [],
     })
@@ -857,7 +761,6 @@ describe('project rail wiring', () => {
   it('says the activity is unknown, not idle, when the runs index request fails', async () => {
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
       '/api/v1/run-summaries': [],
@@ -876,7 +779,6 @@ describe('project rail wiring', () => {
     const indexCalls = () => fetchMock.mock.calls.filter(([input]) => String(input).replace('?archived=recent', '') === '/api/v1/workspace/runs-index').length
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([]),
@@ -898,7 +800,6 @@ describe('project rail wiring', () => {
 
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([indexRow({ projectId: 'shop', id: 's1', status: 'waiting' })]),
@@ -923,7 +824,6 @@ describe('project rail wiring', () => {
     )
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([
@@ -958,7 +858,6 @@ describe('project rail wiring', () => {
     const health = { ...HEALTH, checks: [{ name: 'claude', available: false, hint: 'install' }] } as unknown as HealthResponse
     serve({
       '/api/v1/health': health,
-      '/api/v1/todos': [],
       '/api/v1/projects': TWO_PROJECTS,
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([]),
@@ -983,7 +882,6 @@ describe('project rail wiring', () => {
   it('keeps Add project and All projects on the rail with one project and the capability off', async () => {
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([]),
@@ -1001,7 +899,6 @@ describe('project rail wiring', () => {
   it('renders the rail without Add project and All projects when the capability is on', async () => {
     serve({
       '/api/v1/health': { ...HEALTH, capabilities: { ...HEALTH.capabilities, singleProject: true } },
-      '/api/v1/todos': [],
       '/api/v1/projects': { projects: [PROJECT], bootProject: 'cezar', projectsDir: '/home/me/cezar/projects' },
       '/api/v1/workspace/ui-state': {},
       '/api/v1/workspace/runs-index': railIndex([]),
@@ -1026,7 +923,6 @@ it('keeps sidebar data on the URL project when rendered above the route scope pr
   client.setQueryData(['shop', 'runs', 'list'], [run({ id: 'right', title: 'Selected project task', titleSummary: undefined, status: 'waiting' })])
   serve({
     '/api/v1/health': HEALTH,
-    '/api/v1/todos': [],
     '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'Shop' }] },
     '/api/v1/p/shop/run-summaries': [run({ id: 'right', title: 'Selected project task', titleSummary: undefined, status: 'waiting' })],
   })
@@ -1041,7 +937,6 @@ it('shows the Git view\'s checkout and sections, read for the URL project, inste
   setApiScope('previous')
   serve({
     '/api/v1/health': HEALTH,
-    '/api/v1/todos': [],
     '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'Shop' }] },
     '/api/v1/p/shop/repo': { info: { root: '/shop', branch: 'shop-main', remote: null }, status: [], log: [], branches: ['shop-main'], baseBranch: null },
     '/api/v1/p/shop/worktrees': { worktrees: [], totalBytes: 2 * 1024 ** 3, keep: 0 },
@@ -1063,7 +958,6 @@ it.each(['/tasks', '/tools'])('keeps sidebar navigation on its displayed boot pr
   setApiScope('shop')
   serve({
     '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
-    '/api/v1/todos': [],
     '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'Shop' }] },
     '/api/v1/p/cezar/run-summaries': [run({ id: 'boot-task', title: 'Boot task', titleSummary: undefined })],
     '/api/v1/p/default/run-summaries': [run({ id: 'boot-task', title: 'Boot task', titleSummary: undefined })],
@@ -1084,7 +978,6 @@ it.each(['/tasks', '/tools'])('keeps sidebar navigation on its displayed boot pr
 it.each(['/p/shop/settings/agents', '/settings/global/appearance'])('shows scoped Settings groups instead of tasks at %s', async (entry) => {
   serve({
     '/api/v1/health': { ...HEALTH, bootProject: 'cezar' },
-    '/api/v1/todos': [],
     '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...PROJECT, id: 'shop', name: 'Shop' }] },
   })
   renderShell(entry)
@@ -1097,7 +990,7 @@ it.each(['/p/shop/settings/agents', '/settings/global/appearance'])('shows scope
   expect([...group.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['General', 'Sidebar', 'Agents', 'Agent config', 'Worktrees', 'Bookmarklets', 'Prompt templates'])
   const global = screen.getByRole('navigation', { name: 'Global · every project' })
   expect(within(global).getByRole('link', { name: 'Appearance' }).getAttribute('href')).toBe('/settings/global/appearance')
-  expect([...global.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['Appearance', 'Notifications', 'Resources', 'Tasks', 'Skills', 'Agent accounts', 'Projects'])
+  expect([...global.querySelectorAll('a')].map((a) => a.textContent)).toEqual(['Appearance', 'Notifications', 'Resources', 'Tasks', 'Agent accounts', 'Projects'])
   expect(within(global).getByRole('link', { name: 'Tasks' }).getAttribute('href')).toBe('/settings/global/tasks')
   expect(within(global).queryByRole('link', { name: 'Keyboard' })).toBeNull()
   // The global area has no index page, so its group has no General row.
@@ -1110,7 +1003,6 @@ it.each(['/p/shop/settings/agents', '/settings/global/appearance'])('shows scope
 it('applies single-project visibility to the Settings sidebar', async () => {
   serve({
     '/api/v1/health': { ...HEALTH, capabilities: { ...HEALTH.capabilities, singleProject: true } },
-    '/api/v1/todos': [],
     '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT] },
   })
   renderShell('/settings/global/resources')
@@ -1127,7 +1019,6 @@ describe('GitHub view sidebar list (#622)', () => {
     setApiScope(null)
     serve({
       '/api/v1/health': { ...HEALTH, forge: { available: true } },
-      '/api/v1/todos': [],
       '/api/v1/projects': { bootProject: 'cezar', projects: [{ ...PROJECT, forge: 'github' }, shop] },
       '/api/v1/p/shop/github?limit=50': GH,
       '/api/v1/p/shop/run-summaries': [],
@@ -1146,7 +1037,6 @@ describe('GitHub view sidebar list (#622)', () => {
   it('keeps the task list where GitHub has no sidebar list: other views and forge-less projects', async () => {
     serve({
       '/api/v1/health': HEALTH,
-      '/api/v1/todos': [],
       '/api/v1/projects': { bootProject: 'cezar', projects: [PROJECT, { ...shop, forge: 'none' as const }] },
       '/api/v1/p/shop/run-summaries': [],
     })

@@ -75,10 +75,9 @@ async function attachmentBytes(dataDir: string, parentId: string, id: string, li
 
 const refuse = (message: string) => new DelegationPolicyError('invalid_input', message);
 /**
- * A regular file inside the parent's worktree, reached without any symlink component (hearsay-tools/cezarion#1149).
- * Node has no openat, so a directory above the file can be swapped for a symlink while it is
- * opened: the bytes count only when the opened file IS the one at the canonical path afterwards.
- * Every source failure names the path; only the budget keeps the generic refusal.
+ * Read a regular parent-worktree file without symlink components. Revalidate the open
+ * descriptor’s identity and containment before accepting bytes; path checks alone are
+ * insufficient.
  */
 async function parentFile(parentCwd: string, path: string): Promise<{ read(limit: number): Promise<Buffer> }> {
   const source = join(await realpath(parentCwd), path);
@@ -225,13 +224,9 @@ export async function verifyWorkerContext(options: {
 }
 
 /**
- * Copy each verified `parent-file` snapshot into the worker worktree before its first turn
- * (hearsay-tools/cezarion#1149). First launch only: an existing copy is the worker's, never
- * overwritten, and Continue never calls this, so a deleted copy stays deleted. Directories are
- * walked one component at a time from the worktree root. Node has no openat, so the destination
- * counts only when, after its exclusive no-follow create, it is still the entry in the checked
- * directory. Once every file is in place the whole batch is re-checked against the worker's ignore
- * rules; on any failure the copies this call made are removed and the refusal names the path.
+ * Copy verified parent-file snapshots before first launch only. Never overwrite existing worker
+ * content or restore deleted files on Continue. Require baseline ignore rules and recheck the
+ * whole batch; remove this call’s copies on failure.
  */
 export async function placeWorkerAttachments(options: { dataDir: string; workspace: WorkerWorkspace; context?: WorkerInputRecipe }): Promise<void> {
   const { dataDir, workspace, context } = options;

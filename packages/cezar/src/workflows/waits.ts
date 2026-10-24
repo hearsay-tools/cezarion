@@ -1,9 +1,8 @@
 import type { CezarWaitRequestInput, CiWait, OpenWait, PrWaitEntry, ProcessWaitEntry, RunRecord, TimerWaitEntry, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 
 /**
- * Pure helpers over a run's wait list (spec `.ai/specs/2026-10-17-unified-waits.md`, phase 1:
- * hearsay-tools/cezarion#1233). `RunManager` owns registration, resolution and delivery; this
- * module only reads the list and builds the text the agent sees.
+ * Pure wait-list readers and agent-facing text. RunManager owns registration, resolution and
+ * delivery.
  */
 
 /** What a monitoring timer (the monitoring line or Claude's `ScheduleWakeup`) says when it fires. */
@@ -34,9 +33,10 @@ export function isMonitoringTimer(wait: Wait): boolean {
   return wait.kind === 'timer' && (wait.via === 'monitoring-line' || wait.via === 'schedule-wakeup');
 }
 
-/** A wake the agent arranged for itself rather than an external event: a timer, or a process wait,
- *  which `sleep 61 & cezar_wait(pid)` would otherwise make a timer in disguise
- *  (hearsay-tools/cezarion#1446). Both count against the automatic-wake budget. */
+/**
+ * Timer and process waits count against the automatic-wake budget, including a process used as a
+ * delayed timer.
+ */
 export function chargesBudget(wait: Wait): boolean {
   return wait.kind === 'timer' || wait.kind === 'process';
 }

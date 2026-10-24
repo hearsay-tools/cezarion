@@ -25,7 +25,7 @@ beforeAll(async () => {
   // Headless Chrome can report hover:none even for mouse events. Exercise the actual
   // hover CSS at both widths; moving a pointer alone would silently test the rest style.
   process.env.AGENT_BROWSER_ARGS = [originalBrowserArgs, '--blink-settings=primaryHoverType=2'].filter(Boolean).join(',')
-  // No Git: the real composer must disable variants while leaving model selection available.
+  // No Git: model selection stays available.
   root = mkdtempSync(join(tmpdir(), 'cez-states-'))
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   mkdirSync(join(root, '.ai/skills'), { recursive: true })
@@ -50,10 +50,8 @@ beforeAll(async () => {
     { id: 'fin', title: 'Finished task', task: 'Check the work', workflow: 'default', status: 'done', tokensUsed: 0,
       createdAt: new Date(Date.now() - 7_200_000).toISOString(), finishedAt: new Date(Date.now() - 7_200_000).toISOString(), archived: false, steps: [] },
   ]))
-  // Two follow-ups for the Inbox nav count (#617 01c); the inbox itself is opt-in (CEZ_FOLLOWUPS).
-  writeFileSync(join(root, '.ai/cezar/todos.json'), JSON.stringify([{ id: 'sel-1', summary: 'Review the PR' }, { id: 'sel-2', summary: 'Rerun the checks' }]))
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
-    env: fixtureServeEnv(root, { CEZ_FOLLOWUPS: '1' }), stdio: 'ignore',
+    env: fixtureServeEnv(root), stdio: 'ignore',
   })
   baseUrl = await waitForFixtureServer(server)
   expect((await (await fetch(`${baseUrl}/api/v1/runs`)).json()).map((run: { id: string }) => run.id).sort()).toEqual(['fin', 'ga', 'gb', 'one', 'two'])
@@ -145,19 +143,8 @@ function checkNavSelection(variant: ContrastQaVariant, { base, projectId, nav: n
     samples.push({ variant: variantId, target, state, ...sample })
     expect(sample.ratio, `${state}: ${JSON.stringify(sample)}`).toBeGreaterThanOrEqual(min)
   }
-  // Dry-run reports a tracked skills installation as absent, so no update marker can exist
-  // there (skills-update.e2e.ts). The route the nav reads is stubbed instead, with a body the
-  // contract accepts; nothing in the rendered DOM is written.
-  const skillsRoute = '**/api/v1/workspace/skills-update?*'
-  browser.routeJson(skillsRoute, { status: 'available', available: true, autoUpdateEnabled: false, inherited: true,
-    checkedAt: new Date().toISOString(), updatedAt: null, needsUpgradeNotes: false,
-    scopes: [{ scope: 'project', status: 'available', available: true, skills: ['om-review'], checkedAt: new Date().toISOString(), updatedAt: null }] })
-  try {
-    checkNavBody(variant, { base, projectId, container, navSelector, fill, amber, open, record })
-    checkNeedsYouDot(variant, { base, projectId, container, open, record })
-  } finally {
-    browser.unroute(skillsRoute)
-  }
+  checkNavBody(variant, { base, projectId, container, navSelector, fill, amber, open, record })
+  checkNeedsYouDot(variant, { base, projectId, container, open, record })
 }
 
 type Open = (path: string, ready: string) => void
@@ -194,25 +181,11 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
   record(tasksNav, 'selected nav label', 4.5)
   record(`${tasksNav} svg`, 'selected nav icon', 3)
 
-  // The skills update marker, rendered by the real nav from the stubbed skills-update route: a
-  // 7px --info dot, 3:1 against the row it sits on — at rest here, then hovered and selected.
+  // The Skills nav item carries no update marker (hearsay-tools/cezarion#1494).
   const skills = `${nav} a[href$="/skills"]`
-  const dot = `${skills} [data-slot="nav-update-marker"]`
-  type Marker = { width: number; height: number; bg: string; info: string; row: string }
-  const marker = `(() => {
-    const el = document.querySelector(${JSON.stringify(dot)}); if (!el || el.getBoundingClientRect().width === 0) return null
-    ${resolveFn}
-    const r = el.getBoundingClientRect()
-    return { width: r.width, height: r.height, bg: getComputedStyle(el).backgroundColor, info: resolve('var(--info)'),
-      row: getComputedStyle(document.querySelector(${JSON.stringify(skills)})).backgroundColor }
-  })()`
-  const atRest = waitForSettledSample(browser, marker) as Marker
-  expect({ width: atRest.width, height: atRest.height, bg: atRest.bg, row: atRest.row })
-    .toEqual({ width: 7, height: 7, bg: atRest.info, row: 'rgba(0, 0, 0, 0)' })
-  record(dot, 'update marker at rest', 3, 'background-color', 'parent')
+  expect(browser.count(`${skills} [data-slot="nav-update-marker"]`)).toBe(0)
 
-  // Hover, any nav item: the neutral row hover, with foreground label and icon (and the marker
-  // still readable on that fill).
+  // Hover, any nav item: the neutral row hover, with foreground label and icon.
   hoverVisiblePoint(browser, skills)
   type Ink = { bg: string; label: string; icon: string; ink: string; weight: string; width: number; height: number }
   const ink = (selector: string) => `(() => {
@@ -227,33 +200,12 @@ function checkNavBody(variant: ContrastQaVariant, { base, projectId, container, 
   expect({ label: hovered.label, icon: hovered.icon }).toEqual({ label: hovered.ink, icon: hovered.ink })
   record(skills, 'hover nav label', 4.5)
   record(`${skills} svg`, 'hover nav icon', 3)
-  record(dot, 'update marker on hover', 3, 'background-color', 'parent')
   browser.screenshot(`${artifacts}/states-nav-${variant.id}.png`, { viewport: true })
 
-  // Selected: the Skills page lights its own row, marker and all.
-  open('/skills', '[data-slot="nav-update-marker"]')
-  const onSelected = waitForSettledSample(browser, marker) as Marker
-  expect(onSelected.row).toBe(fill.selected)
-  expect({ width: onSelected.width, height: onSelected.height, bg: onSelected.bg }).toEqual({ width: 7, height: 7, bg: onSelected.info })
-  record(dot, 'update marker on the selected row', 3, 'background-color', 'parent')
-
-  open('/inbox', '[aria-label="More views"]')
-  const more = `${nav} [aria-label="More views"]`
-  const selectedMore = waitForSettledSample(browser, ink(more)) as Ink
-  expect(selectedMore.bg).toBe(fill.selected)
-  expect(selectedMore.icon).toBe(selectedMore.ink)
-  expect(browser.count(`${nav} a[aria-current="page"]`)).toBe(0)
-  expect(browser.count(`${more} [data-slot="overflow-inbox-dot"]`)).toBe(1)
-  browser.click(more)
-  const badge = '[role="menu"] [data-slot="inbox-count"]'
-  const inbox = browser.waitForValue(`(() => {
-    const el = document.querySelector('${badge}'); if (!el) return null
-    return { text: el.textContent, bg: getComputedStyle(el).backgroundColor, color: getComputedStyle(el).color }
-  })()`, (v: { text: string } | null) => v?.text === '2')
-  expect(normalizeColorSample(browser, inbox)).toEqual({ text: '2', bg: amber.fill, color: amber.ink })
-  record(badge, 'inbox-count number', 4.5)
-  browser.press('Escape')
-  browser.waitForFunction(`document.querySelector('[role="menu"]') === null && document.activeElement === document.querySelector(${JSON.stringify(more)})`)
+  // Selected: the Skills page lights its own row.
+  open('/skills', `${navSelector} a[href$="/skills"][aria-current="page"]`)
+  const onSelected = browser.waitForValue(normalizeColorExpression(ink(skills)), (v: Ink | null) => v?.bg === fill.selected) as Ink
+  expect(onSelected.bg).toBe(fill.selected)
 
   // New task on /new: the same fill as the selected nav item and the selected task row.
   const newTask = `${container}[data-sidebar-item="new-task"]`
@@ -460,12 +412,12 @@ describe('selection and control states (#171)', () => {
       browser.waitForFunction(`document.querySelector('[data-slot="reference-status-card"]') === null`)
     })
 
-    it(`${variant.id}: enabled control icons contrast and disabled selectors remain unavailable`, () => {
+    it(`${variant.id}: enabled control icons contrast and retired selectors stay absent`, () => {
       variantId = variant.id
       browser.goto(`${baseUrl}/p/${project}/new`)
       const model = 'button[data-slot="model-pill"]'
-      const disabled = 'button[data-slot="variants-pill"]'
-      browser.waitForFunction(`document.querySelector('${model}')?.disabled === false && document.querySelector('${disabled}')?.disabled === true`)
+      browser.waitForFunction(`document.querySelector('${model}')?.disabled === false`)
+      expect(browser.count('[data-slot="variants-pill"]')).toBe(0)
       applyContrastQaVariant(browser, variant)
       colorSample(`document.querySelector('[data-slot="execution-options"] summary').scrollIntoView({ block: 'center' })`)
       browser.click('[data-slot="execution-options"] summary')
@@ -482,11 +434,7 @@ describe('selection and control states (#171)', () => {
       expect(style(source).border).toBe('solid')
       expect((colorSample(contrastSampleExpression(source)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
       const enabledStyle = style(model)
-      const disabledStyle = style(disabled)
       expect(enabledStyle.border).toBe('solid')
-      expect(colorSample(`document.querySelector('${disabled}').disabled`)).toBe(true)
-      expect(disabledStyle.opacity).toBe('1')
-      expect((colorSample(contrastSampleExpression(disabled)) as ContrastSample).ratio).toBeGreaterThanOrEqual(4.5)
       for (const state of ['rest', 'hover', 'focus']) {
         if (state === 'hover') {
           hoverVisiblePoint(browser, model)
@@ -514,11 +462,6 @@ describe('selection and control states (#171)', () => {
       browser.press('ArrowDown')
       browser.press('Enter')
       browser.waitForFunction(`document.querySelector('[role="menu"]') === null`)
-      // Native disabled behavior, with the actual product prop supplied by a non-Git repo.
-      expect(colorSample(`(() => {
-        const el = document.querySelector('${disabled}'); el.click(); el.focus()
-        return { disabled: el.disabled, focused: document.activeElement === el, menu: !!document.querySelector('[role="menu"]') }
-      })()`)).toEqual({ disabled: true, focused: false, menu: false })
       expect(waitForSettledSample(browser, 'document.documentElement.scrollWidth <= innerWidth')).toBe(true)
       browser.screenshot(`${artifacts}/states-composer-${variant.id}.png`, { viewport: true })
     })

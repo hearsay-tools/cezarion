@@ -214,10 +214,32 @@ describe('task quick-list', () => {
   })
 
   it('groups attention before finished outcomes while retaining independent status rows', () => {
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"]')].map(h => h.dataset.bucket)`)).toEqual(['Needs you', 'Finished'])
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-slot="quick-list-bucket"] [data-slot="task-row"]')].map(row => row.dataset.runId)`)).toEqual(['fix-review-pr', 'fix-done', 'fix-failed'])
-    expect(browser.count('[data-slot="quick-list-bucket"] [data-slot="group-tile"]')).toBe(1)
-    expect(browser.text('[data-slot="quick-list-bucket"]')).toContain('Structured changes endpoint for the git view')
+    // Sample the complete grouping at the assertion, after any setup-time remount.
+    // Evidence: .ai/qa/failures/quick-list/groups-attention-before-finished-outcomes-while-retaining-independent-status-row-1/
+    // in CI run 39934997946, cockpit-failures-shard-4 artifact 12493998500:
+    // probe.json records []; snapshot.txt and screenshot.png show both buckets and all rows.
+    // Controlled proof: ignored scratch copies detach both buckets for exactly their first read,
+    // then restore them in a microtask. `npm exec -- vitest run --config
+    // .ai/qa/1509-proof/vitest.config.ts -t 'groups attention before finished outcomes'`:
+    // 1 of 1 failed before; 1 of 1 passed after, with the same detach/restore and no burners.
+    const expectedBuckets = ['Needs you', 'Finished']
+    const expectedRows = ['fix-review-pr', 'fix-done', 'fix-failed']
+    const title = 'Structured changes endpoint for the git view'
+    const sample = browser.waitForValue<{ buckets: string[]; rows: string[]; groups: number; text: string }>(`(() => {
+      const buckets = [...document.querySelectorAll('[data-slot="quick-list-bucket"]')]
+      return {
+        buckets: buckets.map(bucket => bucket.dataset.bucket),
+        rows: buckets.flatMap(bucket => [...bucket.querySelectorAll('${ROW}')].map(row => row.dataset.runId)),
+        groups: buckets.reduce((count, bucket) => count + bucket.querySelectorAll('${TILE}').length, 0),
+        text: buckets[0]?.textContent ?? '',
+      }
+    })()`, value => JSON.stringify(value.buckets) === JSON.stringify(expectedBuckets)
+      && JSON.stringify(value.rows) === JSON.stringify(expectedRows)
+      && value.groups === 1 && value.text.includes(title))
+    expect(sample.buckets).toEqual(expectedBuckets)
+    expect(sample.rows).toEqual(expectedRows)
+    expect(sample.groups).toBe(1)
+    expect(sample.text).toContain(title)
   })
 
   it('keeps selected and hovered sidebar task metadata AA-readable', () => {
@@ -579,13 +601,8 @@ describe('tasks table overview', () => {
     })
   })
 
-  it('offers the compare strip for the finished variant group', () => {
-    expect(browser.text('[data-slot="compare-strip"]')).toContain('Add skills autocomplete to composer')
-    expect(
-      browser.evaluate(
-        `document.querySelector('[data-slot="compare-strip"] a[href$="/compare/fix-group-1"]').getAttribute('href')`
-      )
-    ).toBe(scoped('/compare/fix-group-1'))
+  it('does not promote retired variant comparisons', () => {
+    expect(browser.count('[data-slot="compare-strip"]')).toBe(0)
   })
 
   it('keeps the table archive filter and the sidebar tabs independent', () => {

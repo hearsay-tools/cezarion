@@ -49,7 +49,7 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
   await execFile('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: repo });
   // The mock answers the no-wait nudge in plain text (hearsay-tools/cezarion#1234), so a turn that
   // ends without a marker parks on Cezar's own wait with no card, as #609 below pins.
-  const env = { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_AUTONAME: '0', CEZ_NO_BANNER: '1',
+  const env = { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_AUTONAME: '0',
     CEZ_REMOTE: '0', CEZ_URL: '', CEZ_DELEGATION_URL: '', CEZ_DELEGATION_TOKEN: '', CEZ_MOCK_NUDGE_REPLY: 'plain' };
   const task = async (args: string[]): Promise<Result> => {
     const result = await execFile(process.execPath, [cli, 'task', ...args], { cwd: repo, env, timeout: 150_000 })
@@ -103,6 +103,10 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
     assert.equal(status.code, 0);
     assert.equal(status.json.id, id);
     assert.equal('steps' in status.json, false, 'status is the slim projection');
+    const defaultOptions = await task(['status', id, '--full']);
+    assert.equal(defaultOptions.code, 0, defaultOptions.stdout);
+    assert.notEqual(defaultOptions.json.archiveWhenDone, true);
+    assert.notEqual(defaultOptions.json.autoMergePr, true);
 
     const log = await task(['log', id]);
     assert.equal(log.code, 0);
@@ -122,7 +126,9 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
     // a marker and the run parks as `waiting`) ends the DEFAULT `start --wait` promptly with the
     // cockpit's own attention answer, instead of running out the timeout (exit 3).
     const parkStarted = Date.now();
-    const parked = await task(['start', 'mock:park-for-follow-up', '--wait', '--timeout-seconds', '120']);
+    const completionRequestId = 'e677b9fa-3780-4e8a-9985-994bb7a77e3d';
+    const completionArgs = ['start', 'mock:park-for-follow-up', '--request-id', completionRequestId, '--archive-when-done', '--auto-merge-pr'];
+    const parked = await task([...completionArgs, '--wait', '--timeout-seconds', '120']);
     assert.equal(parked.code, 0, parked.stdout + parked.stderr);
     assert.ok(Date.now() - parkStarted < 60_000, 'start --wait returned well before its timeout');
     assert.equal(parked.json.timedOut, false);
@@ -136,6 +142,17 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
     assert.equal(parkedStatus.code, 0);
     assert.equal(parkedStatus.json.attention, 'waiting');
     assert.equal(parkedStatus.json.attentionLabel, 'needs you');
+    const savedOptions = await task(['status', String(parked.json.id), '--full']);
+    assert.equal(savedOptions.code, 0, savedOptions.stdout);
+    assert.equal(savedOptions.json.archiveWhenDone, true, 'the built CLI saves archiveWhenDone');
+    assert.equal(savedOptions.json.autoMergePr, true, 'the built CLI saves autoMergePr');
+    const completionRetry = await task(completionArgs);
+    assert.equal(completionRetry.code, 0, completionRetry.stdout);
+    assert.equal(completionRetry.json.id, parked.json.id);
+    assert.equal(completionRetry.json.created, false);
+    const completionConflict = await task(completionArgs.filter((arg) => arg !== '--auto-merge-pr'));
+    assert.equal(completionConflict.code, 2, completionConflict.stdout);
+    assert.equal(completionConflict.json.error, 'request id payload conflict');
     const parkedList = await task(['list', '--status', 'waiting']);
     assert.equal(parkedList.code, 0);
     const parkedRow = (parkedList.json.runs as Array<Record<string, unknown>>).find((row) => row.id === parked.json.id);

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { automationKindSchema, type AutomationKind, type AutomationListQuery, type OnceStatus } from '@open-mercato/cezar-contract/automations';
 import { automationScheduleSchema, nextOccurrence, ONCE_PAST_DUE_MESSAGE, onceInstant } from '@open-mercato/cezar-contract/automation-schedule';
+import { singleRunVariantsSchema } from '@open-mercato/cezar-contract/runs';
 import { SCHEDULED_TASK_NOTE } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { MODEL_DISCOVERY_RUNNERS, type ModelDiscoveryRunner } from '@open-mercato/cezar-contract/workspace';
 import { loadConfig } from '../config.ts';
@@ -24,15 +25,8 @@ import {
 } from './types.ts';
 
 /**
- * The automations family's behavior, shared by the HTTP routes and the session tools
- * (hearsay-tools/cezarion#1465): one place decides what a create, an edit or a toggle does, so
- * the cockpit, `cez automation` and the MCP tools cannot disagree. The routes stay thin and keep
- * their wire shapes; `contract-parity.automations.test.ts` checks them.
- *
- * One-time schedules add three rules on top of the repeating ones: their writes take the project
- * lease (a launch holds it, so a write never races one — Cancelled always means no task was
- * created); every write heals the archive invariant first (`ScheduleRunner.healArchive`); and a
- * due time in the past is refused wherever a body sets one.
+ * Shared automation create/edit/toggle behavior for HTTP, CLI and tools. One-time writes take
+ * the project lease, heal archive state and reject invalid past due times.
  */
 
 export const ONCE_PAST_DUE = ONCE_PAST_DUE_MESSAGE;
@@ -55,7 +49,7 @@ export const automationEditableSchema = z
     intervalSeconds: z.number().int().min(60).max(86_400).optional(),
     filters: automationFiltersSchema.optional(),
     schedule: automationScheduleSchema.optional(),
-    task: automationTaskSchema,
+    task: automationTaskSchema.safeExtend({ variants: singleRunVariantsSchema }),
   })
   .strict();
 export type AutomationEditable = z.infer<typeof automationEditableSchema>;
@@ -487,4 +481,3 @@ export function onceCreateAnswer(automation: AutomationDefinition): { dueAt: str
   if (instant === null) return undefined;
   return { dueAt: automation.schedule.at, timeZone: automation.schedule.timeZone, resolvedInstant: new Date(instant).toISOString(), note: SCHEDULED_TASK_NOTE };
 }
-

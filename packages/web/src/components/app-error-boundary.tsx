@@ -5,25 +5,9 @@ interface ErrorBoundaryState {
 }
 
 /**
- * The cockpit's last line of defence (#416).
- *
- * React 19 unmounts the whole root when a render throws and nothing catches it, so the page
- * goes blank — `#root` empty, no console banner a screenshot can show, nothing for a wait to
- * find. Every cockpit e2e wait then reports the same thing a slow page does: a selector that
- * never appeared. `app-error-boundary.test.tsx` reproduces that empty document directly, and
- * deleting this class is the whole repro.
- *
- * Whether any cockpit spec has ever HIT it is unknown: nothing has been caught firing, and no
- * failure bundle (#408) shows it. That is the point rather than a gap — the boundary is here so
- * a crash becomes visible either way, not because a crash was diagnosed.
- *
- * So the root renders a failure surface instead. `data-slot="app-error"` is the marker a spec,
- * a failure bundle (#408) or a person can point at: present means the app crashed, absent means
- * it is still working.
- *
- * Deliberately self-contained — no design-system import, no provider, no hook. The thing that
- * threw may BE the theme provider or the query client, and a fallback that needs them would
- * throw in the same breath and take the root down anyway.
+ * Root render-error fallback with no provider or design-system dependencies. Keep app-error as
+ * the stable crash marker, log the caught stack and offer reload. An absent marker does not
+ * prove general application health.
  */
 export class AppErrorBoundary extends Component<{ children: ReactNode }, ErrorBoundaryState> {
   override state: ErrorBoundaryState = { error: null }

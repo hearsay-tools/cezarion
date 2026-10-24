@@ -11,15 +11,9 @@ import { matchPath, type UpgradeRoute } from './upgrade-router.ts';
 import type { WsUpgradeVerdict } from './ws.ts';
 
 /**
- * The preview pane's WebSocket (#781, spec 2026-10-02-live-preview-v1 "WebSocket"):
- * `/api/v1/p/:projectId/runs/:id/preview/ws` and the boot alias `/api/v1/runs/:id/preview/ws`.
- * A named exception to the one-socket-per-cockpit rule of the subscription bus: one socket per
- * open pane, carrying that viewer's JPEG frames down and the contract's input vocabulary up.
- *
- * Every refusal happens before the handshake: flag off → 404, the request-origin guard refuses or
- * admits only as untrusted → 403 (a foreign page on another loopback port must never see a task's
- * page), unknown project or run → 404. A run whose worktree is gone completes the handshake and is
- * told so, because that is a state the pane renders (5.15), not an error.
+ * Per-open-pane preview socket on scoped and boot-alias routes. Refuse disabled, untrusted or
+ * unknown targets before handshake. A missing worktree is reported after handshake as pane
+ * state.
  */
 
 export const PREVIEW_WS_PATHS = ['/api/v1/p/:projectId/runs/:id/preview/ws', '/api/v1/runs/:id/preview/ws'];

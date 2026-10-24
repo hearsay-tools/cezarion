@@ -2,6 +2,8 @@
 
 cezar is a **parallel coding-agents orchestrator**: a local cockpit (CLI + browser GUI) for running and tracking AI coding-agent tasks in a repo. You type a task, pick a workflow and a backend — Claude Code, Codex or OpenCode (experimental), or a mix per step — and watch it work live: steps, tool calls, tokens, diffs. Each task runs in its own git worktree, ends at a review gate (never auto-merges), and can be pushed as a draft PR through `gh`. Everything is local: no accounts, no database server, no cloud — state lives under `.ai/cezar/`: the run store is one embedded SQLite file (`runs.db`, `node:sqlite`, built into Node), the rest is plain JSON, NDJSON and Markdown. The server stack stays deliberately small: strict TypeScript (ESM, Node 24.15+), Hono + SSE, Zod at every boundary, and YAML workflows. The cockpit is React 19 + Vite + Tailwind v4 + shadcn/ui, compiled to static assets (the legacy vanilla UI was retired in R7). Every module is meant to be read in one sitting.
 
+Architecture decisions live in [docs/adr/](docs/adr/). Consult the relevant records before changing a mechanism.
+
 ## Issue and PR citations
 
 This fork is `hearsay-tools/cezarion`; upstream is `open-mercato/cezar`.
@@ -29,7 +31,6 @@ Practical rules:
 
 - When a feature seems to need configuration, the design is wrong. Discover it, or default it.
 - Features that widen exposure or cost (network, other processes) are opt-in behind a `CEZ_*` flag, off by default — the zero-config default is also the safe default.
-- Owner-approved exception: Open Mercato skill updates are default-on. They start only after the server listens, run at most once per six-hour cache window, use explicit lock-authorized names and fixed bounded `npx` argument arrays under a cross-process lock, and never block boot. `CEZ_SKILLS_AUTO_UPDATE=0` or the global Settings override disables automatic application (background detection remains read-only).
 - Owner-approved exception: project warm-up is default-on (hearsay-tools/cezarion#667). After the server listens it builds every other registered project's context one at a time, which runs recovery and so may resume interrupted runs and spend tokens in projects not yet opened; it skips projects another live cockpit owns and single-project mode, claims each warmed project's `cockpit.lock` for the process lifetime, and `CEZ_PROJECT_WARMUP=0` restores purely lazy builds.
 - A missing dependency, an absent peer, a read-only home: degrade to a smaller working cockpit, never fail the boot.
 - Prefer a proxy-free, daemon-free mechanism when one exists — and when it doesn't, keep the mechanism invisible: no process to manage, no port to remember, no file to edit.
@@ -151,15 +152,19 @@ proof_dir=$(mktemp -d "${TMPDIR:-/tmp}/cezar-red-proof.XXXXXX")
 git worktree add --detach "$proof_dir/tree" "$proof_base"
 (cd "$proof_dir/tree" && pnpm install --frozen-lockfile)
 # Copy the current regression test, plus any new test helpers/fixtures it needs.
+
 cp packages/cezar/src/path/to/regression.test.ts \
   "$proof_dir/tree/packages/cezar/src/path/to/regression.test.ts"
 (cd "$proof_dir/tree" && npm test -- --passWithNoTests=false packages/cezar/src/path/to/regression.test.ts)
 # Inspect the failure: it must show the reported defect, not a broken import/setup.
+
 # Copy only the fixed source files into the scratch tree; keep the same test.
+
 cp packages/cezar/src/path/to/source.ts \
   "$proof_dir/tree/packages/cezar/src/path/to/source.ts"
 (cd "$proof_dir/tree" && npm test -- --passWithNoTests=false packages/cezar/src/path/to/regression.test.ts)
 # After saving the evidence, clean up even if setup or a test failed.
+
 git -C "$proof_repo" worktree remove --force "$proof_dir/tree"
 rmdir "$proof_dir"
 ```
@@ -254,6 +259,17 @@ at its per-file cap, or was never queued) does not become pending if you wait
 again. Run it with `npm test -- <file>`, and record that command and its result
 next to the Squeal verdict for the other files. Without Squeal, run
 `npm test -- packages/cezar/src/core/*-parity.test.ts packages/cezar/src/workflows/*-parity.test.ts`.
+
+### Generated inbox retirement
+
+The owner waived the compatibility window for hearsay-tools/cezarion#1543. The generated
+follow-up inbox is removed outright in 0.17.0: do not restore `CEZ_FOLLOWUPS`, suggestion
+prompts, todo routes, watchers, synchronization or launch controls. Existing `todos.json`
+files stay untouched; old Inbox URLs show plain-file export guidance. Historical run
+`generateFollowups` fields are read-only legacy data and never enable generation.
+Keep the handoff journal, Notes, Continue, live conversation follow-ups, worker messaging,
+ordinary task creation and issue-authoring skills independent. Native runner plan/todo
+wire events are unrelated to the removed generated inbox.
 
 ## The HTTP API
 
@@ -501,6 +517,7 @@ controlled-load result is needed and unknown, not to duplicate background checks
 
 ```bash
 # Select the first CPU allowed to this shell, including inside a cpuset.
+
 cpu=$(awk '/^Cpus_allowed_list:/ { split($2, cpus, /[,-]/); print cpus[1] }' /proc/self/status)
 LOOPS=2 timeout --kill-after=5s 120s taskset -c "$cpu" bash <<'BASH'
 set -eu
@@ -619,6 +636,7 @@ Count a test file's observed CI failure annotations across rerun attempts with:
 ```bash
 node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/cezarion --runs 20
 # Or select runs by creation time (inclusive UTC timestamps):
+
 node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/cezarion --since 2026-10-22T00:00:00Z --until 2026-10-23T00:00:00Z
 ```
 
@@ -803,5 +821,6 @@ row's value when the thing it names changes, rather than its label.
 | Specs and plans | unknown |
 | Board | **Cezarion**, org `hearsay-tools`, project #1. For same-repository PRs targeting `main`, `.github/workflows/pr-readiness.yml` owns draft state and syncs existing PR and closing-linked issue cards: draft → In progress, ready → In review. Each new head returns the PR to draft; the workflow marks it ready when the head's required checks pass and no review thread is unresolved. Open a draft PR, fix its checks and review threads, and let the workflow move it to ready and In review; do not move the card to In review or run `gh pr ready` by hand. Board sync skips without project access and never moves Done cards back. The initial claim still moves the issue to In progress. |
 | Auto-merge | Read `.ai/skills/auto-merge/SKILL.md` before you open a pull request into `main`, and after each push, CI result, review round or draft/ready change on one you opened with the `auto-merge` label. It decides whether the PR merges without owner review; every merge it makes is a squash. |
+| Code quality | Read `.ai/skills/check-code-quality/SKILL.md` for file/function/module quality stats and before opening a pull request. Use its measurement path for requested stats and its pre-PR path for changed-function checks, small fixes and inherited-refactor issues. |
 | Task orchestrator | Cezar |
 | SDLC feedback | `apptension/toolkit-dev` |

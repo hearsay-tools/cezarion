@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils'
 
 /**
  * The tab bar's "More" destination (#621): a bottom sheet holding the views that do not earn a
- * permanent slot. Skills, Workflows and Project settings are always there; Inbox and Automations
+ * permanent slot. Skills, Workflows and Project settings are always there; Automations
  * sit below a divider and only exist while their flag is on, so `items` (the shell's
  * `visibleNavItems`) is the single gate — the same list the desktop sidebar and the ⌘K palette
  * render from, which is what keeps the three from disagreeing.
@@ -28,7 +28,7 @@ const FIXED_ROWS: readonly { to: string; label: string }[] = [
   { to: '/settings', label: 'Project settings' },
 ]
 
-const FLAG_ROWS: readonly string[] = ['/inbox', '/automations']
+const FLAG_ROWS: readonly string[] = ['/automations']
 
 const ROW_CLASS =
   'flex h-[50px] min-h-11 w-full items-center gap-[14px] rounded-[10px] px-[10px] text-[14.5px] text-foreground hover:bg-sidebar-row-hover focus-visible:outline-2 focus-visible:outline-ring [&_svg]:size-[18px] [&_svg]:shrink-0 [&_svg]:text-muted-foreground'
@@ -40,8 +40,6 @@ export function MoreSheet({
   projectName,
   items,
   activeTo,
-  inboxCount = null,
-  skillsUpdateAvailable = false,
 }: {
   open: boolean
   onOpenChange: (open: boolean) => void
@@ -49,11 +47,9 @@ export function MoreSheet({
   onCloseAutoFocus?: (event: Event) => void
   /** The current project's name, beside the title. Absent on global routes. */
   projectName?: string | null
-  /** `visibleNavItems(...)` — the source of the icons and of the Inbox/Automations gates. */
+  /** `visibleNavItems(...)` — the source of the icons and of the Automations gate. */
   items: readonly NavItem[]
   activeTo: string | null
-  inboxCount?: number | null
-  skillsUpdateAvailable?: boolean
 }) {
   const byPath = new Map(items.map((item) => [item.to, item]))
   const fixed: Row[] = FIXED_ROWS.flatMap(({ to, label }) => {
@@ -80,16 +76,6 @@ export function MoreSheet({
       >
         <Icon aria-hidden="true" />
         <span className="min-w-0 flex-1 truncate">{label}</span>
-        {to === '/skills' && skillsUpdateAvailable ? (
-          <span data-slot="skills-update" className="shrink-0 rounded-full bg-muted px-[10px] py-[3px] text-[12.5px] font-medium text-foreground">
-            1 update
-          </span>
-        ) : null}
-        {to === '/inbox' && inboxCount ? (
-          <span data-slot="inbox-count" className="shrink-0 rounded-full bg-inbox-count px-[10px] py-[3px] text-[12.5px] font-semibold text-inbox-count-foreground">
-            {inboxCount}
-          </span>
-        ) : null}
         <ChevronRightIcon aria-hidden="true" className="!size-[15px]" />
       </Link>
     )

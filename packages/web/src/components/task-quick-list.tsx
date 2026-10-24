@@ -572,8 +572,8 @@ function GroupRow({
           to={scopeTo(scope, `/compare/${row.groupId}`)}
           onClick={onNavigate}
           data-slot="group-compare"
-          title="Compare the variants"
-          aria-label={`Compare the variants of ${row.title}`}
+          title="View retained results"
+          aria-label={`View retained results of ${row.title}`}
           className="inline-flex size-[18px] shrink-0 items-center justify-center rounded-sm text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-link-foreground no-hover:size-[44px] no-hover:min-h-[44px] no-hover:min-w-[44px]"
         >
           <ScaleIcon className="size-[14px]" aria-hidden="true" />

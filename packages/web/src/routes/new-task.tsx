@@ -1,3 +1,4 @@
+import { Button } from '@/components/ui/button'
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { EyeIcon } from 'lucide-react'
 import { CheckIcon, CircleSlashIcon, CpuIcon, GitBranchIcon, GaugeIcon, TerminalIcon, SlidersHorizontalIcon, FolderOpenIcon, SparklesIcon, WorkflowIcon, XIcon } from '@/components/design-icons'
@@ -32,6 +33,7 @@ import type {
 } from '@open-mercato/cezar-api-client'
 import { TwinkleBackdrop } from '@/components/centered-state'
 import { Composer, type ComposerHandle } from '@/components/composer/composer'
+import { CompletionControls } from '@/components/completion-controls'
 import { PickerPill, PickerPillGroup, RunnerPill, chevron, chipClass } from '@/components/picker-pill'
 import { PromptTemplateMenu } from '@/components/prompt-template-menu'
 import { SkillPreviewDialog } from '@/components/skill-detail'
@@ -212,7 +214,7 @@ export function NewTaskRoute() {
     : undefined
 
   // ---- prompt templates (#413 follow-up) ----------------------------------------------------
-  // The same list the GitHub hand-over and Inbox composers read. Two ways in here: the footer's
+  // The same list the GitHub hand-over composer reads. Two ways in here: the footer's
   // icon trigger inserts one by hand at the caret, and a skill whose templates are assigned to it
   // applies them on selection — but only into a box the user has not typed in (`resolveAutoApply`).
   const composerRef = useRef<ComposerHandle>(null)
@@ -280,28 +282,16 @@ export function NewTaskRoute() {
     }
   }, [providersReady])
 
-  // Parallel variants need a worktree per variant, hence git (the server 409s without it).
-  // Read it from the PROJECT-scoped `/repo` above, never from `/api/health.repo`: health is bound
-  // to the boot folder, so booting outside a git repo hid the worktree controls for every
-  // registered project (#791) — the same per-project sweep as #700 (forge) and #699 (runner
-  // defaults). Loading still assumes git so the controls do not flicker.
   const hasGit = repo.data === undefined || repo.data.info !== null
-  const variants = hasGit ? draft.variants : 1
 
   // Worktree opt-out (#worktree-toggle): any ordinary run in a git repo may use the current
-  // checkout. Parallel variants are the one hard constraint because each competing run needs
-  // its own tree; a non-git repo already runs in place.
+  // checkout. Workflows may run in place when the user opts out.
   const worktreeToggleShown = hasGit
-  const worktreeForced = variants > 1
 
-  // Autonomous (#autonomous): the run never pauses for the user. An explicit toggle this session
-  // wins; then an interactive skill recommends handing the ball back; otherwise the configured
-  // workspace default applies ('source-dependent' → skills default ON, everything else OFF).
   // Plan-first forces it OFF (and disables the toggle): planning is inherently interactive, so
   // the run must be able to hand the ball back.
   const runMode = resolveComposerRunMode({
     hasGit,
-    variants,
     planFirst: draft.planFirst,
     explicitAutonomous: draft.autonomous,
     explicitWorktree: draft.worktree,
@@ -320,18 +310,6 @@ export function NewTaskRoute() {
   })
   const worktreeOn = runMode.worktree
   const autonomousOn = runMode.autonomous
-
-  // Follow-up generation (#444) is offered only while the server has the global inbox on
-  // (#471, `CEZ_FOLLOWUPS=1`) — there is no inbox for the follow-ups to land in otherwise, and
-  // the server pins the flag to false regardless, so a toggle would be a lie. Hidden, the value
-  // is false, matching what the server will do. Health unknown → assume offered, the `hasGit`
-  // rule above: the composer must not flicker its controls while health is in flight.
-  const followupsToggleShown = health.data === undefined || health.data.capabilities.followups
-  // Within an enabled server it stays opt-out: a draft choice wins, then the remembered UI
-  // preference; absent state from older installs keeps the historical enabled behavior.
-  const generateFollowupsOn = followupsToggleShown
-    ? (draft.generateFollowups ?? uiState.data?.lastGenerateFollowups ?? true)
-    : false
 
   // ---- plan mode (#383 + spec 008) ----------------------------------------------------------
   const [plan, setPlan] = useState<PendingPlan | null>(null)
@@ -449,6 +427,7 @@ export function NewTaskRoute() {
 
   const submit = async (text: string, images: AttachmentInput[]) => {
     const submittedRevision = draftRevision(draftProjectId)
+    if (draft.retiredVariants) throw new Error('Parallel variants are removed. Choose Use one task before starting this saved draft.')
     if (!providersReady || runner === null) {
       throw new Error(
         providers.isPending
@@ -484,17 +463,11 @@ export function NewTaskRoute() {
         runnerExplicit: draft.runner !== null,
         agentProfile,
         defaultRunner,
-        variants,
         images,
         worktree: worktreeOn,
         autonomous: autonomousOn,
-        generateFollowups: generateFollowupsOn,
-        // #374: when the Inbox's "Run" sent us here, hand the entry's id back so the server
-        // records this run on it and it leaves the inbox — the audit trail the old
-        // POST /api/todos/:id/start kept, minus the blind launch. Empty otherwise.
-        // Deliberately not gated on generateFollowupsOn (#444): turning off follow-up
-        // generation for THIS task must not stop the entry it came from being marked started.
-        todoId: deepLink.todo,
+        archiveWhenDone: draft.archiveWhenDone,
+        autoMergePr: draft.autoMergePr,
       }),
       notifyOn,
     ))
@@ -508,7 +481,6 @@ export function NewTaskRoute() {
       // Recency is a list of PICKS: a task that chose nothing did not pick quick-task, and
       // filling the list with the default would push real choices out of it.
       ...(source ? { recentSources: pushRecentSource(recentSources, source) } : {}),
-      ...(followupsToggleShown ? { lastGenerateFollowups: generateFollowupsOn } : {}),
       // Frequency sort (#408): only a SKILL pick counts — the map is keyed by skill name, and a
       // workflow choice here doesn't select one directly. Gated on the CURRENT map being known:
       // the PUT merge is shallow, so bumping off an errored ui-state query (`sourcesReady` only
@@ -542,21 +514,12 @@ export function NewTaskRoute() {
           runner,
           runnerExplicit: draft.runner !== null,
           defaultRunner,
-          variants,
           images: plan.images,
-          generateFollowups: generateFollowupsOn,
-          todoId: deepLink.todo, // #374: planning first must not lose the inbox entry
+          archiveWhenDone: draft.archiveWhenDone,
+          autoMergePr: draft.autoMergePr,
         }),
         notifyOn,
       ))
-      // Run-mode choices live in the current draft; stable defaults come from workspace policy.
-      // persisting the forced `false` would overwrite their real preference, so turning
-      // CEZ_FOLLOWUPS back on later would silently come up off.
-      if (followupsToggleShown) {
-        void putUiState({ lastGenerateFollowups: generateFollowupsOn })
-          .then(() => queryClient.invalidateQueries({ queryKey: queryKeys.uiState }))
-          .catch(() => {})
-      }
       clearStartedDraft(draftProjectId, submittedRevision)
       setPlan(null)
       void queryClient.invalidateQueries({ queryKey: queryKeys.runs.all })
@@ -668,8 +631,6 @@ export function NewTaskRoute() {
       className="relative isolate flex min-h-full flex-col overflow-x-clip pb-16"
     >
 
-
-
       <div data-slot="new-task-layout" ref={draftPanelRef} style={plan !== null ? { display: 'none' } : undefined} className="relative z-[1] mx-auto w-full max-w-none px-11 pt-12 max-md:px-[18px] max-md:pt-[22px]">
         <header className="mb-7 max-md:mb-5">
           <p data-slot="page-eyebrow" className="mb-2 text-[11px] font-semibold tracking-[0.16em] text-[var(--accent-text)] uppercase">
@@ -682,6 +643,13 @@ export function NewTaskRoute() {
             Describe the outcome. Configure the run. Review everything before it lands.
           </p>
         </header>
+
+        {draft.retiredVariants ? (
+          <section role="alert" className="flex flex-col items-start gap-3 rounded-xl border border-border bg-card p-4">
+            <p>Parallel variants are removed. This saved draft requested multiple candidates. Use owned workers to compare approaches, or start one task.</p>
+            <Button variant="outline" className="min-h-11" onClick={() => update({ retiredVariants: false })}>Use one task</Button>
+          </section>
+        ) : null}
 
         <Composer
           ref={composerRef}
@@ -767,26 +735,9 @@ export function NewTaskRoute() {
               <div className="space-y-3 border-t border-border px-5 pt-3 pb-5">
                 <p className="hidden text-[11px] text-muted-foreground xl:block">Control where and how this task runs.</p>
                 <div role="group" aria-label="Run settings" className="new-task-run-settings">
-                  <div className="flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>Parallel variants</span><PickerPill
-                    slot="variants-pill"
-                    ariaLabel="Parallel variants"
-                    label={variants > 1 ? `×${variants} variants` : '×1'}
-                    value={String(variants)}
-                    onPick={(next) => update({ variants: Number(next) })}
-                    disabled={!hasGit}
-                    hint="How many times to run this task in parallel — each variant gets its own worktree, and you pick the diff you keep. ×1 runs it once."
-                    disabledHint="Parallel variants need a git repository — each variant runs in its own worktree."
-                    options={[
-                      { value: '1', label: '×1', desc: 'One run' },
-                      { value: '2', label: '×2 variants', desc: 'Two competing runs — pick the diff you keep' },
-                      { value: '3', label: '×3 variants', desc: 'Three competing runs — pick the diff you keep' },
-                    ]}
-                  /></div>
                   {worktreeToggleShown ? (
                     <WorktreeToggle
                       on={worktreeOn}
-                      disabled={worktreeForced}
-                      disabledReason="Parallel variants always use isolated worktrees"
                       onChange={(on) => update({ worktree: on })}
                     />
                   ) : null}
@@ -808,9 +759,9 @@ export function NewTaskRoute() {
                 <p data-slot="execution-tip" className="hidden rounded-lg bg-background p-3 text-[11px] leading-5 text-muted-foreground xl:block"><GitBranchIcon aria-hidden="true" className="mb-2 size-[18px] text-accent-text" />{worktreeOn && hasGit ? 'Changes stay in their own worktree, separate from your working directory.' : 'Changes are made in the current working directory.'}</p>
               </div>
             </details>
-            {followupsToggleShown ? <section data-slot="followups-options" aria-label="Follow-ups preference" className="rounded-xl border border-border bg-card p-4">
-              <GenerateFollowupsToggle on={generateFollowupsOn} onChange={(on) => update({ generateFollowups: on })} />
-            </section> : null}
+            <section className="rounded-xl border border-border bg-card p-4">
+              <CompletionControls archiveWhenDone={draft.archiveWhenDone} autoMergePr={draft.autoMergePr} onChange={update} disabled={starting || planning} />
+            </section>
                 </div>
           }
           footerEnd={
@@ -967,36 +918,6 @@ function NotifyWebhookToggle({
       className="flex min-h-11 items-center justify-between gap-3 px-0 py-3 text-left"
     >
       <span className="min-w-0"><span className="block text-[13px] font-medium">Notify webhook</span><span data-slot="notify-webhook-subtitle" className="block truncate text-[12px] text-muted-foreground">Send status changes</span></span>
-      <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
-    </button>
-  )
-}
-
-/** Follow-up toggle: checked lets agents append newly discovered work to the task inbox.
- *  Handoff journaling remains active either way. */
-function GenerateFollowupsToggle({
-  on,
-  onChange,
-}: {
-  on: boolean
-  onChange: (on: boolean) => void
-}) {
-  return (
-    <button
-      type="button"
-      role="checkbox"
-      aria-checked={on}
-      data-slot="generate-followups-toggle"
-      onClick={() => onChange(!on)}
-      title={
-        on
-          ? 'Agents can add newly discovered follow-up work to the task inbox'
-          : 'Follow-up generation is off; agents still maintain the handoff journal'
-      }
-      aria-label="Follow-ups"
-      className="flex min-h-11 w-full items-center justify-between gap-4 text-left text-foreground"
-    >
-      <span><span className="block text-[16px]">Follow-ups</span><span className="mt-1 block text-xs leading-[1.5] text-muted-foreground">Generate suggestions in Inbox after this task. Enabled by default; your choice is remembered.</span></span>
       <span aria-hidden="true" className={cn('flex h-6 w-10 shrink-0 items-center rounded-full border p-0.5', on ? 'border-accent-strong bg-accent-strong' : 'border-muted-foreground bg-muted')}><span className={cn('size-[18px] rounded-full', on ? 'ml-auto bg-accent-strong-foreground' : 'bg-foreground')} /></span>
     </button>
   )

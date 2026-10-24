@@ -1,0 +1,18 @@
+.completion-switch {
+  position: relative;
+}
+
+.completion-switch::after {
+  content: '';
+  position: absolute;
+  inset: min(0px, (100% - 44px) / 2);
+}
+
+.completion-switch:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+}
+
+.completion-control:active {
+  background: var(--muted);
+}

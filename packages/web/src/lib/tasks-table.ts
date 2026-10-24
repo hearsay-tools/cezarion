@@ -1,11 +1,11 @@
 import { runWorkflowLabel } from '@open-mercato/cezar-api-client/contract/run-labels'
 import type { ArchiveFinishedScope, ProcessUsage, RunRecord, RunSummary, RunStatus } from '@open-mercato/cezar-api-client'
 import { isScheduledResume } from '@/lib/read-state'
-import { groupTitle, isOwnedWorker, runTitle, type ListView } from '@/lib/task-groups'
+import { isOwnedWorker, runTitle, type ListView } from '@/lib/task-groups'
 
 /**
  * The pure half of the Tasks table (the `/` overview): search, the header's archive count, the
- * usage-cell decisions and the compare-variants strip. The component only paints what these say.
+ * usage-cell decisions. The component only paints what these say.
  *
  * The usage semantics are ported from the legacy table (`web/app.js` → `renderRunsTable` /
  * `runRowHtml`), which is R1's parity bar: a live sample is only believed while the run's own
@@ -467,38 +467,4 @@ export function usageCells(
         }
       : { text: '', kind: 'none' },
   }
-}
-
-/** One compare-variants strip below the table. */
-export interface CompareGroup {
-  groupId: string
-  /** The shared task title, without the ` (A)` suffix. */
-  title: string
-  count: number
-}
-
-/**
- * The variant groups whose members are all terminal — the ones a Compare link can honestly
- * offer, because every diff it would show is final. Groups still in flight get no strip: a
- * comparison that changes under the reader is worse than none (the mockup's disabled strip is a
- * later refinement; R1 shows only what works).
- *
- * Scoped to the view like everything else on this screen: an archived group belongs to the
- * Archived tab. A `groupId` with one member left in view is a picked winner, not a comparison.
- */
-export function compareGroups(runs: readonly RunSummary[], view: ListView): CompareGroup[] {
-  const inView = runs.filter((run) => (view === 'archived' ? run.archived : !run.archived))
-  const byGroup = new Map<string, RunSummary[]>()
-  for (const run of inView) {
-    if (!run.groupId) continue
-    const members = byGroup.get(run.groupId)
-    if (members) members.push(run)
-    else byGroup.set(run.groupId, [run])
-  }
-  return [...byGroup.entries()].flatMap(([groupId, members]) => {
-    const first = members[0]
-    if (!first || members.length < 2) return []
-    if (!members.every((member) => TERMINAL_STATUSES.has(member.status))) return []
-    return [{ groupId, title: groupTitle(first), count: members.length }]
-  })
 }

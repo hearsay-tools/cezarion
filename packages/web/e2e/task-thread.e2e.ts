@@ -604,7 +604,7 @@ describe('task thread', () => {
     const actions = browser.evaluate(
       `[...document.querySelectorAll('[data-slot="run-actions-menu"] [role^="menuitem"]')].map((b) => b.textContent.trim())`,
     ) as string[]
-    expect(actions).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Delete task…'])
+    expect(actions).toEqual(['Notes / handoff', 'Open in…', 'Copy resume command', 'Mark unread', 'Pin task', 'Archive when Done', 'Auto-merge PR', 'Delete task…'])
 
     browser.evaluate(`[...document.querySelectorAll('[data-slot="run-actions-menu"] [role="menuitem"]')].find(el => el.textContent === 'Open in…').click()`)
     // The take-over command remains in the worktree chooser.

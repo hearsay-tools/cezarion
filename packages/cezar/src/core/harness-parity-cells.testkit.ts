@@ -649,6 +649,9 @@ const CONTROL_CRITERIA = [
   { id: 'R97', scenario: 'baseline' },
   { id: 'R98', scenario: 'baseline' },
   { id: 'R99', scenario: 'baseline' },
+  // hearsay-tools/cezarion#1540: completion-options-parity.test.ts, fresh and Continue.
+  { id: 'R100', scenario: 'baseline' },
+  { id: 'R101', scenario: 'done' },
   { id: 'R28', scenario: 'baseline' },
   { id: 'R29', scenario: 'baseline' },
   { id: 'R30', scenario: 'baseline' },
@@ -2814,8 +2817,10 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
       params?: { input?: { text?: string }[]; prompt?: { text?: string }[] };
       body?: { parts?: { text?: string }[] };
     };
+    // A mock can still be appending the last record. Parse complete lines only;
+    // the next poll will read the trailing fragment once its newline is written.
     const records = (path: string): (Wire | string[])[] => existsSync(path)
-      ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
+      ? readFileSync(path, 'utf8').split('\n').slice(0, -1).filter(Boolean).map(line => JSON.parse(line)) : [];
     // Print carries its combined prompt on stdin; Claude/Pi/OMP keep the system prompt in argv.
     const stdinWire = (backend: RunnerId) => backend === 'claude' || backend === 'pi' || backend === 'omp';
     const messages = (backend: RunnerId, dir: string): string[] => {

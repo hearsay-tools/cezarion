@@ -3,15 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { isCurrentProcess, processStartToken, recordedProcessLive } from '../delegation/process-liveness.ts';
 
 /**
- * Who owns a run claim, and whether that owner can still be writing (#779, plan step 3).
- *
- * A claim in `run_claims` names the RunStore that holds a delegation family: a session id (one per
- * `RunStore.open`), its process id, and that process's start identity (`processStartToken`: the
- * Linux `/proc/<pid>/stat` start time scoped by boot id, or macOS `ps -o lstart`). Only a PROVEN
- * dead owner's claim may be taken over: its pid is gone, the pid now belongs to a process with a
- * different start identity, or — for our own pid, which can only be this process or a dead earlier
- * one — its session is not open here. Anything that cannot be proven dead counts as live, which is
- * what a claim with no start identity on a pid that exists is: there is nothing to compare it with.
+ * Claim owners carry store session, PID and process start identity. Only a proven dead owner can
+ * be replaced; unknown identity on a live PID remains live.
  */
 
 export interface ClaimOwner {

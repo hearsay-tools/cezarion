@@ -1,17 +1,7 @@
 /**
- * Branch classification and safe cleanup for the Git view (issue 08 §A/§B).
- *
- * Every local branch is classified once, here, and the cockpit only renders the answer:
- * `active` (in use — never deletable), `not-landed` / `orphan` (work that exists nowhere else on
- * the base — deletable one at a time, with a typed confirmation), `merged` / `empty` (safe — bulk),
- * `other` (the user's own branches — never touched from this surface). The invariant the Cleanup
- * page states — "nothing here can delete work that is not on main" — is enforced by
- * `deleteBranches` re-classifying at delete time and trusting nothing the client says.
- *
- * Git is read with a never-throwing runner (the git-worktree helper discipline). The forge is an
- * injectable seam so the classifier is testable against real temp repositories without `gh`; the
- * default one degrades to `available: false` — ancestry-only classification, `prStateKnown:
- * false` — whenever GitHub cannot answer.
+ * Server-owned branch classification and cleanup policy. Reclassify before deletion:
+ * active/other are protected; merged/empty allow bulk; not-landed/orphan require one typed
+ * confirmation. Forge failure leaves ancestry evidence with unknown PR state.
  */
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
@@ -522,15 +512,9 @@ export interface DeleteBranchesResult {
 const DROPPED_CAP = 100;
 
 /**
- * Delete local branches — only what a FRESH classification says is safe. `merged` and `empty`
- * delete in bulk; `not-landed`/`orphan` only alone and with `confirm` equal to the branch name;
- * `active` and `other` never. The delete itself runs under the worktree mutation lock and
- * re-checks what could have changed since classifying (a checkout, an owned receipt), refusing
- * owned refs exactly as `removeWorktree` does. Each delete is one `update-ref` transaction that
- * also verifies the base and the tip are still the commits the verdict was read against: a base
- * reset while this waited on GitHub or the lock would otherwise turn a merged branch into the
- * only copy of its work. An `empty` branch whose tip only another ref keeps needs that ref to sit
- * OUTSIDE this request, or two such branches would vouch for each other and both go. Never throws.
+ * Delete from fresh classification under mutation and cleanup claims. Verify base and tip
+ * atomically; recheck checkout/receipt protection. Retention refs must be outside this request.
+ * Unlanded work requires a single exact-name confirmation. Never throw.
  */
 export async function deleteBranches(
   input: ClassifyInput,

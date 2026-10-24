@@ -3,10 +3,8 @@ import { randomUUID } from 'node:crypto';
 import { join } from 'node:path';
 
 /**
- * Launch-key (spec 011): a random secret baked into the bookmarklets so only
- * pages that got it from THIS cockpit can auto-start a run via `/new?auto=1`.
- * A rogue web page can navigate the browser to localhost, but it cannot read
- * `.ai/cezar/launch-key` — without the key `/new` only prefills the form.
+ * Per-project random capability for bookmarklet auto-start. A link without the matching key may
+ * prefill the composer but must not auto-start a run.
  */
 export function ensureLaunchKey(dataDir: string): string {
   const path = join(dataDir, 'launch-key');

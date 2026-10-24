@@ -31,7 +31,7 @@ test('cockpit ownership rejects live duplicates, recovers after death, and isola
     // warm-up's own skip-the-owned-project rule is covered by project-context-warm.test.ts.
     const child = spawn(process.execPath, ['--import', 'tsx', cli, '--repo', directory, '--port', '0', '--no-open'], {
       cwd: packageRoot,
-      env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_NO_BANNER: '1', CEZ_SKILLS_AUTO_UPDATE: '0', CEZ_AUTONAME: '0', CEZ_REMOTE: '0', CEZ_PROJECT_WARMUP: '0' },
+      env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_AUTONAME: '0', CEZ_REMOTE: '0', CEZ_PROJECT_WARMUP: '0' },
       stdio: ['ignore', 'pipe', 'pipe'],
     });
     children.push(child);

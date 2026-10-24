@@ -4,19 +4,22 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createQueryClient } from '@/api/query-client'
-import { useSkillSelection } from './use-skill-selection'
+import type { Skill } from '@open-mercato/cezar-api-client'
+import { teamSkillRows, useTeamSkillSwitches } from './use-skill-selection'
 
 const toastMock = vi.hoisted(() => vi.fn())
 vi.mock('@/components/ui/toaster', () => ({ toast: toastMock }))
 
 /**
- * The write half of the per-project default-skill selection (hearsay-tools/cezarion#1408, port of
- * upstream open-mercato/cezar#1082). Pinned here: the first toggle expands "not curated" into an
- * explicit list, quick toggles reach the server in order, a save queued in one project never lands
- * in another, and a failed save does not leave a switch the file never took.
+ * The write half of the per-project team-skill off-list (hearsay-tools/cezarion#1494). Pinned
+ * here: an absent list switches nothing off, quick toggles reach the server in order, a save
+ * queued in one project never lands in another, and a failed save does not leave a switch the
+ * file never took.
  */
 
-const NAMES = ['om-fix', 'om-review', 'om-plan'] as const
+const X = { repo: 'a/s', name: 'x' } as const
+const Y = { repo: 'a/s', name: 'y' } as const
+const X_OTHER = { repo: 'b/s', name: 'x' } as const
 
 let files: Record<string, Record<string, unknown>>
 let puts: Array<{ project: string; body: Record<string, unknown> }>
@@ -60,90 +63,127 @@ function mount(projectId = 'a', client: QueryClient = createQueryClient()) {
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={client}>{children}</QueryClientProvider>
   )
-  const view = renderHook(({ project }) => useSkillSelection(project, NAMES), {
+  const view = renderHook(({ project }) => useTeamSkillSwitches(project), {
     wrapper,
     initialProps: { project: projectId },
   })
   return { ...view, client }
 }
 
-const enabledOf = (view: ReturnType<typeof mount>) => [...view.result.current.enabled].sort()
+const loaded = (view: ReturnType<typeof mount>, project = 'a') =>
+  waitFor(() => expect(view.client.getQueryData([project, 'ui-state'])).toBeDefined())
 
-describe('useSkillSelection', () => {
-  it('enables every offered skill while the project has no selection', async () => {
+describe('useTeamSkillSwitches', () => {
+  it('with no stored list, every team skill is on', async () => {
     const view = mount()
-    await waitFor(() => expect(view.client.getQueryData(['a', 'ui-state'])).toBeDefined())
-    expect(enabledOf(view)).toEqual([...NAMES].sort())
+    await loaded(view)
+    expect(view.result.current.ready).toBe(true)
+    expect(view.result.current.disabled).toEqual([])
+    for (const ref of [X, Y, X_OTHER]) expect(view.result.current.isOn(ref)).toBe(true)
   })
 
-  it('the first toggle expands "not curated" into every offered name but the toggled one', async () => {
+  it('a toggle adds the ref to the off-list, and a second toggle removes it', async () => {
     const view = mount()
-    await waitFor(() => expect(view.client.getQueryData(['a', 'ui-state'])).toBeDefined())
-    act(() => view.result.current.toggle('om-review'))
-    expect(enabledOf(view)).toEqual(['om-fix', 'om-plan'])
+    await loaded(view)
+    act(() => view.result.current.toggle(X))
+    expect(view.result.current.isOn(X)).toBe(false)
+    // Same name, other source: still on.
+    expect(view.result.current.isOn(X_OTHER)).toBe(true)
     await waitFor(() => expect(puts).toHaveLength(1))
-    expect(puts[0]).toEqual({ project: 'a', body: { importedSkills: ['om-fix', 'om-plan'] } })
+    expect(puts[0]).toEqual({ project: 'a', body: { disabledTeamSkills: [{ repo: 'a/s', name: 'x' }] } })
+    act(() => view.result.current.toggle(X))
+    expect(view.result.current.isOn(X)).toBe(true)
+    await waitFor(() => expect(puts).toHaveLength(2))
+    expect(puts[1]).toEqual({ project: 'a', body: { disabledTeamSkills: [] } })
   })
 
   it('two quick toggles both persist, in order', async () => {
     const view = mount()
-    await waitFor(() => expect(view.client.getQueryData(['a', 'ui-state'])).toBeDefined())
+    await loaded(view)
     act(() => {
-      view.result.current.toggle('om-fix')
-      view.result.current.toggle('om-plan')
+      view.result.current.toggle(X)
+      view.result.current.toggle(Y)
     })
     await waitFor(() => expect(puts).toHaveLength(2))
-    expect(puts.map((put) => put.body.importedSkills)).toEqual([['om-review', 'om-plan'], ['om-review']])
+    expect(puts.map((put) => put.body.disabledTeamSkills)).toEqual([[X], [X, Y]])
     await waitFor(() => expect(view.result.current.pending).toBe(false))
-    expect(files.a!.importedSkills).toEqual(['om-review'])
-    expect(enabledOf(view)).toEqual(['om-review'])
+    expect(files.a!.disabledTeamSkills).toEqual([X, Y])
+  })
+
+  it('ignores junk entries in a hand-edited list', async () => {
+    files.a = { disabledTeamSkills: ['x', { name: 'x' }, 7, Y] }
+    const view = mount()
+    await waitFor(() => expect(view.result.current.isOn(Y)).toBe(false))
+    expect(view.result.current.isOn(X)).toBe(true)
+    expect(view.result.current.disabled).toEqual([Y])
   })
 
   it('keeps a queued save on its project', async () => {
     const view = mount('a')
-    await waitFor(() => expect(view.client.getQueryData(['a', 'ui-state'])).toBeDefined())
+    await loaded(view)
     holdWrites = true
-    act(() => view.result.current.toggle('om-fix'))
+    act(() => view.result.current.toggle(X))
     await waitFor(() => expect(puts).toHaveLength(1))
     view.rerender({ project: 'b' })
-    await waitFor(() => expect(view.client.getQueryData(['b', 'ui-state'])).toBeDefined())
+    await loaded(view, 'b')
     act(() => heldWrites.splice(0).forEach((release) => release()))
     await waitFor(() => expect(view.result.current.pending).toBe(false))
     expect(puts.map((put) => put.project)).toEqual(['a'])
-    expect(files.a!.importedSkills).toEqual(['om-review', 'om-plan'])
+    expect(files.a!.disabledTeamSkills).toEqual([X])
     expect(files.b).toEqual({})
     expect(view.client.getQueryData(['b', 'ui-state'])).toEqual({})
-    expect(enabledOf(view)).toEqual([...NAMES].sort())
+    expect(view.result.current.isOn(X)).toBe(true)
   })
 
-  it('a failed save toasts and the switch goes back to the stored value', async () => {
-    files.a = { importedSkills: ['om-fix'] }
+  it('a rejected save toasts and the switch goes back to the stored value', async () => {
+    files.a = { disabledTeamSkills: [Y] }
     const view = mount()
-    await waitFor(() => expect(enabledOf(view)).toEqual(['om-fix']))
+    await waitFor(() => expect(view.result.current.isOn(Y)).toBe(false))
     failWrites = 'disk full'
-    act(() => view.result.current.toggle('om-plan'))
-    expect(enabledOf(view)).toEqual(['om-fix', 'om-plan'])
+    act(() => view.result.current.toggle(X))
+    expect(view.result.current.isOn(X)).toBe(false)
     await waitFor(() => expect(toastMock).toHaveBeenCalled())
     expect(String(toastMock.mock.calls[0]![0])).toContain('disk full')
-    await waitFor(() => expect(enabledOf(view)).toEqual(['om-fix']))
-  })
-
-  it('a legacy selection the server answers seeds the switches', async () => {
-    // GET /ui-state answers the workspace value when the project has none of its own.
-    files.a = { importedSkills: ['om-plan'] }
-    const view = mount()
-    await waitFor(() => expect(enabledOf(view)).toEqual(['om-plan']))
+    await waitFor(() => expect(view.result.current.isOn(X)).toBe(true))
+    expect(view.result.current.isOn(Y)).toBe(false)
   })
 
   it('a successful save re-reads that project skills, catalog and importable list alike', async () => {
     const view = mount()
-    await waitFor(() => expect(view.client.getQueryData(['a', 'ui-state'])).toBeDefined())
+    await loaded(view)
     view.client.setQueryData(['a', 'skills'], [])
     view.client.setQueryData(['a', 'skills', 'importable'], [])
     view.client.setQueryData(['b', 'skills'], [])
-    act(() => view.result.current.toggle('om-fix'))
+    act(() => view.result.current.toggle(X))
     await waitFor(() => expect(view.client.getQueryState(['a', 'skills'])?.isInvalidated).toBe(true))
     expect(view.client.getQueryState(['a', 'skills', 'importable'])?.isInvalidated).toBe(true)
     expect(view.client.getQueryState(['b', 'skills'])?.isInvalidated).toBe(false)
+  })
+})
+
+describe('teamSkillRows', () => {
+  const teamSkill = (name: string, repo: string, ref = 'main'): Skill => ({
+    name,
+    source: 'team',
+    body: '',
+    path: `${repo}@${ref}:${name}/SKILL.md`,
+    team: { repo, ref, path: `${name}/SKILL.md`, dir: true },
+  })
+
+  it('keeps one row per {repo, name}: one repo at two refs shares one switch', () => {
+    const main = teamSkill('x', 'acme/skills', 'main')
+    const v2 = teamSkill('x', 'acme/skills', 'v2')
+    const rows = teamSkillRows([main, v2], [main], () => true)
+    expect(rows).toEqual([{ skill: main, on: true }])
+  })
+
+  it('names the winning repo on an ON copy that lost de-duplication', () => {
+    const a = teamSkill('x', 'acme/skills')
+    const b = teamSkill('x', 'beta/skills')
+    expect(teamSkillRows([a, b], [a], () => true)).toEqual([
+      { skill: a, on: true },
+      { skill: b, on: true, hiddenBy: 'acme/skills' },
+    ])
+    expect(teamSkillRows([a, b], [a], (ref) => ref.repo !== 'beta/skills')[1]).toEqual({ skill: b, on: false })
   })
 })

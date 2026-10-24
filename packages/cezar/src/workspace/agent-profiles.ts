@@ -89,17 +89,8 @@ export function listAgentProfiles(
 }
 
 /**
- * The account a given `(project, provider)` pair resolves to.
- *
- * `profileId` is the caller's explicit choice — a run's recorded account, or a composer override.
- * When it is absent the project's stored selection decides, and when THAT is absent (or names an
- * account that no longer exists) the answer is the discovered default.
- *
- * Note the deliberate asymmetry with a missing DIRECTORY: an UNKNOWN id degrades silently to the
- * default, because a dangling reference names no account and the default is the only safe answer.
- * A KNOWN id whose directory has vanished does NOT degrade — see `profileDirState`. Falling back
- * there would run the task on the personal subscription while the UI still said "Work", and a
- * billing boundary is not a preference to degrade quietly across.
+ * Resolve explicit choice, then project selection, then discovered default. Unknown selections
+ * fall back here; a known unavailable named account must fail later availability checks.
  */
 export function selectProfile(
   store: AgentAccountStore,

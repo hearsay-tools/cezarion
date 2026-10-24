@@ -269,7 +269,7 @@ describe('useVoiceCommand', () => {
     type(harness, 'open the next failed task')
 
     expect(enter(harness).handled).toBe(true)
-    select(harness, 'view Inbox')
+    select(harness, 'view Skills')
     await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
 
     expect(mocks.navigate).not.toHaveBeenCalled()
@@ -283,7 +283,7 @@ describe('useVoiceCommand', () => {
     type(harness, 'open the next failed task')
 
     expect(enter(harness).handled).toBe(true)
-    select(harness, 'view Inbox')
+    select(harness, 'view Skills')
     select(harness, VOICE_ROW_VALUE)
     await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 'next', confidence: 0.9 })
 

@@ -25,7 +25,7 @@
 .new-task-run-settings { display: flex; flex-direction: column; gap: 0; }
 .new-task-run-settings > * { min-height: 48px; }
 .new-task-run-settings > button { width: 100%; border: 0; border-block-start: 1px solid var(--border); border-radius: 0; background: transparent; }
-.new-task-run-settings [data-slot='variants-pill'], .new-task-run-settings [data-slot='base-pill'] { border: 0; color: var(--accent-text); }
+.new-task-run-settings [data-slot='base-pill'] { border: 0; color: var(--accent-text); }
 .new-task-editor [data-slot='composer-footer-start'] { gap: 8px; padding-block: 8px 12px; padding-inline: 12px; }
 .new-task-editor [data-slot='composer-footer-start'] button { min-height: 44px; }
 @container new-task-layout (min-width: 60rem) {
@@ -68,7 +68,6 @@
   .new-task-agent-options button { border-color: var(--border); }
 }
 
-
 /* New task frames 1 / 23: local geometry, without changing shared picker behavior. */
 [data-route='new'] .new-task-agent-options { gap: 10px; }
 /* Size against the composer: a wide sidebar can leave a desktop viewport narrow. */
@@ -92,7 +91,6 @@
 [data-route='new'] .new-task-agent-options [data-slot='effort-pill'] { background: var(--background); }
 [data-route='new'] [data-slot='mode-seg'] button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; }
 [data-route='new'] [data-slot='source-pill'] { border-color: var(--border); }
-[data-route='new'] [data-slot='followups-options'] { background: transparent; padding: 16px; }
 [data-route='new'] [data-slot='execution-options'] summary { gap: 10px; }
 [data-route='new'] [data-slot='execution-options'] summary > span:first-of-type { font-weight: 600; }
 [data-route='new'] [data-slot='execution-options'] > div { border-block-start: 0; padding-block-start: 0; }

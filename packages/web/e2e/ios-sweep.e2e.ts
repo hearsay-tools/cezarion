@@ -143,8 +143,8 @@ describe('iOS sweep — every primary view at 390×844', () => {
     sweep('tasks', '/', '[data-slot="tasks-table"], [data-slot="task-cards"], [data-slot="tasks-empty"]')
   })
 
-  it('/inbox', () => {
-    sweep('inbox', '/inbox', '[data-slot="todo-card"], [data-route="inbox"] [data-slot="centered-state"]')
+  it('/inbox (retained-file export guidance)', () => {
+    sweep('inbox', '/inbox', '[data-route="inbox"] h1')
   })
 
   it('/git (Git screen)', () => {

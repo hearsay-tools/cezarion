@@ -18,13 +18,13 @@ import './engine-row.css'
 
 /**
  * The runner + model pill pair for the surfaces that START a run outside the /new composer
- * (#401): the Inbox card's "▶ Run" and the GitHub tab's "Run agent on this issue/PR".
+ * (#401): the GitHub tab's "Run agent on this issue/PR".
  *
- * It exists so those two cannot drift from the composer: the resolution quartet
+ * It keeps that surface consistent with the composer: the resolution quartet
  * (`usableRunners` → `resolveRunner` → `modelsForRunner` → `resolveModel`) and the
  * "hide the runner pill on a single-backend host" rule live here once, read from the same
  * provider/config queries new-task.tsx reads. The composer itself keeps its own inline copy —
- * it threads the pills through a persisted draft and a variants pill this pair has no notion of.
+ * it threads the pills through a persisted draft this pair has no notion of.
  *
  * The caller owns the pick (`null` = never touched, so the configured default shows through);
  * this component only resolves and renders. `useResolvedEngine` hands back what the POST body
@@ -121,8 +121,7 @@ export function useResolvedEngine(pick: EnginePick): ResolvedEngine {
 }
 
 /**
- * The runner/model fields of a create-run body. The one place these rules live, so the Inbox
- * and the GitHub tab cannot disagree.
+ * The runner/model fields of a create-run body. Shared with the task composer and GitHub hand-over.
  *
  *  - `model`: auto (`''`) stays implicit — the composer's rule, verbatim.
  *  - `runner`: omitted only when it IS what the server would choose anyway.
@@ -148,10 +147,6 @@ export function engineBody(resolved: ResolvedEngine): Pick<CreateRunInput, 'runn
 /**
  * `engineBody` plus the per-task agent account, for the start surfaces whose endpoint actually
  * takes one (`POST /api/v1/runs`).
- *
- * A sibling rather than a widened `engineBody` on purpose: `inbox.tsx` SPREADS the result into
- * `startTodo`, and TypeScript does not excess-property-check a spread — widening the shared return
- * would compile there and ship an `agentProfile` that `POST /todos/:id/start` silently drops.
  *
  * Conditional spread, per the HTTP-API rule in AGENTS.md: `agentProfile: undefined` types the key
  * as always-present while `JSON.stringify` drops it, which the contract-parity tests flag. An
@@ -180,9 +175,7 @@ export function EnginePills({
   /**
    * Offer the agent ACCOUNT as rows of the runner pill. Opt-in per surface, because it must only
    * be shown where the endpoint can honour it: rendering a picker whose choice the server drops on
-   * the floor is worse than not offering it. On today's surfaces that means the GitHub tab's
-   * hand-off (`POST /api/v1/runs`) but not the Inbox card (`POST /todos/:id/start`, which has no
-   * `agentProfile` field yet).
+   * the floor is worse than not offering it. Task creation (`POST /api/v1/runs`) accepts it.
    */
   accounts?: boolean
   /**

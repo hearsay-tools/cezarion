@@ -3,11 +3,17 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from '../runs/store.ts';
-import { SkillsUpdateCoordinator } from '../skills-update.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { clearProjectProbeCache, listProjects, registerProject } from '../workspace/projects.ts';
-import { ProjectContexts } from './project-context.ts';
+import { ProjectContexts, sweepRegisteredPreviewLeftovers } from './project-context.ts';
 import { startServer } from './server.ts';
+
+// The post-listen chain reads the registry, then sweeps preview leftovers, then decides on the
+// warm-up: the sweep call is the test's signal that the chain reached that decision.
+vi.mock('./project-context.ts', async (original) => {
+  const actual = await original<typeof import('./project-context.ts')>();
+  return { ...actual, sweepRegisteredPreviewLeftovers: vi.fn(actual.sweepRegisteredPreviewLeftovers) };
+});
 
 /**
  * Boot warm-up (#667), asserted at `startServer` because that is where it is wired: once the
@@ -31,8 +37,7 @@ describe('startServer project warm-up', () => {
     delete process.env.CEZ_PROJECT_WARMUP;
     delete process.env.CEZ_SINGLE_PROJECT;
     clearProjectProbeCache();
-    // The skills-update coordinator starts beside the warm-up; it is not what this file tests.
-    vi.spyOn(SkillsUpdateCoordinator.prototype, 'start').mockImplementation(() => undefined);
+    vi.mocked(sweepRegisteredPreviewLeftovers).mockClear();
   });
 
   afterEach(() => {
@@ -86,8 +91,8 @@ describe('startServer project warm-up', () => {
     const warmAll = vi.spyOn(ProjectContexts.prototype, 'warmAll');
     const { contexts, otherId, close } = await boot();
     try {
-      // The background services started (the coordinator sits beside the warm-up) ...
-      await vi.waitFor(() => expect(SkillsUpdateCoordinator.prototype.start).toHaveBeenCalled(), { timeout: 10_000, interval: 20 });
+      // The background services started (the preview sweep sits beside the warm-up) ...
+      await vi.waitFor(() => expect(sweepRegisteredPreviewLeftovers).toHaveBeenCalled(), { timeout: 10_000, interval: 20 });
       // ... and skipped the warm-up.
       expect(warmAll).not.toHaveBeenCalled();
       expect(contexts.peek(otherId)).toBeUndefined();
@@ -101,7 +106,7 @@ describe('startServer project warm-up', () => {
     const warmAll = vi.spyOn(ProjectContexts.prototype, 'warmAll');
     const { contexts, otherId, close } = await boot();
     try {
-      await vi.waitFor(() => expect(SkillsUpdateCoordinator.prototype.start).toHaveBeenCalled(), { timeout: 10_000, interval: 20 });
+      await vi.waitFor(() => expect(sweepRegisteredPreviewLeftovers).toHaveBeenCalled(), { timeout: 10_000, interval: 20 });
       expect(warmAll).not.toHaveBeenCalled();
       expect(contexts.peek(otherId)).toBeUndefined();
     } finally {
@@ -127,7 +132,7 @@ describe('startServer project warm-up', () => {
     // registry, and the server closes in the same tick, before that read can answer.
     await new Promise<void>((resolve) => server.once('listening', () => { server.close(); resolve(); }));
     try {
-      await vi.waitFor(() => expect(SkillsUpdateCoordinator.prototype.start).toHaveBeenCalled(), { timeout: 10_000, interval: 20 });
+      await vi.waitFor(() => expect(sweepRegisteredPreviewLeftovers).toHaveBeenCalled(), { timeout: 10_000, interval: 20 });
       expect(warmAll).not.toHaveBeenCalled();
       expect(contexts.peek(otherId)).toBeUndefined();
     } finally {

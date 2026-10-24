@@ -17,10 +17,10 @@ const MAX_ROUNDS = 5;
 const CODE_FILE_RE = /\.(?:[cm]?[jt]sx?|json)$/;
 /** Vite query imports whose target is a separately bundled entry, so production code. */
 const WORKER_QUERY_RE = /^(?:worker|sharedworker)(?:&|$)/;
-/** TypeScript loaders. esbuild drops a type-only import before resolving it, so a module that
- *  production code uses only for its types (`core/ui-events.ts`, the v2 protocol) would read as
- *  test-only. Each TS file therefore also imports every static specifier it names through this
- *  prefix, which resolves leniently: a specifier only the type checker understands is dropped. */
+/**
+ * Include static type-only specifiers in reachability; esbuild would erase them before
+ * resolving. Drop specifiers only the type checker can resolve.
+ */
 const TS_LOADERS = { '.ts': 'ts', '.mts': 'ts', '.cts': 'ts', '.tsx': 'tsx' };
 const TYPE_IMPORT = 'cez-type-import:';
 

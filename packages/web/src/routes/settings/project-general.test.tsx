@@ -105,7 +105,7 @@ function seededClient({
   const client = createQueryClient()
   client.setQueryData(queryKeys.health, {
     bootProject: 'boot',
-    capabilities: { localHandoff: true, followups: true, singleProject },
+    capabilities: { localHandoff: true, singleProject },
   })
   client.setQueryData(workspaceQueryKeys.projects, {
     projects: registry ?? [project('boot'), project('demo')],
@@ -115,8 +115,6 @@ function seededClient({
   client.setQueryData(workspaceQueryKeys.config, {
     browseRoot: '~/',
     projectsDir: '~/cezar/projects',
-    skillsAutoUpdate: null,
-    effectiveSkillsAutoUpdate: true,
     composerDefaults: {
       autonomous: null,
       worktree: null,

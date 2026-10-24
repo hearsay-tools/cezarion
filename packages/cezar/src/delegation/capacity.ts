@@ -2,19 +2,15 @@ import type { WorkerCapacity } from '@open-mercato/cezar-contract';
 import type { RunRecord } from '../runs/store.ts';
 
 /**
- * Per-parent worker limits (#816, spec 2026-10-04-reclaimable-worker-capacity). Fixed values,
- * never configuration. Capacity bounds owned resources and is reclaimed by verified destroy;
- * the creation ceiling bounds runaway spawning and every receipt-sized payload. Neither is a
- * spending budget: Continue can re-run a worker, and destroy cannot undo earlier charges.
+ * Fixed resource capacity and lifetime creation ceiling. Verified destroy reclaims capacity;
+ * neither limit is a spending budget.
  */
 export const WORKER_CAPACITY = 32;
 export const WORKER_CREATION_LIMIT = 1_024;
 
 /**
- * Derived from durable state on every call, never counted, so a slot returns exactly once and
- * survives restart and Continue without migration. A receipt is released only by a verified
- * complete destroy, or by history deletion (which requires one); everything else, including a
- * record that vanished without a deletion marker, keeps its slot.
+ * Derive capacity from durable receipts. Only verified complete destroy or completed history
+ * deletion releases one; a missing record still consumes capacity.
  */
 export function workerCapacity(parent: RunRecord, getRun: (id: string) => RunRecord | undefined): WorkerCapacity {
   const receipts = parent.delegation?.role === 'root' ? parent.delegation.receipts : [];

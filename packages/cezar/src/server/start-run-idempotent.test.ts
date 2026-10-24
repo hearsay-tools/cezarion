@@ -63,7 +63,6 @@ describe('POST /api/v1/runs clientRequestId', () => {
 
   it.each([
     [{ images: [{ mediaType: 'image/png', data: 'YQ==' }] }, { images: [{ mediaType: 'image/png', data: 'Yg==' }] }],
-    [{ generateFollowups: false }, { generateFollowups: true }],
   ])('rejects changed behavior inputs on a retry: %j', async (original, changed) => {
     const payload = { ...body, ...original };
     expect((await post(payload)).status).toBe(201);
@@ -112,7 +111,7 @@ describe('POST /api/v1/runs clientRequestId', () => {
   it('rejects a request id combined with variants > 1', async () => {
     const res = await post({ ...body, variants: 2 });
     expect(res.status).toBe(400);
-    expect(((await res.json()) as { error: string }).error).toContain('clientRequestId');
+    expect(((await res.json()) as { error: string }).error).toContain('Parallel variants are removed');
     expect(store.listRuns()).toHaveLength(0);
   });
 

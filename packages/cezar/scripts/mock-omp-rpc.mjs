@@ -422,7 +422,7 @@ async function prompt(command, sent = command.message) {
     if (silentEarly.isAckOnlyNudge(message)) { ack(); return; }
     if (silentEarly.isLateNudge(message)) {
       ack();
-      await silentEarly.sleep(silentEarly.LATE_REPLY_MS);
+      await waitForMockRelease(silentEarly.LATE_REPLY_MS);
       beginTurn(command);
     } else {
       ack();

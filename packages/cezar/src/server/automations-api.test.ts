@@ -15,10 +15,25 @@ import { isScheduleAutomation } from '../automations/types.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
+import { ProviderAuthService } from '../core/provider-auth.ts';
 import { registerProject } from '../workspace/projects.ts';
 import { RunManager, type AutomationToolService, type StartRunInput } from '../workflows/run.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { createApp, startServer, WorkspaceEventBus } from './server.ts';
+
+// Server prewarming outlives the HTTP response. Keep unrelated host discovery
+// from starting CLIs that write HOME caches during fixture teardown. GitHub
+// availability still uses the real forge probe and its existing fake gh fixture.
+vi.mock('../core/backend-detect.ts', async (importOriginal) => ({
+  ...await importOriginal<typeof import('../core/backend-detect.ts')>(),
+  detectEnvironment: async () => [],
+}));
+const discovery = () => ({
+  modelCatalog: new RunnerModelCatalog({ adapters: {} }),
+  providerAuth: new ProviderAuthService({
+    runCommand: async () => ({ stdout: '', stderr: '', exitCode: 1 }),
+  }),
+});
 
 /** A git checkout whose `origin` is on github.com — what a GitHub automation needs at create. */
 function withGithubRemote(root: string): void {
@@ -72,7 +87,7 @@ describe('GitHub automation API', () => {
       store.createRun({ title: 'automation', workflow: workflow.name, task: start.task, automation: start.automation, automationTrigger: start.automationTrigger, steps: [] })),
   }) as unknown as RunManager & { startRun: ReturnType<typeof vi.fn> };
   const app = (over: Partial<Parameters<typeof createApp>[0]> = {}) =>
-    createApp({ repoRoot: root, store, manager: {} as RunManager, version: 'test', ...over });
+    createApp({ repoRoot: root, store, manager: {} as RunManager, version: 'test', ...discovery(), ...over });
   const json = (body: unknown, method = 'POST'): RequestInit => ({
     method,
     headers: { 'content-type': 'application/json' },
@@ -704,7 +719,7 @@ describe('GitHub automation API', () => {
     // Registered, as `cez` registers the repo it boots in: the coordinator only keeps a store for
     // a project the registry lists, so an unregistered root would never reach the timer at all.
     const project = await registerProject(root);
-    const server = startServer({ repoRoot: project.root, bootProjectId: project.id, store, manager, version: '0.0.0-test' }, 0);
+    const server = startServer({ ...discovery(), repoRoot: project.root, bootProjectId: project.id, store, manager, version: '0.0.0-test' }, 0);
     try {
       await new Promise<void>((resolve) => server.once('listening', () => resolve()));
       await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
@@ -772,7 +787,7 @@ describe('GitHub automation API', () => {
     const project = await registerProject(root);
     const boot = async (awaited: 'launched' | 'duplicate') => {
       const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start');
-      const server = startServer({ repoRoot: project.root, bootProjectId: project.id, store, manager, version: '0.0.0-test' }, 0);
+      const server = startServer({ ...discovery(), repoRoot: project.root, bootProjectId: project.id, store, manager, version: '0.0.0-test' }, 0);
       try {
         await new Promise<void>((resolve) => server.once('listening', () => resolve()));
         await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
@@ -828,7 +843,7 @@ describe('GitHub automation API', () => {
     const fired = vi.spyOn(ScheduleRunner.prototype, 'fire');
     const started = vi.spyOn(WorkspaceAutomationScheduler.prototype, 'start');
     const project = await registerProject(root);
-    const server = startServer({ repoRoot: project.root, bootProjectId: project.id, store: unavailable, manager, version: '0.0.0-test' }, 0);
+    const server = startServer({ ...discovery(), repoRoot: project.root, bootProjectId: project.id, store: unavailable, manager, version: '0.0.0-test' }, 0);
     try {
       await new Promise<void>((resolve) => server.once('listening', () => resolve()));
       await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
@@ -880,7 +895,7 @@ describe('GitHub automation API', () => {
     });
     const boot = await registerProject(root);
     const second = await registerProject(other);
-    const server = startServer({ repoRoot: boot.root, bootProjectId: boot.id, store, manager: Object.assign(recordingManager(), { isActive: () => false }), version: '0.0.0-test' }, 0);
+    const server = startServer({ ...discovery(), repoRoot: boot.root, bootProjectId: boot.id, store, manager: Object.assign(recordingManager(), { isActive: () => false }), version: '0.0.0-test' }, 0);
     try {
       await new Promise<void>((resolve) => server.once('listening', () => resolve()));
       const automations = AutomationStore.open(dataDir);

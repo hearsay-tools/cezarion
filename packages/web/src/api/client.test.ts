@@ -37,19 +37,15 @@ import {
   searchRuns,
   getSkills,
   getSkillsWhenReady,
-  getTodos,
   getUiState,
   getWorkflows,
   openRunInCli,
   patchRun,
-  pickVariant,
   putUiState,
   refreshSkills,
-  removeTodo,
   runFileRawUrl,
   sendMessage,
   setProviderEnabled,
-  startTodo,
   retryProviderAuth,
   reportVoiceOutcome,
   voiceDecide,
@@ -167,16 +163,9 @@ describe('request shapes', () => {
       method: 'GET',
     },
     { name: 'refreshSkills', call: () => refreshSkills(), path: '/api/v1/skills/refresh', method: 'POST' },
-    { name: 'getTodos', call: () => getTodos(), path: '/api/v1/todos', method: 'GET' },
     { name: 'getRepo', call: () => getRepo(), path: '/api/v1/repo', method: 'GET' },
     { name: 'getGroup', call: () => getGroup('grp-1'), path: '/api/v1/groups/grp-1', method: 'GET' },
-    {
-      name: 'pickVariant',
-      call: () => pickVariant('grp-1', 'run-a'),
-      path: '/api/v1/groups/grp-1/pick',
-      method: 'POST',
-      body: { runId: 'run-a' },
-    },
+
     { name: 'getGithub (no params)', call: () => getGithub(), path: '/api/v1/github', method: 'GET' },
     {
       name: 'getGithub (limit + refresh)',
@@ -236,10 +225,10 @@ describe('request shapes', () => {
     },
     {
       name: 'createRun',
-      call: () => createRun({ task: 'do it', workflow: 'quick-task', variants: 2 }),
+      call: () => createRun({ task: 'do it', workflow: 'quick-task', variants: 1 }),
       path: '/api/v1/runs',
       method: 'POST',
-      body: { task: 'do it', workflow: 'quick-task', variants: 2 },
+      body: { task: 'do it', workflow: 'quick-task', variants: 1 },
     },
     { name: 'cancelRun', call: () => cancelRun('run-1'), path: '/api/v1/runs/run-1/cancel', method: 'POST' },
     {
@@ -307,35 +296,6 @@ describe('request shapes', () => {
       body: { runner: 'codex', model: 'gpt-5.1-codex' },
     },
     { name: 'deleteRun', call: () => deleteRun('run-1'), path: '/api/v1/runs/run-1', method: 'DELETE' },
-    // Inbox actions (R6 1.2): the exact legacy endpoints, ids URL-encoded like every other path.
-    { name: 'removeTodo', call: () => removeTodo('todo/1'), path: '/api/v1/todos/todo%2F1', method: 'DELETE' },
-    { name: 'startTodo', call: () => startTodo('todo/1'), path: '/api/v1/todos/todo%2F1/start', method: 'POST' },
-    // #413: extra instructions (e.g. an inserted prompt template) ride an optional body;
-    // omitted (the case above) sends none at all — the pre-#413 call shape.
-    {
-      name: 'startTodo (with prompt)',
-      call: () => startTodo('todo/1', { prompt: 'Also add tests.' }),
-      path: '/api/v1/todos/todo%2F1/start',
-      method: 'POST',
-      body: { prompt: 'Also add tests.' },
-    },
-    {
-      // #401: an Inbox card that picked a backend. No pick → the bodyless POST above, unchanged.
-      name: 'startTodo (runner + model override, #401)',
-      call: () => startTodo('todo/1', { runner: 'codex', model: 'gpt-5.1-codex' }),
-      path: '/api/v1/todos/todo%2F1/start',
-      method: 'POST',
-      body: { runner: 'codex', model: 'gpt-5.1-codex' },
-    },
-    {
-      // Auto ('') and a single-backend host are filtered out by the caller, so a body that
-      // reaches the wire never carries an empty model or a redundant runner.
-      name: 'startTodo (model only, #401)',
-      call: () => startTodo('todo/1', { model: 'opus' }),
-      path: '/api/v1/todos/todo%2F1/start',
-      method: 'POST',
-      body: { model: 'opus' },
-    },
     {
       name: 'openRunInCli',
       call: () => openRunInCli('run-1'),
@@ -348,6 +308,13 @@ describe('request shapes', () => {
       path: '/api/v1/runs/run-1',
       method: 'PATCH',
       body: { title: 'New name' },
+    },
+    {
+      name: 'patchRun completion choices',
+      call: () => patchRun('run-1', { archiveWhenDone: true, autoMergePr: false }),
+      path: '/api/v1/runs/run-1',
+      method: 'PATCH',
+      body: { archiveWhenDone: true, autoMergePr: false },
     },
     {
       name: 'sendMessage',
@@ -735,7 +702,6 @@ describe('history responses are validated at the boundary (#827)', () => {
     expect(error.message).toBe('run not found')
   })
 })
-
 
 describe('new-project calls (spec 2026-10-15-create-new-project)', () => {
   it('passes a well-formed owners answer through', async () => {

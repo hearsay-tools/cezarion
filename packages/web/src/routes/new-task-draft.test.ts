@@ -14,7 +14,6 @@ afterEach(resetDraft)
 describe('resolveComposerRunMode', () => {
   const base = {
     hasGit: true,
-    variants: 1,
     planFirst: false,
     explicitAutonomous: null,
     explicitWorktree: null,
@@ -47,9 +46,8 @@ describe('resolveComposerRunMode', () => {
     })).toEqual({ autonomous: true, worktree: false })
   })
 
-  it('keeps plan, parallel, and no-git constraints authoritative', () => {
+  it('keeps plan and no-git constraints authoritative', () => {
     expect(resolveComposerRunMode({ ...base, planFirst: true, explicitAutonomous: true }).autonomous).toBe(false)
-    expect(resolveComposerRunMode({ ...base, variants: 2, explicitWorktree: false }).worktree).toBe(true)
     expect(resolveComposerRunMode({ ...base, hasGit: false, explicitWorktree: true }).worktree).toBe(false)
   })
 
@@ -60,6 +58,22 @@ describe('resolveComposerRunMode', () => {
 })
 
 describe('the new-task draft store', () => {
+  it('retains completion choices across navigation, reload and successful starts', () => {
+    writeDraft({ ...readDraft('other'), text: 'Ship it', archiveWhenDone: true, autoMergePr: true }, 'other')
+    expect(readDraft()).toMatchObject({ archiveWhenDone: false, autoMergePr: false })
+    clearStartedDraft('other')
+    expect(readDraft('other')).toMatchObject({ text: '', archiveWhenDone: true, autoMergePr: true })
+    const stored = localStorage.getItem('cez-new-task-draft:other')!
+    resetDraft()
+    localStorage.setItem('cez-new-task-draft:other', stored)
+    expect(readDraft('other')).toMatchObject({ archiveWhenDone: true, autoMergePr: true })
+  })
+
+  it('defaults absent and malformed completion choices to off', () => {
+    localStorage.setItem('cez-new-task-draft', JSON.stringify({ archiveWhenDone: 'true', autoMergePr: 1 }))
+    expect(readDraft()).toMatchObject({ archiveWhenDone: false, autoMergePr: false })
+  })
+
   it('starts empty with the never-chosen sentinels', () => {
     expect(readDraft()).toEqual({
       text: '',
@@ -68,11 +82,12 @@ describe('the new-task draft store', () => {
       agentProfile: null,
       model: null,
       effort: null,
-      variants: 1,
+      retiredVariants: false,
       planFirst: false,
       worktree: null,
       autonomous: null,
-      generateFollowups: null,
+      archiveWhenDone: false,
+      autoMergePr: false,
     })
   })
 
@@ -84,16 +99,16 @@ describe('the new-task draft store', () => {
       agentProfile: null,
       model: 'gpt-5-codex',
       effort: 'high',
-      variants: 2,
+      retiredVariants: false,
       planFirst: false,
       worktree: false,
       autonomous: null,
-      generateFollowups: false,
+      archiveWhenDone: false,
+      autoMergePr: false,
     })
     const first = readDraft()
     expect(first.text).toBe('fix it')
     expect(first.worktree).toBe(false)
-    expect(first.generateFollowups).toBe(false)
     first.text = 'mutated'
     expect(readDraft().text).toBe('fix it')
   })
@@ -106,11 +121,12 @@ describe('the new-task draft store', () => {
       agentProfile: null,
       model: 'opus',
       effort: 'max',
-      variants: 3,
+      retiredVariants: false,
       planFirst: true,
       worktree: null,
       autonomous: null,
-      generateFollowups: true,
+      archiveWhenDone: false,
+      autoMergePr: false,
     })
     clearStartedDraft()
     expect(readDraft()).toEqual({
@@ -119,14 +135,15 @@ describe('the new-task draft store', () => {
       source: null,
       runner: null,
       agentProfile: null,
-      // Runner/model/variants/plan-first are a way of working — they survive, as they always did.
+      // Runner/model/plan-first are a way of working — they survive, as they always did.
       model: 'opus',
       effort: 'max',
-      variants: 3,
+      retiredVariants: false,
       planFirst: true,
       worktree: null,
       autonomous: null,
-      generateFollowups: true,
+      archiveWhenDone: false,
+      autoMergePr: false,
     })
   })
 
@@ -138,21 +155,23 @@ describe('the new-task draft store', () => {
       agentProfile: null,
       model: 'sonnet',
       effort: 'low',
-      variants: 2,
+      retiredVariants: false,
       planFirst: true,
       worktree: false,
       autonomous: null,
-      generateFollowups: false,
+      archiveWhenDone: false,
+      autoMergePr: false,
     })
     // A fresh page has no in-memory cache but keeps localStorage: resetDraft removes storage, so
     // instead drop only the cache by round-tripping through a raw storage read.
     const raw = localStorage.getItem('cez-new-task-draft') as string
     expect(JSON.parse(raw)).toMatchObject({
       text: 'do not lose me',
-      variants: 2,
+      retiredVariants: false,
       worktree: false,
       autonomous: null,
-      generateFollowups: false,
+      archiveWhenDone: false,
+      autoMergePr: false,
       planFirst: true,
     })
   })
@@ -168,15 +187,16 @@ describe('the new-task draft store', () => {
       agentProfile: null,
       model: null,
       effort: null,
-      variants: 1,
+      retiredVariants: false,
       planFirst: false,
       worktree: null,
       autonomous: null,
-      generateFollowups: null,
+      archiveWhenDone: false,
+      autoMergePr: false,
     })
 
     resetDraft()
-    localStorage.setItem('cez-new-task-draft', '{"text":42,"variants":9,"source":"nope","worktree":"x"}')
+    localStorage.setItem('cez-new-task-draft', '{"text":42,"variants":1,"source":"nope","worktree":"x"}')
     expect(readDraft()).toEqual({
       text: '',
       source: null,
@@ -184,11 +204,12 @@ describe('the new-task draft store', () => {
       agentProfile: null,
       model: null,
       effort: null,
-      variants: 1,
+      retiredVariants: false,
       planFirst: false,
       worktree: null,
       autonomous: null,
-      generateFollowups: null,
+      archiveWhenDone: false,
+      autoMergePr: false,
     })
   })
 })
@@ -227,4 +248,11 @@ describe('composerRunModeNote (#793)', () => {
       expect(composerRunModeNote({ worktree: false, hasGit })).not.toContain('isolated worktree')
     }
   })
+})
+
+it('requires an explicit migration choice for an old multi-candidate draft', () => {
+  localStorage.setItem('cez-new-task-draft', JSON.stringify({ text: 'Keep this task', variants: 2 }))
+  expect(readDraft()).toMatchObject({ text: 'Keep this task', retiredVariants: true })
+  writeDraft({ ...readDraft(), retiredVariants: false })
+  expect(readDraft()).toMatchObject({ text: 'Keep this task', retiredVariants: false })
 })

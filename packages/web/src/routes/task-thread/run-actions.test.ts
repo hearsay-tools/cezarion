@@ -508,4 +508,11 @@ describe('the composer slot holds exactly one of Stop and Archive (#281)', () =>
     expect(archiveInComposer(heldFailed())).toBe(false)
     expect(runActionFlags(heldFailed()).archive).toBe(true)
   })
+
+  it('puts manual Archive beside an archive blocker and keeps restore available', () => {
+    const record = { ...run('done'), archiveBlocker: { message: 'A worker still has an open PR.' } }
+    expect(archiveInComposer(record)).toBe(false)
+    expect(runActionFlags(record).archive).toBe(true)
+    expect(runActionFlags({ ...record, archived: true }).archive).toBe(true)
+  })
 })

@@ -19,7 +19,7 @@ import { QUICK_TASK_WORKFLOW } from './types.ts';
 import {
   bookkeeping, captureState, checkpoint, collect, controlledWire, executions, fixtureUpdateRun,
   manager, parent, queuedWake, register, reopenRuntime, restart, root, semaphore, setFailureState,
-  store, terminal, track, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
+  store, terminal, timeline, track, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText } from '../runs/run-store.testkit.ts';
 
@@ -206,19 +206,31 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     await until(() => store.getRun(w.id)?.status === 'running');
     expect(semaphore.busy()).toBe(1); // only child, not parked parent
-    const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:slow', runner: 'claude' });
-    await until(() => store.getRun(w.id)?.status === 'waiting');
-    await until(() => store.getRun(blocker.id)?.status === 'running');
-    manager.finish(w.id);
-    await until(() => terminal.includes(store.getRun(w.id)?.status ?? ''));
-    const wake = waitOf(store.getRun(p.id)); expect(wake?.phase).toBe('wake-pending');
-    expect(store.getRun(p.id)?.agentInputs?.some(i => i.deliveredAt)).not.toBe(true);
-    manager.reconcileWorkerWaits(); manager.reconcileWorkerWaits();
-    manager.cancel(blocker.id);
-    await until(() => !waitOf(store.getRun(p.id)));
-    expect(store.getRun(p.id)?.agentInputs).toHaveLength(1);
-    expect(store.getRun(p.id)?.agentInputs?.[0]).toMatchObject({ id: wake?.wakeId, source: 'lifecycle', parentRunId: p.id, deliveredAt: expect.any(String) });
-    expect(store.readEvents(p.id).filter(e => e.type === 'user-message')).toEqual([]);
+    const release = join(root, 'release-live-wake-blocker');
+    process.env.CEZ_MOCK_RELEASE_FILE = release;
+    const blocker = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold-gated', runner: 'claude' });
+    const explain = () => `worker execution: ${JSON.stringify(store.readWorkerExecution(w.id))}\n${timeline(w.id)}\n${timeline(p.id)}\n${timeline(blocker.id)}`;
+    try {
+      await until(() => store.getRun(w.id)?.status === 'waiting', explain);
+      await until(() => store.getRun(blocker.id)?.status === 'running' &&
+        store.readEvents(blocker.id).some(event => event.type === 'turn.started'), explain);
+      manager.finish(w.id);
+      await until(() => terminal.includes(store.getRun(w.id)?.status ?? ''), explain);
+      // Terminal status precedes execution cleanup; only the resolved wait proves the wake is owed.
+      // bound: until's 15 s guards execution cleanup and durable wait resolution, not blocker lifetime.
+      await until(() => waitOf(store.getRun(p.id))?.phase === 'wake-pending', explain);
+      const wake = waitOf(store.getRun(p.id)); expect(wake?.phase).toBe('wake-pending');
+      expect(store.getRun(blocker.id)?.status).toBe('running');
+      expect(semaphore.busy()).toBe(1);
+      expect(store.getRun(p.id)?.agentInputs?.some(i => i.deliveredAt)).not.toBe(true);
+      manager.reconcileWorkerWaits(); manager.reconcileWorkerWaits();
+      expect(store.getRun(p.id)?.agentInputs?.some(i => i.deliveredAt)).not.toBe(true);
+      manager.cancel(blocker.id);
+      await until(() => !waitOf(store.getRun(p.id)), explain);
+      expect(store.getRun(p.id)?.agentInputs).toHaveLength(1);
+      expect(store.getRun(p.id)?.agentInputs?.[0]).toMatchObject({ id: wake?.wakeId, source: 'lifecycle', parentRunId: p.id, deliveredAt: expect.any(String) });
+      expect(store.readEvents(p.id).filter(e => e.type === 'user-message')).toEqual([]);
+    } finally { writeFileSync(release, ''); }
   });
 
   for (const status of ['review', 'done', 'failed', 'cancelled'] as const) {
@@ -582,13 +594,20 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
 
   it('recovery admits an older queued child before an expired parent wake', async () => {
     const p = await parent(); const w = await worker(p.id, 'mock:slow');
-    register(p.id, [w.id], 1);
-    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
+    const explain = (stage: string) => {
+      const engine = manager as unknown as { queue: string[]; starting: Set<string>; active: Map<string, unknown>; executions: Map<string, unknown> };
+      return `${stage}\n${JSON.stringify({ ...captureState(), queue: engine.queue, starting: [...engine.starting],
+        active: [...engine.active.keys()], executions: [...engine.executions.keys()], workerExecution: store.readWorkerExecution(w.id) })}\n${timeline(p.id)}\n${timeline(w.id)}`;
+    };
+    // Expire the deadline only after the parent parks; mock startup must not race a 1 s budget.
+    register(p.id, [w.id]);
+    await until(() => waitOf(store.getRun(p.id))?.phase === 'parked', () => explain('parent wait parks before restart'));
     const entry = workerEntryOf(store.getRun(p.id));
     if (!entry) throw Error('fixture');
     store.commitWait(p.id, { ...entry, deadline: new Date().toISOString() });
     await restart();
-    await until(() => store.getRun(w.id)?.status === 'running' || store.getRun(p.id)?.status === 'running');
+    await until(() => store.getRun(w.id)?.status === 'running' || store.getRun(p.id)?.status === 'running',
+      () => explain('recovery admits the queued child or parent wake'));
     expect(store.getRun(w.id)?.status).toBe('running');
     expect(store.getRun(p.id)?.status).toBe('queued');
     expect(store.getRun(p.id)?.agentInputs?.some(input => input.deliveredAt)).not.toBe(true);

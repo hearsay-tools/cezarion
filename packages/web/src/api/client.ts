@@ -86,7 +86,6 @@ import type {
   OpenTargetsResponse,
   ParsedWorkflow,
   PatchRunInput,
-  PickVariantResponse,
   PlanResponse,
   ProviderConnectResponse,
   ProviderId,
@@ -98,7 +97,6 @@ import type {
   UpdateProjectResponse,
   NotifyRunInput,
   TestProjectWebhookResponse,
-  RemoveTodoResponse,
   RepoBranchResponse,
   RepoPullBranchesResponse,
   RepoPullConfirmation,
@@ -126,13 +124,10 @@ import type {
   SetWorkspaceUiStateInput,
   ImportableSkill,
   Skill,
-  StartTodoResponse,
-  TodoItem,
   UiState,
   WorkflowsResponse,
   WorkspaceConfigResponse,
   WorkspaceUiState,
-  SkillsUpdateState,
   WorkerDestroyResult,
   VoiceDecideRequest,
   VoiceDecision,
@@ -393,18 +388,9 @@ async function unwrapValidated<R extends ClientResponse<unknown, number, Respons
 }
 
 /**
- * The one `fetch` both request paths go through — hand-written and typed alike.
- *
- * Shared rather than duplicated because the two behaviours below are the contract, and a
- * migrated route that quietly lost either of them would be a regression nobody sees until a
- * server is down:
- *
- * - **Credentials.** Remote installations are commonly behind reverse-proxy Basic Auth, and
- *   every background query/mutation must reuse that authenticated browser session just like
- *   navigation does. `include` is harmless for the root-relative, same-origin paths used here.
- * - **Unreachable is an `ApiError`, not a `TypeError`.** The request never got an answer — not
- *   an HTTP failure, hence status 0 — but callers get one error type either way instead of two.
- *   An abort is re-thrown untouched: that is the caller cancelling, not the server failing.
+ * Shared fetch boundary for typed and hand-written requests. Include browser credentials,
+ * convert unreachable transport failures to status-0 ApiError, and rethrow caller aborts
+ * unchanged.
  */
 async function fetchOrThrow(url: string, init?: RequestInit): Promise<Response> {
   try {
@@ -699,8 +685,8 @@ export async function refreshSkills(): Promise<Skill[]> {
   )
 }
 
-/** The default (vendor) repo's full skill list — every skill the "Import skills" panel can
- *  offer, regardless of import state. Empty once a repo configures its own `skillsRepos`. */
+/** Every team skill the configured `skillsRepos` offer, including those this project switched
+ *  off. Empty without `skillsRepos`. */
 export async function getImportableSkills(opts?: ReadOptions): Promise<ImportableSkill[]> {
   return unwrap(
     await cez.api.v1.p[':projectId'].skills.importable.$get(
@@ -720,13 +706,6 @@ export async function getImportableSkillsWhenReady(opts?: ReadOptions): Promise<
       init(opts),
     ),
     '/skills/importable',
-  )
-}
-
-export async function getTodos(opts?: ReadOptions): Promise<TodoItem[]> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].todos.$get({ param: { projectId: queryScope() } }, init(opts)),
-    '/todos',
   )
 }
 
@@ -1669,7 +1648,7 @@ export async function createRunPr(id: string): Promise<CreatePrResponse> {
   )
 }
 
-/** Rename a run (#389): the edit becomes the display title and wins over any auto-summary. */
+/** Edit a run's title or completion settings through the shared PATCH contract. */
 export async function patchRun(id: string, patch: PatchRunInput): Promise<RunRecord> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs[':id'].$patch({
@@ -1687,68 +1666,6 @@ export async function deleteRun(id: string): Promise<DeleteRunResponse> {
       param: { projectId: queryScope(), id: encodeURIComponent(id) },
     }),
     runPath(id),
-  )
-}
-
-/** Inbox "Dismiss" (spec 007): check the follow-up off — the server deletes the entry. */
-export async function removeTodo(id: string): Promise<RemoveTodoResponse> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].todos[':id'].$delete({
-      param: { projectId: queryScope(), id: encodeURIComponent(id) },
-    }),
-    `/todos/${encodeURIComponent(id)}`,
-  )
-}
-
-/** The Inbox card's optional backend choice + extra instructions for a Run. Unlike
- *  `ContinueOptions` these start a NEW run, so an omitted `runner`/`model` means the host's
- *  `defaultRunner`, not "keep the run's". `prompt` (#413) is extra instructions appended to the
- *  suggested/summary task text — e.g. a template inserted in the Inbox composer. */
-export interface StartTodoOptions {
-  runner?: Runner
-  model?: string
-  effort?: string
-  prompt?: string
-}
-
-/** Inbox "Run" (spec 007): the server turns the entry into a task — a one-off single-step
- *  workflow around the suggested skill when it exists, plain quick-task otherwise — and
- *  answers 201 with the new run. 409 when the entry was already started. An optional
- *  runner/model (#401) picks the engine and an optional `prompt` (#413) appends instructions;
- *  with neither, sends no body at all — the pre-#401/#413 bodyless POST, kept for compat. */
-export async function startTodo(
-  id: string,
-  opts: StartTodoOptions = {},
-): Promise<StartTodoResponse> {
-  const body = {
-    ...(opts.runner !== undefined ? { runner: opts.runner } : {}),
-    ...(opts.model !== undefined ? { model: opts.model } : {}),
-    ...(opts.effort !== undefined ? { effort: opts.effort } : {}),
-    ...(opts.prompt !== undefined ? { prompt: opts.prompt } : {}),
-  }
-  // No override → no body at all, exactly the bodyless POST this endpoint has always sent
-  // (`continueRun` posts `{}` because it always carried one). The server tolerates either, and
-  // `hc` sends nothing for an `undefined` json — no body AND no content-type, which is the same
-  // request `mutate(…, undefined)` used to build.
-  return unwrap(
-    await cez.api.v1.p[':projectId'].todos[':id'].start.$post({
-      param: { projectId: queryScope(), id: encodeURIComponent(id) },
-      json: Object.keys(body).length > 0 ? body : undefined,
-    }),
-    `/todos/${encodeURIComponent(id)}/start`,
-  )
-}
-
-/** "Pick this one" (spec 010): the winner rests at `review` for the gate; the losers are
- *  cancelled if alive, archived, and their worktrees + branches removed. 409 while the picked
- *  variant is still active — the server's words come back verbatim in the ApiError. */
-export async function pickVariant(groupId: string, runId: string): Promise<PickVariantResponse> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].groups[':groupId'].pick.$post({
-      param: { projectId: queryScope(), groupId: encodeURIComponent(groupId) },
-      json: { runId },
-    }),
-    `/groups/${encodeURIComponent(groupId)}/pick`,
   )
 }
 
@@ -2285,34 +2202,6 @@ export async function removeAgentProfile(id: string): Promise<RemoveAgentProfile
       param: { id: encodeURIComponent(id) },
     }),
     `/workspace/agent-profiles/${encodeURIComponent(id)}`,
-  )
-}
-
-/** Cached Open Mercato update state for one registered project. The GET is immediate; the
- * server may start a stale detection-only refresh after taking its snapshot. */
-export async function getSkillsUpdate(
-  projectId: string,
-  opts?: ReadOptions,
-): Promise<SkillsUpdateState> {
-  return unwrap(
-    await cez.api.v1.workspace['skills-update'].$get({ query: { projectId } }, init(opts)),
-    `/workspace/skills-update?projectId=${encodeURIComponent(projectId)}`,
-  )
-}
-
-/** Force a bounded detection pass. The browser supplies identity only, never executable input. */
-export async function checkSkillsUpdate(projectId: string): Promise<SkillsUpdateState> {
-  return unwrap(
-    await cez.api.v1.workspace['skills-update'].check.$post({ json: { projectId } }),
-    '/workspace/skills-update/check',
-  )
-}
-
-/** Apply the server-owned, lock-authorized update set. Identity is the only browser input. */
-export async function applySkillsUpdate(projectId: string): Promise<SkillsUpdateState> {
-  return unwrap(
-    await cez.api.v1.workspace['skills-update'].apply.$post({ json: { projectId } }),
-    '/workspace/skills-update/apply',
   )
 }
 
