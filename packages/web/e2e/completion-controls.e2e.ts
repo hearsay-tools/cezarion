@@ -122,6 +122,35 @@ function assertLayout() {
   }
 }
 
+it.each([360, 1440])('keeps all settings inside one disclosure without stretching the editor rows at %s px', width => {
+  browser.setViewport(width, width === 360 ? 640 : 900)
+  open('new')
+  browser.waitForFunction(`document.querySelectorAll('${switches}').length === 2`)
+  const layout = waitForSettledSample(browser, `(() => {
+    const details = document.querySelector('[data-slot="execution-options"]');
+    const editor = document.querySelector('[data-slot="composer-editor"]').getBoundingClientRect();
+    const agents = document.querySelector('[data-slot="composer-agent-options"]').getBoundingClientRect();
+    return {
+      containsCompletion: [...document.querySelectorAll('${switches}')].every(control => details.contains(control)),
+      editorGap: agents.top - editor.bottom,
+      worktreeHelp: document.querySelector('[data-slot="worktree-toggle"]').textContent,
+      legacyTip: document.querySelector('[data-slot="execution-tip"]') !== null,
+    };
+  })()`) as { containsCompletion: boolean; editorGap: number; worktreeHelp: string; legacyTip: boolean }
+  expect(layout.containsCompletion).toBe(true)
+  expect(layout.worktreeHelp).toContain('Changes stay in a separate working copy.')
+  expect(layout.legacyTip).toBe(false)
+  if (width === 1440) expect(layout.editorGap).toBeLessThanOrEqual(21)
+  browser.screenshot(resolve(artifacts, `combined-settings-${width}.png`), { full: true })
+  browser.evaluate(`document.querySelector('[data-slot="execution-options"] summary').focus()`)
+  browser.press('Space')
+  browser.waitForFunction(`!document.querySelector('[data-slot="execution-options"]').open`)
+  expect(browser.evaluate(`[...document.querySelectorAll('${switches}')].every(control => !control.checkVisibility())`)).toBe(true)
+  browser.press('Enter')
+  browser.waitForFunction(`document.querySelector('[data-slot="execution-options"]').open`)
+  expect(browser.evaluate(`[...document.querySelectorAll('${switches}')].every(control => control.checkVisibility())`)).toBe(true)
+})
+
 it.each([{ width: 360, theme: 'dark' }, { width: 360, theme: 'light' }, { width: 1440, theme: 'light' }])('persists a new-task draft and submits keyboard choices at $width px in $theme', ({ width, theme }) => {
   browser.setViewport(width, width === 360 ? 640 : 900)
   open('new', theme)

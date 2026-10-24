@@ -382,11 +382,16 @@ describe('the hero surface', () => {
     serve()
     const view = renderNewTask()
     await pillReady()
+    const execution = document.querySelector('[data-slot="execution-options"]')!
+    expect(screen.queryByText('After Done', { selector: 'legend:not(.sr-only)' })).toBeNull()
+    expect(screen.queryByText('Merge runs before archive when both are on.')).toBeNull()
     for (const name of ['Archive when Done', 'Auto-merge PR']) {
       const control = screen.getByRole('switch', { name })
+      expect(execution.contains(control)).toBe(true)
       expect(control.getAttribute('aria-checked')).toBe('false')
       fireEvent.click(control)
     }
+    expect(screen.getByText('Merge runs before archive when both are on.')).toBeTruthy()
     view.unmount()
     renderNewTask()
     await pillReady()
@@ -395,6 +400,18 @@ describe('the hero surface', () => {
     fireEvent.change(textarea(), { target: { value: 'Ship it' } })
     await startTask()
     expect(postedBody()).toMatchObject({ archiveWhenDone: true, autoMergePr: true })
+  })
+
+  it('describes the selected working directory directly under Worktree', async () => {
+    serve()
+    renderNewTask()
+    await pillReady()
+    const worktree = screen.getByRole('checkbox', { name: 'Worktree' })
+    expect(worktree.textContent).toContain('Changes stay in a separate working copy.')
+    expect(document.querySelector('[data-slot="execution-tip"]')).toBeNull()
+    fireEvent.click(worktree)
+    expect(worktree.textContent).toContain('Changes are made in the current working directory.')
+    expect(worktree.nextElementSibling?.textContent).toContain('Base branch')
   })
 
   it('keeps run options in a disclosure separate from prompt, agent selection, and submission', async () => {
