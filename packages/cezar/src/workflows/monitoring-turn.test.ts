@@ -89,15 +89,12 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           attention('monitoring', false);
           expect(monitoringWakeOf(run())).toBeDefined();
         } else if (row.id === 'M2' || row.id === 'M3') {
-          // No prose is read (hearsay-tools/cezarion#1234): questions, review requests and their
-          // Markdown forms leave the monitoring line's timer in place.
-          for (const gate of row.id === 'M2'
-            ? ['Should I merge this PR?', 'The checks passed. Do you want me to merge?', 'Which module?', 'Is this okay?', '### Should I merge this PR?', '- Should I merge this PR?', '*Should I merge this PR?* Please let me know.']
-            : ['Please review the changes before I continue.', 'The checks passed. I need your approval before proceeding.', 'The PR is ready for your review.', '- [ ] Please review the changes before I continue.', '**Please review the changes before I continue.**', '1. __I need your approval before proceeding.__']) {
-            await send([MONITORING_TEXT, gate]);
-            attention('monitoring', false);
-            expect(monitoringWakeOf(run())).toBeDefined();
-          }
+          // No prose is read (hearsay-tools/cezarion#1234): a question or review request leaves the
+          // monitoring line's timer in place. Its other plain and Markdown forms are read by the same
+          // turn-end rule in turn-end-text.test.ts (hearsay-tools/cezarion#1665).
+          await send([MONITORING_TEXT, row.id === 'M2' ? 'Should I merge this PR?' : 'Please review the changes before I continue.']);
+          attention('monitoring', false);
+          expect(monitoringWakeOf(run())).toBeDefined();
           expect(hasPendingAsk(store, p.id)).toBe(false);
           expect(store.readEvents(p.id).some(event => event.type === 'note' && event.code === 'unstructured-human-gate')).toBe(false);
         } else if (row.id === 'M24') {
@@ -132,7 +129,9 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           expect(store.readEvents(p.id).some(event => event.type === 'note' && event.tone === 'danger' && String(event.message).includes('payload failed validation'))).toBe(true);
           expect(store.readEvents(p.id).some(event => event.type === 'text' && String(event.text).includes(malformed))).toBe(true);
         } else if (row.id === 'M20') {
-          for (const example of [`> ${REJECTED_ASK_TEXT}`, `Example:\n${REJECTED_ASK_TEXT}`, `\`\`\`text\n${REJECTED_ASK_TEXT}\n\`\`\``, `> ${ASK_TEXT}`, `\`\`\`text\n${ASK_TEXT}\nCEZ:DONE\n\`\`\``, `Example:\n${ASK_TEXT}`, 'Example:\nCEZ:DONE', `    ${ASK_TEXT}`, '    CEZ:DONE']) {
+          // One example before acknowledgement and one at the final line; the other quoted, fenced and
+          // indented forms are in turn-end-text.test.ts (hearsay-tools/cezarion#1665).
+          for (const example of [`\`\`\`text\n${ASK_TEXT}\nCEZ:DONE\n\`\`\``]) {
             await send([MONITORING_TEXT, example, ACK_TEXT]);
             attention('monitoring', false);
             expect(hasPendingAsk(store, p.id)).toBe(false);
@@ -141,17 +140,16 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
             expect(store.readEvents(p.id).some(event => event.type === 'note' && event.tone === 'danger')).toBe(false);
           }
           // Examples at the final line remain inert too.
-          for (const example of [`Example:\n${ASK_TEXT}`, 'Example:\nCEZ:DONE']) {
+          for (const example of ['Example:\nCEZ:DONE']) {
             await send([MONITORING_TEXT, example]);
             attention('monitoring', false);
             expect(hasPendingAsk(store, p.id)).toBe(false);
           }
         } else if (row.id === 'M4' || row.id === 'M7' || row.id === 'M18') {
           if (row.id === 'M18') {
-            for (const messages of [[MONITORING_TEXT, ASK_TEXT, ACK_TEXT], [MONITORING_TEXT, 'CEZ:DONE', ASK_TEXT, ACK_TEXT], [MONITORING_TEXT, ASK_TEXT, ACK_TEXT, MONITORING_TEXT],
-              [MONITORING_TEXT, `Example:\n\`\`\`text\n${ASK_TEXT}\n\`\`\``, ASK_TEXT, ACK_TEXT],
-              [MONITORING_TEXT, `Example:\n> ${ASK_TEXT}`, ASK_TEXT, ACK_TEXT],
-              [MONITORING_TEXT, `Example:\n    ${ASK_TEXT}`, ASK_TEXT, ACK_TEXT]]) {
+            // The plain case and one behind an example; the other orders are in turn-end-text.test.ts
+            // (hearsay-tools/cezarion#1665).
+            for (const messages of [[MONITORING_TEXT, ASK_TEXT, ACK_TEXT], [MONITORING_TEXT, `Example:\n\`\`\`text\n${ASK_TEXT}\n\`\`\``, ASK_TEXT, ACK_TEXT]]) {
               await send(messages);
               attention('needs you', true);
               expect(hasPendingAsk(store, p.id)).toBe(true);
@@ -195,7 +193,9 @@ for (const backend of RUNNER_IDS) describe(`${backend} monitoring turn`, { timeo
           expect(run().status).toBe('review');
           attention('needs review', true);
         } else if (row.id === 'M6') {
-          for (const example of ['Use `CEZ:MONITORING` in your reply.', '> CEZ:MONITORING', 'Example:\n```text\nCEZ:MONITORING\n```', 'Example:\n    CEZ:MONITORING', 'Example:\nCEZ:MONITORING']) {
+          // One fenced example; the inline, quoted and indented forms are in turn-end-text.test.ts
+          // (hearsay-tools/cezarion#1665).
+          for (const example of ['Example:\n```text\nCEZ:MONITORING\n```']) {
             await send([example]);
             attention('needs you', true);
           }
