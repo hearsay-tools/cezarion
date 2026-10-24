@@ -82,6 +82,11 @@ export const NO_WAIT_NUDGE_MARKERS =
 
 /** Appended to a nudge in a session whose done completes a workflow step, not the task
  *  (hearsay-tools/cezarion#1620). Appended, so the nudge keeps its opening words. */
+/** A nudge as an earlier workflow step receives it: with the step suffix when `stepScope` holds. */
+export function stepScopedNudge(text: string, stepScope: boolean): string {
+  return stepScope ? `${text} ${STEP_NUDGE_SUFFIX}` : text;
+}
+
 export const STEP_NUDGE_SUFFIX =
   'In this workflow step, the done signal completes this step\'s own work, and Cezar then starts the next step.';
 
@@ -113,7 +118,7 @@ function decideWithoutDone(facts: TurnEndFacts): TurnEndDecision {
   if (facts.question || facts.agentWaits || facts.cezarHumanWait) return { kind: 'park' };
   if (facts.budgetSpent) return { kind: 'human-wait', via: 'budget' };
   // An autonomous run is nudged on every such turn end until the budget is spent.
-  const scoped = (text: string) => facts.stepScope ? `${text} ${STEP_NUDGE_SUFFIX}` : text;
+  const scoped = (text: string) => stepScopedNudge(text, facts.stepScope);
   if (facts.autonomous) return { kind: 'nudge', cause: 'no-wait', text: scoped(AUTONOMOUS_NUDGE), ifRefused: 'readiness' };
   if (facts.noWaitNudgedLastTurn) return { kind: 'human-wait', via: 'no-wait' };
   return { kind: 'nudge', cause: 'no-wait', text: scoped(facts.tools ? NO_WAIT_NUDGE : NO_WAIT_NUDGE_MARKERS), ifRefused: 'human-wait' };

@@ -1,10 +1,12 @@
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { RunRecord } from '@open-mercato/cezar-contract';
+import type { ContentBlock } from './agent-runner.ts';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { driveRun, promptFor, STEP_COMPLETION_CRITERIA, waitFor } from './harness-parity.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import { NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE } from '../workflows/run.ts';
+import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE, STEP_NUDGE_SUFFIX } from '../workflows/turn-end.ts';
 import { workflowDefSchema } from '../workflows/types.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
@@ -22,6 +24,17 @@ describe('explicit step completion parity — hearsay-tools/cezarion#1620', () =
       const parked = (run: RunRecord | undefined) => run?.status === 'waiting' &&
         (run.waits ?? []).some(wait => wait.kind === 'human' && wait.source === 'cezar');
       const finished = (run: RunRecord | undefined) => ['done', 'review', 'failed'].includes(run?.status ?? '');
+      // The text Cezar submits to the session: an earlier step's nudge names the step.
+      const submitted: string[] = [];
+      const observe = ({ manager }: { manager: object }) => {
+        const engine = manager as { submitAgentInput(runId: string, state: unknown, content: ContentBlock[]): boolean };
+        const submit = engine.submitAgentInput.bind(engine);
+        engine.submitAgentInput = (runId, state, content) => {
+          for (const block of content) if (block.type === 'text') submitted.push(block.text);
+          return submit(runId, state, content);
+        };
+      };
+      const nudged = (nudge: string) => submitted.some(text => text.startsWith(nudge) && text.includes(STEP_NUDGE_SUFFIX));
       await driveRun(backend, row.scenario, run => parked(run) || finished(run), 20_000, async (fixture) => {
         let { manager, store } = fixture;
         const { runId } = fixture;
@@ -44,12 +57,14 @@ describe('explicit step completion parity — hearsay-tools/cezarion#1620', () =
         if (row.id === 'C2' || row.id === 'C6') {
           await complete();
           if (row.id === 'C2') expect(notes(NO_WAIT_NUDGE_NOTE)).toEqual([]);
+          else expect(nudged(AUTONOMOUS_NUDGE)).toBe(true);
           return;
         }
         // A quiet earlier turn end takes the final step's path: one nudge, then Cezar's human wait.
         expect(parked(run())).toBe(true);
         expect(notes(NO_WAIT_NUDGE_NOTE)).toHaveLength(1);
         expect(notes(NO_WAIT_NOTE)).toHaveLength(1);
+        expect(nudged(NO_WAIT_NUDGE)).toBe(true);
         expect(statuses()).toEqual([['implement', 'waiting'], ['review', 'pending'], ['verify', 'pending']]);
         const session = manager['active'].get(runId)!.session!;
         // The session stays open for the user past the runners' one-shot-close window.
@@ -97,7 +112,7 @@ describe('explicit step completion parity — hearsay-tools/cezarion#1620', () =
         expect(manager.isActive(runId)).toBe(false);
         expect(manager.continueRun(runId, { text: 'Carry on. mock:done' }).ok).toBe(true);
         await complete();
-      }, { workflowDef, autonomous: row.id === 'C6' });
+      }, { workflowDef, autonomous: row.id === 'C6', beforeStart: observe });
     }, 60_000);
   }
 });

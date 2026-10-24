@@ -5,7 +5,7 @@ import type { ScheduleTaskAnswer, ScheduleTaskRequest, ScheduledTasksAnswer, Sch
 import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type CezarWaitRequestInput, type DoneErrorCode, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
-import { AUTONOMOUS_NUDGE, decideTurnEnd, turnEndHeartbeat, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
+import { AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, turnEndHeartbeat, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
 import { nextLineEntry } from './line-order.ts';
 import { executionAccount } from './execution-account.ts';
 import { chargesBudget, ciWatchRequest, hasPrWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
@@ -9116,7 +9116,9 @@ export class RunManager {
    * `ask` is this turn's ask line, which an autonomous run does not register before the budget
    * (hearsay-tools/cezarion#1234). A wire that refuses the nudge registers it after all.
    */
-  private tryAutonomousNudge(runId: string, state: ActiveRun, stepId: string, ask: AskRequest | null): boolean {
+  /** `text` is the turn-end rule's nudge; an ask line's nudge scopes the same one itself (hearsay-tools/cezarion#1620). */
+  private tryAutonomousNudge(runId: string, state: ActiveRun, stepId: string, ask: AskRequest | null,
+    text = stepScopedNudge(AUTONOMOUS_NUDGE, !!state.session && state.nextStep?.session === state.session)): boolean {
     const session = state.session;
     if (!state.autonomous || !session || !this.canAutoContinue(runId, state)) return false;
     state.autonomousNudgePending = undefined;
@@ -9126,7 +9128,7 @@ export class RunManager {
       this.store.appendEvent(runId, { type: 'note', stepId, message: `autonomous — safety cap reached (${MAX_AUTO_CONTINUES}); automatic continuation paused` });
       return false;
     }
-    const content: ContentBlock[] = [{ type: 'text', text: AUTONOMOUS_NUDGE }];
+    const content: ContentBlock[] = [{ type: 'text', text }];
     // sendAgentMessage deliberately refuses portable asks on some native wires.
     // The existing answer transport clears that marker, but is safe ONLY for this
     // fresh turn-end ask line: the guards above exclude every pending native/persisted
@@ -9416,7 +9418,7 @@ export class RunManager {
    *  automatic-wake budget. The autonomous wording repeats; the no-wait one is sent once and is
    *  bounded by its reply timer (#544's liveness). */
   private sendTurnEndNudge(runId: string, state: ActiveRun, stepId: string | undefined, text: string): boolean {
-    if (state.autonomous) return !!stepId && this.tryAutonomousNudge(runId, state, stepId, null);
+    if (state.autonomous) return !!stepId && this.tryAutonomousNudge(runId, state, stepId, null, text);
     if (!this.canAutoContinue(runId, state)) return false;
     state.noWaitNudgeSawContent = false;
     if (!this.submitAgentInput(runId, state, [{ type: 'text', text }])) return false;
