@@ -3684,8 +3684,14 @@ export function createApp(deps: ServerDeps) {
     // The archived roots past that window, a page at a time, newest first (#864).
     .get('/run-summaries/archived', queryZodValidator(archivedRunsQuerySchema), (c) => {
       const { before, limit, q } = c.req.valid('query');
-      const page = c.get('project').store.listArchivedRuns({
+      const project = c.get('project');
+      // The page shows each task's origin line, so `q` matches what it names: the automation's
+      // name, or its recorded id while automations are off, as the cockpit's filter does (#1616).
+      const automationNames = new Map(capabilities().automations
+        ? project.automationStore.list().map((automation) => [automation.id, automation.name] as const) : []);
+      const page = project.store.listArchivedRuns({
         limit: limit ?? ARCHIVED_RUNS_PAGE_DEFAULT,
+        automationNames,
         ...(before !== undefined ? { before } : {}),
         ...(q !== undefined ? { q } : {}),
       });
