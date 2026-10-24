@@ -527,6 +527,27 @@ unknown must be updated to test its intended constraint. In
 hearsay-tools/cezarion#1504, a deadline test still used `ci` after the kind became
 `pr`, so it could pass without checking the deadline requirement.
 
+Before opening a PR that removes a default — a catalog, a source or a seeded
+entry — search the browser specs for what that default supplied. Search for its
+entry names and source names, and for the `data-slot` of each list or view that
+renders those entries: a spec can depend on how many entries a list holds
+without naming any of them. From the repo root, replace the example values below
+with the removed default's values:
+
+```bash
+rg -l -F -e 'open-mercato/skills' -e 'skill-row' packages/web/e2e/*.e2e.ts
+```
+
+Check each match. A spec that counts, lists or scrolls the default's entries
+must seed its own, as
+[the e2e README](packages/web/e2e/README.md#seed-the-catalog-entries-a-spec-relies-on)
+says. In hearsay-tools/cezarion#1541, removing the `open-mercato/skills` default
+team catalog broke `settings-skills.e2e.ts`, and only in CI: its scroll case
+needed that catalog's skills to make the skills list overflow on CI's runner.
+The spec named neither the catalog nor its skills, so a search for the names
+alone matched no spec; the `skill-row` slot matches it
+(hearsay-tools/cezarion#1572).
+
 In an unbuilt worktree, only a `Cannot find module` error naming a missing
 `dist/` module is the known Squeal limitation. An assertion failure in
 `test:package` is a real failure that needs investigation; do not dismiss it

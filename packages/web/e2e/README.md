@@ -347,6 +347,29 @@ attached to the old env's dead `baseUrl` and repeated its browser notes.
 
 Seeded NDJSON transcripts must go through `seedTranscript` from `seed-transcript.ts`; every nonblank line needs `seq` and `ts` (and `type`), and validation reports the line number and event type before writing.
 
+## Seed the catalog entries a spec relies on
+
+A spec seeds every catalog entry whose count or presence it relies on: skills, workflows,
+registered projects and the like. It never relies on a catalog it did not write: the skills
+installed on the host, a default that cezar ships, or the skills this checkout keeps in
+`.ai/skills`. Those catalogs differ between a developer machine and CI's runner, and a change can
+remove a default without touching a spec. On the shared server, write the entries under
+`servedRoot()`, and registered projects through `workspace-registry.ts`. A spec that boots its own
+server writes them into its fixture repository. Remove them in `afterAll`. Host entries can still
+show up next to the seeded ones, so scope each assertion to the seeded entries.
+
+`settings-skills.e2e.ts` shows the failure (hearsay-tools/cezarion#1572). Its scroll case needs a
+skills list long enough to overflow. On CI's runner, only the default team catalog made the list
+that long, and the spec's comment gave "the host's real global catalog" as the reason.
+hearsay-tools/cezarion#1541 removed that catalog, and the case failed only in CI (run
+39983148239 attempt 1, job 120515509286). The spec now seeds 40 filler skills.
+`skill-search-ranking.e2e.ts` shows the pattern: it seeds its 24 browse rows, and it checks
+membership against its own fixture skills only, because global skills can match the same query.
+
+A built-in that a spec tests as product behavior, such as the `quick-task` workflow a new task
+runs, is not a catalog entry in this sense. A change that removes one still searches the specs
+first, as [AGENTS.md § Validation](../../../AGENTS.md#validation) says.
+
 ## A plain dry-run reply parks on a "Next step" card
 
 A dry-run task whose reply has no marker does not park with the composer alone. Cezar's no-wait
