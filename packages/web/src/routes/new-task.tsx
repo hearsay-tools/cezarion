@@ -741,7 +741,7 @@ export function NewTaskRoute() {
                       onChange={(on) => update({ worktree: on })}
                     />
                   ) : null}
-                  {repo.data ? <div className="new-task-base-branch flex items-center justify-between gap-2 text-xs text-muted-foreground"><span>Base branch</span><BaseBranchPill repo={repo.data} /></div> : null}
+                  <BaseBranchRow repo={repo} />
                   <AutonomousToggle
                     on={autonomousOn}
                     disabled={draft.planFirst}
@@ -1326,6 +1326,18 @@ function SourcePill({
         </PopoverContent>
       </Popover>
     </>
+  )
+}
+
+/** The Base branch row of the run settings. It stays while `/repo` loads and after it fails:
+ *  it sits above Autonomous, so inserting or removing it moved that toggle under a pointer
+ *  mid-click (hearsay-tools/cezarion#1605). Only the picker waits for the repo. */
+function BaseBranchRow({ repo }: { repo: ReturnType<typeof useRepo> }) {
+  return (
+    <div data-slot="base-branch-row" className="new-task-base-branch flex items-center justify-between gap-2 text-xs text-muted-foreground">
+      <span>Base branch</span>
+      {repo.data ? <BaseBranchPill repo={repo.data} /> : null}
+    </div>
   )
 }
 
