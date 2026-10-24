@@ -256,7 +256,11 @@ a `*-cells.testkit.ts`, and add a guard that every runner has its file. Split a
 runner's file again by row group when one runner alone is too slow.
 `core/harness-parity-cells.testkit.ts` and
 `workflows/waits-parity-cells.testkit.ts` are the examples
-(hearsay-tools/cezarion#1288).
+(hearsay-tools/cezarion#1288). Vitest 4 fails a suite that registers no test,
+so the file that runs the guard and the single-runner cells must not register
+a `describe` whose body holds only runner cells; `describeRunners` in
+`core/harness-parity-cells.testkit.ts` is the example
+(hearsay-tools/cezarion#1375).
 
 Before opening a PR that changes `packages/cezar/src/workflows/run.ts`'s wait,
 turn-end, failure or step-settlement paths, verify every suite matching
