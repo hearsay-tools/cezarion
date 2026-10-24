@@ -23,6 +23,15 @@ export function refNumberFromUrl(url: string): number | null {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+/**
+ * Automation display names by automation id, for a search whose list shows each task's origin line
+ * (hearsay-tools/cezarion#1616). With a lookup, a task an automation launched also matches by that
+ * automation's name, or by its recorded id when no definition names it, as the cockpit's own
+ * filter does. Without one, the automation is not searched: the ⌘K palette shows no origin line,
+ * and a match with no visible reason is noise.
+ */
+export type AutomationNames = ReadonlyMap<string, string>;
+
 /** The query as lowercased, whitespace-split tokens, empties dropped. */
 export function searchTokens(query: string): string[] {
   return query.trim().toLowerCase().split(/\s+/).filter((token) => token !== '');
@@ -33,11 +42,16 @@ export function searchTokens(query: string): string[] {
  * JSON. Only tokens that read the same there: ASCII, since SQLite's `lower()` folds ASCII alone,
  * and without `"` or `\`, which JSON escapes. Leaving a token out only widens the prefilter;
  * `matchesRunQuery` still checks it.
+ *
+ * A token inside an automation's name is left out too: the summary holds the automation's id, not
+ * its name, so the row it should find would never reach `matchesRunQuery`.
  */
-export function sqlPrefilterTokens(query: string): string[] {
+export function sqlPrefilterTokens(query: string, automationNames?: AutomationNames): string[] {
+  const names = [...(automationNames?.values() ?? [])].map((name) => name.toLowerCase());
   return searchTokens(query)
     .map((token) => token.replace(/^#/, ''))
-    .filter((token) => token !== '' && /^[\x20-\x7e]+$/.test(token) && !/["\\]/.test(token));
+    .filter((token) => token !== '' && /^[\x20-\x7e]+$/.test(token) && !/["\\]/.test(token))
+    .filter((token) => !names.some((name) => name.includes(token)));
 }
 
 function referenceNumbers(run: RunSummary): Set<string> {
@@ -54,12 +68,14 @@ function referenceNumbers(run: RunSummary): Set<string> {
 }
 
 /** Whether every token of `query` matches `run`. A blank query matches nothing. */
-export function matchesRunQuery(run: RunSummary, query: string): boolean {
+export function matchesRunQuery(run: RunSummary, query: string, automationNames?: AutomationNames): boolean {
   const tokens = searchTokens(query);
   if (tokens.length === 0) return false;
+  const origin = automationNames && run.automationId !== undefined
+    ? automationNames.get(run.automationId) ?? run.automationId : undefined;
   // The fields a person reads. A number typed is a reference or part of a title, never a digit
   // run inside a URL or a uuid: `86` must not find #864 through `…/issues/864` (#864 review).
-  const prose = [run.title, run.titleSummary, run.branch, run.workflow, run.workflowLabel]
+  const prose = [run.title, run.titleSummary, run.branch, run.workflow, run.workflowLabel, origin]
     .filter((field): field is string => typeof field === 'string').map((field) => field.toLowerCase());
   const urls = [run.pullRequestUrl, run.referencedPullRequestUrl, run.referencedIssueUrl, ...(run.pullRequests ?? []).map(pr => pr.url)]
     .filter((field): field is string => typeof field === 'string').map((field) => field.toLowerCase());

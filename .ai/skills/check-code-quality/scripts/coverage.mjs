@@ -89,7 +89,7 @@ async function addChildCoverage(raw, files, cwd, output) {
 
 /** One bounded test run covers all changed files. Test output stays on stderr. */
 export async function collectCoverage(options, directory) {
-  const { runner, files, tests, imports, cwd } = options;
+  const { runner, files, tests, imports, testTimeout, cwd } = options;
   const output = join(directory, 'coverage-final.json');
   const raw = join(directory, 'raw');
   if (runner === 'vitest') {
@@ -107,7 +107,8 @@ export async function collectCoverage(options, directory) {
     throw new Error(`Node coverage supports untransformed JavaScript only, not ${transformed.join(', ')}. Use --runner vitest with the --project that runs these tests, or supply --coverage with an Istanbul report from another runner.`);
   }
   mkdirSync(raw);
-  const argv = [...imports.flatMap(file => ['--import', file]), '--test', ...tests];
+  const timeout = testTimeout ? [`--test-timeout=${testTimeout}`] : [];
+  const argv = [...imports.flatMap(file => ['--import', file]), '--test', ...timeout, ...tests];
   execute(argv, options, { ...process.env, NODE_V8_COVERAGE: raw });
   await convertNodeCoverage(raw, files, cwd, output);
   return { path: output, runner, command: [process.execPath, ...argv], environment: { NODE_V8_COVERAGE: '<temporary-directory>/raw' } };

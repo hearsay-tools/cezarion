@@ -80,7 +80,10 @@ node <skill>/scripts/check.mjs --base origin/main \
 ```
 
 Collection has a ten-minute bound. Failed tests produce exit 2 and no accepted
-verdict. Missing, stale or unmatched function coverage remains incomplete. A
+verdict. `--test-timeout <ms>` sets the per-test timeout of the coverage run.
+With Vitest it replaces the `testTimeout` of every selected project; hook
+timeouts keep their configured values. With Node it passes `--test-timeout` to
+`node --test`. Use it when tests time out under host load but pass alone. Missing, stale or unmatched function coverage remains incomplete. A
 source edit, new changed function or HEAD change during measurement also produces
 exit 2. The tool checks source hashes and rescans against the pinned baseline.
 Changed test functions stay in scope. A file missing from the report, such as a

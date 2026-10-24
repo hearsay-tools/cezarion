@@ -1128,6 +1128,18 @@ export function getRunHandoff(id: string, opts?: ReadOptions): Promise<string> {
   return requestText(runPath(id, '/handoff'), { method: 'GET', signal: opts?.signal })
 }
 
+/** Another project's handoff journal, for a row of All tasks (hearsay-tools/cezarion#1616): the
+ *  project is named explicitly, since `queryScope()` is the boot project there. */
+export async function getProjectRunHandoff(projectId: string, id: string, opts?: ReadOptions): Promise<string> {
+  const res = await cez.api.v1.p[':projectId'].runs[':id'].handoff.$get(
+    { param: { projectId, id: encodeURIComponent(id) } },
+    { init: { signal: opts?.signal }, headers: { accept: 'text/plain' } },
+  )
+  const body = await res.text()
+  if (!res.ok) throw errorFor(res.status, res.statusText, body)
+  return body
+}
+
 /** The run's structured working-directory-vs-base diff (R5): per-file status/±/patch + the
  *  aggregate stat. Worktree-off runs read the repo checkout they executed in. */
 export async function getRunChanges(id: string, opts?: ReadOptions): Promise<ChangesPayload> {
@@ -1606,10 +1618,12 @@ export async function markRunUnseen(id: string): Promise<RunRecord> {
 }
 
 /** "Mark all read": stamp every currently-unread finished run in one call. */
-export async function markAllRunsSeen(): Promise<MarkAllReadResponse> {
+export async function markAllRunsSeen(automation?: boolean): Promise<MarkAllReadResponse> {
   return unwrap(
     await cez.api.v1.p[':projectId'].runs['read-all'].$post({
       param: { projectId: queryScope() },
+      // `automation` narrows the sweep to one origin (hearsay-tools/cezarion#1616); absent is all.
+      json: automation !== undefined ? { automation } : {},
     }),
     '/runs/read-all',
   )

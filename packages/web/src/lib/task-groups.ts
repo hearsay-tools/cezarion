@@ -285,8 +285,14 @@ export function sidebarActiveRunId(
  * Empty buckets are omitted rather than rendered headerless-and-empty; a fully empty result is the
  * component's cue for the empty state.
  */
-export function groupRuns(runs: readonly RunSummary[], view: ListView): QuickListBucket[] {
-  const positions = queuePositions(runs)
+export function groupRuns(
+  runs: readonly RunSummary[],
+  view: ListView,
+  /** Queue numbers from the FULL queue. A Tasks page that filters before grouping passes the
+   *  positions of its unfiltered list, so a search or an origin filter never renumbers the queue
+   *  (hearsay-tools/cezarion#1616). The sidebar groups the whole list and takes the default. */
+  positions: ReadonlyMap<string, number> = queuePositions(runs),
+): QuickListBucket[] {
   const sorted = sortRuns(runs, view).filter((run) => !isOwnedWorker(run))
   const byBucket = new Map<BucketLabel, QuickListRow[]>()
   const push = (label: BucketLabel, row: QuickListRow) => {

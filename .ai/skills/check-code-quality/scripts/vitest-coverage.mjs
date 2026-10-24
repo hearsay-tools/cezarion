@@ -21,9 +21,9 @@ export function resolveVitest(cwd) {
 }
 
 /** The argv for one coverage run in a child process. */
-export function vitestCoverageArguments({ cwd, files, tests, projects }, directory, processCoverage) {
+export function vitestCoverageArguments({ cwd, files, tests, projects, testTimeout }, directory, processCoverage) {
   resolveVitest(cwd);
-  return [fileURLToPath(import.meta.url), JSON.stringify({ files, tests, projects, directory, processCoverage })];
+  return [fileURLToPath(import.meta.url), JSON.stringify({ files, tests, projects, testTimeout, directory, processCoverage })];
 }
 
 // Vitest appends every test.include glob to coverage.exclude after it resolves the
@@ -45,7 +45,7 @@ export function recordChildCoverage(vitest, directory) {
 }
 
 async function main([request]) {
-  const { files, tests, projects, directory, processCoverage } = JSON.parse(request);
+  const { files, tests, projects, testTimeout, directory, processCoverage } = JSON.parse(request);
   const { createVitest } = await import(pathToFileURL(resolveVitest(process.cwd())).href);
   // The Vitest CLI sets these before it loads the config.
   process.env.TEST = 'true';
@@ -54,6 +54,8 @@ async function main([request]) {
   const vitest = await createVitest('test', {
     run: true, watch: false, ...(projects.length ? { project: projects } : {}),
     maxWorkers: 2, passWithNoTests: false,
+    // Vitest applies testTimeout to every project over the project's own value.
+    ...(testTimeout ? { testTimeout } : {}),
     coverage: { enabled: true, provider: 'v8', include: files, reporter: ['json'], reportsDirectory: directory },
   });
   try {
