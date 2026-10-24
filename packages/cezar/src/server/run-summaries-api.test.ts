@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { apiRunSchema, archivedRunsResponseSchema, runSummarySchema } from '@open-mercato/cezar-contract/runs';
+import { AutomationStore } from '../automations/store.ts';
 import { seedRuns } from '../runs/run-store.testkit.ts';
 import { RunStore } from '../runs/store.ts';
 import type { RunManager } from '../workflows/run.ts';
@@ -148,6 +149,39 @@ describe('run summaries API', () => {
     it('answers byte-identically under the project-scoped default alias', async () => {
       reseed();
       expect(await getJson('/api/v1/p/default/run-summaries/archived?limit=3')).toEqual(await getJson('/api/v1/run-summaries/archived?limit=3'));
+    });
+
+    it('matches a task by its automation name while automations are on, and by its id otherwise (hearsay-tools/cezarion#1616)', async () => {
+      // The page shows each task's origin line, so a search finds what that line names. The
+      // summary holds the automation's id, never its name, so the SQL prefilter must not drop it.
+      reseed([run('nightly', 300, { automationTrigger: {
+        automationId: 'auto-7f3', automationRevision: 1, receiptId: 'r1', trigger: 'schedule', occurrenceAt: at(300),
+      } })]);
+      const automationStore = AutomationStore.open(join(repoRoot, '.ai/cezar'));
+      automationStore.create({
+        name: 'Dependency bump', kind: 'schedule', enabled: false,
+        schedule: { type: 'daily', hour: 4, minute: 0 }, task: { prompt: 'Bump deps' },
+      } as Parameters<AutomationStore['create']>[0], 'auto-7f3');
+      const search = async (q: string) => {
+        const res = await apiRequest(createApp({
+          repoRoot, store, automationStore, manager: {} as RunManager, version: '0.0.0-test',
+        }), `/api/v1/run-summaries/archived?q=${encodeURIComponent(q)}`);
+        expect(res.status).toBe(200);
+        return archivedRunsResponseSchema.parse(await res.json()).runs.map((row) => row.id);
+      };
+      const saved = process.env.CEZ_AUTOMATIONS;
+      try {
+        process.env.CEZ_AUTOMATIONS = '1';
+        expect(await search('dependency')).toEqual(['nightly']);
+        expect(await search('bump nightly')).toEqual(['nightly']);
+        expect(await search('dependency missing')).toEqual([]);
+        delete process.env.CEZ_AUTOMATIONS;
+        expect(await search('dependency')).toEqual([]);
+        expect(await search('auto-7f3')).toEqual(['nightly']);
+      } finally {
+        if (saved === undefined) delete process.env.CEZ_AUTOMATIONS;
+        else process.env.CEZ_AUTOMATIONS = saved;
+      }
     });
   });
 });

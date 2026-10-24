@@ -91,13 +91,18 @@ export function workflowLabel(run: Pick<RunSummary, 'workflow'> & { workflowLabe
  * raw `title` hidden behind a summary: matching on text the table never displays makes rows
  * appear for no visible reason.
  */
-export function filterRuns(runs: readonly RunSummary[], query: string): RunSummary[] {
+export function filterRuns(
+  runs: readonly RunSummary[],
+  query: string,
+  /** Text the row shows outside these fields, such as its automation's name (#1616). */
+  extraText: (run: RunSummary) => string = () => '',
+): RunSummary[] {
   const listed = runs.filter((run) => !isOwnedWorker(run))
   const needle = query.trim().toLowerCase()
   if (!needle) return [...listed]
   return listed.filter((run) =>
     matchesTaskReferenceNumber(run, needle) ||
-    [runTitle(run), run.branch ?? '', run.workflow, workflowLabel(run)].some((text) =>
+    [runTitle(run), run.branch ?? '', run.workflow, workflowLabel(run), extraText(run)].some((text) =>
       text.toLowerCase().includes(needle),
     ),
   )
