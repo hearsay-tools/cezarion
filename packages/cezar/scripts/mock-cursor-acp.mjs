@@ -34,6 +34,7 @@ import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 // Dynamic, like every sibling import here, so a test's copy of this mock can repoint it.
 const { answerNudge, silentNudge } = await import('./mock-nudge.mjs');
 import * as parityGateFs from 'node:fs';
+import { withoutSessionContextParts } from './mock-session-context.mjs';
 if (process.argv.includes('--version')) { process.stdout.write('2026.09.15-mock-acp\n'); process.exit(0); }
 
 // #401: let the test observe the actual monitoring park before releasing late wire frames.
@@ -223,6 +224,7 @@ createInterface({ input: process.stdin }).on('line', async line => {
   let msg; try { msg = JSON.parse(line); } catch { return; }
   record(process.env.CEZ_MOCK_ARGS_FILE, msg);
   record(process.env.CEZ_MOCK_STDIN_FILE, msg);
+  if (Array.isArray(msg.params?.prompt)) msg.params.prompt = withoutSessionContextParts(msg.params.prompt);
   if (!msg.method) {
     if (pendingAsk) {
       const pending = pendingAsk; pendingAsk = undefined;
