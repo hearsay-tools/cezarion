@@ -97,6 +97,14 @@ passes alone. Add `--test-timeout 30000` to the same command and rerun it. Do
 not build a coverage command by hand. The flag sets the per-test timeout for
 the coverage run only; a test that fails for another reason still fails.
 
+The whole coverage collection defaults to 600000 ms, independently of
+`--test-timeout`. If collection exceeds that limit, rerun the same command with
+`--coverage-timeout 900000` (fifteen minutes), or a larger positive safe whole
+number of milliseconds. The timeout remains an incomplete check (exit 2).
+Alternatively, supply a separately collected current Istanbul report through
+`--coverage <coverage-final.json>` instead of `--test`; temporary reports from
+the stopped collection are removed.
+
 A coverage run is a distinct measurement even when background validation passed.
 For dependencies, runner limits or a collection failure, read
 [tool.md](tool.md). Use the bundled command for collection, matching,
