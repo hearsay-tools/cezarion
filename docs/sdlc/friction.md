@@ -192,9 +192,12 @@ work for an issue that already has a task.
 
 ## Where a new agent rule goes
 
-A friction fix often adds a rule that agents must follow. `AGENTS.md` loads on every
-agent turn, so put the rule in the narrowest document that the tasks it governs
-already read:
+A friction fix often adds a rule that agents must follow. First ask whether code, a
+test or a script can make the rule unnecessary. If so, file that change, and write
+the rule only until it lands, citing the issue that removes it.
+
+`AGENTS.md` loads on every agent turn, so put the rule in the narrowest document that
+the tasks it governs already read:
 
 | The rule governs | Put it in |
 | --- | --- |
