@@ -11,6 +11,8 @@ import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
+import { groupExists, startOwnedGroup, stopGroup, watchGroup } from '../../packages/cezar/src/detached-process.ts';
+
 const windowsScript = resolve(import.meta.dirname, 'test-env-windows.ps1');
 function windowsProbe(mode, payload, timeout = 15_000) {
   const result = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', windowsScript, mode, payload], {
@@ -50,6 +52,7 @@ export function identity(pid, timeout = 15_000) {
   }
   return {};
 }
+const readStart = pid => identity(pid).start;
 
 // Diagnostics are transient and never participate in ownership or reclamation.
 // Limit reads as well as display size; command lines can contain arbitrary arguments.
@@ -285,33 +288,34 @@ export async function acquireTestEnvLease(root, { token, pid = process.pid, grou
 
 // Only the supervisor outside the mutation job can start the cached app.
 // This local pipe admits the existing detach-app operation, never a shell command.
+// The app starts through packages/cezar/src/detached-process.ts (hearsay-tools/cezarion#1717): on
+// POSIX a start identity nothing can read stops it again, since no later stop could name it.
 async function detachApp(args, root, effectiveEnv = process.env) {
   const fd = openSync(resolve(root, args[0]), 'w');
   const env = { ...effectiveEnv };
   for (const key of Object.keys(env)) if (key.startsWith('TEST_ENV_LEASE_')) delete env[key];
   try {
-    const child = spawn(process.execPath, args.slice(1), { cwd: root, detached: true, stdio: ['ignore', fd, fd], env });
-    await new Promise((done, fail) => { child.once('spawn', done); child.once('error', fail); });
+    const { child, leader } = await startOwnedGroup(process.execPath, args.slice(1), {
+      cwd: root, stdio: ['ignore', fd, fd], env, readStart, requireStart: process.platform !== 'win32',
+    });
     child.unref();
     // The app has no end of its own (#1448): a sibling watcher stops it once nothing uses it.
     // A failed watcher start leaves the app as before, stoppable by test-env-down.sh.
-    const start = identity(child.pid).start;
     const repo = args.indexOf('--repo');
     const served = repo >= 0 && args[repo + 1] ? resolve(root, args[repo + 1]) : root;
     // Its own log, next to the app's, so the app log holds only the app's output.
-    if (start) {
+    if (leader.start) {
       let watchFd;
       try {
         watchFd = openSync(resolve(dirname(resolve(root, args[0])), 'test-env-watch.log'), 'a');
-        const watcher = spawn(process.execPath, [import.meta.filename, 'watch-app', String(child.pid), start, root, served], {
-          cwd: tmpdir(), detached: true, stdio: ['ignore', watchFd, watchFd], env, windowsHide: true,
+        const watcher = await startOwnedGroup(process.execPath, [import.meta.filename, 'watch-app', String(leader.pid), leader.start, root, served], {
+          cwd: tmpdir(), stdio: ['ignore', watchFd, watchFd], env, windowsHide: true, readStart,
         });
-        await new Promise(done => { watcher.once('spawn', done); watcher.once('error', done); });
-        watcher.unref();
+        watcher.child.unref();
       } catch { /* best effort: the caller must still record the app it started */ }
       finally { if (watchFd !== undefined) closeSync(watchFd); }
     }
-    return child.pid;
+    return leader;
   } finally { closeSync(fd); }
 }
 
@@ -327,21 +331,23 @@ function envNumber(env, name, fallback, min, max) {
   return value >= min && value <= max ? value : fallback;
 }
 
-/** Resolves true only when the app is confirmed gone: dead, or its pid now names another process. */
-async function stopApp(pid, start) {
-  // Only a verified identity may be signalled: an unreadable one could be a reused pid.
-  const same = () => { const current = identity(pid); return !current.dead && current.start === start; };
-  const gone = () => { const current = identity(pid); return Boolean(current.dead || (current.start && current.start !== start)); };
-  // The app can exit and its pid be reused between polls: never signal another process.
-  if (same()) {
-    try { process.kill(pid, 'SIGTERM'); } catch { /* checked below */ }
-    const deadline = performance.now() + STOP_GRACE_MS;
-    while (same() && performance.now() < deadline) await delay(100);
-    if (same()) try { process.kill(pid, 'SIGKILL'); } catch { /* checked below */ }
-    // SIGKILL is asynchronous; give the kernel a moment to reap before the verdict.
-    for (let tries = 0; tries < 20 && same(); tries++) await delay(50);
-  }
-  return gone();
+/** The app `.ai/qa/test-env.json` names, when this checkout started it. A descriptor written before
+ * hearsay-tools/cezarion#1717 has no `app.start`, so its app is stopped by its pid alone, as before. */
+function recordedApp(root) {
+  try {
+    const descriptor = JSON.parse(readFileSync(resolve(root, '.ai/qa/test-env.json'), 'utf8'));
+    const { pid, start } = descriptor?.startedByThisRepo === true ? descriptor.app ?? {} : {};
+    if (!Number.isSafeInteger(pid) || pid <= 1) return undefined;
+    return typeof start === 'string' && start ? { pid, start } : { pid };
+  } catch { return undefined; /* absent or corrupt: nothing safe to stop */ }
+}
+
+/** Stops the app's whole process group, and only the recorded incarnation. Throws when it would not stop. */
+async function stopApp(app, graceMs) {
+  const log = message => console.error(`[test-env] ${message}`);
+  if (!app || !groupExists(app, readStart)) { log('app is already stopped'); return; }
+  log(`stopping cezar (pid ${app.pid})`);
+  if (!await stopGroup(app, { graceMs, readStart })) throw new Error(`cezar pid ${app.pid} did not stop`);
 }
 
 function markStopped(root, pid) {
@@ -353,12 +359,14 @@ function markStopped(root, pid) {
     descriptor.status = 'stopped';
     // The pid is free for reuse now: teardown_stale and test-env-down.sh must not signal it.
     delete descriptor.app.pid;
+    delete descriptor.app.start;
     writeFileSync(file, JSON.stringify(descriptor, null, 2) + '\n');
   } catch { /* absent or corrupt: test-env-up.sh treats it as stale */ }
 }
 
 /** Stop the detached app when its checkout is deleted, or when no lease holder has existed for
- * the idle period (TEST_ENV_IDLE_EXIT_MINUTES, 0 = never). Exit when the app exits on its own. */
+ * the idle period (TEST_ENV_IDLE_EXIT_MINUTES, 0 = never). An app that exits on its own leaves
+ * nothing behind: the rest of its group is stopped too. A stop that fails is tried again. */
 async function watchApp(pid, start, root, served, env = process.env) {
   const idleMs = envNumber(env, 'TEST_ENV_IDLE_EXIT_MINUTES', IDLE_DEFAULT_MINUTES, 0, Infinity) * 60_000;
   // Node turns a timer delay outside its range into 1 ms, a busy loop: keep it inside 0.1–3600 s.
@@ -366,22 +374,11 @@ async function watchApp(pid, start, root, served, env = process.env) {
   const log = message => console.log(`[test-env] watcher ${message}`);
   log(`${process.pid} watching cezar pid ${pid}`);
   let lastBusy = performance.now();
-  while (true) {
-    await delay(intervalMs);
-    const current = identity(pid);
-    if (current.dead || (current.start && current.start !== start)) return;
-    if (!existsSync(root)) {
-      // The lease database was inside the checkout: no holder can remain.
-      log(`stopping cezar pid ${pid}: checkout deleted`);
-      await stopApp(pid, start);
-      return;
-    }
-    if (!existsSync(resolve(root, '.ai/qa'))) {
-      // Its descriptor went with it, so no run can reuse this app.
-      log(`stopping cezar pid ${pid}: test-env state deleted`);
-      await stopApp(pid, start);
-      return;
-    }
+  const stopping = reason => { log(`stopping cezar pid ${pid}: ${reason}`); return { reason }; };
+  /** No lease holder for the idle period, or no served project. The verdict claims the environment
+   * in the same transaction that saw no holder: a run that starts now waits for this row, then
+   * cold-boots, instead of attaching to a stopping app. Settling the stop releases the claim. */
+  const leaseVerdict = () => {
     let db;
     try {
       db = openLeaseDb(root, { create: false });
@@ -391,27 +388,43 @@ async function watchApp(pid, start, root, served, env = process.env) {
         if (liveHolders(db).length > 0) lastBusy = performance.now();
         else if (!existsSync(served)) reason = 'served project deleted';
         else if (idleMs > 0 && performance.now() - lastBusy >= idleMs) reason = `idle ${idleMs / 60_000} minutes`;
-        // Claim the environment in the same transaction that saw no holder: a run that starts
-        // now waits for this row, then cold-boots, instead of attaching to a stopping app.
         const own = reason && identity(process.pid).start;
         if (own) db.prepare('INSERT INTO holders (id, token, pid, start, pgid) VALUES (?, ?, ?, ?, NULL)').run(`watcher-${process.pid}`, randomUUID(), process.pid, own);
         else reason = undefined;
         db.exec('COMMIT');
       } catch (error) { db.exec('ROLLBACK'); throw error; }
-      if (reason) {
-        try {
-          log(`stopping cezar pid ${pid}: ${reason}`);
-          // An app that could not be confirmed gone keeps its descriptor, so down can still stop it.
-          if (await stopApp(pid, start)) markStopped(root, pid);
-          else log(`could not confirm cezar pid ${pid} stopped; left its descriptor for test-env-down.sh`);
-        } finally { db.prepare('DELETE FROM holders WHERE id = ?').run(`watcher-${process.pid}`); }
-        return;
-      }
+      if (!reason) return undefined;
+      const claim = db;
+      db = undefined;
+      return {
+        ...stopping(reason),
+        settle(stopped) {
+          try {
+            // An app that could not be confirmed gone keeps its descriptor, so down can still stop it.
+            if (stopped) markStopped(root, pid);
+            else log(`could not confirm cezar pid ${pid} stopped; trying again at the next poll`);
+          } finally {
+            claim.prepare('DELETE FROM holders WHERE id = ?').run(`watcher-${process.pid}`);
+            claim.close();
+          }
+        },
+      };
     } catch (error) {
       // A busy database, or state deleted mid-poll, is retried at the next poll.
       if (existsSync(resolve(root, '.ai/qa'))) log(`poll failed: ${error.message}`);
+      return undefined;
     } finally { db?.close(); }
-  }
+  };
+  await watchGroup({
+    leader: { pid, start }, intervalMs, readStart, stop: { graceMs: STOP_GRACE_MS },
+    decide: () => {
+      // The lease database was inside the checkout: no holder can remain.
+      if (!existsSync(root)) return stopping('checkout deleted');
+      // Its descriptor went with it, so no run can reuse this app.
+      if (!existsSync(resolve(root, '.ai/qa'))) return stopping('test-env state deleted');
+      return leaseVerdict();
+    },
+  });
 }
 async function cachedAppBroker(root, token) {
   const pipe = `\\\\.\\pipe\\cez-test-env-${randomUUID()}`;
@@ -438,8 +451,8 @@ async function cachedAppBroker(root, token) {
               !request.args.every(arg => typeof arg === 'string' && !arg.includes('\0')) ||
               !request.env || typeof request.env !== 'object' || Array.isArray(request.env) ||
               !Object.entries(request.env).every(([key, value]) => key && !/[=\0]/.test(key) && typeof value === 'string' && !value.includes('\0'))) throw new Error('invalid cached-app request');
-          const pid = await detachApp(request.args, root, request.env);
-          socket.end(JSON.stringify({ pid }) + '\n');
+          const app = await detachApp(request.args, root, request.env);
+          socket.end(JSON.stringify(app) + '\n');
         } catch (error) { socket.end(JSON.stringify({ error: error.message }) + '\n'); }
       })();
     });
@@ -462,33 +475,73 @@ async function requestCachedApp(args) {
       try {
         const receipt = JSON.parse(data);
         if (!Number.isSafeInteger(receipt.pid) || receipt.pid <= 0) throw new Error(receipt.error || 'invalid cached-app receipt');
-        done(receipt.pid);
+        done(typeof receipt.start === 'string' && receipt.start ? { pid: receipt.pid, start: receipt.start } : { pid: receipt.pid });
       } catch (error) { fail(error); }
     });
   });
 }
-async function main(args) {
-  const root = resolve(import.meta.dirname, '../..');
-  if (args[0] === 'detach-app') {
-    if (process.platform === 'win32' && process.env.TEST_ENV_LEASE_JOB && !process.env.TEST_ENV_LEASE_BROKER) throw new Error('missing cached-app broker');
-    console.log(process.platform === 'win32' && process.env.TEST_ENV_LEASE_JOB
-      ? await requestCachedApp(args.slice(1)) : await detachApp(args.slice(1), root));
-    return;
+const USAGE = 'usage: test-env-lease.mjs run sh <script> [args] | join <pid> | watch-app <pid> <start> <root> <served> | stop-app <grace-ms> [<pid> <start>]';
+
+/** detach-app [--json] <log> <args...>: --json prints the app's start identity too, for the
+ * descriptor; plain output is the bare pid. */
+async function detachAppCommand(args, root) {
+  const json = args[0] === '--json';
+  const rest = args.slice(json ? 1 : 0);
+  const brokered = process.platform === 'win32' && process.env.TEST_ENV_LEASE_JOB;
+  if (brokered && !process.env.TEST_ENV_LEASE_BROKER) throw new Error('missing cached-app broker');
+  const app = brokered ? await requestCachedApp(rest) : await detachApp(rest, root);
+  console.log(json ? JSON.stringify(app) : app.pid);
+}
+
+/** stop-app <grace-ms> stops the app the descriptor names; <pid> <start> name one the descriptor
+ * does not hold yet. */
+async function stopAppCommand(args, root) {
+  const [graceMs, pid] = [Number(args[0]), Number(args[1])];
+  const named = args.length === 3 && Number.isSafeInteger(pid) && pid > 1;
+  if (!Number.isSafeInteger(graceMs) || graceMs < 0 || (args.length !== 1 && !named)) throw new Error(USAGE);
+  await stopApp(named ? (args[2] ? { pid, start: args[2] } : { pid }) : recordedApp(root), graceMs);
+}
+
+async function watchAppCommand(args) {
+  const pid = Number(args[0]);
+  if (!Number.isSafeInteger(pid) || pid <= 1 || !args[1] || !args[2] || !args[3]) throw new Error('usage: test-env-lease.mjs watch-app <pid> <start> <root> <served>');
+  await watchApp(pid, args[1], args[2], args[3]);
+}
+
+async function joinCommand(args, root) {
+  // The shell itself must be recorded, not this short-lived registration process. The
+  // supervising `run` owns its lifetime; an abruptly orphaned shell stays protected too.
+  const lease = await acquireTestEnvLease(root, { token: process.env.TEST_ENV_LEASE_TOKEN, pid: process.platform === 'win32' ? process.ppid : Number(args[0]), group: true });
+  if (!process.env.TEST_ENV_LEASE_TOKEN) { lease.release(); throw new Error('missing inherited test environment lease'); }
+}
+
+/** Runs `command` under the lease and forwards SIGINT and SIGTERM to its group (its job on Windows). */
+async function superviseCommand(command, env, job) {
+  const child = spawn(command[0], command.slice(1), {
+    stdio: 'inherit', detached: !job, env,
+  });
+  const forward = signal => {
+    try { process.kill(job ? child.pid : -child.pid, signal); }
+    catch (error) { if (error.code !== 'ESRCH') console.error(`[test-env] cannot signal command group: ${error.message}`); }
+  };
+  const term = () => forward('SIGTERM');
+  const int = () => forward('SIGINT');
+  process.on('SIGTERM', term);
+  process.on('SIGINT', int);
+  try {
+    process.exitCode = await new Promise((resolveExit, reject) => {
+      child.once('error', reject);
+      child.once('close', (code, signal) => resolveExit(code ?? (signal === 'SIGINT' ? 130 : 143)));
+    });
+  } finally {
+    process.off('SIGTERM', term);
+    process.off('SIGINT', int);
   }
-  if (args[0] === 'watch-app') {
-    const pid = Number(args[1]);
-    if (!Number.isSafeInteger(pid) || pid <= 1 || !args[2] || !args[3] || !args[4]) throw new Error('usage: test-env-lease.mjs watch-app <pid> <start> <root> <served>');
-    await watchApp(pid, args[2], args[3], args[4]);
-    return;
-  }
-  if (args[0] === 'join') {
-    // The shell itself must be recorded, not this short-lived registration process. The
-    // supervising `run` owns its lifetime; an abruptly orphaned shell stays protected too.
-    const lease = await acquireTestEnvLease(root, { token: process.env.TEST_ENV_LEASE_TOKEN, pid: process.platform === 'win32' ? process.ppid : Number(args[1]), group: true });
-    if (!process.env.TEST_ENV_LEASE_TOKEN) { lease.release(); throw new Error('missing inherited test environment lease'); }
-    return;
-  }
-  if (args[0] !== 'run' || args[1] !== 'sh' || !args[2]) throw new Error('usage: test-env-lease.mjs run sh <script> [args] | join <pid> | watch-app <pid> <start> <root> <served>');
+}
+
+/** run sh <script> [args]: holds the lease through the whole command. */
+async function runCommand(args, root) {
+  if (args[0] !== 'sh' || !args[1]) throw new Error(USAGE);
   const job = process.platform === 'win32' ? `Local\\CezTestEnv-${randomUUID()}` : undefined;
   const lease = await acquireTestEnvLease(root, {
     group: job,
@@ -503,29 +556,18 @@ async function main(args) {
     const inheritedBroker = job && process.env.TEST_ENV_LEASE_TOKEN === lease.token
       ? process.env.TEST_ENV_LEASE_BROKER : undefined;
     if (job && !inheritedBroker) broker = await cachedAppBroker(root, lease.token);
-    const env = { ...process.env, TEST_ENV_LEASE_TOKEN: lease.token, TEST_ENV_LEASE_ENTRY: args[2], ...(job ? { TEST_ENV_LEASE_JOB: job, TEST_ENV_LEASE_BROKER: inheritedBroker ?? broker.pipe } : {}) };
-    const command = job ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', windowsScript, 'run', windowsPayload({ job, parent: process.pid, start: identity(process.pid).start, command: windowsCommand(args.slice(1)) })] : args.slice(1);
-    const child = spawn(command[0], command.slice(1), {
-      stdio: 'inherit', detached: !job, env,
-    });
-    const forward = signal => {
-      try { process.kill(job ? child.pid : -child.pid, signal); }
-      catch (error) { if (error.code !== 'ESRCH') console.error(`[test-env] cannot signal command group: ${error.message}`); }
-    };
-    const term = () => forward('SIGTERM');
-    const int = () => forward('SIGINT');
-    process.on('SIGTERM', term);
-    process.on('SIGINT', int);
-    try {
-      process.exitCode = await new Promise((resolveExit, reject) => {
-        child.once('error', reject);
-        child.once('close', (code, signal) => resolveExit(code ?? (signal === 'SIGINT' ? 130 : 143)));
-      });
-    } finally {
-      process.off('SIGTERM', term);
-      process.off('SIGINT', int);
-    }
+    const env = { ...process.env, TEST_ENV_LEASE_TOKEN: lease.token, TEST_ENV_LEASE_ENTRY: args[1], ...(job ? { TEST_ENV_LEASE_JOB: job, TEST_ENV_LEASE_BROKER: inheritedBroker ?? broker.pipe } : {}) };
+    const command = job ? ['powershell.exe', '-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', windowsScript, 'run', windowsPayload({ job, parent: process.pid, start: identity(process.pid).start, command: windowsCommand(args) })] : args;
+    await superviseCommand(command, env, job);
   } finally { broker?.close(); lease.release(); }
+}
+
+const COMMANDS = { 'detach-app': detachAppCommand, 'stop-app': stopAppCommand, 'watch-app': watchAppCommand, join: joinCommand, run: runCommand };
+
+async function main([name, ...args]) {
+  const command = Object.hasOwn(COMMANDS, name ?? '') ? COMMANDS[name] : undefined;
+  if (!command) throw new Error(USAGE);
+  await command(args, resolve(import.meta.dirname, '../..'));
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
