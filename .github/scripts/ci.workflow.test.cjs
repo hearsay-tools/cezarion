@@ -521,3 +521,25 @@ test('no workflow declares both pull_request and pull_request_target', () => {
     assert.ok(!(events.includes('pull_request') && events.includes('pull_request_target')), name);
   }
 });
+
+test('baseline growth is required through trusted classify-pr with default PR event types', () => {
+  const ci = workflow();
+  const job = ci.jobs['classify-pr'];
+  const checkIndex = job.steps.findIndex(step => step.name === 'Reject baseline growth');
+  const checkoutIndex = job.steps.findIndex(step => step.uses?.startsWith('actions/checkout@'));
+  assert.ok(checkIndex > checkoutIndex);
+  const checkout = job.steps[checkoutIndex];
+  assert.match(checkout.with.ref, /pull_request.base.sha/);
+  assert.doesNotMatch(checkout.with.ref, /pull_request.head/);
+  assert.equal(checkout.with['persist-credentials'], false);
+  assert.equal(checkout.with['fetch-depth'], 0);
+  assert.equal(job.permissions.contents, 'read');
+  assert.equal(job.permissions['pull-requests'], 'read');
+  const check = job.steps[checkIndex];
+  assert.equal(check.if, "github.event_name == 'pull_request_target' || steps['resolve-dispatch'].outputs.valid == 'true'");
+  assert.match(check.with.script, /require\('\.\/.github\/scripts\/baseline-growth.cjs'\)/);
+  assert.match(check.with.script, /await checkPullRequest\(\{ github, context, core \}\)/);
+  assert.ok(ci.jobs.verify.needs.includes('classify-pr'));
+  assert.match(ci.jobs.verify.steps[0].run, /test "\$CLASSIFY_RESULT" = success/);
+  assert.equal(ci.on.pull_request_target.types, undefined, 'label changes must not cancel and restart CI');
+});
