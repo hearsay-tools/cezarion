@@ -2757,6 +2757,17 @@ as `decline`, so it is not offered. If Codex still asks before a cezar tool (an
 older Codex that ignores the key, say), the request reaches Needs you like any
 other; it is never answered silently. Elicitations carry no item ID.
 
+`.ai/scripts/probe-approvals.ts` checks this routing against the installed Codex
+in one paid turn (hearsay-tools/cezarion#1343). It builds a scratch `CODEX_HOME`
+from the user's provider settings only, with no `approval_policy`, and runs
+cezar's own runner and tool socket beside a second, marker MCP server. The model
+calls the marker tool and then `cezar_wait`. The probe prints the thread's
+`approvalPolicy`, every server request with cezar's reply, and each
+`mcpToolCall` status. A default run shows the cezar call completed with no
+approval request, and the marker call's `permission.requested` answered with
+"Allow once". With `--answer decline`, the marker call is rejected. CI never
+runs the probe.
+
 Approvals emit the `permission.requested` event with an opaque, fresh
 request ID, item ID when present, a title, full action/scope details and offered
 options. Command `availableDecisions`, when supplied, is authoritative, including
