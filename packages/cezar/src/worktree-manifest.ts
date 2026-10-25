@@ -171,13 +171,22 @@ async function isFile(path: string): Promise<boolean> {
   return stat?.isFile() === true;
 }
 
-/** Rename into place; across filesystems (`EXDEV`), copy instead, which a crash can leave partial. */
+/**
+ * Rename into place; across filesystems (`EXDEV`), copy instead. A copy that fails is removed, so
+ * the path is free and the next pass writes it again. A crash during the copy leaves a partial
+ * entry that matches neither identity: it is kept, because nothing tells it from the agent's edit.
+ */
 async function moveInto(from: string, to: string): Promise<void> {
   try {
     await rename(from, to);
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'EXDEV') throw error;
-    await cp(from, to, { recursive: true, verbatimSymlinks: true });
+    try {
+      await cp(from, to, { recursive: true, verbatimSymlinks: true });
+    } catch (copyError) {
+      await rm(to, { recursive: true, force: true }).catch(() => undefined);
+      throw copyError;
+    }
     await rm(from, { recursive: true, force: true });
   }
 }
