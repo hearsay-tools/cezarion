@@ -623,7 +623,7 @@ export function automationIdOf(run: Pick<RunRecord, 'automation' | 'automationTr
 
 /** Whether a list row is an automation-created task: the sidebar's Automations tab and its
  *  scoped "Archive all" read this, on the cockpit and in the store. */
-export function isAutomationTask(run: { automationId?: string }): boolean {
+export function isAutomationTask(run: { automationId?: string | undefined }): boolean {
   return run.automationId !== undefined;
 }
 

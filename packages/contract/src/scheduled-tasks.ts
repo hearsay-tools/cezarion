@@ -62,7 +62,7 @@ const scheduleFields = {
   effort: z.string().trim().min(1).max(32).optional(),
 };
 
-const notBoth = (value: { at?: string; delay?: string }) => !(value.at && value.delay);
+const notBoth = (value: { at?: string | undefined; delay?: string | undefined }) => !(value.at && value.delay);
 
 /** `cezar_schedule_task`. */
 export const scheduleTaskRequestSchema = z

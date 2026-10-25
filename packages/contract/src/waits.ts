@@ -387,7 +387,7 @@ export type WaitingOn = z.infer<typeof waitingOnSchema>;
 
 /** Full records carry the full delegation state; summaries and index rows the slim projection. */
 export type WaitingOnInput = Partial<Pick<RunRecord, 'waits' | 'autoResumeAt'>> & {
-  delegation?: DelegationState | RunDelegationSummary;
+  delegation?: DelegationState | RunDelegationSummary | undefined;
 };
 
 /** Ids a worker entry has not heard about yet, or requests without an outcome. */
@@ -454,13 +454,13 @@ export function asksQuestion(run: Pick<WaitingOnInput, 'waits'>): boolean {
 /** A resolved wait is a wake owed to the agent: its result is in, its turn has not started.
  *  Rung 10 of the attention ladder ("waiting for capacity"); a summary carries it as
  *  `waitWakePending`. */
-export function hasResolvedWait(run: { waitWakePending?: true } & Pick<WaitingOnInput, 'waits'>): boolean {
+export function hasResolvedWait(run: { waitWakePending?: true | undefined } & Pick<WaitingOnInput, 'waits'>): boolean {
   if (run.waitWakePending) return true;
   return Array.isArray(run.waits) && run.waits.some((wait) => wait?.phase === 'resolved');
 }
 
 /** A summary's `waitingOn` when it has one; a full or stream-patched record computes it. */
-export function resolveWaitingOn(run: { waitingOn?: WaitingOn } & WaitingOnInput): WaitingOn | undefined {
+export function resolveWaitingOn(run: { waitingOn?: WaitingOn | undefined } & WaitingOnInput): WaitingOn | undefined {
   return run.waitingOn ?? computeWaitingOn(run);
 }
 
