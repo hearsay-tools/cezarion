@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { expectNoWaitNudgeKinds } from './turn-end.testkit.ts';
-import { AUTONOMOUS_NUDGE, decideTurnEnd, NO_WAIT_NUDGE, NO_WAIT_NUDGE_MARKERS, turnEndHeartbeat, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
+import { AUTONOMOUS_NUDGE, decideTurnEnd, NO_WAIT_NUDGE, NO_WAIT_NUDGE_MARKERS, STEP_NUDGE_SUFFIX, turnEndHeartbeat, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
 
 /** A quiet final turn end whose owed input was already tried: nothing taken, nothing owed. */
 const quiet: TurnEndFacts = {
   sessionOpen: true, done: false, inputInFlight: false, inputQueued: false, inputTaken: false, nudgePending: false,
-  turnAsk: false, nativeAsk: false, question: false, agentWaits: false, cezarHumanWait: false, finalStep: true,
+  turnAsk: false, nativeAsk: false, question: false, agentWaits: false, cezarHumanWait: false, stepScope: false,
   noWaitNudgedLastTurn: false, completionNudgedLastTurn: false, autonomous: false, budgetSpent: false, tools: true,
 };
 const live = { doneRefused: { liveWorkers: true }, done: true };
@@ -34,9 +34,14 @@ describe('decideTurnEnd decides both nudge causes (hearsay-tools/cezarion#1234, 
     ['an open agent wait parks', { agentWaits: true }, { kind: 'park' }],
     ['a question parks', { question: true }, { kind: 'park' }],
     ['Cezar\'s own human wait parks', { cezarHumanWait: true }, { kind: 'park' }],
-    ['waiting outranks a non-final step', { agentWaits: true, finalStep: false }, { kind: 'park' }],
-    ['a non-final step with no wait completes', { finalStep: false }, { kind: 'complete-step' }],
-    ['a non-final step completes even with the budget spent', { finalStep: false, budgetSpent: true }, { kind: 'complete-step' }],
+    // hearsay-tools/cezarion#1620: an earlier workflow step completes only on a done.
+    ['an earlier step\'s done completes it', { done: true, stepScope: true }, { kind: 'done' }],
+    ['an earlier step parks on its wait', { agentWaits: true, stepScope: true }, { kind: 'park' }],
+    ['an earlier step with no wait gets the step nudge', { stepScope: true }, { ...noWaitNudge, text: `${NO_WAIT_NUDGE} ${STEP_NUDGE_SUFFIX}` }],
+    ['an earlier step without cezar tools gets the step marker nudge', { stepScope: true, tools: false }, { ...noWaitNudge, text: `${NO_WAIT_NUDGE_MARKERS} ${STEP_NUDGE_SUFFIX}` }],
+    ['an autonomous earlier step gets the step autonomous nudge', { stepScope: true, autonomous: true }, { ...autonomousNudge, text: `${AUTONOMOUS_NUDGE} ${STEP_NUDGE_SUFFIX}` }],
+    ['an earlier step with the budget spent opens the budget human wait', { stepScope: true, budgetSpent: true }, { kind: 'human-wait', via: 'budget' }],
+    ['an earlier step\'s second no-wait turn end opens the no-wait human wait', { stepScope: true, noWaitNudgedLastTurn: true }, { kind: 'human-wait', via: 'no-wait' }],
     ['no wait gets the nudge', {}, noWaitNudge],
     ['no wait without cezar tools gets the marker nudge', { tools: false }, { ...noWaitNudge, text: NO_WAIT_NUDGE_MARKERS }],
     ['a second no-wait turn end opens the no-wait human wait', { noWaitNudgedLastTurn: true }, { kind: 'human-wait', via: 'no-wait' }],

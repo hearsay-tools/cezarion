@@ -540,6 +540,10 @@ rl.on('line', async (line) => {
         emit({ method: 'item/commandExecution/outputDelta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'busy', delta: 'working\n' } });
         await new Promise(r => setTimeout(r, 100));
       }
+      const busy = 'busy complete\n\nCEZ:DONE';
+      emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_busy', text: '' } } });
+      emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_busy', delta: busy } });
+      emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_busy', text: busy } } });
       emit({ method: 'turn/completed', params: { turn: { id: 'turn_mock_1', status: 'completed' } } });
       return;
     }

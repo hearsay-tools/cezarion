@@ -73,7 +73,7 @@ describe('cezar_done tool contract', () => {
       expect(cezarServerInstructions(env)).toContain('- cezar_done: load when the task is complete and verified.');
       expect(cezarServerInstructions(env)).toContain('- cezar_ask: load for a user decision or missing input');
     }
-    expect(doneToolDefinition.description).toBe('Finish the task. Call it when the goal is fully achieved and verified and you have no question for the user; end your turn after it answers. Cezar closes the session at the end of this turn and cancels every open wait. It refuses, naming what to do first, while owned workers are live or uncollected, a worker question is unanswered, or your question to the user is still pending.');
+    expect(doneToolDefinition.description).toBe('Finish the task, or in a workflow step that is not the last, finish that step. Call it when the goal is fully achieved and verified and you have no question for the user; end your turn after it answers. Cezar closes the session at the end of this turn and cancels every open wait; after a step, Cezar starts the next step, and the answer names it. It refuses, naming what to do first, while owned workers are live or uncollected, a worker question is unanswered, or your question to the user is still pending.');
     expect(doneToolDefinition.inputSchema).toMatchObject({ type: 'object', additionalProperties: false, properties: { summary: { type: 'string', maxLength: 2000 } } });
     expect(doneToolDefinition.inputSchema).not.toHaveProperty('required');
   });

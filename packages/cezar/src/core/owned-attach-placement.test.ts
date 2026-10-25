@@ -40,7 +40,7 @@ const ATTACHED = { 'qa/1149/brief.md': 'the brief\n', 'qa/evidence.log': 'eviden
 // the worker's worktree holds at the moment its session starts (hearsay-tools/cezarion#1149).
 describe('attached parent files in the worker worktree', { timeout: 30_000 }, () => {
   let f: ReturnType<typeof fixture>;
-  const seen: Array<{ spec: AgentRunSpec; files: Record<string, string | undefined>; claudeLocal?: string; finish(): void }> = [];
+  const seen: Array<{ spec: AgentRunSpec; files: Record<string, string | undefined>; claudeLocal?: string; finish(): void; done(): void }> = [];
   const spawn = (paths: readonly string[]) => f.service.spawn(f.caller, { task: 'inspect', baseline: 'parent-head', requestId: randomUUID(),
     context: { artifacts: paths.map(path => ({ kind: 'parent-file' as const, path })) } satisfies WorkerSpawnRequest['context'] });
   const commit = (path: string, content: string) => {
@@ -64,7 +64,7 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     vi.stubEnv('CEZ_DELEGATION', '1'); vi.stubEnv('CEZ_DRY_RUN', '1'); vi.stubEnv('CEZ_AUTONAME', '0');
     f = fixture();
     vi.spyOn(runners, 'createRunner').mockImplementation(backend => ({ backend: backend ?? 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent',
-      interrupt: async () => {}, run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), startSession: spec => {
+      interrupt: async () => {}, run: async () => ({ text: '', toolCalls: [], tokensUsed: 0 }), startSession: (spec, onEvent) => {
         const read = (path: string) => existsSync(join(spec.cwd, path)) ? readFileSync(join(spec.cwd, path), 'utf8') : undefined;
         const files = Object.fromEntries(Object.keys(ATTACHED).map(path => [path, read(path)]));
         const claudeLocal = read('CLAUDE.local.md');
@@ -73,7 +73,9 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
         const finish = () => { if (open) { open = false; resolve({ text: '', toolCalls: [], tokensUsed: 0 }); } };
         const session: AgentSession = { result, get open() { return open; }, sendMessage: () => open, sendAgentMessage: () => open ? Promise.resolve() : false,
           discardQueuedMessages: () => {}, holdsHumanInput: () => false, interrupt: finish, end: finish };
-        seen.push({ spec, files, claudeLocal, finish }); return session;
+        // An earlier workflow step completes only on its done (hearsay-tools/cezarion#1620).
+        const done = () => { if (open) { onEvent?.({ type: 'text', text: 'ok\n\nCEZ:DONE' }); onEvent?.({ type: 'turn-end' }); } finish(); };
+        seen.push({ spec, files, claudeLocal, finish, done }); return session;
       } }));
   });
   /** Accept `paths` through the service, materialize the worker worktree, and return placement's options. */
@@ -146,7 +148,7 @@ describe('attached parent files in the worker worktree', { timeout: 30_000 }, ()
     await launch();
     await until(() => seen.length === 1);
     rmSync(join(seen[0]!.spec.cwd, 'qa/1149/brief.md'));
-    seen[0]!.finish();
+    seen[0]!.done();
     await until(() => seen.length === 2);
     seen[1]!.finish();
     expect(await f.manager.awaitRunTermination(workerId, 15_000)).toBe(true);

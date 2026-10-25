@@ -35,7 +35,7 @@ export type CezarToolHandlers = {
   /** `cezar_ask` (hearsay-tools/cezarion#1234): opens the run's human wait with its card. */
   ask: (request: CezarAskRequest, signal: AbortSignal) => Promise<CezarAskAnswer>;
   cancelWait: (request: CezarCancelWaitRequest, signal: AbortSignal) => Promise<CezarCancelWaitAnswer>;
-  /** `cezar_done` (hearsay-tools/cezarion#1234): accepted means the run finishes at this turn's end. */
+  /** `cezar_done` (hearsay-tools/cezarion#1234): accepted means the run, or a workflow step that is not the last, finishes at this turn's end (hearsay-tools/cezarion#1620). */
   finishTurn: (request: CezarDoneRequest, signal: AbortSignal) => Promise<CezarDoneAnswer>;
   /** #781: absent where no cockpit owns the run, which the route answers as `headless`. */
   registerPreview?: PreviewRegistration;

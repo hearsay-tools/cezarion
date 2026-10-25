@@ -89,6 +89,7 @@ const engine = () => manager as unknown as {
 };
 // The delivery bound, not the backoff, is what these cells pin: retries start at once.
 const retryAtOnce = () => { engine().wakeRetryBackoff = { fastMs: 0, fastCount: MAX_WAKE_DELIVERY_ATTEMPTS, capMs: 0 }; };
+const stepStatus = (id: string, stepId: string) => store.getRun(id)?.steps.find(step => step.id === stepId)?.status;
 const failedSteps = (id: string) => store.getRun(id)?.steps.filter(step => step.status === 'failed').length;
 
 /** The run settled `failed` at the delivery bound and still holds the result: resolved, its input
@@ -1235,24 +1236,24 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(closed).toEqual([expect.objectContaining({ via: 'cezar_done' })]);
       });
 
-      // The turn end of a step that is not the last runs the next step, so the done it would
-      // promise never happens: the tool refuses instead of answering a finish.
-      it(`${runner} U6s cezar_done in a workflow step that is not the last is refused with not_final_step, and the next step runs`, async () => {
+      // hearsay-tools/cezarion#1620: every agent step accepts the done. In a step that is not the
+      // last, it completes that step, says which step starts, and the next step runs.
+      it(`${runner} U6s cezar_done in a workflow step that is not the last completes that step, and the next step runs`, async () => {
         nativeWire(runner);
         const answers = join(root, 'done-answers');
         process.env.CEZ_MOCK_CI_RESULT = answers;
         const chain = workflowDefSchema.parse({ name: 'done-chain', source: 'file', steps: [
           { id: 'implement', prompt: '{{task}}' },
-          { id: 'review', prompt: HARNESS_ADAPTERS[runner].scenarios.baseline! },
+          { id: 'review', name: 'Review', prompt: HARNESS_ADAPTERS[runner].scenarios.baseline! },
         ] });
-        const run = manager.startRun(chain, { task: toolCall('cezar_done', { summary: 'too early' }), runner });
-        await until(() => store.getRun(run.id)?.status === 'waiting' && existsSync(answers));
+        const run = manager.startRun(chain, { task: toolCall('cezar_done', { summary: 'step shipped' }), runner });
+        await until(() => stepStatus(run.id, 'review') === 'waiting' && existsSync(answers));
         const answer = JSON.parse(JSON.parse(readFileSync(answers, 'utf8')).response.content[0].text.split('\n')[0]);
-        expect(answer).toMatchObject({ ok: false, code: 'not_final_step' });
-        expect(answer.message).toContain('next step');
+        expect(answer).toMatchObject({ ok: true, finishes: 'at_turn_end', completes: 'step', next_step: 'Review' });
         expect(store.getRun(run.id)!.steps.map(step => [step.id, step.status])).toEqual([['implement', 'done'], ['review', 'waiting']]);
-        expect(store.readEvents(run.id).some(event => event.type === 'lifecycle' && event.message === 'goal achieved — session closed')).toBe(false);
-        expect(store.readEvents(run.id).some(event => event.type === 'note' && event.message === 'too early')).toBe(false);
+        const closings = store.readEvents(run.id).filter(event => event.type === 'lifecycle' && /session closed$/.test(String(event.message)));
+        expect(closings).toEqual([expect.objectContaining({ message: 'step complete — session closed', via: 'cezar_done' })]);
+        expect(store.readEvents(run.id).some(event => event.type === 'note' && event.message === 'step shipped')).toBe(true);
       });
 
       it(`${runner} U7d the done line and cezar_done finish through the same path`, async () => {

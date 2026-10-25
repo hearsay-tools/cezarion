@@ -312,6 +312,8 @@ export type CezarDoneRequest = z.infer<typeof cezarDoneRequestSchema>;
 
 // `worker_wait_pending` (here and in the ask and CI wait codes) was the old completion wait's
 // refusal; it is kept for old clients and never returned since hearsay-tools/cezarion#1301.
+// `not_final_step` is kept the same way: every agent step accepts a done since
+// hearsay-tools/cezarion#1620.
 export const doneErrorCodeSchema = z.enum([
   'workers_outstanding', 'workers_uncollected', 'worker_questions', 'human_question_pending', 'worker_wait_pending',
   'root_finish_pending', 'not_final_step', 'manager_disposed', 'capability_revoked', 'run_missing', 'run_not_running', 'run_stopping',
@@ -320,12 +322,19 @@ export const doneErrorCodeSchema = z.enum([
 ]);
 export type DoneErrorCode = z.infer<typeof doneErrorCodeSchema>;
 
+const doneAccepted = {
+  ok: z.literal(true),
+  finishes: z.literal('at_turn_end'),
+  open_waits: z.array(openWaitSchema).max(WAIT_LIMIT),
+};
+
+/** An accepted done finishes the task, or, in a workflow step that is not the last, completes that
+ *  step and starts `next_step`, named as the run's rail names it (hearsay-tools/cezarion#1620). */
 export const cezarDoneAnswerSchema = z.discriminatedUnion('ok', [
-  z.object({
-    ok: z.literal(true),
-    finishes: z.literal('at_turn_end'),
-    open_waits: z.array(openWaitSchema).max(WAIT_LIMIT),
-  }).strict(),
+  z.discriminatedUnion('completes', [
+    z.object({ ...doneAccepted, completes: z.literal('task') }).strict(),
+    z.object({ ...doneAccepted, completes: z.literal('step'), next_step: z.string().min(1) }).strict(),
+  ]),
   z.object({
     ok: z.literal(false),
     code: doneErrorCodeSchema,

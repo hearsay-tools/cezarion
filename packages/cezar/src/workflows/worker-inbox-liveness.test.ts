@@ -16,7 +16,7 @@ describe('worker inbox holds nonfinal agent completion', { timeout: 30_000 }, ()
     const wire = controlledWire({ firstResultGate: gate });
     const run = manager.startRun({ name: 'inbox chain', source: 'built-in', steps: [
       { id: 'task', prompt: '{{task}}' }, { id: 'check', command: 'echo checked' },
-    ] }, { task: 'Handle worker progress', runner: 'claude' });
+    ] }, { task: 'Handle worker progress mock:done', runner: 'claude' });
     store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
     await until(wire.initialReceived);
     const sender = { id: randomUUID() };
@@ -26,7 +26,7 @@ describe('worker inbox holds nonfinal agent completion', { timeout: 30_000 }, ()
   it.each(['release', 'expiry', 'ack'] as const)('keeps the agent→check recipient live until inbox %s', async action => {
     const { run, sender, gate } = await startChain();
     const input = { id: randomUUID(), parentRunId: run.id, source: 'agent' as const,
-      text: 'Review this before checking', createdAt: new Date().toISOString(),
+      text: 'Review this before checking mock:done', createdAt: new Date().toISOString(),
       conversation: { senderRunId: sender.id, recipientRunId: run.id, kind: 'progress' as const } };
     store.commitAgentInputs(run.id, [input]);
     vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] });
@@ -38,13 +38,16 @@ describe('worker inbox holds nonfinal agent completion', { timeout: 30_000 }, ()
     writeFileSync(gate, 'release');
     await until(() => store.readEvents(run.id).some(event => event.type === 'turn-end'));
     await vi.advanceTimersByTimeAsync(400); // Beyond the runner's actual auto-end window.
+    // The turn's done waits behind the claimed input: the step neither completes nor closes.
     expect(session.open).toBe(true);
-    expect(store.getRun(run.id)?.steps.map(step => step.status)).toEqual(['running', 'pending']);
+    expect(store.getRun(run.id)?.steps.map(step => step.status)).toEqual([expect.stringMatching(/^(running|waiting)$/), 'pending']);
     expect(store.getRun(run.id)?.agentInputs?.[0]?.deliveredAt).toBeUndefined();
 
     if (action === 'expiry') await vi.advanceTimersByTimeAsync(120_000);
     else if (action === 'release') manager.releaseInbox(run.id, generation, receipt.receiptId);
     else manager.acknowledgeInbox(run.id, generation, receipt.receiptId);
+    // An acknowledged input settles the done the turn kept behind it; a released or expired one
+    // runs as its own turn, which signals done (hearsay-tools/cezarion#1620).
     await until(() => terminal.includes(store.getRun(run.id)!.status));
     expect(store.getRun(run.id)?.steps.map(step => step.status)).toEqual(['done', 'done']);
     expect(store.getRun(run.id)?.agentInputs?.[0]?.deliveredAt).toBeDefined();
@@ -52,7 +55,8 @@ describe('worker inbox holds nonfinal agent completion', { timeout: 30_000 }, ()
     expect(semaphore.busy()).toBe(0);
   });
 
-  it('auto-ends the same chain normally without an inbox claim', async () => {
+  // hearsay-tools/cezarion#1620: the earlier step completes on its done, not on a quiet turn end.
+  it('completes the same chain on its done without an inbox claim', async () => {
     const { run, gate } = await startChain();
     writeFileSync(gate, 'release');
     await until(() => terminal.includes(store.getRun(run.id)!.status));

@@ -190,7 +190,7 @@ describe('CI H1 executable harness parity', () => {
         registerWait: async () => { registrations++; return { answer: { ok: true, wait_id: wait.id, kind: 'pr', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'pr', source: 'agent', via: 'cezar_wait', phase: 'open' } }; },
         cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }),
         ask: async () => { throw new Error('not an ask test'); },
-        finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', open_waits: [] }),
+        finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: [] }),
       });
       try {
         const resultFile = join(dir, 'result');
@@ -261,7 +261,7 @@ describe('U0 wait tools on every native wire', () => {
         },
         ask: async request => { calls.push(['ask', request]); return { ok: true, wait_id: humanId, open_waits: humanOpen }; },
         cancelWait: async request => { calls.push(['cancel', request]); return { cancelled: true, wait_id: wait.id, open_waits: [] }; },
-        finishTurn: async request => { calls.push(['done', request]); return { ok: true, finishes: 'at_turn_end', open_waits: openWaits }; },
+        finishTurn: async request => { calls.push(['done', request]); return { ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: openWaits }; },
       });
       try {
         const resultFile = join(dir, 'result');
@@ -283,7 +283,7 @@ describe('U0 wait tools on every native wire', () => {
           expect(hint).toBe('Registered. End your turn to wait; any open wait wakes you when it resolves.');
         } else if (tool === 'cezar_done') {
           expect(calls).toEqual([['done', {}]]);
-          expect(JSON.parse(json)).toEqual({ ok: true, finishes: 'at_turn_end', open_waits: openWaits });
+          expect(JSON.parse(json)).toEqual({ ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: openWaits });
           expect(hint).toBe('Accepted. End your turn; Cezar finishes the task at its end.');
         } else {
           expect(calls).toEqual([['cancel', args]]);

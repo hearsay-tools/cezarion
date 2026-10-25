@@ -18,7 +18,7 @@ const CHANNELS = {
 
 function read(messages: string[], { channel = 'identical', liveWorkers = false }: { channel?: keyof typeof CHANNELS; liveWorkers?: boolean } = {}) {
   const [v1, v2] = CHANNELS[channel](messages);
-  return classifyTurnEnd(v1, v2, { sessionOpen: true, interactive: true, pendingHumanAsk: false, scheduledWake: false, liveWorkers });
+  return classifyTurnEnd(v1, v2, { sessionOpen: true, pendingHumanAsk: false, scheduledWake: false, liveWorkers });
 }
 const QUESTIONS = JSON.parse(ASK_TEXT.slice('CEZ:ASK '.length)).questions;
 const DANGER = [expect.objectContaining({ tone: 'danger' })];

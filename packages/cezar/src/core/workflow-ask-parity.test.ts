@@ -30,12 +30,24 @@ describe('intermediate workflow ASK parity — #427', () => {
             expect(run().steps.find(s => s.id === 'implement')?.status).toBe('done');
             expect(checks()).toMatchObject([{ stepId: 'verify', exitCode: 0 }]);
           };
-          if (row.id === 'Q2' || row.id === 'Q9') {
+          if (row.id === 'Q2') {
+            // A malformed marker is no done (hearsay-tools/cezarion#1620): the step parks on
+            // Cezar's human wait, and only a done in the reply runs the tail.
+            expect(events().some(e => e.type === 'note' && e.stepId === 'implement' && e.tone === 'danger' &&
+              /CEZ:ASK.*JSON/.test(String(e.message)))).toBe(true);
+            expect(events().filter(e => e.type === 'ask.requested')).toHaveLength(0);
+            expect(run().status).toBe('waiting');
+            expect((run().waits ?? []).some(wait => wait.kind === 'human' && wait.source === 'cezar')).toBe(true);
+            expect(run().steps.map(s => s.status)).toEqual(['waiting', 'pending']);
+            expect(checks()).toEqual([]);
+            expect(manager.sendMessage(runId, [{ type: 'text', text: 'Carry on. mock:done' }])).toBe(true);
+            await complete();
+            return;
+          }
+          if (row.id === 'Q9') {
             await complete();
             expect(events().filter(e => e.type === 'ask.requested')).toHaveLength(0);
-            expect(events().some(e => e.type === 'note' && (row.id === 'Q2'
-              ? e.stepId === 'implement' && e.tone === 'danger' && /CEZ:ASK.*JSON/.test(String(e.message))
-              : String(e.message).startsWith(AUTONOMOUS_ASK_NOTE)))).toBe(true);
+            expect(events().some(e => e.type === 'note' && String(e.message).startsWith(AUTONOMOUS_ASK_NOTE))).toBe(true);
             return;
           }
           expect(run().status).toBe('waiting');
