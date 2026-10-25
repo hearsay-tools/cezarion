@@ -4,6 +4,8 @@ cezar is a **parallel coding-agents orchestrator**: a local cockpit (CLI + brows
 
 Architecture decisions live in [docs/adr/](docs/adr/). Consult the relevant records before changing a mechanism.
 
+This file holds what every task needs. A new agent rule goes in the narrowest document its tasks already read, as [docs/sdlc/friction.md § Where a new agent rule goes](docs/sdlc/friction.md#where-a-new-agent-rule-goes) says; this file gains at most a pointer to it. `.github/scripts/agents-md-budget.test.cjs` holds this file to a byte limit that only goes down.
+
 ## Issue and PR citations
 
 This fork is `hearsay-tools/cezarion`; upstream is `open-mercato/cezar`.
