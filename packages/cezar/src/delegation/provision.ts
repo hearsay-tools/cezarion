@@ -59,6 +59,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `Native workers are not tracked by cezar: do not spawn them.`,
         `Per-run controls suppress verified native entry points only; custom extensions, Claude forked skills (context: fork) and same-user unrestricted shell are not hard isolation.`,
         `Commit reviewed work before your parent deliberately integrates it; report the summary, commits, tests and remaining concerns.`,
+        `When you park before finishing while your parent waits on you, Cezar tells your parent what you wait on and quotes your last message: end such a turn by saying what you wait on and what you have done.`,
       ].join(' ')
       : [
         `Prefer governed cezar workers for delegation.`,
@@ -88,6 +89,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
         `cancel-wait <wait-id> stops one wait, is safe to retry, and never touches workers.`,
         `Wait registers and returns immediately: end your turn to release capacity, then Cezar resumes you on a selected terminal outcome or deadline (default 600 seconds).`,
         `Your other waits stay open beside it; timeout/cancellation reports partial outcomes and unresolved workers. The same wait is open to you as cezar_wait with kind "worker".`,
+        `When a worker you wait on parks before finishing, Cezar sends you a notice from it naming what it waits on, at most one per wait; like any message it wakes you and closes no wait.`,
         `collect returns revision/status/settled plus typed summary/head/diff/artifacts availability and records the latest evidence under the parent.`,
         `An available diff.path points to a JSON result file: read its diffSnapshot field for the bounded patch, not the file as a raw patch.`,
         `Running output is partial.`,

@@ -3,12 +3,21 @@ import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import type { WorkerCollectedResult } from '@open-mercato/cezar-contract';
-import type { RunRecord, RunStore } from '../runs/store.ts';
+import type { RunEvent, RunRecord, RunStore } from '../runs/store.ts';
 import { isAttachmentFileName, resolveAttachmentPath } from '../workflows/attachment-path.ts';
 import { readOwnedDiff, verifyOwnedWorkspace } from './workspace.ts';
 import { artifactDirectory, listArtifacts, readArtifact } from '../artifacts/store.ts';
 
 export const workerRevision = (run: RunRecord): number => run.delegation?.role === 'worker' ? run.delegation.executionRevision ?? 0 : 0;
+
+/** The text of a top-level assistant message event, v1 `text` or v2 `item.completed`; the newest
+ *  one is what `collect` reports and what a park notice quotes (hearsay-tools/cezarion#1327). */
+export function topLevelAssistantText(event: RunEvent): string | undefined {
+  const item = event.item as { kind?: string; role?: string; text?: string; parentItemId?: string } | undefined;
+  const text = event.type === 'text' && !event.parentItemId ? event.text
+    : event.type === 'item.completed' && item?.kind === 'message' && item.role === 'assistant' && item.parentItemId === undefined ? item.text : undefined;
+  return typeof text === 'string' ? text : undefined;
+}
 
 /** Snapshot collection is deliberately read-only until the service rechecks lifecycle identity. */
 export async function collectWorkerEvidence(repoRoot: string, store: RunStore, run: RunRecord): Promise<{ result: WorkerCollectedResult; diffSnapshot?: string }> {
@@ -20,10 +29,8 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
   const events = allEvents.filter(event => event.seq > (delegation.executionStartSeq ?? -1));
   let summary: WorkerCollectedResult['summary'] = { state: 'unavailable', reason: 'no-assistant-output' };
   for (const event of events) {
-    const item = event.item as { kind?: string; role?: string; text?: string; parentItemId?: string } | undefined;
-    const text = event.type === 'text' && !event.parentItemId ? event.text
-      : event.type === 'item.completed' && item?.kind === 'message' && item.role === 'assistant' && item.parentItemId === undefined ? item.text : undefined;
-    if (typeof text === 'string' && text.trim()) summary = { state: 'available', text: text.slice(0, 4000), source: 'assistant', seq: event.seq, truncated: text.length > 4000 };
+    const text = topLevelAssistantText(event);
+    if (text?.trim()) summary = { state: 'available', text: text.slice(0, 4000), source: 'assistant', seq: event.seq, truncated: text.length > 4000 };
   }
   const destroyed = delegation.destroy?.phase === 'complete';
   const workspaceRemoved = !!delegation.destroy && !delegation.destroy.remaining.includes('worktree');

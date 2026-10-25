@@ -174,3 +174,34 @@ A first reply after expiry amends only `timed-out` to `replied-late`, with the
 reply ID and observation time. Other settlements stay final, and settled waits
 never reopen. The transcript emits an idempotent amendment projection and accepts
 that specific transition when replayed.
+
+## Park notices — hearsay-tools/cezarion#1327
+
+A parent waiting on a worker wakes on the worker's outcome, the wait's deadline,
+or a message. A worker that parks before finishing sends none of these, so the
+parent slept until the deadline (or forever, on Cezar's deadline-less completion
+wait). Cezar now sends the parent a **park notice** from the worker.
+
+- When: a worker is `waiting`, not stopping, destroyed or complete, and has no
+  pending question and no queued input, while its parent has an open `worker`
+  wait that selects it, by worker ID or by a request sent to it. Any park counts
+  except a question, which already reaches the parent as a routed request (#505).
+  Queued input wakes the worker, so the turn that takes it decides at its park.
+- Who fires it: the worker's turn-end park (`settleTurn`, every entry), the
+  parent's worker-wait registration and completion wait, and the recovery sweep.
+  The last one posts a notice that a crash lost before its commit.
+- What: one `progress` message, sender the worker, recipient the parent,
+  committed with the parent's input in one write. It wakes the parent and closes
+  no wait. Its text says Cezar wrote it, lists the worker's open waits as the
+  wake footer names them (or says it waits for a message), quotes the worker's
+  last assistant text of its parking turn (at most 1,000 characters, without
+  `CEZ:` lines), and names `worker inspect` and `worker send`.
+- How often: the ID derives from the worker and the parent's wait, so each wait
+  gets at most one notice from each worker. None is sent when the worker's
+  parking turn already messaged the parent, Cezar's own notice included. A full
+  ledger or parent inbox sends none, and the worker's log gets one note per wait.
+- A worker that finishes without parking sends none.
+
+Instructions tell workers that the notice quotes their last message, and tell
+parents that a notice is progress. RUNNER_IDS cells U3n, U3r and U3d pin it on
+every native wire, with the worker on that wire.
