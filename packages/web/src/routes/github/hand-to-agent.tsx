@@ -108,10 +108,11 @@ export function HandToAgent({
   // could not tell the item context had been dropped. Refs only, never the quoted body: a wall
   // of issue text is unreadable in a box you are meant to edit, and the URL is right there.
   // Captured ONCE per mount, not recomputed per render: `prompt` is seeded from it, so the two
-  // must not drift. The tab loads GitHub data twice (a fast batch, then a `limit: 1000` refetch
-  // that replaces it — github.tsx), and the component is keyed by `item.url`, not by title — so a
-  // title that differs between the two payloads would otherwise leave `prompt !== base`, which
-  // reads as "user-owned": the pre-fill would be persisted as a draft and auto-apply would stop.
+  // must not drift. The tab can replace an item's payload while it stays open (the live read of
+  // page 1, a focus refetch or Refresh — `useGithubPages`), and the component is keyed by
+  // `item.url`, not by title — so a title that differs between two payloads would otherwise leave
+  // `prompt !== base`, which reads as "user-owned": the pre-fill would be persisted as a draft and
+  // auto-apply would stop.
   const [base] = useState(() => githubTaskRef(item))
   // The route remounts this component per item (key={item.url}); the DRAFT — not plain component
   // state (#408) — restores whatever was typed for THIS item, so switching away and back (or a

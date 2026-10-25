@@ -172,7 +172,7 @@ export function TasksOverview({
   onOriginChange?: (origin: TaskOrigin) => void
   /** The search text in the URL, and the setter that writes the typed text back. */
   urlQuery?: string
-  onQueryChange?: (query: string) => void
+  onQueryChange?: TasksQueryWriter
   /** Which saved fold preferences this list reads: `project:<id>`. */
   foldScope?: string
   /** An automation's display name, or undefined when it is unknown here. */
@@ -284,21 +284,37 @@ export function TasksOverview({
   )
 }
 
+/** Hands the search text to the page; the page calls `written` with each trimmed text its
+ *  debounced write puts in the URL. */
+type TasksQueryWriter = (query: string, written: (query: string) => void) => void
+
 /**
  * The search box's text. It starts from the URL's, follows the URL when something else changes
  * it (a link, Back), and keeps what is being typed while the page's own debounced, trimmed write
  * catches up.
+ *
+ * `sent` holds the trimmed texts the page wrote to the URL since it last changed, oldest first;
+ * the page reports each one through `written` when its debounced write changes the URL. The
+ * router renders each write later, in a transition, so the URL can show an older one after the
+ * box has moved on, even after it was cleared: that is the box's own echo, never a change from
+ * outside (hearsay-tools/cezarion#1710). A text typed and erased inside one debounce is never
+ * written, so a link to it is still followed.
  */
-function useUrlQuery(urlQuery: string, onQueryChange: ((query: string) => void) | undefined) {
+function useUrlQuery(urlQuery: string, onQueryChange: TasksQueryWriter | undefined) {
   const [query, setQuery] = React.useState(urlQuery)
-  const written = React.useRef(urlQuery)
+  const shown = React.useRef(urlQuery)
+  const typed = React.useRef(urlQuery)
+  const sent = React.useRef<string[]>([])
   React.useEffect(() => {
-    if (urlQuery !== written.current) setQuery(urlQuery)
-    written.current = urlQuery
+    if (urlQuery === shown.current) return
+    shown.current = urlQuery
+    const own = sent.current.indexOf(urlQuery)
+    sent.current = own === -1 ? [] : sent.current.slice(own + 1)
+    if (own === -1 && urlQuery !== typed.current) setQuery(urlQuery)
   }, [urlQuery])
   React.useEffect(() => {
-    written.current = query.trim()
-    onQueryChange?.(query)
+    typed.current = query.trim()
+    onQueryChange?.(query, (written) => { sent.current.push(written) })
   }, [onQueryChange, query])
   return [query, setQuery] as const
 }
@@ -1563,10 +1579,15 @@ function useTasksUrlState() {
     const pending = timer
     return () => clearTimeout(pending.current)
   }, [])
-  const writeQuery = React.useCallback((query: string) => {
+  const writeQuery = React.useCallback<TasksQueryWriter>((query, written) => {
     clearTimeout(timer.current)
     const trimmed = query.trim()
-    timer.current = setTimeout(() => write(setParam('q', trimmed === '' ? null : trimmed)), QUERY_DEBOUNCE_MS)
+    timer.current = setTimeout(() => write((current) => {
+      const next = setParam('q', trimmed === '' ? null : trimmed)(current)
+      // The writer navigates exactly when the params change, so this is a write the URL will show.
+      if (next.get('q') !== current.get('q')) written(trimmed)
+      return next
+    }), QUERY_DEBOUNCE_MS)
   }, [write])
   return {
     view,

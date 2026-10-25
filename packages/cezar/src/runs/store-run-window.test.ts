@@ -2,8 +2,10 @@ import { randomUUID } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { DatabaseSync } from 'node:sqlite';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+import { ARCHIVED_ROOT, RUNS_DB_FILE, RunDatabase } from './run-database.ts';
 import { ARCHIVED_WINDOW, RunStore } from './store.ts';
 import { seedRuns } from './run-store.testkit.ts';
 
@@ -164,4 +166,196 @@ it('archived search retains summaries whose only match is a PR in the collection
     expect('error' in found).toBe(false);
     if (!('error' in found)) expect(found.runs.map(run => run.id)).toEqual(['split']);
   }
+});
+
+/**
+ * `listArchivedRuns` (#864, hearsay-tools/cezarion#1644): guards for the steps its body took in
+ * one pass — the cursor, the stored rows, the held overlay, the page and its hydration. They pin
+ * what the function answers and which store reads it makes, so splitting it into steps cannot
+ * change either.
+ */
+describe('RunStore.listArchivedRuns', () => {
+  /** A step status the record schema rejects: the row's stored summary is valid, its record is not. */
+  const unreadableSteps = [{ id: 's', name: 's', kind: 'agent', status: 'bogus', iterations: 1, tokensUsed: 0 }];
+
+  const list = (store: RunStore, options: Parameters<RunStore['listArchivedRuns']>[0]) => {
+    const found = store.listArchivedRuns(options);
+    if ('error' in found) throw new Error(found.error);
+    return found;
+  };
+
+  /** The three store reads the archived list may make; each still calls through. */
+  const spyOnReads = () => ({
+    keys: vi.spyOn(RunDatabase.prototype, 'listKeysWhere'),
+    search: vi.spyOn(RunDatabase.prototype, 'searchRootSummaries'),
+    summaries: vi.spyOn(RunDatabase.prototype, 'getSummaries'),
+  });
+
+  /** Rewrite a stored summary the way an older writer left it, while the record stays valid. */
+  const setStoredSummaries = (summaries: Record<string, string>) => {
+    const db = new DatabaseSync(join(dataDir, RUNS_DB_FILE));
+    try {
+      for (const [id, summary] of Object.entries(summaries)) db.prepare('UPDATE runs SET summary = ? WHERE id = ?').run(summary, id);
+    } finally {
+      db.close();
+    }
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('answers { error } for a cursor this store did not write, before it reads a row', () => {
+    seedRuns(dataDir, [root('a', 1)]);
+    const store = open();
+    const { keys, search, summaries } = spyOnReads();
+    // `{"c":1}`: JSON, but not a cursor this store wrote.
+    for (const before of ['garbage', 'eyJjIjoxfQ']) {
+      expect(store.listArchivedRuns({ before, limit: 10 })).toEqual({ error: 'before is not a cursor this server wrote' });
+    }
+    for (const spy of [keys, search, summaries]) expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('ranks by key alone and reads only the page rows in full', () => {
+    seedRuns(dataDir, [1, 2, 3, 4, 5].map((n) => root(`a${n}`, n)));
+    const store = open();
+    const { keys, search, summaries } = spyOnReads();
+
+    const first = list(store, { limit: 2 });
+    expect(ids(first.runs)).toEqual(['a5', 'a4']);
+    expect(first.total).toBe(5);
+    expect(first.nextCursor).not.toBeNull();
+    expect(keys).toHaveBeenCalledExactlyOnceWith(ARCHIVED_ROOT);
+    expect(search).not.toHaveBeenCalled();
+    expect(summaries).toHaveBeenCalledExactlyOnceWith(['a5', 'a4']);
+    expect(keys.mock.invocationCallOrder[0]).toBeLessThan(summaries.mock.invocationCallOrder[0]!);
+
+    const second = list(store, { limit: 2, before: first.nextCursor! });
+    expect(ids(second.runs)).toEqual(['a3', 'a2']);
+    expect(second.total).toBe(5);
+    const last = list(store, { limit: 2, before: second.nextCursor! });
+    expect(ids(last.runs)).toEqual(['a1']);
+    expect(last).toMatchObject({ total: 5, nextCursor: null });
+  });
+
+  it('gives no next cursor when the page takes the last row, and one when a row is left', () => {
+    seedRuns(dataDir, [1, 2, 3].map((n) => root(`a${n}`, n)));
+    const store = open();
+    expect(list(store, { limit: 3 })).toMatchObject({ total: 3, nextCursor: null });
+    expect(list(store, { limit: 2 }).nextCursor).not.toBeNull();
+  });
+
+  it('with q, searches once, makes no other ranking read and counts only the matches', () => {
+    seedRuns(dataDir, [
+      root('a1', 1, { title: 'needle one' }), root('a2', 2), root('a3', 3, { title: 'needle three' }), root('a4', 4),
+      // The search reads roots, archived or not; only archived ones list.
+      root('live', 5, { title: 'needle live', archived: false }),
+    ]);
+    const store = open();
+    const { keys, search, summaries } = spyOnReads();
+
+    // Every ranked row carries its summary, so the page reads none in full.
+    const found = list(store, { q: '  needle ', limit: 1 });
+    expect(ids(found.runs)).toEqual(['a3']);
+    expect(found.total).toBe(2);
+    expect(found.nextCursor).not.toBeNull();
+    expect(search).toHaveBeenCalledTimes(1);
+    expect(keys).not.toHaveBeenCalled();
+    expect(summaries).toHaveBeenCalledExactlyOnceWith([]);
+
+    // A q of spaces is no q.
+    expect(list(store, { q: '   ', limit: 10 }).total).toBe(4);
+    expect(keys).toHaveBeenCalledTimes(1);
+  });
+
+  it('skips a deleted run, an unreadable run and the stored row of a held run, with and without q', () => {
+    seedRuns(dataDir, [
+      root('a1', 1, { title: 'needle' }), root('a2', 2, { title: 'needle' }), root('a3', 3, { title: 'needle' }),
+      root('a4', 4, { title: 'needle', steps: unreadableSteps }), root('a5', 5, { title: 'needle' }),
+    ]);
+    const store = open();
+    expect(store.getRun('a4')).toBeUndefined();
+    expect(store.isUnreadable('a4')).toBe(true);
+    // Held and unarchived in memory, while its row is still archived: the record wins.
+    store.setArchived('a3', false);
+    // Last: a write commits the deletes pending before it, and this row must still be stored.
+    expect(store.deleteRun('a2')).toBe(true);
+
+    for (const q of [undefined, 'needle']) {
+      const found = list(store, { limit: 10, ...(q === undefined ? {} : { q }) });
+      expect(ids(found.runs), `q=${q}`).toEqual(['a5', 'a1']);
+      expect(found.total, `q=${q}`).toBe(2);
+    }
+  });
+
+  it('lists a held run by its record, in place of its stored row', () => {
+    seedRuns(dataDir, [root('a1', 1, { title: 'alpha' }), root('a2', 2, { title: 'alpha' }), root('a3', 3, { title: 'alpha' })]);
+    const store = open();
+    store.updateRun('a2', { title: 'omega' });
+
+    const all = list(store, { limit: 10 });
+    expect(all.runs.map((run) => [run.id, run.title])).toEqual([['a3', 'alpha'], ['a2', 'omega'], ['a1', 'alpha']]);
+    expect(all.total).toBe(3);
+    // Found by the record alone: the stored summary never says omega.
+    expect(ids(list(store, { q: 'omega', limit: 10 }).runs)).toEqual(['a2']);
+    // The stored row said alpha, but the record that replaces it does not.
+    const alpha = list(store, { q: 'alpha', limit: 10 });
+    expect(ids(alpha.runs)).toEqual(['a3', 'a1']);
+    expect(alpha.total).toBe(2);
+  });
+
+  it('matches a stored run and a held run by their automation\'s name when given the names (hearsay-tools/cezarion#1616)', () => {
+    const trigger = { automationId: 'auto-7f3', automationRevision: 1, receiptId: 'r1', trigger: 'schedule', occurrenceAt: at(1) };
+    seedRuns(dataDir, [root('stored', 1, { automationTrigger: trigger }), root('held', 2, { automationTrigger: trigger }), root('other', 3)]);
+    const store = open();
+    store.updateRun('held', { title: 'held run' });
+    const automationNames = new Map([['auto-7f3', 'Dependency bump']]);
+
+    // The stored summary holds the automation's id, never its name, so SQL must not drop the row.
+    expect(ids(list(store, { q: 'dependency', limit: 10, automationNames }).runs)).toEqual(['held', 'stored']);
+    expect(ids(list(store, { q: 'bump held', limit: 10, automationNames }).runs)).toEqual(['held']);
+    // Without a lookup the automation is not searched; an empty one finds it by its recorded id.
+    expect(ids(list(store, { q: 'dependency', limit: 10 }).runs)).toEqual([]);
+    expect(ids(list(store, { q: 'auto-7f3', limit: 10 }).runs)).toEqual([]);
+    expect(ids(list(store, { q: 'auto-7f3', limit: 10, automationNames: new Map() }).runs)).toEqual(['held', 'stored']);
+  });
+
+  it('leaves out a held archived worker, with and without q', () => {
+    const parent = randomUUID();
+    const heldWorker = randomUUID();
+    seedRuns(dataDir, [
+      root('a1', 1),
+      root(parent, 2, { status: 'running', archived: false, finishedAt: undefined }),
+      worker(heldWorker, parent, 3, { status: 'running', archived: true, finishedAt: undefined }),
+    ]);
+    const store = open();
+    expect(store.heldIds()).toContain(heldWorker);
+    for (const q of [undefined, 'run']) {
+      const found = list(store, { limit: 10, ...(q === undefined ? {} : { q }) });
+      expect(ids(found.runs), `q=${q}`).toEqual(['a1']);
+      expect(found.total, `q=${q}`).toBe(1);
+    }
+  });
+
+  it('projects a summary from the record when the stored one does not fit the contract', () => {
+    seedRuns(dataDir, [
+      root('a1', 1), root('a2', 2, { title: 'needle' }), root('a3', 3), root('a4', 4, { steps: unreadableSteps }), root('a5', 5),
+    ]);
+    // a1 and a4 have no summary at all; a2's and a5's hold the search word but are no summary, and
+    // the record decides a5 does not match it.
+    setStoredSummaries({ a1: '{}', a2: '{"title":"needle"}', a4: '{}', a5: '{"title":"needle"}' });
+    const store = open();
+
+    const all = list(store, { limit: 10 });
+    // a4 cannot be read at all, so it has nothing to list, and the read marks it.
+    expect(all.runs.map((run) => [run.id, run.title, run.archived])).toEqual([
+      ['a5', 'run a5', true], ['a3', 'run a3', true], ['a2', 'needle', true], ['a1', 'run a1', true],
+    ]);
+    expect(store.isUnreadable('a4')).toBe(true);
+    expect(list(store, { limit: 10 }).total).toBe(4);
+
+    const found = list(store, { q: 'needle', limit: 10 });
+    expect(found.runs.map((run) => [run.id, run.title])).toEqual([['a2', 'needle']]);
+    expect(found.total).toBe(1);
+  });
 });

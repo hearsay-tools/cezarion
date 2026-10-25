@@ -10,10 +10,8 @@ import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runn
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
-import { CredentialRegistry } from '../delegation/credentials.ts';
-import { DelegationService } from '../delegation/service.ts';
 import { parkNoticeId } from '../delegation/park-notice.ts';
-import { checkpoint, collect, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { checkpoint, collect, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
 import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
@@ -259,22 +257,18 @@ function silenceRefusals() {
 /** A steering parent on `runner`'s native wire and a worker running on the Claude wire, parked,
  *  with each one's credential on a delegation service, as `cez worker send` reaches them. */
 async function conversingParent(runner: RunnerId) {
-  process.env.CEZ_DELEGATION = '1';
-  const { p, w } = await parentWithWorker(runner);
-  const delegation = store.getRun(p.id)!.delegation!;
-  if (delegation.role !== 'root') throw Error('root fixture');
-  store.commitDelegation([{ id: p.id, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer', 'inspect'] } }]);
+  nativeWire(runner);
+  process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
+  const { p, service, callerFor } = await delegatingParent({ task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner, permissions: ['spawn', 'wait', 'steer', 'inspect'] });
+  checkpoint('parent-opening-repark');
+  await until(() => store.getRun(p.id)?.status === 'waiting', () => timeline(p.id));
+  const w = await worker(p.id);
   // An idle worker that only talks: it plain-parks rather than ask its parent (hearsay-tools/cezarion#1301).
   spendWorkerBudget(w.id);
   manager.enqueueOwnedRun(w.id);
   checkpoint('conversing-worker-repark');
   await until(() => store.getRun(w.id)?.status === 'waiting', () => timeline(w.id));
-  const credentials = new CredentialRegistry();
-  onTestFinished(() => credentials.close());
-  const workerCaller = credentials.authenticate(credentials.issue('project', w.id, randomUUID()))!;
-  const parentCaller = credentials.authenticate(credentials.issue('project', p.id, randomUUID()))!;
-  const service = new DelegationService();
-  service.registerProject({ id: 'project', root, store, manager });
+  const workerCaller = callerFor(w.id), parentCaller = callerFor(p.id);
   const inspect = () => service.inspect(parentCaller, { workerId: w.id });
   const progress = async (text: string) => {
     const id = randomUUID();
@@ -2381,13 +2375,9 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       // hearsay-tools/cezarion#1301: a worker keeps its one no-wait nudge; the next turn end with no
       // wait or done asks its parent, and the parent's reply resumes it, charged to its budget.
       it(`${runner} U24 a worker's second no-wait turn end asks its parent, and the reply resumes it`, async () => {
-        process.env.CEZ_DELEGATION = '1';
         nativeWire(runner);
-        const p = await parent(HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
+        const { p, service, callerFor } = await delegatingParent({ task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner, permissions: ['spawn', 'wait', 'steer'] });
         await until(() => store.getRun(p.id)?.status === 'waiting');
-        const delegation = store.getRun(p.id)!.delegation!;
-        if (delegation.role !== 'root') throw Error('root fixture');
-        store.commitDelegation([{ id: p.id, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer'] } }]);
         const w = await worker(p.id, HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
         manager.enqueueOwnedRun(w.id);
         const routed = () => store.readEvents(w.id).find(event => event.type === 'worker-question-routed');
@@ -2403,11 +2393,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(conversation?.messages.find(message => message.id === requestId)).toMatchObject({ kind: 'request', senderRunId: w.id });
         await until(() => delivered(p.id, requestId) && prompted(runner, question).length > 0);
         const wakes = store.getRun(w.id)?.automaticWakes ?? 0;
-        const credentials = new CredentialRegistry();
-        onTestFinished(() => credentials.close());
-        const service = new DelegationService();
-        service.registerProject({ id: 'project', root, store, manager });
-        const parentCaller = credentials.authenticate(credentials.issue('project', p.id, randomUUID()))!;
+        const parentCaller = callerFor(p.id);
         await service.send(parentCaller, { id: randomUUID(), recipientRunId: w.id, kind: 'reply', requestId, text: `${WORKER_FALLBACK_HEADER}: cez-dev`, timeoutSeconds: 600 });
         await until(() => store.readEvents(w.id).some(event => event.type === 'human-input-delivered' && event.source === 'parent' && event.askSeq === asks(w.id)[0]!.seq));
         expect(store.readEvents(w.id).filter(event => event.type === 'note' && String(event.message).startsWith(WORKER_FALLBACK_REPLY_NOTE)))

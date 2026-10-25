@@ -5,34 +5,31 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { CredentialRegistry } from '../delegation/credentials.ts';
-import { DelegationService } from '../delegation/service.ts';
 import { parkNoticeId } from '../delegation/park-notice.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 import {
-  checkpoint, controlledWire, manager, parent, restart, root, semaphore, spendWorkerBudget,
+  checkpoint, controlledWire, delegatingParent, manager, parent, restart, root, semaphore, spendWorkerBudget,
   store, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
 
 describe('parent and worker conversation waits through RunManager', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
+  // Regression proof (hearsay-tools/cezarion#1752), proof_base=2a28cfe91:
+  // npm test -- --config .ai/qa/worker-wait-proof/vitest.config.ts -t 'claude WP1'
+  // Ignored scratch copy of this test, with CEZ_DELEGATION deleted before setup; relative
+  // imports resolved to their original files. Before: 0 passed, 1 failed, 28 skipped / 29;
+  // unavailable_transport at DelegationService.context. After: 1 passed, 0 failed,
+  // 28 skipped / 29 with the same absent flag and the shared helper. Captured runner output:
+  // /p/cezar/tasks/f4a3c123-a0a3-428a-92d3-df300459b424/files?artifact=43db3075-91aa-41fc-b958-54fe92bc150a
   async function conversationPair(runner: RunnerId = 'claude') {
-    process.env.CEZ_DELEGATION = '1';
-    const p = await parent('mock:hold', runner);
-    const metadata = store.getRun(p.id)!.delegation!;
-    if (metadata.role !== 'root') throw Error('missing root');
-    store.commitDelegation([{ id: p.id, delegation: { ...metadata, permissions: [...metadata.permissions, 'steer'] } }]);
+    const { p, service, callerFor, close } = await delegatingParent({ runner, permissions: ['spawn', 'wait', 'steer'] });
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:hold', runner);
     // An idle worker that only talks: it plain-parks rather than ask its parent (hearsay-tools/cezarion#1301).
     spendWorkerBudget(w.id);
     manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'waiting');
-    const credentials = new CredentialRegistry();
-    const callers = [p, w].map(run => credentials.authenticate(credentials.issue('project', run.id, randomUUID()))!);
-    const service = new DelegationService();
-    service.registerProject({ id: 'project', root, store, manager });
-    return { p, w, service, parentCaller: callers[0]!, workerCaller: callers[1]!, close: () => credentials.close() };
+    return { p, w, service, parentCaller: callerFor(p.id), workerCaller: callerFor(w.id), callerFor, close };
   }
 
   // A parent with a live worker parks on a monitoring timer after handling a request
@@ -287,12 +284,12 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
   // hearsay-tools/cezarion#1235: the first reply settles its request in the open entry, which
   // waits on for the second; the reply itself reaches the parent as a message.
   it('conversation: parent waits for replies from two workers and the first reply leaves the wait open', async () => {
-    const f = await conversationPair(); const credentials = new CredentialRegistry();
+    const f = await conversationPair();
     try {
       const secondWorker = await worker(f.p.id);
       manager.enqueueOwnedRun(secondWorker.id);
       await until(() => store.getRun(secondWorker.id)?.status === 'waiting');
-      const secondCaller = credentials.authenticate(credentials.issue('project', secondWorker.id, randomUUID()))!;
+      const secondCaller = f.callerFor(secondWorker.id);
       const first = randomUUID(); const second = randomUUID();
       await f.service.send(f.parentCaller, { id: first, recipientRunId: f.w.id, kind: 'request', text: 'First check mock:hold', timeoutSeconds: 600 });
       await f.service.send(f.parentCaller, { id: second, recipientRunId: secondWorker.id, kind: 'request', text: 'Second check mock:hold', timeoutSeconds: 600 });
@@ -304,7 +301,7 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
       await until(() => lastWaitOf(store.getRun(f.p.id))?.id === wait.id && !waitOf(store.getRun(f.p.id)));
       expect(lastWaitOf(store.getRun(f.p.id))).toMatchObject({ id: wait.id, reason: 'outcome', requestOutcomes: [expect.objectContaining({ requestId: first }), expect.objectContaining({ requestId: second })] });
       expect(store.getRun(f.p.id)?.agentInputs?.filter(input => input.id === wait.id && input.deliveredAt)).toHaveLength(1);
-    } finally { credentials.close(); f.close(); }
+    } finally { f.close(); }
   });
 
   it('conversation: a full queue of 32 replies can admit an all-request wake without losing a message', async () => {

@@ -23,6 +23,7 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker s
   useWorkerWaitFixture({ processScope: false });
   afterEach(() => { vi.restoreAllMocks(); syncBuiltinESMExports(); });
   it.each(RUNNER_IDS)('%s R60 cold terminal starting-proof recovery repairs execution without a synchronous facts join', async runner => {
+    // Explicit opt-in: this recovery fixture seeds an inactive parent and registers the rebuilt runtime.
     process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
     const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
     const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
