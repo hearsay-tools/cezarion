@@ -2,7 +2,7 @@ import { summaryOf } from '@/test/run-summary-fixture'
 import { QueryClientProvider } from '@tanstack/react-query'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import type { ComponentProps } from 'react'
-import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
+import { MemoryRouter, Route, Routes, useLocation, useNavigate } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 // Exercise the workspace reducers through their named-event adapter seam.
@@ -1207,6 +1207,22 @@ describe('TasksOverviewRoute — wired to the app', () => {
     document.querySelector(`[data-slot="overview-tab"][data-view="${view}"]`) as HTMLElement
   const sidebarRow = (id: string) => document.querySelector(`[data-slot="task-row"][data-run-id="${id}"]`)
 
+  it('follows a link to a search that was typed and erased before the page wrote it (hearsay-tools/cezarion#1710)', async () => {
+    let navigate!: ReturnType<typeof useNavigate>
+    function Navigator() { navigate = useNavigate(); return null }
+    fetchMock.mockImplementation(async () => json([run({ title: 'Needle' }), run({ id: 'r2', title: 'Haystack' })]))
+    render(
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter><ListViewProvider><Navigator /><TasksOverviewRoute /></ListViewProvider></MemoryRouter>
+      </QueryClientProvider>,
+    )
+    const box = await screen.findByRole('textbox', { name: 'Search tasks' }) as HTMLInputElement
+    fireEvent.change(box, { target: { value: 'Needle' } })
+    fireEvent.change(box, { target: { value: '' } })
+    act(() => { void navigate({ search: '?q=Needle' }) })
+    await waitFor(() => expect(box.value).toBe('Needle'))
+  })
+
   it('reads the archived pages when the window is full, and pages older ones in (#864)', { timeout: 30_000 }, async () => {
     const window = Array.from({ length: 200 }, (_, i) => run({ id: `win-${i}`, archived: true, createdAt: ago(1_000_000 + i * 1000) }))
     const asked: string[] = []
@@ -1706,7 +1722,9 @@ describe('TasksOverview — status groups and origin (hearsay-tools/cezarion#161
   })
 
   it('keeps a cleared search when the URL renders the earlier write late (hearsay-tools/cezarion#1710)', () => {
-    const props = { runs: [run({ title: 'Needle' }), run({ id: 'r2', title: 'Haystack' })], onQueryChange: vi.fn() }
+    // The page reports `Needle` as written to the URL; the clear is still in its debounce.
+    const onQueryChange = vi.fn((query: string, written: (query: string) => void) => { if (query === 'Needle') written(query) })
+    const props = { runs: [run({ title: 'Needle' }), run({ id: 'r2', title: 'Haystack' })], onQueryChange }
     const box = () => screen.getByRole('textbox', { name: 'Search tasks' }) as HTMLInputElement
     const view = (query: string) => (
       <QueryClientProvider client={createQueryClient()}>
