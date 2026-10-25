@@ -4,6 +4,7 @@ on:
   # The target trigger is installed on main. One PR event owns verification;
   # PR publishing is isolated in publish-pr-snapshot.yml after this run completes.
   pull_request_target:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
     branches:
       - main
       - release/**
@@ -178,6 +179,16 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.base.sha || steps['resolve-dispatch'].outputs.base_sha || github.event.merge_group.base_sha || github.sha }}
           persist-credentials: false
+          fetch-depth: 0
+      # Required through classify-pr -> verify, including docs/infra-only PRs.
+      # Only trusted base code runs here; the head is read from Git as data.
+      - name: Reject baseline growth
+        if: github.event_name == 'pull_request_target' || steps['resolve-dispatch'].outputs.valid == 'true'
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { checkPullRequest } = require('./.github/scripts/baseline-growth.cjs');
+            await checkPullRequest({ github, context, core });
       - id: classify
         env:
           EVENT_NAME: ${{ github.event_name }}

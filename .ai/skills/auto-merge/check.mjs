@@ -13,6 +13,7 @@
 import { execFileSync } from 'node:child_process'
 import { matchesGlob } from 'node:path'
 import { parseArgs } from 'node:util'
+import { checkBaselineGrowth } from '../../../.github/scripts/baseline-growth.cjs'
 
 const MAX_FILES = 10
 const MAX_LINES = 400
@@ -23,13 +24,12 @@ const BLOCKED_TYPES = new Set(['feat'])
 const NEVER = [
   { why: 'gate or test harness', globs: [
     '.github/workflows/**', '.github/codex/**', '.github/schemas/**', '.github/actionlint.yaml',
-    '.github/scripts/{change-surface,change-surface-readers,automated-review,pr-readiness,require-e2e-passed,fetch-ci-results,release-*,pr-snapshot,node-floor-reporter,ci-test-sequencer,cockpit-test-sequencer,merge-recommendation*}.*',
+    '.github/scripts/{baseline-growth*,change-surface,change-surface-readers,automated-review,pr-readiness,require-e2e-passed,fetch-ci-results,release-*,pr-snapshot,node-floor-reporter,ci-test-sequencer,cockpit-test-sequencer,merge-recommendation*}.*',
     '.github/scripts/*.workflow.test.cjs',
     '**/vitest.config.ts', '**/vitest.setup.ts',
     'packages/web/e2e/{agent-browser,failure-setup,environment,fixture-server,held-browser-daemon,poll}.ts',
     'squeal.config.json', 'scripts/{test-changed,test-git-env}.mjs', '.ai/scripts/**', '**/tsconfig*.json',
   ] },
-  { why: 'ratchet baseline growth', unless: 'deletes', globs: ['**/*.baseline.json', '.github/*.baseline.json'] },
   { why: 'guard test change', unless: 'adds', globs: [
     'packages/cezar/src/server/{contract-parity*,route-parity,versioned-surface,bc-route-inventory,typed-bodies,api-types,origin-guard,host-guard}.test.ts',
     'packages/cezar/src/{contract-import-boundaries,contract-subpaths,test-wait-discipline,pack-check}.test.ts',
@@ -161,6 +161,22 @@ function parseDiff(base, head) {
   }
 }
 
+function pathReasons(diff) {
+  const reasons = []
+  for (const f of diff.files) {
+    if ([f.oldMode, f.newMode].some((m) => m === '120000' || m === '160000')) reasons.push(`symlink or submodule: ${f.path}`)
+    else if (f.status === 'M' && f.oldMode !== f.newMode) reasons.push(`changes the file mode: ${f.path}`)
+    for (const rule of NEVER) {
+      if (rule.source && TEST_FILE.test(f.path)) continue
+      if (!rule.globs.some((g) => matchesGlob(f.path, g))) continue
+      if (rule.unless === 'deletes' && f.adds.length === 0) continue
+      if (rule.unless === 'adds' && f.dels.length === 0) continue
+      reasons.push(`${rule.why}: ${f.path}`)
+    }
+  }
+  return reasons
+}
+
 function check({ title, base, head }) {
   const reasons = []
   const type = /^(\w+)(\([^)]*\))?(!)?: \S/.exec(title ?? '')
@@ -175,18 +191,10 @@ function check({ title, base, head }) {
   if (lines > MAX_LINES) reasons.push(`changes ${lines} lines (limit ${MAX_LINES})`)
   for (const [a, , path] of numstat) if (a === '-') reasons.push(`binary file: ${path}`)
 
+  reasons.push(...checkBaselineGrowth({ base, head }).map(reason => `ratchet baseline growth: ${reason}`))
+
   const diff = parseDiff(base, head)
-  for (const f of diff.files) {
-    if ([f.oldMode, f.newMode].some((m) => m === '120000' || m === '160000')) reasons.push(`symlink or submodule: ${f.path}`)
-    else if (f.status === 'M' && f.oldMode !== f.newMode) reasons.push(`changes the file mode: ${f.path}`)
-    for (const rule of NEVER) {
-      if (rule.source && TEST_FILE.test(f.path)) continue
-      if (!rule.globs.some((g) => matchesGlob(f.path, g))) continue
-      if (rule.unless === 'deletes' && f.adds.length === 0) continue
-      if (rule.unless === 'adds' && f.dels.length === 0) continue
-      reasons.push(`${rule.why}: ${f.path}`)
-    }
-  }
+  reasons.push(...pathReasons(diff))
   for (const rule of CONTENT) {
     const reason = rule(diff)
     if (reason) reasons.push(reason)
