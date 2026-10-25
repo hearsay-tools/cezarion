@@ -112,6 +112,29 @@ test('reads a GitHub Actions `run:` block with shell rules and the rest of the f
   assert.deepEqual(cites('ci.yml', workflow), ['2:11:comment', '5:124:comment', '6:125:comment', '7:126:comment', '9:127:comment']);
 });
 
+test('a YAML block scalar is data, except a `run:` block, which holds shell', () => {
+  const yaml = [
+    'body: |',
+    '  ## Heading #123',
+    '  text # see #124',
+    'items:',
+    '  - |',
+    '    ## #125',
+    '  - key: >-',
+    '      # #126',
+    '# after the blocks (#127)',
+    'steps:',
+    '  - run: |',
+    '      cmd # see (#128)',
+    '    with:',
+    '      script: |',
+    '        // a value # (#129)',
+    'last: | # the key line (#130)',
+    '  ## still data #131',
+  ].join('\n');
+  assert.deepEqual(cites('ci.yml', yaml), ['9:127:comment', '12:128:comment', '16:130:comment']);
+});
+
 test('a shell here-document body is data, in a shell file and in a `run:` block', () => {
   const shell = [
     "cat <<'EOF'",

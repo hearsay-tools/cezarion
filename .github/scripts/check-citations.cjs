@@ -5,9 +5,10 @@
 //   node .github/scripts/check-citations.cjs [--base <ref>]   (default origin/main)
 //
 // It compares HEAD with its merge-base against <ref>, so only committed changes count.
-// It reads comments and test titles in JS/TS, comments in CSS, YAML and shell, and
-// Markdown prose. String literals, code, JSX text and every other file type carry data
-// (UI sample numbers, fixture titles, payloads), so it never reads them.
+// It reads comments and test titles in JS/TS, comments in CSS, YAML and shell (a GitHub
+// Actions `run:` block holds shell), and Markdown prose. String literals, YAML values,
+// code, JSX text and every other file type carry data (UI sample numbers, fixture
+// titles, payloads), so it never reads them.
 //
 // A number N fails only when the changed files hold more bare #N after the change than
 // before it, and the failure names each bare #N on an added line. Rewording, reflowing
@@ -166,36 +167,47 @@ function scanHashComments(text, start, end, shell, indent) {
   return spans;
 }
 
-// A GitHub Actions `run:` block scalar holds shell: the lines indented past its `run` key.
-const RUN_BLOCK = /^( *)(- +)?run: *[|>][-+0-9]* *(?:#.*)?$/;
-
+// A block scalar (`key: |`, `key: >-`, `- |`) holds the lines indented past its key, or
+// past its `- `. Its value is data, except a GitHub Actions `run:` block, which holds shell.
+const BLOCK_SCALAR = /^( *)(- +)?(?:([\w.-]+|"[^"\n]*"|'[^'\n]*') *: *)?[|>][-+0-9]* *(?:#.*)?$/;
 // The indentation YAML removes from every line of a block scalar: its first non-blank line's.
 const BLOCK_INDENT = /^(?:[ \t]*\n)*( *)/;
 
-/** YAML comments with YAML rules, and the shell in each `run:` block with shell rules. */
+/** The block scalar `line` opens: the column its lines must pass, and whether it holds shell. */
+function blockScalarOf(line) {
+  const [, indent, entry, key] = BLOCK_SCALAR.exec(line) ?? [];
+  if (!entry && !key) return null;
+  return { column: indent.length + (key ? entry?.length ?? 0 : 0), shell: key === 'run' };
+}
+
+/** YAML comments with YAML rules, the shell in each `run:` block with shell rules, and no
+ *  other block scalar, since its value is data. */
 function yamlCommentSpans(text) {
   const spans = [];
   let regionStart = 0;
-  let runColumn = null;
+  let block = null;
   let offset = 0;
   const scan = (end, shell) => {
     const indent = shell ? BLOCK_INDENT.exec(text.slice(regionStart, end))[1].length : 0;
     spans.push(...scanHashComments(text, regionStart, end, shell, indent));
     regionStart = end;
   };
+  const closeBlock = (end) => {
+    if (block.shell) scan(end, true);
+    regionStart = end;
+    block = null;
+  };
   for (const line of text.split('\n')) {
-    if (runColumn !== null && line.trim() !== '' && /^ */.exec(line)[0].length <= runColumn) {
-      scan(offset, true);
-      runColumn = null;
-    }
-    const block = runColumn === null ? RUN_BLOCK.exec(line) : null;
+    if (block && line.trim() !== '' && /^ */.exec(line)[0].length <= block.column) closeBlock(offset);
+    const opened = block ? null : blockScalarOf(line);
     offset += line.length + 1;
-    if (block) {
+    if (opened) {
       scan(offset, false);
-      runColumn = block[1].length + (block[2]?.length ?? 0);
+      block = opened;
     }
   }
-  scan(text.length, runColumn !== null);
+  if (block) closeBlock(text.length);
+  else scan(text.length, false);
   return spans;
 }
 
