@@ -257,6 +257,9 @@ jobs:
           # opt out of checkout's fork protection for this reviewed, read-only gate.
           allow-unsafe-pr-checkout: true
           persist-credentials: false
+          # The merge result and its first parent, the base it merged into, for
+          # the citation check below.
+          fetch-depth: 2
 
       # Lint the merge result's workflows, so an unknown input or secret on a
       # `uses: ./.github/workflows/…` caller, or a bad expression, fails here in
@@ -324,6 +327,16 @@ jobs:
       - name: Install pnpm dependencies
         if: hashFiles('pnpm-lock.yaml') != ''
         run: pnpm install --frozen-lockfile
+
+      # Fail a change that adds a bare `#N` issue or PR citation
+      # (hearsay-tools/cezarion#1310). HEAD^1 is the base the PR or merge group
+      # merged into, or the previous commit on a bare dispatch. A push reaches
+      # main only through a PR this step already checked, and HEAD^1 there is
+      # only its last commit, so a push run would re-check part of it after the
+      # merge, where a failure cannot be fixed first.
+      - name: Check issue citations
+        if: github.event_name != 'push'
+        run: node .github/scripts/check-citations.cjs --base HEAD^1
 
       - name: Typecheck
         run: npm run typecheck

@@ -89,7 +89,7 @@ intentionally trading single-run latency for lower concurrency on a shared host.
 Verification runs in eight parallel jobs. Seven use the current Node LTS; the build/package job uses exactly the `engines.node` minimum (Node 24.21.0):
 
 - Three Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/3 --maxWorkers=4` for N=1..3.
-- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It runs typechecking, Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
+- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It runs the issue-citation check, typechecking, Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
 - Four cockpit browser E2E shards on `ubuntu-latest` each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
 The full Vitest suite runs once across the three LTS shards. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
@@ -217,6 +217,29 @@ keeps read-only permissions and the required aggregate name stays unchanged.
 CI and review recognize the configured `RELEASE_APP_BOT_LOGIN`
 as well as legacy `github-actions[bot]` bumps, with the same file and version
 checks. See [release App setup](../publishing.md#release-app-setup).
+
+### Checking issue citations
+
+The build/package job's `Check issue citations` step runs
+`.github/scripts/check-citations.cjs`. It fails a change that adds a bare `#N`
+citation in a comment, a test title or Markdown prose, as
+[AGENTS.md § Issue and PR citations](../../AGENTS.md#issue-and-pr-citations) says.
+Run it before a PR, from the repository root:
+
+```bash
+node .github/scripts/check-citations.cjs               # HEAD against its merge-base with origin/main
+node .github/scripts/check-citations.cjs --base <ref>  # against another base
+```
+
+Each failure names the file, the line and the qualified forms to use. The check
+counts each number's bare citations in the changed files before and after the
+change, so rewording or moving a legacy citation passes. It never reads string
+literals, code, JSX text, backtick spans, a `#` joined to a word or path,
+generated upstream scan files, test-data directories, or a file the change adds
+with a historical source note. A change that removes an archive's source note
+fails every bare citation left in it. On a PR, the step checks the merge commit
+against its first parent (`--base HEAD^1`). A push to `main` skips the step,
+because every change reaches `main` through a PR that the step already checked.
 
 ### Upstream scan PRs
 

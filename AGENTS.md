@@ -8,20 +8,20 @@ This file holds what every task needs. A new agent rule goes in the narrowest do
 
 ## Issue and PR citations
 
-This fork is `hearsay-tools/cezarion`; upstream is `open-mercato/cezar`.
-Cite issues and PRs as `hearsay-tools/cezarion#N` / `open-mercato/cezar#N`,
-or as `fork #N` / `upstream #N`. A repository-qualified GitHub link is also
-unambiguous. Never infer the tracker from the number or the current remote:
-upstream history predates the fork and both trackers reuse numbers. Check the
-source link, tracker title and git history when attribution is uncertain.
+This fork is `hearsay-tools/cezarion`; upstream is `open-mercato/cezar`. Both
+trackers reuse numbers and upstream history predates the fork, so never infer the
+tracker from the number or the current remote. Cite issues and PRs as
+`hearsay-tools/cezarion#N` / `open-mercato/cezar#N`, `fork #N` / `upstream #N`,
+or a repository-qualified GitHub link. When attribution is uncertain, check the
+source link, tracker title and git history. A bare `#N` in older code is legacy,
+not a style to copy: CI's `Check issue citations` step fails a change that adds
+one. Run `node .github/scripts/check-citations.cjs` before a PR.
 
-Historical documents may retain literal citations under a local source note
-identifying their repository and snapshot. Generated upstream commit titles and
-structured ledger fields follow the source attribution in
-[the ledger guide](.ai/upstream/README.md#citation-provenance); edit the canonical
-YAML and regenerate `LEDGER.md`. Preserve example protocol markers, test filters,
-UI sample numbers, spec numbers, colors and shell syntax. These are not citations.
-New prose in an archive must still qualify its references individually.
+An archive may keep bare citations under a source note naming its repository and
+snapshot; new prose in it still qualifies each reference. Upstream commit titles
+and ledger fields follow [the ledger guide](.ai/upstream/README.md#citation-provenance).
+Example protocol markers, test filters, UI sample numbers, spec numbers, colors
+and shell syntax are not citations.
 
 ## Zero config
 

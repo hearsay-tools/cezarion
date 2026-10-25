@@ -255,6 +255,18 @@ test('build-and-package lints workflows with pinned, hash-verified actionlint an
   assert.match(lint, /-pyflakes=(\s|$)/, 'pyflakes is off');
 });
 
+test('build-and-package fails an added bare issue citation before every merge (hearsay-tools/cezarion#1310)', () => {
+  const steps = workflow().jobs['build-and-package'].steps;
+  const checkout = steps.find((step) => step.name === 'Check out repository');
+  assert.equal(checkout.with['fetch-depth'], 2, 'the merge result and the base it merged into');
+  const index = steps.findIndex((step) => step.name === 'Check issue citations');
+  assert.ok(index > 0, 'expected a Check issue citations step');
+  assert.equal(steps[index].run, 'node .github/scripts/check-citations.cjs --base HEAD^1');
+  // A push reaches main only through a checked PR, and HEAD^1 there is only its last commit.
+  assert.equal(steps[index].if, "github.event_name != 'push'", 'PRs of every surface, merge groups and dispatches');
+  assert.ok(index > steps.findIndex((step) => step.name === 'Install pnpm dependencies'), '@babel/parser is installed first');
+});
+
 test('test jobs require full-matrix classification without losing the bot bump skip', () => {
   const ci = workflow();
   for (const name of ['vitest', 'cockpit-browser']) {
