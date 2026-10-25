@@ -80,30 +80,34 @@ function classifyPaths(paths) {
   return 'full-matrix';
 }
 
-function classifyJsonLines(input) {
+// null marks malformed input; an empty list retains the no-path verdict.
+function parseJsonLines(input) {
   if (typeof input !== 'string' || input.length === 0) {
-    return 'full-matrix';
+    return [];
   }
 
   const withoutFinalNewline = input.endsWith('\n') ? input.slice(0, -1) : input;
   if (withoutFinalNewline.length === 0) {
-    return 'full-matrix';
+    return [];
   }
 
-  const lines = withoutFinalNewline.split('\n');
   const paths = [];
   try {
-    for (const line of lines) {
+    for (const line of withoutFinalNewline.split('\n')) {
       const value = JSON.parse(line);
       if (typeof value !== 'string') {
-        return 'full-matrix';
+        return null;
       }
       paths.push(value);
     }
   } catch {
-    return 'full-matrix';
+    return null;
   }
-  return classifyPaths(paths);
+  return paths;
+}
+
+function classifyJsonLines(input) {
+  return classifyPaths(parseJsonLines(input));
 }
 
 const usage = `usage: <changed paths, one JSON string per line> | node .github/scripts/change-surface.cjs
@@ -118,7 +122,9 @@ if (require.main === module) {
     process.stderr.write(usage);
     process.exitCode = 2;
   } else {
-    process.stdout.write(`${classifyJsonLines(fs.readFileSync(0, 'utf8'))}\n`);
+    const paths = parseJsonLines(fs.readFileSync(0, 'utf8'));
+    if (paths === null) process.stderr.write(usage);
+    process.stdout.write(`${classifyPaths(paths)}\n`);
   }
 }
 
