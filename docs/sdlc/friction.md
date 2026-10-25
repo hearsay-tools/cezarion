@@ -6,6 +6,90 @@ blanket approval of new behavior; each task verifies the evidence and scope agai
 The reference analysis is in
 [the category report](../../.ai/analysis/2026-10-19-friction-categories.md).
 
+A finding does not become a `friction` issue when an agent finds it. It goes to
+the [friction inbox](#friction-inbox) first. Only the issues the owner approves
+from the daily digest carry `friction`, so only those reach the intake and the
+handling automations below.
+
+## Friction inbox
+
+### Recording a finding
+
+Write one finding to a file and post it from the repository root:
+
+```sh
+node .github/scripts/friction-inbox.cjs post finding.md
+```
+
+The command posts the file as a comment on today's inbox issue and prints the
+comment URL. The inbox issue is `Friction inbox YYYY-MM-DD` (the UTC date),
+labeled `friction-inbox`. The first finding of the day creates it. When two
+agents create it at the same time, both post to the lower number and the
+command closes the other copy.
+
+Use this format. The command refuses a file without a known `Destination`:
+
+```markdown
+**Destination:** project | sdlc | squeal
+**Type:** Undocumented knowledge | Long path | Architecture deviation | SDLC gap
+**Cost:** about 20 min, 3 retries
+**What happened:** one line, with its evidence: the command, the run, the review thread.
+**Proposed fix:** the concrete change.
+**Source:** task 6ce6ae5a, PR hearsay-tools/cezarion#1234
+```
+
+`Destination` names where a fix would live: `project` for this repository,
+`sdlc` for an `apptension-sdlc` skill, `squeal` for Squeal. Record every
+finding, small ones and already-tracked ones too: the digest counts
+recurrences and removes duplicates. Keep the project detail, because the digest
+removes it before it files outside this repository. Never include a credential
+or a configuration value.
+
+### The daily digest
+
+The `Friction — daily digest` schedule (weekdays at 09:00, cockpit time)
+reviews every inbox issue dated before today that does not carry
+`friction-inbox-reviewed`. On Monday, that is the issues from Friday to Sunday.
+The digest groups the findings, and the watch items from the previous digest,
+by root cause. It checks each group against `main`, the docs and the trackers,
+and gives it one verdict:
+
+| Verdict | When |
+| --- | --- |
+| Act | One run lost more than 30 minutes to it, it gave a wrong result, or it occurred in two or more runs |
+| Watch | A first occurrence below that bar. The digest carries it forward with its count and first-seen date |
+| Drop | Already fixed or tracked, the run doing its job, or a watch item with no new occurrence in 30 days |
+
+For each Act group, the digest names the smallest fix that removes the whole
+class, and places any new rule as
+[Where a new agent rule goes](#where-a-new-agent-rule-goes) says. It also lists
+the rules that the evidence shows are obsolete or duplicated.
+
+The digest posts its report on the newest issue it reviewed and asks the owner
+which groups to file. It files one issue per approved group:
+
+| Destination | Repository | Labels |
+| --- | --- | --- |
+| `project` | `hearsay-tools/cezarion`, written to the task template | `friction`, `friction-log` and one `area-*` label |
+| `squeal` | `hearsay-tools/squeal`, written to its friction template | `friction` |
+| `sdlc` | The `SDLC feedback` binding's repository, with no project detail | `friction-log`, `dev-flow` |
+
+It then adds `friction-inbox-reviewed` to the issues it reviewed and closes
+them. The digest never implements a fix. `node .github/scripts/friction-policy.cjs`
+emits its definition, with its prompt, after the three handling polls.
+
+Issue Intake skips an issue opened with `friction-inbox`, so it gets no labels
+and is never closed as a duplicate of an earlier inbox issue.
+
+| State | Trigger | Who or what fires it | Behavior at shipped defaults |
+| --- | --- | --- | --- |
+| Collecting (today's issue) | The UTC date changes | The clock | Awaiting review |
+| Awaiting review | The digest asks and the owner answers | The digest task and the owner | Reviewed: labeled and closed |
+| Awaiting review | The digest task fails or is cancelled | Nothing | Stays; the next digest reviews it |
+| Awaiting review | The owner does not answer | Only the owner | The digest task stays parked. The next weekday's digest reviews the same issues and the new ones; whichever digest the owner answers first files, and the other stops when it finds `friction-inbox-reviewed` |
+| Awaiting review | The digest automation is paused | Only the owner, by enabling it or running it once | Issues collect; none is lost |
+| Reviewed | None | Nothing | Final |
+
 ## Categories
 
 | Label | Obstacle | Minimum handling |
@@ -241,3 +325,7 @@ When updating an existing design poll, remove its `task.workflow` key (the CLI
 accepts `null` to remove a task key), set its `task.steps` to the `dev-flow` agent
 step, and set `task.autonomous:false`. Preview the updated filter without
 `--execute`; preserve its existing enablement and backlog settings.
+
+The same command emits the daily digest last. Create it paused too, and enable
+it only after the [friction inbox](#friction-inbox) section is on `main`: its
+prompt reads that section there.
