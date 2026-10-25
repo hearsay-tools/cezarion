@@ -350,6 +350,12 @@ Seeded NDJSON transcripts must go through `seedTranscript` from `seed-transcript
 
 ## Seed the catalog entries a spec relies on
 
+When a test change removes a hidden catalog dependency, follow
+[AGENTS.md’s regression-proof rule](../../../AGENTS.md#regression-proof): run the
+old test with the dependency absent, then the fixed test under the same conditions,
+even when no failure was observed. Record the evidence at the changed test site
+in the provenance form above.
+
 A spec seeds every catalog entry whose count or presence it relies on: skills, workflows,
 registered projects and the like. It never relies on a catalog it did not write: the skills
 installed on the host, a default that cezar ships, or the skills this checkout keeps in
