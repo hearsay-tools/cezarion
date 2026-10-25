@@ -10,7 +10,7 @@ export interface ToolDisplay {
   /** Human line for the card trigger, e.g. "Ran npm test". */
   title: string
   /** Secondary detail, e.g. the claude Bash `description`. */
-  subtitle?: string
+  subtitle?: string | undefined
 }
 
 /** Longest title/subtitle we emit — display truncation belongs here, not in
