@@ -2136,6 +2136,12 @@ pin the same through delayed ACK admission with live workers; M28 preserves ordi
 rejected-ASK autonomous nudging. Active ASK lines use the existing payload parser
 unchanged.
 
+Each text-form row keeps one or two representative forms on every native wire, on
+fresh and Continue sessions (M2, M3, M6, M18, M20, and M30's earlier gate). The other
+quoted, fenced, indented, example and Markdown forms are read by the shared turn-end
+rule directly in `workflows/turn-end-text.test.ts`, with identical channels and the
+`missing` and `refresh` channel shapes (hearsay-tools/cezarion#1665).
+
 M9, M10, M15, M16 and M25 are retired (hearsay-tools/cezarion#1234). They pinned
 the prose gate and the rejected-ASK fallback gate, which raised Needs you beside a
 monitoring line, live workers or a dependency wait and held later worker input until
@@ -2149,7 +2155,8 @@ partial channels on fresh/Continue. Native Codex completion refreshes and
 Codex/OpenCode omitted completion text exercise actual channel divergence;
 the native observer pins each capability. Claude/Pi/OMP/Cursor carry coupled
 completion text; OpenCode also deduplicates refreshed completed parts. Those
-named executable wire controls assert equality rather than inject divergence.
+named executable wire controls assert equality rather than inject divergence; a
+runner runs one coupled control, not one per direction it lacks.
 When one channel is an ordered expansion of the other, classify its raw text
 once; neither channel always wins. Incomparable transcripts retain the existing
 conservative gate policy. This partial/replayed-frame coverage differs from
