@@ -8,8 +8,8 @@ import { PARK_NOTICE_EXCERPT_MAX, formatParkNoticeText, parkNoticeExcerpt, parkN
 const worker = randomUUID();
 const parent = randomUUID();
 const wait = randomUUID();
-const timer: Wait = { id: randomUUID(), kind: 'timer', source: 'agent', via: 'monitoring-line', registeredAt: '2026-10-20T12:13:00.000Z',
-  deadline: '2026-10-20T12:23:00.000Z', phase: 'open', turnId: 'monitoring', note: 'Opened by CEZ:MONITORING.' };
+const timer: Extract<Wait, { kind: 'timer' }> = { id: randomUUID(), kind: 'timer', source: 'agent', via: 'monitoring-line', registeredAt: '2026-10-20T12:13:00.000Z',
+  seconds: 600, deadline: '2026-10-20T12:23:00.000Z', phase: 'open', turnId: 'monitoring', note: 'Opened by CEZ:MONITORING.' };
 let seq = 0;
 const event = (type: string, fields: Record<string, unknown> = {}): RunEvent => ({ seq: ++seq, ts: `2026-10-20T12:${String(10 + seq).padStart(2, '0')}:00.000Z`, type, ...fields });
 
