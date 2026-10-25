@@ -12,7 +12,7 @@ import { DelegationService } from '../delegation/service.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
-import { bookkeeping, eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, spendWorkerBudget, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
+import { bookkeeping, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, spendWorkerBudget, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 
@@ -214,17 +214,14 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
 
   /** A parent and a worker that has asked; the question is routed and the worker waits. */
   async function askedPair(parentTask = 'mock:hold') {
-    process.env.CEZ_DELEGATION = '1';
-    const p = await steeringParent(parentTask); await until(() => store.getRun(p.id)?.status === 'waiting');
+    const { p, service, callerFor, close } = await delegatingParent({ task: parentTask, permissions: ['spawn', 'wait', 'steer'] });
+    await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
     await until(() => eventsOf(w.id, 'worker-question-routed').length === 1 && store.getRun(w.id)?.status === 'waiting');
     const questionId = String(eventsOf(w.id, 'worker-question-routed')[0]!.messageId);
-    const credentials = new CredentialRegistry();
-    const [parentCaller, workerCaller] = [p, w].map(run => credentials.authenticate(credentials.issue('project', run.id, randomUUID()))!);
-    const service = new DelegationService();
-    service.registerProject({ id: 'project', root, store, manager });
+    const parentCaller = callerFor(p.id), workerCaller = callerFor(w.id);
     const reply = (text: string, id = randomUUID()) => service.send(parentCaller!, { id, recipientRunId: w.id, kind: 'reply', requestId: questionId, text, timeoutSeconds: 600 });
-    return { p, w, questionId, service, parentCaller: parentCaller!, workerCaller: workerCaller!, reply, close: () => credentials.close() };
+    return { p, w, questionId, service, parentCaller: parentCaller!, workerCaller: workerCaller!, reply, close };
   }
   const answered = (runId: string) => eventsOf(runId, 'human-input-delivered').filter(event => event.source === 'parent');
   const said = (runId: string, text: string) => store.readEvents(runId).some(event => event.type === 'text' && String(event.text).includes(text));
@@ -702,7 +699,6 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
   // closed session withdraws nothing.
   it('leaves an earlier wait open when the answer reopens a closed worker session', async () => {
     const f = await askedPair();
-    f.close();
     const request = randomUUID();
     const credentials = new CredentialRegistry();
     try {
@@ -713,6 +709,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     if (delegation.role !== 'worker') throw Error('missing worker');
     store.commitDelegation([{ id: f.w.id, delegation: { ...delegation, wait: { id: randomUUID(), workerIds: [], requestIds: [request], outcomes: [],
       deadline: new Date(Date.now() + 600_000).toISOString(), phase: 'parked' } } }]);
+    f.close();
     await restart(false, undefined, eventCheckpoint());
     const credentials2 = new CredentialRegistry();
     try {

@@ -8,12 +8,10 @@ import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import type { AskQuestion, HumanWaitEntry } from '@open-mercato/cezar-contract';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { CredentialRegistry } from '../delegation/credentials.ts';
-import { DelegationService } from '../delegation/service.ts';
 import { handoffInstructions } from '../handoff.ts';
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
-import { eventCheckpoint, manager, parent, restart, root, semaphore, store, terminal, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { eventCheckpoint, manager, parent, restart, root, semaphore, store, terminal, until, delegatingParent, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
 import { MAX_AUTO_CONTINUES } from './run.ts';
 import { MONITORING_WAKE_NUDGE, MONITORING_WAKE_NUDGE_MARKERS } from './waits.ts';
@@ -148,12 +146,8 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
   });
 
   it('a worker\'s question routes to the parent and the parent reply settles the wait', async () => {
-    process.env.CEZ_DELEGATION = '1';
     claudeWire();
-    const p = await parent();
-    const delegation = store.getRun(p.id)!.delegation!;
-    if (delegation.role !== 'root') throw Error('missing root');
-    store.commitDelegation([{ id: p.id, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer'] } }]);
+    const { p, service, callerFor, close } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const gate = join(root, 'release');
     process.env.CEZ_MOCK_RELEASE_FILE = gate;
@@ -172,15 +166,12 @@ describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () =>
     const question = parentDelegation.conversation!.messages.find(message => message.id === routed.messageId)!;
     expect(question.question).toMatchObject({ context: '## Draft\n\nThe plan.' });
     expect(question.text).toContain('Context:\n## Draft\n\nThe plan.\n\n1. [Choice] Which module?');
-    const credentials = new CredentialRegistry();
     try {
-      const caller = credentials.authenticate(credentials.issue('project', p.id, randomUUID()))!;
-      const service = new DelegationService();
-      service.registerProject({ id: 'project', root, store, manager });
+      const caller = callerFor(p.id);
       await service.send(caller, { id: randomUUID(), recipientRunId: w.id, kind: 'reply', requestId: String(routed.messageId), text: 'Choice: Parser', timeoutSeconds: 600 });
       await until(() => settled(w.id, registered.wait_id)?.phase === 'delivered');
       expect(store.readEvents(w.id).filter(event => event.type === 'human-input-delivered')).toMatchObject([{ askSeq: asks(w.id)[0]!.seq, source: 'parent' }]);
-    } finally { credentials.close(); }
+    } finally { close(); }
   });
 
   it('recovery surfaces an unsurfaced human wait', async () => {
