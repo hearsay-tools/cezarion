@@ -67,7 +67,7 @@ function cockpitFor(origin: string, projectId: string, hasWebhook: boolean): Coc
 
 export interface DiscoverOptions {
   /** `--url` / `CEZ_URL`: skip the probe. */
-  url?: string;
+  url?: string | undefined;
   repoDir: string;
   ports?: readonly number[];
   timeoutMs?: number;

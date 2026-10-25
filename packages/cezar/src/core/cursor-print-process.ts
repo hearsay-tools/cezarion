@@ -16,7 +16,7 @@ export interface CursorPrintProcessOptions {
 }
 
 export interface CursorPrintProcess {
-  readonly pid?: number;
+  readonly pid?: number | undefined;
   write(content: string): Promise<void>;
   closeInput(): void;
   readonly exit: Promise<{ code: number | null; signal: NodeJS.Signals | null }>;

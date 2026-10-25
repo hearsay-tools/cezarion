@@ -34,7 +34,7 @@ export function windowsAutosaveProcessToken(pid: number): string | undefined {
   const token = incarnation(pid);
   return token === 'gone' ? undefined : token;
 }
-export function windowsAutosaveProcessLive(entry: { pid: number; startToken?: string }): boolean {
+export function windowsAutosaveProcessLive(entry: { pid: number; startToken?: string | undefined }): boolean {
   const token = incarnation(entry.pid);
   return token !== 'gone' && (token === undefined || entry.startToken === undefined || token === entry.startToken);
 }

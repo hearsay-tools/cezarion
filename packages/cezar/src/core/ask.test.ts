@@ -5,6 +5,7 @@ import {
   parseAskMarkerResult,
   parseAskRequest,
   stripAskMarker,
+  uiAskQuestions,
   type AskRequest,
 } from './ask.ts';
 
@@ -20,6 +21,21 @@ const valid: AskRequest = {
     },
   ],
 };
+
+describe('uiAskQuestions', () => {
+  it('omits undefined fields at both question and option boundaries without changing JSON', () => {
+    const questions: AskRequest['questions'] = [{
+      header: 'Choice', question: 'Choose?', id: undefined, multiSelect: false,
+      options: [{ label: 'Keep', description: undefined }],
+    }, { header: 'Text', question: 'Explain?', options: undefined }];
+    const result = uiAskQuestions(questions);
+    expect(JSON.stringify(result)).toBe(JSON.stringify(questions));
+    expect(Object.hasOwn(result[0]!, 'id')).toBe(false);
+    expect(Object.hasOwn(result[0]!.options![0]!, 'description')).toBe(false);
+    expect(Object.hasOwn(result[1]!, 'options')).toBe(false);
+    expect(Object.hasOwn(questions[0]!, 'id')).toBe(true);
+  });
+});
 
 describe('parseAskRequest', () => {
   it('accepts a well-formed single-question request', () => {

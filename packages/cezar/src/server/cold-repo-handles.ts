@@ -9,7 +9,7 @@ type Entry = {
   handle?: RepoHandle;
   retryAt: number;
   pending: boolean;
-  controller?: AbortController;
+  controller?: AbortController | undefined;
 };
 
 /**

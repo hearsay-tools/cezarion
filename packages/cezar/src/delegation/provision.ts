@@ -115,7 +115,7 @@ export function provisionDelegationSession(options: { projectId: string; runId: 
 export class DelegationController {
   readonly service = new DelegationService();
   readonly credentials = new CredentialRegistry();
-  private transport?: Awaited<ReturnType<typeof startDelegationTransport>>;
+  private transport?: Awaited<ReturnType<typeof startDelegationTransport>> | undefined;
   private projects = new Map<string, { project: DelegationProject; detach(): void }>();
   private closed = false;
   private warned = false;

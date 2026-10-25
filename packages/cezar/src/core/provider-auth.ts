@@ -32,7 +32,7 @@ export interface ProviderCommandResult {
   stdout: string;
   stderr: string;
   exitCode: number | null;
-  errorCode?: string;
+  errorCode?: string | undefined;
   timedOut?: boolean;
 }
 
@@ -433,7 +433,7 @@ export class ProviderAuthService {
   private inFlight?: {
     raw: Promise<ProviderStatusResponse>;
     visible: Promise<ProviderStatusResponse>;
-  };
+  } | undefined;
   /** Per-account probe results, keyed by `profileCacheKey` (spec 2026-07-29-agent-profiles).
    *  Separate from `completed` because a second Claude login is a different answer to the same
    *  question, and sharing one slot would let whichever probe ran last speak for both. Each
@@ -447,7 +447,7 @@ export class ProviderAuthService {
     runCommand?: RunProviderCommand;
     now?: () => number;
     platform?: NodeJS.Platform;
-    createAuthFailureId?: () => string;
+    createAuthFailureId?: (() => string) | undefined;
     scheduleRuntimeRetry?: (fn: () => void, delayMs: number) => () => void;
   }) {
     this.runCommand = options?.runCommand ?? defaultRunProviderCommand;

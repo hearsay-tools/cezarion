@@ -5,7 +5,7 @@ import { workerRevision } from './results.ts';
 /** Status alone never attests process exit, and collecting live output never
  * acknowledges the eventual result even when the revision number is unchanged. */
 export function parentReadiness(parent: RunRecord, observations: ReadonlyArray<{
-  workerId: string; run?: RunRecord; terminated: boolean; result?: WorkerCollectedResult;
+  workerId: string; run?: RunRecord | undefined; terminated: boolean; result?: WorkerCollectedResult | undefined;
 }>): Array<{ workerId: string; reason: 'outstanding' | 'uncollected' }> {
   if (parent.delegation?.role !== 'root') return [];
   return observations.flatMap<{ workerId: string; reason: 'outstanding' | 'uncollected' }>(({ workerId, run, terminated, result }) => {

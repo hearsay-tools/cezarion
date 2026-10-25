@@ -87,21 +87,21 @@ export class PreviewSession {
   /** The page's current top-level URL, as Chromium last reported it. */
   url?: string;
 
-  private viewer?: Viewer;
+  private viewer?: Viewer | undefined;
   /** The frame sent to the viewer and not yet acked. */
-  private pending?: number;
+  private pending?: number | undefined;
   /** The newest frame that arrived while one was in flight. */
-  private held?: ScreencastFrame;
+  private held?: ScreencastFrame | undefined;
   private announced = false;
   private viewport = DEFAULT_VIEWPORT;
   /** Viewport changes and screencast stops run one at a time: overlapping stop/start pairs can leave Chromium without a first frame. */
   private queue: Promise<void> = Promise.resolve();
   /** The size the running screencast was started at; unset while stopped. */
-  private streaming?: { w: number; h: number };
-  private watchdog?: ReturnType<typeof setTimeout>;
+  private streaming?: { w: number; h: number } | undefined;
+  private watchdog?: ReturnType<typeof setTimeout> | undefined;
   private silentStarts = 0;
   /** The top-level frame, so a subframe's load steps do not count as page activity. */
-  private mainFrameId?: string;
+  private mainFrameId?: string | undefined;
 
   private constructor(
     private readonly cdp: Cdp,

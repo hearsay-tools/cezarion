@@ -1,3 +1,4 @@
+import { defined } from '../core/defined.ts';
 import { readFile } from 'node:fs/promises';
 import { agentHomePaths, claudeStateFilePath } from '../paths.ts';
 import { CONFIG_FILES, type ConfigFileDef } from './catalog.ts';
@@ -89,7 +90,7 @@ export async function listAgentConfig(
     CONFIG_FILES.map(async (def): Promise<ConfigFileListing> => {
       const path = def.resolve(repoRoot, home);
       const { exists, size } = await statConfigPath(path);
-      return {
+      return defined({
         id: def.id,
         runners: def.runners,
         kind: def.kind,
@@ -108,7 +109,7 @@ export async function listAgentConfig(
         version: await versionOf(path, exists),
         writable: editable,
         readOnlyReason: editable ? undefined : HOSTED_REASON,
-      };
+      });
     }),
   );
   return {

@@ -1,3 +1,4 @@
+import { uiAskQuestions } from './ask.ts';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
@@ -908,7 +909,7 @@ class CodexSession implements AgentSession {
     if (this.isCurrentTurn(params)) this.clearStreamRetry();
     if (this.pendingUserInput) this.rejectPendingUserInput('superseded by a newer requestUserInput');
     this.pendingUserInput = { rpcId, questions };
-    this.opts.onUiEvent?.({ type: 'ask.requested', requestId: `codex-${String(rpcId)}`, questions });
+    this.opts.onUiEvent?.({ type: 'ask.requested', requestId: `codex-${String(rpcId)}`, questions: uiAskQuestions(questions) });
   }
 
   private rejectPendingUserInput(message: string): void {

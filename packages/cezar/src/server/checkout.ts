@@ -292,7 +292,7 @@ export interface CheckoutOptions {
   checkoutId?: string | undefined;
   signal?: AbortSignal | undefined;
   /** Test seam; defaults to `gh` (or the dry-run fake under `CEZ_DRY_RUN=1`). */
-  run?: CloneRunner;
+  run?: CloneRunner | undefined;
 }
 
 /**

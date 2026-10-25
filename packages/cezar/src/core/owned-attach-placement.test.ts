@@ -40,7 +40,7 @@ const ATTACHED = { 'qa/1149/brief.md': 'the brief\n', 'qa/evidence.log': 'eviden
 // the worker's worktree holds at the moment its session starts (hearsay-tools/cezarion#1149).
 describe('attached parent files in the worker worktree', { timeout: 30_000 }, () => {
   let f: ReturnType<typeof fixture>;
-  const seen: Array<{ spec: AgentRunSpec; files: Record<string, string | undefined>; claudeLocal?: string; finish(): void; done(): void }> = [];
+  const seen: Array<{ spec: AgentRunSpec; files: Record<string, string | undefined>; claudeLocal?: string | undefined; finish(): void; done(): void }> = [];
   const spawn = (paths: readonly string[]) => f.service.spawn(f.caller, { task: 'inspect', baseline: 'parent-head', requestId: randomUUID(),
     context: { artifacts: paths.map(path => ({ kind: 'parent-file' as const, path })) } satisfies WorkerSpawnRequest['context'] });
   const commit = (path: string, content: string) => {

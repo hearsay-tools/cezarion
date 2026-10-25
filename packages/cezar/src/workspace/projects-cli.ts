@@ -51,7 +51,7 @@ const SINGLE_PROJECT_EDIT_ERROR = 'single-project mode is enabled; editing proje
  */
 export async function runProjectsCommand(
   args: string[],
-  opts: { defaultRoot: string; bootProjectId?: string; env?: NodeJS.ProcessEnv; io?: ProjectsCommandIo },
+  opts: { defaultRoot: string; bootProjectId?: string | undefined; env?: NodeJS.ProcessEnv; io?: ProjectsCommandIo },
 ): Promise<number> {
   const io = opts.io ?? defaultIo;
   const singleProject = (opts.env ?? process.env).CEZ_SINGLE_PROJECT === '1';
@@ -86,7 +86,7 @@ export async function runProjectsCommand(
 }
 
 /** `ok` shows the branch when git could name one; the other states say why. */
-function statusLabel(entry: { status: string; branch?: string }): string {
+function statusLabel(entry: { status: string; branch?: string | undefined }): string {
   if (entry.status === 'missing') return 'missing';
   if (entry.status === 'not-git') return 'not a git repo';
   return entry.branch ?? 'ok';

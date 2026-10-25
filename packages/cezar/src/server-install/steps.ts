@@ -300,7 +300,7 @@ export function depCheckStep(opts: DepStepOpts = {}): InstallStep {
       }
       const pick = await ctx.ui.multiselect<string>({
         message: 'Missing tools — select the ones to install',
-        options: missing.map((c) => ({ value: c.name, label: c.name, hint: c.hint })),
+        options: missing.map((c) => ({ value: c.name, label: c.name, ...(c.hint !== undefined ? { hint: c.hint } : {}) })),
         required: false,
       });
       if (pick === CANCEL) throw new StepCancelled();

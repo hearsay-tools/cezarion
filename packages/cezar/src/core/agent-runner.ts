@@ -31,14 +31,14 @@ export interface AgentRunSpec {
   userPrompt: string;
   /** Image blocks delivered with the first user message — screenshots pasted
    *  into the new-task form (spec 002's paste path, at task start). */
-  images?: ContentBlock[];
+  images?: ContentBlock[] | undefined;
   /** The directory the agent runs in — also the only writable root. */
   cwd: string;
   /** Tool allowlist; the CLI is default-deny for anything not listed — but
    *  the zero-config default (`DEFAULT_ALLOWED_TOOLS`) includes `Bash`
    *  unrestricted unless `bashAllowlist` is set, so treat the default as
    *  full shell access in `cwd`, not a sandboxed allowlist (#430). */
-  allowedTools?: string[];
+  allowedTools?: string[] | undefined;
   /** Prefer governed cezar workers: suppress verified native delegation entry
    * points for this invocation only. Adapters map this intent; absent preserves
    * ordinary harness settings. Custom tools, unrestricted shell and Claude
@@ -46,24 +46,24 @@ export interface AgentRunSpec {
    * AGENT_PROTOCOL.md's D1 capability limits. */
   restrictNativeDelegation?: boolean;
   /** When `Bash` is allowed, restrict it to commands starting with one of these. */
-  bashAllowlist?: string[];
+  bashAllowlist?: string[] | undefined;
   /** Extra directories the agent may read/write besides `cwd`. */
   additionalDirectories?: string[];
   /** Extra env vars for the agent process (merged over `process.env`) —
    *  e.g. CEZ_HANDOFF_FILE / CEZ_ARTIFACTS_DIR / CEZ_TASK_ID (spec 007). */
   env?: Record<string, string>;
-  model?: string;
+  model?: string | undefined;
   /** Reasoning-effort pin (#45). Canonical `low`/`medium`/`high`/`xhigh`/`max`;
    *  absent means each harness keeps its own default. Same class of override as
    *  `model`, so `modelsLocked` suppresses it too. */
-  effort?: string;
+  effort?: string | undefined;
   /** Wall-clock kill switch for the run (ms). */
-  timeoutMs?: number;
+  timeoutMs?: number | undefined;
   /**
    * Stable session id (UUID) so the user can take over interactively later:
    * `cd <repo> && claude --resume <sessionId>`.
    */
-  sessionId?: string;
+  sessionId?: string | undefined;
   /**
    * Spawn `claude --resume <sessionId>` instead of starting a fresh session —
    * picks up the on-disk conversation (used by "Continue" after a run ends).
@@ -219,7 +219,7 @@ export interface AgentRunResult {
   toolCalls: AgentToolCallRecord[];
   /** Cost-weighted token usage; 0 when the backend surfaced no telemetry. */
   tokensUsed: number;
-  sessionId?: string;
+  sessionId?: string | undefined;
 }
 
 export interface SessionOptions {
@@ -229,7 +229,7 @@ export interface SessionOptions {
   /** Close the session shortly after the first turn ends (single-turn
    *  behavior, used for non-interactive workflow steps). Interactive
    *  sessions omit this and control `end()` themselves. */
-  autoEndAfterFirstTurn?: boolean;
+  autoEndAfterFirstTurn?: boolean | undefined;
   /** Internal synchronous veto, checked when the auto-end timer fires. A held
    * turn stays open; a later turn may auto-end normally. Explicit end/interrupt
    * and provider failure still close the session. */
@@ -240,7 +240,7 @@ export interface SessionOptions {
   onUiEvent?: (event: UiEvent) => void;
   /** Readiness hint only, not an acknowledgement or a turn completion. The
    * caller rechecks session identity, ask state and queue before retrying. */
-  onAgentInputReady?: () => void;
+  onAgentInputReady?: (() => void) | undefined;
   /** The model received these inputs (replay echo, userMessage item, …). Fires at most
    * once per ID and never from a transport acknowledgement (#505). */
   onAgentInputConsumed?: (inputIds: readonly string[]) => void;
@@ -271,7 +271,7 @@ export interface AgentSession {
   /** OS pid of the spawned backend process — the root of the run's process
    *  tree (agents spawn Bash children under it). Absent when the spawn
    *  failed before a pid existed. Feeds live resource telemetry (#348). */
-  readonly pid?: number;
+  readonly pid?: number | undefined;
   /** Write a user message into the live session. False when it is closed. */
   sendMessage(content: ContentBlock[]): boolean;
   /** Resolve a native approval using opaque runner-owned request/option ids. */

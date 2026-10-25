@@ -14,7 +14,7 @@ const cleanupSchema = z.object({
   uncertain: z.boolean(), message: z.string(),
 });
 export type AutosaveCleanupProof = Pick<z.infer<typeof cleanupSchema>, 'processes' | 'groups' | 'uncertain'>;
-const processLive = (entry: { pid: number; startToken?: string }) => process.platform === 'win32' ? windowsAutosaveProcessLive(entry) : recordedProcessLive(entry);
+const processLive = (entry: { pid: number; startToken?: string | undefined }) => process.platform === 'win32' ? windowsAutosaveProcessLive(entry) : recordedProcessLive(entry);
 const pathFor = (dataDir: string, id: string) => join(dataDir, 'runs', `${z.uuid().parse(id)}.autosave-cleanup.json`);
 
 /** Write before releasing execution. A failed write never authorizes settlement. */

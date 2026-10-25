@@ -1,3 +1,4 @@
+import type { WireExact } from './contract-parity-wire.testkit.ts';
 import type { LiveRunBatchResponse, CheckoutProgressResponse, CreateProjectResponse, GithubOwnersResponse } from '@open-mercato/cezar-contract';
 import type { InferResponseType } from 'hono/client';
 import { hc } from 'hono/client';
@@ -67,9 +68,10 @@ describe('src/contract projects/workspace schemas match the routes exactly', () 
   /**
    * `Exact`, for the two OPEN bags — the only schemas here with a catchall.
    *
-   * `c.json(x)` types its route as `JSONParsed<x>` (hono's `context.d.ts`), and for every CLOSED
-   * schema in this file that mapping is the identity, which is why `Exact` compares the raw
-   * `z.infer` everywhere else. It is not the identity for a catchall: `z.looseObject` infers
+   * `c.json(x)` types its route as `JSONParsed<x>` (hono's `context.d.ts`). With exact optional
+   * properties, even closed Zod schemas need that same wire projection: `.optional()` admits
+   * explicit undefined, while a conditional spread describes omission. Both `Exact` and
+   * `ExactOpen` compare JSON images in both directions. A catchall also needs projection: `z.looseObject` infers
    * `[k: string]: unknown`, and `JSONParsed<unknown>` is hono's `JSONValue`. `unknown` is not
    * assignable to `JSONValue`, so the raw comparison reports `schema-is-wider` — truthfully, since
    * `unknown` admits a bigint the wire cannot carry, but about the CATCHALL rather than about any
@@ -174,20 +176,20 @@ describe('src/contract projects/workspace schemas match the routes exactly', () 
 
   type _Checks = [
     // the registry
-    Assert<Exact<z.infer<typeof projectsResponseSchema>, Projects200>>,
+    Assert<WireExact<z.infer<typeof projectsResponseSchema>, Projects200>>,
     // the cross-project task index behind ⌘K
     Assert<Exact<z.infer<typeof runsIndexResponseSchema>, RunsIndex200>>,
     // and its reach past each project's window (#864)
     Assert<Exact<z.infer<typeof runsSearchResponseSchema>, RunsSearch200>>,
-    Assert<Exact<z.infer<typeof registerProjectResponseSchema>, RegisterProject200>>,
-    Assert<Exact<z.infer<typeof registerProjectResponseSchema>, Checkout200>>,
+    Assert<WireExact<z.infer<typeof registerProjectResponseSchema>, RegisterProject200>>,
+    Assert<WireExact<z.infer<typeof registerProjectResponseSchema>, Checkout200>>,
     Assert<Exact<CreateProjectResponse, CreateProject200>>,
     Assert<Exact<GithubOwnersResponse, GithubOwners200>>,
-    Assert<Exact<z.infer<typeof updateProjectResponseSchema>, UpdateProject200>>,
+    Assert<WireExact<z.infer<typeof updateProjectResponseSchema>, UpdateProject200>>,
     Assert<Exact<z.infer<typeof removeProjectResponseSchema>, RemoveProject200>>,
     Assert<Exact<z.infer<typeof projectWebhookResponseSchema>, CreateWebhook201>>,
     Assert<Exact<z.infer<typeof projectWebhookResponseSchema>, UpdateWebhook200>>,
-    Assert<Exact<z.infer<typeof updateProjectResponseSchema>, RemoveWebhook200>>,
+    Assert<WireExact<z.infer<typeof updateProjectResponseSchema>, RemoveWebhook200>>,
     Assert<Exact<z.infer<typeof testProjectWebhookResponseSchema>, TestWebhook200>>,
     Assert<Exact<z.infer<typeof agentWebhooksResponseSchema>, AgentWebhooks200>>,
     Assert<Exact<z.infer<typeof sendAgentReportResponseSchema>, SendAgentReport200>>,
@@ -215,11 +217,11 @@ describe('src/contract projects/workspace schemas match the routes exactly', () 
     Assert<Exact<z.infer<typeof openTargetsResponseSchema>, OpenTargets200>>,
     Assert<Exact<z.infer<typeof openProjectInResponseSchema>, OpenProjectIn200>>,
     // agent profiles
-    Assert<Exact<z.infer<typeof agentProfilesResponseSchema>, AgentProfiles200>>,
+    Assert<WireExact<z.infer<typeof agentProfilesResponseSchema>, AgentProfiles200>>,
     Assert<Exact<z.infer<typeof agentProfileResponseSchema>, CreateAgentProfile201>>,
     Assert<Exact<z.infer<typeof agentProfileResponseSchema>, UpdateAgentProfile200>>,
     Assert<Exact<z.infer<typeof removeAgentProfileResponseSchema>, RemoveAgentProfile200>>,
-    Assert<Exact<z.infer<typeof agentProfileSelectionsResponseSchema>, SelectAgentProfile200>>,
+    Assert<WireExact<z.infer<typeof agentProfileSelectionsResponseSchema>, SelectAgentProfile200>>,
     Assert<Exact<z.infer<typeof agentAccountDetailsResponseSchema>, AgentAccountDetails200>>,
     Assert<Exact<z.infer<typeof agentAccountStatusResponseSchema>, AgentAccountStatus200>>,
     Assert<Exact<z.infer<typeof openAgentAccountFileResponseSchema>, OpenAgentAccountFile200>>,

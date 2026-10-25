@@ -20,8 +20,8 @@ export interface HandoffSeed {
   title: string;
   workflow: string;
   task: string;
-  branch?: string;
-  worktreePath?: string;
+  branch?: string | undefined;
+  worktreePath?: string | undefined;
 }
 
 /** Create the handoff skeleton. Idempotent — an existing file (resume,

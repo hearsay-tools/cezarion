@@ -37,7 +37,7 @@ export interface VoiceEngineState {
     question: string;
     options?: { label: string; description?: string }[];
     multiSelect?: boolean;
-  }[];
+  }[] | undefined;
   recent: { sentence: string; action: string; outcome?: string }[];
 }
 

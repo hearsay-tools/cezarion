@@ -121,7 +121,7 @@ describe('macosx-ngrok review fixes (PR #423)', () => {
   }
 
   it('never puts the authtoken in argv — it travels via NGROK_AUTHTOKEN env', async () => {
-    const interactiveCalls: Array<{ args: string[]; env?: Record<string, string> }> = [];
+    const interactiveCalls: Array<{ args: string[]; env?: Record<string, string> | undefined }> = [];
     const runner: Runner = {
       capture: async (_p, args) => {
         // launchctl print reports loaded; command -v finds ngrok

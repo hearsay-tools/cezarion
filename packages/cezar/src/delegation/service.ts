@@ -433,7 +433,7 @@ export class DelegationService {
     const project = this.context(caller);
     const run = project.store.getRun(caller.runId);
     if (!run || (run.delegation?.role !== 'root' && run.delegation?.role !== 'worker')) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-    const selected: { message: ConversationState['messages'][number]; outcome?: RequestOutcome }[] = [];
+    const selected: { message: ConversationState['messages'][number]; outcome?: RequestOutcome | undefined }[] = [];
     let characters = 0;
     const states = new Map<string, ConversationState>();
     for (const input of run.agentInputs ?? []) {

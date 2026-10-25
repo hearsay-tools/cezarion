@@ -250,9 +250,9 @@ export async function collectChanges(
   baseBranch: string,
   opts: {
     patchCap?: number;
-    intentToAdd?: boolean;
-    taskBranch?: string;
-    runStartedAt?: string;
+    intentToAdd?: boolean | undefined;
+    taskBranch?: string | undefined;
+    runStartedAt?: string | undefined;
   } = {},
 ): Promise<ChangesResult> {
   if (!isSafeGitRef(baseBranch)) return { ok: false, error: 'refusing option-like base ref' };

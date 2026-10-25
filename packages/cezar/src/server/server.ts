@@ -1,3 +1,4 @@
+import { defined } from '../core/defined.ts';
 import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
 import { CompletionActionCoordinator } from './completion-actions.ts';
 import { discoverRepoHandle, lookupMergedPullRequests } from './forge/github.ts';
@@ -322,14 +323,14 @@ export interface ServerDeps {
    *  `latest` appears once the registry answers with a newer version. */
   update?: { latest?: string };
   /** Local npm update coordinator, absent for test/embedded servers. */
-  applicationUpdate?: ApplicationUpdateServiceLike;
+  applicationUpdate?: ApplicationUpdateServiceLike | undefined;
   /** Host the HTTP server binds (default 127.0.0.1). A non-loopback host
    *  implies hosted mode — `capabilities.localHandoff:false`. */
-  bindHost?: string;
+  bindHost?: string | undefined;
   /** Workspace-registry id of the boot project (multi-project spec) — plumbed
    *  from `initWorkspace` in src/index.ts. Optional: legacy callers/tests get
    *  a lazy registry lookup by `repoRoot`, falling back to the repo's slug. */
-  bootProjectId?: string;
+  bootProjectId?: string | undefined;
   /** Per-project context map (multi-project spec, step 2.2). Non-boot
    *  `/api/p/:projectId/*` requests resolve their `{store, manager, …}` here,
    *  built lazily on first touch. Optional so legacy callers change nothing —
@@ -337,7 +338,7 @@ export interface ServerDeps {
    *  `disposeAll()` after. The BOOT project never lives in this map: its
    *  context is seeded from `deps.{store,manager}` (which src/index.ts already
    *  recovered/pruned at startup) and the resolver short-circuits to it. */
-  contexts?: ProjectContexts;
+  contexts?: ProjectContexts | undefined;
   /** Boot project's shared automation store. `startServer` injects the
    *  coordinator-owned instance so HTTP routes and the scheduler never cache
    *  separate views of the same project files. */
@@ -354,7 +355,7 @@ export interface ServerDeps {
    *  `provider-status` event reach `/api/workspace/events` through this.
    *  Optional — createApp builds a private one; inject to emit from outside
    *  the app (tests, future CLI hooks). */
-  workspaceEvents?: WorkspaceEventBus;
+  workspaceEvents?: WorkspaceEventBus | undefined;
   /** How `POST /api/projects/checkout` (step 4.3) actually clones. Defaults to
    *  `gh repo clone` (or the `CEZ_DRY_RUN=1` fake) — injected by tests so the
    *  route's guards, cleanup and error surfacing are exercised for real
@@ -375,13 +376,13 @@ export interface ServerDeps {
   workspaceConfig?: {
     load: typeof loadWorkspaceConfig;
     mergeWrite: typeof mergeWriteWorkspaceConfig;
-  };
+  } | undefined;
   /** Shared runtime rejection observer. The CLI injects the instance already
    *  watching the boot store before recovery; createApp builds one for legacy
    *  callers and tests. */
   providerRuntimeAuth?: ProviderRuntimeAuthObserver;
   /** Local terminal handoff for provider-owned login. */
-  openTerminal?: typeof openInTerminal;
+  openTerminal?: typeof openInTerminal | undefined;
   /** Hand a local FILE (or folder) to the OS default app. Injected so the account-file open route
    *  is testable without actually launching an editor. */
   openFile?: typeof openFileInDefaultApp;
@@ -397,7 +398,7 @@ export interface ServerDeps {
   /** The workspace-wide live preview host (#781), one per server process because ports are
    *  host-global. Present only under `CEZ_PREVIEW=1`; absent, the preview WebSocket answers 404
    *  and every run manager answers `headless`. */
-  previewHost?: PreviewHost;
+  previewHost?: PreviewHost | undefined;
   /** The port the cockpit listens on, once it does: `cezar_preview_serve` refuses it. */
   cezarPort?: () => number | undefined;
   /** Filled in by `createApp` with the scope middleware's own project lookup, so an upgrade-only
@@ -2707,7 +2708,8 @@ export function createApp(deps: ServerDeps) {
         return { webhooks: webhooks.filter((entry) => entry !== webhook), webhook };
       });
       if ('error' in answer) return c.json({ error: answer.error }, answer.status);
-      const body: UpdateProjectResponse = { project: answer.body.project };
+      const project = answer.body.project;
+      const body: UpdateProjectResponse = { project: defined({ ...project, webhook: project.webhook && defined(project.webhook) }) };
       return c.json(body);
     })
 
@@ -6118,7 +6120,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   // handler without closing/rebinding; direct server callers retain normal startup.
   if (listener) {
     listener.removeAllListeners('request');
-    listener.on('request', getRequestListener(serverOptions.fetch, { hostname: serverOptions.hostname }));
+    listener.on('request', getRequestListener(serverOptions.fetch, defined({ hostname: serverOptions.hostname })));
   }
   const server = listener ?? serve(serverOptions);
   // EVERY registered project, remote or not: a schedule needs none. `github` is present only for

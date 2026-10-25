@@ -14,11 +14,11 @@ interface PendingMergeSet { projectId: string; rootId: string; token: string; of
 
 /** One browser-independent workspace poller. Never builds a manager or recovers a run. */
 export class ArchiveOnMergeCoordinator {
-  private timer?: ReturnType<typeof setTimeout>;
+  private timer?: ReturnType<typeof setTimeout> | undefined;
   private busy = false;
   private stopped = false;
   private generation = 0;
-  private abort?: AbortController;
+  private abort?: AbortController | undefined;
   private projectCursor = 0;
   private readonly cursors = new Map<string, number>();
   private readonly pending = new Map<string, PendingMergeSet>();

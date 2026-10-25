@@ -209,7 +209,7 @@ describe('process liveness (#469)', () => {
       expect(recordedProcessLive({ pid: proc.pid!, startToken: start })).toBe(true);
       expect(recordedProcessLive({ pid: proc.pid!, startToken: `${start}0` })).toBe(false);
       expect(recordedProcessLive({ pid: proc.pid!, startToken: `00000000-0000-0000-0000-000000000000:${start}` })).toBe(false);
-      const record = (processes: { pid: number; startToken?: string }[]) => ({ generation: 'g', controller: { pid: process.pid }, processes });
+      const record = (processes: { pid: number; startToken?: string | undefined }[]) => ({ generation: 'g', controller: { pid: process.pid }, processes });
       expect(probeGeneration({ record: record([{ pid: proc.pid!, startToken: `${token}0` }]), paths: [dir] })).toBe('gone');
       expect(probeGeneration({ record: record([{ pid: proc.pid!, startToken: token }]), paths: [dir] })).toBe('alive');
       // Even with a previous-boot controller, a verified live record blocks independently of cwd.
