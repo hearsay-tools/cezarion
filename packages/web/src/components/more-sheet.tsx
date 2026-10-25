@@ -46,7 +46,7 @@ export function MoreSheet({
   /** Where focus goes on close; the tab bar's More button is not a SheetTrigger. */
   onCloseAutoFocus?: (event: Event) => void
   /** The current project's name, beside the title. Absent on global routes. */
-  projectName?: string | null
+  projectName?: string | null | undefined
   /** `visibleNavItems(...)` — the source of the icons and of the Automations gate. */
   items: readonly NavItem[]
   activeTo: string | null

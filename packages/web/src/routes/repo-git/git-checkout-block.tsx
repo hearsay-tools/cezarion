@@ -59,7 +59,7 @@ export function GitCheckoutBlock({ scope, repo, info, variant, onNavigate }: {
   repo: RepoResponse
   info: RepoInfo
   variant: 'sidebar' | 'screen'
-  onNavigate?: () => void
+  onNavigate?: (() => void) | undefined
 }) {
   const size = SIZES[variant]
   const checkout = useGitCheckout(scope, info)

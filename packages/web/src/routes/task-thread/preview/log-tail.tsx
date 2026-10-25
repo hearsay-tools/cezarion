@@ -16,7 +16,7 @@ export function LogTail({
   /** What produced the lines: `npm run dev`, `chromium`. */
   source: string
   onCopy: (text: string) => void
-  className?: string
+  className?: string | undefined
 }) {
   const lines = text.replace(/\s+$/, '').split('\n')
   return (

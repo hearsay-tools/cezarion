@@ -12,7 +12,7 @@ export interface LivePort {
 export interface LiveOwnerDeps {
   stream(kind: 'workspace' | 'runs', runs: LiveRunDemand[], frame: (frame: LiveFrame) => void, signal: AbortSignal): Promise<void>
   topic(topic: string, value: (value: unknown) => void): () => void
-  read(path: string, signal: AbortSignal): Promise<{ value: unknown; error?: string }>
+  read(path: string, signal: AbortSignal): Promise<{ value: unknown; error?: string | undefined }>
 }
 interface Entry {
   id: string
@@ -24,8 +24,8 @@ interface Entry {
   paused: boolean
 }
 interface DocumentPort { port: LivePort; id: string; epoch: number; seenAt: number; entries: Map<string, Entry> }
-interface Lane { signature: string; controller?: AbortController; retry?: ReturnType<typeof setTimeout>; lastFrame: number }
-interface ReadJob { controller: AbortController; deadline?: ReturnType<typeof setTimeout>; nextAt: number; timer?: ReturnType<typeof setTimeout>; revision: number; interval: number }
+interface Lane { signature: string; controller?: AbortController | undefined; retry?: ReturnType<typeof setTimeout> | undefined; lastFrame: number }
+interface ReadJob { controller: AbortController; deadline?: ReturnType<typeof setTimeout> | undefined; nextAt: number; timer?: ReturnType<typeof setTimeout> | undefined; revision: number; interval: number }
 
 /** Worker-owned demand union. No React, document globals, or authentication-bound remote data. */
 export function createLiveOwner(deps: LiveOwnerDeps) {

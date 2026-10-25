@@ -1,3 +1,4 @@
+import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import { execFileSync, type ChildProcess } from 'node:child_process'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -48,7 +49,7 @@ function startServer(): ChildProcess {
 }
 
 async function workspaceConfig(signal?: AbortSignal): Promise<WorkspaceConfig> {
-  const response = await fetch(`${baseUrl}/api/v1/workspace/config`, { signal })
+  const response = await fetch(`${baseUrl}/api/v1/workspace/config`, { ...defined({ signal }) })
   if (!response.ok) throw new Error(`workspace config answered ${response.status}`)
   return await response.json() as WorkspaceConfig
 }

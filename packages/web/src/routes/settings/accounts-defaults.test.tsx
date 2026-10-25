@@ -109,7 +109,7 @@ function serve({
       requests.push({ method, url, body })
       if (url === '/api/v1/workspace/config' && method === 'GET') return json(state)
       if (url === '/api/v1/workspace/config' && method === 'PUT') {
-        const patch = (body?.agentDefaults ?? {}) as { runner?: string; models?: Record<string, string | null> }
+        const patch = (body?.agentDefaults ?? {}) as { runner?: string | undefined; models?: Record<string, string | null> }
         if (patch.runner !== undefined) state.agentDefaults.runner = patch.runner as never
         if (patch.models) {
           state.agentDefaults.models = { ...state.agentDefaults.models, ...patch.models } as never

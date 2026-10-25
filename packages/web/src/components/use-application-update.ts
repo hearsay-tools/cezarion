@@ -74,7 +74,7 @@ export function useApplicationUpdate(health: HealthResponse | undefined, reloadD
     queryClient.setQueryData<HealthResponse>(queryKeys.health, (current) => current ? { ...current, applicationUpdate: state } : current)
   }, [queryClient])
 
-  const finish = React.useCallback((operation: ActiveOperation, outcome: { state?: ApplicationUpdateState; source: 'health' | 'response' | 'failure' | 'timeout'; cause?: unknown }) => {
+  const finish = React.useCallback((operation: ActiveOperation, outcome: { state?: ApplicationUpdateState | undefined; source: 'health' | 'response' | 'failure' | 'timeout'; cause?: unknown }) => {
     if (active.current !== operation) return // An aborted request may still resolve much later.
     if (operation.reconciledRestart && (outcome.source === 'timeout'
       || outcome.source === 'failure' && outcome.cause instanceof ApiError && outcome.cause.status === 0)) {

@@ -64,7 +64,7 @@ describe('overlaySegments', () => {
   })
 
   it('renders tokens alone when the line has no word marks', () => {
-    const tokens = [{ content: 'plain', color: undefined }]
+    const tokens = [{ content: 'plain' }]
     expect(overlaySegments(tokens, undefined, 'plain')).toEqual([{ text: 'plain', color: undefined, changed: false }])
   })
 

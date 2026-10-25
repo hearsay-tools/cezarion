@@ -32,7 +32,7 @@ class FakeRecognition implements SpeechRecognitionLike {
   stopped = false
   aborted = false
   onresult: ((event: SpeechResultEventLike) => void) | null = null
-  onerror: ((event: { error?: string; message?: string }) => void) | null = null
+  onerror: ((event: { error?: string | undefined; message?: string }) => void) | null = null
   onend: (() => void) | null = null
 
   start(): void {

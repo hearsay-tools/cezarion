@@ -44,11 +44,11 @@ export interface PreviewPaneProps {
   /** The task's registered servers, newest registration last. */
   servers: readonly PreviewServer[]
   /** Where each registered server stands now (from the task's events). Absent reads as registered. */
-  serverStates?: ReadonlyMap<number, ThreadPreviewServer>
+  serverStates?: ReadonlyMap<number, ThreadPreviewServer> | undefined
   /** What the owner asked for: a server to show, and whether they already approved running it. */
-  request?: PreviewOpenRequest
+  request?: PreviewOpenRequest | undefined
   /** Set where the pane replaces the transcript (below 1180 px): the way back to the conversation. */
-  onSession?: () => void
+  onSession?: (() => void) | undefined
   /** The server the pane shows changed (`undefined` for a typed URL). */
   onPort?: (port: number | undefined) => void
   /** Frames are flowing (the header toggle's green dot). */

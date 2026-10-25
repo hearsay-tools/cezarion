@@ -56,17 +56,17 @@ export type RepoChip = {
 export type AppShellProps = {
   /** The routed view. Renders into the one scrolling region. */
   children: ReactNode
-  breadcrumb?: { project: string | null; page: string; branch?: string | null }
+  breadcrumb?: { project: string | null; page: string; branch?: string | null | undefined }
   /** Repo + branch for the brand chip. Null until Step 3.1/3.2 wires `/api/health` — the chip
    *  is simply absent rather than showing an invented repo name. */
-  repo?: RepoChip | null
+  repo?: RepoChip | null | undefined
   /** Running cezar version beside the wordmark. Null while health is unknown. */
   version?: string | null
   /** The npm registry's newer version, when the server's update check found one (#368). */
   latestVersion?: string | null
-  applicationUpdate?: ApplicationUpdateState
-  onApplyUpdate?: () => Promise<void>
-  onRestart?: () => Promise<void>
+  applicationUpdate?: ApplicationUpdateState | undefined
+  onApplyUpdate?: (() => Promise<void>) | undefined
+  onRestart?: (() => Promise<void>) | undefined
   applicationUpdateError?: string | null
   applicationUpdateBusy?: boolean
   applicationUpdateOffline?: boolean
@@ -91,18 +91,18 @@ export type AppShellProps = {
   banner?: ReactNode
   /** The registry and every project's signal, for the phone's menu button and drawer (#620). Plain
    *  data rather than a slot: the shell reads no query itself. Absent renders no project UI. */
-  mobileProjects?: MobileProjectNav | null
+  mobileProjects?: MobileProjectNav | null | undefined
   projectHeader?: ReactNode
   /** Navigation belongs to the project displayed here, even on workspace routes. */
-  sidebarProjectId?: string
-  needsYou?: boolean
+  sidebarProjectId?: string | undefined
+  needsYou?: boolean | undefined
   /** The desktop project rail (#618): a 60px workspace-level column left of the sidebar. A slot
    *  because the rail reads the registry and the runs index, and this shell must keep rendering
    *  where no QueryClient is provided. Absent renders nothing; hidden below `md` by its own frame. */
   projectRail?: ReactNode
   /** The phone drawer's Tools row (#621): amber dot and forge note, derived from health by the
    *  container. Null/absent renders no row, as `toolsMenu` renders no trigger without health. */
-  toolsStatus?: DrawerTools | null
+  toolsStatus?: DrawerTools | null | undefined
 }
 
 /**
@@ -344,7 +344,7 @@ function ShellComposerRow({ showTabBar, items, activeTo, mobileProjects, current
   showTabBar: boolean
   items: NavItem[]
   activeTo: string | null
-  mobileProjects?: MobileProjectNav | null
+  mobileProjects?: MobileProjectNav | null | undefined
   currentProjectId: string | null
   repo: RepoChip | null
   newTask: boolean
@@ -387,8 +387,8 @@ type NavProps = {
   toolsMenu?: ReactNode
   projectHeader?: ReactNode
   /** Navigation belongs to the project displayed here, even on workspace routes. */
-  sidebarProjectId?: string
-  needsYou?: boolean
+  sidebarProjectId?: string | undefined
+  needsYou?: boolean | undefined
 
 }
 
@@ -557,9 +557,9 @@ function MobileNavDrawer({
 }: Pick<NavProps, 'sidebarProjectId' | 'taskQuickList' | 'update'> & {
   onNavigate: () => void
   onCloseAutoFocus?: React.ComponentProps<typeof SheetContent>['onCloseAutoFocus']
-  mobileProjects?: MobileProjectNav | null
+  mobileProjects?: MobileProjectNav | null | undefined
   currentProjectId: string | null
-  toolsStatus?: DrawerTools | null
+  toolsStatus?: DrawerTools | null | undefined
 }) {
   return (
     <SheetContent
@@ -600,8 +600,8 @@ function isBootAliasResolution(previous: string, next: string): boolean {
 
 /** Displayed-project navigation is shared by the desktop sidebar and the mobile task list. */
 function SidebarNavigationScope({ projectId, onNavigate, children }: {
-  projectId?: string
-  onNavigate?: () => void
+  projectId?: string | undefined
+  onNavigate?: (() => void) | undefined
   children: React.ReactNode
 }) {
   const inheritedScope = useProjectScope()
@@ -637,7 +637,7 @@ function SidebarContent({
   /** Fires on any in-drawer navigation. The route-change effect already closes the drawer for
    *  every *changed* route; this also covers re-clicking the active item (per the spec, Tasks
    *  navigates home even when already active), which changes no pathname at all. */
-  onNavigate?: () => void
+  onNavigate?: (() => void) | undefined
 }) {
   return (
     <SidebarNavigationScope projectId={sidebarProjectId} onNavigate={onNavigate}><div

@@ -31,8 +31,8 @@ export function ResolveConflictsButton({
   run: ApiRun
   /** Named only by a surface standing OUTSIDE this run's project — the global Tasks page, whose
    *  rows span the registry. Elsewhere the scope is already right. */
-  projectId?: string
-  prNumber?: number
+  projectId?: string | undefined
+  prNumber?: number | undefined
 }) {
   // Whichever seam this run's state allows — a live message, or a continue for a task parked at
   // review. Offering a prompt that only worked on a running task would offer it exactly when it
@@ -108,7 +108,7 @@ export function ResolveConflictsForRun({
 }: {
   projectId: string
   runId: string
-  prNumber?: number
+  prNumber?: number | undefined
 }) {
   const run = useProjectRun(projectId, runId)
   if (!run.data) {
@@ -127,13 +127,13 @@ export function ResolveConflictsForRun({
  * scope (another project's sidebar group) reads and delivers through THAT project; elsewhere the
  * mounted scope is the row's own.
  */
-function ResolveConflictsForListRun({ runId, prNumber }: { runId: string; prNumber?: number }) {
+function ResolveConflictsForListRun({ runId, prNumber }: { runId: string; prNumber?: number | undefined }) {
   const { projectId } = useReferenceScope()
   if (projectId !== undefined) return <ResolveConflictsForRun projectId={projectId} runId={runId} prNumber={prNumber} />
   return <ResolveConflictsForMountedRun runId={runId} prNumber={prNumber} />
 }
 
-function ResolveConflictsForMountedRun({ runId, prNumber }: { runId: string; prNumber?: number }) {
+function ResolveConflictsForMountedRun({ runId, prNumber }: { runId: string; prNumber?: number | undefined }) {
   const run = useRun(runId)
   if (!run.data) {
     return (
@@ -162,8 +162,8 @@ export function TaskReferenceChip({
   inert = false,
 }: {
   run: Pick<RunSummary, 'id' | 'title' | 'titleSummary' | 'titleOrigin'>
-  reference: { kind: 'PR' | 'Issue'; number?: number; url?: string }
-  className?: string
+  reference: { kind: 'PR' | 'Issue'; number?: number | undefined; url?: string | undefined }
+  className?: string | undefined
   /** The narrow sidebar row — the chip's own abbreviation. The panel it opens is the full one:
    *  there is room for words in a panel wherever the row it hangs off is. */
   compact?: boolean

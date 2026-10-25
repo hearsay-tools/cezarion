@@ -108,7 +108,7 @@ const HOUR_MS = 3_600_000
  * another time, and a time they repeat runs at one of the two. `note` says which, so the editor and
  * the preview never claim a time that is not the one the task starts at.
  */
-export function onceResolved(schedule: Parameters<typeof onceInstant>[0]): { date: string; time: string; note?: string } | null {
+export function onceResolved(schedule: Parameters<typeof onceInstant>[0]): { date: string; time: string; note?: string | undefined } | null {
   const instant = onceInstant(schedule)
   const zone = schedule.timeZone
   const typed = onceWall(schedule.at)

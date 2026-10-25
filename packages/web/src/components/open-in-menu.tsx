@@ -125,7 +125,7 @@ export function OpenInMenu({
   trailing?: ReactNode
   slot?: string
   /** Extra trigger classes — a phone row needs the 44px target. */
-  className?: string
+  className?: string | undefined
 }) {
   return (
     <DropdownMenu>

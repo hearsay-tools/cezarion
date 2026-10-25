@@ -38,7 +38,7 @@ export function SignalPill({
   position: 'top' | 'bottom'
   segments: readonly { tone: SignalTone; count: number }[]
   /** Placement and ring colour for a mark that is not the rail's: merged over the rail's defaults. */
-  className?: string
+  className?: string | undefined
   compact?: boolean
 }) {
   const shown = segments.filter((segment) => segment.count > 0)

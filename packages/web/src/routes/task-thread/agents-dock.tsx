@@ -22,7 +22,7 @@ export function AgentList({
 }: {
   agents: SubagentSummary[]
   /** Phase 2: opens the drill-down sheet. Absent ⇒ rows are static display. */
-  onSelect?: (id: string) => void
+  onSelect?: ((id: string) => void) | undefined
 }) {
   // No fan-out to show — the overwhelming majority of runs never mount this at all.
   if (agents.length === 0) return null
@@ -37,7 +37,7 @@ export function AgentList({
 
 /** Rows keep stream order and never re-sort on completion — a finishing agent must not make
  *  the row the user is reading jump somewhere else (spec §Edge Cases). */
-function AgentRow({ agent, onSelect }: { agent: SubagentSummary; onSelect?: (id: string) => void }) {
+function AgentRow({ agent, onSelect }: { agent: SubagentSummary; onSelect?: ((id: string) => void) | undefined }) {
   const body = (
     <>
       <AgentIcon status={agent.status} stalled={agent.stalled === true} />

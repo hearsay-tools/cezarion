@@ -33,7 +33,7 @@ export interface TaskColumnDefinition {
   align: 'left' | 'right'
   /** Preferred expanded width. Extra table width is distributed after these readable defaults. */
   width?: string
-  icon?: TaskColumnIcon
+  icon?: TaskColumnIcon | undefined
   capability?: 'tokens' | 'cost'
 }
 

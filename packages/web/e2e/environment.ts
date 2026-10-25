@@ -46,7 +46,7 @@ export function useSocketSafeTmpdir(
 export async function setup(): Promise<() => void> {
   const previousToken = process.env.TEST_ENV_LEASE_TOKEN
   const lease = await acquireTestEnvLease(root, {
-    token: previousToken,
+    ...(previousToken === undefined ? {} : { token: previousToken }),
     onWait: message => console.error(`[test-env] ${message}`),
   })
   process.env.TEST_ENV_LEASE_TOKEN = lease.token

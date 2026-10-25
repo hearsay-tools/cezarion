@@ -13,7 +13,7 @@ export interface DiffFile {
   /** The file's current path (`b/` side; the `a/` side for deletions). */
   path: string
   /** The pre-rename path — set only when the diff declares `rename from/to`. */
-  oldPath?: string
+  oldPath?: string | undefined
   status: 'modified' | 'added' | 'deleted' | 'renamed'
   /** `Binary files … differ` / `GIT binary patch` — there are no lines to render. */
   binary: boolean

@@ -33,7 +33,7 @@ export function providerForExistingRun(run: ApiRun): Runner {
 function providerAvailability(
   provider: Runner,
   status: ProviderStatusResponse,
-): { provider: Runner; usable: boolean; reason?: string } {
+): { provider: Runner; usable: boolean; reason?: string | undefined } {
   const row = providerStatusFor(status, provider)
   if (row?.enabled === false) {
     return {
@@ -55,14 +55,14 @@ function providerAvailability(
 export function activeProviderAvailability(
   run: ApiRun,
   status: ProviderStatusResponse,
-): { provider: Runner; usable: boolean; reason?: string } {
+): { provider: Runner; usable: boolean; reason?: string | undefined } {
   return providerAvailability(providerForActiveRun(run), status)
 }
 
 export function existingProviderAvailability(
   run: ApiRun,
   status: ProviderStatusResponse,
-): { provider: Runner; usable: boolean; reason?: string } {
+): { provider: Runner; usable: boolean; reason?: string | undefined } {
   return providerAvailability(providerForExistingRun(run), status)
 }
 

@@ -1,3 +1,4 @@
+import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import { useMutation } from '@tanstack/react-query'
 import { CheckCheckIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, SettingsIcon } from 'lucide-react'
 import { useRef, useState } from 'react'
@@ -40,7 +41,7 @@ export function useActiveProjectIdentity() {
 
 /** This project's identity and actions. Workspace health describes only the boot project;
  * the registry is authoritative for every other project's name, root and branch. */
-export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void } = {}) {
+export function SidebarProjectHeader({ onNavigate }: { onNavigate?: (() => void) | undefined } = {}) {
   const markRef = useRef<HTMLSpanElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const [menuOffset, setMenuOffset] = useState(0)
@@ -68,7 +69,7 @@ export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void }
         triggerClassName="size-7 max-md:size-11"
         align="start"
         alignOffset={menuOffset}
-        onOpenChange={(open) => {
+        onOpenChange={(open: boolean) => {
           if (open && markRef.current && menuButtonRef.current) {
             setMenuOffset(markRef.current.getBoundingClientRect().left - menuButtonRef.current.getBoundingClientRect().left)
           }
@@ -90,14 +91,14 @@ export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void }
  */
 export function ProjectMenu({ projectId, onNavigate, triggerRef, triggerClassName, align = 'start', alignOffset, side, onOpenChange }: {
   projectId: string | null
-  onNavigate?: () => void
+  onNavigate?: (() => void) | undefined
   triggerRef?: React.Ref<HTMLButtonElement>
   /** Size classes for the trigger; its colours and states are shared. */
   triggerClassName?: string
   align?: 'start' | 'center' | 'end'
   alignOffset?: number
-  side?: 'top' | 'right' | 'bottom' | 'left'
-  onOpenChange?: (open: boolean) => void
+  side?: 'top' | 'right' | 'bottom' | 'left' | undefined
+  onOpenChange?: ((open: boolean) => void) | undefined
 }) {
   const sidebarNavigate = useSidebarNavigate()
   const health = useHealth()
@@ -140,13 +141,13 @@ export function ProjectMenu({ projectId, onNavigate, triggerRef, triggerClassNam
   }
 
   return (
-    <DropdownMenu onOpenChange={onOpenChange}>
+    <DropdownMenu {...defined({ onOpenChange })}>
       <DropdownMenuTrigger asChild>
         <button data-slot="project-menu-trigger" ref={triggerRef} type="button" aria-label="Project menu" className={cn('flex shrink-0 items-center justify-center rounded-[6px] text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring data-[state=open]:bg-sidebar-row-selected data-[state=open]:text-foreground', triggerClassName)}>
           <EllipsisIcon aria-hidden="true" className="size-[15px]" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={align} alignOffset={alignOffset} side={side} sideOffset={4} className={menuClass}>
+      <DropdownMenuContent align={align} {...defined({ alignOffset, side })} sideOffset={4} className={menuClass}>
         <DropdownMenuItem className={itemClass} disabled={marking || runs.isError || runs.data === undefined || unread.length === 0 || projectId === null} onSelect={() => { void markAllRead() }}>
           <CheckCheckIcon aria-hidden="true" /> Mark all read
           <span className="ml-auto text-[11.5px] text-soft-foreground">{marking ? 'Marking…' : count}</span>

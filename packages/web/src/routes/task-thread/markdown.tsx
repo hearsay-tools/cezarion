@@ -1,3 +1,4 @@
+import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import { memo, useContext, useMemo } from 'react'
 import {
   Streamdown,
@@ -35,7 +36,7 @@ const shikiPlugin: CodeHighlighterPlugin = {
 interface MdastNode {
   type: string
   value?: string
-  url?: string
+  url?: string | undefined
   children?: MdastNode[]
 }
 
@@ -142,7 +143,7 @@ export const Markdown = memo(function Markdown({
   breaks?: boolean
   inline?: boolean
   document?: boolean
-  imageSrc?: (src: string) => string | null
+  imageSrc?: ((src: string) => string | null) | undefined
 }) {
   const fileContext = useContext(TaskFileContext)
   const contextual = useMemo(() => {
@@ -182,12 +183,12 @@ export const Markdown = memo(function Markdown({
     return {
       remark: [...(breaks ? HARD_BREAKS : Object.values(defaultRemarkPlugins)), ...links, ...images],
       components: {
-        ...(fileContext || document ? { a: ({ href, children }: { href?: string; children?: React.ReactNode }) => {
+        ...(fileContext || document ? { a: ({ href, children }: { href?: string | undefined; children?: React.ReactNode }) => {
           // A snapshot has no live directory. Relative links cannot silently target the host.
           if (document && !fileContext && !/^(?:https?:|mailto:|#)/i.test(href ?? '')) return <span>{children}</span>
           return <TaskLink href={href} internal={internal.has(href ?? '')}>{children}</TaskLink>
         } } : {}),
-        ...(document ? { img: ({ src, alt }: { src?: unknown; alt?: string }) => {
+        ...(document ? { img: ({ src, alt }: { src?: unknown; alt?: string | undefined }) => {
           if (typeof src === 'string' && resolvedImages.has(src)) return <img src={src} alt={alt ?? ''} loading="lazy" />
           return <span className="text-muted-foreground">[Image: {alt || 'embedded image'}]</span>
         } } : {}),
@@ -199,10 +200,12 @@ export const Markdown = memo(function Markdown({
       className={inline ? 'thread-markdown thread-markdown-inline' : 'thread-markdown'}
       plugins={{ code: shikiPlugin }}
       shikiTheme={[SYN_THEME, SYN_THEME]}
-      remarkPlugins={fileContext || (document && imageSrc) ? contextual.remark : breaks ? HARD_BREAKS : undefined}
-      allowedElements={inline ? INLINE_ELEMENTS : undefined}
-      unwrapDisallowed={inline || undefined}
-      components={inline ? INLINE_COMPONENTS : fileContext || document ? contextual.components : undefined}
+      {...defined({
+        remarkPlugins: fileContext || (document && imageSrc) ? contextual.remark : breaks ? HARD_BREAKS : undefined,
+        allowedElements: inline ? INLINE_ELEMENTS : undefined,
+        unwrapDisallowed: inline || undefined,
+        components: inline ? INLINE_COMPONENTS : fileContext || document ? contextual.components : undefined,
+      })}
       linkSafety={LINK_SAFETY}
       // Copy + language chip on every fence (the deliverable); download is file-manager noise
       // in a chat, and table export dropdowns are R5-territory chrome.

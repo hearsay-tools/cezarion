@@ -41,8 +41,8 @@ export function parseRunEvent(data: string): RunEvent | null {
  * to exactly the component that asked for it.
  */
 export interface RunEventStreamOptions {
-  cursor?: string
-  afterSeq?: number
+  cursor?: string | undefined
+  afterSeq?: number | undefined
   /** Optimized history keeps a bounded live tail; full-replay fallback leaves this absent. */
   maxEvents?: number
   /** Ask the history owner to fold the live prefix into a fresh persisted tail page. */

@@ -31,7 +31,7 @@ export function parseOrigin(value: string | null | undefined): TaskOrigin {
   return value === 'direct' || value === 'automations' ? value : 'all'
 }
 
-export function matchesOrigin(run: { automationId?: string }, origin: TaskOrigin): boolean {
+export function matchesOrigin(run: { automationId?: string | undefined }, origin: TaskOrigin): boolean {
   if (origin === 'all') return true
   return isAutomationTask(run) === (origin === 'automations')
 }
@@ -44,7 +44,7 @@ export function originAutomationFlag(origin: TaskOrigin): boolean | undefined {
 /** The origin chips' counts, for the archive view in front of the reader. Owned workers are not
  *  rows, so they are not counted. */
 export function originCounts(
-  runs: readonly (Pick<RunSummary, 'archived' | 'automationId'> & { delegation?: { role?: string } | null })[],
+  runs: readonly (Pick<RunSummary, 'archived' | 'automationId'> & { delegation?: { role?: string } | null | undefined })[],
   view: ListView,
 ): Record<TaskOrigin, number> {
   const counts = { all: 0, direct: 0, automations: 0 }

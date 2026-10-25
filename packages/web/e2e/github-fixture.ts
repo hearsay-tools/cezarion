@@ -11,7 +11,7 @@ const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e
 const DESKTOP = { width: 1440, height: 900 }
 export interface GithubPayload {
   available: boolean
-  repo?: string
+  repo?: string | undefined
   issues: Array<{ number: number; title: string; labels: string[] }>
   prs: Array<{ number: number; title: string; checks?: string | null }>
 }

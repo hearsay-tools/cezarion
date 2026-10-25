@@ -171,7 +171,7 @@ function workerMeta({
 }
 
 /** The worker row's glyph — shape first, color second, the language the plan and agent rows use. */
-function WorkerGlyph({ status }: { status?: WorkerInspection['status'] }) {
+function WorkerGlyph({ status }: { status?: WorkerInspection['status'] | undefined }) {
   const base = 'size-[15px] shrink-0'
   if (status === 'done') return <CircleCheckIcon aria-hidden className={cn(base, 'text-success')} />
   if (status === 'failed') return <CircleXIcon aria-hidden className={cn(base, 'text-danger')} />

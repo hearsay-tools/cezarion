@@ -1,3 +1,4 @@
+import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import * as React from 'react'
 
 import { AddProjectDialog } from '@/components/add-project-dialog'
@@ -45,10 +46,10 @@ export function AddProjectMenu({
 }: {
   /** Extra trigger classes, merged over the footer's. The project rail (#618) restyles it. */
   triggerClassName?: string
-  icon?: typeof FolderPlusIcon
+  icon?: typeof FolderPlusIcon | undefined
   iconClassName?: string
   /** Which side the menu opens on; the rail opens it to the right, over the sidebar. */
-  side?: 'right'
+  side?: 'right' | undefined
   /** Where this mount lives, as `data-origin` on the trigger, so a second mount (the rail) stays
    *  addressable. Not a `data-slot`: that would replace the Button's, which holds the 44px floor. */
   origin?: string
@@ -83,7 +84,7 @@ export function AddProjectMenu({
           {label ? <span>{label}</span> : <span className="sr-only">Add project</span>}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side={side} className="w-56">
+      <DropdownMenuContent align="start" {...defined({ side })} className="w-56">
         <DropdownMenuLabel className="text-xs text-soft-foreground">Add project</DropdownMenuLabel>
         <DropdownMenuItem data-slot="add-project-new" onSelect={() => setCreating(true)}>
           <FolderPlusIcon aria-hidden="true" />
