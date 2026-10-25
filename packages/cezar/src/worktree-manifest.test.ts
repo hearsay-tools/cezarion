@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -11,6 +12,7 @@ import {
   MANIFEST_FILE,
   withWorktreeFiles,
   type EntryContent,
+  type PathState,
   type WorktreeFiles,
   type WorktreeFilesOptions,
   type WriteBoundary,
@@ -18,6 +20,8 @@ import {
 import { readManifest } from './worktree-manifest.testkit.ts';
 
 const execFileAsync = promisify(execFile);
+/** The `tree:` identity a cezar before hearsay-tools/cezarion#1814 recorded for a file holding `text`. */
+const legacyFileIdentity = (text: string) => `tree:${createHash('sha256').update(`F  ${text}\n`).digest('hex')}`;
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 
 describe('worktree manifest', { timeout: 30_000 }, () => {
@@ -192,6 +196,49 @@ describe('worktree manifest', { timeout: 30_000 }, () => {
     } finally {
       rmSync(outside, { recursive: true, force: true });
     }
+  });
+
+  it('tells two trees apart whose names and bytes run together the same way', async () => {
+    mkdirSync(join(worktree, 'one'));
+    writeFileSync(join(worktree, 'one', 'a'), '\nF b y');
+    mkdirSync(join(worktree, 'two'));
+    writeFileSync(join(worktree, 'two', 'a'), '');
+    writeFileSync(join(worktree, 'two', 'b'), 'y');
+    expect(await identityOf(join(worktree, 'one'))).not.toBe(await identityOf(join(worktree, 'two')));
+  });
+
+  it.skipIf(process.platform === 'win32')('never opens a special file the agent put in place of an entry', async () => {
+    await pass('seed', (files) => files.put('a.json', { type: 'file', text: '{}' }, { kind: 'file' }));
+    const fifo = join(worktree, 'a.json');
+    rmSync(fifo);
+    await execFileAsync('mkfifo', [fifo]);
+    const inspected = pass('seed', (files) => files.inspect('a.json'));
+    let timer: NodeJS.Timeout | undefined;
+    // bound: a read of a FIFO with no writer never returns; 10 s is a hang guard far above the lstat the pass needs.
+    const hung = new Promise<'hung'>((resolve) => { timer = setTimeout(() => resolve('hung'), 10_000); });
+    const outcome = await Promise.race([inspected, hung]);
+    clearTimeout(timer);
+    // Release a read that blocked, so the pass and the worker can end.
+    if (outcome === 'hung') closeSync(openSync(fifo, 'w'));
+    expect(outcome).not.toBe('hung');
+    expect((outcome as PathState).owner).toBe('theirs');
+  });
+
+  it('checks an identity from the legacy record in its older encoding, then records it in the new one', async () => {
+    writeFileSync(join(worktree, 'kept.txt'), 'v1');
+    writeFileSync(join(gitDir, LEGACY_SKILLS_MANIFEST_FILE), JSON.stringify({
+      version: 1, roots: [], entries: [{ path: 'kept.txt', kind: 'ignore-file', identity: legacyFileIdentity('v1') }],
+    }));
+    await pass('skills', async (files) => {
+      const state = await files.inspect('kept.txt');
+      expect(state.owner).toBe('ours');
+      expect(state.current).toBe(fileIdentity('v1'));
+      expect(state.entry?.identity).toBe(fileIdentity('v1'));
+      await files.save();
+    });
+    expect((await readManifest(worktree))?.entries[0]?.identity).toBe(fileIdentity('v1'));
+    writeFileSync(join(worktree, 'kept.txt'), 'v2');
+    await pass('skills', async (files) => expect((await files.inspect('kept.txt')).owner).toBe('theirs'));
   });
 
   // The Worktree cases rows for a crash inside one write, read from what the crash committed.

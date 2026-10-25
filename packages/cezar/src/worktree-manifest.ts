@@ -44,7 +44,10 @@ const entrySchema = z.object({
   skill: z.string().optional(),
   /** What the entry was made from: a changed source means a rewrite. */
   source: z.string().optional(),
-  /** What cezar left at the path: `link:<target>`, or `tree:<sha256>` over every name, link and byte. */
+  /**
+   * What cezar left at the path: `link:<target>`, or `tree2:<sha256>` over every name, link target
+   * and byte, each length-prefixed. A `tree:` identity is an imported one in the older encoding.
+   */
   identity: z.string(),
   /** A pending entry's other complete form that still counts as cezar's: the copy it replaces. */
   alternate: z.string().optional(),
@@ -128,36 +131,70 @@ async function loadManifest(gitDir: string): Promise<Loaded | 'newer'> {
   return loaded;
 }
 
-async function digestInto(hash: Hash, path: string, rel: string): Promise<void> {
-  const stat = await lstat(path);
-  if (stat.isSymbolicLink()) hash.update(`L ${rel} ${await readlink(path)}\n`);
-  else if (stat.isDirectory()) {
-    hash.update(`D ${rel}\n`);
-    for (const name of (await readdir(path)).sort()) await digestInto(hash, join(path, name), rel ? `${rel}/${name}` : name);
-  } else {
-    hash.update(`F ${rel} `);
-    hash.update(await readFile(path));
-    hash.update('\n');
-  }
+/** How a tree's records are written into its hash, per identity prefix. */
+interface TreeEncoding {
+  link: (rel: string, target: string) => string;
+  dir: (rel: string) => string;
+  /** Written before the file's bytes; `fileEnd` after them. */
+  file: (rel: string, size: number) => string;
+  fileEnd: string;
+  special: (rel: string, mode: number) => string;
 }
 
-/** What is at `path` now, comparable with a recorded identity; null when nothing is there. */
-export async function identityOf(path: string): Promise<string | null> {
+/** Each name, link target and file is prefixed with its byte length, so no bytes pass for another record. */
+const sized = (value: string) => `${Buffer.byteLength(value)}:${value}`;
+const TREE2: TreeEncoding = {
+  link: (rel, target) => `L${sized(rel)}${sized(target)}`,
+  dir: (rel) => `D${sized(rel)}`,
+  file: (rel, size) => `F${sized(rel)}${size}:`,
+  fileEnd: '',
+  special: (rel, mode) => `S${sized(rel)}${mode}:`,
+};
+
+/** The encoding a cezar before hearsay-tools/cezarion#1814 recorded; read only to check an imported identity. */
+const LEGACY_TREE: TreeEncoding = {
+  link: (rel, target) => `L ${rel} ${target}\n`,
+  dir: (rel) => `D ${rel}\n`,
+  file: (rel) => `F ${rel} `,
+  fileEnd: '\n',
+  special: (rel, mode) => `S ${rel} ${mode}\n`,
+};
+
+/** Only a regular file is opened: a FIFO, socket or device is hashed by its type, never read. */
+async function digestInto(hash: Hash, path: string, rel: string, encoding: TreeEncoding): Promise<void> {
+  const stat = await lstat(path);
+  if (stat.isSymbolicLink()) hash.update(encoding.link(rel, await readlink(path)));
+  else if (stat.isDirectory()) {
+    hash.update(encoding.dir(rel));
+    for (const name of (await readdir(path)).sort()) await digestInto(hash, join(path, name), rel ? `${rel}/${name}` : name, encoding);
+  } else if (stat.isFile()) {
+    const bytes = await readFile(path);
+    hash.update(encoding.file(rel, bytes.length)).update(bytes).update(encoding.fileEnd);
+  } else hash.update(encoding.special(rel, stat.mode));
+}
+
+async function digestOf(path: string, prefix: 'tree2' | 'tree'): Promise<string | null> {
   const stat = await lstat(path).catch(() => null);
   if (!stat) return null;
   if (stat.isSymbolicLink()) return `link:${await readlink(path)}`;
   const hash = createHash('sha256');
-  await digestInto(hash, path, '');
-  return `tree:${hash.digest('hex')}`;
+  await digestInto(hash, path, '', prefix === 'tree2' ? TREE2 : LEGACY_TREE);
+  return `${prefix}:${hash.digest('hex')}`;
+}
+
+/** What is at `path` now, comparable with a recorded identity; null when nothing is there. */
+export function identityOf(path: string): Promise<string | null> {
+  return digestOf(path, 'tree2');
 }
 
 /** The identity `identityOf` reads from a regular file holding `content`. */
 export function fileIdentity(content: string | Buffer): string {
-  return `tree:${createHash('sha256').update('F  ').update(content).update('\n').digest('hex')}`;
+  const bytes = typeof content === 'string' ? Buffer.from(content) : content;
+  return `tree2:${createHash('sha256').update(TREE2.file('', bytes.length)).update(bytes).digest('hex')}`;
 }
 
 /** Only these identities can prove a path unchanged; any other (a legacy `marker:`) cannot. */
-const verifiable = (identity: string) => identity.startsWith('link:') || identity.startsWith('tree:');
+const verifiable = (identity: string) => /^(link|tree2?):/.test(identity);
 
 async function removePath(path: string): Promise<void> {
   const stat = await lstat(path).catch(() => null);
@@ -306,7 +343,19 @@ export class WorktreeFiles {
     if (current === null) return { owner: 'free', current, entry: listed };
     if (!listed) return { owner: 'theirs', current, entry: undefined };
     if (current === listed.identity || current === listed.alternate) return { owner: 'ours', current, entry: listed };
+    const upgraded = await this.upgradeLegacy(at, listed, current);
+    if (upgraded) return { owner: 'ours', current, entry: upgraded };
     return { owner: listed.kind === 'pending' || !verifiable(listed.identity) ? 'kept' : 'theirs', current, entry: listed };
+  }
+
+  /** An imported `tree:` identity that still matches, in its older encoding, is recorded again as `current`. */
+  private async upgradeLegacy(at: string, listed: ManifestEntry, current: string): Promise<ManifestEntry | null> {
+    if (!listed.identity.startsWith('tree:') && !listed.alternate?.startsWith('tree:')) return null;
+    const old = await digestOf(at, 'tree');
+    if (old !== listed.identity && old !== listed.alternate) return null;
+    const entry = old === listed.identity ? { ...listed, identity: current } : { ...listed, alternate: current };
+    this.byPath.set(entry.path, entry);
+    return entry;
   }
 
   /** A new dir in the private git dir to build an entry in; removed when the pass ends. */

@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
@@ -16,7 +17,7 @@ import {
   skillClosure,
 } from './skills-provision.ts';
 import { seedTeamDirSkillClone } from './skills-remote.testkit.ts';
-import { fileIdentity, identityOf, type WriteBoundary } from './worktree-manifest.ts';
+import { identityOf, type WriteBoundary } from './worktree-manifest.ts';
 import { readManifest, uncoveredPaths } from './worktree-manifest.testkit.ts';
 
 const execFileAsync = promisify(execFile);
@@ -683,7 +684,8 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
         roots: ['team-legacy'],
         entries: [
           { path: '.agents/skills/team-legacy', kind: 'team-copy', skill: 'team-legacy', identity: `marker:${marker}` },
-          { path: '.agents/skills/.gitignore', kind: 'ignore-file', identity: fileIdentity(ignore) },
+          // The tree encoding a cezar before hearsay-tools/cezarion#1814 used for a file.
+          { path: '.agents/skills/.gitignore', kind: 'ignore-file', identity: `tree:${createHash('sha256').update(`F  ${ignore}\n`).digest('hex')}` },
           { path: '.claude/skills/lead-skill', kind: 'link', skill: 'lead-skill', source: `dir:${dirname(lead.path)}`, identity: `link:${dirname(lead.path)}` },
         ],
       }));
