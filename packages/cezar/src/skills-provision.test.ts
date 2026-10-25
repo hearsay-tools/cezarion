@@ -75,6 +75,7 @@ describe('namesSkillCommand', () => {
   it('matches /name before punctuation', () => {
     expect(namesSkillCommand('run /auto-merge, then stop', 'auto-merge')).toBe(true);
     expect(namesSkillCommand('then run /auto-merge.', 'auto-merge')).toBe(true);
+    expect(namesSkillCommand('Next: /auto-merge', 'auto-merge')).toBe(true);
   });
 
   it('never matches a path segment', () => {
@@ -82,6 +83,7 @@ describe('namesSkillCommand', () => {
     expect(namesSkillCommand('see src/fix', 'fix')).toBe(false);
     expect(namesSkillCommand('see https://example.test/fix', 'fix')).toBe(false);
     expect(namesSkillCommand('see ~/fix', 'fix')).toBe(false);
+    expect(namesSkillCommand('Open C:/repo/src', 'repo')).toBe(false);
   });
 
   it('never matches a bare word, a quoted name, a longer name or another case', () => {
