@@ -84,6 +84,8 @@ describe('namesSkillCommand', () => {
     expect(namesSkillCommand('see https://example.test/fix', 'fix')).toBe(false);
     expect(namesSkillCommand('see ~/fix', 'fix')).toBe(false);
     expect(namesSkillCommand('Open C:/repo/src', 'repo')).toBe(false);
+    expect(namesSkillCommand('Open /repo/src', 'repo')).toBe(false);
+    expect(namesSkillCommand('Open /repo.json', 'repo')).toBe(false);
   });
 
   it('never matches a bare word, a quoted name, a longer name or another case', () => {

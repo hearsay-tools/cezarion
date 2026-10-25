@@ -36,13 +36,13 @@ export function mentionsSkill(body: string, name: string): boolean {
 
 /**
  * True when a human's `text` names `name` as a typed `/name`, at the start of a word and never
- * inside a path (`a/name`, `~/name`, `C:/name`, a URL). Stricter than `mentionsSkill`: a prompt is
- * prose and paths, where a bare hyphenated word is not a request to run a skill
- * (hearsay-tools/cezarion#1672).
+ * as a path segment (`a/name`, `~/name`, `C:/name`, `/name/a`, `/name.ext`, a URL). Stricter than
+ * `mentionsSkill`: a prompt is prose and paths, where a bare hyphenated word is not a request to
+ * run a skill (hearsay-tools/cezarion#1672).
  */
 export function namesSkillCommand(text: string, name: string): boolean {
   const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?<![A-Za-z0-9_.~:/-])/${escaped}(?![A-Za-z0-9_-])`).test(text);
+  return new RegExp(`(?<![A-Za-z0-9_.~:/-])/${escaped}(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9_])`).test(text);
 }
 
 /**
