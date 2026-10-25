@@ -235,7 +235,7 @@ its line text moves with a moved line; an edited line is a new site, and gets a 
 ## Reading a failure bundle
 
 A red spec leaves `.ai/qa/failures/<spec>/<test>-<n>/` behind (#408), and CI uploads the
-directory as the `cockpit-failures-shard-<n>` artifact:
+directory as the `cockpit-failures-shard-<n>` artifact and lists it in the job's step summary:
 
 | File | What it holds |
 | --- | --- |
@@ -304,6 +304,27 @@ other arguments, including `--shard=N/M`, spec paths and quoted test-name patter
 are passed intact to Vitest. A literal `--` ends wrapper option parsing.
 With no arguments the full sequential suite still runs. A filtered run's
 `TEST_E2E_STATUS=passed` verifies only that selection, not the full browser gate.
+
+Local exit contract of `npm run test:e2e`:
+
+| Exit     | Marker                    | Meaning                                                                                                           |
+| -------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------- |
+| 0        | `TEST_E2E_STATUS=passed`  | every selected spec passed; a filtered run is not a full-suite pass                                                                                                 |
+| 0        | `TEST_E2E_STATUS=skipped` | agent-browser could not be provisioned (no network / unsupported platform); prints a loud banner — **not** a pass |
+| non-zero | `TEST_E2E_STATUS=failed`  | a spec failed, or the env could not boot                                                                          |
+
+`npm run test:e2e:local` prints the same marker but exits nonzero on `skipped` as well as
+`failed` (§ Full local suite in four lanes). Pull request CI pipes the `test:e2e` log through
+`.github/scripts/require-e2e-passed.cjs` and fails on skipped or failed.
+
+The server boots on a free port with `CEZ_DRY_RUN=1` (agent CLIs mocked — no login, no network) from the
+`VITE_CEZ_E2E=1` build, never `packages/cezar/dist` or `packages/cezar/web/dist`, which stay the
+production build. It reuses an already-healthy instance instead of double-booting and writes
+`.ai/qa/test-env.json` so QA skills attach to the same instance. Stop it with
+`.ai/scripts/test-env-down.sh`. When another process holds the test-env lease, the
+timeout message names the holder's executable and interpreter script, with other arguments
+omitted so no credentials reach the log. It reuses the diagnostic snapshot taken when the wait
+began and starts no more command probes after the acquisition deadline.
 
 The launcher waits up to 180 elapsed seconds for app health after starting the server.
 Set `TEST_ENV_HEALTH_TIMEOUT_SECONDS` to a positive integer to override that budget
@@ -391,7 +412,7 @@ membership against its own fixture skills only, so unrelated catalog entries can
 
 A built-in that a spec tests as product behavior, such as the `quick-task` workflow a new task
 runs, is not a catalog entry in this sense. A change that removes one still searches the specs
-first, as [AGENTS.md § Validation](../../../AGENTS.md#validation) says.
+first, as the [AGENTS.md reader sweep](../../../AGENTS.md#reader-sweep) says.
 
 ## A plain dry-run reply parks on a "Next step" card
 
@@ -429,6 +450,22 @@ Shard output, boot logs, descriptors, app logs, and failure bundles remain under
 `.ai/qa/local-runs/<run-id>/`. A failed lane makes the command exit nonzero and print
 `TEST_E2E_STATUS=failed`; an unavailable browser prints `TEST_E2E_STATUS=skipped`.
 Both statuses exit nonzero for this final local gate.
+
+## Checking a UI change by hand
+
+To check a UI change by hand in a real browser, run `node .ai/scripts/qa-fixture.mjs up`
+(hearsay-tools/cezarion#1406). It builds the `VITE_CEZ_E2E=1` cockpit into a temporary root
+and serves it under `CEZ_DRY_RUN=1` on a new Git repository with its own `CEZ_HOME`. That
+repository is a registered project, so project settings and project routes work from a task
+worktree too; the clone the shared test env serves is not registered there. It prints
+`QA_FIXTURE_BASE_URL`, `QA_FIXTURE_PROJECT_ID` and `QA_FIXTURE_PROJECT_URL`; drive that URL
+with the agent-browser operations in `.ai/browsers/agent-browser.md`. Opt-ins use
+`--server-env=CEZ_NAME=value`, as for `test-env-up.sh`. It takes no test-env lease, so a
+Squeal browser run does not block it. One fixture runs per worktree, and `up` replaces it.
+`node .ai/scripts/qa-fixture.mjs down` stops the server's process group and removes the
+temporary root. A forgotten fixture stops on its own when its worktree, its `.ai/qa` or its
+temporary root is deleted, and so does a server whose `up` was interrupted during boot.
+Linux and macOS only.
 
 ## Forcing a race with a delayed route
 

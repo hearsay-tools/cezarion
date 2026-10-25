@@ -27,20 +27,46 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
   // One async read (#880): an archived transcript decodes with the async brotli API.
   const allEvents = await store.readEventsAsync(run.id);
   const events = allEvents.filter(event => event.seq > (delegation.executionStartSeq ?? -1));
+  const summary = latestAssistantSummary(events);
+  const destroyed = delegation.destroy?.phase === 'complete';
+  const workspaceRemoved = !!delegation.destroy && !delegation.destroy.remaining.includes('worktree');
+  const { lastExecutionOutcome, settled } = executionOutcome(store, run);
+  const head = await readWorkerHead(repoRoot, run, previous, workspaceRemoved);
+  const { diff, diffSnapshot } = await readWorkerDiff(repoRoot, store, run, delegation, { destroyed, workspaceRemoved });
+  const artifacts = await listWorkerArtifacts(repoRoot, run, delegation, allEvents);
+  return { result: {
+    workerId: run.id, parentRunId: delegation.parentRunId, revision: workerRevision(run), observedAt: new Date().toISOString(),
+    status: run.status, outcome: destroyed ? 'destroyed' : lastExecutionOutcome, lastExecutionOutcome,
+    partial: !settled || run.status === 'failed' || run.status === 'cancelled', settled,
+    ...(run.error ? { error: run.error.slice(0, 2000) } : {}),
+    ...(run.runner ? { backend: run.runner } : {}), ...(run.model ? { model: run.model } : {}),
+    baselineSha: delegation.workspace.baselineSha, workspace: { ...delegation.workspace, state: workspaceRemoved ? 'deleted' : head.state === 'available' ? 'available' : 'unavailable' }, cleanup: delegation.destroy?.phase ?? 'retained',
+    summary, head, diff, artifacts,
+  }, ...(diffSnapshot === undefined ? {} : { diffSnapshot }) };
+}
+
+/** The newest non-blank top-level assistant text of this execution, bounded to 4000 characters. */
+function latestAssistantSummary(events: RunEvent[]): WorkerCollectedResult['summary'] {
   let summary: WorkerCollectedResult['summary'] = { state: 'unavailable', reason: 'no-assistant-output' };
   for (const event of events) {
     const text = topLevelAssistantText(event);
     if (text?.trim()) summary = { state: 'available', text: text.slice(0, 4000), source: 'assistant', seq: event.seq, truncated: text.length > 4000 };
   }
-  const destroyed = delegation.destroy?.phase === 'complete';
-  const workspaceRemoved = !!delegation.destroy && !delegation.destroy.remaining.includes('worktree');
+  return summary;
+}
+
+/** The public status as an execution outcome; settled only once the private execution record is complete. */
+function executionOutcome(store: RunStore, run: RunRecord): { lastExecutionOutcome: WorkerCollectedResult['lastExecutionOutcome']; settled: boolean } {
   const lastExecutionOutcome = run.status === 'review' ? 'review-ready' : run.status === 'done' ? 'completed'
     : run.status === 'failed' ? 'failed' : run.status === 'cancelled' ? 'cancelled' : 'running';
   const settled = lastExecutionOutcome !== 'running' && store.readWorkerExecution(run.id)?.phase === 'complete';
+  return { lastExecutionOutcome, settled };
+}
+
+/** The owned workspace's verified HEAD. A failed read keeps the last collected SHA: `unverified`, or `deleted` once the worktree is removed. */
+async function readWorkerHead(repoRoot: string, run: RunRecord, previous: WorkerCollectedResult | undefined, workspaceRemoved: boolean): Promise<WorkerCollectedResult['head']> {
   const historicalSha = previous?.head && 'sha' in previous.head ? previous.head.sha : undefined;
   let head: WorkerCollectedResult['head'] = { state: workspaceRemoved ? 'deleted' : 'unavailable', reason: 'missing', ...(historicalSha ? { sha: historicalSha } : {}) };
-  let diff: WorkerCollectedResult['diff'] = { state: workspaceRemoved ? 'deleted' : 'unavailable', reason: 'missing' };
-  let diffSnapshot: string | undefined;
   try {
     const workspace = await verifyOwnedWorkspace(repoRoot, run);
     const sha = await new Promise<string>((resolve, reject) => execFile('git', ['rev-parse', '--verify', 'HEAD^{commit}'],
@@ -48,12 +74,21 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
     if (!/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(sha)) throw Error('invalid HEAD');
     head = { state: 'available', sha };
   } catch { if (!workspaceRemoved) head = { state: 'unavailable', reason: 'unverified', ...(historicalSha ? { sha: historicalSha } : {}) }; }
+  return head;
+}
+
+type WorkerDelegation = Extract<NonNullable<RunRecord['delegation']>, { role: 'worker' }>;
+
+/** The owned workspace's diff, or this revision's retained snapshot when the live read fails. */
+async function readWorkerDiff(repoRoot: string, store: RunStore, run: RunRecord, delegation: WorkerDelegation, cleanup: { destroyed: boolean; workspaceRemoved: boolean }): Promise<{ diff: WorkerCollectedResult['diff']; diffSnapshot: string | undefined }> {
+  let diff: WorkerCollectedResult['diff'] = { state: cleanup.workspaceRemoved ? 'deleted' : 'unavailable', reason: 'missing' };
+  let diffSnapshot: string | undefined;
   try {
     const observation = await readOwnedDiff(repoRoot, run);
     diffSnapshot = observation.diff;
     const snapshotId = randomUUID();
     diff = { state: 'available', snapshotId, path: store.workerResultSnapshotPath(delegation.parentRunId, run.id, snapshotId), truncated: observation.truncated };
-  } catch { if (!destroyed) diff = { state: 'unavailable', reason: 'unverified' }; }
+  } catch { if (!cleanup.destroyed) diff = { state: 'unavailable', reason: 'unverified' }; }
   // Re-read after the live workspace checks. A concurrent reclaim can commit a
   // snapshot while this collect still holds a `previous` captured as undefined.
   if (diffSnapshot === undefined) {
@@ -63,6 +98,11 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
       if (retained !== undefined) { diffSnapshot = retained; diff = { ...stored.diff, snapshotId: randomUUID() }; }
     }
   }
+  return { diff, diffSnapshot };
+}
+
+/** Published artifacts, newest first, then image and parent-attachment descriptors; at most 32. */
+async function listWorkerArtifacts(repoRoot: string, run: RunRecord, delegation: WorkerDelegation, allEvents: RunEvent[]): Promise<WorkerCollectedResult['artifacts']> {
   const dataDir = join(repoRoot, '.ai/cezar');
   const ids = new Set<string>();
   for (const event of allEvents) {
@@ -80,15 +120,7 @@ export async function collectWorkerEvidence(repoRoot: string, store: RunStore, r
     if (resolveAttachmentPath(dataDir, run.id, id)) return { state: 'available', id, path };
     return existsSync(path) ? { state: 'unavailable', reason: 'unreadable', id, path } : { state: 'deleted', reason: 'missing', id, path };
   })].slice(0, 32);
-  return { result: {
-    workerId: run.id, parentRunId: delegation.parentRunId, revision: workerRevision(run), observedAt: new Date().toISOString(),
-    status: run.status, outcome: destroyed ? 'destroyed' : lastExecutionOutcome, lastExecutionOutcome,
-    partial: !settled || run.status === 'failed' || run.status === 'cancelled', settled,
-    ...(run.error ? { error: run.error.slice(0, 2000) } : {}),
-    ...(run.runner ? { backend: run.runner } : {}), ...(run.model ? { model: run.model } : {}),
-    baselineSha: delegation.workspace.baselineSha, workspace: { ...delegation.workspace, state: workspaceRemoved ? 'deleted' : head.state === 'available' ? 'available' : 'unavailable' }, cleanup: delegation.destroy?.phase ?? 'retained',
-    summary, head, diff, artifacts: { state: 'available', items, truncated: ids.size + published.length > 32 },
-  }, ...(diffSnapshot === undefined ? {} : { diffSnapshot }) };
+  return { state: 'available', items, truncated: ids.size + published.length > 32 };
 }
 
 /** History deletion retains observation bytes, not attachment files or live Git refs. */
