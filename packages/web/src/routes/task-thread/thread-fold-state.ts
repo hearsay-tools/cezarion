@@ -26,9 +26,9 @@ export interface DraftEntry {
 
 export interface DraftTurn {
   id: string
-  turnId?: string
+  turnId?: string | undefined
   userMessage?: ThreadTurn['userMessage']
-  startedAt?: string
+  startedAt?: string | undefined
   entries: DraftEntry[]
   planEntries?: PlanEntry[]
   completed?: { stopReason: StopReason; costUsd?: number; ts?: string | undefined }
@@ -47,7 +47,7 @@ export interface FoldState {
   /** The latest unresolved AskUser card (#473). The next `user-message` resolves
    *  it client-side (only one ask is ever pending — the agent asks once, then
    *  parks `waiting` until the user answers). */
-  pendingAsk?: ThreadAsk
+  pendingAsk?: ThreadAsk | undefined
   permissions: Map<string, ThreadPermission>
   conversationEntries: Map<string, ThreadConversationMessage>
   outcomesByRequest: Map<string, RequestOutcome>
@@ -196,14 +196,14 @@ export interface ConversationUpsert {
   state?: ConversationMessage['state'] | undefined
   createdAt?: string
   requestHash?: string
-  deadline?: string
-  instruction?: string
-  resumed?: true
+  deadline?: string | undefined
+  instruction?: string | undefined
+  resumed?: true | undefined
 }
 
 export interface ConversationTiming {
-  deliveredAt?: string
-  consumedAt?: string
+  deliveredAt?: string | undefined
+  consumedAt?: string | undefined
   recordedAt?: string
 }
 

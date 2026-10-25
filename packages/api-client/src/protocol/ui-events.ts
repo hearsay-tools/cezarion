@@ -101,8 +101,8 @@ export interface UiToolItem {
   status: ToolStatus
   /** Raw input — may arrive incrementally. */
   input?: unknown
-  output?: string
-  error?: string
+  output?: string | undefined
+  error?: string | undefined
   diffs?: FileDiff[]
   locations?: ToolLocation[]
   /** commandExecution / bash exit code, when the backend reports one. */
@@ -123,7 +123,7 @@ export interface UiHookItem {
   /** Native event, PascalCase: `SessionStart`, `PreToolUse`, `Stop`. */
   event: string
   /** Native label when richer than `event`: `SessionStart:startup`, `PreToolUse:Bash`. */
-  name?: string
+  name?: string | undefined
   /** Where the hook is defined, when the wire says (codex `sourcePath`). */
   source?: string
   status: HookStatus

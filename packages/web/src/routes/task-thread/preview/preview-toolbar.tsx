@@ -83,7 +83,7 @@ export interface PreviewToolbarProps {
   /** First open in progress (5.10): the thin bar under the toolbar. */
   loading?: boolean
   /** Where each registered server stands now; a server missing here reads as just registered. */
-  serverStates?: ReadonlyMap<number, ThreadPreviewServer>
+  serverStates?: ReadonlyMap<number, ThreadPreviewServer> | undefined
   /** The Experimental badge. False where the stage carries it instead (5.14). */
   badge?: boolean
   /** Present while frames flow. */
@@ -92,7 +92,7 @@ export interface PreviewToolbarProps {
   status?: { tone: StatusDotTone; label: string } | undefined
   urlInputRef?: RefObject<HTMLInputElement | null>
   /** Set where the pane replaces the transcript; the control returns to it. */
-  onSession?: () => void
+  onSession?: (() => void) | undefined
   onNavigate: (input: string) => void
   onBack: () => void
   onForward: () => void

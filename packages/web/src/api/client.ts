@@ -202,14 +202,14 @@ export class ApiError extends Error {
   /** `POST /api/runs/:id/pr`: the `git merge <branch>` to run by hand when the PR failed. */
   readonly manual?: string | undefined
   /** `POST /api/runs/:id/open-in-cli`: the resume command, when no terminal could be opened. */
-  readonly command?: string
+  readonly command?: string | undefined
   /** `POST /api/workflows`: the file is already there — the caller may retry with `overwrite`. */
-  readonly exists?: boolean
+  readonly exists?: boolean | undefined
 
   constructor(
     status: number,
     message: string,
-    extras: { manual?: string | undefined; command?: string; exists?: boolean; cause?: unknown } = {},
+    extras: { manual?: string | undefined; command?: string | undefined; exists?: boolean | undefined; cause?: unknown } = {},
   ) {
     super(message, extras.cause !== undefined ? { cause: extras.cause } : undefined)
     this.name = 'ApiError'
@@ -328,7 +328,7 @@ function unscoped(url: string): string {
  * value — whose type the caller gets from the route, not from a hand-written declaration.
  */
 /** The per-request options `hc` takes, from this module's `ReadOptions`. */
-const init = (opts?: ReadOptions) => ({ init: { signal: opts?.signal } })
+const init = (opts?: ReadOptions) => ({ init: { ...(opts?.signal === undefined ? {} : { signal: opts.signal }) } })
 
 /**
  * Accepts a route that answers more than one FORMAT — `/repo/commit/:sha` serves a structured
@@ -1118,13 +1118,13 @@ export async function getGithubPrChanges(
 /** The run's worktree diff against its base, as unified-diff text. Also the plain-text
  *  "(no worktree — …)" sentence for runs that executed in the repo working tree. */
 export function getRunDiff(id: string, opts?: ReadOptions): Promise<string> {
-  return requestText(runPath(id, '/diff'), { method: 'GET', signal: opts?.signal })
+  return requestText(runPath(id, '/diff'), { method: 'GET', ...(opts?.signal === undefined ? {} : { signal: opts.signal }) })
 }
 
 /** The run's handoff journal (spec 007) as markdown text. `''` until the file is seeded —
  *  the server only 404s for an unknown run, never for a missing file. */
 export function getRunHandoff(id: string, opts?: ReadOptions): Promise<string> {
-  return requestText(runPath(id, '/handoff'), { method: 'GET', signal: opts?.signal })
+  return requestText(runPath(id, '/handoff'), { method: 'GET', ...(opts?.signal === undefined ? {} : { signal: opts.signal }) })
 }
 
 /** Another project's handoff journal, for a row of All tasks (hearsay-tools/cezarion#1616): the
@@ -1132,7 +1132,7 @@ export function getRunHandoff(id: string, opts?: ReadOptions): Promise<string> {
 export async function getProjectRunHandoff(projectId: string, id: string, opts?: ReadOptions): Promise<string> {
   const res = await cez.api.v1.p[':projectId'].runs[':id'].handoff.$get(
     { param: { projectId, id: encodeURIComponent(id) } },
-    { init: { signal: opts?.signal }, headers: { accept: 'text/plain' } },
+    { init: { ...(opts?.signal === undefined ? {} : { signal: opts.signal }) }, headers: { accept: 'text/plain' } },
   )
   const body = await res.text()
   if (!res.ok) throw errorFor(res.status, res.statusText, body)
@@ -1193,12 +1193,12 @@ export function runFileRawUrl(id: string, path: string): string {
 
 /** Prepare the server-selected release without interrupting the running cockpit. */
 export async function applyApplicationUpdate(signal?: AbortSignal): Promise<ApplicationUpdateResponse> {
-  return unwrap(await cez.api.v1.workspace['application-update'].apply.$post({ json: {} }, init({ signal })), '/workspace/application-update/apply')
+  return unwrap(await cez.api.v1.workspace['application-update'].apply.$post({ json: {} }, init({ ...(signal === undefined ? {} : { signal }) })), '/workspace/application-update/apply')
 }
 
 /** Acknowledges the restart before the server hands off to its detached helper. */
 export async function restartApplication(signal?: AbortSignal): Promise<ApplicationUpdateResponse> {
-  return unwrap(await cez.api.v1.workspace['application-update'].restart.$post({ json: {} }, init({ signal })), '/workspace/application-update/restart')
+  return unwrap(await cez.api.v1.workspace['application-update'].restart.$post({ json: {} }, init({ ...(signal === undefined ? {} : { signal }) })), '/workspace/application-update/restart')
 }
 
 /**
@@ -1632,14 +1632,14 @@ export async function finishRun(id: string): Promise<FinishResponse> {
  *  the engine opens with its plain "Continue.". */
 export interface ContinueOptions {
   text?: string | undefined
-  images?: AttachmentInput[]
+  images?: AttachmentInput[] | undefined
   runner?: Runner | undefined
   model?: string | undefined
   /** Reasoning-effort pin (#45). Omitted keeps the run's pin; empty string clears it. */
-  effort?: string
+  effort?: string | undefined
   /** Which login of that agent reopens it (spec 2026-07-29-agent-profiles). Switching account
    *  starts a fresh session server-side — a session id lives inside ONE account's config dir. */
-  agentProfile?: string
+  agentProfile?: string | undefined
 }
 
 /** Reopen a finished run's session. 409 (with the reason) when it cannot be resumed. An optional
@@ -2107,7 +2107,7 @@ export async function putWorkspaceUiState(
   return unwrap(
     await cez.api.v1.workspace['ui-state'].$put(
       { json: patch },
-      { init: { keepalive: opts.keepalive } },
+      { init: { ...(opts.keepalive === undefined ? {} : { keepalive: opts.keepalive }) } },
     ),
     '/workspace/ui-state',
   )
@@ -2347,7 +2347,7 @@ export async function voiceDecide(input: VoiceDecideRequest, signal?: AbortSigna
   return unwrap(
     await cez.api.v1.p[':projectId'].voice.decide.$post(
       { param: { projectId: queryScope() }, json: input },
-      init({ signal }),
+      init({ ...(signal === undefined ? {} : { signal }) }),
     ),
     '/voice/decide',
   )

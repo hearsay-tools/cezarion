@@ -67,8 +67,8 @@ export function SidebarProjectHeader({ onNavigate }: { onNavigate?: (() => void)
         triggerRef={menuButtonRef}
         triggerClassName="size-7 max-md:size-11"
         align="start"
-        alignOffset={menuOffset}
-        onOpenChange={(open) => {
+        {...(menuOffset === undefined ? {} : { alignOffset: menuOffset })}
+        onOpenChange={(open: boolean) => {
           if (open && markRef.current && menuButtonRef.current) {
             setMenuOffset(markRef.current.getBoundingClientRect().left - menuButtonRef.current.getBoundingClientRect().left)
           }
@@ -140,13 +140,13 @@ export function ProjectMenu({ projectId, onNavigate, triggerRef, triggerClassNam
   }
 
   return (
-    <DropdownMenu onOpenChange={onOpenChange}>
+    <DropdownMenu {...(onOpenChange === undefined ? {} : { onOpenChange })}>
       <DropdownMenuTrigger asChild>
         <button data-slot="project-menu-trigger" ref={triggerRef} type="button" aria-label="Project menu" className={cn('flex shrink-0 items-center justify-center rounded-[6px] text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring data-[state=open]:bg-sidebar-row-selected data-[state=open]:text-foreground', triggerClassName)}>
           <EllipsisIcon aria-hidden="true" className="size-[15px]" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={align} alignOffset={alignOffset} side={side} sideOffset={4} className={menuClass}>
+      <DropdownMenuContent align={align} {...(alignOffset === undefined ? {} : { alignOffset })} {...(side === undefined ? {} : { side })} sideOffset={4} className={menuClass}>
         <DropdownMenuItem className={itemClass} disabled={marking || runs.isError || runs.data === undefined || unread.length === 0 || projectId === null} onSelect={() => { void markAllRead() }}>
           <CheckCheckIcon aria-hidden="true" /> Mark all read
           <span className="ml-auto text-[11.5px] text-soft-foreground">{marking ? 'Marking…' : count}</span>

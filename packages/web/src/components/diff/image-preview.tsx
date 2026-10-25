@@ -36,7 +36,7 @@ export function ImagePreview({
 }: {
   file: DiffFileChange
   imageSrc?: ((path: string) => string) | undefined
-  onOpenInApp?: (path: string) => void
+  onOpenInApp?: ((path: string) => void) | undefined
 }) {
   if (file.status === 'deleted') {
     return <ImageNote>Image deleted — only the new side can be previewed.</ImageNote>

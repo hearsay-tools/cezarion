@@ -71,9 +71,9 @@ export function TaskQuickList({
    *  belongs to is a container's question — this list is painted for other projects too. */
   onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
   /** Archive one finished row (#780). Like the pin, the container owns the mutation. */
-  onArchiveRun?: (run: RunSummary) => void | Promise<unknown>
+  onArchiveRun?: ((run: RunSummary) => void | Promise<unknown>) | undefined
   /** Sweep unpinned finished rows across the full project list. */
-  onSweep?: (scope: ArchiveFinishedScope) => void
+  onSweep?: ((scope: ArchiveFinishedScope) => void) | undefined
   /** The sweep in flight, so its button reads busy. */
   sweeping?: ArchiveFinishedScope | null
   showViewControls?: boolean
@@ -168,11 +168,11 @@ export function QuickListBuckets({
   now?: number
   scope?: string | null
   onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
-  onArchiveRun?: (run: RunSummary) => void | Promise<unknown>
-  onSweep?: (scope: ArchiveFinishedScope) => void
+  onArchiveRun?: ((run: RunSummary) => void | Promise<unknown>) | undefined
+  onSweep?: ((scope: ArchiveFinishedScope) => void) | undefined
   sweeping?: ArchiveFinishedScope | null
   /** What each group sweep would take, from the whole list. Absent = no group buttons. */
-  sweepCounts?: { unpinned: number; pinned: number }
+  sweepCounts?: { unpinned: number; pinned: number } | undefined
   /** Names the project in a group button's accessible name, where several lists share a page. */
   projectName?: string | undefined
 }) {
@@ -474,7 +474,7 @@ function RunRow({
   /** Archive this row (#780). Where references are inert (touch, the mobile shell) the swipe
    *  replaces the button, so it only renders on a device that can hover. A promise that
    *  resolves `false` says the archive failed, and a swiped row snaps back. */
-  onArchiveRun?: (run: RunSummary) => void | Promise<unknown>
+  onArchiveRun?: ((run: RunSummary) => void | Promise<unknown>) | undefined
 }) {
   const navigate = useNavigate()
   const onNavigate = useSidebarNavigate()

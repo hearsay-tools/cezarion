@@ -23,7 +23,7 @@ export interface DiffFileChange {
    *  (#365) — set from the path's EXTENSION, so it is true for SVGs too. It means "previewable",
    *  NOT "has no text diff": whether the renderer actually swaps the rows for a picture is
    *  `shouldPreviewImage` in `./image-preview`. Present only when true. */
-  image?: boolean
+  image?: boolean | undefined
   /** This file's unified-diff section (`diff --git …` headers + `@@` hunks), possibly
    *  ending in the server's `… (patch truncated)` marker, possibly empty (metadata-only). */
   patch: string
@@ -78,7 +78,7 @@ export interface DiffProps {
    * default application. Absent ⇒ the action is hidden, not disabled — the doctrine every
    * other local-machine affordance in the cockpit follows (`git-actions.ts`).
    */
-  onOpenInApp?: (path: string) => void
+  onOpenInApp?: ((path: string) => void) | undefined
   /**
    * Receives the {@link DiffHandle}. A plain ref-shaped prop rather than the component's own
    * `ref`, because `<Diff>` lazy-loads its renderer: the handle only exists once that chunk

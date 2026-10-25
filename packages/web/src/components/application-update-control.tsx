@@ -13,11 +13,11 @@ export type ApplicationUpdateControlProps = {
   version: string | null
   latestVersion: string | null
   state?: ApplicationUpdateState | undefined
-  onApplyUpdate?: () => Promise<void>
-  onRestart?: () => Promise<void>
+  onApplyUpdate?: (() => Promise<void>) | undefined
+  onRestart?: (() => Promise<void>) | undefined
   error?: string | null | undefined
-  busy?: boolean
-  offline?: boolean
+  busy?: boolean | undefined
+  offline?: boolean | undefined
 }
 
 /** The same compact control is rendered in the desktop sidebar and mobile drawer. */

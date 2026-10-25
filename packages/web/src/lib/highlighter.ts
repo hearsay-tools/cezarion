@@ -10,7 +10,7 @@ import type { HighlighterCore } from 'shiki/core'
 export interface SynToken {
   content: string
   /** A `var(--syn-*)` reference, or undefined for plaintext runs. */
-  color?: string | undefined
+  color?: string
 }
 
 export interface SynHighlight {
@@ -222,10 +222,10 @@ export function highlightSync(code: string, lang: string, options: HighlightOpti
     const result = core.codeToTokens(code, {
       lang: canonical as never,
       theme: SYN_THEME.name,
-      tokenizeTimeLimit: options.tokenizeTimeLimit,
+      ...(options.tokenizeTimeLimit === undefined ? {} : { tokenizeTimeLimit: options.tokenizeTimeLimit }),
     })
     return {
-      tokens: result.tokens.map((line) => line.map(({ content, color }) => ({ content, color }))),
+      tokens: result.tokens.map((line) => line.map(({ content, color }) => ({ content, ...(color === undefined ? {} : { color }) }))),
       fg: result.fg ?? 'var(--syn-var)',
       bg: 'transparent',
     }

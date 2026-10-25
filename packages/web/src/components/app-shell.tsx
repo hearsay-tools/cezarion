@@ -64,9 +64,9 @@ export type AppShellProps = {
   version?: string | null
   /** The npm registry's newer version, when the server's update check found one (#368). */
   latestVersion?: string | null
-  applicationUpdate?: ApplicationUpdateState
-  onApplyUpdate?: () => Promise<void>
-  onRestart?: () => Promise<void>
+  applicationUpdate?: ApplicationUpdateState | undefined
+  onApplyUpdate?: (() => Promise<void>) | undefined
+  onRestart?: (() => Promise<void>) | undefined
   applicationUpdateError?: string | null
   applicationUpdateBusy?: boolean
   applicationUpdateOffline?: boolean
@@ -102,7 +102,7 @@ export type AppShellProps = {
   projectRail?: ReactNode
   /** The phone drawer's Tools row (#621): amber dot and forge note, derived from health by the
    *  container. Null/absent renders no row, as `toolsMenu` renders no trigger without health. */
-  toolsStatus?: DrawerTools | null
+  toolsStatus?: DrawerTools | null | undefined
 }
 
 /**
@@ -559,7 +559,7 @@ function MobileNavDrawer({
   onCloseAutoFocus?: React.ComponentProps<typeof SheetContent>['onCloseAutoFocus']
   mobileProjects?: MobileProjectNav | null | undefined
   currentProjectId: string | null
-  toolsStatus?: DrawerTools | null
+  toolsStatus?: DrawerTools | null | undefined
 }) {
   return (
     <SheetContent

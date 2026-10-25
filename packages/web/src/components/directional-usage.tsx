@@ -3,7 +3,7 @@ import { cn } from '@/lib/utils'
 
 interface DirectionalUsageProps {
   inputTokens?: number | undefined
-  outputTokens?: number
+  outputTokens?: number | undefined
   /** Compact prose (`IN … · OUT …`) or the desktop table's denser (`… / …`) form. */
   variant?: 'compact' | 'table'
   /** Historical compact surfaces disappear when neither direction was persisted. */

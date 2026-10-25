@@ -1072,7 +1072,7 @@ describe('useGlobalEvents — run events', () => {
       expect(invalidate).toHaveBeenCalledWith({ queryKey: workspaceQueryKeys.runsIndex }),
     )
     const indexRefreshes = invalidate.mock.calls.filter(
-      (call) => (call[0] as { queryKey: unknown[] }).queryKey?.[1] === 'runs-index',
+      (call) => (call[0] as { queryKey: readonly unknown[] }).queryKey?.[1] === 'runs-index',
     )
     expect(indexRefreshes).toHaveLength(1)
   })
@@ -1682,8 +1682,8 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     source.open()
 
     const predicates = invalidate.mock.calls
-      .map((call) => (call[0] as { predicate?: ((query: { queryKey: unknown[] }) => boolean) | undefined }).predicate)
-      .filter((predicate): predicate is (query: { queryKey: unknown[] }) => boolean => typeof predicate === 'function')
+      .map((call) => (call[0] as { predicate?: ((query: { queryKey: readonly unknown[] }) => boolean) | undefined }).predicate)
+      .filter((predicate): predicate is (query: { queryKey: readonly unknown[] }) => boolean => typeof predicate === 'function')
     expect(predicates.some((predicate) => predicate({ queryKey: ['default', 'runs', 'list'] }))).toBe(true)
     expect(predicates.some((predicate) => predicate({ queryKey: ['shop', 'runs', 'list'] }))).toBe(true)
     expect(predicates.every((predicate) => !predicate({ queryKey: ['shop', 'runs', 'detail', 'r1'] }))).toBe(

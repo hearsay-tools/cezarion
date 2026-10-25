@@ -32,7 +32,7 @@ export function TabLink({
   return (
     <Link
       to={to}
-      replace={replace}
+      {...(replace === undefined ? {} : { replace })}
       aria-current={active ? 'page' : undefined}
       onClick={onClick}
       className={cn(

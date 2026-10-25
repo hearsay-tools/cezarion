@@ -64,7 +64,7 @@ const failureCapture = {
   test: 'unknown-test',
 }
 
-export function configureFailureCapture(next: { root?: string | undefined; spec?: string; test?: string }): void {
+export function configureFailureCapture(next: { root?: string | undefined; spec?: string | undefined; test?: string | undefined }): void {
   if ('root' in next) failureCapture.root = next.root ?? defaultFailureRoot
   if ('spec' in next) failureCapture.spec = next.spec ?? 'unknown-spec'
   if ('test' in next) failureCapture.test = next.test ?? 'unknown-test'

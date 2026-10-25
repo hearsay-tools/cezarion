@@ -83,7 +83,7 @@ export function AddProjectMenu({
           {label ? <span>{label}</span> : <span className="sr-only">Add project</span>}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side={side} className="w-56">
+      <DropdownMenuContent align="start" {...(side === undefined ? {} : { side })} className="w-56">
         <DropdownMenuLabel className="text-xs text-soft-foreground">Add project</DropdownMenuLabel>
         <DropdownMenuItem data-slot="add-project-new" onSelect={() => setCreating(true)}>
           <FolderPlusIcon aria-hidden="true" />

@@ -111,7 +111,7 @@ export function useThreadScroll(
   options: {
     surface?: 'document' | 'panel'
     onLoadOlder?: (() => Promise<void>) | undefined
-    onJumpToLatest?: () => Promise<void>
+    onJumpToLatest?: (() => Promise<void>) | undefined
     rowKeys?: readonly string[]
   } = {},
 ): ThreadScrollControls {

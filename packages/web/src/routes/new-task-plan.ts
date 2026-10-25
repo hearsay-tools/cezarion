@@ -88,7 +88,7 @@ export function buildPlannedRunBody(opts: {
   model: string
   /** Native coding-agent settings stay visible, but a locked model is never a request override. */
   modelsLocked?: boolean
-  effort?: string
+  effort?: string | undefined
   runner: Runner
   /** True when the draft contains a sticky/user runner choice rather than an untouched default. */
   runnerExplicit?: boolean

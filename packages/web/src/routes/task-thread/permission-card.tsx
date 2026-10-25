@@ -59,7 +59,7 @@ function PendingPermission({ permission, runId }: { permission: ThreadPermission
 function PermissionChoices({ permission, state, offline = false, error, onSelect }: {
   permission: ThreadPermission
   state: 'pending' | 'sending' | 'resolved' | 'expired'
-  offline?: boolean
+  offline?: boolean | undefined
   error?: string | undefined
   onSelect?: ((optionId: string) => void) | undefined
 }) {

@@ -158,12 +158,12 @@ export function TasksOverview({
   /** Prevent a shallow write before the authoritative workspace state can preserve siblings. */
   columnsPending?: boolean
   error?: string | undefined
-  onRetry?: () => void
+  onRetry?: (() => void) | undefined
   /** Archived runs older than the list's window (#864), from `GET /run-summaries/archived`: for
    *  the search text when there is one, otherwise the newest pages. */
-  archivedPages?: ArchivedPages
+  archivedPages?: ArchivedPages | undefined
   /** Every archived task, when the server has counted them; until then a full window reads `200+`. */
-  archivedTotal?: number
+  archivedTotal?: number | undefined
   /** The search text as typed, so the route can ask the server for archived matches too. */
   onArchivedSearch?: (needle: string) => void
   /** All / Direct tasks / Automations (hearsay-tools/cezarion#1616), held by the route in the URL.
@@ -586,7 +586,7 @@ function ProjectTaskResults({ view, query, origin, onShowAll, caption, captionOn
   )
 }
 
-function TasksLoading({ error, onRetry }: { error?: string | undefined; onRetry?: () => void }) {
+function TasksLoading({ error, onRetry }: { error?: string | undefined; onRetry?: (() => void) | undefined }) {
   return error ? (
     <div role="alert" className="rounded-xl border border-border bg-card p-6"><h2 className="text-lg">Could not load tasks</h2><p className="mt-2 text-sm text-muted-foreground">{error}</p><Button variant="outline" className="mt-4" onClick={onRetry}>Retry</Button></div>
   ) : (

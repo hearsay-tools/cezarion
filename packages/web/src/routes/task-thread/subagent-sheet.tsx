@@ -29,7 +29,7 @@ export function SubagentSheet({
 }: {
   runId: string
   renderAsk?: ((ask: ThreadAsk) => ReactNode) | undefined
-  renderPermission?: (permission: ThreadPermission) => ReactNode
+  renderPermission?: ((permission: ThreadPermission) => ReactNode) | undefined
   /** The selected agent, or `undefined` when the sheet is closed. */
   agent: SubagentSummary | undefined
   /** That agent's child entries, in stream order (`subagentChildren`). */
@@ -66,7 +66,7 @@ function SheetBody({
 }: {
   runId: string
   renderAsk?: ((ask: ThreadAsk) => ReactNode) | undefined
-  renderPermission?: (permission: ThreadPermission) => ReactNode
+  renderPermission?: ((permission: ThreadPermission) => ReactNode) | undefined
   agent: SubagentSummary
   entries: ThreadEntry[]
   taskTitles?: TaskTitleMap | undefined

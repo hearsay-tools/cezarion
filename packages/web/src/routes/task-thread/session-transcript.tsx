@@ -40,7 +40,7 @@ export interface TranscriptUserMessage {
   text: string
   ask?: ThreadAsk | undefined
   imageCount?: number | undefined
-  images?: readonly string[]
+  images?: readonly string[] | undefined
   /** When this message was sent — or, for a still-queued one, when it was queued (#941). */
   ts?: string | undefined
 }
@@ -53,7 +53,7 @@ export interface TranscriptSection {
   entries: readonly ThreadEntry[]
   /** The turn's own clock (#941): when it opened, and when the agent finished it. Absent on the
    *  initial-prompt, queued and attributed-agent sections, which have no turn boundaries. */
-  startedAt?: string
+  startedAt?: string | undefined
   completedAt?: string
   /** Whether this section's stamp may move the thread's day cursor (#941). Default true; false
    *  for a section rendered OUT of chronological order, whose date says nothing about where the
@@ -62,10 +62,10 @@ export interface TranscriptSection {
 }
 
 export interface TranscriptMessageActions {
-  onEdit?: (text: string) => Promise<void>
-  onRemove?: () => Promise<void>
-  editLabel?: string
-  removeLabel?: string
+  onEdit?: ((text: string) => Promise<void>) | undefined
+  onRemove?: (() => Promise<void>) | undefined
+  editLabel?: string | undefined
+  removeLabel?: string | undefined
 }
 
 export interface TranscriptRowModel {
@@ -75,7 +75,7 @@ export interface TranscriptRowModel {
     | { kind: 'user-message'; message: TranscriptUserMessage }
     | { kind: 'block'; block: ThreadBlock }
     | { kind: 'day-separator'; ts: string }
-    | { kind: 'turn-time'; completedAt: string; startedAt?: string }
+    | { kind: 'turn-time'; completedAt: string; startedAt?: string | undefined }
 }
 
 export interface SessionTranscriptProps {
@@ -86,7 +86,7 @@ export interface SessionTranscriptProps {
   empty?: ReactNode
   /** Injects the run-aware reply behavior without coupling this view to run data or stores. */
   renderAsk?: ((ask: ThreadAsk) => ReactNode) | undefined
-  renderPermission?: (permission: ThreadPermission) => ReactNode
+  renderPermission?: ((permission: ThreadPermission) => ReactNode) | undefined
   messageActions?: Readonly<Record<string, TranscriptMessageActions>> | undefined
   /** Main-document integration preserves the shell's existing dock-owned jump pill. */
   scrollControls?: ThreadScrollControls
@@ -451,7 +451,7 @@ function ThreadBlockRenderer({
   block: ThreadBlock
   scope: string
   renderAsk?: ((ask: ThreadAsk) => ReactNode) | undefined
-  renderPermission?: (permission: ThreadPermission) => ReactNode
+  renderPermission?: ((permission: ThreadPermission) => ReactNode) | undefined
   runId: string
   taskTitles?: TaskTitleMap | undefined
   recipientBackends?: RecipientBackendMap | undefined
@@ -499,7 +499,7 @@ function GroupedEntries({
   entries: readonly ThreadEntry[]
   scope: string
   renderAsk?: ((ask: ThreadAsk) => ReactNode) | undefined
-  renderPermission?: (permission: ThreadPermission) => ReactNode
+  renderPermission?: ((permission: ThreadPermission) => ReactNode) | undefined
   runId: string
   taskTitles?: TaskTitleMap | undefined
   recipientBackends?: RecipientBackendMap | undefined
@@ -521,7 +521,7 @@ function ThreadEntryRenderer({
   entry: ThreadEntry
   scope: string
   renderAsk?: ((ask: ThreadAsk) => ReactNode) | undefined
-  renderPermission?: (permission: ThreadPermission) => ReactNode
+  renderPermission?: ((permission: ThreadPermission) => ReactNode) | undefined
   runId: string
   taskTitles?: TaskTitleMap | undefined
   recipientBackends?: RecipientBackendMap | undefined

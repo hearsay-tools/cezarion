@@ -48,16 +48,16 @@ export interface ThreadConversationMessage {
   messageKind: ConversationMessage['kind']
   requestId?: string | undefined
   delivery: ThreadConversationDelivery
-  deliveredAt?: string
+  deliveredAt?: string | undefined
   /** When the recipient's harness reported the model read it (#505). */
-  consumedAt?: string
+  consumedAt?: string | undefined
   recordedAt?: string
-  instruction?: string
-  resumed?: true
+  instruction?: string | undefined
+  resumed?: true | undefined
   state?: ConversationMessage['state'] | undefined
   createdAt?: string
   requestHash?: string
-  deadline?: string
+  deadline?: string | undefined
   outcome?: { status: RequestOutcome['status'] | 'pending'; replyId?: string; observedAt?: string }
 }
 
@@ -140,7 +140,7 @@ export interface ThreadTurn {
    *  ordinal fallback exists only for malformed legacy content with no boundary event. */
   id: string
   /** The protocol-v2 turnId, once known. */
-  turnId?: string
+  turnId?: string | undefined
   /** The v1 `user-message` that opened this turn. The FIRST turn usually has none — the initial
    *  prompt is the run's `task`, which the view renders from the run record. `ts` is when that
    *  line was persisted (#941). */
@@ -149,7 +149,7 @@ export interface ThreadTurn {
    *  otherwise `turn.started` (#941). First stamp wins, so the v1 line and the v2 event that
    *  follow each other for the same turn produce one coherent start rather than two. This is the
    *  left-hand side of the turn duration. */
-  startedAt?: string
+  startedAt?: string | undefined
   items: ThreadEntry[]
   /** Latest `plan.updated` snapshot seen during this turn (full-replacement semantics). */
   planEntries?: PlanEntry[]

@@ -127,13 +127,13 @@ export function UserBubble({
 }: {
   text: string
   imageCount?: number | undefined
-  images?: readonly string[]
+  images?: readonly string[] | undefined
   /** When it was sent (#941) — in the bubble's top-right corner; omitted if invalid. */
   ts?: string | undefined
-  onEdit?: (text: string) => Promise<void>
-  onRemove?: () => Promise<void>
-  editLabel?: string
-  removeLabel?: string
+  onEdit?: ((text: string) => Promise<void>) | undefined
+  onRemove?: (() => Promise<void>) | undefined
+  editLabel?: string | undefined
+  removeLabel?: string | undefined
   /** Structured answer details replace the raw reply, keeping the same attachments and clock. */
   children?: ReactNode
 }) {

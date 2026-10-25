@@ -40,7 +40,7 @@ export function GitToolbar({
 }: {
   bar: GitActionBar
   branch?: string | undefined
-  stat?: DiffStat
+  stat?: DiffStat | undefined
   mode: DiffMode
   wrap: boolean
   onModeChange: (mode: DiffMode) => void

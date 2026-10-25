@@ -32,7 +32,7 @@ export interface GitActionState {
   /** Whether any step recorded an agent session — the terminal handoff resumes it. */
   hasSession: boolean
   /** The run's PR, once known — flips Create PR into View PR. */
-  prUrl?: string
+  prUrl?: string | undefined
 }
 
 export type GitActionId = 'commit' | 'push' | 'create-pr' | 'view-pr' | 'open-terminal'

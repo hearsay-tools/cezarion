@@ -43,7 +43,7 @@ export function pollSentence(draft: Pick<AutomationDraft, 'events' | 'intervalSe
   return `Polls GitHub every ${minutes} minute${minutes === 1 ? '' : 's'} for ${draft.events.join(', ') || 'no events'}. ${historySentence(draft.filters.includeExisting)}`
 }
 
-export function GithubFields({ draft, onChange, disabledReason }: { draft: AutomationDraft; onChange: (patch: Partial<AutomationDraft>) => void; disabledReason?: string }) {
+export function GithubFields({ draft, onChange, disabledReason }: { draft: AutomationDraft; onChange: (patch: Partial<AutomationDraft>) => void; disabledReason?: string | undefined }) {
   const toggleEvent = (event: AutomationEvent) => {
     const events = draft.events.includes(event) ? draft.events.filter((item) => item !== event) : [...draft.events, event]
     onChange({ events })

@@ -21,7 +21,7 @@ export interface PollOptions {
   /** Bound each probe; the signal also aborts fetch and body reads. */
   requestTimeoutMs?: number
   /** Absolute shared deadline for multiple waits in one test. */
-  deadline?: number
+  deadline?: number | undefined
   /** How long to wait between them, in milliseconds. */
   intervalMs?: number
 }

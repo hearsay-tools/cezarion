@@ -330,7 +330,7 @@ function DiffFileCard({
   wrap: boolean
   canExpand: boolean
   imageSrc?: ((path: string) => string) | undefined
-  onOpenInApp?: (path: string) => void
+  onOpenInApp?: ((path: string) => void) | undefined
 }) {
   const badge = STATUS_BADGE[file.status]
   return (
@@ -440,7 +440,7 @@ function DiffFileBody({
   wrap: boolean
   canExpand: boolean
   imageSrc?: ((path: string) => string) | undefined
-  onOpenInApp?: (path: string) => void
+  onOpenInApp?: ((path: string) => void) | undefined
 }) {
   const parsed = useMemo(() => parsePatch(file.patch), [file.patch])
   // The trailing (after-last-hunk) region has an unknown length — only offer it when a

@@ -107,7 +107,7 @@ function FallbackFile({
   file: DiffFileChange
   wrap: boolean
   imageSrc?: ((path: string) => string) | undefined
-  onOpenInApp?: (path: string) => void
+  onOpenInApp?: ((path: string) => void) | undefined
 }) {
   return (
     <section data-slot="diff-file" data-path={file.path} className="min-w-0 overflow-clip rounded-md border border-border bg-card">

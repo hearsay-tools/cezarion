@@ -598,7 +598,7 @@ describe('picker data flows', () => {
     fireEvent.change(textarea(), { target: { value: 'use supported effort only' } })
     await startTask()
     expect(postedBody()).toMatchObject({ runner: 'codex', model: 'gpt-lean' })
-    expect((postedBody() as { effort?: string }).effort).toBeUndefined()
+    expect((postedBody() as { effort?: string | undefined }).effort).toBeUndefined()
   })
 
   it('shows the runner pill with >1 backend, and switching runner swaps the model presets', async () => {

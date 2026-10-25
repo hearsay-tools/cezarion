@@ -48,7 +48,7 @@ function startServer(): ChildProcess {
 }
 
 async function workspaceConfig(signal?: AbortSignal): Promise<WorkspaceConfig> {
-  const response = await fetch(`${baseUrl}/api/v1/workspace/config`, { signal })
+  const response = await fetch(`${baseUrl}/api/v1/workspace/config`, { ...(signal === undefined ? {} : { signal }) })
   if (!response.ok) throw new Error(`workspace config answered ${response.status}`)
   return await response.json() as WorkspaceConfig
 }

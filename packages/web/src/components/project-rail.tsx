@@ -102,7 +102,7 @@ function ProjectMark({
   /** Where the mark goes: the project's remembered page, or its home. */
   target: ProjectSwitchTarget
   onSwitchProject?: ((projectId: string) => void) | undefined
-  onSelectProject?: (projectId: string) => void
+  onSelectProject?: ((projectId: string) => void) | undefined
   sort?: RailSort | undefined
 }) {
   const label = projectSignalLabel(project.name, signal, { unknown: !known })
@@ -177,7 +177,7 @@ function ExpandedProjectRow({
   /** Where the mark goes: the project's remembered page, or its home. */
   target: ProjectSwitchTarget
   onSwitchProject?: ((projectId: string) => void) | undefined
-  onSelectProject?: (projectId: string) => void
+  onSelectProject?: ((projectId: string) => void) | undefined
   sort?: RailSort | undefined
 }) {
   // The words are on screen, so no tooltip; the accessible name still spells all four counts.
@@ -510,7 +510,7 @@ export type ProjectRailProps = {
   projectTarget?: (projectId: string) => ProjectSwitchTarget
   /** Called instead of the link's own navigation when `projectTarget(id).verify` is set. */
   onSwitchProject?: ((projectId: string) => void) | undefined
-  onSelectProject?: (projectId: string) => void
+  onSelectProject?: ((projectId: string) => void) | undefined
   /** The workspace ui-state has loaded, so a reorder has something safe to write. */
   canReorder?: boolean
   /** Persist a new order. Absent, the rail is not sortable. */

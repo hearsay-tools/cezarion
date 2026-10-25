@@ -887,7 +887,7 @@ function StepCard({
   insertBefore: boolean
   onRemove: () => void
   onMoveUp?: (() => void) | undefined
-  onMoveDown?: () => void
+  onMoveDown?: (() => void) | undefined
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: step.id,
@@ -938,9 +938,9 @@ function StepCardBody({
   step: WorkflowStepDef
   index: number
   skills: readonly Skill[]
-  onRemove?: () => void
+  onRemove?: (() => void) | undefined
   onMoveUp?: (() => void) | undefined
-  onMoveDown?: () => void
+  onMoveDown?: (() => void) | undefined
   gripProps?: Record<string, unknown>
   overlay?: boolean
 }) {
