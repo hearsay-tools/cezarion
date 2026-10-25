@@ -11,7 +11,8 @@ import { down, parseUpArgs, up } from '../.ai/scripts/qa-fixture.mjs';
 // A stand-in for the e2e build: `dist/index.js` answers like `cezar serve` does for the checks
 // qa-fixture makes. It records its argv and environment, and keeps a child in its own process
 // group, so a test can see what reached the server and that `down` stops the whole group.
-// CEZ_STUB_MODE (passed through --server-env) picks a failure.
+// CEZ_STUB_MODE (passed through --server-env) picks a failure; CEZ_STUB_CHILD=stubborn makes
+// the child ignore SIGTERM.
 const STUB_SERVER = `
 import { spawn } from 'node:child_process';
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
@@ -21,7 +22,8 @@ const args = process.argv.slice(2);
 const repo = realpathSync(args[args.indexOf('--repo') + 1]);
 const mode = process.env.CEZ_STUB_MODE ?? 'serve';
 if (mode === 'exit') process.exit(3);
-const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+const childScript = (process.env.CEZ_STUB_CHILD === 'stubborn' ? 'process.on("SIGTERM", () => {}); ' : '') + 'setInterval(() => {}, 1000)';
+const child = spawn(process.execPath, ['-e', childScript], { stdio: 'ignore' });
 // cezar creates its home on first write, as here.
 mkdirSync(process.env.CEZ_HOME, { recursive: true });
 writeFileSync(join(process.env.CEZ_HOME, 'stub.json'), JSON.stringify({ args, env: process.env, child: child.pid }));
@@ -191,12 +193,25 @@ test('the watcher stops the server once its descriptor is gone', async (t) => {
   await until(() => !alive(server.pid) && !existsSync(root) && !alive(watcher.pid), 'the watcher to stop the fixture');
 });
 
-test('the watcher removes the temporary root and descriptor of a server that exited on its own', async (t) => {
+test('the watcher stops what is left of a server that exited on its own, then cleans up', async (t) => {
   const f = fixture(t);
   await up(f.options({ watchIntervalMs: 100 }));
   const { root, watcher } = descriptor(f.worktree);
+  const { child } = JSON.parse(readFileSync(join(root, 'home/stub.json'), 'utf8'));
   await fetch(`${values(f.stdout.text).QA_FIXTURE_BASE_URL}/exit`).catch(() => {});
-  await until(() => !existsSync(root) && !existsSync(descriptorPath(f.worktree)) && !alive(watcher.pid), 'the watcher to clean up');
+  await until(() => !alive(child) && !existsSync(root) && !existsSync(descriptorPath(f.worktree)) && !alive(watcher.pid), 'the watcher to clean up');
+});
+
+test('down kills a group member that outlives the server and ignores SIGTERM', async (t) => {
+  const f = fixture(t);
+  await up(f.options({ args: ['--server-env=CEZ_STUB_CHILD=stubborn'] }));
+  const { root, server } = descriptor(f.worktree);
+  const { child } = JSON.parse(readFileSync(join(root, 'home/stub.json'), 'utf8'));
+  await down(f.options({ stdout: sink(), stopGraceMs: 300 }));
+  // SIGKILL is asynchronous; the kernel may need a moment to finish the child.
+  await until(() => !alive(child), 'the stubborn child to exit');
+  assert.equal(alive(server.pid), false);
+  assert.equal(existsSync(root), false);
 });
 
 test('the watcher stops the server once its temporary root is gone', async (t) => {

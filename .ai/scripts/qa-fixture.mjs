@@ -109,16 +109,31 @@ const isRunning = ({ pid, start }) => {
   return !current.dead && current.start === start;
 };
 
-/** Stops the process group `leader` leads, while the leader keeps its recorded start identity:
- *  a reused pid is never signalled. True once the leader is gone. */
-async function stopGroup(leader) {
-  for (const [signal, waitMs] of [['SIGTERM', STOP_GRACE_MS], ['SIGKILL', 1000]]) {
-    if (!isRunning(leader)) return true;
+/** True while the process group `leader` started may still hold its processes. A group outlives
+ *  its leader while any member runs, and the kernel never hands out a pid that still names a
+ *  group, so `-pid` reaches only this group until its last member exits. A live process with the
+ *  leader's pid and another start identity means the group ended and the pid was reused. */
+function groupRunning(leader) {
+  const current = identity(leader.pid);
+  if (!current.dead && current.start !== leader.start) return false;
+  try {
+    process.kill(-leader.pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Stops the process group `leader` started: SIGTERM, then SIGKILL for whatever outlives the
+ *  grace, the leader or any other member. True once the group is empty. */
+async function stopGroup(leader, graceMs = STOP_GRACE_MS) {
+  for (const [signal, waitMs] of [['SIGTERM', graceMs], ['SIGKILL', 1000]]) {
+    if (!groupRunning(leader)) return true;
     try { process.kill(-leader.pid, signal); } catch { /* the group already ended */ }
     const deadline = performance.now() + waitMs;
-    while (isRunning(leader) && performance.now() < deadline) await delay(100);
+    while (groupRunning(leader) && performance.now() < deadline) await delay(100);
   }
-  return !isRunning(leader);
+  return !groupRunning(leader);
 }
 
 async function waitForCockpit(server, logPath, timeoutMs) {
@@ -174,20 +189,20 @@ function printLogTail(stderr, root) {
 
 /** Stops the fixture the descriptor names. The watcher goes first, so it cannot clean up at the
  *  same time. A server that would not stop keeps its descriptor, so `down` can try again. */
-async function stopFixture(repoRoot, stderr) {
+async function stopFixture(repoRoot, stderr, graceMs) {
   const fixture = readDescriptor(repoRoot);
   if (!fixture) return log(stderr, 'no fixture is running');
-  if (fixture.watcher) await stopGroup(fixture.watcher);
+  if (fixture.watcher) await stopGroup(fixture.watcher, graceMs);
   if (fixture.server) {
     log(stderr, `stopping cezar (pid ${fixture.server.pid})`);
-    if (!await stopGroup(fixture.server)) throw new Error(`cezar pid ${fixture.server.pid} did not stop`);
+    if (!await stopGroup(fixture.server, graceMs)) throw new Error(`cezar pid ${fixture.server.pid} did not stop`);
   }
   removeRoot(fixture.root);
   rmSync(join(repoRoot, DESCRIPTOR), { force: true });
 }
 
-export async function down({ repoRoot, stdout = process.stdout, stderr = process.stderr }) {
-  await stopFixture(repoRoot, stderr);
+export async function down({ repoRoot, stdout = process.stdout, stderr = process.stderr, stopGraceMs = STOP_GRACE_MS }) {
+  await stopFixture(repoRoot, stderr, stopGraceMs);
   stdout.write('QA_FIXTURE_STATUS=stopped\n');
 }
 
@@ -201,12 +216,13 @@ export async function up({
   tmp = tmpdir(),
   bootTimeoutMs = BOOT_TIMEOUT_MS,
   watchIntervalMs = WATCH_INTERVAL_MS,
+  stopGraceMs = STOP_GRACE_MS,
 }) {
   const optIns = parseUpArgs(args);
   if (process.platform !== 'linux' && process.platform !== 'darwin') {
     throw new Error('qa-fixture runs on Linux and macOS only: it stops the server by its process group');
   }
-  await stopFixture(repoRoot, stderr);
+  await stopFixture(repoRoot, stderr, stopGraceMs);
   const root = mkdtempSync(join(realpathSync(tmp), ROOT_PREFIX));
   const repo = join(root, 'repo');
   let server;
@@ -236,7 +252,7 @@ export async function up({
       'QA_FIXTURE_STOP=node .ai/scripts/qa-fixture.mjs down',
     ].join('\n') + '\n');
   } catch (error) {
-    if (server) await stopGroup(server);
+    if (server) await stopGroup(server, stopGraceMs);
     printLogTail(stderr, root);
     removeRoot(root);
     rmSync(join(repoRoot, DESCRIPTOR), { force: true });
@@ -246,17 +262,17 @@ export async function up({
 
 /** The fixture's end when nobody runs `down`. The descriptor is the only handle `down` has, so
  *  the server stops once the descriptor no longer names it, or its temporary root is gone. A
- *  server that exits on its own leaves nothing behind. */
+ *  server that exits on its own leaves nothing behind, members of its group included. */
 export async function watch({ repoRoot, root, server, intervalMs = WATCH_INTERVAL_MS }) {
   while (true) {
     await delay(intervalMs);
     const current = identity(server.pid);
-    const exited = current.dead || (current.start !== undefined && current.start !== server.start);
-    if (!exited) {
-      if (sameProcess(readDescriptor(repoRoot)?.server, server) && existsSync(root)) continue;
-      // Retried at the next poll when the server would not stop.
-      if (!await stopGroup(server)) continue;
-    }
+    // An unreadable identity proves nothing either way: look again at the next poll.
+    if (!current.dead && current.start === undefined) continue;
+    const owned = sameProcess(readDescriptor(repoRoot)?.server, server) && existsSync(root);
+    if (owned && current.start === server.start) continue;
+    // Retried at the next poll when the group would not stop.
+    if (!await stopGroup(server)) continue;
     removeRoot(root);
     if (sameProcess(readDescriptor(repoRoot)?.server, server)) rmSync(join(repoRoot, DESCRIPTOR), { force: true });
     return;
