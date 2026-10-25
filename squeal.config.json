@@ -26,6 +26,10 @@
       "packages/api-client/src/**/*.ts",
       "packages/contract/src/**/*.ts"
     ],
+    "packages/cezar/src/file-length.test.ts": [
+      "packages/**/*.{ts,tsx,mjs,cjs}",
+      "packages/cezar/src/file-length.baseline.json"
+    ],
     "packages/cezar/src/contract-subpaths.test.ts": [
       "packages/contract/src/**",
       "packages/contract/package.json",
