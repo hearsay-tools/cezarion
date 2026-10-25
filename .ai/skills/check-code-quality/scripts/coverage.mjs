@@ -7,16 +7,19 @@ import { mergeProcessCovs } from '@bcoe/v8-coverage';
 import convert from 'ast-v8-to-istanbul';
 import { vitestCoverageArguments } from './vitest-coverage.mjs';
 
-function execute(argv, { cwd, stderr }, env) {
+function execute(argv, { cwd, stderr, coverageTimeout = 600_000 }, env) {
   // A collector invoked by node:test must start a new test coordinator.
   env = { ...env };
   delete env.NODE_TEST_CONTEXT;
   const result = spawnSync(process.execPath, argv, {
     cwd, env, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024,
-    timeout: 600_000, killSignal: 'SIGTERM',
+    timeout: coverageTimeout, killSignal: 'SIGTERM',
   });
   if (result.stdout) stderr.write(result.stdout);
   if (result.stderr) stderr.write(result.stderr);
+  if (result.error?.code === 'ETIMEDOUT') {
+    throw new Error(`Coverage collection exceeded ${coverageTimeout} ms. Raise the limit with --coverage-timeout <ms> (for example, --coverage-timeout 900000), or use --coverage <coverage-final.json> with a separately collected current Istanbul report. Temporary coverage is removed.`);
+  }
   if (result.error) throw new Error(`Coverage run failed: ${result.error.message}`);
   if (result.status !== 0) throw new Error(`Coverage tests failed (exit ${result.status ?? result.signal}).`);
 }

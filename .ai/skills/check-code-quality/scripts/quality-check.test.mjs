@@ -1,6 +1,7 @@
 import { nodeModulesWith } from './test-support.mjs';
 import assert from 'node:assert/strict';
-import { execFileSync, spawnSync } from 'node:child_process';
+import childProcess, { execFileSync, spawnSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -8,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { analyzeSource } from './code-metrics.mjs';
 import { runCheck } from './check.mjs';
-import { convertNodeCoverage } from './coverage.mjs';
+import { collectCoverage, convertNodeCoverage } from './coverage.mjs';
 import { finishReport, markdownReport } from './quality-report.mjs';
 import { thresholds } from './changed-functions.mjs';
 
@@ -344,6 +345,65 @@ test('--test-timeout reaches the Node test runner', async t => {
   const long = await invoke(f, ['--runner', 'node', '--test', 'source.test.mjs', '--test-timeout', '30000']);
   assert.equal(long.code, 0, long.error + JSON.stringify(long.report.errors));
   assert.ok(long.report.measurement.command.includes('--test-timeout=30000'));
+});
+
+test('coverage collection uses the default bound or the explicit timeout for both runners', async t => {
+  const original = childProcess.spawnSync;
+  const timeouts = [];
+  t.mock.method(childProcess, 'spawnSync', (...args) => {
+    timeouts.push(args[2].timeout);
+    return original(...args);
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  for (const runner of ['node', 'vitest']) {
+    const f = runner === 'node' ? fixture(t) : vitestFixture(t);
+    const args = ['--runner', runner, '--test', runner === 'node' ? 'source.test.mjs' : 'choose.test.js'];
+    for (const timeout of [undefined, 900000, Number.MAX_SAFE_INTEGER]) {
+      const result = await invoke(f, [...args, ...(timeout ? ['--coverage-timeout', String(timeout)] : [])]);
+      assert.equal(result.code, 0, result.error + JSON.stringify(result.report.errors));
+      assert.equal(timeouts.at(-1), timeout ?? 600000);
+    }
+  }
+});
+
+test('coverage collection timeout is incomplete, explains recovery and cleans up for both runners', async t => {
+  for (const runner of ['node', 'vitest']) {
+    const f = runner === 'node' ? fixture(t) : vitestFixture(t);
+    const args = ['--runner', runner, '--test', runner === 'node' ? 'source.test.mjs' : 'choose.test.js'];
+    let temporary;
+    const result = await invoke(f, [...args, '--coverage-timeout', '1'], {
+      collect(options, directory) {
+        temporary = directory;
+        return collectCoverage(options, directory);
+      },
+    });
+    assert.equal(result.code, 2);
+    assert.equal(result.report.status, 'incomplete');
+    const message = result.report.errors.join(' ');
+    assert.match(message, /Coverage collection exceeded 1 ms/);
+    assert.match(message, /--coverage-timeout <ms>/);
+    assert.match(message, /--coverage <coverage-final\.json>/);
+    assert.match(message, /separately collected/);
+    assert.equal(result.report.summary.functions, 0);
+    assert.equal(existsSync(temporary), false);
+    const longer = await invoke(f, [...args, '--coverage-timeout', '30000']);
+    assert.equal(longer.code, 0, longer.error + JSON.stringify(longer.report.errors));
+  }
+});
+
+test('invalid coverage timeouts fail before collection', async t => {
+  const f = fixture(t);
+  for (const args of [
+    ['--coverage-timeout', '900000'],
+    ['--coverage', 'coverage.json', '--coverage-timeout', '900000'],
+    ...['0', '-1', '1.5', '30s', '', 'Infinity', '1e6', '9007199254740992'].map(value =>
+      ['--test', 'source.test.mjs', `--coverage-timeout=${value}`]),
+  ]) {
+    const result = await invoke(f, args, { collect: () => assert.fail('must not run tests') });
+    assert.equal(result.code, 2, JSON.stringify(args));
+    assert.match(result.report.errors.join(' '), /Runner options require --test|--coverage-timeout must be/);
+  }
 });
 
 test('invalid runner arguments fail before starting tests', async t => {

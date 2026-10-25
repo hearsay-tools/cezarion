@@ -79,8 +79,14 @@ node <skill>/scripts/check.mjs --base origin/main \
   --coverage coverage/coverage-final.json --output quality.md
 ```
 
-Collection has a ten-minute bound. Failed tests produce exit 2 and no accepted
-verdict. `--test-timeout <ms>` sets the per-test timeout of the coverage run.
+Collection defaults to a ten-minute bound (600000 ms). `--coverage-timeout <ms>`
+changes that bound for the whole collection child process, for both runners;
+for example, `--coverage-timeout 900000` allows fifteen minutes. It requires
+`--test` and accepts positive safe whole milliseconds, at most 9007199254740991;
+zero does not disable the bound. A timeout produces exit 2, names the effective
+limit and explains how to raise it. Temporary coverage is removed on failure;
+`--coverage <coverage-final.json>` requires a current Istanbul report collected
+separately. Failed tests produce exit 2 and no accepted verdict. `--test-timeout <ms>` sets the per-test timeout of the coverage run.
 With Vitest it replaces the `testTimeout` of every selected project; hook
 timeouts keep their configured values. With Node it passes `--test-timeout` to
 `node --test`. Use it when tests time out under host load but pass alone. Missing, stale or unmatched function coverage remains incomplete. A
