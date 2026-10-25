@@ -1,3 +1,4 @@
+import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import { invalidateLiveReads } from './live-coordinator'
 import type {
   FileLinkResult,
@@ -200,16 +201,16 @@ export class ApiError extends Error {
   /** HTTP status, or 0 when the request never reached the server (offline, server stopped). */
   readonly status: number
   /** `POST /api/runs/:id/pr`: the `git merge <branch>` to run by hand when the PR failed. */
-  readonly manual?: string
+  readonly manual?: string | undefined
   /** `POST /api/runs/:id/open-in-cli`: the resume command, when no terminal could be opened. */
-  readonly command?: string
+  readonly command?: string | undefined
   /** `POST /api/workflows`: the file is already there — the caller may retry with `overwrite`. */
-  readonly exists?: boolean
+  readonly exists?: boolean | undefined
 
   constructor(
     status: number,
     message: string,
-    extras: { manual?: string; command?: string; exists?: boolean; cause?: unknown } = {},
+    extras: { manual?: string | undefined; command?: string | undefined; exists?: boolean | undefined; cause?: unknown } = {},
   ) {
     super(message, extras.cause !== undefined ? { cause: extras.cause } : undefined)
     this.name = 'ApiError'
@@ -222,10 +223,10 @@ export class ApiError extends Error {
 
 export type ReadOptions = {
   /** Wired to TanStack Query's per-query signal, so an unmounted view stops its fetch. */
-  signal?: AbortSignal
+  signal?: AbortSignal | undefined
   /** Read another project than the active one — only for the functions that say so (the
    *  project-switch existence checks); everything else follows `queryScope()`. */
-  projectId?: string
+  projectId?: string | undefined
 }
 
 type Json = Record<string, unknown>
@@ -328,7 +329,7 @@ function unscoped(url: string): string {
  * value — whose type the caller gets from the route, not from a hand-written declaration.
  */
 /** The per-request options `hc` takes, from this module's `ReadOptions`. */
-const init = (opts?: ReadOptions) => ({ init: { signal: opts?.signal } })
+const init = (opts?: ReadOptions) => ({ init: { ...defined({ signal: opts?.signal }) } })
 
 /**
  * Accepts a route that answers more than one FORMAT — `/repo/commit/:sha` serves a structured
@@ -527,7 +528,7 @@ export async function getRuns(opts?: ReadOptions): Promise<RunSummary[]> {
 /** One page of the active project's archived runs past the run list's window, newest first
  *  (`GET /run-summaries/archived`, #864). `before` is the previous page's `nextCursor`. */
 export async function getArchivedRuns(
-  params: { before?: string; limit?: number; q?: string },
+  params: { before?: string | undefined; limit?: number | undefined; q?: string },
   opts?: ReadOptions,
 ): Promise<ArchivedRunsResponse> {
   const query = {
@@ -899,7 +900,7 @@ export async function getGithub(
   /** `projectId` is for callers that render outside the routed view's scope (the shell's sidebar
    *  list, which sits above the provider); everyone else leaves it to `queryScope()`. */
   params: {
-    limit?: number; refresh?: boolean; projectId?: string
+    limit?: number | undefined; refresh?: boolean; projectId?: string | undefined
     /** One page (hearsay-tools/cezarion#1183): each side's cursor, or that side done. */
     issuesCursor?: string; prsCursor?: string; issuesDone?: boolean; prsDone?: boolean
   } = {},
@@ -974,7 +975,7 @@ export async function getGithubChecks(
 export async function getGithubSearch(
   kind: 'issue' | 'pr',
   query: string,
-  params: { limit?: number; projectId?: string } = {},
+  params: { limit?: number | undefined; projectId?: string | undefined } = {},
   opts?: ReadOptions,
 ): Promise<GithubSearchData> {
   return unwrap(
@@ -1118,13 +1119,13 @@ export async function getGithubPrChanges(
 /** The run's worktree diff against its base, as unified-diff text. Also the plain-text
  *  "(no worktree — …)" sentence for runs that executed in the repo working tree. */
 export function getRunDiff(id: string, opts?: ReadOptions): Promise<string> {
-  return requestText(runPath(id, '/diff'), { method: 'GET', signal: opts?.signal })
+  return requestText(runPath(id, '/diff'), { method: 'GET', ...defined({ signal: opts?.signal }) })
 }
 
 /** The run's handoff journal (spec 007) as markdown text. `''` until the file is seeded —
  *  the server only 404s for an unknown run, never for a missing file. */
 export function getRunHandoff(id: string, opts?: ReadOptions): Promise<string> {
-  return requestText(runPath(id, '/handoff'), { method: 'GET', signal: opts?.signal })
+  return requestText(runPath(id, '/handoff'), { method: 'GET', ...defined({ signal: opts?.signal }) })
 }
 
 /** Another project's handoff journal, for a row of All tasks (hearsay-tools/cezarion#1616): the
@@ -1132,7 +1133,7 @@ export function getRunHandoff(id: string, opts?: ReadOptions): Promise<string> {
 export async function getProjectRunHandoff(projectId: string, id: string, opts?: ReadOptions): Promise<string> {
   const res = await cez.api.v1.p[':projectId'].runs[':id'].handoff.$get(
     { param: { projectId, id: encodeURIComponent(id) } },
-    { init: { signal: opts?.signal }, headers: { accept: 'text/plain' } },
+    { init: { ...defined({ signal: opts?.signal }) }, headers: { accept: 'text/plain' } },
   )
   const body = await res.text()
   if (!res.ok) throw errorFor(res.status, res.statusText, body)
@@ -1631,15 +1632,15 @@ export async function finishRun(id: string): Promise<FinishResponse> {
  *  backend/model/account. `text`/`images` are the prompt the reopened session starts on — omitted,
  *  the engine opens with its plain "Continue.". */
 export interface ContinueOptions {
-  text?: string
-  images?: AttachmentInput[]
-  runner?: Runner
-  model?: string
+  text?: string | undefined
+  images?: AttachmentInput[] | undefined
+  runner?: Runner | undefined
+  model?: string | undefined
   /** Reasoning-effort pin (#45). Omitted keeps the run's pin; empty string clears it. */
-  effort?: string
+  effort?: string | undefined
   /** Which login of that agent reopens it (spec 2026-07-29-agent-profiles). Switching account
    *  starts a fresh session server-side — a session id lives inside ONE account's config dir. */
-  agentProfile?: string
+  agentProfile?: string | undefined
 }
 
 /** Reopen a finished run's session. 409 (with the reason) when it cannot be resumed. An optional
@@ -2102,12 +2103,12 @@ export async function getWorkspaceUiState(opts?: ReadOptions): Promise<Workspace
  *  objects (`{ sidebar: {...} }`), never a nested leaf alone. Answers the merged state. */
 export async function putWorkspaceUiState(
   patch: SetWorkspaceUiStateInput,
-  opts: { keepalive?: boolean } = {},
+  opts: { keepalive?: boolean | undefined } = {},
 ): Promise<WorkspaceUiState> {
   return unwrap(
     await cez.api.v1.workspace['ui-state'].$put(
       { json: patch },
-      { init: { keepalive: opts.keepalive } },
+      { init: { ...defined({ keepalive: opts.keepalive }) } },
     ),
     '/workspace/ui-state',
   )

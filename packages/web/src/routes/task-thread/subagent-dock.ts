@@ -28,12 +28,12 @@ export interface SubagentSummary {
   /** "Review the store layer" — the detail half of "Task: …", else the whole title. */
   title: string
   /** claude `subagent_type`/`subagentType`, opencode `agent`; absent for codex. */
-  agentType?: string
+  agentType?: string | undefined
   status: ToolStatus
   /** Children of kind `tool` — what the row's "N tools" count shows. */
   toolCalls: number
   /** One-line readout from the most recent child; `undefined` ⇒ the row renders "starting…". */
-  activity?: string
+  activity?: string | undefined
   /**
    * The agent never finished and never will: it was still `running`/`pending` when the run
    * itself reached a terminal state (cancelled, failed, done).

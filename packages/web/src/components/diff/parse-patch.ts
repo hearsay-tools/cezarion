@@ -92,7 +92,7 @@ export interface ContextGap {
   /** Index of the hunk this gap precedes; `hunks.length` for the trailing gap. */
   beforeHunk: number
   /** Hidden line count — undefined for the trailing gap (the patch doesn't know EOF). */
-  count?: number
+  count?: number | undefined
   /** First hidden line, old side. */
   oldStart: number
   /** First hidden line, new side. */
@@ -147,7 +147,7 @@ export function contextLinesForGap(gap: ContextGap, fileLines: readonly string[]
 /** A line plus its word-level marks (only paired del/add lines carry spans). */
 export interface DiffCell {
   line: HunkLine
-  spans?: WordSpan[]
+  spans?: WordSpan[] | undefined
 }
 
 export type UnifiedRow =

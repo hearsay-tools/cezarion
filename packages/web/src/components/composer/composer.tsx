@@ -62,7 +62,7 @@ export interface ComposerProps {
   /** Keep text and attachments visible until submission succeeds. */
   retainDraftUntilSuccess?: boolean
   /** Execution actions stay in the composer; keyboard submission never invokes Stop. */
-  onStop?: () => Promise<unknown>
+  onStop?: (() => Promise<unknown>) | undefined
   stopOnEmpty?: boolean
   stopping?: boolean
   /**
@@ -72,7 +72,7 @@ export interface ComposerProps {
    * straight back to Send, because a draft is an intent to say something, not to close the task.
    * Keyboard submission never invokes it, exactly as it never invokes Stop.
    */
-  onFinish?: () => Promise<unknown>
+  onFinish?: (() => Promise<unknown>) | undefined
   finishing?: boolean
   /**
    * The outline control beside the primary, for a host whose run offers no Stop (#281). Stop and
@@ -81,12 +81,12 @@ export interface ComposerProps {
    * no business knowing what archiving is, the same seam `footerEnd` and `sessionControls` use.
    */
   secondaryAction?: ReactNode
-  emptySubmitLabel?: string
+  emptySubmitLabel?: string | undefined
   compactFeedback?: boolean
   /** Idle guidance occupies the already-reserved submission status space. */
   idleFeedback?: ReactNode
   pendingLabel?: string
-  failureHint?: string
+  failureHint?: string | undefined
   clearOnSuccess?: boolean
   onPendingChange?: (pending: boolean) => void
   /**
@@ -116,7 +116,7 @@ export interface ComposerProps {
   disabled?: boolean
   /** Shown as the placeholder while disabled — e.g. the legacy "Session closed — Continue to
    *  reopen." */
-  disabledReason?: string
+  disabledReason?: string | undefined
   /**
    * Let the send button fire on an empty draft. Off by default (an empty message is not a
    * message); ON for the thread's closed-but-resumable state, where submitting IS "Continue"
@@ -309,7 +309,7 @@ export function Composer({
     value: string
     insert: string
     label: string
-    description?: string
+    description?: string | undefined
     emphasized: boolean
   }
 

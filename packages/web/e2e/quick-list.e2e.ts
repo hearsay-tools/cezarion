@@ -808,7 +808,7 @@ describe('the tasks table under worst-case row content', () => {
       id: string
       status: string
       workflow: string
-      delegation?: { role: string; wait?: { phase: string } }
+      delegation?: { role: string; wait?: { phase: string } } | undefined
       waits?: Array<{ kind: string; phase: string }>
     }>
     expect(runs.map((r) => r.id).sort()).toEqual(['worst-unbroken', 'worst-wrapping'])
@@ -1694,7 +1694,7 @@ describe('swipe to archive on touch (#780 §7)', () => {
       return r.bottom <= innerHeight && r.top >= 0 ? { left: r.left, right: r.right, top: r.top, bottom: r.bottom, cy: r.top + r.height / 2, width: r.width } : null
     })()`)
   /** A left swipe from near the row's right edge by `dx` px, in `steps` moves `stepMs` apart. */
-  const leftSwipe = (r: { right: number; cy: number }, dx: number, opts: { steps?: number; stepMs?: number; whileDown?: string } = {}) => {
+  const leftSwipe = (r: { right: number; cy: number }, dx: number, opts: { steps?: number; stepMs?: number; whileDown?: string | undefined } = {}) => {
     const steps = opts.steps ?? 6
     const start = { x: r.right - 12, y: r.cy }
     return browser.touchDrag(

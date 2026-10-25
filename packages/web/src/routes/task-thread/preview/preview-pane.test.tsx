@@ -335,7 +335,7 @@ describe('PreviewPane', () => {
   })
 })
 
-function Harness({ open, session = false, port = 5173, servers }: { open: boolean; session?: boolean; port?: number | null; servers?: PreviewServer[] }) {
+function Harness({ open, session = false, port = 5173, servers }: { open: boolean; session?: boolean; port?: number | null | undefined; servers?: PreviewServer[] }) {
   const state = usePreviewPaneState()
   useEffect(() => {
     if (open) state.openPane(port === null ? {} : { port })

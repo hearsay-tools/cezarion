@@ -34,14 +34,14 @@ export function CenteredState({
   icon: ReactNode
   tone?: CenteredStateTone
   title: string
-  subtitle?: string
+  subtitle?: string | undefined
   /** Free-form content below the subtitle (the `/new` param echo uses this). */
   children?: ReactNode
-  actions?: ReactNode
+  actions?: ReactNode | undefined
   backdrop?: boolean
   /** `h1` when the state IS the page; `h2` when it sits under an existing page heading. */
   heading?: 'h1' | 'h2'
-  className?: string
+  className?: string | undefined
 }) {
   return (
     <div
@@ -116,7 +116,7 @@ const twinkleTone: Record<Twinkle['tone'], string> = {
  * `motion-safe:` — under `prefers-reduced-motion` the squares render static at their base
  * opacity, exactly as the spec's motion rules require.
  */
-export function TwinkleBackdrop({ className }: { className?: string }) {
+export function TwinkleBackdrop({ className }: { className?: string | undefined }) {
   return (
     <div
       data-slot="twinkle-backdrop"

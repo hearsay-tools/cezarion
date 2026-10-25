@@ -27,7 +27,7 @@ export function filterGithubItems(
     query?: string
     labels?: readonly string[]
     assignees?: readonly string[]
-    projectId?: string
+    projectId?: string | undefined
     /** The GitHub sidebar's predicates (#622): author login, and number sets for the task join and
      *  the search-backed PR filters. An empty `includeNumbers` is an answer ("nothing"), not absence. */
     author?: string

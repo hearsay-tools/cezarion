@@ -9,7 +9,7 @@ import {
 
 /** screenFiles reads only `type`, `size`, `name` — a structural stand-in keeps the 5MB cases
  *  from allocating 5MB buffers. */
-const fakeFile = (over: { type?: string; size?: number; name?: string } = {}): File =>
+const fakeFile = (over: { type?: string; size?: number; name?: string | undefined } = {}): File =>
   ({ type: 'image/png', size: 1024, name: 'shot.png', ...over }) as File
 
 describe('screenFiles — the legacy 4×5MB caps, mirrored from the server zod', () => {

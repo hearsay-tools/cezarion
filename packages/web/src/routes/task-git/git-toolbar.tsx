@@ -39,15 +39,15 @@ export function GitToolbar({
   onAction,
 }: {
   bar: GitActionBar
-  branch?: string
-  stat?: DiffStat
+  branch?: string | undefined
+  stat?: DiffStat | undefined
   mode: DiffMode
   wrap: boolean
   onModeChange: (mode: DiffMode) => void
   onWrapChange: (wrap: boolean) => void
   preview?: boolean
   /** Present only when the diff has a Markdown file to preview — see `MarkdownPreviewToggle`. */
-  onPreviewChange?: (preview: boolean) => void
+  onPreviewChange?: ((preview: boolean) => void) | undefined
   onAction: (id: GitActionId) => void
 }) {
   return (

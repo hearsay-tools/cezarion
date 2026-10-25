@@ -77,9 +77,9 @@ type SectionKey = 'status' | 'workflow' | 'subagents' | 'workers' | 'plan' | 'us
 export function RunActivityDock(props: {
   run: ApiRun
   currentThread: ThreadState
-  onOpenWorker?: (id: string) => void
+  onOpenWorker?: ((id: string) => void) | undefined
   /** The transcript's reader scroll signals (`useThreadScroll().subscribeReaderScroll`). */
-  readerScroll?: (listener: ReaderScrollListener) => () => void
+  readerScroll?: ((listener: ReaderScrollListener) => () => void) | undefined
 }) {
   // Own provider for the Workspace chips and the conflict roll-up. The app root's registry unions
   // its requests with the header's, so it costs no extra request.
@@ -107,8 +107,8 @@ function SessionActivityCard({
 }: {
   run: ApiRun
   currentThread: ThreadState
-  onOpenWorker?: (id: string) => void
-  readerScroll?: (listener: ReaderScrollListener) => () => void
+  onOpenWorker?: ((id: string) => void) | undefined
+  readerScroll?: ((listener: ReaderScrollListener) => () => void) | undefined
   prNumbers: number[]
   hasReferences: boolean
   references: TaskReference[]
@@ -430,7 +430,7 @@ function SubagentsSection({
   onOpenWorker,
   open,
   onToggle,
-}: { activity: SessionActivity; desktop: boolean; onOpenWorker?: (id: string) => void } & SectionDisclosure) {
+}: { activity: SessionActivity; desktop: boolean; onOpenWorker?: ((id: string) => void) | undefined } & SectionDisclosure) {
   const { agents, agentCounts } = activity
   if (agents.length === 0) return null
   return (
@@ -602,7 +602,7 @@ function DetailLine({ label, children }: { label: string; children: ReactNode })
 
 /** Runner, account, model, effort and identity (#416, #546), as labelled lines rather than the
  *  header badge's hover menu. Same `data-slot`s as that menu, so readers keep their anchors. */
-function AgentDetails({ run, tokens, cost }: { run: ApiRun; tokens: ReactNode; cost?: string }) {
+function AgentDetails({ run, tokens, cost }: { run: ApiRun; tokens: ReactNode; cost?: string | undefined }) {
   const { runner, account, model, effort, identity } = useAgentIdentity(run)
   return (
     <dl data-slot="agent-details" className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-[13px]">

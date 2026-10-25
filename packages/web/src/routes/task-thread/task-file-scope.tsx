@@ -10,7 +10,7 @@ export function TaskFileScope({ runId, children }: { runId: string; children: Re
 function ScopedTaskFiles({ runId, children }: { runId: string; children: ReactNode }) {
   // File links use the run’s route owner, never ambient viewer scope.
   // A route without a project stays unscoped so owner resolution remains possible.
-  const { projectId } = useParams<{ projectId?: string }>()
+  const { projectId } = useParams<{ projectId?: string | undefined }>()
   const value = useMemo(() => ({ runId, ...(projectId ? { projectId } : {}) }), [runId, projectId])
   return <TaskFileContext.Provider value={value}>{children}</TaskFileContext.Provider>
 }

@@ -60,7 +60,7 @@ function Segmented<V extends string>({
   slot: string
   label: string
   value: V
-  options: Array<{ value: V; label: string; icon?: ComponentType<SVGProps<SVGSVGElement>>; swatch?: string }>
+  options: Array<{ value: V; label: string; icon?: ComponentType<SVGProps<SVGSVGElement>> | undefined; swatch?: string }>
   onChange: (value: V) => void
 }) {
   return (

@@ -64,7 +64,7 @@ const failureCapture = {
   test: 'unknown-test',
 }
 
-export function configureFailureCapture(next: { root?: string; spec?: string; test?: string }): void {
+export function configureFailureCapture(next: { root?: string | undefined; spec?: string | undefined; test?: string | undefined }): void {
   if ('root' in next) failureCapture.root = next.root ?? defaultFailureRoot
   if ('spec' in next) failureCapture.spec = next.spec ?? 'unknown-spec'
   if ('test' in next) failureCapture.test = next.test ?? 'unknown-test'
@@ -326,7 +326,7 @@ type EnvDescriptor = {
     /** Extra spawn env. Its TMPDIR/TMP/TEMP are test-env-up.sh's doctor/probe answer and are
      *  ignored here: the seam decides those from its caller's env (hearsay-tools/cezarion#1090). */
     runtimeEnv?: Record<string, string>
-    namespace?: string
+    namespace?: string | undefined
   }
 }
 
@@ -640,7 +640,7 @@ export class AgentBrowser {
     } catch (cause) {
       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} failed`, { cause })
     }
-    const parsed = JSON.parse(stdout) as { success: boolean; data?: unknown; error?: unknown }
+    const parsed = JSON.parse(stdout) as { success: boolean; data?: unknown | undefined; error?: unknown | undefined }
     if (!parsed.success) {
       throw new Error(`cezar e2e: agent-browser ${args.join(' ')} → ${JSON.stringify(parsed.error)}`)
     }
@@ -742,11 +742,11 @@ export class AgentBrowser {
    *  first truth, which is how `waitForValue` is built on this rather than beside it. */
   waitForStable<T, U extends T>(
     js: string,
-    options: { holdMs: number; matcher: (value: T) => value is U; intervalMs?: number; failure?: string; timeoutMs?: number },
+    options: { holdMs: number; matcher: (value: T) => value is U; intervalMs?: number; failure?: string | undefined; timeoutMs?: number },
   ): U
   waitForStable<T = unknown>(
     js: string,
-    options: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string; timeoutMs?: number },
+    options: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string | undefined; timeoutMs?: number },
   ): T
   waitForStable<T = unknown>(
     js: string,
@@ -756,7 +756,7 @@ export class AgentBrowser {
       intervalMs = 100,
       failure,
       timeoutMs,
-    }: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string; timeoutMs?: number },
+    }: { holdMs: number; matcher?: (value: T) => boolean; intervalMs?: number; failure?: string | undefined; timeoutMs?: number },
   ): T {
     const deadline = performance.now() + (timeoutMs ?? defaultWaitTimeoutMs())
     let lastValue: unknown = undefined
@@ -815,17 +815,17 @@ export class AgentBrowser {
   waitForValue<T, U extends T>(
     js: string,
     matcher: (value: T) => value is U,
-    options?: { intervalMs?: number; failure?: string; timeoutMs?: number },
+    options?: { intervalMs?: number; failure?: string | undefined; timeoutMs?: number },
   ): U
   waitForValue<T = unknown>(
     js: string,
     matcher?: (value: T) => boolean,
-    options?: { intervalMs?: number; failure?: string; timeoutMs?: number },
+    options?: { intervalMs?: number; failure?: string | undefined; timeoutMs?: number },
   ): T
   waitForValue<T = unknown>(
     js: string,
     matcher: (value: T) => boolean = (value) => value !== null && value !== undefined && value !== false,
-    options: { intervalMs?: number; failure?: string } = {},
+    options: { intervalMs?: number; failure?: string | undefined } = {},
   ): T {
     return this.waitForStable(js, { holdMs: 0, matcher, ...options })
   }
@@ -919,7 +919,7 @@ export class AgentBrowser {
    *  `WaitForValueError` naming the expression and its last sample. */
   async touchDrag(
     points: ReadonlyArray<{ x: number; y: number }>,
-    { stepMs = 40, whileDown }: { stepMs?: number; whileDown?: string } = {},
+    { stepMs = 40, whileDown }: { stepMs?: number; whileDown?: string | undefined } = {},
   ): Promise<unknown> {
     if (points.length < 2) throw new Error('touchDrag needs a start and at least one move')
     const matched = (value: unknown) => value !== null && value !== undefined && value !== false
@@ -1276,7 +1276,7 @@ function describeError(error: unknown): string {
  *  prototype `String()` could fall back on. */
 function errorLine(value: unknown): string {
   if (typeof value === 'object' && value !== null && 'message' in value) {
-    const { name, message } = value as { name?: unknown; message?: unknown }
+    const { name, message } = value as { name?: unknown | undefined; message?: unknown }
     return `${typeof name === 'string' ? name : 'Error'}: ${String(message)}`
   }
   if (typeof value === 'string') return value

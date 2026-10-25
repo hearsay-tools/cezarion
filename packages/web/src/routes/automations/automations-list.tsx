@@ -146,7 +146,7 @@ const ONCE_BADGE: Record<OnceStatus, { label: string; dot: 'success' | 'neutral'
 function AutomationCard({ automation, timeZone, note, busy, onRun, onToggle, onPreview, onCancel }: {
   automation: AutomationListEntry
   timeZone: string
-  note?: Note
+  note?: Note | undefined
   busy: boolean
   onRun: () => void
   onToggle: () => void

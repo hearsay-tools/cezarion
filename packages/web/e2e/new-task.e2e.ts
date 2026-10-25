@@ -388,8 +388,8 @@ describe('the full-screen /new against a live dry-run server', () => {
     expect(runId).not.toBe('')
     const record = await getJson<{
       task: string
-      workflow?: string
-      workflowDef?: { name?: string; steps?: Array<Record<string, unknown>> }
+      workflow?: string | undefined
+      workflowDef?: { name?: string | undefined; steps?: Array<Record<string, unknown>> }
     }>(`${baseUrl}/api/v1/runs/${runId}`)
     expect(record.task).toBe('Fix the flake, then prove it with the tests.')
     expect(record.workflow).toBe('fix-and-verify')

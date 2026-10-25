@@ -30,9 +30,9 @@ export interface AutomationDraft {
   intervalSeconds: number
   filters: AutomationFilters
   prompt: string
-  workflow?: string
-  runner?: Runner
-  model?: string
+  workflow?: string | undefined
+  runner?: Runner | undefined
+  model?: string | undefined
   autonomous: boolean
   archiveWhenDone: boolean
   autoMergePr: boolean
@@ -47,15 +47,15 @@ export interface AutomationDraft {
 /** What `fromDefinition` reads: a stored definition, or the create body built from a draft. */
 type DraftSource = Partial<{
   name: string
-  description: string
-  kind: AutomationKind
-  events: AutomationEvent[]
-  intervalSeconds: number
-  filters: AutomationFilters
-  schedule: AutomationSchedule
+  description: string | undefined
+  kind: AutomationKind | undefined
+  events: AutomationEvent[] | undefined
+  intervalSeconds: number | undefined
+  filters: AutomationFilters | undefined
+  schedule: AutomationSchedule | undefined
   task: TaskInput | AutomationTask
-  enabled: boolean
-  enable: boolean
+  enabled: boolean | undefined
+  enable: boolean | undefined
 }>
 
 export function fromDefinition(source: DraftSource = {}): AutomationDraft {

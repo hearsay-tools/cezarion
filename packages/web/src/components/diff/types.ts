@@ -13,7 +13,7 @@
 export interface DiffFileChange {
   path: string
   /** Rename/copy source — present only when `status` is renamed/copied. */
-  oldPath?: string
+  oldPath?: string | undefined
   status: 'added' | 'modified' | 'deleted' | 'renamed' | 'copied'
   adds: number
   dels: number
@@ -23,7 +23,7 @@ export interface DiffFileChange {
    *  (#365) — set from the path's EXTENSION, so it is true for SVGs too. It means "previewable",
    *  NOT "has no text diff": whether the renderer actually swaps the rows for a picture is
    *  `shouldPreviewImage` in `./image-preview`. Present only when true. */
-  image?: boolean
+  image?: boolean | undefined
   /** This file's unified-diff section (`diff --git …` headers + `@@` hunks), possibly
    *  ending in the server's `… (patch truncated)` marker, possibly empty (metadata-only). */
   patch: string
@@ -65,20 +65,20 @@ export interface DiffProps {
    * Resolve `null` when unavailable (binary, deleted, too large); the gap stays collapsed.
    * Absent ⇒ gaps render as static "N unchanged lines" separators.
    */
-  loadFileText?: (path: string) => Promise<string | null>
+  loadFileText?: ((path: string) => Promise<string | null>) | undefined
   /**
    * Raw-bytes URL for an image path (#365) — given a path, resolve the same-origin URL an
    * `<img>` can load it from (the Changes tab wires `runFileRawUrl`). Absent ⇒ image files
    * still show the plain "Binary file" note, so consumers that never serve bytes for their
    * files (repo view, commit diffs) need no change to keep working.
    */
-  imageSrc?: (path: string) => string
+  imageSrc?: ((path: string) => string) | undefined
   /**
    * "Open in default app" (#365, LOCAL MODE ONLY): given a path, hand it off to the OS's
    * default application. Absent ⇒ the action is hidden, not disabled — the doctrine every
    * other local-machine affordance in the cockpit follows (`git-actions.ts`).
    */
-  onOpenInApp?: (path: string) => void
+  onOpenInApp?: ((path: string) => void) | undefined
   /**
    * Receives the {@link DiffHandle}. A plain ref-shaped prop rather than the component's own
    * `ref`, because `<Diff>` lazy-loads its renderer: the handle only exists once that chunk
@@ -86,5 +86,5 @@ export interface DiffProps {
    * their DOM-based scroll there).
    */
   viewRef?: { current: DiffHandle | null }
-  className?: string
+  className?: string | undefined
 }

@@ -21,7 +21,7 @@ export interface PollOptions {
   /** Bound each probe; the signal also aborts fetch and body reads. */
   requestTimeoutMs?: number
   /** Absolute shared deadline for multiple waits in one test. */
-  deadline?: number
+  deadline?: number | undefined
   /** How long to wait between them, in milliseconds. */
   intervalMs?: number
 }
@@ -137,7 +137,7 @@ export async function waitForStatus(
       // one spec before the helpers were folded together.
       const response = await fetch(`${baseUrl}/api/v1/runs/${id}`, { signal })
       if (!response.ok) throw new Error(`GET run ${id} answered ${response.status}`)
-      const record = (await response.json()) as { status?: string }
+      const record = (await response.json()) as { status?: string | undefined }
       lastState = record.status
       return record.status !== undefined && wanted.includes(record.status) ? record.status : undefined
     },

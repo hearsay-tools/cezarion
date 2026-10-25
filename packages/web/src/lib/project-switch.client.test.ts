@@ -17,7 +17,7 @@ const OWN = 'https://github.com/acme/widgets'
 const go = (pathname: string, repoBaseOf: ((id: string) => string | undefined) | undefined = () => OWN) =>
   resolveProjectSwitch('other', { projectId: 'other', pathname }, { registry, capabilities: undefined, repoBaseOf })
 
-function answer(routes: Record<string, { status?: number; body: unknown }>) {
+function answer(routes: Record<string, { status?: number | undefined; body: unknown }>) {
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL) => {

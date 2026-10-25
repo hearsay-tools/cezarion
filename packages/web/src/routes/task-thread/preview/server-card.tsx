@@ -57,7 +57,7 @@ export function PreviewServerCard({
   entry: ThreadPreviewServer
   inPreview: boolean
   /** Absent when the task view hosts no pane: the card then shows no action at all. */
-  onOpen?: (request: Required<PreviewOpenRequest>) => void
+  onOpen?: ((request: Required<PreviewOpenRequest>) => void) | undefined
 }) {
   const { server } = entry
   const current = view(entry)
@@ -126,7 +126,7 @@ export function PreviewServerCard({
   )
 }
 
-function Note({ icon, children }: { icon?: ReactNode; children: string }) {
+function Note({ icon, children }: { icon?: ReactNode | undefined; children: string }) {
   return (
     <p className="mt-2.5 flex items-start gap-2 text-xs text-muted-foreground">
       {icon}

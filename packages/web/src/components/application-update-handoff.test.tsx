@@ -64,7 +64,7 @@ process.send?.({event:'listening',port:server.address().port});
     cwd: packageRoot, env: { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_REMOTE: '0' },
     stdio: ['ignore', 'ignore', 'pipe', 'ipc'],
   })
-  const events: Array<{ event: string; port?: number; count?: number }> = []
+  const events: Array<{ event: string; port?: number | undefined; count?: number | undefined }> = []
   let stderr = ''
   child.stderr?.on('data', data => { stderr += String(data) })
   child.on('message', message => { events.push(message as typeof events[number]) })

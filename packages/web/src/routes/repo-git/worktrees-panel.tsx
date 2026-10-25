@@ -213,7 +213,7 @@ function WorktreeRow({
   worktree: WorktreeInfo
   keep: number
   disabled: boolean
-  onOpen?: () => void
+  onOpen?: (() => void) | undefined
   opening: boolean
   onReclaim: () => void
 }) {

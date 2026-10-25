@@ -69,18 +69,18 @@ export function TaskQuickList({
   now?: number
   /** Pin/unpin one row (#935). The container owns the mutation, because WHICH project a row
    *  belongs to is a container's question — this list is painted for other projects too. */
-  onTogglePin?: (run: RunSummary, pinned: boolean) => void
+  onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
   /** Archive one finished row (#780). Like the pin, the container owns the mutation. */
-  onArchiveRun?: (run: RunSummary) => void | Promise<unknown>
+  onArchiveRun?: ((run: RunSummary) => void | Promise<unknown>) | undefined
   /** Sweep unpinned finished rows across the full project list. */
-  onSweep?: (scope: ArchiveFinishedScope) => void
+  onSweep?: ((scope: ArchiveFinishedScope) => void) | undefined
   /** The sweep in flight, so its button reads busy. */
   sweeping?: ArchiveFinishedScope | null
   showViewControls?: boolean
   rowLimit?: number
   sidebarLimits?: SidebarLimits
   /** Canonical project id for browser-local section folding; null while discovery is pending. */
-  projectId?: string | null
+  projectId?: string | null | undefined
 }) {
   const onNavigate = useSidebarNavigate()
   const counts = sidebarCounts(runs)
@@ -167,14 +167,14 @@ export function QuickListBuckets({
   currentRunId?: string | null
   now?: number
   scope?: string | null
-  onTogglePin?: (run: RunSummary, pinned: boolean) => void
-  onArchiveRun?: (run: RunSummary) => void | Promise<unknown>
-  onSweep?: (scope: ArchiveFinishedScope) => void
+  onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
+  onArchiveRun?: ((run: RunSummary) => void | Promise<unknown>) | undefined
+  onSweep?: ((scope: ArchiveFinishedScope) => void) | undefined
   sweeping?: ArchiveFinishedScope | null
   /** What each group sweep would take, from the whole list. Absent = no group buttons. */
-  sweepCounts?: { unpinned: number; pinned: number }
+  sweepCounts?: { unpinned: number; pinned: number } | undefined
   /** Names the project in a group button's accessible name, where several lists share a page. */
-  projectName?: string
+  projectName?: string | undefined
 }) {
   const headingId = React.useId()
   const sections = useSidebarSections(sectionProjectId)
@@ -470,11 +470,11 @@ function RunRow({
   /** Explicit `/p/<id>` link scope for a non-active project's row; null = the active scope. */
   scope: string | null
   inWorkingGroup?: boolean
-  onTogglePin?: (run: RunSummary, pinned: boolean) => void
+  onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
   /** Archive this row (#780). Where references are inert (touch, the mobile shell) the swipe
    *  replaces the button, so it only renders on a device that can hover. A promise that
    *  resolves `false` says the archive failed, and a swiped row snaps back. */
-  onArchiveRun?: (run: RunSummary) => void | Promise<unknown>
+  onArchiveRun?: ((run: RunSummary) => void | Promise<unknown>) | undefined
 }) {
   const navigate = useNavigate()
   const onNavigate = useSidebarNavigate()
@@ -733,7 +733,7 @@ function GroupSweepButton({
 }: {
   label: QuickListBucket['label']
   headingId: string
-  projectName?: string
+  projectName?: string | undefined
   counts: { unpinned: number; pinned: number }
   onSweep: (scope: ArchiveFinishedScope) => void
   sweeping: ArchiveFinishedScope | null
@@ -767,7 +767,7 @@ function GroupSweepButton({
  * stream, Step 3.2), the router for which row is open, and the sidebar Active/Automations context —
  * independent of the Tasks table's own tabs.
  */
-export function TaskQuickListContainer({ showViewControls = true, projectId: explicitProjectId, boot = false }: { showViewControls?: boolean; projectId?: string; boot?: boolean }) {
+export function TaskQuickListContainer({ showViewControls = true, projectId: explicitProjectId, boot = false }: { showViewControls?: boolean; projectId?: string | undefined; boot?: boolean }) {
   const onNavigate = useSidebarNavigate()
   const scope = explicitProjectId ?? queryScope()
   const runs = useProjectRuns(scope, true, boot)

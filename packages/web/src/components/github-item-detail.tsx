@@ -72,7 +72,7 @@ export function GithubItemDetail({
   checks?: GithubItem['checks']
   /** Resolved comment count — the hydrated value overrides a deferred list row's placeholder
    *  `0` (hearsay-tools/cezarion#1183). */
-  comments?: number
+  comments?: number | undefined
   /** The phone-only "Back to the list" target; `null` renders no back link. */
   backLink: { to: string } | null
   /** The PR Conversation/Changes tabs, keeping the list's `?filter=`; `null` renders a
@@ -80,7 +80,7 @@ export function GithubItemDetail({
   subNav: { filter: GithubFilter | null; changes: boolean } | null
   /** The merge box's "Run agent on this PR" on a conflicting PR; absent renders no button, so a
    *  surface with no agent panel never offers an inert control. */
-  onRunAgent?: () => void
+  onRunAgent?: (() => void) | undefined
   /** Optional context beneath the heading, supplied by the owning surface. */
   afterHeading?: ReactNode
   children?: ReactNode
@@ -211,7 +211,7 @@ function MergeRequirementIcon({ state }: { state: MergeRequirementState }) {
   return <CircleIcon size={16} aria-hidden="true" data-slot="gh-merge-status-unknown" className={cn(iconClass, 'text-soft-foreground')} />
 }
 
-function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: () => void }) {
+function GithubMergeBox({ number, onRunAgent }: { number: number; onRunAgent?: (() => void) | undefined }) {
   const queryClient = useQueryClient()
   // Ref-status batches are keyed by the explicit project, not `queryScope()` (queries.ts).
   const referenceProjectId = useReferenceProjectId()
@@ -878,7 +878,7 @@ function ThreadEntry({ comment }: { comment: GithubComment }) {
 
 /** A 16 px comment avatar. Falls back to a letter block when no URL is known or the image fails to
  *  load (private-repo attachments, deleted avatars) — never a broken-image glyph. */
-function Avatar({ url, login }: { url?: string; login: string }) {
+function Avatar({ url, login }: { url?: string | undefined; login: string }) {
   const [failed, setFailed] = useState(false)
   if (url && !failed) {
     return (
@@ -935,7 +935,7 @@ export function CommentCount({ count }: { count: number | undefined }) {
 
 /** The checks badge — the legacy tab's three phrases, tinted by outcome. Links out
  *  to the PR's checks tab on GitHub (issue #415) when a URL is available. */
-function ChecksBadge({ checks, url }: { checks: Checks; url?: string }) {
+function ChecksBadge({ checks, url }: { checks: Checks; url?: string | undefined }) {
   const className = cn('text-[11px] font-medium', CHECKS_TONE[checks], url && 'hover:underline')
   const label = `${CHECKS_GLYPH[checks]} checks ${checks}`
 

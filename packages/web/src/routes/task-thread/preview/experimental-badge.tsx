@@ -16,7 +16,7 @@ export function ExperimentalBadge({
   iconOnly?: boolean
   /** Icon only until the toolbar (a size container) is wide enough for the word. */
   responsive?: boolean
-  className?: string
+  className?: string | undefined
 }) {
   if (responsive) {
     return (

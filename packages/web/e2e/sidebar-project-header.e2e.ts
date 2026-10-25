@@ -64,7 +64,7 @@ describe('project header actions', () => {
     browser.waitForFunction(`document.querySelector('[role="menu"]')?.textContent.includes('2 unread')`)
     browser.click('[role="menu"] [role="menuitem"]:first-child')
     browser.waitForFunction(`document.querySelector('${rail} [data-slot="rail-pill-bottom"]') === null`)
-    const records = await fetch(`${fixture.url}/api/v1/runs`).then(response => response.json()) as Array<{ seenAt?: string }>
+    const records = await fetch(`${fixture.url}/api/v1/runs`).then(response => response.json()) as Array<{ seenAt?: string | undefined }>
     expect(records).toHaveLength(2)
     expect(records.every(run => typeof run.seenAt === 'string')).toBe(true)
     browser.waitForFunction(`document.querySelector('[role="menu"]') === null && document.activeElement === document.querySelector('[data-slot="sidebar"] [data-slot="project-menu-trigger"]')`)

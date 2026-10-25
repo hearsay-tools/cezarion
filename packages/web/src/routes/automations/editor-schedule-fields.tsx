@@ -51,7 +51,7 @@ export function TimeField({ label, value, max, onCommit }: { label: string; valu
 }
 
 /** `stored` is the saved schedule when editing: a one-time due time left as saved is not re-judged as past. */
-export function ScheduleFields({ value, stored, onChange, timeZone }: { value: NormalizedSchedule; stored?: AutomationSchedule; onChange: (next: NormalizedSchedule) => void; timeZone: string }) {
+export function ScheduleFields({ value, stored, onChange, timeZone }: { value: NormalizedSchedule; stored?: AutomationSchedule | undefined; onChange: (next: NormalizedSchedule) => void; timeZone: string }) {
   const set = (patch: Partial<NormalizedSchedule>) => onChange({ ...value, ...patch })
   // Once starts tomorrow at 09:00 in the cockpit's zone; the draft keeps what it had if it had one.
   const choose = (type: ScheduleType) => set(type === 'once'

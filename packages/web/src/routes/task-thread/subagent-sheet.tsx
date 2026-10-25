@@ -28,15 +28,15 @@ export function SubagentSheet({
   recipientBackends,
 }: {
   runId: string
-  renderAsk?: (ask: ThreadAsk) => ReactNode
-  renderPermission?: (permission: ThreadPermission) => ReactNode
+  renderAsk?: ((ask: ThreadAsk) => ReactNode) | undefined
+  renderPermission?: ((permission: ThreadPermission) => ReactNode) | undefined
   /** The selected agent, or `undefined` when the sheet is closed. */
   agent: SubagentSummary | undefined
   /** That agent's child entries, in stream order (`subagentChildren`). */
   entries: ThreadEntry[]
   onClose: () => void
-  taskTitles?: TaskTitleMap
-  recipientBackends?: RecipientBackendMap
+  taskTitles?: TaskTitleMap | undefined
+  recipientBackends?: RecipientBackendMap | undefined
 }) {
   return (
     <Sheet open={agent !== undefined} onOpenChange={(open) => { if (!open) onClose() }}>
@@ -65,12 +65,12 @@ function SheetBody({
   recipientBackends,
 }: {
   runId: string
-  renderAsk?: (ask: ThreadAsk) => ReactNode
-  renderPermission?: (permission: ThreadPermission) => ReactNode
+  renderAsk?: ((ask: ThreadAsk) => ReactNode) | undefined
+  renderPermission?: ((permission: ThreadPermission) => ReactNode) | undefined
   agent: SubagentSummary
   entries: ThreadEntry[]
-  taskTitles?: TaskTitleMap
-  recipientBackends?: RecipientBackendMap
+  taskTitles?: TaskTitleMap | undefined
+  recipientBackends?: RecipientBackendMap | undefined
 }) {
   return (
     <>

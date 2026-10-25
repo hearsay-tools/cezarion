@@ -33,7 +33,7 @@ const sharedHome = resolve(repoRoot, '.ai/qa/cez-home')
 export type RegistryProject = {
   id: string
   root: string
-  name?: string
+  name?: string | undefined
   addedAt?: string
   lastOpenedAt?: string
   source?: 'local' | 'checkout'

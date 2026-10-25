@@ -70,7 +70,7 @@ function reduceWebhookReport(fold: FoldState, event: RunEvent): void {
 }
 
 function reduceWebhookDryRun(fold: FoldState, event: RunEvent): void {
-  const payload = (event.payload ?? {}) as { status?: unknown }
+  const payload = (event.payload ?? {}) as { status?: unknown | undefined }
   const text = `Webhook (dry run, nothing sent): ${str(event.event) ?? 'delivery'}${str(payload.status) ? ` · ${str(payload.status)}` : ''}`
   pushMeta(fold, { kind: 'note', id: `v1:${event.seq}`, text, tone: 'dim' })
 }

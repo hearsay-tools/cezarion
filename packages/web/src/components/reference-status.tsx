@@ -91,10 +91,10 @@ interface ReferenceStatusContextValue {
   /** The project a chip belongs to when it does not name one. Absent on the global Tasks page
    *  alone, which spans the whole registry and whose chips each name their own; every other
    *  surface stands in exactly one project, where repeating it per chip would be noise. */
-  projectId?: string
+  projectId?: string | undefined
   /** The repository `projectId` lives in — what tells a chip whether its reference is the project's
    *  own, and so can open in the cockpit (#692). Absent = unknown, and every chip links out. */
-  repoBase?: string
+  repoBase?: string | undefined
 }
 
 const ReferenceStatusContext = createContext<ReferenceStatusContextValue | null>(null)
@@ -105,10 +105,10 @@ export function ReferenceStatusProvider({
   requests,
   children,
 }: {
-  projectId?: string
+  projectId?: string | undefined
   /** The project's repository URL, for the chips' in-app item links (#692). A nested provider for
    *  the SAME project inherits it, so a surface that only narrows the request list need not repeat it. */
-  repoBase?: string
+  repoBase?: string | undefined
   /** Every reference on this surface. Stable content matters, not identity — the hook keys off
    *  what is IN the list, so rebuilding it each render is free. */
   requests: readonly ReferenceStatusRequest[]
@@ -177,7 +177,7 @@ export function useConflictingPullRequests(numbers: readonly number[], projectId
  *  stable identity rather than a new object per render. */
 /** The project and repository the surrounding provider stands in, for building a chip's in-app link
  *  (#692). Both undefined outside a provider, which leaves every chip linking to GitHub. */
-export function useReferenceScope(): { projectId?: string; repoBase?: string } {
+export function useReferenceScope(): { projectId?: string | undefined; repoBase?: string | undefined } {
   const context = useContext(ReferenceStatusContext)
   return { projectId: context?.projectId, repoBase: context?.repoBase }
 }

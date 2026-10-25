@@ -13,7 +13,7 @@ export type RouteAnswer = Response | Promise<Response> | undefined
 
 export type FetchRoute<Request extends RoutedRequest = RoutedRequest> = {
   /** Absent matches every method. */
-  method?: string
+  method?: string | undefined
   /** A string matches the whole URL, query string included; a RegExp is executed against it. */
   path: string | RegExp
   /** `match` is the RegExp's result, and `null` for a string path. */
