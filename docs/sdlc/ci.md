@@ -167,6 +167,15 @@ Refresh browser weights from successful per-file suite summary lines in CI logs 
 
 The Vitest sequencer assigns discovered tests to shards by measured duration using `.github/test-durations.json`. New files receive the median known duration and are always included; deleted files are ignored. The manifest affects balancing only, never discovery. Refreshing its durations can improve balance as the suite changes. Ordinary `npm test` still runs every suite without sharding.
 
+When a PR adds or splits a Vitest unit test file taking longer than about one
+minute on CI, add or update its repository-relative path and measured duration
+in milliseconds under `durationsMs` in `.github/test-durations.json`. Use the
+passed per-file Vitest suite-summary line in the CI log, not an individual test
+timing or total job duration; record the source run and commit in provenance.
+For split files, measure each resulting file separately. Keep browser E2E weights
+in their separate manifest. The paragraph above gives the
+sequencer's balancing-only role and median fallback for unlisted files.
+
 The push-only `.github/workflows/ci-benchmark.yml` workflow runs controlled experiments on `bench/156-*` branches. It uses a fixed application baseline, records failures and resource usage, and performs publication experiments only as dry runs. Reproduction instructions and retained results are in [the issue 156 benchmark report](../benchmarks/ci-performance-156.md). Automated review remains enabled throughout.
 
 Automated code review runs inside the `ci.yml` pull-request run, as the `review` job that calls `automated-code-review.yml` with `needs: verify`. GitHub starts it only when the **Unit, build, E2E, and package** job succeeds, so no runner sits polling for CI. Failed, cancelled or skipped verification leaves the review skipped. The model jobs still run on the trusted base's scripts, and their context fetch rechecks that verification succeeded for the exact head SHA immediately before model work. Standalone CI context collection still reports verification's actual conclusion and failed verification jobs; individual completed-job logs avoid waiting for the whole workflow archive. Ambiguous jobs or job-query errors fail the recheck.
@@ -253,6 +262,38 @@ The runner selection and three updated split-suite weights were measured togethe
 
 The release workflow's verification job also uses `blacksmith-4vcpu-ubuntu-2404`, with its existing commands and default Vitest worker policy. Two successful matched release-verification pairs reduced median queue-inclusive job time from 438 to 354.5 seconds; one failure on each provider is retained in the report. Stable and snapshot npm publishing remain on GitHub-hosted runners.
 
+### Proving a `ci.yml` change
+
+A PR that edits `ci.yml`, or a workflow it calls, does not run its own definition.
+CI triggers on `pull_request_target`, which loads the workflow from the base branch,
+so every check on the PR can pass while a new step never ran. To prove a `ci.yml`
+change before merge, push the branch and run `gh workflow run ci.yml --ref <branch>`
+without `-f pr_number`, which only bot release PRs take. The dispatched run uses the
+branch's `ci.yml` on the pushed head, with the full matrix. It skips both publishing
+jobs, so it publishes nothing: `publish-snapshot` runs only on a push to `main`, and
+`prepare-pr-snapshot` only on `pull_request_target`. It also skips `review` and
+`review-result`, so it never exercises `automated-code-review.yml`, the one workflow
+`ci.yml` calls. The dispatched run does not satisfy the PR's required checks (see
+§ Diagnostic dispatch), so cite its run ID in the PR's
+Verification section. Run `38979957113` proved the new `Lint workflows` step of
+hearsay-tools/cezarion#1199.
+
+Dispatch again after each later edit to `ci.yml` or a workflow it calls. Cite
+only a successful run whose head carries the final workflow files. From the
+final pushed PR head, compare the cited run's workflow files with `HEAD`:
+
+```bash
+sha=$(gh run view <run-id> --repo hearsay-tools/cezarion --json headSha --jq .headSha)
+git diff --quiet "$sha" HEAD -- .github/workflows/ && echo current || echo stale
+```
+
+The lookup must succeed and the run's commit must be available locally; resolve
+any lookup or Git error before using the result. `current` means the workflow
+files match, not that the run passed or exercised the skipped jobs above.
+`stale` requires a fresh dispatch and an updated citation. This directory-wide
+comparison also treats edits to unrelated workflows as stale; later commits
+that leave the workflow files unchanged do not invalidate the proof.
+
 ### Re-running a review
 
 A flaky verification failure needs no separate recovery workflow. **Re-run failed jobs** on the CI run reruns the failed shards, `verify`, and every job downstream of it, including the review. The poster reads the PR's reviews and live head again just before posting, so a rerun never exceeds `AUTOMATED_REVIEW_ROUNDS`, never posts a second review on one head, and never posts on a stale head.
@@ -311,6 +352,132 @@ positive/negative examples and manual recovery.
 
 Node-side browser-test API requests send `Connection: close`. The synchronous agent-browser commands can block the test process long enough for a fixture server to expire an idle connection before Node handles its close event. CI diagnostics captured reused sockets after 6–23 seconds without an event-loop tick, followed by `UND_ERR_SOCKET`. Fresh connections avoid that stale pool; the real browser and application server keep their normal connection policies. No request retries are added.
 Wed Sep 16 13:50:51 CEST 2026
+
+### Investigating a CI or load failure
+
+A full local Vitest run (or one shard) that fails only under host load can still
+back a PR. Record the load average (`uptime`) and the failed files, rerun those
+files (`npm test -- <files>`) until they pass, state both in the PR's
+Verification, and let CI's Vitest shards decide. Squeal reports and
+`squeal why <check>` output are the same evidence. The rerun is not a full pass;
+green CI shards are. A failure in a file the branch touches never qualifies: fix it.
+
+Count a test file's observed CI failure annotations across rerun attempts with:
+
+```bash
+node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/cezarion --runs 20
+# Or select runs by creation time (inclusive UTC timestamps):
+
+node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/cezarion --since 2026-10-22T00:00:00Z --until 2026-10-23T00:00:00Z
+```
+
+The command uses authenticated `gh` reads and defaults to the current repository's
+latest 20 `ci.yml` runs. It scans every attempt, including runs whose latest
+conclusion is success. Use a literal file name or path; matching uses annotation
+paths and titles, not stack references in messages. It prints each matching
+failure and separate totals for failing runs, failing attempts and runs scanned.
+These are observed annotated failures: no matching annotation does not prove a
+test ran or passed, and the count is not a pass rate. Missing data, unfinished
+attempts, changed run metadata, GitHub's date-query cap, or the 1,500-request /
+12-minute limits produce an incomplete report and exit 1. Narrow the range and
+repeat an incomplete scan. This evidence does not replace the reproduction or
+before/after verification required for a changed wait.
+
+**Cite a CI failure by run, attempt and job ID**, for example
+`run 39253390769 attempt 1, job 118062500873`. "Re-run failed jobs" adds an
+attempt to the same run, so a run ID alone can lead a reader to a passing
+rerun. `count-test-ci-failures.cjs` prints each failure in this form.
+
+`gh run view <run-id> --log` and `--log-failed` read the latest attempt unless
+you pass `--attempt <n>`. `--job <job-id>` does not select that job's attempt:
+`gh` reads the latest attempt and takes the job with the same name, so after a
+rerun it can show the passing log. Read a failed attempt that a rerun replaced
+by its job ID:
+
+```bash
+gh api --allow-escape-sequences repos/hearsay-tools/cezarion/actions/jobs/<job-id>/logs > job.log
+# List the job IDs of one attempt of a run:
+gh api repos/hearsay-tools/cezarion/actions/runs/<run-id>/attempts/<n>/jobs --jq '.jobs[] | {id, name, conclusion}'
+```
+
+Without `--allow-escape-sequences`, `gh api` exits 1 and writes no log.
+`gh run view <run-id> --attempt <n> --log-failed` also reads the failed attempt.
+
+**When filing a load-dependent test failure, preserve the diagnostic evidence.**
+Quote the full error line verbatim, with nothing cut, including any list after
+its `;`. Name the stack frame that throws the error, rather than an operation
+named in the message. Give the full log location: the originating repo's
+`.ai/cezar/runs/<runId>.ndjson` (or `.ndjson.br`), `squeal why <check>`
+with the check identifier and its worktree path, or the CI run, attempt and
+job IDs.
+
+Plain text searches do not read Brotli-compressed `.ndjson.br` logs. To read one,
+replace `<file.ndjson.br>` with its path:
+
+```bash
+node -e "process.stdout.write(require('node:zlib').brotliDecompressSync(require('node:fs').readFileSync(process.argv[1])))" '<file.ndjson.br>'
+```
+
+#### One-CPU load reproduction
+
+For a failure that appears under CPU contention, use this optional diagnostic
+from the repo root. It needs **Linux**, Bash, `taskset` (util-linux), and GNU
+`timeout` (coreutils). Choose a focused test file and name; replace both
+placeholders below. This is a controlled reproduction, not a routine test rerun
+or a replacement for the failure bundle. With Squeal validating, read its failure
+report first and follow its installed skill: use this command only when the
+controlled-load result is needed and unknown, not to duplicate background checks.
+
+```bash
+# Select the first CPU allowed to this shell, including inside a cpuset.
+
+cpu=$(awk '/^Cpus_allowed_list:/ { split($2, cpus, /[,-]/); print cpus[1] }' /proc/self/status)
+LOOPS=2 timeout --kill-after=5s 120s taskset -c "$cpu" bash <<'BASH'
+set -eu
+pids=()
+cleanup() {
+  if ((${#pids[@]})); then
+    kill "${pids[@]}" 2>/dev/null || true
+    wait "${pids[@]}" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM HUP
+for ((i = 0; i < LOOPS; i++)); do
+  sh -c 'while :; do :; done' &
+  pids+=("$!")
+done
+npm test -- <test-file> -t '<test-name>'
+BASH
+```
+
+The shell, busy loops, test command and its children inherit the same logical
+CPU affinity unless a child explicitly changes it. Together they can consume
+one logical CPU, not the whole host; other sessions using that CPU still compete
+with them. Start with `LOOPS=2`, then increase in small steps only as needed.
+For CPU-bound work, the failing host's load average divided by its available
+logical CPU count gives a rough starting point for runnable work per CPU.
+Each busy loop adds one runnable competitor, and the test adds its own work.
+For example, load 48 over 24 CPUs suggests roughly two runnable tasks per CPU,
+not an exact prescription of two loops. Load average includes I/O waits; CPU
+quotas, priorities and test parallelism also change the result. Record the CPU,
+loop count, command, revision and observed outcome. Eight loops reproduced the
+reported R24/R25 failures in hearsay-tools/cezarion#1392; it is no universal
+threshold or guarantee of reproduction.
+
+Normal completion or test failure runs the EXIT cleanup, which stops and reaps
+only the recorded loop PIDs. Ctrl-C uses the same cleanup. The 120-second limit
+sends SIGTERM to the command group, including test descendants. If Bash remains
+alive five seconds later, GNU `timeout` sends SIGKILL. If Bash exits first,
+`timeout` exits too: a descendant that ignores SIGTERM can survive. This bounds
+the reproduction command, not every possible descendant. After an interrupted
+or timed-out test, check for remaining test processes and stop those you own
+before another attempt. A timeout normally returns 124 (or 137 after SIGKILL),
+not a test assertion result. Do not add `--foreground`: it would exclude children
+from the timeout's group handling. Increase the limit only for a known longer
+focused test, and keep it finite. Traps cannot run after SIGKILL of the shell
+itself; do not kill the outer timeout to stop the reproduction.
 
 ## Single-trigger migration (#371)
 
