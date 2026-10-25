@@ -165,7 +165,9 @@ describe('createBootContext', () => {
 });
 
 describe('context listeners', () => {
-  const contextOf = (id: string) => ({ id, store: { id } }) as unknown as ProjectContext;
+  const contextOf = (id: string): ProjectContext => {
+    return { id, store: { id } } as unknown as ProjectContext;
+  };
 
   const fakeContexts = (built: ProjectContext[]) => {
     const storeListeners: ((store: unknown) => void)[] = [];
