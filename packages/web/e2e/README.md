@@ -412,7 +412,7 @@ membership against its own fixture skills only, so unrelated catalog entries can
 
 A built-in that a spec tests as product behavior, such as the `quick-task` workflow a new task
 runs, is not a catalog entry in this sense. A change that removes one still searches the specs
-first, as [AGENTS.md § Validation](../../../AGENTS.md#validation) says.
+first, as the [AGENTS.md reader sweep](../../../AGENTS.md#reader-sweep) says.
 
 ## A plain dry-run reply parks on a "Next step" card
 
