@@ -14,7 +14,12 @@ const source = process.argv[2] ?? resolve(import.meta.dirname, '../../../../.ai/
 const root = fs.mkdtempSync(join(tmpdir(), 'cez-lease-churn-'));
 // Expose the private probe in a disposable copy, without adding a production API
 // or changing its body. All process state below comes from real /proc stat files.
-const copy = join(root, 'lease.mjs');
+// The copy keeps the lease's place in a checkout, so its import of the process-group helper resolves.
+const copy = join(root, '.ai/scripts/lease.mjs');
+fs.mkdirSync(join(root, '.ai/scripts'), { recursive: true });
+fs.mkdirSync(join(root, 'packages/cezar/src'), { recursive: true });
+fs.copyFileSync(resolve(import.meta.dirname, '../../src/detached-process.ts'), join(root, 'packages/cezar/src/detached-process.ts'));
+fs.writeFileSync(join(root, 'packages/cezar/src/package.json'), '{"type":"module"}\n');
 fs.writeFileSync(copy, fs.readFileSync(source, 'utf8') + '\nexport { groupLive };\n');
 const { acquireTestEnvLease, groupLive } = await import(pathToFileURL(copy).href);
 const originalReadDir = fs.readdirSync;

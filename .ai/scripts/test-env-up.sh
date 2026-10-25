@@ -30,6 +30,9 @@
 #   2026-10-15 scrub every ambient CEZ_* before boot (hearsay-tools/cezarion#1045): an agent's
 #             shell inherits the live cockpit's opt-ins, which CI never sets. Opt-ins are
 #             requested with --server-env=CEZ_NAME=value and are part of the reuse key.
+#   2026-10-25 record the app's start identity (app.start) and stop its whole process group
+#             through test-env-lease.mjs stop-app, which never signals a reused pid
+#             (hearsay-tools/cezarion#1717).
 set -eu
 
 # ---- project-specific parameters -------------------------------------------
@@ -197,10 +200,11 @@ port_free() {
 
 http_ok() { curl -fsS --max-time "${2:-5}" "$1" >/dev/null 2>&1; }
 
+# json_get <file|-> <key.path>: "-" reads standard input (fd 0, which Node opens on every platform).
 json_get() { node -e '
   const fs = require("fs");
   try {
-    const d = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+    const d = JSON.parse(fs.readFileSync(process.argv[1] === "-" ? 0 : process.argv[1], "utf8"));
     const v = process.argv[2].split(".").reduce((o, k) => (o == null ? o : o[k]), d);
     if (v !== undefined && v !== null) process.stdout.write(String(v));
   } catch { /* absent or corrupt descriptor → empty, caller treats as stale */ }
@@ -326,15 +330,8 @@ try_reuse() {
 
 teardown_stale() {
   [ -f "$ENV_DESCRIPTOR" ] || return 0
-  pid=$(json_get "$ENV_DESCRIPTOR" app.pid)
-  own=$(json_get "$ENV_DESCRIPTOR" startedByThisRepo)
-  # Only ever kill what this repo started.
-  if [ -n "$pid" ] && [ "$own" = true ] && kill -0 "$pid" 2>/dev/null; then
-    log "stopping stale instance (pid $pid)"
-    kill "$pid" 2>/dev/null || true
-    sleep 1
-    kill -9 "$pid" 2>/dev/null || true
-  fi
+  # Only ever stop what this repo started, and only the recorded incarnation.
+  node "$SCRIPT_DIR/test-env-lease.mjs" stop-app 1000 || true
   # A cold boot replaces the env, so its descriptor goes now: specs that run after a failed
   # boot must report "no env", not attach to a dead baseUrl or repeat its browser notes.
   rm -f "$ENV_DESCRIPTOR"
@@ -602,8 +599,10 @@ start_app() {
   # keep the caller's HOME; only the detached server sees this disposable home.
   rm -rf "$QA_DIR/server-home"
   mkdir -p "$QA_DIR/server-home"
-  APP_PID=$(cd "$REPO_ROOT" && HOME="$QA_DIR/server-home" USERPROFILE="$QA_DIR/server-home" node "$SCRIPT_DIR/test-env-lease.mjs" detach-app "$APP_LOG" \
+  APP=$(cd "$REPO_ROOT" && HOME="$QA_DIR/server-home" USERPROFILE="$QA_DIR/server-home" node "$SCRIPT_DIR/test-env-lease.mjs" detach-app --json "$APP_LOG" \
     "$E2E_BUILD_ROOT/dist/index.js" --port "$PORT" --no-open --repo "$SERVED_ROOT")
+  APP_PID=$(printf '%s' "$APP" | json_get - pid)
+  APP_START=$(printf '%s' "$APP" | json_get - start)
 
   health_started=$(date +%s)
   health_deadline=$((health_started + HEALTH_TIMEOUT))
@@ -633,7 +632,7 @@ start_app() {
   done
   log "health wait timed out after $((health_now - health_started))s — see .ai/qa/test-env-app.log"
   tail -20 "$APP_LOG" >&2 || true
-  kill "$APP_PID" 2>/dev/null || true
+  node "$SCRIPT_DIR/test-env-lease.mjs" stop-app 1000 "$APP_PID" "$APP_START" || true
   exit 1
 }
 
@@ -643,7 +642,7 @@ write_descriptor() {
   [ "${CEZ_SINGLE_PROJECT:-}" = 1 ] && SINGLE_PROJECT=true
   node -e '
     const fs = require("fs");
-    const [out, baseUrl, port, pid, cmd, bInstalled, bCmd, bVer, bNotes, desc, singleProject, platform, launchPath, servedRoot, serverEnv, watch] = process.argv.slice(1);
+    const [out, baseUrl, port, pid, start, cmd, bInstalled, bCmd, bVer, bNotes, desc, singleProject, platform, launchPath, servedRoot, serverEnv, watch] = process.argv.slice(1);
     let launch = {};
     try { launch = JSON.parse(fs.readFileSync(launchPath, "utf8")); } catch { /* resolver absent */ }
     const browser = {
@@ -667,7 +666,7 @@ write_descriptor() {
       startedByThisRepo: true,
       startScript: ".ai/scripts/test-env-up.sh",
       stopScript: ".ai/scripts/test-env-down.sh",
-      app: { startCommand: cmd, port: Number(port), healthPath: "/api/v1/health", pid: Number(pid) },
+      app: { startCommand: cmd, port: Number(port), healthPath: "/api/v1/health", pid: Number(pid), ...(start ? { start } : {}) },
       services: [],
       credentials: [],
       environment: { singleProject: singleProject === "true", serverEnv, watch, serverHome: ".ai/qa/server-home", serverUserProfile: ".ai/qa/server-home" },
@@ -677,7 +676,7 @@ write_descriptor() {
       startedAt: new Date().toISOString(),
       notes: "Booted from the VITE_CEZ_E2E=1 build in .ai/qa/build/cezar (never packages/cezar/dist) after pnpm install --frozen-lockfile with CEZ_DRY_RUN=1, so workspace links/runtime dependencies are present, the agent CLIs are mocked, and no agent login/network is needed. Serves servedRoot, an isolated clone of this checkout. No backing services. Stop with .ai/scripts/test-env-down.sh. App log: .ai/qa/test-env-app.log.",
     }, null, 2) + "\n");
-  ' "$ENV_DESCRIPTOR" "$BASE_URL" "$PORT" "$APP_PID" \
+  ' "$ENV_DESCRIPTOR" "$BASE_URL" "$PORT" "$APP_PID" "$APP_START" \
     "${SERVER_ENV:+$SERVER_ENV }CEZ_DRY_RUN=1 CEZ_HOME=.ai/qa/cez-home HOME=.ai/qa/server-home USERPROFILE=.ai/qa/server-home node $E2E_BUILD_ROOT/dist/index.js --port $PORT --no-open --repo $SERVED_ROOT" \
     "$BROWSER_INSTALLED" "$BROWSER_COMMAND" "$BROWSER_VERSION" "$BROWSER_NOTES" "$BROWSER_DESCRIPTOR" \
     "$SINGLE_PROJECT" "$(uname -s 2>/dev/null | grep -qi Linux && { grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null && echo wsl2 || echo linux; } || echo darwin)" \

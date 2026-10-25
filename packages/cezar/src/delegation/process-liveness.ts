@@ -2,45 +2,21 @@ import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 
+import { linuxBootId, parseProcStat, processStartToken } from '../detached-process.ts';
+
 /**
  * Synchronous process evidence for worker recovery and resource cleanup. Unreadable cwd is no
  * evidence; other uncertainty stays alive or unknown, never proven gone.
  */
+// A process's start identity lives with the helper that starts detached processes (hearsay-tools/cezarion#1717).
+export { parseProcStat, processStartToken };
 /** `pgid`: the session leader leads its own process group (hearsay-tools/cezarion#890). */
 export type RecordedProcess = { pid: number; startToken?: string | undefined; pgid?: number | undefined };
 export type WorkerProcessRecord = { generation: string; controller: RecordedProcess; processes: RecordedProcess[] };
 export type GenerationLiveness = 'gone' | 'alive' | 'unknown';
 
-/** `/proc/<pid>/stat` field 22 (`starttime`); `comm` may hold spaces and `)`, so parse after the LAST `)`. */
-export function parseProcStat(stat: string): { state: string; startToken: string } | undefined {
-  const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
-  return stat.includes(')') && fields.length >= 20 && /^\d+$/.test(fields[19]!)
-    ? { state: fields[0]!, startToken: fields[19]! } : undefined;
-}
-
 function procStat(pid: number) {
   try { return parseProcStat(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return undefined; }
-}
-
-let bootId: string | null | undefined;
-/** `starttime` counts ticks since boot, so it repeats across reboots; the boot id scopes it. */
-function linuxBootId(): string | undefined {
-  if (bootId === undefined) { try { bootId = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim() || null; } catch { bootId = null; } }
-  return bootId ?? undefined;
-}
-
-/** One process incarnation, so a reused PID never matches. Absent when the platform cannot say. */
-export function processStartToken(pid: number, platform: NodeJS.Platform = process.platform): string | undefined {
-  if (!Number.isSafeInteger(pid) || pid <= 0) return undefined;
-  if (platform === 'linux') {
-    const start = procStat(pid)?.startToken; const boot = linuxBootId();
-    return start && boot ? `${boot}:${start}` : start;
-  }
-  if (platform !== 'darwin') return undefined;
-  // `lstart` is locale- and zone-formatted; pin both so the token is stable across cezar processes.
-  const ps = spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', timeout: 2_000, env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' } });
-  const token = ps.status === 0 ? ps.stdout.trim() : '';
-  return token || undefined;
 }
 
 function pidExists(pid: number): boolean {
