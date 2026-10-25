@@ -1,7 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { buildRequest, mapAnswers, classify } = require('./jev-friction-intake.cjs');
-const { buildAutomations } = require('./friction-policy.cjs');
+const { execFileSync } = require('node:child_process');
+const path = require('node:path');
+const { buildAutomations, buildDigestAutomation, INBOX, LABELS } = require('./friction-policy.cjs');
 
 const issue = { number: 12, title: 'An assertion hides the events', body: 'Print the timeline without changing the assertions.', state: 'open', labels: [{ name: 'friction' }] };
 function choice(value, probability = 0.95) {
@@ -146,6 +148,29 @@ test('design handling selects dev-flow and allows its human approval gate', () =
     assert.equal(implementation.task.autonomous, true);
     assert.equal(implementation.task.workflow, 'quick-task');
   }
+});
+
+test('the daily digest is a non-autonomous weekday schedule that uses only schedule placeholders', () => {
+  const digest = buildDigestAutomation();
+  assert.equal(digest.kind, 'schedule');
+  assert.deepEqual(digest.schedule, { type: 'weekdays', hour: 9, minute: 0 });
+  assert.notEqual(digest.enabled, true);
+  assert.equal(digest.task.autonomous, false);
+  assert.equal(digest.task.worktree, true);
+  assert.deepEqual([...digest.task.prompt.matchAll(/\{\{(\w+)\}\}/g)].map(match => match[1]), ['date']);
+  for (const text of [INBOX.label, INBOX.reviewedLabel, `${INBOX.actMinutes} minutes`, `${INBOX.watchDays} days`, 'cezar_ask', 'hearsay-tools/squeal', 'SDLC feedback']) {
+    assert.ok(digest.task.prompt.includes(text), text);
+  }
+});
+
+test('inbox labels stay out of the routing labels the intake applicator manages', () => {
+  const managed = LABELS.map(label => label.name);
+  for (const label of [INBOX.label, INBOX.reviewedLabel]) assert.ok(!managed.includes(label), label);
+});
+
+test('the policy command emits the three handling polls and the digest', () => {
+  const emitted = JSON.parse(execFileSync(process.execPath, [path.join(__dirname, 'friction-policy.cjs')], { encoding: 'utf8' }));
+  assert.deepEqual(emitted, JSON.parse(JSON.stringify([...buildAutomations(), buildDigestAutomation()])));
 });
 
 test('coercible category values cannot bypass a category minimum', () => {
