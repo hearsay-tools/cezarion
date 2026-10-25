@@ -36,7 +36,7 @@ function runShell(command, env = {}) {
   return spawnSync('bash', ['-e', '-c', command], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: { ...process.env, CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', EVENT_NAME: 'pull_request_target', ...env },
+    env: { ...process.env, CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success', EVENT_NAME: 'pull_request_target', ...env },
   });
 }
 
@@ -542,4 +542,124 @@ test('baseline growth is required through trusted classify-pr with default PR ev
   assert.ok(ci.jobs.verify.needs.includes('classify-pr'));
   assert.match(ci.jobs.verify.steps[0].run, /test "\$CLASSIFY_RESULT" = success/);
   assert.equal(ci.on.pull_request_target.types, undefined, 'label changes must not cancel and restart CI');
+});
+
+test('the complexity gate runs the workflow commit and reads the pull request head as Git data', () => {
+  const ci = workflow();
+  const job = ci.jobs['complexity-gate'];
+  const checkouts = job.steps.filter(step => step.uses?.startsWith('actions/checkout@'));
+  assert.equal(checkouts.length, 1);
+  // On pull_request_target github.sha is the current tip of the base branch. The event's base.sha is the
+  // tip from when the PR opened and can lack the scripts this workflow calls (hearsay-tools/cezarion#1834).
+  assert.equal(checkouts[0].with.ref, '${{ github.sha }}');
+  assert.equal(checkouts[0].with['persist-credentials'], false);
+  assert.equal(checkouts[0].with['fetch-depth'], 0);
+  assert.doesNotMatch(JSON.stringify(job), /base\.sha|refs\/pull\/\{0\}\/merge|allow-unsafe-pr-checkout/);
+  assert.deepEqual(job.permissions, { contents: 'read', 'pull-requests': 'read' });
+  const install = job.steps.find(step => /^pnpm install/.test(step.run ?? ''));
+  assert.match(install.run, /--frozen-lockfile/);
+  assert.match(install.run, /--ignore-scripts/);
+  assert.ok(job.steps.indexOf(install) > job.steps.indexOf(checkouts[0]));
+  assert.ok(ci.jobs.verify.needs.includes('complexity-gate'));
+});
+
+test('the complexity gate runs on pull requests and bare dispatches, and verify never lets a pull request skip it', () => {
+  const { runInNewContext } = require('node:vm');
+  const ci = workflow();
+  const condition = ci.jobs['complexity-gate'].if.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+  const runs = (eventName, prNumber = '') => runInNewContext(condition, { github: { event_name: eventName }, inputs: { pr_number: prNumber } });
+  assert.deepEqual(['pull_request_target', 'merge_group', 'push', 'workflow_dispatch'].map(event => runs(event)), [true, false, false, true]);
+  assert.equal(runs('workflow_dispatch', '42'), false, 'a dispatched release PR changes manifests only');
+  const gate = ci.jobs.verify.steps.find(step => step.name === 'Require every verification job');
+  assert.equal(gate.env.COMPLEXITY_GATE_RESULT, "${{ needs['complexity-gate'].result }}");
+  const verify = (event, result) => runShell(gate.run, {
+    EVENT_NAME: event, COMPLEXITY_GATE_RESULT: result, BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success',
+    COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'false',
+  }).status;
+  assert.equal(verify('pull_request_target', 'success'), 0);
+  for (const result of ['failure', 'cancelled', 'skipped', '']) assert.notEqual(verify('pull_request_target', result), 0, result);
+  for (const event of ['merge_group', 'workflow_dispatch']) {
+    assert.equal(verify(event, 'skipped'), 0, event);
+    assert.equal(verify(event, 'success'), 0, event);
+    assert.notEqual(verify(event, 'failure'), 0, event);
+  }
+});
+
+// The step's own shell against a fixture: trusted scripts in the checkout, the pull request only as
+// a ref, and a fake `gh` that answers with the pull request's live JSON.
+function complexityGateFixture(t) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cezar-complexity-gate-'));
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+  const git = (...args) => {
+    const result = spawnSync('git', args, { cwd: dir, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+    return result.stdout.trim();
+  };
+  const over = `export function over(x) {\n${'  if (x) x++;\n'.repeat(20)}  return x;\n}\n`;
+  const write = (file, source) => fs.writeFileSync(path.join(dir, file), source);
+  const commit = (message) => { git('add', '-A'); git('commit', '-qm', message); return git('rev-parse', 'HEAD'); };
+  git('init', '-q', '-b', 'main');
+  git('config', 'user.email', 'fixture@example.invalid');
+  git('config', 'user.name', 'Gate fixture');
+  const scripts = path.join(dir, '.ai/skills/check-code-quality/scripts');
+  fs.mkdirSync(scripts, { recursive: true });
+  for (const name of ['changed-functions', 'code-metrics', 'complexity-gate', 'metrics']) {
+    fs.copyFileSync(path.join(repoRoot, `.ai/skills/check-code-quality/scripts/${name}.mjs`), path.join(scripts, `${name}.mjs`));
+  }
+  fs.symlinkSync(path.join(repoRoot, 'node_modules'), path.join(dir, 'node_modules'));
+  write('.gitignore', 'node_modules\n');
+  write('a.ts', 'export function small(x) { return x; }\n');
+  const forkPoint = commit('base');
+  git('checkout', '-q', '-b', 'pr');
+  write('a.ts', `export function small(x) { return x; }\n${over}`);
+  const head = commit('pull request');
+  git('checkout', '-q', 'main');
+  write('later.ts', 'export const later = 1;\n');
+  const tip = commit('main moved on');
+  git('remote', 'add', 'origin', dir);
+  git('update-ref', 'refs/pull/7/head', head);
+  git('update-ref', 'refs/remotes/origin/main', tip);
+  const bin = fs.mkdtempSync(path.join(os.tmpdir(), 'cezar-gate-bin-'));
+  t.after(() => fs.rmSync(bin, { recursive: true, force: true }));
+  fs.writeFileSync(path.join(bin, 'gh'), '#!/bin/sh\nprintf \'%s\\n\' "$FAKE_PR"\n', { mode: 0o755 });
+  const step = workflow().jobs['complexity-gate'].steps.find(candidate => candidate.name === 'Reject function complexity growth');
+  const run = (env) => spawnSync('bash', ['-e', '-c', step.run], { cwd: dir, encoding: 'utf8', env: {
+    PATH: `${bin}:${process.env.PATH}`, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GH_TOKEN: 'unused',
+    GITHUB_REPOSITORY: 'owner/repo', PR_NUMBER: '7', EXPECTED_HEAD_SHA: head, EVENT_NAME: 'pull_request_target',
+    GITHUB_SHA: tip, FAKE_PR: JSON.stringify({ head: { sha: head }, labels: [] }), ...env,
+  } });
+  return { dir, git, run, head, tip, forkPoint };
+}
+
+test('the complexity gate step compares the pull request with the merge base of the current base tip, without checking it out', (t) => {
+  const f = complexityGateFixture(t);
+  const failed = f.run({});
+  assert.equal(failed.status, 1, failed.stdout + failed.stderr);
+  assert.match(failed.stdout, /over: complexity 21 \(new function; limit 20\)/);
+  assert.match(failed.stdout, /For an owner-approved increase, the owner adds the baseline-growth label, then re-runs the failed complexity-gate job\./);
+  assert.doesNotMatch(failed.stdout, /later/, 'a change that landed on the base after the fork point is not the pull request\'s');
+  assert.equal(f.git('rev-parse', 'HEAD'), f.tip, 'the head is fetched, never checked out');
+  assert.equal(f.git('status', '--porcelain'), '');
+});
+
+test('the baseline-growth label read live approves the growth, and a stale or moved head fails the step', (t) => {
+  const f = complexityGateFixture(t);
+  const labelled = f.run({ FAKE_PR: JSON.stringify({ head: { sha: f.head }, labels: [{ name: 'baseline-growth' }] }) });
+  assert.equal(labelled.status, 0, labelled.stdout + labelled.stderr);
+  assert.match(labelled.stdout, /approved by the baseline-growth label; owner merge required/);
+  const stale = f.run({ FAKE_PR: JSON.stringify({ head: { sha: 'a'.repeat(40) }, labels: [] }) });
+  assert.equal(stale.status, 1);
+  assert.match(stale.stderr, /changed after this run started/);
+  f.git('update-ref', 'refs/pull/7/head', f.forkPoint);
+  const moved = f.run({});
+  assert.equal(moved.status, 1);
+  assert.match(moved.stderr, /changed during the fetch/);
+});
+
+test('a bare dispatch gates the dispatched commit against main', (t) => {
+  const f = complexityGateFixture(t);
+  f.git('checkout', '-q', '--detach', f.head);
+  const result = f.run({ EVENT_NAME: 'workflow_dispatch', GITHUB_SHA: f.head, PR_NUMBER: '', EXPECTED_HEAD_SHA: '' });
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /over: complexity 21 \(new function; limit 20\)/);
 });

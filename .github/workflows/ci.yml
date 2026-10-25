@@ -244,6 +244,74 @@ jobs:
           fi
           node .github/scripts/release-bump-pr.cjs
 
+  # Function complexity ratchet (hearsay-tools/cezarion#1800). Like the baseline-growth
+  # step in classify-pr, it runs trusted code and reads the pull request head as Git
+  # data: the head is fetched, never checked out, so no head code runs here.
+  # `github.sha` is the workflow's own commit, the current tip of the base branch on
+  # pull_request_target. The event's `base.sha` is the tip from when the PR opened, and
+  # a checkout of it can lack scripts that this workflow calls. @babel/parser installs
+  # from that commit's lockfile with lifecycle scripts off. A bare dispatch gates the
+  # dispatched branch against main, which proves this job before merge.
+  complexity-gate:
+    name: Check function complexity
+    if: ${{ github.event_name == 'pull_request_target' || (github.event_name == 'workflow_dispatch' && inputs.pr_number == '') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out the workflow's own commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: '12.11.2'
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install dependencies without lifecycle scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Reject function complexity growth
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          growth=()
+          if [ "$EVENT_NAME" = pull_request_target ]; then
+            pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
+            if ! jq -e --arg head "$EXPECTED_HEAD_SHA" '.head.sha == $head' <<<"$pr" >/dev/null; then
+              echo "::error::The pull request changed after this run started. Re-run CI for the current head." >&2
+              exit 1
+            fi
+            git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head"
+            head="$(git rev-parse FETCH_HEAD)"
+            if [ "$head" != "$EXPECTED_HEAD_SHA" ]; then
+              echo "::error::The pull request changed during the fetch. Re-run CI for the current head." >&2
+              exit 1
+            fi
+            base="$GITHUB_SHA"
+            # Live labels, so a re-run of this job sees a label added after the event.
+            if jq -e 'any(.labels[]; .name == "baseline-growth")' <<<"$pr" >/dev/null; then
+              growth=(--allow-growth)
+            fi
+          else
+            head="$GITHUB_SHA"
+            base=origin/main
+          fi
+          node .ai/skills/check-code-quality/scripts/complexity-gate.mjs --base "$base" --head "$head" "${growth[@]}"
+
   build-and-package:
     name: Typecheck, unit, build, and package
     needs: queue-proof
@@ -520,7 +588,7 @@ jobs:
   # cockpit browser jobs.
   verify:
     name: Unit, build, E2E, and package
-    needs: [queue-proof, change-surface, classify-pr, build-and-package, vitest, cockpit-browser]
+    needs: [queue-proof, change-surface, classify-pr, complexity-gate, build-and-package, vitest, cockpit-browser]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -535,6 +603,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           CLASSIFY_RESULT: ${{ needs.classify-pr.result }}
           SURFACE_RESULT: ${{ needs.change-surface.result }}
+          COMPLEXITY_GATE_RESULT: ${{ needs['complexity-gate'].result }}
           BUILD_AND_PACKAGE_RESULT: ${{ needs['build-and-package'].result }}
           VITEST_RESULT: ${{ needs.vitest.result }}
           COCKPIT_BROWSER_RESULT: ${{ needs['cockpit-browser'].result }}
@@ -546,6 +615,13 @@ jobs:
         run: |
           test "$CLASSIFY_RESULT" = success
           test "$SURFACE_RESULT" = success
+          # The complexity ratchet runs on pull requests and bare dispatches. Other
+          # events skip it, and a pull request may never skip it.
+          if [ "$EVENT_NAME" = pull_request_target ]; then
+            test "$COMPLEXITY_GATE_RESULT" = success
+          else
+            test "$COMPLEXITY_GATE_RESULT" = success -o "$COMPLEXITY_GATE_RESULT" = skipped
+          fi
           if [ "$EVENT_NAME" = push ] && [ "$PROOF_RESULT" = success ] && [ "$PROOF_VERIFIED" = true ]; then
             test "$BUILD_AND_PACKAGE_RESULT" = skipped
             test "$VITEST_RESULT" = skipped
