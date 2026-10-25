@@ -190,6 +190,35 @@ The Jev action itself creates no cezar task, leaving issue deduplication availab
 for its selected handler. Edits or reclassifications do not launch replacement
 work for an issue that already has a task.
 
+## Where a new agent rule goes
+
+A friction fix often adds a rule that agents must follow. `AGENTS.md` loads on every
+agent turn, so put the rule in the narrowest document that the tasks it governs
+already read:
+
+| The rule governs | Put it in |
+| --- | --- |
+| One code area: the runs store, worktrees, skills, real-time events and the like | That area's doc under `docs/areas/`, or a new one the Task routing row points to |
+| Runners, the event protocol or the parity matrices | `AGENT_PROTOCOL.md` |
+| Browser specs and the e2e environment | `packages/web/e2e/README.md` |
+| CI, workflows or investigating a CI failure | `docs/sdlc/ci.md` |
+| Regression proof | `docs/sdlc/regression-proof.md` |
+| What a reviewer checks, and severities | `CODE_REVIEW.md` |
+| Labels, claims, the QA gate or process | `SDLC.md`, or this file for friction |
+| A protected public surface | `BACKWARD_COMPATIBILITY.md` |
+| Work every task does, or a design rule for any mechanism change | `AGENTS.md` |
+
+When the rule lands outside `AGENTS.md`, confirm that a pointer reaches it: a Task
+routing row or a Related documents line names the document with when-to-read
+wording. Add a pointer only when none fits. When the rule belongs in `AGENTS.md`,
+state it once: extend the defined term it belongs to (*case table*, *reader sweep*)
+rather than adding a paragraph, and keep its incident to one clause and a citation.
+
+`.github/scripts/agents-md-budget.test.cjs` fails when `AGENTS.md` exceeds `maxBytes`
+in `.github/agents-md.baseline.json`, and when it falls more than 1,024 bytes below
+it, so a PR that shrinks the file also lowers the limit. Raise the limit only with
+the owner's approval in that PR.
+
 ## Rollout
 
 The previous Friction automation is disabled. Replacements are created **paused**,
