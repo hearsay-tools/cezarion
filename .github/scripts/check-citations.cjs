@@ -297,8 +297,11 @@ const READERS = [
 ];
 const readerOf = (file) => READERS.find(([type]) => type.test(file))?.[1];
 
-/** Every bare citation `file`'s text holds where it is read: `{ line, number, context }`. */
-function bareCitations(file, text) {
+/** Every bare citation `file`'s text holds where it is read: `{ line, number, context }`.
+ *  CRLF line endings read as LF, as YAML reads them before a `run:` block reaches the
+ *  shell. The line count stays the same, so the numbers still match git's added lines. */
+function bareCitations(file, raw) {
+  const text = raw.replaceAll('\r\n', '\n');
   const starts = [0];
   for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) starts.push(i + 1);
   const found = [];

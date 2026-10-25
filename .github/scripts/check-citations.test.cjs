@@ -269,6 +269,18 @@ test('reads indented code blocks as code, counting from the list item that holds
   ]);
 });
 
+test('reads a file with CRLF line endings as its LF form', () => {
+  const files = {
+    'up.sh': ["cat <<'EOF'", 'x # see #123', 'EOF', '# after (#124)'],
+    'ci.yml': ['steps:', '  - run: |', '      cat <<EOF', '      ## body #140', '      EOF', '      cmd;# after (#141)'],
+    'notes.md': ['```', '#12', '```', '', 'Fixes #13.', '', '    echo #14'],
+  };
+  const crlf = (file) => cites(file, `${files[file].join('\r\n')}\r\n`);
+  assert.deepEqual(crlf('up.sh'), ['4:124:comment']);
+  assert.deepEqual(crlf('ci.yml'), ['6:141:comment']);
+  assert.deepEqual(crlf('notes.md'), ['5:13:Markdown prose']);
+});
+
 test('reads nothing in file types it does not know', () => {
   assert.deepEqual(cites('data.json', '{"title": "#12"}'), []);
   assert.deepEqual(cites('mock.html', '<p>#12</p>'), []);
