@@ -1,9 +1,14 @@
-import { resolve } from 'node:path'
+import { execFileSync, type ChildProcess } from 'node:child_process'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join, resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
+import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { waitForSettledSample } from './visual-ready'
-import { AgentBrowser, bootProjectId, readTestEnv } from './agent-browser'
+import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv, readTestEnv } from './agent-browser'
 import { assertDiffCoverage } from './repo-diff-coverage'
+// fixture-server starts: 1
 
 /**
  * The repo view (R5 Step 1.7) end-to-end against the shared dry-run environment — which
@@ -18,6 +23,11 @@ import { assertDiffCoverage } from './repo-diff-coverage'
  *  `<Diff>` virtualizes and the viewport mounts a window. Totals, the file tree, and
  *  last-row selection are the oracles (`repo-diff-coverage.ts`); card counts stay for
  *  the flat renderer. Deterministic small/large fixtures live in `repo-git-diff.e2e.ts`.
+ *
+ *  The one exception to "real git state" is opening a commit's structured diff, which runs
+ *  against a two-commit repository this spec builds and serves itself (see the last
+ *  `describe`): what the served clone's commit diffs hold depends on how the checkout was
+ *  made and how big its tree is, which is no business of a test about opening a commit.
  */
 
 const artifactsDir = resolve(import.meta.dirname, '../../../.ai/qa/artifacts_e2e')
@@ -34,8 +44,8 @@ let bootProject: string
  *  every cockpit link is scoped, and every legacy flat URL redirects onto its scoped twin. */
 const scoped = (path: string) => `/p/${bootProject}${path}`
 
-async function api<T>(path: string): Promise<T> {
-  const res = await fetch(`${baseUrl}${path}`)
+async function api<T>(path: string, origin = baseUrl): Promise<T> {
+  const res = await fetch(`${origin}${path}`)
   if (!res.ok) throw new Error(`cezar e2e: GET ${path} answered ${res.status}`)
   return (await res.json()) as T
 }
@@ -96,38 +106,6 @@ describe('the repo view against the live dry-run server', () => {
     const firstRow = browser.text(`[data-slot="commit-row"][data-sha="${first.hash}"]`)
     expect(firstRow).toContain(first.hash)
     expect(firstRow).toContain(first.subject)
-  })
-
-  it('opens one commit’s structured diff (a non-merge commit, found honestly)', async () => {
-    // Merge commits honestly answer zero files — pick the newest commit that carries a diff.
-    const repo = await api<RepoPayload>('/api/v1/repo')
-    let picked: { hash: string; subject: string; files: Array<{ path: string }> } | null = null
-    for (const entry of repo.log) {
-      const commit = await api<{ subject: string; files: Array<{ path: string }> }>(
-        `/api/v1/repo/commit/${entry.hash}?structured=1`,
-      )
-      if (commit.files.length > 0) {
-        picked = { hash: entry.hash, subject: commit.subject, files: commit.files }
-        break
-      }
-    }
-    expect(picked).not.toBeNull()
-    if (!picked) return
-
-    browser.goto(`${baseUrl}${scoped('/git/commits')}`)
-    browser.waitForFunction(`document.querySelector('[data-slot="commit-row"]') !== null`)
-    browser.click(`[data-slot="commit-row"][data-sha="${picked.hash}"]`)
-
-    browser.waitForFunction(`document.querySelector('[data-slot="commit-meta"]') !== null`)
-    expect(browser.url()).toBe(`${baseUrl}${scoped(`/git/commits/${picked.hash}`)}`)
-    expect(browser.text('[data-slot="commit-meta"]')).toContain(picked.subject)
-    assertDiffCoverage(browser, picked.files, { tree: false })
-    // A commit opens inside Recently on main, and the way back is that section.
-    expect(
-      browser.evaluate(`document.querySelector('[data-slot="commit-back"]').getAttribute('href')`),
-    ).toBe(scoped('/git'))
-
-    browser.screenshot(`${artifactsDir}/repo-git-commit.png`)
   })
 
   it('/git/branches renders the live branch list with the checkout marked current', async () => {
@@ -201,5 +179,93 @@ describe('the repo view against the live dry-run server', () => {
     } finally {
       browser.setViewport(DESKTOP.width, DESKTOP.height)
     }
+  })
+})
+
+const COMMIT_SUBJECT = 'change two modules'
+const COMMIT_FILES = 2
+
+/** A base commit, then a non-merge commit that rewrites two small files: a diff that is the same
+ *  size on every machine, whatever the checkout this suite runs from looks like. */
+function buildCommitFixture(dir: string): void {
+  const git = (args: string[]) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' })
+  const writeModules = (tag: string) => {
+    for (const name of ['alpha', 'beta']) {
+      const lines = Array.from({ length: 4 }, (_, line) => `export const ${tag}_${name}_${line} = ${line}\n`)
+      writeFileSync(join(dir, `${name}.ts`), lines.join(''), 'utf8')
+    }
+  }
+  git(['init', '-q', '-b', 'main'])
+  git(['config', 'user.email', 'e2e@example.com'])
+  git(['config', 'user.name', 'cezar e2e'])
+  writeModules('before')
+  git(['add', '-A'])
+  git(['commit', '-q', '-m', 'base'])
+  writeModules('after')
+  git(['add', '-A'])
+  git(['commit', '-q', '-m', COMMIT_SUBJECT])
+}
+
+// This test used to search the served clone's log for "the newest commit that carries a diff", so
+// it depended on how the checkout was made and how big its tree is. CI checks out at depth 1: the
+// clone's only commit is a root commit, and its whole-tree `git diff-tree --root --patch` (33,564,799
+// bytes at 3bed231) is over the 32 MiB `maxBuffer` of `collectCommitChanges`, so the route answers 409
+// (hearsay-tools/cezarion#1840). The cap and the 409 stay; the test builds its own diff instead.
+// Evidence: repo-git.e2e.ts failed with "cezar e2e: GET /api/v1/repo/commit/3bed231?structured=1
+// answered 409" (bundle .ai/qa/failures/repo-git/opens-one-commit-s-structured-diff-a-non-merge-commit-found-honestly-1/:
+// probe.json `error` is that line and its `page.url` is `/p/cezarion/git/commits`, so the test died in
+// its API probe before any click; CI run 40223630364, job 121260693226, artifact
+// `cockpit-failures-shard-3` 12610397586). Reproduce on a depth-1 clone of main
+// (`git clone --depth 1 file://<checkout>`) with `npm run test:e2e -- repo-git.e2e.ts -t 'opens one commit'`
+// before this change and `-t 'opens the newest commit'` after: 1 of 1 failed before (the cap is
+// deterministic, so one run is the whole sample), 3 of 3 passed after.
+describe('opening one commit’s structured diff, in a repository this spec builds', () => {
+  let repo = ''
+  let server: ChildProcess | undefined
+  let fixtureUrl = ''
+  let fixtureScoped = (path: string) => path
+
+  beforeAll(async () => {
+    repo = mkdtempSync(join(tmpdir(), 'cezar-e2e-repo-git-commit-'))
+    buildCommitFixture(repo)
+    server = spawnFixtureServer([cezarCli, 'serve', '--repo', repo, '--port', '0', '--no-open'], {
+      env: fixtureServeEnv(repo),
+      stdio: 'ignore',
+    })
+    fixtureUrl = await waitForFixtureServer(server)
+    const project = await bootProjectId(fixtureUrl)
+    fixtureScoped = (path) => `/p/${project}${path}`
+  }, 120_000)
+
+  afterAll(async () => {
+    await stopFixtureServer(server)
+    if (repo) rmSync(repo, { recursive: true, force: true })
+  })
+
+  it('opens the newest commit’s structured diff from the Recently list', async () => {
+    // The fixture's newest commit is a non-merge commit that carries a diff, so there is nothing to search for.
+    const log = await api<RepoPayload>('/api/v1/repo', fixtureUrl)
+    const hash = log.log[0]!.hash
+    const commit = await api<{ subject: string; files: Array<{ path: string }> }>(
+      `/api/v1/repo/commit/${hash}?structured=1`,
+      fixtureUrl,
+    )
+    expect(commit.subject).toBe(COMMIT_SUBJECT)
+    expect(commit.files.length).toBe(COMMIT_FILES)
+
+    browser.goto(`${fixtureUrl}${fixtureScoped('/git/commits')}`)
+    browser.waitForFunction(`document.querySelector('[data-slot="commit-row"]') !== null`)
+    browser.click(`[data-slot="commit-row"][data-sha="${hash}"]`)
+
+    browser.waitForFunction(`document.querySelector('[data-slot="commit-meta"]') !== null`)
+    expect(browser.url()).toBe(`${fixtureUrl}${fixtureScoped(`/git/commits/${hash}`)}`)
+    expect(browser.text('[data-slot="commit-meta"]')).toContain(commit.subject)
+    assertDiffCoverage(browser, commit.files, { tree: false })
+    // A commit opens inside Recently on main, and the way back is that section.
+    expect(
+      browser.evaluate(`document.querySelector('[data-slot="commit-back"]').getAttribute('href')`),
+    ).toBe(fixtureScoped('/git'))
+
+    browser.screenshot(`${artifactsDir}/repo-git-commit.png`)
   })
 })
