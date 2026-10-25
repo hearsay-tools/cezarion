@@ -11,7 +11,7 @@ import { taskReference, taskReferences, type TaskReference } from '@/lib/tasks-t
  * every case without rendering a row — `task-quick-list.tsx` only lays the results out.
  */
 
-/** What the meta line's state word (#617) says on each rung, beside the dot: nothing where the
+/** What the meta line's state word (hearsay-tools/cezarion#617) says on each rung, beside the dot: nothing where the
  *  dot is the whole story (the amber, green and grey filled dots of needs you, done and
  *  cancelled), the label, or the label with the detail the dot cannot carry. Exhaustive: a new
  *  rung fails to compile until it says (hearsay-tools/cezarion#1496). */
@@ -34,7 +34,7 @@ const STATE_WORD: Record<AttentionRung, 'none' | 'label' | 'queue-position' | 'r
   unseen: 'label',
 }
 
-/** The meta line's state word (#617): the attention label for the states the dot alone cannot
+/** The meta line's state word (hearsay-tools/cezarion#617): the attention label for the states the dot alone cannot
  *  say, with the queue position (`queued #2`), the resume (`usage limit, resumes in 12m`), the
  *  timer's next check or the command's deadline where the rung has one. */
 export function metaStateWord(attention: Attention, queuePosition: number | null, run: RunSummary, now: number): string | undefined {
@@ -45,7 +45,7 @@ export function metaStateWord(attention: Attention, queuePosition: number | null
     case 'queue-position':
       return queuePosition !== null ? `queued #${queuePosition}` : label
     case 'resume': {
-      // When, not just that (#617 01b): `usage limit, resumes in 12m`, or `usage limit` once due.
+      // When, not just that (hearsay-tools/cezarion#617 01b): `usage limit, resumes in 12m`, or `usage limit` once due.
       const resume = resumeLabel(run.autoResumeAt, now)
       return resume === 'scheduled' ? label : `${label}, ${resume}`
     }
