@@ -212,7 +212,9 @@ async function startParent(task: string, runner: RunnerId, permissions: WorkerOp
   checkpoint('parent-start');
   const run = manager.startRun(QUICK_TASK_WORKFLOW, { task, runner });
   store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions, receipts: [] } }]);
-  await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(run.id)?.sessionEverOpened === true);
+  await until(() => {
+    return (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(run.id)?.sessionEverOpened === true;
+  });
   checkpoint('parent-session-open'); return run;
 }
 /** Low-level root builder. It does not enable `CEZ_DELEGATION`: use `delegatingParent`
