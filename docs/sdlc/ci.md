@@ -250,7 +250,9 @@ changes behavior at shipped defaults.
 `.ai/skills/check-code-quality/scripts/complexity-gate.mjs` on the functions a pull request
 changes. It fails when a changed function has classic complexity above 20 and is new or more
 complex than at the merge base. A pull request can lower a function's complexity, and it never
-fails because a function it does not touch is long. A moved or renamed function is compared with
+fails because a function it does not touch is long. A changed function that is lowered but stays
+over 20 passes; the job lists it as a notice, and the pre-PR check (`check-code-quality`) still
+reports it. A moved or renamed function is compared with
 the function it came from: first one with an identical body, then one with the same name. A copy of
 a long function is still new. The job runs the workflow commit's own scripts and reads the pull
 request head from Git objects, so no head code runs and a pull request cannot change its own gate.

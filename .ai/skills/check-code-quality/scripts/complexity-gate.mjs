@@ -67,6 +67,7 @@ export function findGrowth(scan, limit = thresholds.complexity) {
   return {
     limit, checked: changed.length, files: scan.files.length, growth,
     moved: results.filter(item => item.from?.kind === 'moved' && !growth.includes(item)),
+    kept: results.filter(item => item.from?.kind !== 'moved' && !growth.includes(item)),
     lost: [...free].filter(item => item.complexity > limit),
   };
 }
@@ -117,10 +118,20 @@ const escapeProperty = text => escapeData(text).replaceAll(':', '%3A').replaceAl
 const annotation = (level, item, limit) =>
   `::${level} file=${escapeProperty(item.fn.file)},line=${item.fn.line},title=Function complexity::${escapeData(headline(item, limit))}`;
 
+/** A notice, not a failure: a changed function over the limit that did not grow still fails the pre-PR check. */
+function keptLines({ kept, limit }) {
+  if (!kept.length) return [];
+  const [verb, pronoun] = kept.length === 1 ? ['function stays', 'it'] : ['functions stay', 'them'];
+  return ['', `${kept.length} changed ${verb} over ${limit} without growing. The pre-PR check still reports ${pronoun}:`,
+    ...kept.slice(0, MAX_HINTS).map(item => `  ${headline(item, limit)}`),
+    ...(kept.length > MAX_HINTS ? [`  ... ${kept.length - MAX_HINTS} more`] : [])];
+}
+
 function passReport(result, seconds) {
   return [
     `Checked ${result.checked} changed functions in ${result.files} files in ${seconds.toFixed(1)} s: none over ${result.limit} is new or more complex than at the merge base.`,
     ...result.moved.map(item => `  matched to a removed function: ${headline(item, result.limit)}`),
+    ...keptLines(result),
   ];
 }
 

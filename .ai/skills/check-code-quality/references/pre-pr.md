@@ -187,9 +187,11 @@ To plan a split along a flagged function's decision points, list them with
 point, so the rows plus one equal the complexity.
 
 CI runs a looser ratchet on the same functions:
-`node <skill>/scripts/complexity-gate.mjs --base <target-ref> --head HEAD` fails only on a
-function over 20 that is new or more complex than at the merge base. This check still
-flags every changed function above a limit, so passing here implies passing there.
+`node <skill>/scripts/complexity-gate.mjs --base <target-ref> --head HEAD` refuses only a
+changed function over 20 that is new or more complex than at the merge base. A change that
+lowers such a function but leaves it above 20 passes CI, and the gate lists it as a notice.
+This check still flags every changed function above a limit, so a clean report here implies
+a pass there. A pass there does not imply a clean report here.
 
 A small change stays within the function or an immediate helper, preserves its
 contract and needs no new architecture. Prefer simpler control flow and useful

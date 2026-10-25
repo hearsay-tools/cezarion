@@ -72,6 +72,20 @@ test('a function over the limit may fall or stay level but not rise; crossing th
   assert.match(result.output, /^2 changed functions are over/m);
 });
 
+test('a passing run names the changed functions that stay over the limit without growing', t => {
+  const f = repo(t, { 'a.ts': complex('lowered', 30) + complex('level', 24) + complex('fine', 5) });
+  const head = f.commit({ 'a.ts': complex('lowered', 25) + complex('level', 24, '  x += 1;\n') + complex('fine', 6) });
+  const result = gate(f, head);
+  assert.equal(result.code, 0, result.output);
+  assert.match(result.output, /^2 changed functions stay over 20 without growing\. The pre-PR check still reports them:$/m);
+  assert.match(result.output, /a\.ts:\d+ lowered: complexity 26 \(was 31 at the merge base; limit 20\)/);
+  assert.match(result.output, /a\.ts:\d+ level: complexity 25 \(was 25 at the merge base; limit 20\)/);
+  assert.doesNotMatch(result.output, /fine/);
+
+  const untouched = f.commit({ 'a.ts': complex('lowered', 30) + complex('level', 24) + complex('fine', 7) });
+  assert.doesNotMatch(gate(f, untouched).output, /stay over/);
+});
+
 test('a long function the change does not touch never fails the change', t => {
   const f = repo(t, { 'a.ts': complex('huge', 40) + complex('tiny', 1) });
   const head = f.commit({ 'a.ts': complex('huge', 40) + complex('tiny', 2) });
