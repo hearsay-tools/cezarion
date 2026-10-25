@@ -137,6 +137,26 @@ source, a crash between the removal and the replacement write, and agent edits
 lost to a full re-install. The code was reverted, and hearsay-tools/cezarion#1539
 now holds the five cases.
 
+**Enumerate process exits before starting a background process.** A spec or
+plan that starts a process which outlives the command that started it MUST carry
+a **Process exits** table, reviewed with the spec or plan before implementation
+starts. Detached servers, watchers and daemons are such processes. Use one row
+per case: **Case | What stops it | Behavior at shipped defaults**. State when a
+case cannot happen, and why.
+
+Cover all of these cases: the normal stop; the starting command interrupted by
+SIGINT or SIGKILL in each phase, before and after the process starts; the leader
+exits before its children; a member ignores SIGTERM; members stay zombies because
+their parent never reaps them; the start identity cannot be read; the leader's
+PID is reused; and the handle the stop reads, such as a descriptor or lock file,
+is deleted or forged.
+
+hearsay-tools/cezarion#1406 and PR hearsay-tools/cezarion#1708 are the worked
+example. The plan named only the normal stop. Five review rounds then found
+children outliving the leader, an unconfirmed descriptor, an unreadable start
+identity, a zombie-only group and an interrupted boot. The table makes those
+cases explicit before implementation starts.
+
 **Commit an outcome with what it depends on, or after it.** A write that records
 an outcome (`delivered`, `charged`, `settled`, `answered`) must commit atomically
 with the write holding what that outcome needs, or after that write commits.
@@ -304,10 +324,11 @@ fix. See `AGENT_PROTOCOL.md` §7 for the contract and examples. Do not defer thi
 coverage to a separate issue.
 
 Keep each parity test file under about 300 s on an idle host, so that it stays
-inside Squeal's 600 s per-file cap on a loaded host. When a parity suite grows
-past that, run its `RUNNER_IDS` cells from one file per runner, defined once in
-a `*-cells.testkit.ts`, and add a guard that every runner has its file. Split a
-runner's file again by row group when one runner alone is too slow.
+inside Squeal's per-file cap (`runner.timeoutMs` in `squeal.config.json`) on a
+loaded host. When a parity suite grows past that, run its `RUNNER_IDS` cells
+from one file per runner, defined once in a `*-cells.testkit.ts`, and add a
+guard that every runner has its file. Split a runner's file again by row group
+when one runner alone is too slow.
 `core/harness-parity-cells.testkit.ts` and
 `workflows/waits-parity-cells.testkit.ts` are the examples
 (hearsay-tools/cezarion#1288). Vitest 4 fails a suite that registers no test,
@@ -321,11 +342,12 @@ turn-end, failure or step-settlement paths, verify every suite matching
 `packages/cezar/src/core/*-parity.test.ts` and
 `packages/cezar/src/workflows/*-parity.test.ts`: with Squeal, run
 `squeal status --wait 60000 packages/cezar/src/core/*-parity.test.ts packages/cezar/src/workflows/*-parity.test.ts`
-and require a passing verdict for all selected files. Repeat the wait only for
-files that are still pending. A file that Squeal reports as unknown (it timed out
-at its per-file cap, or was never queued) does not become pending if you wait
-again. Run it with `npm test -- <file>`, and record that command and its result
-next to the Squeal verdict for the other files. Without Squeal, run
+and require a passing verdict for every selected file that gets one. Repeat the
+wait only for files that are still pending. When a file gets no verdict, follow
+[the bound on a Squeal wait](#squeal-wait-bound): run the parity cells that the
+change affects with `npm test -- <file> -t '<name>'`, record them in the PR's
+Verification, and let CI's Vitest shards give the file's full verdict. Without
+Squeal, run
 `npm test -- packages/cezar/src/core/*-parity.test.ts packages/cezar/src/workflows/*-parity.test.ts`.
 
 ### Generated inbox retirement
@@ -467,6 +489,40 @@ If test-first work intentionally makes a previously passing check fail, Squeal d
 Under Codex, use the absolute Squeal command printed in its messages when
 `squeal` is not on PATH. Fix regressions and report known failures, pending,
 stale, or unknown results accurately; zero known failures is not a full pass.
+
+<a id="squeal-wait-bound"></a>
+
+**A wait for one file's verdict has a bound.** Squeal's skill says to wait again
+when `squeal status --wait` returns on timeout. In this repo, stop waiting for a
+unit test file's verdict when either case holds:
+
+- Squeal reports the file unknown: for example, it timed out at the per-file
+  cap (`runner.timeoutMs` in `squeal.config.json`), or it was never queued.
+  Waiting again does not change an unknown result, and `squeal retry` runs the
+  file again under the same cap.
+- The file is still pending after the per-file cap plus five minutes, counted
+  from your first wait at the revision you will push.
+
+Then do these three things:
+
+1. Run the tests in that file that the change adds, changes or reads:
+   `npm test -- <file> -t '<name>'`. Check that each run reports passed tests,
+   not only skipped ones. Run the whole file (`npm test -- <file>`) only when no
+   test name covers the change, for example after an edit to a shared testkit.
+2. In the PR's Verification, record the file and its Squeal state (unknown and
+   its reason, or pending and for how long). Also record the load average
+   (`uptime`), the logical CPU count (`nproc`), and each command with its passed
+   and skipped counts.
+3. Let CI's three Vitest shards give the file's full verdict. A focused pass is
+   not a full pass, and the PR does not merge until the shards pass.
+
+A file that gets a verdict must pass: the bound covers a missing verdict, never
+a failure. The bound also covers a test file that Squeal re-runs only because
+the change edited a document it reads. For example, an edit to
+`AGENT_PROTOCOL.md` prose re-runs
+`packages/cezar/src/core/harness-parity.test.ts`, and the focused run is
+`npm test -- packages/cezar/src/core/harness-parity.test.ts -t "counted roster"`
+(hearsay-tools/cezarion#1326).
 
 Squeal is optional. If it is absent, no daemon is validating, or a needed result
 is unknown, run affected test files/test names through npm. Inspect
