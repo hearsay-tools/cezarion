@@ -3,18 +3,17 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { setTimeout as delay } from 'node:timers/promises';
 
 /**
- * The one way cezar code and the repo's scripts start a process that outlives the call that
- * started it, and later stop it (hearsay-tools/cezarion#1717, hearsay-tools/cezarion#1815). It
- * holds the Process exits cases of AGENTS.md § Case tables, so a caller that starts through it
- * owns only its own handle and the phases of its own start.
+ * Starts a process that outlives the call that started it, and later stops it
+ * (hearsay-tools/cezarion#1717, hearsay-tools/cezarion#1815). It holds the Process exits cases
+ * of AGENTS.md § Case tables, so a caller that starts through it owns only its own handle and
+ * the phases of its own start.
  *
  * A started process leads its own process group (on POSIX), and its start identity is recorded:
  * `stopGroup` ends every member the leader forked, and never signals a pid that now names
  * another process.
  *
- * `.ai/scripts` imports this file from source, before any build, through Node's type stripping,
- * and the update launcher copies its compiled form next to the update helper. So it imports only
- * Node builtins and uses only TypeScript syntax that strips to JavaScript.
+ * `.ai/scripts` imports this file from source, before any build, through Node's type stripping.
+ * So it imports only Node builtins and uses only TypeScript syntax that strips to JavaScript.
  */
 
 /** A process's start identity: one incarnation, so a reused pid never matches. */
@@ -63,7 +62,7 @@ export function processStartToken(pid: number, platform: NodeJS.Platform = proce
   return token || undefined;
 }
 
-/** The only `detached: true` spawn. On POSIX the child leads a new process group, so `stopGroup`
+/** A `detached: true` spawn. On POSIX the child leads a new process group, so `stopGroup`
  *  reaches every member it forks; on Windows it gets a console of its own. */
 export function spawnDetached(file: string, args: readonly string[], options: Omit<SpawnOptions, 'detached'> = {}): ChildProcess {
   return spawn(file, args, { ...options, detached: true });
