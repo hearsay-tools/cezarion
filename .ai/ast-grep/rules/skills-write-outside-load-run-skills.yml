@@ -1,0 +1,46 @@
+id: skills-write-outside-load-run-skills
+language: typescript
+severity: warning
+message: >-
+  Write a run's skills only in RunManager.loadRunSkills (workflows/run.ts), which RunManager.execute
+  and RunManager.runContinuation both call. A launch path that loads the registry itself can skip
+  the load, as open-mercato/cezar#811 did; call loadRunSkills there, and read the registry through
+  RunManager.enabledSkills (hearsay-tools/cezarion#1806).
+files:
+  - packages/cezar/src/workflows/run.ts
+utils:
+  # The ways run.ts reaches an ActiveRun, as in skills-read-outside-enabled-skills.yml: the `state`
+  # and `active` parameters, `execution.state`, and a direct lookup in the live map, bare or with a
+  # `!`. Not every `.skills`: `launch.skills` is another object's field. A write through a cast or a
+  # differently named local is not matched: the rule sees names, not types. A write with no
+  # assignment to `.skills` (`Object.assign(state, { skills })`, or the `skills` key of a literal)
+  # is not matched either; the only literal is createActiveRun's, which sets no registry.
+  active-run:
+    any:
+      - { kind: identifier, regex: '^(state|active)$' }
+      - { kind: member_expression, has: { field: property, regex: '^state$' } }
+      - pattern: this.active.get($$$)
+      - { kind: non_null_expression, has: { pattern: this.active.get($$$) } }
+rule:
+  all:
+    - any:
+        # `state.skills`, `state?.skills`, `state['skills']`
+        - all:
+            - kind: member_expression
+            - has: { field: object, matches: active-run }
+            - has: { field: property, regex: '^skills$' }
+        - all:
+            - kind: subscript_expression
+            - has: { field: object, matches: active-run }
+            - has: { field: index, regex: '^.skills.$' }
+    # …as the target of `=`, or of `??=`, `||=`, `+=` and the like.
+    - inside:
+        any:
+          - { kind: assignment_expression }
+          - { kind: augmented_assignment_expression }
+        field: left
+    - not:
+        inside:
+          kind: method_definition
+          stopBy: end
+          has: { field: name, regex: '^loadRunSkills$' }
