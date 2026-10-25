@@ -1,8 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
-import { CredentialRegistry } from '../delegation/credentials.ts';
-import { DelegationService } from '../delegation/service.ts';
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { withHeldAck, withHeldResponse } from '../core/owned-input-delivery.testkit.ts';
@@ -10,7 +8,7 @@ import { attentionFields } from '../task-cli/projections.ts';
 import { ASK_TEXT, MONITORING_TEXT, messagesPrompt, REJECTED_ASK_TEXT } from './monitoring-turn.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
-import { fixtureUpdateRun, manager, parent, queuedWake, register, store, root, terminal, worker, until, semaphore, useWorkerWaitFixture, waitOf, workerEntryOf } from './worker-wait.testkit.ts';
+import { delegatingParent, fixtureUpdateRun, manager, parent, queuedWake, register, store, root, terminal, worker, until, semaphore, useWorkerWaitFixture, waitOf, workerEntryOf } from './worker-wait.testkit.ts';
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 
 // Exhaustive transport classification: a new runner must provide either the real
@@ -32,10 +30,8 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
       it(`${mode} ${gate === 'rejected' ? mode === 'fresh' ? 'M26' : 'M27' : ''} worker progress then ${gate === 'rejected' ? 'rejected ASK keeps its diagnostic and stays monitoring' : 'markerless turn stays Working'} (${transport === 'pipe-write' ? 'pipe-write ACK exemption: acceptance precedes provider response' : transport === 'model-work' ? 'model-work admission boundary' : transport === 'protocol' ? 'delayed ACK' : 'ordinary ACK'})`, async () => {
         const exercise = async (release: () => void, responseHeld?: () => boolean) => {
           process.env.CEZ_DRY_RUN = '0';
-          process.env.CEZ_DELEGATION = '1';
           process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
-          const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: backend });
-          store.commitDelegation([{ id: p.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+          const { p, service, callerFor, close } = await delegatingParent({ runner: backend, permissions: ['spawn', 'wait'] });
           await until(() => store.getRun(p.id)?.status === 'waiting');
           // No workers and no marker still means waiting (#119).
           if (mode === 'continuation') {
@@ -50,11 +46,8 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
           process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
           manager.enqueueOwnedRun(w.id);
           await until(() => store.getRun(w.id)?.status === 'waiting');
-          const credentials = new CredentialRegistry();
-          const service = new DelegationService();
-          service.registerProject({ id: 'project', root, store, manager });
           try {
-            const caller = credentials.authenticate(credentials.issue('project', w.id, randomUUID()))!;
+            const caller = callerFor(w.id);
             const id = randomUUID();
             const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
             const delivery = service.send(caller, { id, recipientRunId: p.id, kind: 'progress', text: `Progress mock:agent-echo delay-owned-ack${gate === 'rejected' ? `\n${MONITORING_TEXT}\n${REJECTED_ASK_TEXT}` : ''}`, timeoutSeconds: 600 });
@@ -92,7 +85,7 @@ for (const backend of RUNNER_IDS) describe(`${backend} worker parent attention`,
             }
             expect(store.getRun(p.id)?.waits?.filter(wait => wait.kind === 'human') ?? []).toEqual([]);
             expect(monitoringWakeOf(store.getRun(p.id))).toBeDefined();
-          } finally { release(); credentials.close(); }
+          } finally { release(); close(); }
         };
         if (transport === 'protocol' && backend !== 'claude' && backend !== 'cursor') await withHeldAck(backend, exercise);
         else if (transport === 'pipe-write' && backend === 'claude') await withHeldResponse(backend, exercise);

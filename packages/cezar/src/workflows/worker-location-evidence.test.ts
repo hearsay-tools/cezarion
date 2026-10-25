@@ -34,6 +34,7 @@ describe.runIf(process.platform === 'linux' && process.getuid?.() !== 0)('R43 or
   });
 
   for (const damage of cases) it.each(RUNNER_IDS)(`%s keeps legacy execution unsettled with a real fallback holder and ${damage}`, async runner => {
+    // Explicit opt-in: this recovery fixture seeds an inactive parent and registers the rebuilt runtime.
     process.env.CEZ_DELEGATION = '1';
     const adapter = HARNESS_ADAPTERS[runner];
     process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = adapter.mockBin;

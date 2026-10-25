@@ -26,6 +26,7 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
 
   for (const settleVia of ['collect', 'destroy'] as const) it.each(RUNNER_IDS)(`%s ${settleVia} settles and clears parent Finish; after restart, cleanup completes while an unreadable holder runs`, async runner => {
     // Service collection is opt-in; useWorkerWaitFixture restores the caller's environment.
+    // Explicit opt-in: this recovery fixture seeds an inactive parent and registers the rebuilt runtime.
     process.env.CEZ_DELEGATION = '1';
     const adapter = HARNESS_ADAPTERS[runner];
     process.env.CEZ_DRY_RUN = '0'; process.env[adapter.binEnv] = adapter.mockBin;
