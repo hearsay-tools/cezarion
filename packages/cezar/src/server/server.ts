@@ -143,13 +143,11 @@ import { WORKFLOWS_DIR, loadWorkflows } from '../workflows/load.ts';
 import {
   QUICK_TASK_WORKFLOW,
   normalizeWorkflowDoc,
-  plannedWorkflow,
   skillStackOf,
   skillsToSteps,
   stepsIssue,
   workflowFileSchema,
   workflowStepSchema,
-  type WorkflowDef,
 } from '../workflows/types.ts';
 import { planChain, slugify } from '../planner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
@@ -165,7 +163,6 @@ import {
 import { readRunIndexFromDisk, searchRunIndexFromDisk } from '../runs/run-index.ts';
 import { workerDestroyView } from '../runs/delegation-state.ts';
 import { searchTokens } from '../runs/run-search.ts';
-import { clientRequestHash } from '../runs/client-request.ts';
 import { ownPullRequestNumbers } from '../runs/pull-requests.ts';
 import { ColdRepoHandles } from './cold-repo-handles.ts';
 import { isV2WireEventType } from '../runs/ui-event-sink.ts';
@@ -287,6 +284,18 @@ import {
   resolveServerDeps,
   watchProviderRuntimeAuth,
 } from './server-deps.ts';
+import {
+  NO_WEBHOOK_ERROR,
+  agentProfileRefusal,
+  clientRequestOf,
+  launchRun,
+  modelLockRefusal,
+  notifyRefusal,
+  providerGateRefusal,
+  replayedRun,
+  resolveStartWorkflow,
+  startRunInput,
+} from './start-run-options.ts';
 import {
   ASSET_CACHE_CONTROL,
   BUILD_HINT_HTML,
@@ -3895,78 +3904,29 @@ export function createApp(deps: ServerDeps) {
     })
 
     .post('/runs', jsonZodValidator(startRunSchema), async (c) => {
-      const { root: repoRoot, dataDir, manager, store } = c.get('project');
-      const parsed = { data: c.req.valid('json') };
-      const clientRequest = parsed.data.clientRequestId
-        ? { id: parsed.data.clientRequestId, hash: clientRequestHash(parsed.data) }
-        : undefined;
-      // A retry only retrieves a persisted result: mutable start prerequisites (workflow,
-      // provider, account and model policy) must not invalidate an already accepted request.
+      const { id: projectId, root: repoRoot, manager, store } = c.get('project');
+      const body = c.req.valid('json');
+      const clientRequest = clientRequestOf(body);
       if (clientRequest) {
-        const existing = store.findRunByClientRequestId(clientRequest.id);
-        if (existing) {
-          if (existing.clientRequestHash !== clientRequest.hash) return c.json({ error: 'request id payload conflict' }, 409);
-          return c.json(existing, 200 as const);
-        }
+        const replay = replayedRun(store, clientRequest);
+        if (replay && 'error' in replay) return c.json({ error: replay.error }, replay.status);
+        if (replay) return c.json(replay.run, 200 as const);
       }
-      if (
-        agentModelsLocked(repoRoot) &&
-        (parsed.data.model?.trim() || parsed.data.effort?.trim())
-      ) {
-        return c.json({ error: AGENT_MODELS_LOCKED_ERROR }, 409);
-      }
-      let workflow: WorkflowDef | undefined;
-      if (parsed.data.steps) {
-        // Inline chain (spec 008): an approved plan runs as an ad-hoc workflow.
-        const issue = stepsIssue(parsed.data.steps);
-        if (issue) return c.json({ error: issue }, 400);
-        workflow = plannedWorkflow(parsed.data.steps);
-      } else {
-        const { workflows } = await loadWorkflows(repoRoot);
-        workflow = workflows.find((w) => w.name === parsed.data.workflow);
-        if (!workflow) return c.json({ error: `unknown workflow: ${parsed.data.workflow}` }, 404);
-      }
-      const fallback = parsed.data.runner ?? (await loadConfig(repoRoot)).defaultRunner;
-      const blocked = await providerActionError(providersRequiredByWorkflow(workflow, fallback));
-      if (blocked) return c.json({ error: blocked }, 409);
-      // A composer override names an account the user just picked, so a stale id (deleted since
-      // the page loaded) is answered honestly instead of quietly running on the default — the
-      // opposite of how RESOLUTION treats a dangling reference, and deliberately so: a run
-      // replaying a stored id has no better answer than the default, a user does.
-      if (parsed.data.agentProfile !== undefined) {
-        const account = await resolveWorkspaceProfile(fallback, parsed.data.agentProfile);
-        if ('error' in account) return c.json({ error: account.error }, 400);
-      }
-      // Task webhook (#589): an explicit `true` on a project with no webhook is refused, so a
-      // bot learns in one round trip. `cez task start`'s implicit default never sends it there.
-      if (parsed.data.notify === true && taskWebhookList(await projectRegistryEntry(c.get('project').id).catch(() => undefined)).length === 0) {
-        return c.json({ error: NO_WEBHOOK_ERROR }, 400);
-      }
-      const images = parsed.data.images?.map(toPastedContent);
-      const input = {
-        task: parsed.data.task,
-        notify: parsed.data.notify,
-        model: parsed.data.model,
-        effort: parsed.data.effort,
-        runner: parsed.data.runner,
-        agentProfile: parsed.data.agentProfile,
-        images,
-        systemPrompt: parsed.data.systemPrompt,
-        worktree: parsed.data.worktree,
-        autonomous: parsed.data.autonomous,
-        archiveWhenDone: parsed.data.archiveWhenDone,
-        autoMergePr: parsed.data.autoMergePr,
-      };
-      if (clientRequest) {
-        // Recheck after every await: concurrent first requests may both miss the early lookup.
-        // The manager's lookup and create are synchronous, so exactly one can create (#504).
-        const result = manager.startRunIdempotent(workflow, input, clientRequest);
-        if ('conflict' in result) return c.json({ error: 'request id payload conflict' }, 409);
-        if (!result.created) return c.json(result.run, 200 as const);
-        return c.json(result.run, 201 as const);
-      }
-      const run = manager.startRun(workflow, input);
-      return c.json(run, 201);
+      const locked = modelLockRefusal(repoRoot, body);
+      if (locked) return c.json({ error: locked.error }, locked.status);
+      const resolved = await resolveStartWorkflow(repoRoot, body);
+      if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const { workflow } = resolved;
+      const runner = body.runner ?? (await loadConfig(repoRoot)).defaultRunner;
+      const blocked = await providerGateRefusal(providerActionError, workflow, runner);
+      if (blocked) return c.json({ error: blocked.error }, blocked.status);
+      const badProfile = await agentProfileRefusal(resolveWorkspaceProfile, runner, body.agentProfile);
+      if (badProfile) return c.json({ error: badProfile.error }, badProfile.status);
+      const noWebhook = await notifyRefusal(body.notify, projectId, projectRegistryEntry);
+      if (noWebhook) return c.json({ error: noWebhook.error }, noWebhook.status);
+      const started = launchRun(manager, workflow, startRunInput(body), clientRequest);
+      if ('error' in started) return c.json({ error: started.error }, started.status);
+      return c.json(started.run, started.status);
     })
 
     .get('/runs/:id', (c) => {
@@ -6088,9 +6048,6 @@ export function cockpitOriginFor(bindHost: string | undefined, port: number): st
 }
 
 const webhookNameTakenError = (name: string) => `this project already has a webhook named "${name.trim()}" — pick another name`;
-
-const NO_WEBHOOK_ERROR =
-  'this project has no task webhook — add a webhook with Task notifications on in Settings → General → Webhooks, or start without notify';
 
 export function startServer(deps: ServerDeps, port: number, listener?: Server): ServerType & { shutdownForRestart: () => Promise<void> } {
   const workspaceEvents = deps.workspaceEvents ?? new WorkspaceEventBus();
