@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, renameSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Skill } from './skills.ts';
@@ -12,9 +12,12 @@ import {
   namesSkillCommand,
   provisionSkills,
   removeProvisionedSkills,
+  type ProvisionOptions,
   skillClosure,
 } from './skills-provision.ts';
 import { seedTeamDirSkillClone } from './skills-remote.testkit.ts';
+import { fileIdentity, identityOf, type WriteBoundary } from './worktree-manifest.ts';
+import { readManifest, uncoveredPaths } from './worktree-manifest.testkit.ts';
 
 const execFileAsync = promisify(execFile);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
@@ -198,7 +201,8 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  const manifestPath = async () => join((await git(worktree, 'rev-parse', '--absolute-git-dir')).trim(), 'cezar-skills.json');
+  const gitDir = async () => (await git(worktree, 'rev-parse', '--absolute-git-dir')).trim();
+  const manifestPath = async () => join(await gitDir(), 'cezar-manifest.json');
   const status = (cwd: string) => git(cwd, 'status', '--porcelain', '--untracked-files=all');
 
   it('links a local directory skill and its single-file companion into all three dirs', async () => {
@@ -319,10 +323,11 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
   it('records every entry in the worktree git dir, nothing in the working tree or a link target', async () => {
     await provisionSkills(worktree, [lead], [lead, helper]);
     const manifest = JSON.parse(readFileSync(await manifestPath(), 'utf8')) as {
-      version: number; roots: string[]; entries: Array<{ path: string; kind: string }>;
+      version: number; skills: { roots: string[] }; entries: Array<{ path: string; writer: string }>;
     };
     expect(manifest.version).toBe(1);
-    expect(manifest.roots).toEqual(['lead-skill']);
+    expect(manifest.skills.roots).toEqual(['lead-skill']);
+    expect(new Set(manifest.entries.map((entry) => entry.writer))).toEqual(new Set(['skills']));
     expect(manifest.entries.map((entry) => entry.path)).toEqual(expect.arrayContaining([
       '.agents/skills/lead-skill', '.agents/skills/helper-skill', '.agents/skills/.gitignore',
     ]));
@@ -402,7 +407,9 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
       name, body: 'TEAM-BODY', path: `${repo}@main:skills/${name}/SKILL.md`, source: 'team',
       team: { repo, ref: 'main', path: `skills/${name}/SKILL.md`, dir: true, commit: seeded.commit },
     };
-    return { team, cleanup: () => rmSync(seeded.sourceDir, { recursive: true, force: true }) };
+    const update = async (files: Record<string, string>): Promise<Skill> =>
+      ({ ...team, team: { ...team.team!, commit: await seeded.update(files) } });
+    return { team, update, cleanup: () => rmSync(seeded.sourceDir, { recursive: true, force: true }) };
   };
 
   it('never writes a team skill into a directory the user owns', async () => {
@@ -461,8 +468,8 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
       provisionSkills(worktree, [lead], [lead, other]),
       provisionSkills(worktree, [other], [lead, other]),
     ]);
-    const manifest = JSON.parse(readFileSync(await manifestPath(), 'utf8')) as { roots: string[]; entries: Array<{ path: string }> };
-    expect([...manifest.roots].sort()).toEqual(['lead-skill', 'other-skill']);
+    const manifest = JSON.parse(readFileSync(await manifestPath(), 'utf8')) as { skills: { roots: string[] }; entries: Array<{ path: string }> };
+    expect([...manifest.skills.roots].sort()).toEqual(['lead-skill', 'other-skill']);
     expect(manifest.entries.map((entry) => entry.path)).toEqual(expect.arrayContaining([
       '.agents/skills/lead-skill', '.agents/skills/other-skill',
     ]));
@@ -471,15 +478,17 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     expect(await status(worktree)).toBe('');
   });
 
+  /** A `faults` hook that ends the pass at `boundary` of the write to `path`, as a crash would. */
+  const crashAt = (boundary: WriteBoundary, path: string, inspect?: () => Promise<void>) =>
+    async (at: WriteBoundary, written: string) => {
+      if (at !== boundary || written !== path) return;
+      await inspect?.();
+      throw new Error(`crash at ${boundary}`);
+    };
+
   it('an entry interrupted before its record stays out of git and is reinstalled', async () => {
     await provisionSkills(worktree, [helper], [lead, helper]);
-    // The link lands, then the pass dies before it records it: the copy fallback cannot
-    // copy a directory onto its own link, so the pass ends as a crash would.
-    const interrupted = async (target: string, path: string, type?: 'dir' | 'file' | 'junction') => {
-      symlinkSync(target, path, type);
-      throw new Error('interrupted');
-    };
-    await provisionSkills(worktree, [lead], [lead, helper], { symlink: interrupted });
+    await provisionSkills(worktree, [lead], [lead, helper], { faults: crashAt('placed', '.claude/skills/lead-skill') });
     expect(lstatSync(join(worktree, '.claude', 'skills', 'lead-skill')).isSymbolicLink()).toBe(true);
     expect(await status(worktree)).toBe('');
     await provisionSkills(worktree, [], [lead, helper]);
@@ -487,16 +496,13 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     for (const dir of AGENT_DIRS) {
       expect(readlinkSync(join(worktree, dir, 'skills', 'lead-skill'))).toBe(join(home, 'skills-src', 'lead-skill'));
     }
+    expect(await uncoveredPaths(worktree)).toEqual([]);
     await removeProvisionedSkills(worktree);
     for (const dir of AGENT_DIRS) expect(existsSync(join(worktree, dir, 'skills', 'lead-skill'))).toBe(false);
   });
 
   it('an interrupted entry the user then changed stays theirs, and out of git', async () => {
-    const interrupted = async (target: string, path: string, type?: 'dir' | 'file' | 'junction') => {
-      symlinkSync(target, path, type);
-      throw new Error('interrupted');
-    };
-    await provisionSkills(worktree, [lead], [lead], { symlink: interrupted });
+    await provisionSkills(worktree, [lead], [lead], { faults: crashAt('placed', '.claude/skills/lead-skill') });
     const dest = join(worktree, '.claude', 'skills', 'lead-skill');
     rmSync(dest);
     mkdirSync(dest);
@@ -508,6 +514,7 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     expect(readFileSync(join(dest, 'SKILL.md'), 'utf8')).toBe('MINE\n');
     await removeProvisionedSkills(worktree);
     expect(readFileSync(join(dest, 'SKILL.md'), 'utf8')).toBe('MINE\n');
+    expect(await status(worktree)).toBe('');
   });
 
   it('a copied skill follows its source when the source changes in place', async () => {
@@ -519,6 +526,174 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     expect(result.installed).toEqual(['lead-skill', 'helper-skill']);
     expect(readFileSync(join(worktree, '.agents', 'skills', 'lead-skill', 'references', 'notes.txt'), 'utf8')).toBe('new notes\n');
     expect(readFileSync(join(worktree, '.agents', 'skills', 'helper-skill', 'SKILL.md'), 'utf8')).toBe('NEW-HELPER\n');
+  });
+
+  // hearsay-tools/cezarion#1814: what the agent changed in an entry stays through every later pass.
+  interface KindCase {
+    rel: string;
+    /** The first pass's root, its catalog and a catalog whose source for that root changed. */
+    setup: () => Promise<{ root: Skill; catalog: Skill[]; changed: () => Promise<Skill[]>; options?: ProvisionOptions; cleanup?: () => void }>;
+    changes: Record<string, (dest: string) => void>;
+  }
+  const refuse = async () => { throw Object.assign(new Error('EPERM'), { code: 'EPERM' }); };
+  const movedLead = () => {
+    const movedDir = join(home, 'moved', 'lead-skill');
+    mkdirSync(movedDir, { recursive: true });
+    writeFileSync(join(movedDir, 'SKILL.md'), 'moved\n');
+    return { ...lead, path: join(movedDir, 'SKILL.md') };
+  };
+  const replaceWithDir = (dest: string) => {
+    rmSync(dest, { recursive: true, force: true });
+    mkdirSync(dest);
+    writeFileSync(join(dest, 'SKILL.md'), 'MINE\n');
+  };
+  const builtin: Skill = { name: 'auto-skill', description: 'Built in.', body: 'BUILTIN-BODY', path: 'builtin:auto-skill', source: 'builtin' };
+  const KINDS: Record<string, KindCase> = {
+    link: {
+      rel: '.agents/skills/lead-skill',
+      setup: async () => ({ root: lead, catalog: [lead, helper], changed: async () => [movedLead(), helper] }),
+      changes: {
+        replace: replaceWithDir,
+        retarget: (dest) => { rmSync(dest); symlinkSync(join(home, 'skills-src'), dest); },
+      },
+    },
+    generated: {
+      rel: '.agents/skills/auto-skill',
+      setup: async () => ({ root: builtin, catalog: [builtin], changed: async () => [{ ...builtin, body: 'NEW-BODY' }] }),
+      changes: {
+        edit: (dest) => writeFileSync(join(dest, 'SKILL.md'), 'EDITED\n'),
+        add: (dest) => writeFileSync(join(dest, 'added.txt'), 'mine\n'),
+        replace: (dest) => { rmSync(dest, { recursive: true }); writeFileSync(dest, 'a file now\n'); },
+      },
+    },
+    copy: {
+      rel: '.agents/skills/lead-skill',
+      setup: async () => ({
+        root: lead, catalog: [lead, helper], options: { symlink: refuse },
+        changed: async () => {
+          writeFileSync(join(home, 'skills-src', 'lead-skill', 'references', 'notes.txt'), 'new notes\n');
+          return [lead, helper];
+        },
+      }),
+      changes: {
+        edit: (dest) => writeFileSync(join(dest, 'references', 'notes.txt'), 'EDITED\n'),
+        add: (dest) => writeFileSync(join(dest, 'added.txt'), 'mine\n'),
+        replace: (dest) => { rmSync(dest, { recursive: true }); symlinkSync(join(home, 'skills-src'), dest); },
+      },
+    },
+    'team-copy': {
+      rel: '.agents/skills/team-kind',
+      setup: async () => {
+        const { team, update, cleanup } = await seedTeam('team-kind');
+        return { root: team, catalog: [team], changed: async () => [await update({ 'SKILL.md': 'TEAM-V2\n' })], cleanup };
+      },
+      changes: {
+        edit: (dest) => writeFileSync(join(dest, 'references', 'r.md'), 'EDITED\n'),
+        add: (dest) => writeFileSync(join(dest, 'added.txt'), 'mine\n'),
+        replace: replaceWithDir,
+      },
+    },
+    'ignore-file': {
+      rel: '.agents/skills/.gitignore',
+      setup: async () => ({ root: lead, catalog: [lead, helper], changed: async () => [movedLead(), helper] }),
+      changes: { edit: (dest) => writeFileSync(dest, `${readFileSync(dest, 'utf8')}*.tmp\n`) },
+    },
+  };
+  const matrix = Object.entries(KINDS).flatMap(([kind, c]) => Object.keys(c.changes).map((change) => [kind, change] as const));
+
+  it.each(matrix)('a %s entry the agent changed (%s) survives every later pass', async (kind, change) => {
+    const c = KINDS[kind]!;
+    const { root, catalog, changed, options = {}, cleanup } = await c.setup();
+    try {
+      await provisionSkills(worktree, [root], catalog, options);
+      const dest = join(worktree, c.rel);
+      c.changes[change]!(dest);
+      const theirs = await identityOf(dest);
+      await provisionSkills(worktree, [], catalog, options);
+      expect(await identityOf(dest), 'the same pass').toBe(theirs);
+      const next = await changed();
+      await provisionSkills(worktree, [], next, options);
+      expect(await identityOf(dest), 'a changed source').toBe(theirs);
+      await provisionSkills(worktree, [], next.filter((skill) => skill.name !== root.name), options);
+      expect(await identityOf(dest), 'a closure that drops it').toBe(theirs);
+      await removeProvisionedSkills(worktree);
+      expect(await identityOf(dest), 'removeProvisionedSkills').toBe(theirs);
+      expect(await uncoveredPaths(worktree, [c.rel])).toEqual([]);
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  it.each(Object.keys(KINDS))('a %s entry the agent deleted is created again by the next pass', async (kind) => {
+    const c = KINDS[kind]!;
+    const { root, catalog, options = {}, cleanup } = await c.setup();
+    try {
+      await provisionSkills(worktree, [root], catalog, options);
+      const dest = join(worktree, c.rel);
+      const ours = await identityOf(dest);
+      rmSync(dest, { recursive: true, force: true });
+      await provisionSkills(worktree, [], catalog, options);
+      expect(await identityOf(dest)).toBe(ours);
+      expect(await uncoveredPaths(worktree)).toEqual([]);
+      expect(await status(worktree)).toBe('');
+    } finally {
+      cleanup?.();
+    }
+  });
+
+  it('never rewrites a marked team copy that has no record', async () => {
+    const { team, cleanup } = await seedTeam('team-unrecorded');
+    try {
+      const dest = join(worktree, '.agents', 'skills', 'team-unrecorded');
+      mkdirSync(dest, { recursive: true });
+      writeFileSync(join(dest, 'SKILL.md'), 'OLD\n');
+      const { repo, ref, path, commit } = team.team!;
+      writeFileSync(join(dest, '.cezar-team-skill.json'), `${JSON.stringify({ repo, ref, path, commit }, null, 2)}\n`);
+      const result = await provisionSkills(worktree, [team], [team]);
+      expect(readFileSync(join(dest, 'SKILL.md'), 'utf8')).toBe('OLD\n');
+      expect(existsSync(join(dest, 'references'))).toBe(false);
+      expect(result.teamCopies['team-unrecorded']).toEqual([
+        join(worktree, '.claude', 'skills', 'team-unrecorded'), join(worktree, '.cursor', 'skills', 'team-unrecorded'),
+      ]);
+    } finally {
+      cleanup();
+    }
+  });
+
+  it('imports a skills record from before the manifest, and keeps its team copies', async () => {
+    const { team, cleanup } = await seedTeam('team-legacy');
+    try {
+      const copy = join(worktree, '.agents', 'skills', 'team-legacy');
+      mkdirSync(copy, { recursive: true });
+      writeFileSync(join(copy, 'SKILL.md'), 'OLD\n');
+      const { repo, ref, path, commit } = team.team!;
+      const marker = `${JSON.stringify({ repo, ref, path, commit }, null, 2)}\n`;
+      writeFileSync(join(copy, '.cezar-team-skill.json'), marker);
+      const leadLink = join(worktree, '.claude', 'skills', 'lead-skill');
+      mkdirSync(dirname(leadLink), { recursive: true });
+      symlinkSync(dirname(lead.path), leadLink);
+      const ignore = `${PROVISION_IGNORE_MARK}\n/.gitignore\n/team-legacy\n`;
+      writeFileSync(join(worktree, '.agents', 'skills', '.gitignore'), ignore);
+      const legacy = join(await gitDir(), 'cezar-skills.json');
+      writeFileSync(legacy, JSON.stringify({
+        version: 1,
+        roots: ['team-legacy'],
+        entries: [
+          { path: '.agents/skills/team-legacy', kind: 'team-copy', skill: 'team-legacy', identity: `marker:${marker}` },
+          { path: '.agents/skills/.gitignore', kind: 'ignore-file', identity: fileIdentity(ignore) },
+          { path: '.claude/skills/lead-skill', kind: 'link', skill: 'lead-skill', source: `dir:${dirname(lead.path)}`, identity: `link:${dirname(lead.path)}` },
+        ],
+      }));
+      // The closure drops both: the link goes, as before; the team copy stays, and out of git.
+      await provisionSkills(worktree, [], [helper]);
+      expect(readFileSync(join(copy, 'SKILL.md'), 'utf8')).toBe('OLD\n');
+      expect(existsSync(leadLink)).toBe(false);
+      expect(existsSync(legacy)).toBe(false);
+      expect((await readManifest(worktree))?.entries.map((entry) => entry.path)).toContain('.agents/skills/team-legacy');
+      expect(await status(worktree)).toBe('');
+    } finally {
+      cleanup();
+    }
   });
 
   it('writes nothing outside a git worktree', async () => {

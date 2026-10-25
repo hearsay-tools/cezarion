@@ -7,7 +7,7 @@
 import { createFixtureManager, drainFixtureManagers } from './fixture-cleanup.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -290,14 +290,23 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
   it('Continue of a team directory skill rematerializes without a note', async () => {
     const skill = teamDirSkill();
     vi.spyOn(skills, 'discoverSkills').mockResolvedValue([skill]);
-    const materialize = vi.spyOn(skillsRemote, 'materializeSkillDir').mockImplementation(async (root) => writtenSkillDirs(root));
+    // Provisioning stages the copies in the worktree's git dir, then places them (hearsay-tools/cezarion#1814).
+    const materialize = vi.spyOn(skillsRemote, 'materializeSkillDir').mockImplementation(async (root) => {
+      for (const dir of writtenSkillDirs(root)) {
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, 'SKILL.md'), TEAM_SKILL_BODY);
+        writeFileSync(join(dir, '.cezar-team-skill.json'), '{}');
+      }
+      return writtenSkillDirs(root);
+    });
     const id = terminalSkillRun(TEAM_SKILL);
     const worktree = await attachWorktree(id);
 
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
     expect(materialize).toHaveBeenCalledTimes(1);
-    expect(materialize).toHaveBeenCalledWith(worktree, skill, expect.any(Function), { onlyOwned: true });
+    expect(materialize).toHaveBeenCalledWith(expect.stringContaining('cezar-staging'), skill, expect.any(Function));
+    for (const dir of writtenSkillDirs(worktree)) expect(readFileSync(join(dir, 'SKILL.md'), 'utf8')).toBe(TEAM_SKILL_BODY);
     expect(launches[0]!.spec.systemPrompt).toContain(skillSystemPrompt(skill));
     expect(store.readEvents(id).some((event) => event.type === 'note' && String(event.message).includes(MATERIALIZED_NOTE))).toBe(false);
     sessions[0]!.finish();
