@@ -27,11 +27,10 @@ export type NavItem = {
 /** The sidebar nav from the spec's "App shell & navigation" section, in mockup order.
  *
  *  `match` exists because a nav item is active for a whole *area*, not just its own URL:
- *  the spec requires Tasks to stay active while a task thread (`/tasks/:id`) or a variant
- *  compare (`/compare/:groupId`) is open.
+ *  the spec requires Tasks to stay active while a task thread (`/tasks/:id`) is open.
  */
 export const NAV_ITEMS: NavItem[] = [
-  { to: '/', label: 'Tasks', icon: ListTodoIcon, match: ['/', '/tasks', '/compare'], badge: 'tasks-unread' },
+  { to: '/', label: 'Tasks', icon: ListTodoIcon, match: ['/', '/tasks'], badge: 'tasks-unread' },
   { to: '/git', label: 'Git', icon: GitBranchIcon, match: ['/git'] },
   { to: '/github', label: 'GitHub', icon: GithubIcon, match: ['/github'], forge: true },
   { to: '/automations', label: 'Automations', icon: ZapIcon, match: ['/automations'], automations: true },
@@ -109,13 +108,13 @@ export function activeNavItem(pathname: string): NavItem | null {
 /**
  * Is `pathname` a mobile PUSHED screen — one opened from a list, that owns its own top bar (back,
  * title, state) and facet tabs instead of the list chrome? A task (`/tasks/:id` and its
- * `/changes` `/commits` `/files` sub-tabs) or a variant compare (`/compare/:groupId`).
+ * `/changes` `/commits` `/files` sub-tabs).
  *
  * The `/tasks` INDEX is not one: that is the all-projects overview, a list like any other. A
  * `/p/:projectId` prefix is stripped first, so the scoped and flat spellings answer alike.
  */
 export function isPushedRoute(pathname: string): boolean {
-  return /^\/(?:tasks|compare)\/[^/]+(?:\/|$)/.test(stripProjectPrefix(pathname))
+  return /^\/tasks\/[^/]+(?:\/|$)/.test(stripProjectPrefix(pathname))
 }
 
 /**

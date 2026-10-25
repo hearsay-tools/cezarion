@@ -6,7 +6,6 @@ describe('voiceViewOf', () => {
   it.each([
     ['/tasks/abc', 'task'],
     ['/tasks/abc/changes', 'task'],
-    ['/compare/g1', 'compare'],
     ['/new', 'new-task'],
     ['/github', 'github'],
     ['/github/prs/12', 'github'],

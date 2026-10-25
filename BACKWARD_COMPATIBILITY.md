@@ -92,7 +92,6 @@ What is protected now: **the shape of each route under `/api/v1`**, the three-wa
     - **Process waits (hearsay-tools/cezarion#1446; additive).** `waits` and `lastWaits` may hold a `kind: 'process'` entry: `{ timeoutSeconds, pid, startToken?, exitFile?, note?, result? }` beside the shared fields. `result` is `{ outcome, observedAt, exitCode?, exitFileNote?, diagnostic? }`, with `outcome` one of `exit_file`, `exited`, `deadline` or `error`; `exitCode` is a 32-bit integer and `exitFileNote: 'not-an-exit-code'` marks an exit file whose first line is not one. `waitingOn` adds the arm `{ kind: 'process', waitId, pid, deadline, note? }`, ranked after a PR wait and before a timer (human > usage limit > workers > PR > process > timer). `deriveAttention` reads it as bucket running, a pulsing ring, label `waiting for a command`; the webhook state is `waiting-other`, as for PR and timer waits. The cockpit sidebar adds the deadline (`waiting for a command, until 15:40`). A reader that skips unknown kinds, as phase 1 asked, is unaffected. The store moves to schema 9 (section 3).
 - Worktrees: `GET /api/v1/worktrees`, `POST /api/v1/worktrees/reclaim`, `POST /api/v1/worktrees/:runId/reclaim` (issue 08 §B4: one finished run's worktree DIRECTORY, by retention's rule and helper — the branch is kept; answers `{runId, worktreeReclaimedAt}`, 404 for an unknown id, 409 + `{error}` when the run is live, at `review`, an owned worker mid-destroy, or already reclaimed. Breaking: deleting the branch from this route, or reclaiming a run retention would not)
 - Open-in: `GET /api/v1/open-targets`, `POST /api/v1/open-in` — the latter opens the SCOPED PROJECT'S root in an `open-targets` id (Settings → "Project folder"). It takes `{target}` and no path at all: the folder is the registry's own root, so there is nothing for a client to point elsewhere. `cli:<runner>` targets are refused with a 400 (an agent CLI belongs in a task worktree), as is an app this machine does not have; localHandoff-gated like the rest of the family.
-- Historical variant groups: `GET /api/v1/groups/:groupId` remains read-only; `POST /api/v1/groups/:groupId/pick` returns `410 {error}` and changes no run or Git data (hearsay-tools/cezarion#1542).
 - Generated Inbox: removed in 0.17.0 under the owner-approved exception above; the old page URL provides file-export guidance.
 - **Finish eligibility (#449)**: `GET /api/v1/runs/:id` adds read-only `finishBlocked`: `null` when the current server state permits `POST /finish`, otherwise a refusal reason. Lists, stored records, and mutation responses omit it; absence is unknown, never permission. Eligibility shares the Finish decision and does not guarantee a future request against changed state or an operational write failure. The composer uses an explicit clear verdict; Finish is absent from the kebab.
 - Run history: `GET /api/v1/runs/:id/{history,history-context}` (reverse-paged visible events + compact current-state context; boot/default/project aliases remain identical)
@@ -670,29 +669,3 @@ remain unchanged. A first explicit reply after deadline expiry changes the
 recorded `timed-out` outcome to `replied-late`; other settlements stay final.
 Transcript consumers accept a separate outcome amendment projection, replacing
 only `timed-out` with `replied-late`. Existing timeout projections remain valid.
-
-## Parallel variant retirement — owner-approved immediate removal
-
-For hearsay-tools/cezarion#1542, the owner explicitly waived the deprecation window
-and requested immediate removal. This is a breaking change for the next minor
-release (0.17), with no compatibility release first. This exception applies to
-parallel variants; other protections in this document continue to apply.
-
-- New runs accept only an omitted count or the old single-run spelling `variants: 1`.
-  Multi-candidate requests return `400 {error}` before any launch. The creation response
-  is one run record, never `{runs}`. Automation create/update requests apply the same rule.
-- Stored automation templates still read their old count. Both GitHub and scheduled
-  launchers refuse counts above one, including manual runs and retries. They never
-  silently start one candidate. Remove `task.variants` or set it to `1` to migrate.
-- `POST /api/v1/groups/:groupId/pick` is a `410 {error}` tombstone. The winner-selection
-  and loser-cleanup implementation is removed. All three API scope aliases agree.
-- `GET /api/v1/groups/:groupId`, retained run `groupId`/`variant` fields and comparison
-  bookmarks remain readable. The old page now links to individual retained tasks and
-  explains owned-worker comparison. Retirement changes no retained run, diff, commit,
-  branch or worktree. Ordinary retention and explicit cleanup still apply.
-- The composer and automation editor require an explicit **Use one task** choice for
-  saved multi-candidate settings. Owned-worker spawning, collection, explicit Git
-  integration and verified destruction remain supported. One-click side-by-side
-  comparison and winner selection have no replacement UI.
-
-See README's “Parallel variant removal” for the owned-worker migration steps.

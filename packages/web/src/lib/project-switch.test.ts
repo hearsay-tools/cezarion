@@ -4,7 +4,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 vi.mock('@/api/client', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@/api/client')>()),
   getProjectRun: vi.fn(),
-  getGroup: vi.fn(),
   getRepoCommit: vi.fn(),
   getRunCommit: vi.fn(),
   getGithubItem: vi.fn(),
@@ -62,7 +61,6 @@ describe('projectSwitchTarget', () => {
     '/p/other/tasks/run-1/',
     '/p/other/Tasks/run-1/changes',
     '/p/other/tasks/run-1/commits/abc',
-    '/p/other/compare/g1',
     '/p/other/git/commits/abc',
     '/p/other/github/issues/4',
     '/p/other/github/prs/9/changes',
@@ -172,10 +170,7 @@ describe('resolveProjectSwitch', () => {
     await expect(resolve('/p/other/workflows/deploy')).resolves.toBe('/p/other/workflows/deploy')
   })
 
-  it('verifies compare, commit, workflow, automation and forge pages', async () => {
-    vi.mocked(client.getGroup).mockRejectedValue(apiError(404))
-    await expect(resolve('/p/other/compare/g1')).resolves.toBe('/p/other/')
-
+  it('verifies commit, workflow, automation and forge pages', async () => {
     vi.mocked(client.getRepoCommit).mockRejectedValue(apiError(404))
     await expect(resolve('/p/other/git/commits/abc')).resolves.toBe('/p/other/')
 

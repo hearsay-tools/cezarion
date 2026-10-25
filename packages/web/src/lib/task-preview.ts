@@ -4,8 +4,8 @@ const LIFECYCLE_HEARTBEAT = /^- \S+ — (?:turn complete|step ".*" complete|sess
 
 /**
  * The latest progress a Tasks row previews (hearsay-tools/cezarion#1616): the first lines of the
- * handoff journal's `## Progress log`, newest first, by the same rule the variants compare column
- * reads on the server. The list bullet is dropped; the line is otherwise the agent's own words.
+ * handoff journal's `## Progress log`, newest first. The list bullet is dropped; the line is
+ * otherwise the agent's own words.
  */
 export function progressPreview(handoff: string, maxLines = 3): string[] {
   const marker = '## Progress log'

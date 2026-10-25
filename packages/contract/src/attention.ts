@@ -64,7 +64,7 @@ function isUnseen(_run: AttentionInput): boolean {
 }
 
 /** What attention derivation actually reads. `Pick`ed rather than the full `RunRecord` so
- *  surfaces that only have a status — the cockpit compare view's `GroupVariant` columns — can use
+ *  surfaces that only have a status can use
  *  the same canonical function instead of inventing a second status-to-tone mapping. Delegation
  *  uses the slim contract projection: full run records, `ApiRun`s and workspace index rows all
  *  carry it. A summary carries `waitingOn`; a full or stream-patched record carries `waits` and no

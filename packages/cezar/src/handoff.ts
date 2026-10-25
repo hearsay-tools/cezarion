@@ -196,33 +196,6 @@ export function readHandoff(dataDir: string, runId: string): string {
   }
 }
 
-/** A turn or step lifecycle line cez writes at every turn end (`appendHandoffHeartbeat`). */
-const LIFECYCLE_HEARTBEAT = /^- \S+ — (?:turn complete|step ".*" complete|session idle-closed) — /;
-
-/**
- * First few non-empty lines under "## Progress log" (spec 010 — the variant
- * comparison columns). Stops at the next `## ` header; '' when there's no
- * Progress log section or it's empty. The agent's own lines win: cez's
- * lifecycle heartbeats show only when the agent wrote none, so the extra turns
- * of a no-wait nudge (hearsay-tools/cezarion#1234) never push its summary out
- * of the column.
- */
-export function handoffProgressExcerpt(text: string, maxLines = 3): string {
-  const marker = '## Progress log';
-  const idx = text.indexOf(marker);
-  if (idx < 0) return '';
-  const own: string[] = [];
-  const lifecycle: string[] = [];
-  for (const line of text.slice(idx + marker.length).split('\n')) {
-    if (line.startsWith('## ')) break;
-    const trimmed = line.trim();
-    if (!trimmed) continue;
-    (LIFECYCLE_HEARTBEAT.test(trimmed) ? lifecycle : own).push(trimmed);
-    if (own.length >= maxLines) break;
-  }
-  return (own.length ? own : lifecycle).slice(0, maxLines).join('\n');
-}
-
 export function deleteHandoff(dataDir: string, runId: string): void {
   try {
     rmSync(handoffPath(dataDir, runId), { force: true });

@@ -133,17 +133,13 @@
 }
 [data-slot="plan-overwrite-dialog"] [data-slot="alert-dialog-action"] { background: var(--accent-strong); color: var(--accent-strong-foreground); }
 [data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state"],
-[data-route="automations"] > [data-slot="centered-state"],
-[data-route="compare"] > [data-slot="centered-state"] { min-height: 0; flex: none; align-items: start; justify-content: start; padding: 24px; text-align: start; }
+[data-route="automations"] > [data-slot="centered-state"] { min-height: 0; flex: none; align-items: start; justify-content: start; padding: 24px; text-align: start; }
 [data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state"] > div,
-[data-route="automations"] > [data-slot="centered-state"] > div,
-[data-route="compare"] > [data-slot="centered-state"] > div { max-width: none; align-items: start; gap: 20px; }
+[data-route="automations"] > [data-slot="centered-state"] > div { max-width: none; align-items: start; gap: 20px; }
 [data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state-tile"],
-[data-route="automations"] > [data-slot="centered-state"] [data-slot="centered-state-tile"],
-[data-route="compare"] > [data-slot="centered-state"] [data-slot="centered-state-tile"] { display: none; }
+[data-route="automations"] > [data-slot="centered-state"] [data-slot="centered-state-tile"] { display: none; }
 [data-route="inbox"][data-inbox-empty="false"] [data-slot="centered-state"] :is(h1,h2),
-[data-route="automations"] > [data-slot="centered-state"] :is(h1,h2),
-[data-route="compare"] > [data-slot="centered-state"] :is(h1,h2) { font-size: 20px; font-weight: 400; }
+[data-route="automations"] > [data-slot="centered-state"] :is(h1,h2) { font-size: 20px; font-weight: 400; }
 
 /* Design22 keeps review in the page canvas; only Save/Overwrite are modal dialogs. */
 [data-route="new"][data-plan-review="true"] { padding-block-end: 0; }

@@ -321,7 +321,7 @@ describe('list rows', () => {
 });
 
 describe('indexed queries reach runs not in memory', () => {
-  it('find a run by its client request id, a group, the worktree owners and the branch owners', () => {
+  it('find a run by its client request id, the worktree owners and the branch owners', () => {
     const requested = record({ clientRequestId: 'client-1' });
     const variantA = record({ groupId: 'g', variant: 'A' });
     const variantB = record({ groupId: 'g', variant: 'B' });
@@ -333,7 +333,6 @@ describe('indexed queries reach runs not in memory', () => {
     const store = open();
     expect(store.findRunByClientRequestId('client-1')?.id).toBe(requested.id);
     expect(store.findRunByClientRequestId('client-2')).toBeUndefined();
-    expect(ids(store.listGroupRuns('g'))).toEqual(ids([variantA, variantB]));
     expect(store.listRunsWithWorktree().map((run) => run.id)).toEqual([tree.id]);
     expect(store.listBranchOwners().find((owner) => owner.id === tree.id)).toEqual({
       id: tree.id, title: tree.title, status: 'done', archived: false, createdAt: tree.createdAt, branch: 'cez/t', baseBranch: 'main',

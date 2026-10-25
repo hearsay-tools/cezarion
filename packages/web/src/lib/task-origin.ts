@@ -58,18 +58,16 @@ export function originCounts(
 }
 
 /** One row of a status group, over any row type: a project's `RunSummary` or a global task. */
-export type TaskGroupRow<R> =
-  | { kind: 'run'; run: R; queuePosition: number | null }
-  | { kind: 'group'; groupId: string; title: string; members: R[]; lead: R }
+export type TaskGroupRow<R> = { kind: 'run'; run: R; queuePosition: number | null }
 
 export interface TaskStatusGroup<R> {
   label: BucketLabel
   rows: TaskGroupRow<R>[]
 }
 
-/** Every task in a group, variant members included: what its heading counts. */
+/** Every task in a group: what its heading counts. */
 export function groupMembers<R>(group: TaskStatusGroup<R>): R[] {
-  return group.rows.flatMap((row) => (row.kind === 'run' ? [row.run] : row.members))
+  return group.rows.map((row) => row.run)
 }
 
 /**
@@ -122,7 +120,6 @@ export function groupIndexedTasks<T extends { run: RunIndexEntry }>(
     return {
       ...run,
       id,
-      ...(run.groupId === undefined ? {} : { groupId: qualified(run.projectId, run.groupId) }),
       ...(delegation && 'parentRunId' in delegation
         ? { delegation: { ...delegation, parentRunId: qualified(run.projectId, delegation.parentRunId) } }
         : {}),
@@ -141,15 +138,11 @@ export function groupIndexedTasks<T extends { run: RunIndexEntry }>(
   const back = (run: RunSummary) => byKey.get(run.id) as T
   return groupRuns(namespaced, view, positions).map((group) => ({
     label: group.label,
-    rows: group.rows.map((row): TaskGroupRow<T> =>
-      row.kind === 'run'
-        ? { kind: 'run', run: back(row.run), queuePosition: row.queuePosition }
-        : { kind: 'group', groupId: row.groupId, title: row.title, members: row.members.map(back), lead: back(row.lead) },
-    ),
+    rows: group.rows.map((row): TaskGroupRow<T> => ({ kind: 'run', run: back(row.run), queuePosition: row.queuePosition })),
   }))
 }
 
-/** A row's tasks in display order: one run, or a variant group's members (A, B, C). */
+/** A row's tasks in display order: its one run. */
 export function rowTasks<R>(row: TaskGroupRow<R>): R[] {
-  return row.kind === 'run' ? [row.run] : row.members
+  return [row.run]
 }
