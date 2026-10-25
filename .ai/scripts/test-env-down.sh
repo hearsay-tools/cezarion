@@ -4,6 +4,8 @@
 # history:
 #   2026-07-14 generated — mirrors test-env-up.sh; no services to remove, so this
 #             only stops the app PID this repo started and marks the descriptor stopped.
+#   2026-10-25 stop the app's whole process group through test-env-lease.mjs stop-app, only
+#             when its recorded start identity still matches (hearsay-tools/cezarion#1717).
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
@@ -23,27 +25,9 @@ log() { echo "[test-env] $*" >&2; }
 
 [ -f "$ENV_DESCRIPTOR" ] || { log "no descriptor — nothing to stop"; exit 0; }
 
-pid=$(node -e '
-  const fs = require("fs");
-  try {
-    const d = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
-    if (d.startedByThisRepo && d.app && d.app.pid) process.stdout.write(String(d.app.pid));
-  } catch { /* corrupt descriptor → nothing safe to stop */ }
-' "$ENV_DESCRIPTOR" 2>/dev/null || true)
-
-# Only ever stop what this repo started; safe to run twice.
-if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-  log "stopping cezar (pid $pid)"
-  kill "$pid" 2>/dev/null || true
-  waited=0
-  while kill -0 "$pid" 2>/dev/null && [ "$waited" -lt 10 ]; do
-    sleep 1
-    waited=$((waited + 1))
-  done
-  kill -9 "$pid" 2>/dev/null || true
-else
-  log "app is already stopped"
-fi
+# Only ever stop what this repo started, and only the recorded incarnation; safe to run twice.
+# An app that would not stop keeps its descriptor running, so down can try again.
+node "$SCRIPT_DIR/test-env-lease.mjs" stop-app 10000
 
 node -e '
   const fs = require("fs");

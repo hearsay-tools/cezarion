@@ -107,11 +107,11 @@ recovery wording that assumed cezar tools, a timer resuming a continuation witho
 tool controller, a budget-cap wake cancelling its timer without opening the budget wait).
 
 **Find every construction site of a shared in-memory object — grep the TYPE, not the
-field.** `ActiveRun` is built in `execute` AND in `runContinuation`;
-open-mercato/cezar#811 populated `state.skills` in the first only, so registry `/skill`
-expansion silently failed on every Continue and every restart recovery. When you add a
-field that a delivery path reads, add it everywhere in the same commit or route both
-sites through one helper.
+field.** Give it one factory: `ActiveRun` is built only by `createActiveRun`, where a new
+required field fails to compile; one that differs by entry path is a required
+`ActiveRunInit` field. `loadRunSkills` alone writes `state.skills` and `enabledSkills`
+alone reads it; ast-grep rules refuse a second literal, write or read
+(open-mercato/cezar#811).
 
 **List each handler's side effects, in order, before you merge handlers into one.** The
 merged method can lose one step of a handler's order while every test stays green. For
@@ -161,7 +161,7 @@ and a case that cannot happen stated with the reason.
 | Adds or changes a run state | **Transitions out**: State · Trigger · Who or what fires it · Behavior at shipped defaults | One row per exit of every state the change adds or keeps. Say so explicitly when a state's only default exit is a human action, and when it has no default exit. |
 | Changes how `allowedTools` or `bashAllowlist` maps onto a runner's tool flags | **Tool-list kinds**, one per affected runner: Input kind · Emitted runner flags · Callable built-in, MCP and extension tools at shipped defaults | `allowedTools` unset; the step default from `allowedToolsForStep`; a list inherited from another runner's default (such as a pi worker spawned from a Claude parent); a hand-written copy of the default list; the default plus an extra built-in or custom name; the default plus an `mcp__` name; a narrowed list; an empty list; a list with a `bashAllowlist`. Show effective tool access, not only the flags sent, and say when a runner ignores a restriction or cannot distinguish two kinds. |
 | Adds, replaces or removes files in a running task's worktree, such as skill copies from `packages/cezar/src/skills-provision.ts` or the personal config layer from `packages/cezar/src/agent-config/seed.ts` | **Worktree cases**: Case · Files written, kept or removed · Worktree state at the next step, Continue and restart | A catalog or source that has not loaded yet; the same name from two sources; records written by an older cezar version; a crash between two writes (see *Commit an outcome with what it depends on, or after it*); edits the agent made to the files, including files it added; the source removing the item. |
-| Starts a process that outlives the command that started it: a detached server, watcher or daemon | **Process exits**: Case · What stops it · Behavior at shipped defaults | The normal stop; the starting command interrupted by SIGINT or SIGKILL in each phase, before and after the process starts; the leader exits before its children; a member ignores SIGTERM; members stay zombies because their parent never reaps them; the start identity cannot be read; the leader's PID is reused; the handle the stop reads, such as a descriptor or lock file, is deleted or forged. |
+| Starts a process that outlives the command that started it, which code and scripts do through `packages/cezar/src/detached-process.ts` | **Process exits**: Case · What stops it · Behavior at shipped defaults | The normal stop; the starting command interrupted by SIGINT or SIGKILL before and after the start; the handle the stop reads, such as a descriptor, deleted or forged. The helper's tests hold the rest: the leader exits first, a member ignores SIGTERM, zombies, an unreadable or reused start identity. |
 
 Each table exists because a plan named only the obvious case and review rounds found
 the rest: hearsay-tools/cezarion#1305 and hearsay-tools/cezarion#1360 (tool lists with

@@ -16,6 +16,10 @@ test('Windows wrapper serializes callers, preserves arguments, and kills mutator
   const scripts = join(root, '.ai/scripts');
   mkdirSync(scripts, { recursive: true });
   for (const file of ['test-env-lease.mjs', 'test-env-windows.ps1']) copyFileSync(resolve('.ai/scripts', file), join(scripts, file));
+  // The lease imports the process-group helper from source; the marker makes it an ES module.
+  mkdirSync(join(root, 'packages/cezar/src'), { recursive: true });
+  copyFileSync(resolve('packages/cezar/src/detached-process.ts'), join(root, 'packages/cezar/src/detached-process.ts'));
+  writeFileSync(join(root, 'packages/cezar/src/package.json'), '{"type":"module"}\n');
   const helper = join(scripts, 'test-env-lease.mjs');
   if (process.env.TEST_ENV_PROOF_BASE) {
     const old = spawnSync('git', ['show', `${process.env.TEST_ENV_PROOF_BASE}:.ai/scripts/test-env-lease.mjs`], { encoding: 'utf8' });

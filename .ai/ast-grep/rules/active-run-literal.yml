@@ -2,15 +2,15 @@ id: active-run-literal
 language: typescript
 severity: warning
 message: >-
-  Build an ActiveRun only in RunManager.execute and RunManager.runContinuation (workflows/run.ts),
-  which both register it through RunManager.activate. A third literal misses fields those two set
-  (open-mercato/cezar#811): add the field to both, or use the one factory when
-  hearsay-tools/cezarion#1806 adds it.
+  Build an ActiveRun only in createActiveRun (workflows/active-run.ts), which RunManager.execute and
+  RunManager.runContinuation both call before RunManager.activate. A second literal misses fields
+  the factory sets (open-mercato/cezar#811): add the field to createActiveRun, as a required
+  ActiveRunInit field when it differs by entry path (hearsay-tools/cezarion#1806).
 files:
   - packages/cezar/src/**/*.ts
 # Matches a literal that names its type in the same statement. It does not match one returned from
-# a function typed `: ActiveRun` or annotated as a union such as `ActiveRun | undefined`: the rule
-# sees syntax, not types.
+# a function typed `: ActiveRun` (createActiveRun's own literal is one) or annotated as a union such
+# as `ActiveRun | undefined`: the rule sees syntax, not types.
 rule:
   any:
     - pattern: 'const $V: ActiveRun = { $$$ }'
