@@ -146,26 +146,90 @@ function yamlCommentSpans(text) {
   return spans;
 }
 
-/** Markdown outside fenced code blocks. */
+// CommonMark block structure, as far as code needs it: block quotes, list items, ATX and
+// setext headings, thematic breaks (`* * *` is one, not a list item), and fences.
+const QUOTE_PREFIX = /^(?: {0,3}> ?)*/;
+const LIST_MARKER = /^(?:[-+*]|\d{1,9}[.)]) {1,4}(?=\S)/;
+const HEADING_OR_BREAK = /^(?:#{1,6}(?:[ \t]|$)|(?:=+|-+)[ \t]*$|(?:\*[ \t]*){3,}$|(?:-[ \t]*){3,}$|(?:_[ \t]*){3,}$)/;
+const FENCE = /^(`{3,}|~{3,})/;
+const FENCE_CLOSE = /^(`{3,}|~{3,})[ \t]*$/;
+
+/** A Markdown line inside its block quotes: their depth, its indentation in columns (a tab stops every 4) and its text. */
+function markdownLine(line) {
+  const quote = QUOTE_PREFIX.exec(line)[0];
+  let width = 0;
+  let i = quote.length;
+  for (; line[i] === ' ' || line[i] === '\t'; i++) width += line[i] === '\t' ? 4 - (width % 4) : 1;
+  return { depth: quote.split('>').length - 1, width, text: line.slice(i) };
+}
+
+/** The marker of the fence `text` opens; a backtick fence's info string holds no backtick. */
+function fenceOf(text) {
+  const marker = FENCE.exec(text)?.[1];
+  return marker && !(marker[0] === '`' && text.slice(marker.length).includes('`')) ? marker : null;
+}
+
+/** A closing fence repeats its opening fence's character, at least as many times, and nothing else. */
+const closesFence = (fence, { width, text }) =>
+  width - fence.base <= 3 && Boolean(FENCE_CLOSE.exec(text)?.[1].startsWith(fence.marker));
+
+/**
+ * Tells, line by line, whether a Markdown line is code: in a fenced code block, or in an
+ * indented one. Indentation counts from the content column of the list item that holds the
+ * line. An indented code block cannot interrupt a paragraph, so a paragraph's indented next
+ * line stays prose.
+ */
+function markdownCodeReader() {
+  let fence = null;
+  let indented = null; // the base column of an open indented code block
+  let items = []; // the content column of each open list item
+  let depth = 0;
+  let paragraph = false;
+  return (raw) => {
+    const line = markdownLine(raw);
+    if (fence) {
+      if (closesFence(fence, line)) fence = null;
+      return true;
+    }
+    if (line.text === '') {
+      paragraph = false;
+      return indented !== null;
+    }
+    if (indented !== null && line.width >= indented + 4) return true;
+    indented = null;
+    const marker = HEADING_OR_BREAK.test(line.text) ? undefined : LIST_MARKER.exec(line.text)?.[0];
+    if (!paragraph || marker) {
+      if (line.depth !== depth) items = [];
+      depth = line.depth;
+      items = items.filter((column) => column <= line.width);
+    }
+    const base = items.at(-1) ?? 0;
+    if (line.width - base >= 4) {
+      if (!paragraph) indented = base;
+      return !paragraph;
+    }
+    if (marker) items.push(line.width + marker.length);
+    const opened = fenceOf(line.text.slice(marker?.length ?? 0));
+    if (opened) fence = { marker: opened, base: items.at(-1) ?? 0 };
+    paragraph = !opened && !HEADING_OR_BREAK.test(line.text);
+    return Boolean(opened);
+  };
+}
+
+/** Markdown outside fenced and indented code blocks. */
 function proseSpans(text) {
   const spans = [];
-  let fence = null;
+  const isCode = markdownCodeReader();
   let start = 0;
   let offset = 0;
   for (const line of text.split('\n')) {
-    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
-    if (fence) {
-      if (marker?.[0] === fence[0] && marker.length >= fence.length && /^ {0,3}[`~]+\s*$/.test(line)) {
-        fence = null;
-        start = offset + line.length + 1;
-      }
-    } else if (marker && !(marker[0] === '`' && line.slice(line.indexOf(marker) + marker.length).includes('`'))) {
-      spans.push({ start, end: offset, context: 'Markdown prose' });
-      fence = marker;
+    if (isCode(line)) {
+      if (start < offset) spans.push({ start, end: offset, context: 'Markdown prose' });
+      start = offset + line.length + 1;
     }
     offset += line.length + 1;
   }
-  if (!fence) spans.push({ start, end: text.length, context: 'Markdown prose' });
+  if (start < text.length) spans.push({ start, end: text.length, context: 'Markdown prose' });
   return spans;
 }
 

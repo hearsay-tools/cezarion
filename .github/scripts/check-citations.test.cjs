@@ -122,6 +122,68 @@ test('reads Markdown prose but not code fences, inline code or qualified links',
   assert.deepEqual(cites('notes.md', text), ['2:12:Markdown prose', '10:17:Markdown prose']);
 });
 
+test('reads indented code blocks as code, counting from the list item that holds them', () => {
+  const text = [
+    "    echo '#20'",
+    '',
+    'Run this:',
+    '',
+    "    echo '#21'",
+    '\techo #22',
+    '',
+    '    echo #23',
+    'A paragraph that goes on',
+    '    to cite #24.',
+    '',
+    '- An item',
+    '',
+    '    The item goes on and cites #25.',
+    '',
+    '      echo #26',
+    '',
+    '1. An ordered item',
+    '',
+    '       echo #27',
+    '   ```',
+    '   #28',
+    '   ```',
+    '    Fixes #29.',
+    '',
+    'After the list, #30.',
+    '',
+    '    echo #31',
+    '',
+    '> Quoted text cites #32.',
+    '>',
+    '>     echo #33',
+    '',
+    '## A heading',
+    '    echo #34',
+    '',
+    '* * *',
+    '',
+    '    echo #35',
+    '',
+    '- ```',
+    '  #36',
+    '  ```',
+    '- A sibling item',
+    '  - A nested item',
+    '',
+    '        echo #37',
+    '',
+    '      The nested item goes on, #38.',
+  ].join('\n');
+  assert.deepEqual(cites('notes.md', text), [
+    '10:24:Markdown prose',
+    '14:25:Markdown prose',
+    '24:29:Markdown prose',
+    '26:30:Markdown prose',
+    '30:32:Markdown prose',
+    '49:38:Markdown prose',
+  ]);
+});
+
 test('reads nothing in file types it does not know', () => {
   assert.deepEqual(cites('data.json', '{"title": "#12"}'), []);
   assert.deepEqual(cites('mock.html', '<p>#12</p>'), []);
