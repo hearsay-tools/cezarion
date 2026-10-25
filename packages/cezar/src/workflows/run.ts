@@ -9897,7 +9897,6 @@ export class RunManager {
   }
 }
 
-/** How `cezar_done` names the step its done starts: the rail's name, else the id. */
 /** The session whose done completes a step that is not the last, and the step it starts next. */
 function stepScope(session: AgentSession, next: WorkflowStepDef | undefined): ActiveRun['nextStep'] {
   return next ? { session, label: stepLabel(next) } : undefined;
@@ -9908,8 +9907,10 @@ function settlesAsDone(step: { id: string; status: string }, keepStepId: string 
   return (step.status === 'running' || step.status === 'waiting') && step.id !== keepStepId;
 }
 
-function stepLabel(step: WorkflowStepDef): string {
-  return step.name ?? step.id;
+/** How `cezar_done` names the step its done starts: the rail's name, else the id. A workflow file
+ *  may give a step an empty name, and the done answer's `next_step` must not be empty. */
+export function stepLabel(step: WorkflowStepDef): string {
+  return step.name?.trim() ? step.name : step.id;
 }
 
 function applyTemplate(template: string, task: string): string {
