@@ -13,14 +13,15 @@ import { Link, pathnameProjectId, stripProjectPrefix, useNavigate } from '@/lib/
 import { MobileRunBarSlotContext } from '@/components/mobile-run-bar'
 import { StatusDot } from '@/components/status-dot'
 import { SidebarViewTabs } from '@/components/sidebar-view-tabs'
-import { ApplicationUpdateControl, ApplicationUpdateFeedback } from '@/components/application-update-control'
+import { ApplicationUpdateControl, ApplicationUpdateFeedback, type ApplicationUpdateControlProps } from '@/components/application-update-control'
 import { API_PREFIX } from '@open-mercato/cezar-api-client/utils/project-scope'
 import type { ApplicationUpdateState } from '@open-mercato/cezar-api-client'
 import { ProjectScopeContext, useProjectScope } from '@/api/project-scope-context'
 import { isNewerVersion } from '@/lib/is-newer-version'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
-import { activeNavItem, activeNavPath, isPushedGitScreen, isPushedRoute, visibleNavItems, type NavItem } from '@/components/nav-items'
+import { visibleNavItems, type NavItem } from '@/components/nav-items'
+import { shellRoute } from '@/lib/app-shell-route'
 import { MobileTabBar } from '@/components/mobile-tab-bar'
 import { useKeyboardOpen } from '@/lib/keyboard-inset'
 import { SIDEBAR_SELECTED_CLASS } from '@/components/nav-row-styles'
@@ -175,47 +176,19 @@ export function AppShell({
   toolsStatus,
 }: AppShellProps) {
   const { pathname, search } = useLocation()
-  // The nav's area rules reason about the flat route map — strip any `/p/:projectId` prefix
-  // (multi-project spec, step 3.2) so `/p/cezar/git/commits` still lights Git.
-  const areaPathname = stripProjectPrefix(pathname)
-  const activeTo = areaPathname === '/new' ? '/new' : activeNavPath(areaPathname)
-  const current = activeNavItem(areaPathname)
-  // The URL's own scope, as on the rail: global routes carry none, so every project is "elsewhere".
-  const currentProjectId = pathnameProjectId(pathname)
-  // The tab bar belongs to list screens (#621): an opened task is a pushed screen whose composer
-  // owns the bottom edge, and while the keyboard is up (the visual viewport shrank below the
-  // layout viewport — the same source `--kb` is published from) it would only eat the room the
-  // composer needs.
-  // A pinch-zoom also leaves the visual viewport shorter than the layout one, so a real keyboard
-  // is the bottom inset that is both large and seen at scale ~1.
+  // The keyboard is up when the visual viewport shrank below the layout viewport — the same
+  // source `--kb` is published from. A pinch-zoom also leaves the visual viewport shorter than
+  // the layout one, so a real keyboard is the bottom inset that is both large and seen at scale ~1.
   const keyboardOpen = useKeyboardOpen()
-  // Pushed Git section screens hide it too (issue 08 §C, the slice 5 rule): each has its own Back to Git.
-  const showTabBar = !isPushedRoute(pathname) && !isPushedGitScreen(pathname, search) && !keyboardOpen
-  const tabBarSignal = currentProjectId !== null ? mobileProjects?.signals?.get(currentProjectId) : undefined
+  const { activeTo, current, currentProjectId, newTask, pushed, showTabBar, gitRepositoryView } = shellRoute(pathname, search, keyboardOpen)
   const [menuOpen, setMenuOpen] = React.useState(false)
-  // The pushed task screen (#621): its top bar carries back / title / state / run actions, and the
-  // routed `RunHeader` fills the slot below through `MobileRunBarSlotContext`.
-  const pushed = isPushedRoute(pathname)
+  // On the pushed task screen the routed `RunHeader` fills the top bar's slot through
+  // `MobileRunBarSlotContext`.
   const [runBarSlot, setRunBarSlot] = React.useState<HTMLElement | null>(null)
   const mobileNavTrigger = React.useRef<HTMLButtonElement | null>(null)
   const mainRef = React.useRef<HTMLElement>(null)
   const previousPathname = React.useRef<string | null>(null)
   const routeOwnsArrival = routeOwnsScrollArrival(pathname)
-  // Git's phone index and its repository share ONE pathname (`/git` vs `/git?view=repo`), so the
-  // pathname-only reset below misses that switch. A boolean, so unrelated search changes do not
-  // reset anything.
-  const gitRepositoryView = areaPathname === '/git' && new URLSearchParams(search).get('view') === 'repo'
-  // The desktop column's width (#788). Read once, lazily, from `localStorage` — it is a
-  // browser-local preference like the theme, so there is nothing to fetch and nothing to wait
-  // for, and the first paint is already the user's width rather than a default that jumps.
-  const [sidebarWidth, setSidebarWidth] = React.useState(readStoredSidebarWidth)
-  const changeSidebarWidth = React.useCallback((next: number) => {
-    const width = clampSidebarWidth(next)
-    setSidebarWidth(width)
-    // Persist on every change rather than on drag end: a drag is a stream of small writes to one
-    // key, which localStorage is fine with, and it means a tab closed mid-drag still remembers.
-    writeStoredSidebarWidth(width)
-  }, [])
 
   // The scroller PERSISTS across routes (it is the shell's, not the view's), so without this
   // a deep scroll on one page carries into the next — most visibly on mobile, where Tasks or
@@ -265,26 +238,19 @@ export function AppShell({
     return () => query.removeEventListener('change', onChange)
   }, [])
 
-  const nav = {
-    activeTo,
-    items: visibleNavItems({ forge: forgeAvailable, automations: automationsAvailable }),
-    repo,
+  const items = visibleNavItems({ forge: forgeAvailable, automations: automationsAvailable })
+  // The application update's state and actions, in the shape the footer control and the drawer
+  // row both take.
+  const update: ApplicationUpdateControlProps = {
     version,
     latestVersion,
-    applicationUpdate,
+    state: applicationUpdate,
     onApplyUpdate,
     onRestart,
-    applicationUpdateError,
-    applicationUpdateBusy,
-    applicationUpdateOffline,
-    sidebarList,
-    taskQuickList,
-    sessionScope,
-    toolsMenu,
-    projectHeader,
-    sidebarProjectId,
-    needsYou,
-    }
+    error: applicationUpdateError,
+    busy: applicationUpdateBusy,
+    offline: applicationUpdateOffline,
+  }
 
   return (
     // The Sheet root renders no DOM of its own — it is the context that lets the top bar's menu
@@ -294,11 +260,22 @@ export function AppShell({
         data-slot="app-shell"
         className="flex h-dvh overflow-hidden bg-background text-foreground pl-[env(safe-area-inset-left)] pr-[env(safe-area-inset-right)]"
       >
-        {/* Outside the resizable sidebar: SidebarResize only ever changes the aside's width. */}
-        <ShellSidebarWidthContext.Provider value={sidebarWidth}>{projectRail}</ShellSidebarWidthContext.Provider>
-        <Sidebar {...nav} width={sidebarWidth} onWidthChange={changeSidebarWidth} />
+        <DesktopSidebar
+          projectRail={projectRail}
+          activeTo={activeTo}
+          items={items}
+          repo={repo}
+          update={update}
+          sidebarList={sidebarList}
+          taskQuickList={taskQuickList}
+          sessionScope={sessionScope}
+          toolsMenu={toolsMenu}
+          projectHeader={projectHeader}
+          sidebarProjectId={sidebarProjectId}
+          needsYou={needsYou}
+        />
         {/* The drawer leaves a visible dismissal strip beside the shared navigation. */}
-        <MobileNavDrawer {...nav} mobileProjects={mobileProjects} currentProjectId={currentProjectId} toolsStatus={toolsStatus} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {
+        <MobileNavDrawer update={update} taskQuickList={taskQuickList} sidebarProjectId={sidebarProjectId} mobileProjects={mobileProjects} currentProjectId={currentProjectId} toolsStatus={toolsStatus} onNavigate={() => setMenuOpen(false)} onCloseAutoFocus={(event) => {
           // Both mobile controls open the same drawer. Restore the actual opener, rather
           // than Radix's single trigger ref (which otherwise points at the last mount).
           if (mobileNavTrigger.current?.isConnected) {
@@ -309,13 +286,7 @@ export function AppShell({
 
         <div className="grid min-w-0 flex-1 grid-rows-[auto_auto_1fr_auto] overflow-hidden">
           <MobileTopBar title={current?.label ?? 'cezar'} pushed={pushed ? { onSlot: setRunBarSlot } : null} repo={repo} elsewhere={elsewhereSignal(mobileProjects, currentProjectId)} onTrigger={(button) => { mobileNavTrigger.current = button }} />
-          <header data-slot="desktop-breadcrumb" className={cn("row-start-1 hidden min-w-0 items-center gap-3 border-b border-border text-[13px] text-muted-foreground md:flex", areaPathname === '/new' ? 'h-[72px] px-11' : 'h-16 px-9')}>
-            <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
-            {(breadcrumb?.project ?? repo?.name) ? <><span className="truncate font-medium text-foreground">{breadcrumb?.project ?? repo?.name}</span><span aria-hidden="true">/</span></> : null}
-            <span className="min-w-0 truncate">{breadcrumb?.page ?? current?.label ?? 'Cezarion'}</span>
-            {(breadcrumb?.branch ?? repo?.branch) ? <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px]">{/* The one teal left beside the sidebar, deliberately (#617 01c): the header's ShieldCheck
-                sits outside the sidebar list and waits for the brand accent's own review. */}<ShieldCheckIcon aria-hidden="true" className="size-4 text-accent-text" />{breadcrumb?.branch ?? repo?.branch}</span> : null}
-          </header>
+          <DesktopBreadcrumb breadcrumb={breadcrumb} repo={repo} label={current?.label} newTask={newTask} />
 
           {banner ? (
             <div data-slot="banner-slot" className="row-start-2">
@@ -328,41 +299,80 @@ export function AppShell({
             data-slot="main"
             // The New task button floats over the bottom of main, so leave its height (48px + 16px
             // gap) plus air clear while it is shown, or the last row sits under it at full scroll.
-            className={cn('row-start-3 min-h-0 overflow-y-auto overscroll-contain', showTabBar && areaPathname !== '/new' && 'max-md:pb-20')}
+            className={cn('row-start-3 min-h-0 overflow-y-auto overscroll-contain', showTabBar && !newTask && 'max-md:pb-20')}
           >
             <MobileRunBarSlotContext.Provider value={pushed ? runBarSlot : null}>
               {children}
             </MobileRunBarSlotContext.Provider>
           </main>
 
-          {/* Row 4 reserves whichever obstruction is taller: the home indicator or the visual
-              keyboard inset published as --kb. The real thread composer remains in document
-              flow inside main; shrinking that viewport keeps it reachable without an overlay. */}
-          <div
-            data-slot="composer"
-            // On a list screen below `md` the row IS the tab bar's surface, so the inset padding
-            // sits under the bar on the bar's own fill, and it is the anchor the New task button
-            // floats from. `md:` sheds all of it: the desktop row stays the empty gutter it was.
-            className={cn(
-              'row-start-4 pb-[max(env(safe-area-inset-bottom),var(--kb,0px))]',
-              showTabBar && 'relative max-md:border-t max-md:border-border max-md:bg-sidebar',
-            )}
-          >
-            {showTabBar ? (
-              <div className="md:hidden">
-                <MobileTabBar
-                  items={nav.items}
-                  activeTo={activeTo}
-                  signal={tabBarSignal}
-                  projectName={mobileProjects?.projects.find((project) => project.id === currentProjectId)?.name ?? repo?.name ?? null}
-                  showNewTask={areaPathname !== '/new'}
-                />
-              </div>
-            ) : null}
-          </div>
+          <ShellComposerRow showTabBar={showTabBar} items={items} activeTo={activeTo} mobileProjects={mobileProjects} currentProjectId={currentProjectId} repo={repo} newTask={newTask} />
         </div>
       </div>
     </Sheet>
+  )
+}
+
+/** The desktop page header (`md` up): project / page, and the branch at the right. */
+function DesktopBreadcrumb({ breadcrumb, repo, label, newTask }: {
+  breadcrumb: AppShellProps['breadcrumb']
+  repo: RepoChip | null
+  /** The active nav item's label: the page when the route names none. */
+  label: string | undefined
+  newTask: boolean
+}) {
+  const project = breadcrumb?.project ?? repo?.name
+  const branch = breadcrumb?.branch ?? repo?.branch
+  return (
+    <header data-slot="desktop-breadcrumb" className={cn("row-start-1 hidden min-w-0 items-center gap-3 border-b border-border text-[13px] text-muted-foreground md:flex", newTask ? 'h-[72px] px-11' : 'h-16 px-9')}>
+      <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
+      {project ? <><span className="truncate font-medium text-foreground">{project}</span><span aria-hidden="true">/</span></> : null}
+      <span className="min-w-0 truncate">{breadcrumb?.page ?? label ?? 'Cezarion'}</span>
+      {branch ? <span className="ml-auto flex shrink-0 items-center gap-2 text-[11px]">{/* The one teal left beside the sidebar, deliberately (#617 01c): the header's ShieldCheck
+          sits outside the sidebar list and waits for the brand accent's own review. */}<ShieldCheckIcon aria-hidden="true" className="size-4 text-accent-text" />{branch}</span> : null}
+    </header>
+  )
+}
+
+/**
+ * Row 4 of the main column. It reserves whichever obstruction is taller: the home indicator or
+ * the visual keyboard inset published as --kb. The real thread composer remains in document flow
+ * inside main; shrinking that viewport keeps it reachable without an overlay. On a list screen
+ * below `md` it also carries the tab bar.
+ */
+function ShellComposerRow({ showTabBar, items, activeTo, mobileProjects, currentProjectId, repo, newTask }: {
+  showTabBar: boolean
+  items: NavItem[]
+  activeTo: string | null
+  mobileProjects?: MobileProjectNav | null
+  currentProjectId: string | null
+  repo: RepoChip | null
+  newTask: boolean
+}) {
+  const signal = currentProjectId !== null ? mobileProjects?.signals?.get(currentProjectId) : undefined
+  return (
+    <div
+      data-slot="composer"
+      // On a list screen below `md` the row IS the tab bar's surface, so the inset padding
+      // sits under the bar on the bar's own fill, and it is the anchor the New task button
+      // floats from. `md:` sheds all of it: the desktop row stays the empty gutter it was.
+      className={cn(
+        'row-start-4 pb-[max(env(safe-area-inset-bottom),var(--kb,0px))]',
+        showTabBar && 'relative max-md:border-t max-md:border-border max-md:bg-sidebar',
+      )}
+    >
+      {showTabBar ? (
+        <div className="md:hidden">
+          <MobileTabBar
+            items={items}
+            activeTo={activeTo}
+            signal={signal}
+            projectName={mobileProjects?.projects.find((project) => project.id === currentProjectId)?.name ?? repo?.name ?? null}
+            showNewTask={!newTask}
+          />
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -370,14 +380,7 @@ type NavProps = {
   activeTo: string | null
   items: NavItem[]
   repo: RepoChip | null
-  version: string | null
-  latestVersion: string | null
-  applicationUpdate?: ApplicationUpdateState
-  onApplyUpdate?: () => Promise<void>
-  onRestart?: () => Promise<void>
-  applicationUpdateError?: string | null
-  applicationUpdateBusy?: boolean
-  applicationUpdateOffline?: boolean
+  update: ApplicationUpdateControlProps
   sidebarList?: ReactNode
   taskQuickList?: ReactNode
   sessionScope?: ReactNode
@@ -387,6 +390,32 @@ type NavProps = {
   sidebarProjectId?: string
   needsYou?: boolean
 
+}
+
+/**
+ * The desktop columns, from `md` up: the project rail, then the resizable sidebar.
+ * The sidebar's width is state here because nothing else reads it: the sidebar draws it, and the
+ * rail reads it through `ShellSidebarWidthContext`.
+ */
+function DesktopSidebar({ projectRail, ...nav }: NavProps & { projectRail?: ReactNode }) {
+  // The desktop column's width (#788). Read once, lazily, from `localStorage` — it is a
+  // browser-local preference like the theme, so there is nothing to fetch and nothing to wait
+  // for, and the first paint is already the user's width rather than a default that jumps.
+  const [sidebarWidth, setSidebarWidth] = React.useState(readStoredSidebarWidth)
+  const changeSidebarWidth = React.useCallback((next: number) => {
+    const width = clampSidebarWidth(next)
+    setSidebarWidth(width)
+    // Persist on every change rather than on drag end: a drag is a stream of small writes to one
+    // key, which localStorage is fine with, and it means a tab closed mid-drag still remembers.
+    writeStoredSidebarWidth(width)
+  }, [])
+  return (
+    <>
+      {/* Outside the resizable sidebar: SidebarResize only ever changes the aside's width. */}
+      <ShellSidebarWidthContext.Provider value={sidebarWidth}>{projectRail}</ShellSidebarWidthContext.Provider>
+      <Sidebar {...nav} width={sidebarWidth} onWidthChange={changeSidebarWidth} />
+    </>
+  )
 }
 
 /**
@@ -524,10 +553,8 @@ function SidebarResizeHandle({ width, onWidthChange }: SidebarResize) {
  */
 function MobileNavDrawer({
   onNavigate, onCloseAutoFocus, mobileProjects, currentProjectId, toolsStatus,
-  version, latestVersion, applicationUpdate, onApplyUpdate, onRestart,
-  applicationUpdateError, applicationUpdateBusy, applicationUpdateOffline,
-  taskQuickList, sidebarProjectId,
-}: Pick<NavProps, 'sidebarProjectId' | 'taskQuickList' | 'version' | 'latestVersion' | 'applicationUpdate' | 'onApplyUpdate' | 'onRestart' | 'applicationUpdateError' | 'applicationUpdateBusy' | 'applicationUpdateOffline'> & {
+  update, taskQuickList, sidebarProjectId,
+}: Pick<NavProps, 'sidebarProjectId' | 'taskQuickList' | 'update'> & {
   onNavigate: () => void
   onCloseAutoFocus?: React.ComponentProps<typeof SheetContent>['onCloseAutoFocus']
   mobileProjects?: MobileProjectNav | null
@@ -549,17 +576,8 @@ function MobileNavDrawer({
     >
       {/* The dialog's accessible name. Visually redundant with the identity row below. */}
       <SheetTitle className="sr-only">Navigation</SheetTitle>
-      <DrawerIdentity version={version} />
-      <DrawerUpdate
-        version={version}
-        latestVersion={latestVersion}
-        state={applicationUpdate}
-        onApplyUpdate={onApplyUpdate}
-        onRestart={onRestart}
-        error={applicationUpdateError}
-        busy={applicationUpdateBusy}
-        offline={applicationUpdateOffline}
-      />
+      <DrawerIdentity version={update.version} />
+      <DrawerUpdate {...update} />
       {/* One scroll: Projects, then the workspace links. The safe-area insets are the identity
           row's and the global rows', so the content between them takes none of its own. */}
       <div data-slot="drawer-scroll" className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain">
@@ -606,14 +624,7 @@ function SidebarContent({
   activeTo,
   items,
   repo,
-  version,
-  latestVersion,
-  applicationUpdate,
-  onApplyUpdate,
-  onRestart,
-  applicationUpdateError,
-  applicationUpdateBusy,
-  applicationUpdateOffline,
+  update,
   sidebarList,
   taskQuickList,
   sessionScope,
@@ -676,18 +687,24 @@ function SidebarContent({
         </SidebarNavigateContext.Provider>
       </div>
 
-      <div data-slot="sidebar-footer" className="shrink-0">
-        {/* The board's footer: a 44px bar, 12px sides, Tools at the left, version and update at the right. */}
-        <div data-slot="sidebar-footer-controls" className="flex h-11 items-center justify-between gap-1 border-t border-border px-3">
-          <div data-slot="tools-menu" className="shrink-0">{toolsMenu}</div>
-          <div className="flex min-w-0 items-center gap-1" data-slot="version-action">
-            {version ? <VersionChip version={version} latestVersion={latestVersion} /> : null}
-            <ApplicationUpdateControl version={version} latestVersion={latestVersion} state={applicationUpdate} onApplyUpdate={onApplyUpdate} onRestart={onRestart} error={applicationUpdateError} busy={applicationUpdateBusy} offline={applicationUpdateOffline} />
-          </div>
-        </div>
-        <ApplicationUpdateFeedback version={version} latestVersion={latestVersion} state={applicationUpdate} error={applicationUpdateError} offline={applicationUpdateOffline} busy={applicationUpdateBusy} />
-      </div>
+      <SidebarFooter toolsMenu={toolsMenu} update={update} />
     </div></SidebarNavigationScope>
+  )
+}
+
+/** The board's footer: a 44px bar, 12px sides, Tools at the left, version and update at the right. */
+function SidebarFooter({ toolsMenu, update }: Pick<NavProps, 'toolsMenu' | 'update'>) {
+  return (
+    <div data-slot="sidebar-footer" className="shrink-0">
+      <div data-slot="sidebar-footer-controls" className="flex h-11 items-center justify-between gap-1 border-t border-border px-3">
+        <div data-slot="tools-menu" className="shrink-0">{toolsMenu}</div>
+        <div className="flex min-w-0 items-center gap-1" data-slot="version-action">
+          {update.version ? <VersionChip version={update.version} latestVersion={update.latestVersion} /> : null}
+          <ApplicationUpdateControl {...update} />
+        </div>
+      </div>
+      <ApplicationUpdateFeedback {...update} />
+    </div>
   )
 }
 
