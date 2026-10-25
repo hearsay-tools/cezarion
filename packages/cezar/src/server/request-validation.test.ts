@@ -9,6 +9,7 @@ import type { WorkflowDef } from '../workflows/types.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { workflowsResponseSchema } from '@open-mercato/cezar-contract/workflows';
+import { createRunInputSchema } from '@open-mercato/cezar-contract/runs';
 import { connectedProviderAuth } from './provider-auth.testkit.ts';
 
 /**
@@ -87,7 +88,7 @@ describe('request validation bounds (#429)', () => {
     expect(store.getRun(run.id)).not.toHaveProperty('pinnedAt');
   });
 
-  // ---- startRunSchema.task -------------------------------------------------
+  // ---- createRunInputSchema.task -------------------------------------------------
   const stepsBody = { steps: [{ id: 'work', prompt: '{{task}}' }] };
 
   it('accepts a 100k-char task', async () => {
@@ -101,6 +102,64 @@ describe('request validation bounds (#429)', () => {
     expect(res.status).toBe(400);
     expect(((await res.json()) as { error: string }).error).toContain('task');
     expect(captured).toBeUndefined();
+  });
+
+  // Preserve the route's pre-consolidation answers (hearsay-tools/cezarion#1792).
+  // Field-by-field comparison found no differing bounds. These independent expected
+  // answers guard the shared bounds, nested refinements and unknown-key stripping.
+  const inlineBody = { ...stepsBody, task: 'work' };
+  const agentStep = { id: 'work', prompt: '{{task}}' };
+  const validationCases: { name: string; body: unknown; status: number; schemaValid?: boolean }[] = [
+    { name: 'minimal inline chain', body: inlineBody, status: 201 },
+    { name: 'catalog workflow', body: { workflow: 'quick-task', task: 'work' }, status: 201 },
+    { name: 'neither workflow nor steps', body: { task: 'work' }, status: 400 },
+    { name: 'both workflow and steps', body: { ...inlineBody, workflow: 'quick-task' }, status: 400 },
+    { name: 'empty workflow', body: { workflow: '', task: 'work' }, status: 400 },
+    { name: 'empty task', body: { ...inlineBody, task: '' }, status: 400 },
+    { name: 'empty steps', body: { ...inlineBody, steps: [] }, status: 400 },
+    { name: 'eight steps', body: { task: 'work', steps: Array.from({ length: 8 }, (_, i) => ({ ...agentStep, id: `s${i}` })) }, status: 201 },
+    { name: 'nine steps', body: { task: 'work', steps: Array.from({ length: 9 }, (_, i) => ({ ...agentStep, id: `s${i}` })) }, status: 400 },
+    { name: 'empty step id', body: { task: 'work', steps: [{ ...agentStep, id: '' }] }, status: 400 },
+    { name: 'step without prompt or command', body: { task: 'work', steps: [{ id: 'work' }] }, status: 400 },
+    { name: 'step with prompt and command', body: { task: 'work', steps: [{ ...agentStep, command: 'true' }] }, status: 400 },
+    { name: 'step effort over cap', body: { task: 'work', steps: [{ ...agentStep, effort: 'x'.repeat(33) }] }, status: 400 },
+    { name: 'step timeout at cap', body: { task: 'work', steps: [{ ...agentStep, timeoutMs: 2_147_483_647 }] }, status: 201 },
+    { name: 'step timeout over cap', body: { task: 'work', steps: [{ ...agentStep, timeoutMs: 2_147_483_648 }] }, status: 400 },
+    { name: 'negative timeout', body: { task: 'work', steps: [{ ...agentStep, timeoutMs: -1 }] }, status: 400 },
+    { name: 'fractional timeout', body: { task: 'work', steps: [{ ...agentStep, timeoutMs: 0.5 }] }, status: 400 },
+    { name: 'timeout on check', body: { task: 'work', steps: [{ id: 'check', command: 'true', timeoutMs: 0 }] }, status: 400 },
+    { name: 'legacy runner', body: { ...inlineBody, runner: 'claude-cli' }, status: 400 },
+    { name: 'legacy step runner', body: { task: 'work', steps: [{ ...agentStep, runner: 'claude-cli' }] }, status: 400 },
+    { name: 'empty step profile', body: { task: 'work', steps: [{ ...agentStep, agentProfile: '' }] }, status: 400 },
+    { name: 'step profile over cap', body: { task: 'work', steps: [{ ...agentStep, agentProfile: 'x'.repeat(65) }] }, status: 400 },
+    { name: 'profile over cap', body: { ...inlineBody, agentProfile: 'x'.repeat(65) }, status: 400 },
+    { name: 'empty task profile reaches account lookup', body: { ...inlineBody, agentProfile: '' }, status: 400, schemaValid: true },
+    { name: 'effort at cap', body: { ...inlineBody, effort: 'x'.repeat(32) }, status: 201 },
+    { name: 'effort over cap', body: { ...inlineBody, effort: 'x'.repeat(33) }, status: 400 },
+    { name: 'retired variants', body: { ...inlineBody, variants: 2 }, status: 400 },
+    { name: 'single variant', body: { ...inlineBody, variants: 1 }, status: 201 },
+    { name: 'trimmed system prompt at cap', body: { ...inlineBody, systemPrompt: ` ${'x'.repeat(20_000)} ` }, status: 201 },
+    { name: 'system prompt over cap', body: { ...inlineBody, systemPrompt: 'x'.repeat(20_001) }, status: 400 },
+    { name: 'malformed request id', body: { ...inlineBody, clientRequestId: 'bad' }, status: 400 },
+    { name: 'invalid attachment media type', body: { ...inlineBody, images: [{ mediaType: 'audio/wav', data: 'x' }] }, status: 400 },
+    { name: 'empty attachment data', body: { ...inlineBody, images: [{ mediaType: 'text/plain', data: '' }] }, status: 400 },
+    { name: 'too many attachments', body: { ...inlineBody, images: Array.from({ length: 5 }, () => ({ mediaType: 'text/plain', data: 'eA==' })) }, status: 400 },
+    { name: 'unknown keys stripped', body: { ...inlineBody, unknown: true }, status: 201 },
+    ...['model', 'worktree', 'autonomous', 'archiveWhenDone', 'autoMergePr', 'notify'].map((key) => ({
+      name: `invalid ${key} type`, body: { ...inlineBody, [key]: 1 }, status: 400,
+    })),
+  ];
+
+  it.each(validationCases)('POST /runs preserves $name', async ({ body, status, schemaValid }) => {
+    const response = await postJson('/api/v1/runs', body);
+    expect(response.status).toBe(status);
+    expect(createRunInputSchema.safeParse(body).success).toBe(schemaValid ?? (status === 201));
+    if (status === 400) {
+      expect(await response.json()).toHaveProperty('error');
+      expect(captured).toBeUndefined();
+    } else {
+      expect(captured?.task).toBe('work');
+    }
   });
 
   // ---- planSchema.task -----------------------------------------------------

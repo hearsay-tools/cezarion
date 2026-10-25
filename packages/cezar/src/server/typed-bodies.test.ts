@@ -1,6 +1,6 @@
 import type { ExtractSchema } from 'hono/types';
 import { describe, expect, it } from 'vitest';
-import { archiveFinishedRequestSchema, pinRunInputSchema } from '@open-mercato/cezar-contract/runs';
+import { archiveFinishedRequestSchema, createRunInputSchema, pinRunInputSchema } from '@open-mercato/cezar-contract/runs';
 import { permissionDecisionSchema } from '@open-mercato/cezar-contract/permissions';
 import { setWorkspaceUiStateInputSchema } from '@open-mercato/cezar-contract/workspace';
 import type { TeamSkillRef } from '@open-mercato/cezar-contract/skills';
@@ -93,6 +93,11 @@ describe('every mutating route carries a typed body into AppType', () => {
   type _UiStateDisabledTeamSkillsCheck = Assert<
     Mutual<UiStatePutBody['disabledTeamSkills'], TeamSkillRef[] | undefined>
   >;
+
+  type _CreateRunInputChecks = [
+    Assert<Mutual<z.input<typeof createRunInputSchema>, Schema['/api/v1/runs']['$post']['input']['json']>>,
+    Assert<Mutual<z.input<typeof createRunInputSchema>, Schema['/api/v1/p/:projectId/runs']['$post']['input']['json']>>,
+  ];
 
   type _PinInputChecks = [
     Assert<Mutual<z.infer<typeof pinRunInputSchema>, Schema['/api/v1/runs/:id/pin']['$post']['input']['json']>>,

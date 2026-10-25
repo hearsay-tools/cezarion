@@ -190,12 +190,6 @@
     {
       "file": "packages/cezar/src/server/server.ts",
       "rule": "server-declared-validator-schema",
-      "site": "startRunSchema",
-      "count": 1
-    },
-    {
-      "file": "packages/cezar/src/server/server.ts",
-      "rule": "server-declared-validator-schema",
       "site": "uiStateBody",
       "count": 1
     },
