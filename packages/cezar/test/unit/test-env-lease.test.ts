@@ -10,6 +10,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { acquireTestEnvLease } from '../../../../.ai/scripts/test-env-lease.mjs';
 import * as leaseDiagnostics from '../../../../.ai/scripts/test-env-lease.mjs';
 import { requirePid } from '../../src/pid-file.testkit.ts';
+import { checkZombieGroupChurn } from './test-env-lease-churn.testkit.mjs';
 
 // A temporary checkout cannot join the daemon caller's lease in another checkout.
 const fixtureEnv = { ...process.env };
@@ -131,6 +132,9 @@ test('a same-group fork and exit during process enumeration retains the lease', 
   assert.match(result.stdout, /"unrelatedLeaseGranted":false/);
 });
 
+
+// Keep fs scheduling hooks and stopped child ownership out of the test runner.
+test('zombie-only groups under churn retain unknown leases and reclaim stable snapshots', { skip: process.platform !== 'linux' }, checkZombieGroupChurn);
 
 test('lease diagnostics name every holder command in both wait and timeout', async () => {
   const root = mkdtempSync(join(tmpdir(), 'cez-env-diagnostics-'));
