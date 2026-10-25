@@ -3632,51 +3632,21 @@ export class RunManager {
     // has no live/deferred anchor, but orphan settlement still appends its lifecycle event.
     // Prepare only eligible starting generations' families before any repair mutation;
     // retain IDs, never an ownership or execution snapshot, across readiness.
-    const workerIds = familyRootId === undefined ? this.store.listWorkerIds() : this.store.listWorkersOf(familyRootId).map((run) => run.id);
-    const orphanWorkerIds: string[] = [];
-    const orphanFactIds = new Set<string>();
-    for (const id of workerIds) {
-      if (this.store.readWorkerExecution(id)?.phase !== 'starting' || this.store.writeRefusal(id)) continue;
-      const run = this.store.getRun(id);
-      if (run?.delegation?.role !== 'worker' || !inScope(run)) continue;
-      orphanWorkerIds.push(id);
-      for (const member of this.store.listFamilyRunIds(run.delegation.parentRunId)) orphanFactIds.add(member);
-    }
+    const { orphanWorkerIds, orphanFactIds } = this.collectOrphanWorkerGenerations(familyRootId, inScope);
     await this.store.prepareTranscriptFacts(orphanFactIds);
     if (this.disposed) return;
     this.recoveryFactsPending = false;
     // Recovery reads the live set (#779): `listRuns()` is the runs `open` loaded by the `live`
     // column, and finished runs have nothing to recover. The worker passes below go through
     // indexed queries instead.
-    for (const run of this.store.listRuns().filter(inScope)) {
-      // A restarted controller cannot answer an old transport's permission RPC.
-      if (!this.isActive(run.id) && run.hasPendingPermission) {
-        // A permission wait interrupted an unfinished native turn. Route it
-        // through interrupted-turn recovery, never the settled-worker fallback.
-        this.store.updateRun(run.id, { hasPendingPermission: false,
-          ...(run.status === 'waiting' && !run.stopping && !this.workerExecutionStopped(run.id) ? { status: 'running' as const } : {}) });
-      }
-      this.store.clearExpiredInboxClaims(run.id, new Date().toISOString());
-      this.armInboxClaimExpiry(run.id);
-      // #505: the session that accepted this input died before the model read it.
-      // Delivery is at-least-once: the replay keeps the input's ID in its text.
-      if (['queued', 'running', 'waiting'].includes(run.status) && !this.isActive(run.id)) {
-        const replayed = this.store.requeueAwaitingReadInputs(run.id);
-        if (replayed.length) this.store.appendEvent(run.id, { type: 'note', message: `replaying ${replayed.length} message${replayed.length === 1 ? '' : 's'} accepted before the restart but not read` });
-      }
-    }
+    this.recoverUnreadInputs(inScope);
     // #469: a generation whose processes died with the old controller is finalized first, so it
     // re-launches through the ordinary Continue path; live task scratch is retained.
     // Any worker, finished or not, may hold a generation a dead controller left `starting`. Its
     // private proof is read first, so only those workers' records are decoded: settling and
     // re-probing are no-ops for every other proof phase.
     // Another process's workers are its own to settle.
-    for (const id of orphanWorkerIds) {
-      const run = this.store.getRun(id);
-      if (!run || !inScope(run)) continue;
-      if (this.store.readWorkerExecution(id)?.phase === 'starting' && !this.store.writeRefusal(id) &&
-        !this.settleOrphanedWorkerExecution(id)) this.armOrphanReprobe(id);
-    }
+    this.settleOrphanWorkerGenerations(orphanWorkerIds, inScope);
     this.reconcileWorkerWaits(familyRootId);
     const live = this.store
       .listRuns()
@@ -3685,171 +3655,12 @@ export class RunManager {
     // Scratch cleanup discovers private evidence independently of the salvageable run index.
     // Terminal worker cleanup/retries and the generic orphan sweep share this boundary. An
     // adopted family only schedules its own members: the sweep belongs to restart.
-    if (familyRootId === undefined) this.workerScratchCleanup.recover();
-    else for (const run of this.familyMembers(familyRootId)) this.workerScratchCleanup.schedule(run.id);
-    for (let run of live) {
-      if (this.isActive(run.id)) continue;
-      if (this.workerExecutionStopped(run.id)) continue;
-      if (run.delegation?.role === 'worker') {
-        const parent = this.store.getRun(run.delegation.parentRunId);
-        if (parent?.delegation?.role === 'root') {
-          if (['done', 'failed', 'cancelled'].includes(parent.status)) { this.cancel(run.id); continue; }
-          if (parent.status === 'review') continue;
-          if (parent.delegation.finishRequestedAt) continue;
-        }
-      }
-      if (this.rootFinishRequested(run.id)) {
-        await this.settleRequestedRootFinish(run.id);
-        continue;
-      }
-      // A usage-limit hold ran no process, so nothing was interrupted: its waits re-arm and resolve,
-      // and `reconcileAutoResumes` re-arms the resume that delivers them (hearsay-tools/cezarion#1236).
-      if (onUsageLimitHold(run)) {
-        for (const wait of openWaits(run)) this.armWait(run.id, wait);
-        continue;
-      }
-      // A worker no process survived for is a closed session: Cezar's fallback question goes as at an
-      // idle close, and the worker recovers as its plain park did (hearsay-tools/cezarion#1301).
-      if (run.delegation?.role === 'worker' && run.status === 'waiting' && this.supersedeWorkerFallback(run.id)) run = this.store.getRun(run.id)!;
-      // Phase 4b (hearsay-tools/cezarion#1236): attention reads the human wait, so an unanswered ask
-      // an older cezar left without one gets one now, attached to that ask.
-      if (this.adoptTranscriptAsk(run.id)) run = this.store.getRun(run.id)!;
-      // A stored pending-question flag can be stale: the answer's receipt reached the transcript and
-      // the row's save did not. The wait read from it is answered (review of #1437).
-      if (this.settleAnsweredLegacyAsk(run.id)) run = this.store.getRun(run.id)!;
-      // hearsay-tools/cezarion#1234: a crash after a human wait's registration and before its turn
-      // end shows the question now. The run waits on the user, its other waits re-armed.
-      if (this.unsurfacedHumanWait(run.id)) {
-        this.surfaceHumanWait(run.id, undefined);
-        this.store.updateRun(run.id, { status: 'waiting' });
-        for (const wait of openWaits(run)) this.armWait(run.id, wait);
-        continue;
-      }
-      if (run.delegation && run.delegation.role !== 'invalid' && this.hasPendingHumanAsk(run.id)) {
-        this.store.updateRun(run.id, { status: 'waiting' });
-        // A pending question leaves its waits open: they re-arm, and a result still wakes the run.
-        for (const wait of openWaits(run)) this.armWait(run.id, wait);
-        // Only the durable, explicitly human payload may resume an unanswered
-        // question. A refused recovery leaves attention, not terminal failure.
-        if (run.continuationMessage?.origin === 'human') {
-          run = this.checkpointRestartContext(run);
-          this.continueRun(run.id, {}, true);
-        }
-        continue;
-      }
-      // No process survived. Open waits re-arm from their stored deadlines (an overdue timer
-      // resolves now); resolved ones wake through a scheduler-owned continuation after recovery.
-      // A human message no longer withdraws a wait, so an interrupted or queued run with queued
-      // messages still owes their delivery: it recovers as below, with its waits armed
-      // (hearsay-tools/cezarion#1233). A parked one stays parked; its wake folds them in.
-      if (run.waits?.length && !this.hasPendingHumanAsk(run.id) && (run.status === 'waiting' || !run.queuedMessages?.length)) {
-        this.store.updateRun(run.id, { status: 'waiting' });
-        for (const wait of openWaits(run)) this.armWait(run.id, wait);
-        continue;
-      }
-      // A pending question or a queued message leaves the waits open: they re-arm, and a result
-      // still wakes the run.
-      for (const wait of openWaits(run)) this.armWait(run.id, wait);
-      if (run.status === 'queued') {
-        await this.reviveQueuedRun(run, 'cezar restarted');
-        continue;
-      }
-      this.deliverConversationInput(run.id);
-      // Waiting is durable human attention for roots and ordinary top-level
-      // runs. A worker reaches here only when it has neither a recoverable ask
-      // nor a worker wait; preserving that record would strand both it and its
-      // parent because workers cannot accept an ordinary inactive Continue.
-      if (run.status === 'waiting' && (run.delegation?.role !== 'worker' ||
-        run.agentInputs?.some(input => !input.deliveredAt && hasLiveInboxClaim(input)))) continue;
-      if (run.status === 'waiting') {
-        const finishedAt = new Date().toISOString();
-        if (run.invalidAsk) {
-          for (const step of run.steps) if (step.status === 'waiting' || step.status === 'running') {
-            this.store.updateStep(run.id, step.id, { status: 'failed', error: 'invalid structured question', finishedAt });
-          }
-          this.store.updateRun(run.id, { status: 'failed', error: 'invalid structured question', finishedAt, currentStepId: undefined });
-          continue;
-        }
-        if (this.ciWorkflowResumeStepIndex(run) >= 0) {
-          // CI ACK retires the wait, but not the failed workflow source. A closed
-          // worker at this boundary must resume before its remaining checks run.
-          const resumed = this.continueRun(run.id, { text: RESTART_CONTINUATION_PROMPT }, true);
-          this.store.appendEvent(run.id, { type: 'lifecycle', message: resumed.ok
-            ? 'cezar restarted — resuming the worker CI recovery from its last session'
-            : `cezar restarted — could not resume worker CI recovery (${resumed.error ?? 'unknown'})` });
-          continue;
-        }
-        for (const step of run.steps) {
-          if (step.status === 'waiting' || step.status === 'running') {
-            this.store.updateStep(run.id, step.id, { status: 'done', finishedAt });
-          }
-        }
-        this.store.appendEvent(run.id, {
-          type: 'lifecycle',
-          message: 'cezar restarted — the open worker session was settled',
-        });
-        await this.settleSuccess(run.id);
-        continue;
-      }
-      // `running`: the process died mid-turn. Mark it interrupted (the state
-      // continueRun expects), then pick the work back up from the last session.
-      run = this.checkpointRestartContext(run);
-      const interruptedStepId = run.currentStepId;
-      const finishedAt = new Date().toISOString();
-      for (const step of run.steps) {
-        if (step.status === 'running' || step.status === 'waiting') {
-          this.store.updateStep(run.id, step.id, {
-            status: 'failed',
-            error: 'interrupted — cezar process exited during the run',
-            finishedAt,
-          });
-        }
-      }
-      this.store.updateRun(run.id, {
-        status: 'failed',
-        error: 'interrupted — cezar process exited during the run',
-        finishedAt,
-        currentStepId: undefined,
-      });
-      const interruptedIndex = run.workflowDef?.steps.findIndex(step => step.id === interruptedStepId) ?? -1;
-      const interruptedDef = interruptedIndex >= 0 ? run.workflowDef?.steps[interruptedIndex] : undefined;
-      const requeueInput = () => ({ task: run.task, runner: run.runner, model: run.model, effort: run.effort,
-        agentProfile: run.agentProfile, systemPrompt: run.systemPrompt, autonomous: run.autonomous,
-        worktree: run.worktree });
-      // Worktree setup (#917) interrupted before any agent session: there is no session to
-      // continue, so start the workflow over. `execute` sees setup still `running` and reruns it.
-      if (run.workflowDef && run.worktreeSetup?.status === 'running' && !run.steps.some(step => step.sessionId)) {
-        this.store.updateRun(run.id, { status: 'queued', error: undefined, finishedAt: undefined, currentStepId: undefined });
-        this.store.flush();
-        this.pendingJobs.set(run.id, { workflow: run.workflowDef, startAt: 0, input: requeueInput() });
-        this.queue.push(run.id);
-        continue;
-      }
-      if (run.workflowDef && interruptedDef && stepKind(interruptedDef) === 'check') {
-        this.store.updateStep(run.id, interruptedDef.id, { status: 'pending', error: undefined, finishedAt: undefined });
-        this.store.updateRun(run.id, { status: 'queued', error: undefined, finishedAt: undefined, currentStepId: undefined });
-        this.store.flush();
-        this.pendingJobs.set(run.id, {
-          workflow: run.workflowDef,
-          startAt: interruptedIndex,
-          input: requeueInput(),
-        });
-        this.queue.push(run.id);
-        continue;
-      }
-      const resumed = this.continueRun(
-        run.id,
-        {
-          text: run.continuationMessage?.text ?? RESTART_CONTINUATION_PROMPT,
-        },
-        true,
-      );
-      this.store.appendEvent(run.id, {
-        type: 'lifecycle',
-        message: resumed.ok
-          ? 'cezar restarted — resuming the interrupted task from its last session'
-          : `cezar restarted — could not resume the interrupted task (${resumed.error ?? 'unknown'})`,
-      });
+    this.recoverWorkerScratch(familyRootId);
+    for (const run of live) {
+      // Await only what the run hands back, so a run that settles nothing recovers without
+      // yielding to the work an earlier run started.
+      const settling = this.recoverLiveRun(run);
+      if (settling) await settling;
     }
     // Re-arm usage-limit resumes (spec 2026-08-03-auto-resume-after-usage-limit): the wait is
     // routinely longer than a cezar session, so the deadline is durable and the timer is rebuilt
@@ -3867,9 +3678,284 @@ export class RunManager {
     this.recoverWorkerMessages(familyRootId === undefined ? this.liveFamilyMembers() : this.familyMembers(familyRootId), familyRootId);
     // A parent reply accepted just before the crash still answers its worker (#505), and only a
     // live worker takes one.
-    for (const run of this.store.listRuns().filter(inScope)) if (run.delegation?.role === 'worker') this.answerRoutedQuestion(run.id);
+    this.answerRecoveredRoutedQuestions(inScope);
     // The rest re-arms wakes from durable state and is idempotent, so it runs for every live run
     // even after one adopted family: anything the recovery window held back goes out now.
+    this.rearmRecoveredWakes();
+    this.reconcileAutoResumes();
+    void this.pump();
+  }
+
+  /** The workers in scope whose generation a dead controller left `starting`, and the members of
+   *  their families, whose transcript facts recovery prepares before it settles them. */
+  private collectOrphanWorkerGenerations(
+    familyRootId: string | undefined,
+    inScope: (run: RunRecord) => boolean,
+  ): { orphanWorkerIds: string[]; orphanFactIds: Set<string> } {
+    const workerIds = familyRootId === undefined ? this.store.listWorkerIds() : this.store.listWorkersOf(familyRootId).map((run) => run.id);
+    const orphanWorkerIds: string[] = [];
+    const orphanFactIds = new Set<string>();
+    for (const id of workerIds) {
+      if (this.store.readWorkerExecution(id)?.phase !== 'starting' || this.store.writeRefusal(id)) continue;
+      const run = this.store.getRun(id);
+      if (run?.delegation?.role !== 'worker' || !inScope(run)) continue;
+      orphanWorkerIds.push(id);
+      for (const member of this.store.listFamilyRunIds(run.delegation.parentRunId)) orphanFactIds.add(member);
+    }
+    return { orphanWorkerIds, orphanFactIds };
+  }
+
+  /** Recovery's first pass over the live set: the input state a dead controller left behind. */
+  private recoverUnreadInputs(inScope: (run: RunRecord) => boolean): void {
+    for (const run of this.store.listRuns().filter(inScope)) {
+      // A restarted controller cannot answer an old transport's permission RPC.
+      if (!this.isActive(run.id) && run.hasPendingPermission) {
+        // A permission wait interrupted an unfinished native turn. Route it
+        // through interrupted-turn recovery, never the settled-worker fallback.
+        this.store.updateRun(run.id, { hasPendingPermission: false,
+          ...(run.status === 'waiting' && !run.stopping && !this.workerExecutionStopped(run.id) ? { status: 'running' as const } : {}) });
+      }
+      this.store.clearExpiredInboxClaims(run.id, new Date().toISOString());
+      this.armInboxClaimExpiry(run.id);
+      // #505: the session that accepted this input died before the model read it.
+      // Delivery is at-least-once: the replay keeps the input's ID in its text.
+      if (['queued', 'running', 'waiting'].includes(run.status) && !this.isActive(run.id)) {
+        const replayed = this.store.requeueAwaitingReadInputs(run.id);
+        if (replayed.length) this.store.appendEvent(run.id, { type: 'note', message: `replaying ${replayed.length} message${replayed.length === 1 ? '' : 's'} accepted before the restart but not read` });
+      }
+    }
+  }
+
+  /** Settles each orphaned `starting` generation, or re-probes it when its proof does not settle. */
+  private settleOrphanWorkerGenerations(orphanWorkerIds: string[], inScope: (run: RunRecord) => boolean): void {
+    for (const id of orphanWorkerIds) {
+      const run = this.store.getRun(id);
+      if (!run || !inScope(run)) continue;
+      if (this.store.readWorkerExecution(id)?.phase === 'starting' && !this.store.writeRefusal(id) &&
+        !this.settleOrphanedWorkerExecution(id)) this.armOrphanReprobe(id);
+    }
+  }
+
+  /** Restart sweeps every worker's scratch; an adopted family schedules only its own members. */
+  private recoverWorkerScratch(familyRootId: string | undefined): void {
+    if (familyRootId === undefined) this.workerScratchCleanup.recover();
+    else for (const run of this.familyMembers(familyRootId)) this.workerScratchCleanup.schedule(run.id);
+  }
+
+  /**
+   * One live run of the restart loop. Returns the promise the loop must await (a root finish, a
+   * re-queue or a settlement), else `undefined`.
+   */
+  private recoverLiveRun(found: RunRecord): Promise<void> | undefined {
+    if (this.isActive(found.id)) return undefined;
+    if (this.workerExecutionStopped(found.id)) return undefined;
+    if (this.recoveryLeavesWorkerToRoot(found)) return undefined;
+    if (this.rootFinishRequested(found.id)) return this.settleRequestedRootFinish(found.id);
+    // A usage-limit hold ran no process, so nothing was interrupted: its waits re-arm and resolve,
+    // and `reconcileAutoResumes` re-arms the resume that delivers them (hearsay-tools/cezarion#1236).
+    if (onUsageLimitHold(found)) {
+      for (const wait of openWaits(found)) this.armWait(found.id, wait);
+      return undefined;
+    }
+    const run = this.reconcileRecoveredAsk(found);
+    if (this.parkRecoveredRun(run)) return undefined;
+    // A pending question or a queued message leaves the waits open: they re-arm, and a result
+    // still wakes the run.
+    for (const wait of openWaits(run)) this.armWait(run.id, wait);
+    if (run.status === 'queued') return this.reviveQueuedRun(run, 'cezar restarted');
+    this.deliverConversationInput(run.id);
+    if (run.status === 'waiting') return this.recoverClosedWaitingRun(run);
+    this.recoverInterruptedRun(run);
+    return undefined;
+  }
+
+  /** True when a worker's root takes no more work from it: a closed root cancels the worker, and a
+   *  root in review or finishing leaves it as it is. */
+  private recoveryLeavesWorkerToRoot(run: RunRecord): boolean {
+    if (run.delegation?.role !== 'worker') return false;
+    const parent = this.store.getRun(run.delegation.parentRunId);
+    if (parent?.delegation?.role !== 'root') return false;
+    if (['done', 'failed', 'cancelled'].includes(parent.status)) {
+      this.cancel(run.id);
+      return true;
+    }
+    return parent.status === 'review' || Boolean(parent.delegation.finishRequestedAt);
+  }
+
+  /** The run as recovery reads it after it reconciles the run's question state. */
+  private reconcileRecoveredAsk(found: RunRecord): RunRecord {
+    let run = found;
+    // A worker no process survived for is a closed session: Cezar's fallback question goes as at an
+    // idle close, and the worker recovers as its plain park did (hearsay-tools/cezarion#1301).
+    if (run.delegation?.role === 'worker' && run.status === 'waiting' && this.supersedeWorkerFallback(run.id)) run = this.store.getRun(run.id)!;
+    // Phase 4b (hearsay-tools/cezarion#1236): attention reads the human wait, so an unanswered ask
+    // an older cezar left without one gets one now, attached to that ask.
+    if (this.adoptTranscriptAsk(run.id)) run = this.store.getRun(run.id)!;
+    // A stored pending-question flag can be stale: the answer's receipt reached the transcript and
+    // the row's save did not. The wait read from it is answered (review of #1437).
+    if (this.settleAnsweredLegacyAsk(run.id)) run = this.store.getRun(run.id)!;
+    return run;
+  }
+
+  /** True when the recovered run stays parked: on a human wait, a pending question or its waits. */
+  private parkRecoveredRun(run: RunRecord): boolean {
+    // hearsay-tools/cezarion#1234: a crash after a human wait's registration and before its turn
+    // end shows the question now. The run waits on the user, its other waits re-armed.
+    if (this.unsurfacedHumanWait(run.id)) {
+      this.surfaceHumanWait(run.id, undefined);
+      this.parkOnOpenWaits(run);
+      return true;
+    }
+    if (run.delegation && run.delegation.role !== 'invalid' && this.hasPendingHumanAsk(run.id)) {
+      // A pending question leaves its waits open: they re-arm, and a result still wakes the run.
+      this.parkOnOpenWaits(run);
+      // Only the durable, explicitly human payload may resume an unanswered
+      // question. A refused recovery leaves attention, not terminal failure.
+      if (run.continuationMessage?.origin === 'human') {
+        const restarted = this.checkpointRestartContext(run);
+        this.continueRun(restarted.id, {}, true);
+      }
+      return true;
+    }
+    // No process survived. Open waits re-arm from their stored deadlines (an overdue timer
+    // resolves now); resolved ones wake through a scheduler-owned continuation after recovery.
+    // A human message no longer withdraws a wait, so an interrupted or queued run with queued
+    // messages still owes their delivery: it recovers as below, with its waits armed
+    // (hearsay-tools/cezarion#1233). A parked one stays parked; its wake folds them in.
+    if (run.waits?.length && !this.hasPendingHumanAsk(run.id) && (run.status === 'waiting' || !run.queuedMessages?.length)) {
+      this.parkOnOpenWaits(run);
+      return true;
+    }
+    return false;
+  }
+
+  /** Parks a recovered run: `waiting`, with each of its open waits re-armed. */
+  private parkOnOpenWaits(run: RunRecord): void {
+    this.store.updateRun(run.id, { status: 'waiting' });
+    for (const wait of openWaits(run)) this.armWait(run.id, wait);
+  }
+
+  /**
+   * A `waiting` run that did not park. Returns the settlement the loop must await, else
+   * `undefined`.
+   */
+  private recoverClosedWaitingRun(run: RunRecord): Promise<void> | undefined {
+    // Waiting is durable human attention for roots and ordinary top-level
+    // runs. A worker reaches here only when it has neither a recoverable ask
+    // nor a worker wait; preserving that record would strand both it and its
+    // parent because workers cannot accept an ordinary inactive Continue.
+    if (run.delegation?.role !== 'worker' ||
+      run.agentInputs?.some(input => !input.deliveredAt && hasLiveInboxClaim(input))) return undefined;
+    const finishedAt = new Date().toISOString();
+    if (run.invalidAsk) {
+      this.failRecoveredInvalidAsk(run, finishedAt);
+      return undefined;
+    }
+    if (this.ciWorkflowResumeStepIndex(run) >= 0) {
+      // CI ACK retires the wait, but not the failed workflow source. A closed
+      // worker at this boundary must resume before its remaining checks run.
+      const resumed = this.continueRun(run.id, { text: RESTART_CONTINUATION_PROMPT }, true);
+      this.store.appendEvent(run.id, { type: 'lifecycle', message: resumed.ok
+        ? 'cezar restarted — resuming the worker CI recovery from its last session'
+        : `cezar restarted — could not resume worker CI recovery (${resumed.error ?? 'unknown'})` });
+      return undefined;
+    }
+    for (const step of run.steps) {
+      if (step.status === 'waiting' || step.status === 'running') {
+        this.store.updateStep(run.id, step.id, { status: 'done', finishedAt });
+      }
+    }
+    this.store.appendEvent(run.id, {
+      type: 'lifecycle',
+      message: 'cezar restarted — the open worker session was settled',
+    });
+    return this.settleSuccess(run.id);
+  }
+
+  /** A recovered run whose structured question cannot be answered fails with its open steps. */
+  private failRecoveredInvalidAsk(run: RunRecord, finishedAt: string): void {
+    for (const step of run.steps) if (step.status === 'waiting' || step.status === 'running') {
+      this.store.updateStep(run.id, step.id, { status: 'failed', error: 'invalid structured question', finishedAt });
+    }
+    this.store.updateRun(run.id, { status: 'failed', error: 'invalid structured question', finishedAt, currentStepId: undefined });
+  }
+
+  /** A `running` run whose process died mid-turn. */
+  private recoverInterruptedRun(found: RunRecord): void {
+    // `running`: the process died mid-turn. Mark it interrupted (the state
+    // continueRun expects), then pick the work back up from the last session.
+    const run = this.checkpointRestartContext(found);
+    const interruptedStepId = run.currentStepId;
+    const finishedAt = new Date().toISOString();
+    for (const step of run.steps) {
+      if (step.status === 'running' || step.status === 'waiting') {
+        this.store.updateStep(run.id, step.id, {
+          status: 'failed',
+          error: 'interrupted — cezar process exited during the run',
+          finishedAt,
+        });
+      }
+    }
+    this.store.updateRun(run.id, {
+      status: 'failed',
+      error: 'interrupted — cezar process exited during the run',
+      finishedAt,
+      currentStepId: undefined,
+    });
+    if (this.requeueInterruptedRun(run, interruptedStepId)) return;
+    const resumed = this.continueRun(
+      run.id,
+      {
+        text: run.continuationMessage?.text ?? RESTART_CONTINUATION_PROMPT,
+      },
+      true,
+    );
+    this.store.appendEvent(run.id, {
+      type: 'lifecycle',
+      message: resumed.ok
+        ? 'cezar restarted — resuming the interrupted task from its last session'
+        : `cezar restarted — could not resume the interrupted task (${resumed.error ?? 'unknown'})`,
+    });
+  }
+
+  /** True when the interrupted run has no session to continue and goes back to the queue. */
+  private requeueInterruptedRun(run: RunRecord, interruptedStepId: RunRecord['currentStepId']): boolean {
+    const interruptedIndex = run.workflowDef?.steps.findIndex(step => step.id === interruptedStepId) ?? -1;
+    const interruptedDef = interruptedIndex >= 0 ? run.workflowDef?.steps[interruptedIndex] : undefined;
+    const requeueInput = () => ({ task: run.task, runner: run.runner, model: run.model, effort: run.effort,
+      agentProfile: run.agentProfile, systemPrompt: run.systemPrompt, autonomous: run.autonomous,
+      worktree: run.worktree });
+    // Worktree setup (#917) interrupted before any agent session: there is no session to
+    // continue, so start the workflow over. `execute` sees setup still `running` and reruns it.
+    if (run.workflowDef && run.worktreeSetup?.status === 'running' && !run.steps.some(step => step.sessionId)) {
+      this.store.updateRun(run.id, { status: 'queued', error: undefined, finishedAt: undefined, currentStepId: undefined });
+      this.store.flush();
+      this.pendingJobs.set(run.id, { workflow: run.workflowDef, startAt: 0, input: requeueInput() });
+      this.queue.push(run.id);
+      return true;
+    }
+    if (run.workflowDef && interruptedDef && stepKind(interruptedDef) === 'check') {
+      this.store.updateStep(run.id, interruptedDef.id, { status: 'pending', error: undefined, finishedAt: undefined });
+      this.store.updateRun(run.id, { status: 'queued', error: undefined, finishedAt: undefined, currentStepId: undefined });
+      this.store.flush();
+      this.pendingJobs.set(run.id, {
+        workflow: run.workflowDef,
+        startAt: interruptedIndex,
+        input: requeueInput(),
+      });
+      this.queue.push(run.id);
+      return true;
+    }
+    return false;
+  }
+
+  /** Delivers the parent replies routed to each worker in scope. */
+  private answerRecoveredRoutedQuestions(inScope: (run: RunRecord) => boolean): void {
+    for (const run of this.store.listRuns().filter(inScope)) if (run.delegation?.role === 'worker') this.answerRoutedQuestion(run.id);
+  }
+
+  /** Re-arms each live run's waits, or queues the wake it owes. */
+  private rearmRecoveredWakes(): void {
     for (const run of this.store.listRuns()) {
       // A terminal row keeps its waits (and stays live) until something cancels them. A failed run
       // that owes results keeps them for a human, and its open waits still resolve without a wake.
@@ -3879,8 +3965,6 @@ export class RunManager {
       // A message the recovery window held back is a wake of its own (hearsay-tools/cezarion#1235).
       else if (['running', 'waiting', 'queued'].includes(run.status) && this.owesWake(run)) this.queueWaitWake(run.id);
     }
-    this.reconcileAutoResumes();
-    void this.pump();
   }
 
   /**
