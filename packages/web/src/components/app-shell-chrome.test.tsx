@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
+import { useProjectScope } from '@/api/project-scope-context'
 import { AppShell, type AppShellProps } from '@/components/app-shell'
 import type { MobileProjectNav } from '@/components/mobile-projects'
 import { ThemeProvider } from '@/components/theme-provider'
@@ -40,6 +41,12 @@ const projects: MobileProjectNav = {
   ],
   signals: new Map([['cezarion', { needsYou: 0, failedUnread: 0, inMotion: 0, finishedUnread: 0 }]]),
   singleProject: false,
+}
+
+/** Prints the project scope the shell gives the task list slot. */
+function ScopeProbe() {
+  const { projectId, apiBase } = useProjectScope()
+  return <span data-testid="scope">{`${projectId} ${apiBase}`}</span>
 }
 
 const slot = (name: string, root: ParentNode = document) => root.querySelector(`[data-slot="${name}"]`) as HTMLElement | null
@@ -110,6 +117,13 @@ describe('desktop sidebar slots', () => {
     expect(navigation.querySelector('[data-testid="view-sidebar"]')).not.toBeNull()
     expect(slot('task-quick-list', sidebar())).toBeNull()
     expect(sidebar().querySelector('[data-testid="quick-list"]')).toBeNull()
+  })
+
+  it('scopes the task list to the displayed project in the sidebar and the drawer', () => {
+    renderShell('/p/cezarion/', { sidebarProjectId: 'other', taskQuickList: <ScopeProbe /> })
+    expect(sidebar().querySelector('[data-testid="scope"]')?.textContent).toBe('other /api/v1/p/other')
+    openDrawer()
+    expect(drawer()?.querySelector('[data-testid="scope"]')?.textContent).toBe('other /api/v1/p/other')
   })
 
   it('marks Tasks while tasks need you', () => {
