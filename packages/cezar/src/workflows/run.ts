@@ -5275,8 +5275,8 @@ export class RunManager {
     const state = root.delegation.conversation ?? { messages: [], outcomes: [] };
     const selects = (wait: WorkerWaitEntry) => wait.workerIds ? wait.workerIds.includes(workerId)
       : (wait.requestIds ?? []).some(id => state.messages.some(message => message.id === id && message.recipientRunId === workerId));
-    const wait = (root.waits ?? []).find((entry): entry is WorkerWaitEntry => entry.kind === 'worker' && entry.phase === 'open' && selects(entry) &&
-      !state.messages.some(message => message.id === parkNoticeId(workerId, entry.id)));
+    const noticed = (entry: WorkerWaitEntry) => { const id = parkNoticeId(workerId, entry.id); return state.messages.some(message => message.id === id); };
+    const wait = (root.waits ?? []).find((entry): entry is WorkerWaitEntry => entry.kind === 'worker' && entry.phase === 'open' && selects(entry) && !noticed(entry));
     if (!wait) return;
     const turn = parkingTurn(this.store.readEvents(workerId));
     if (turn.startedAt && state.messages.some(message => message.senderRunId === workerId && message.recipientRunId === parentId &&
