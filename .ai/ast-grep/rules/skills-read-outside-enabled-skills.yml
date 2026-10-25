@@ -7,12 +7,16 @@ message: >-
 files:
   - packages/cezar/src/workflows/run.ts
 utils:
-  # The names run.ts gives an ActiveRun: the `state` and `active` parameters and `execution.state`.
-  # Not every `.skills`: `launch.skills` is another object's field.
+  # The ways run.ts reaches an ActiveRun: the `state` and `active` parameters, `execution.state`, and
+  # a direct lookup in the live map, `this.active.get(runId)`, bare or with a `!`. Not every
+  # `.skills`: `launch.skills` is another object's field. A lookup through a cast or a differently
+  # named local is not matched: the rule sees names, not types.
   active-run:
     any:
       - { kind: identifier, regex: '^(state|active)$' }
       - { kind: member_expression, has: { field: property, regex: '^state$' } }
+      - pattern: this.active.get($$$)
+      - { kind: non_null_expression, has: { pattern: this.active.get($$$) } }
 rule:
   all:
     - any:
