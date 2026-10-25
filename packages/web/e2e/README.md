@@ -5,7 +5,8 @@ The specs in this directory drive the built cockpit in a real Chrome through the
 Squeal's slow tier when installed. The root Vitest config exposes the browser project,
 and its `environment.ts` globalSetup uses the same environment bootstrap as the wrapper.
 `npm test` and `npm run test:watch` select only the four unit projects. Browser results
-are keyed by the built server and cockpit in `squeal.config.json`; CI owns the full gate.
+are keyed by the server, cockpit and e2e sources that `squeal.config.json` lists as their
+inputs, not by built output; CI owns the full gate.
 This page is about one thing: how a spec waits. Most red shards on `main`
 and on unrelated pull requests have been sampling races, not product bugs (#369, #393, #394,
 #405, #409), and every one of them looked like a flake until the page state was in hand.
