@@ -1,0 +1,64 @@
+name: Weekly change coupling
+
+on:
+  schedule:
+    - cron: '37 6 * * 1'
+  workflow_dispatch: {}
+
+permissions: {}
+
+concurrency:
+  group: change-coupling-report
+  cancel-in-progress: false
+
+jobs:
+  report:
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Check out trusted report code and history
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+      - name: Generate reports
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { readHistory, countPairs, renderReport, TRACKING_MIN_SHARED, ISSUE_MAX_BYTES } = require('./.github/scripts/change-coupling.cjs');
+            const { owner, repo } = context.repo;
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const { execFileSync } = require('node:child_process');
+            const directory = process.env.RUNNER_TEMP;
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${context.runId}`;
+            fs.writeFileSync(path.join(directory, 'change-coupling.md'), renderReport(countPairs(readHistory()), { repository: `${owner}/${repo}`, minimum: 0.5 }));
+            const preview = execFileSync(process.execPath, ['.github/scripts/change-coupling.cjs',
+              '--minimum-shared', String(TRACKING_MIN_SHARED), '--minimum-degree', '0.5',
+              '--max-bytes', String(ISSUE_MAX_BYTES), '--repository', `${owner}/${repo}`, '--run-url', runUrl], { encoding: 'utf8' });
+            fs.writeFileSync(path.join(directory, 'change-coupling-issue.md'), preview);
+      - name: Upload complete report
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: change-coupling-report
+          path: ${{ runner.temp }}/change-coupling.md
+          retention-days: 90
+          if-no-files-found: error
+      - name: Update tracking issue
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const { updateTrackingIssue } = require('./.github/scripts/change-coupling.cjs');
+            const { owner, repo } = context.repo;
+            const body = require('node:fs').readFileSync(require('node:path').join(process.env.RUNNER_TEMP, 'change-coupling-issue.md'), 'utf8');
+            const url = await updateTrackingIssue({ github, owner, repo, body });
+            core.notice(`Tracking issue: ${url}`);
+            await core.summary.addLink('Change coupling report', url).write();

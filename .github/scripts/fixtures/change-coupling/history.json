@@ -1,0 +1,8 @@
+[
+  {"date":"2026-10-24T12:00:00Z", "files":["src/a.ts","src/b.ts","src/a.test.ts"]},
+  {"date":"2026-10-23T12:00:00Z", "files":["src/a.ts","src/b.ts","src/c.ts"]},
+  {"date":"2026-10-22T12:00:00Z", "files":["src/a.ts","src/c.ts"]},
+  {"date":"2026-10-21T12:00:00Z", "files":["src/b.ts"]},
+  {"date":"2026-07-27T12:00:00Z", "files":["src/boundary.ts","src/a.ts"]},
+  {"date":"2026-07-27T11:59:59Z", "files":["src/old.ts","src/a.ts"]}
+]
