@@ -124,6 +124,23 @@ describe('sidebar reference status (#677)', () => {
 
   it('desktop hover keeps Resolve conflicts reachable and delivers the numbered prompt', () => {
     browser.goto(`${base}/p/${project}`)
+    // Hover the chip only after the sidebar has finished hydrating. Until the project's repository URL
+    // and the forge status arrive, the quick list paints a bare external link and then re-creates every
+    // chip (in-app link, hover card, `data-conflicting`) under a stationary pointer. Chrome answers that
+    // swap with `pointerover` on the new chip, and only sometimes with the `pointerout` on the old target
+    // that React derives `onPointerEnter` from; without it the card's open timer never starts, while CSS
+    // `:hover` still applies. The final form is the chip with its hover card and conflict action.
+    // Evidence: this test failed with "predicate never became truthy: document.querySelector('[data-slot=
+    // "reference-conflict-action"]:not([disabled])') !== null" (bundle
+    // .ai/qa/failures/sidebar-reference-status/desktop-hover-keeps-Resolve-conflicts-reachable-and-delivers-the-numbered-prompt-1/:
+    // probe.json `kind: wait-fn` with no open dialog, snapshot.txt the `conflict#611` link `expanded=false`;
+    // `cockpit-failures-shard-3` artifacts of CI run 40226458126 (job 121268830602) and run 40233020461
+    // (jobs 121289165017 and 121292450976), hearsay-tools/cezarion#1848). Reproduce with the README's
+    // "Specs that boot their own server" delay recipe (GET /health and /projects held 1000 ms) and
+    // `npm run test:e2e -- sidebar-reference-status.e2e.ts -t 'desktop hover keeps Resolve conflicts'` —
+    // 6 of 10 runs failed before (4 with this error, 2 with the underline check below), 10 of 10 passed
+    // after; with no delay, 0 of 10 failed before and 10 of 10 passed after.
+    browser.waitForStable(`document.querySelector('${chip('conflict')}[data-conflicting="true"][aria-haspopup="dialog"]') !== null && window.__cezIdle === true`, { holdMs: 150 })
     hoverVisiblePoint(browser, chip('conflict'))
     browser.waitForFunction(`document.querySelector('[data-slot="reference-conflict-action"]:not([disabled])') !== null`)
     expect(browser.waitForValue(`getComputedStyle(document.querySelector('${chip('conflict')} > span')).textDecorationLine`)).toBe('underline')
