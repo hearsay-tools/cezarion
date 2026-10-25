@@ -67,7 +67,7 @@ export function SidebarProjectHeader({ onNavigate }: { onNavigate?: (() => void)
         triggerRef={menuButtonRef}
         triggerClassName="size-7 max-md:size-11"
         align="start"
-        {...(menuOffset === undefined ? {} : { alignOffset: menuOffset })}
+        alignOffset={menuOffset}
         onOpenChange={(open: boolean) => {
           if (open && markRef.current && menuButtonRef.current) {
             setMenuOffset(markRef.current.getBoundingClientRect().left - menuButtonRef.current.getBoundingClientRect().left)

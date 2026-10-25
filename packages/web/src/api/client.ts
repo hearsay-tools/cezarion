@@ -1193,12 +1193,12 @@ export function runFileRawUrl(id: string, path: string): string {
 
 /** Prepare the server-selected release without interrupting the running cockpit. */
 export async function applyApplicationUpdate(signal?: AbortSignal): Promise<ApplicationUpdateResponse> {
-  return unwrap(await cez.api.v1.workspace['application-update'].apply.$post({ json: {} }, init({ ...(signal === undefined ? {} : { signal }) })), '/workspace/application-update/apply')
+  return unwrap(await cez.api.v1.workspace['application-update'].apply.$post({ json: {} }, init({ signal })), '/workspace/application-update/apply')
 }
 
 /** Acknowledges the restart before the server hands off to its detached helper. */
 export async function restartApplication(signal?: AbortSignal): Promise<ApplicationUpdateResponse> {
-  return unwrap(await cez.api.v1.workspace['application-update'].restart.$post({ json: {} }, init({ ...(signal === undefined ? {} : { signal }) })), '/workspace/application-update/restart')
+  return unwrap(await cez.api.v1.workspace['application-update'].restart.$post({ json: {} }, init({ signal })), '/workspace/application-update/restart')
 }
 
 /**
@@ -2347,7 +2347,7 @@ export async function voiceDecide(input: VoiceDecideRequest, signal?: AbortSigna
   return unwrap(
     await cez.api.v1.p[':projectId'].voice.decide.$post(
       { param: { projectId: queryScope() }, json: input },
-      init({ ...(signal === undefined ? {} : { signal }) }),
+      init({ signal }),
     ),
     '/voice/decide',
   )
