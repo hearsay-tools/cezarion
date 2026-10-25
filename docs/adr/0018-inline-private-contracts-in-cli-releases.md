@@ -20,6 +20,10 @@ A file-list packaging check cannot prove that rewritten declaration imports reso
 packaged test checks runtime specifiers and declarations, including a consumer probe with
 `skipLibCheck` disabled.
 
+Every subpath repoints to one bundle, which exports only the names the contract index
+re-exports. The postbuild step therefore links the emitted JavaScript against the bundle and
+fails the build when an import names a value the bundle lacks.
+
 Implementation: [inline-contract.mjs](../../packages/cezar/scripts/inline-contract.mjs), [release.mjs](../../scripts/release.mjs), [release-snapshot.mjs](../../scripts/release-snapshot.mjs), [stable.ts](../../packages/cezar/src/release/stable.ts).
 
-Coverage: [stable.test.ts](../../packages/cezar/src/release/stable.test.ts), [snapshot.test.ts](../../packages/cezar/src/release/snapshot.test.ts), [inline-contract.test.ts](../../packages/cezar/test/e2e/inline-contract.test.ts).
+Coverage: [stable.test.ts](../../packages/cezar/src/release/stable.test.ts), [snapshot.test.ts](../../packages/cezar/src/release/snapshot.test.ts), [inline-contract.test.ts](../../packages/cezar/test/e2e/inline-contract.test.ts), [inline-contract-check.test.ts](../../packages/cezar/src/inline-contract-check.test.ts).
