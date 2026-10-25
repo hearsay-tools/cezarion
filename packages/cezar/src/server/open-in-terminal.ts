@@ -1,9 +1,9 @@
-import { spawn } from 'node:child_process';
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { shellQuote, withEnvPrefix } from '../core/shell-env.ts';
+import { startAndForget } from '../detached-process.ts';
 import { isWsl, wslDistroName } from './wsl.ts';
 
 /**
@@ -163,29 +163,11 @@ export function refuseSpawnUnderTest(bin: string, args: readonly string[]): void
   );
 }
 
-/** Spawn detached; success = no error within a short settle window. */
-function runDetached(bin: string, args: string[]): Promise<boolean> {
-  return new Promise((resolve) => {
-    refuseSpawnUnderTest(bin, args);
-    let child;
-    try {
-      child = spawn(bin, args, { stdio: 'ignore', detached: true });
-    } catch {
-      resolve(false);
-      return;
-    }
-    let settled = false;
-    const settle = (ok: boolean) => {
-      if (settled) return;
-      settled = true;
-      resolve(ok);
-    };
-    child.once('error', () => settle(false));
-    setTimeout(() => {
-      child.unref();
-      settle(true);
-    }, 250);
-  });
+/** Starts a launcher cezar never stops; success = no spawn error within a short settle window.
+ *  Exported so `open-in-app.ts` launches through the same guard. */
+export async function runDetached(bin: string, args: string[]): Promise<boolean> {
+  refuseSpawnUnderTest(bin, args);
+  return startAndForget(bin, args);
 }
 
 function appleScriptQuote(s: string): string {
