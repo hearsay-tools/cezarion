@@ -267,6 +267,8 @@ try_reuse() {
   url=$(json_get "$ENV_DESCRIPTOR" baseUrl)
   started=$(json_get "$ENV_DESCRIPTOR" startedAt)
   [ "$(json_get "$ENV_DESCRIPTOR" environment.serverEnv)" = "$SERVER_ENV_KEY" ] || { log "not reusing: the requested --server-env set changed (now: $SERVER_ENV_KEY)"; return 1; }
+  [ "$(json_get "$ENV_DESCRIPTOR" environment.serverUserProfile)" = .ai/qa/server-home ] || { log "not reusing: Windows server home isolation changed"; return 1; }
+  [ "$(json_get "$ENV_DESCRIPTOR" environment.serverHome)" = .ai/qa/server-home ] || { log "not reusing: server HOME isolation changed"; return 1; }
   [ "$(json_get "$ENV_DESCRIPTOR" environment.watch)" = "$WATCH_KEY" ] || { log "not reusing: the watcher settings changed (now: $WATCH_KEY)"; return 1; }
   [ "$(json_get "$ENV_DESCRIPTOR" servedRoot)" = "$SERVED_ROOT" ] && [ -d "$SERVED_ROOT" ] || { log "not reusing: the served project is not $SERVED_ROOT"; return 1; }
   { [ -n "$pid" ] && [ -n "$url" ]; } || { log "not reusing: descriptor has no app pid or base URL"; return 1; }
@@ -596,7 +598,11 @@ start_app() {
   # --no-open: a test boot must never hijack the operator's browser.
   # Detach through Node on every host: the cached app survives the caller and is
   # outside the command group retained by a crashed build's lifetime lease.
-  APP_PID=$(cd "$REPO_ROOT" && node "$SCRIPT_DIR/test-env-lease.mjs" detach-app "$APP_LOG" \
+  # Reset only on a cold boot, after teardown and tool setup. Browser/build caches
+  # keep the caller's HOME; only the detached server sees this disposable home.
+  rm -rf "$QA_DIR/server-home"
+  mkdir -p "$QA_DIR/server-home"
+  APP_PID=$(cd "$REPO_ROOT" && HOME="$QA_DIR/server-home" USERPROFILE="$QA_DIR/server-home" node "$SCRIPT_DIR/test-env-lease.mjs" detach-app "$APP_LOG" \
     "$E2E_BUILD_ROOT/dist/index.js" --port "$PORT" --no-open --repo "$SERVED_ROOT")
 
   health_started=$(date +%s)
@@ -664,7 +670,7 @@ write_descriptor() {
       app: { startCommand: cmd, port: Number(port), healthPath: "/api/v1/health", pid: Number(pid) },
       services: [],
       credentials: [],
-      environment: { singleProject: singleProject === "true", serverEnv, watch },
+      environment: { singleProject: singleProject === "true", serverEnv, watch, serverHome: ".ai/qa/server-home", serverUserProfile: ".ai/qa/server-home" },
       browser,
       testRunner: { name: "other", config: "packages/web/e2e/vitest.config.ts" },
       platform,
@@ -672,7 +678,7 @@ write_descriptor() {
       notes: "Booted from the VITE_CEZ_E2E=1 build in .ai/qa/build/cezar (never packages/cezar/dist) after pnpm install --frozen-lockfile with CEZ_DRY_RUN=1, so workspace links/runtime dependencies are present, the agent CLIs are mocked, and no agent login/network is needed. Serves servedRoot, an isolated clone of this checkout. No backing services. Stop with .ai/scripts/test-env-down.sh. App log: .ai/qa/test-env-app.log.",
     }, null, 2) + "\n");
   ' "$ENV_DESCRIPTOR" "$BASE_URL" "$PORT" "$APP_PID" \
-    "${SERVER_ENV:+$SERVER_ENV }CEZ_DRY_RUN=1 CEZ_HOME=.ai/qa/cez-home node $E2E_BUILD_ROOT/dist/index.js --port $PORT --no-open --repo $SERVED_ROOT" \
+    "${SERVER_ENV:+$SERVER_ENV }CEZ_DRY_RUN=1 CEZ_HOME=.ai/qa/cez-home HOME=.ai/qa/server-home USERPROFILE=.ai/qa/server-home node $E2E_BUILD_ROOT/dist/index.js --port $PORT --no-open --repo $SERVED_ROOT" \
     "$BROWSER_INSTALLED" "$BROWSER_COMMAND" "$BROWSER_VERSION" "$BROWSER_NOTES" "$BROWSER_DESCRIPTOR" \
     "$SINGLE_PROJECT" "$(uname -s 2>/dev/null | grep -qi Linux && { grep -qiE 'microsoft|wsl' /proc/version 2>/dev/null && echo wsl2 || echo linux; } || echo darwin)" \
     "$BROWSER_LAUNCH_JSON" "$SERVED_ROOT" "$SERVER_ENV_KEY" "$WATCH_KEY"
