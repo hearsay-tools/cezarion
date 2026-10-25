@@ -147,6 +147,37 @@ test('a shell here-document body is data, in a shell file and in a `run:` block'
   assert.deepEqual(cites('up.sh', 'cat <<EOF\nx # see #150\n# and #151'), []);
 });
 
+test('a here-document closes only at its exact delimiter line', () => {
+  const shell = [
+    'cat <<EOF',
+    '  EOF',
+    'x # see #160',
+    'EOF',
+    '# after (#161)',
+    'cat <<-EOF',
+    '  EOF',
+    'x # see #162',
+    '\t\tEOF',
+    '# after (#163)',
+  ].join('\n');
+  assert.deepEqual(cites('up.sh', shell), ['5:161:comment', '10:163:comment']);
+  const workflow = [
+    'steps:',
+    '  - run: |',
+    '      cat <<EOF',
+    '        EOF',
+    '      ## still the body, #144',
+    '      EOF',
+    '      # after (#145)',
+    '      if true; then',
+    '        cat <<-EOF',
+    '      \tx # see #146',
+    '      \tEOF',
+    '      fi # (#147)',
+  ].join('\n');
+  assert.deepEqual(cites('ci.yml', workflow), ['7:145:comment', '12:147:comment']);
+});
+
 test('reads Markdown prose but not code fences, inline code or qualified links', () => {
   const text = [
     '# Notes',

@@ -93,15 +93,17 @@ function cssSpans(text) {
 
 // `<<WORD`, `<<-WORD`, `<<'WORD'` or `<<"WORD"` opens a here-document; `<<<` is a
 // here-string and `1<<2` a shift.
-const HERE_DOC = /(?<!<)<<(?!<)-?[ \t]*(?:'([^'\n]+)'|"([^"\n]+)"|\\?([A-Za-z_][\w-]*))/y;
+const HERE_DOC = /(?<!<)<<(?!<)(-?)[ \t]*(?:'([^'\n]+)'|"([^"\n]+)"|\\?([A-Za-z_][\w-]*))/y;
 
 /** The end of the here-document body that starts at `from`: the line that holds only its
- *  delimiter. Indentation may come first, because a `run:` block indents every line. */
-function hereDocEnd(text, from, end, word) {
+ *  delimiter, once `indent` columns are gone (a `run:` block indents every line). Only
+ *  `<<-` lets tabs come before the delimiter. */
+function hereDocEnd(text, from, end, doc, indent) {
   for (let lineStart = from; lineStart < end; ) {
     const newline = text.indexOf('\n', lineStart);
     const lineEnd = newline === -1 || newline > end ? end : newline;
-    if (text.slice(lineStart, lineEnd).trimStart() === word) return lineEnd;
+    const line = text.slice(lineStart + indent, lineEnd);
+    if ((doc.tabs ? line.replace(/^\t+/, '') : line) === doc.word) return lineEnd;
     lineStart = lineEnd + 1;
   }
   return end;
@@ -110,13 +112,13 @@ function hereDocEnd(text, from, end, word) {
 /** Steps over what shell reads as data at `i`: an escaped character, a here-document
  *  operator, and at the end of its command line each pending here-document body. Returns
  *  `i` when the character there is none of them. */
-function shellDataEnd(text, i, end, hereDocs) {
+function shellDataEnd(text, i, end, here) {
   if (text[i] === '\\') return i + 1;
-  if (text[i] === '\n') return hereDocs.splice(0).reduce((at, word) => hereDocEnd(text, at + 1, end, word), i);
+  if (text[i] === '\n') return here.pending.splice(0).reduce((at, doc) => hereDocEnd(text, at + 1, end, doc, here.indent), i);
   HERE_DOC.lastIndex = i;
   const match = text[i] === '<' ? HERE_DOC.exec(text) : null;
   if (!match) return i;
-  hereDocs.push(match[1] ?? match[2] ?? match[3]);
+  here.pending.push({ word: match[2] ?? match[3] ?? match[4], tabs: match[1] === '-' });
   return HERE_DOC.lastIndex - 1;
 }
 
@@ -125,14 +127,14 @@ function shellDataEnd(text, i, end, hereDocs) {
  *  (`cmd;#`), and a here-document body is data. A YAML quote opens only at the start of a
  *  token, so the apostrophe in a plain value such as `the fork's rail` stays prose, and a
  *  YAML comment needs whitespace before it. */
-function scanHashComments(text, start, end, shell) {
+function scanHashComments(text, start, end, shell, indent) {
   const spans = [];
-  const hereDocs = [];
+  const here = { indent, pending: [] };
   let quote = null;
   for (let i = start; i < end; i++) {
     const char = text[i];
     const before = i === 0 ? '\n' : text[i - 1];
-    const dataEnd = shell && !quote ? shellDataEnd(text, i, end, hereDocs) : i;
+    const dataEnd = shell && !quote ? shellDataEnd(text, i, end, here) : i;
     if (quote) {
       if (char === '\\' && quote === '"') i++;
       else if (char === quote) quote = null;
@@ -155,27 +157,33 @@ function scanHashComments(text, start, end, shell) {
 // A GitHub Actions `run:` block scalar holds shell: the lines indented past its `run` key.
 const RUN_BLOCK = /^( *)(- +)?run: *[|>][-+0-9]* *(?:#.*)?$/;
 
+// The indentation YAML removes from every line of a block scalar: its first non-blank line's.
+const BLOCK_INDENT = /^(?:[ \t]*\n)*( *)/;
+
 /** YAML comments with YAML rules, and the shell in each `run:` block with shell rules. */
 function yamlCommentSpans(text) {
   const spans = [];
   let regionStart = 0;
   let runColumn = null;
   let offset = 0;
+  const scan = (end, shell) => {
+    const indent = shell ? BLOCK_INDENT.exec(text.slice(regionStart, end))[1].length : 0;
+    spans.push(...scanHashComments(text, regionStart, end, shell, indent));
+    regionStart = end;
+  };
   for (const line of text.split('\n')) {
     if (runColumn !== null && line.trim() !== '' && /^ */.exec(line)[0].length <= runColumn) {
-      spans.push(...scanHashComments(text, regionStart, offset, true));
-      regionStart = offset;
+      scan(offset, true);
       runColumn = null;
     }
     const block = runColumn === null ? RUN_BLOCK.exec(line) : null;
     offset += line.length + 1;
     if (block) {
-      spans.push(...scanHashComments(text, regionStart, offset, false));
-      regionStart = offset;
+      scan(offset, false);
       runColumn = block[1].length + (block[2]?.length ?? 0);
     }
   }
-  spans.push(...scanHashComments(text, regionStart, text.length, runColumn !== null));
+  scan(text.length, runColumn !== null);
   return spans;
 }
 
@@ -272,7 +280,7 @@ const READERS = [
   [/\.(?:[cm]?[jt]s|[jt]sx)$/, scriptSpans],
   [/\.css$/, cssSpans],
   [/\.ya?ml$/, yamlCommentSpans],
-  [/\.(?:sh|bash)$/, (text) => scanHashComments(text, 0, text.length, true)],
+  [/\.(?:sh|bash)$/, (text) => scanHashComments(text, 0, text.length, true, 0)],
   [/\.md$/, proseSpans],
 ];
 const readerOf = (file) => READERS.find(([type]) => type.test(file))?.[1];
