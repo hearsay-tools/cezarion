@@ -37,7 +37,7 @@ Practical rules:
 - A missing dependency, an absent peer, a read-only home: degrade to a smaller working cockpit, never fail the boot.
 - Prefer a proxy-free, daemon-free mechanism when one exists — and when it doesn't, keep the mechanism invisible: no process to manage, no port to remember, no file to edit.
 - Never trade a working default for a knob.
-- Adding, renaming, or removing a `CEZ_*` env var — or changing what its default does — MUST update `.env.example` in the same commit (and the README env table when the var is user-facing). `.env.example` is the env contract's single documentation surface; an undocumented env var is a bug.
+- Adding, renaming, or removing a `CEZ_*` env var — or changing what its default does — MUST update `.env.example` in the same commit (and the README env table when the var is user-facing). `env-example.test.ts` checks source reads against `.env.example`, the env contract.
 
 ## Changing a mechanism that already works
 
@@ -430,7 +430,9 @@ Before you change or review code in an area, read its *Read first* files. An are
 
 ## Validation
 
-A fresh task worktree (`.ai/cezar/worktrees/<runId>`) has no `node_modules`. Run `pnpm install --frozen-lockfile` in that worktree before the commands below, unless the project's `worktreeSetup` already ran it — otherwise Node walks up to the main checkout, `@open-mercato/*` workspace packages resolve there, and typecheck/tests compile against that tree's sources, not this one.
+In a fresh task worktree (`.ai/cezar/worktrees/<runId>`), run `pnpm install --frozen-lockfile` unless `worktreeSetup` already did. Without local `node_modules`, Node resolves `@open-mercato/*` in the main checkout, so typecheck/tests use its sources.
+
+Before adding a YAML, shell or Markdown reader, read [Script readers](docs/sdlc/script-readers.md).
 
 ### Iterate
 
