@@ -289,6 +289,23 @@ function renderAt(entry: string) {
   return client
 }
 
+/** The bare `/github` inside the shell's `main` scroll container, which the workspace geometry
+ *  effect (#523, #754) needs; returns that `main`. */
+function renderGithubInMain(): HTMLElement {
+  render(
+    <QueryClientProvider client={createQueryClient()}>
+      <MemoryRouter initialEntries={['/github']}>
+        <main data-slot="main">
+          <Routes>
+            <Route path="/github" element={<GithubRoute view="issues" index />} />
+          </Routes>
+        </main>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  )
+  return document.querySelector<HTMLElement>('[data-slot="main"]')!
+}
+
 const rows = () => [...document.querySelectorAll<HTMLElement>('[data-slot="gh-row"]')]
 const detail = () => document.querySelector('[data-slot="gh-detail-inner"]')
 const ghList = () => document.querySelector<HTMLElement>('[data-slot="gh-list"]')!
@@ -451,6 +468,56 @@ describe('the GitHub tab lists', () => {
     expect(ghList().className).toContain('md:overflow-x-hidden')
     expect(ghList().className).toContain('md:overflow-y-auto')
     expect(detail.className).toContain('md:overflow-y-auto')
+  })
+
+  // jsdom lays nothing out, so this stubs the docking geometry: a desktop viewport, a workspace
+  // wide enough for columns, and a workspace top below main's top. The real-layout proof stays in
+  // `github-layout.e2e.ts`; this pins which wheel input the route takes over while docking.
+  it('routes wheel input over the panes to main until the workspace docks (#523)', async () => {
+    stubFetch()
+    vi.stubGlobal('matchMedia', (query: string) => ({
+      matches: query === '(min-width: 768px)', addEventListener() {}, removeEventListener() {},
+    }))
+    const clientWidth = Object.getOwnPropertyDescriptor(Element.prototype, 'clientWidth')!.get!
+    const clientHeight = Object.getOwnPropertyDescriptor(Element.prototype, 'clientHeight')!.get!
+    let workspaceTop = 120
+    const spies = [
+      vi.spyOn(Element.prototype, 'clientWidth', 'get').mockImplementation(function (this: Element) {
+        return this.matches('[data-slot="gh-workspace"]') ? 1_200 : clientWidth.call(this)
+      }),
+      vi.spyOn(Element.prototype, 'clientHeight', 'get').mockImplementation(function (this: Element) {
+        return this.matches('[data-slot="main"]') ? 800 : clientHeight.call(this)
+      }),
+      vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+        const top = this.matches('[data-slot="gh-workspace"]') ? workspaceTop : 0
+        return { x: 0, y: top, top, left: 0, right: 0, bottom: top, width: 0, height: 0, toJSON: () => ({}) } as DOMRect
+      }),
+    ]
+    try {
+      const main = renderGithubInMain()
+      let scrollTop = 0
+      Object.defineProperty(main, 'scrollTop', { configurable: true, get: () => scrollTop, set: (value: number) => { scrollTop = value } })
+      await screen.findByRole('heading', { name: 'Issues · All open' })
+      // Columns fit, so the route docks the workspace to main's height.
+      const route = document.querySelector<HTMLElement>('[data-route="github"]')!
+      await waitFor(() => expect(route.style.getPropertyValue('--gh-workspace-height')).toBe('800px'))
+      await waitFor(() => expect(rows().length).toBeGreaterThan(0))
+      const row = rows()[0]!
+      // Pixels, lines and pages all move main; the pane under the pointer does not scroll first.
+      expect(fireEvent.wheel(row, { deltaY: 40 })).toBe(false)
+      expect(fireEvent.wheel(row, { deltaY: 2, deltaMode: 1 })).toBe(false)
+      expect(fireEvent.wheel(row, { deltaY: 1, deltaMode: 2 })).toBe(false)
+      expect(scrollTop).toBe(40 + 2 * 16 + 800)
+      // Zoom, horizontal input, input outside the panes and a docked workspace keep native scrolling.
+      expect(fireEvent.wheel(row, { deltaY: 40, ctrlKey: true })).toBe(true)
+      expect(fireEvent.wheel(row, { deltaX: 50, deltaY: 10 })).toBe(true)
+      expect(fireEvent.wheel(document.querySelector('[data-slot="gh-search"]')!, { deltaY: 40 })).toBe(true)
+      workspaceTop = 1
+      expect(fireEvent.wheel(row, { deltaY: 40 })).toBe(true)
+      expect(scrollTop).toBe(40 + 2 * 16 + 800)
+    } finally {
+      for (const spy of spies) spy.mockRestore()
+    }
   })
 
   it('compacts the phone header so the first result can share the 360×640 viewport (#325)', async () => {
