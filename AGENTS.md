@@ -39,166 +39,86 @@ Practical rules:
 
 ## Changing a mechanism that already works
 
-Replacing working behavior is the highest-risk change in this repo, and it fails in a
+Replacing working behavior is the highest-risk change in this repo. It fails in a
 characteristic way: the new mechanism is correct, the tests are green, the spec is
-thorough — and the DEFAULT path quietly lost a guarantee nobody wrote down. open-mercato/cezar#810 and open-mercato/cezar#811
-are the worked examples; both shipped a well-specified improvement that left the
-zero-config user worse off than before.
+thorough — and the DEFAULT path quietly lost a **load-bearing** guarantee, one that
+other code reaches a correct state *because of*, whether or not anyone wrote it down.
+open-mercato/cezar#810 and open-mercato/cezar#811 both shipped a well-specified
+improvement that left the zero-config user worse off than before.
 
-**Name what the old mechanism was load-bearing FOR, not what it was for.** Those are
-different questions. `IDLE_TIMEOUT_MS` read as session hygiene, and open-mercato/cezar#661 removed it from
-the monitoring branch for a good reason (it was closing live sessions mid-CI and recording
+**Name what the old mechanism was load-bearing FOR, not what it was for.**
+`IDLE_TIMEOUT_MS` read as session hygiene, and open-mercato/cezar#661 removed it from
+the monitoring branch for a good reason (it closed live sessions mid-CI and recorded
 them as `done`). It was also the only liveness bound on `CEZ:MONITORING` and the only
-reason a parked monitor eventually stopped holding a `maxParallel` slot. Neither
-dependency was named in the spec, so neither was replaced, and `monitoring` became a state
-with no exit. Before deleting a timer, lock, cap or timeout, grep for everything that
-reaches a terminal state *because* of it.
+reason a parked monitor released its `maxParallel` slot, so `monitoring` became a
+state with no exit. Before deleting a timer, lock, cap or timeout, grep for
+everything that reaches a terminal state *because* of it.
 
-**Name the guarantee before changing a test’s expected outcome.** When a change edits the expected outcome of an existing parity or regression test, the plan—or the PR body when no plan exists—must name the guarantee the old outcome pinned. Explain how the change replaces that guarantee, or why it is dropped and where the follow-up is tracked. Recording a follow-up does not itself authorize dropping a guarantee. hearsay-tools/cezarion#1662 is the worked example: the P8 `permission-late` cell changed from requiring a late permission card and answer to completing before the card could pend. Review identified the lost guarantee, and the owner chose a follow-up in hearsay-tools/cezarion#1680.
-
-**Preserve queue-head reads when changing queue boundaries.** When splitting,
-merging or re-keying a queue, list every value the old task read when it reached
-the queue head, and read each one again at the head of the new queue. Carry stable
-identity through the queue rather than an earlier copy of mutable settings.
-hearsay-tools/cezarion#1639 is the worked example: dispatch-time snapshots retained
-removed webhooks and stale URL, token and trigger settings until sends started.
-Test the boundary: hold the head task, enqueue another, change the value, release
-the head, and assert what the queued task used. Cover removal or deselection when
-applicable.
+**Name the load-bearing guarantee before changing a test's expected outcome.** When a
+change edits the expected outcome of an existing parity or regression test, the plan —
+or the PR body when no plan exists — names the guarantee the old outcome pinned. It
+explains how the change replaces that guarantee, or why it is dropped and where the
+follow-up is tracked. Recording a follow-up does not itself authorize dropping a
+guarantee (hearsay-tools/cezarion#1662: the P8 `permission-late` cell stopped
+requiring a late permission card; the owner chose follow-up hearsay-tools/cezarion#1680).
 
 **A replacement that ships OFF is not a replacement.** Diff the default path, not the
-feature. The question is always: *with every new knob at its shipped default, what does
-the old scenario do now?* If the answer is "nothing", the change removed a mechanism and
-added a setting. A spec's "Resolved assumptions" table answering a COST question with
-"opt-in, default null" is not an answer to whether the zero-config path still works —
-cost-safe and functional are separate reviews. See § Zero config: *never trade a working
-default for a knob*.
+feature: *with every new knob at its shipped default, what does the old scenario do
+now?* If the answer is "nothing", the change removed a mechanism and added a setting.
+A spec's "Resolved assumptions" table answering a COST question with "opt-in, default
+null" does not show that the zero-config path still works — cost-safe and functional
+are separate reviews. See § Zero config: *never trade a working default for a knob*.
 
-**Enumerate the transitions out of every state you add or keep.** "Who fires this?" is the
-question that finds these bugs in one step. A parked run has exactly three wake sources —
-a user message (`deliverMessage`), the autonomous nudge (turn-end only), and the monitoring
-wake timer. Cezar has no process-exit callback, no CI webhook and no sub-agent-completion
-event, so a state whose only on-by-default exit is "a human types something" is a dead end,
-however well it renders.
+**Preserve queue-head reads when changing queue boundaries.** When splitting, merging
+or re-keying a queue, list every value the old task read when it reached the queue
+head, and read each one again at the head of the new queue. Carry stable identity
+through the queue rather than an earlier copy of mutable settings
+(hearsay-tools/cezarion#1639: dispatch-time snapshots kept removed webhooks and stale
+URL, token and trigger settings until sends started). Test the boundary: hold the head
+task, enqueue another, change the value, release the head, and assert what the queued
+task used. Cover removal or deselection when applicable.
 
-A spec or plan that adds or changes a run state MUST carry a **Transitions out**
-table, reviewed with the spec or plan before implementation starts. Cover every
-state the change adds or keeps, with one row per exit: **State | Trigger | Who or
-what fires it | Behavior at shipped defaults**. A state whose only default exit
-is a human action must say so explicitly in the table; a state with no default
-exit must also say so. For example,
-[the unified-waits spec](.ai/specs/2026-10-17-unified-waits.md) needs this table:
-its list of input mechanisms and exits does not enumerate the transitions out of
-every state the change retains.
+**Enumerate the transitions out of every state you add or keep.** "Who fires this?" is
+the question that finds these bugs in one step. A parked run wakes only through a path
+someone wrote: a human message, the turn-end nudge, the resolution of a durable wait it
+registered (the wait kinds in `packages/contract/src/waits.ts`), conversation input from
+a worker or parent, a usage-limit auto-resume, or native runner activity on a monitoring
+or worker park (`workflows/run.ts`). No other event calls back, so a state whose only
+on-by-default exit is "a human types something" is a dead end, however well it renders. The plan carries a **Transitions out** case table (below).
 
-**Enumerate tool-list kinds before changing a runner's tool flags.** A spec or
-plan that changes how `allowedTools` or `bashAllowlist` maps onto a runner's tool
-flags MUST carry a **Tool-list kinds** table, reviewed with the spec or plan
-before implementation starts. Use one row per kind, for each affected runner:
-**Input kind | Emitted runner flags | Callable built-in, MCP and extension tools
-at shipped defaults**. Show effective tool access, not only the flags sent;
-state when a runner ignores a restriction or cannot distinguish two input kinds.
-
-Cover all of these kinds: `allowedTools` unset; the step default from
-`allowedToolsForStep`; a list inherited from another runner's default (such as a
-pi worker spawned from a Claude parent); a hand-written copy of the default
-list; the default plus an extra built-in or custom name; the default plus an
-`mcp__` name; a narrowed list; an empty list; and a list with a `bashAllowlist`.
-
-hearsay-tools/cezarion#1305 and hearsay-tools/cezarion#1360 are the worked
-example: the pi plan compared rules for recognizing the default list without
-enumerating their inputs. Reviews then found extra MCP names, extra non-default
-names and hand-written default copies with different access implications. The
-table makes those cases explicit for design review; it does not decide which
-ones should share a policy.
-
-**Enumerate worktree cases before changing a running task's files.** A spec or
-plan that adds, replaces or removes files in a running task's worktree MUST carry
-a **Worktree cases** table, reviewed with the spec or plan before implementation
-starts. Skill copies from `packages/cezar/src/skills-provision.ts` and the
-personal config layer from `packages/cezar/src/agent-config/seed.ts` are such
-files. Use one row per case: **Case | Files written, kept or removed | Worktree
-state at the next step, Continue and restart**. State when a case cannot happen,
-and why.
-
-Cover all of these cases: a catalog or source that has not loaded yet; the same
-name from two sources; records written by an older cezar version; a crash between
-two writes (see *Commit an outcome with what it depends on, or after it*); edits
-the agent made to the files, including files it added; and the source removing
-the item.
-
-hearsay-tools/cezarion#1494 and hearsay-tools/cezarion#1539 are the worked
-example. The hearsay-tools/cezarion#1494 design enforced switched-off team skills
-in provisioning, but did not say what happens to copies already in a running
-task's worktree. Three fix rounds tried to remove them on Continue, and each
-review found a new case: an enabled copy deleted while its source was still
-loading, duplicate names across sources, older manifest entries with no recorded
-source, a crash between the removal and the replacement write, and agent edits
-lost to a full re-install. The code was reverted, and hearsay-tools/cezarion#1539
-now holds the five cases.
-
-**Enumerate process exits before starting a background process.** A spec or
-plan that starts a process which outlives the command that started it MUST carry
-a **Process exits** table, reviewed with the spec or plan before implementation
-starts. Detached servers, watchers and daemons are such processes. Use one row
-per case: **Case | What stops it | Behavior at shipped defaults**. State when a
-case cannot happen, and why.
-
-Cover all of these cases: the normal stop; the starting command interrupted by
-SIGINT or SIGKILL in each phase, before and after the process starts; the leader
-exits before its children; a member ignores SIGTERM; members stay zombies because
-their parent never reaps them; the start identity cannot be read; the leader's
-PID is reused; and the handle the stop reads, such as a descriptor or lock file,
-is deleted or forged.
-
-hearsay-tools/cezarion#1406 and PR hearsay-tools/cezarion#1708 are the worked
-example. The plan named only the normal stop. Five review rounds then found
-children outliving the leader, an unconfirmed descriptor, an unreadable start
-identity, a zombie-only group and an interrupted boot. The table makes those
-cases explicit before implementation starts.
-
-**Commit an outcome with what it depends on, or after it.** A write that records
-an outcome (`delivered`, `charged`, `settled`, `answered`) must commit atomically
-with the write holding what that outcome needs, or after that write commits.
-Check every crash boundary between the writes: a delivered answer must already
-be saved, and a delivered automatic wake must already be charged. A best-effort
-write in a cleanup path must never throw past the cleanup and prevent it from
-finishing. Test the boundary by reading the **committed row** at the point a crash
-would hit, rather than checking only the final state or the in-memory object.
-hearsay-tools/cezarion#1250 is the worked example: its review caught a wake delivered
-without its charge, a counter write blocking Finish, and a Continue settling its
-human wait before saving `continuationMessage`.
+**Commit an outcome with what it depends on, or after it.** A write that records an
+outcome (`delivered`, `charged`, `settled`, `answered`) must commit atomically with the
+write holding what that outcome needs, or after that write commits. Check every crash
+boundary between the writes: a delivered answer must already be saved, and a delivered
+automatic wake must already be charged. A best-effort write in a cleanup path must
+never throw past the cleanup and prevent it from finishing. Test the boundary by
+reading the **committed row** at the point a crash would hit, rather than checking only
+the final state or the in-memory object (hearsay-tools/cezarion#1250: a wake delivered
+without its charge, a counter write blocking Finish, a Continue settling its human wait
+before saving `continuationMessage`).
 
 **Test the path with no live session.** When changing a path that reads
-`this.active.get(runId)`, add a test with no session. Restart recovery and
-scheduler continuations can reach the path before a session exists; an absent
-entry must still produce the required durable outcome and a usable next step.
-hearsay-tools/cezarion#1250 is the worked example: recovery used wording that assumed
-cezar tools, a timer resumed a continuation without its tool controller, and a
-wake at the budget cap cancelled its timer without opening the budget wait.
+`this.active.get(runId)`, add a test with no session. Restart recovery and scheduler
+continuations can reach the path before a session exists; an absent entry must still
+produce the required durable outcome and a usable next step (hearsay-tools/cezarion#1250:
+recovery wording that assumed cezar tools, a timer resuming a continuation without its
+tool controller, a budget-cap wake cancelling its timer without opening the budget wait).
 
 **Find every construction site of a shared in-memory object — grep the TYPE, not the
-field.** `ActiveRun` is built in `execute` AND in `runContinuation`; open-mercato/cezar#811 populated
-`state.skills` in the first only, so registry `/skill` expansion worked on new tasks and
-silently failed on every Continue and every restart recovery. The same shape recurs in the
-fresh step's and the Continue's turn-end handlers in `workflows/run.ts` (`runAgentStep` and
-`runContinuation`): a lifecycle change applied to one of them ships half a fix. When you add
-a field that a delivery path reads, add it everywhere in the same commit or route both sites
-through one helper.
+field.** `ActiveRun` is built in `execute` AND in `runContinuation`;
+open-mercato/cezar#811 populated `state.skills` in the first only, so registry `/skill`
+expansion silently failed on every Continue and every restart recovery. When you add a
+field that a delivery path reads, add it everywhere in the same commit or route both
+sites through one helper.
 
-**List each handler's side effects, in order, before you merge handlers into one.** Each
-handler carries its own order of side effects, and the merged method can lose one step of
-that order while every test stays green. Before you merge several handlers into one method,
-list what each handler does, in order, for each entry and each case. Name its input
-delivery, the timers or waits it opens, the gates it calls and the heartbeat or note it
-writes. Pin each line with a test, or name the test row that already covers it, before you
-delete the handler. hearsay-tools/cezarion#1534 is the worked example: it merged the twin
-turn-end blocks, `applyTurnEnd`, `parkAtTurnEnd`, `refuseCompletion` and
-`takeCompletionRefusal` into `settleTurn`, and two review rounds each found a lost
-guarantee. `refuseCompletion` left a mid-turn refusal to the live turn end; the new `gate`
-entry settled it at once, so it skipped queued input and parked before the turn ended.
-`applyTurnEnd` opened the monitoring timer for a turn that also carried an ask line; the
-new method opened it only after the input step, which an ask skips.
+**List each handler's side effects, in order, before you merge handlers into one.** The
+merged method can lose one step of a handler's order while every test stays green. For
+each entry and each case, list what each handler does, in order: its input delivery,
+the timers or waits it opens, the gates it calls, and the heartbeat or note it writes.
+Pin each line with a test, or name the test row that already covers it, before you
+delete the handler (hearsay-tools/cezarion#1534: merging the turn-end handlers into
+`settleTurn` settled a mid-turn refusal before the turn ended, and skipped the
+monitoring timer for a turn that also carried an ask).
 
 **A fail-open helper needs a populated-input guarantee, or it lies.**
 `expandRegistrySlashSkill` returning its input unchanged on no-match is right on its own —
@@ -213,104 +133,146 @@ every silent pass-through with a test that pins the *empty/absent input* case.
 after the diagnosis can pass against the bug; a green-either-way test does not prove
 the fix. Keep the guard tests that pass both ways — they pin behavior you did NOT
 want to change (park mode stays reachable; unknown slashes stay untouched) — but
-know which is which. Do not use the shared stash stack for this proof.
+know which is which. A **test-only change that removes a hidden dependency** (on a
+catalog, a host setting or a default the test did not write) needs this proof even
+when no failure has been observed. Run the proof in a disposable worktree or an
+ignored scratch copy, never through the shared stash stack:
+[`docs/sdlc/regression-proof.md`](docs/sdlc/regression-proof.md) has the recipes for
+a source fix, a test-only fix and a removed hidden dependency, and how to cite the
+evidence.
 
-For a **source fix**, run the new regression test against the old source in a
-disposable worktree. From the repo root, replace the example commit and paths:
+**Read the run-history evidence before theorizing, and cite it.** `.ai/specs/` records
+the design, `git log -S` and `git merge-base --is-ancestor <commit> <tag>` settle "was
+this in the release the user is on", and a user's "it worked in 0.9.1" is a testable
+claim, not an opinion. open-mercato/cezar#810 was confirmed in one command before a
+line of code was read.
 
-```bash
-proof_base=<pre-fix-commit>
-proof_repo=$(git rev-parse --show-toplevel)
-proof_dir=$(mktemp -d "${TMPDIR:-/tmp}/cezar-red-proof.XXXXXX")
-git worktree add --detach "$proof_dir/tree" "$proof_base"
-(cd "$proof_dir/tree" && pnpm install --frozen-lockfile)
-# Copy the current regression test, plus any new test helpers/fixtures it needs.
+### Case tables
 
-cp packages/cezar/src/path/to/regression.test.ts \
-  "$proof_dir/tree/packages/cezar/src/path/to/regression.test.ts"
-(cd "$proof_dir/tree" && npm test -- --passWithNoTests=false packages/cezar/src/path/to/regression.test.ts)
-# Inspect the failure: it must show the reported defect, not a broken import/setup.
+Some changes fail in cases nobody listed. For these changes the spec or plan MUST
+carry a **case table**, reviewed with the spec or plan before implementation starts:
+one row per case, every required case covered, behavior shown at shipped defaults,
+and a case that cannot happen stated with the reason.
 
-# Copy only the fixed source files into the scratch tree; keep the same test.
+| Change | Table and columns | Required cases |
+| --- | --- | --- |
+| Adds or changes a run state | **Transitions out**: State · Trigger · Who or what fires it · Behavior at shipped defaults | One row per exit of every state the change adds or keeps. Say so explicitly when a state's only default exit is a human action, and when it has no default exit. |
+| Changes how `allowedTools` or `bashAllowlist` maps onto a runner's tool flags | **Tool-list kinds**, one per affected runner: Input kind · Emitted runner flags · Callable built-in, MCP and extension tools at shipped defaults | `allowedTools` unset; the step default from `allowedToolsForStep`; a list inherited from another runner's default (such as a pi worker spawned from a Claude parent); a hand-written copy of the default list; the default plus an extra built-in or custom name; the default plus an `mcp__` name; a narrowed list; an empty list; a list with a `bashAllowlist`. Show effective tool access, not only the flags sent, and say when a runner ignores a restriction or cannot distinguish two kinds. |
+| Adds, replaces or removes files in a running task's worktree, such as skill copies from `packages/cezar/src/skills-provision.ts` or the personal config layer from `packages/cezar/src/agent-config/seed.ts` | **Worktree cases**: Case · Files written, kept or removed · Worktree state at the next step, Continue and restart | A catalog or source that has not loaded yet; the same name from two sources; records written by an older cezar version; a crash between two writes (see *Commit an outcome with what it depends on, or after it*); edits the agent made to the files, including files it added; the source removing the item. |
+| Starts a process that outlives the command that started it: a detached server, watcher or daemon | **Process exits**: Case · What stops it · Behavior at shipped defaults | The normal stop; the starting command interrupted by SIGINT or SIGKILL in each phase, before and after the process starts; the leader exits before its children; a member ignores SIGTERM; members stay zombies because their parent never reaps them; the start identity cannot be read; the leader's PID is reused; the handle the stop reads, such as a descriptor or lock file, is deleted or forged. |
 
-cp packages/cezar/src/path/to/source.ts \
-  "$proof_dir/tree/packages/cezar/src/path/to/source.ts"
-(cd "$proof_dir/tree" && npm test -- --passWithNoTests=false packages/cezar/src/path/to/regression.test.ts)
-# After saving the evidence, clean up even if setup or a test failed.
+Each table exists because a plan named only the obvious case and review rounds found
+the rest: hearsay-tools/cezarion#1305 and hearsay-tools/cezarion#1360 (tool lists with
+extra MCP names and hand-written default copies), hearsay-tools/cezarion#1494 and
+hearsay-tools/cezarion#1539 (three fix rounds on switched-off skill copies, then a
+revert), hearsay-tools/cezarion#1406 and PR hearsay-tools/cezarion#1708 (five review
+rounds on process exits). The table makes the cases explicit for design review; it
+does not decide which ones share a policy. The phase tables in
+[the unified-waits spec](.ai/specs/2026-10-17-unified-waits.md) (§ Transitions out
+(phase 2a) and later) show the form.
 
-git -C "$proof_repo" worktree remove --force "$proof_dir/tree"
-rmdir "$proof_dir"
-```
+<a id="reader-sweep"></a>
 
-Create destination directories for new test paths as needed. Keep the package's
-setup and environment; a scratch worktree needs its own dependency installation,
-not a symlink to another checkout's workspace packages. Do not start Squeal in
-this disposable tree. Run the fixed test in the task worktree too (through Squeal
-when it is validating) so the proof does not replace normal verification.
+### Reader sweep
 
-A **test-only change that removes a hidden dependency** needs this proof even
-when no failure has been observed. This includes dependence on a catalog, a host
-setting or a default the test did not write. Run the old test with that dependency
-absent and confirm it fails for that reason, then run the fixed test under the
-same conditions and confirm it passes. Cite the evidence in a comment at the
-changed test site, using the [E2E provenance form](packages/web/e2e/README.md#the-rules-the-ratchet-enforces):
-the reproduction command and conditions, and both before/after counts with their
-totals. For browser failures, include the full failure-bundle leaf path and a
-durable citation as that form requires; for non-browser tests, cite the captured
-runner output instead.
+A change to a shared name, value or default needs a **reader sweep**: find every reader
+of the thing you changed — code, unit tests, browser specs, packaged fixtures, messages
+that name it — and update each one, or state in the plan or PR why it stays. Search for
+the old and the new form, because a reader can assert that something is present or that
+it is absent. Inspect every match: common names match unrelated text, and compatibility
+names, intentional refusal tests, legacy-row conversion tests and historical references
+stay. The construction-site rule above is the sweep for a shared in-memory object, and
+the Task routing rows for run search, pending asks and skills list their readers.
 
-For a **test-only fix**, reproduce the old test's defect under the same conditions
-as the fixed test. There is no source fix to remove. Keep both versions out of the
-watched test paths: create an ignored scratch copy with `git show`, then select it
-with an explicit scratch Vitest config. For a server test, from the repo root:
+Where readers hide, searched from the repo root (replace the example values):
 
-```bash
-proof_base=<pre-fix-commit>
-mkdir -p .ai/qa
-proof_dir=$(mktemp -d .ai/qa/red-proof.XXXXXX)
-git check-ignore "$proof_dir/before.test.ts"
-git show "$proof_base:packages/cezar/src/path/to/test.test.ts" > "$proof_dir/before.test.ts"
-```
+- **A `RunRecord` field renamed, moved or removed**: packaged and browser fixtures, by
+  its old and new names or paths (hearsay-tools/cezarion#1300).
 
-In that directory, write `vitest.config.ts` with this content:
+  ```bash
+  rg -l -F -e 'delegation.wait' -e 'waits' packages/cezar/test/e2e/*.test.ts packages/web/e2e/*.e2e.ts
+  ```
 
-```typescript
-import { fileURLToPath } from 'node:url'
-import { defineConfig } from 'vitest/config'
-import server from '../../../packages/cezar/vitest.config.ts'
+- **An enum or discriminant value renamed** (a wait kind, outcome, status or attention
+  label): the quoted old value in tests, searched before each push that renames one,
+  not only before the PR opens. A rejection test that passes only because the
+  old value is now unknown must be updated to test its intended constraint
+  (hearsay-tools/cezarion#1504).
 
-export default defineConfig({
-  ...server,
-  root: fileURLToPath(new URL('../../../packages/cezar/', import.meta.url)),
-  test: {
-    ...server.test,
-    include: [fileURLToPath(new URL('./before.test.ts', import.meta.url))],
-    passWithNoTests: false,
-  },
-})
-```
+  ```bash
+  rg -n -F -e "'ci'" -e '"ci"' packages --glob '*.test.*' --glob '*.e2e.ts'
+  ```
 
-Adapt the package config for other workspaces. In the scratch test, adjust relative
-imports and fixture paths to their original absolute locations; account for uses
-of `import.meta.url` and colocated mocks too. Preserve the assertions and the
-reproduction conditions. Run `npm test -- --config "$proof_dir/vitest.config.ts"`.
-Inspect the failure, then replace only the scratch test with the fixed version,
-apply the same path adjustments, and run the same command for green. A load-related
-failure needs its original load or a controlled reproduction; an unrelated import
-error, empty test selection or ordinary passing run is not red proof. Scratch tests
-outside a package root can lose `console.log` output; use assertion failures and
-captured runner output as evidence, not the presence or absence of a log line.
-Remove the scratch test and config after saving the evidence (`rm -r "$proof_dir"`).
+- **A default removed** (a catalog, a source or a seeded entry): browser specs, by its
+  entry names, source names and the `data-slot` of each list or view that renders those
+  entries — a spec can depend on how many entries a list holds without naming any of
+  them. A spec that counts, lists or scrolls the default's entries must seed its own, as
+  [the e2e README](packages/web/e2e/README.md#seed-the-catalog-entries-a-spec-relies-on)
+  says (hearsay-tools/cezarion#1541 broke `settings-skills.e2e.ts` only in CI, through
+  its scroll case; hearsay-tools/cezarion#1572).
 
-These recipes leave the task's tracked source and test files in place, so Squeal
-never runs a temporarily swapped version. Ignoring a scratch file alone does not
-exclude it from a test runner: keep it outside the package's test include patterns
-and use the explicit scratch config only for the manual proof.
+  ```bash
+  rg -l -F -e 'open-mercato/skills' -e 'skill-row' packages/web/e2e/*.e2e.ts
+  ```
 
-**Read the run-history evidence before theorizing, and cite it.** `.ai/specs/` records the
-design, `git log -S` and `git merge-base --is-ancestor <commit> <tag>` settle "was this in
-the release the user is on", and a user's "it worked in 0.9.1" is a testable claim, not an
-opinion. open-mercato/cezar#810 was confirmed in one command before a line of code was read.
+- **Cockpit source changed**: browser specs, by the `data-slot`, `data-streamdown` and
+  `data-testid` values and distinctive class names that the changed file and the local
+  components it imports render. No tool maps a cockpit change to its specs:
+  `npm run test:changed` holds no browser spec, and Squeal's browser-spec inputs include
+  all of `packages/web/src/**`, so an edit marks every spec stale and names none. Walk
+  down to what the file renders, never up to what renders it: going up reaches most of
+  the suite. Shared renderers such as `packages/web/src/routes/task-thread/markdown.tsx`
+  and `packages/web/src/components/diff/*` matter most, because one edit reaches specs
+  written for other features — `markdown.tsx` renders no `data-slot`, yet an edit to it
+  broke `artifact-project-links.e2e.ts` through its siblings `task-link.tsx` and
+  `link-safety-dialog.tsx` (hearsay-tools/cezarion#1076).
+
+  ```bash
+  grep -lE 'link-safety|data-streamdown|thread-markdown' packages/web/e2e/*.e2e.ts
+  ```
+
+- **Visible copy added, renamed or removed** (a label, a tab, a heading, a button, an
+  empty state): browser specs, by the new and the old string; the attribute search does
+  not find text assertions (hearsay-tools/cezarion#1335: the attribute search found
+  `quick-list.e2e.ts` and `mobile-task-controls.e2e.ts`, but `automations.e2e.ts`, which
+  asserts the sidebar does not show "Automations" while the feature is off, failed in CI).
+
+  ```bash
+  grep -lF 'Automations' packages/web/e2e/*.e2e.ts
+  ```
+
+- **A cockpit control renamed or removed**: server and contract sources, by its old label
+  and the navigation text that led to it. Update messages that tell users where to find
+  the control, including API errors, CLI output and agent prompts; do not replace every
+  match blindly (hearsay-tools/cezarion#1639: `NO_WEBHOOK_ERROR` still named the removed
+  "Task webhook" control).
+
+  ```bash
+  rg -n -F -e 'Task webhook' -e 'Settings → General →' packages/cezar/src packages/contract/src
+  ```
+
+- **Dry-run turn-end behavior changed** — the `packages/cezar/scripts/mock-*.mjs` mocks,
+  the turn-end rule, attention, or the human-ask summary: the browser and packaged
+  fixtures that drive a dry-run task to a park (hearsay-tools/cezarion#1251). A
+  `mock-*.mjs` edit counts when it changes the frames that an existing `mock:<scenario>`
+  sends, or where that scenario's turn ends, for the configuration a runner sends at
+  shipped defaults. A new scenario does not count, and neither does a branch that the
+  shipped configuration never reaches, such as one for a misconfigured runner or for a
+  configuration no runner sends yet (hearsay-tools/cezarion#1334). When a mock edit does
+  not count, the PR's Verification section says why.
+
+  ```bash
+  P="waitForStatus\([^)]*'waiting'|hasPendingHumanAsk|attentionLabel|'mock:"
+  grep -lE "$P" packages/web/e2e/*.e2e.ts packages/cezar/test/e2e/*.test.ts
+  ```
+
+Require passing results for the specs and fixtures the sweep selects. Read browser specs
+through Squeal (`squeal status --wait 60000 <files>`, then `squeal run --slow --wait 60000`
+if slow results are not current), or without it run `npm run test:e2e -- <specs>` (one
+call takes several specs). Run packaged fixtures by hand after a fresh build
+(§ Validation → *Packaged CLI E2E runs by hand*). Dry-run park fixtures also need the
+unit parity suites in
+[Runner regressions ship with shared coverage](#runner-regressions-ship-with-shared-coverage).
 
 ## Runner regressions ship with shared coverage
 
@@ -391,11 +353,9 @@ admits never comes back a 400 from the handler, and `AppType` never promises an 
 turns away. Export a shared rule ONCE from `packages/contract` and use that constant in the schema,
 the handler and the cockpit; the handler never refuses, on shape alone, a value the schema let
 through. What a schema cannot know — a name already taken, a run another process holds — stays the
-handler's to refuse. hearsay-tools/cezarion#1081 is the worked example: its create-project body
-first matched the name against GitHub's repository-name characters, which admit a leading `-`, `.`
-or `_`, and the handler then refused those names through `isValidCheckoutName`. The fix there
-exports one project-name pattern from the contract, and the schema, the handler and the New project
-dialog all test against it.
+handler's to refuse. In hearsay-tools/cezarion#1081 the create-project schema admitted names the
+handler refused through `isValidCheckoutName`; one project-name pattern exported from the contract
+now serves the schema, the handler and the New project dialog.
 
 Import a contract VALUE from the module that defines it, never through a package root. The
 service writes `@open-mercato/cezar-contract/<module>`. The cockpit writes
@@ -453,9 +413,9 @@ Rules that follow from that:
 | GitHub integration (issues/PRs tab, draft PRs)                                                                                                                                                                | `packages/cezar/src/server/github.ts`, `packages/cezar/src/server/pr.ts`                                                                                                                                                                                                    | Must degrade gracefully: no `gh`, no remote, offline all return `{ available: false, reason }` — never an error. `gh … --json` output is zod-validated at the boundary. `GITHUB_TOKEN` is the fallback when `gh` isn't authenticated. `createDraftPr` never throws; failures map to one-line human errors. `CEZ_DRY_RUN=1` fakes the PR URL.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Automations (GitHub polls and schedules) | `packages/cezar/src/automations/`, then `packages/contract/src/automations.ts`, `packages/contract/src/automation-schedule.ts`, the automations family in `packages/cezar/src/server/server.ts`, `packages/web/src/routes/automations/`, and `.ai/specs/2026-10-02-scheduled-automations.md` | Opt-in behind `CEZ_AUTOMATIONS=1`; the gate middleware answers `409` otherwise. Two kinds: `github` polls, `schedule` fires on the clock and needs no remote. A schedule fire takes the hearsay-tools/cezarion#651 store lease, reserves one receipt per occurrence (`<id>:schedule:<iso>`), launches an ordinary task, and never advances `nextRunAt` on a lost lease. At most one catch-up inside 24 h, auto-pause after 3 consecutive launch failures. `setState` is a read-modify-write against a fresh disk read. No `task.dispatch`, no default-on. Stage 2 (hearsay-tools/cezarion#774): `cez automation` (`automations/automation-cli.ts`) reaches the cockpit through `CEZ_COCKPIT_URL`/`CEZ_PROJECT_ID`, which the boot manager receives at construction (`serve` binds its listener before it recovers, so recovered runs carry it) and every other project's manager receives from `startServer` via `RunManager.setCockpitAddress`; it never starts a server or probes ports on its own. The prompt part and the built-in `create-cezarion-automation` skill share ONE gate (`CEZ_AUTOMATIONS=1` AND an address): add any new skill lookup through `RunManager.builtinSkills()` and any new session construction site through `automationsPart()`. Templates, calendars and stats are stage 3. |
 | Workflows (YAML chains, steps, retries)                                                                                                                                                                       | `packages/cezar/src/workflows/types.ts`, then `packages/cezar/src/workflows/load.ts`, `packages/cezar/src/workflows/run.ts`                                                                                                                                                                | A step is agent (`prompt`/`skill`) XOR check (`command`); a file has `steps` XOR the portable `skills` shorthand — both enforced by zod refinements. `onFail.retry` may only reference an _earlier_ step (`stepsIssue`). `{{task}}` is the substitution token. `quick-task` is the built-in zero-config workflow; built-ins always come back after delete.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-| Run search (project tasks, All tasks, archived pages and ⌘K) | `packages/web/src/lib/tasks-table.ts`, `packages/web/src/routes/tasks-overview.tsx`, `packages/web/src/lib/global-tasks.ts`, `packages/web/src/routes/global-tasks.tsx`, then `packages/cezar/src/runs/run-search.ts`, `packages/cezar/src/server/server.ts`, `packages/cezar/src/runs/store.ts`, `packages/cezar/src/runs/run-index.ts` | `filterRuns` (`tasks-table.ts`) filters the project task list in `tasks-overview.tsx`. `haystack`, `filterGlobalTasks` and `tasksExcludingFacet` (`global-tasks.ts`) feed the All tasks list and its facet counts in `global-tasks.tsx`. On the server, `matchesRunQuery` and `sqlPrefilterTokens` (`run-search.ts`) serve `GET /api/v1/run-summaries/archived` (`server.ts`), `RunStore.searchRunSummaries` (`store.ts`) and the cold reader `searchRunIndexFromDisk` (`run-index.ts`) for the ⌘K palette. A new search field must reach every reader, or the change must explain why a reader leaves it out. Preserve intentional differences: the palette excludes automation names because it shows no origin line, and the SQL prefilter must not discard a match the final predicate accepts. hearsay-tools/cezarion#1637 is the worked example: archived pages, All tasks facet counts and server archive search each needed a follow-up fix. |
-| Pending asks (`cezar_ask`, the ask card, a new field on the ask) | `packages/cezar/src/workflows/run.ts`, then `packages/cezar/src/runs/transcript-facts-fold.ts`, `packages/cezar/src/delegation/questions.ts`, `packages/web/src/routes/task-thread/thread-state.ts`, `packages/cezar/src/task-cli/projections.ts` | A pending ask has four kinds of reader. `workflows/run.ts` opens the human wait and emits the `ask.requested` event. `runs/transcript-facts-fold.ts` and `delegation/questions.ts` route a worker's question to its parent. `routes/task-thread/thread-state.ts` builds the cockpit ask card. `task-cli/projections.ts` (`projectStatus`, fed by `pendingQuestion` in `task-cli/cli.ts` and `runs/webhook.ts`) feeds `cez task status` and the task webhook; these read the `ask.requested` event, not the human wait, so a design that follows the wait misses them. A field added to the ask card must reach every reader, or the spec must say why a reader leaves it out. hearsay-tools/cezarion#1471 is the worked example: its `context` field missed the CLI and webhook projections until review round 1. |
-| Skills (Markdown playbooks, team repos)                                                                                                                                                                       | `packages/cezar/src/skills.ts`, `packages/cezar/src/skills-remote.ts`, `packages/cezar/src/workflows/run.ts`, `packages/cezar/src/ui-state.ts`                                                                                                                                                                                                       | A skill is a `.md` file with optional YAML frontmatter (`name`, `description`); its body becomes the agent's extra system prompt. Discovery precedence is local-first: `.ai/cezar/skills` → `.ai/skills` → `.agents/skills` + agent mirrors → global → team repo. Missing dirs are fine; team-skill loading never blocks on the network (background cache in `~/.cache/cez/`). A skill list has two kinds of reader. Fresh discovery goes through `discoverSkills` (`skills.ts`), which applies the project's team-skill off-list (`disabledTeamSkills` in `ui-state.json`) itself. Its callers are the `GET /skills` and `POST /skills/refresh` routes, the planner (`planner.ts`), a worker's `--skill` lookup (`delegation/service.ts`) and auto-naming (`autoNameRun` in `workflows/run.ts`). `GET /skills/importable` returns the unfiltered team list on purpose, so the Skills catalog can switch a skill back on. The run's saved list, `state.skills` in `workflows/run.ts`, is discovered when the run starts or continues, so it can predate a change made during the run. Two methods read it and apply the off-list as it is at that moment. `provisionRunSkills` installs the step skill, a leading `/name` and their companions. `enabledSkills` feeds live `/name` expansion in `deliverMessage`, a later step's skill lookup and prompt in `runAgentStep`, and the Continue skill lookup and opening prompt in `runContinuation`. A change to which skills a run may use must reach every reader listed here, or the spec must say why a reader leaves it out. hearsay-tools/cezarion#1494 is the worked example: PR hearsay-tools/cezarion#1541 applied the off-list to provisioning first, and two review rounds then found the `state.skills` readers still sending a switched-off skill to the agent. A state file that a synchronous reader reads is written atomically: a temporary file, then a rename, as `writeProjectUiState` (`ui-state.ts`) does. `enabledSkills` reads `ui-state.json` synchronously (`readProjectUiStateSync`), and a write in place lets it see a partial file, which parses as `{}`: an empty off-list. |
+| Run search (project tasks, All tasks, archived pages and ⌘K) | `packages/web/src/lib/tasks-table.ts`, `packages/web/src/routes/tasks-overview.tsx`, `packages/web/src/lib/global-tasks.ts`, `packages/web/src/routes/global-tasks.tsx`, then `packages/cezar/src/runs/run-search.ts`, `packages/cezar/src/server/server.ts`, `packages/cezar/src/runs/store.ts`, `packages/cezar/src/runs/run-index.ts` | `filterRuns` (`tasks-table.ts`) filters the project task list in `tasks-overview.tsx`. `haystack`, `filterGlobalTasks` and `tasksExcludingFacet` (`global-tasks.ts`) feed the All tasks list and its facet counts in `global-tasks.tsx`. On the server, `matchesRunQuery` and `sqlPrefilterTokens` (`run-search.ts`) serve `GET /api/v1/run-summaries/archived` (`server.ts`), `RunStore.searchRunSummaries` (`store.ts`) and the cold reader `searchRunIndexFromDisk` (`run-index.ts`) for the ⌘K palette. A new search field needs a [reader sweep](#reader-sweep) over every reader above, or the change explains why a reader leaves it out (hearsay-tools/cezarion#1637: archived pages, All tasks facet counts and server archive search each needed a follow-up fix). Preserve intentional differences: the palette excludes automation names because it shows no origin line, and the SQL prefilter must not discard a match the final predicate accepts. |
+| Pending asks (`cezar_ask`, the ask card, a new field on the ask) | `packages/cezar/src/workflows/run.ts`, then `packages/cezar/src/runs/transcript-facts-fold.ts`, `packages/cezar/src/delegation/questions.ts`, `packages/web/src/routes/task-thread/thread-state.ts`, `packages/cezar/src/task-cli/projections.ts` | A pending ask has four kinds of reader. `workflows/run.ts` opens the human wait and emits the `ask.requested` event. `runs/transcript-facts-fold.ts` and `delegation/questions.ts` route a worker's question to its parent. `routes/task-thread/thread-state.ts` builds the cockpit ask card. `task-cli/projections.ts` (`projectStatus`, fed by `pendingQuestion` in `task-cli/cli.ts` and `runs/webhook.ts`) feeds `cez task status` and the task webhook; these read the `ask.requested` event, not the human wait, so a design that follows the wait misses them. A field added to the ask card needs a [reader sweep](#reader-sweep) over all four, or the spec says why a reader leaves it out (hearsay-tools/cezarion#1471: its `context` field missed the CLI and webhook projections). |
+| Skills (Markdown playbooks, team repos)                                                                                                                                                                       | `packages/cezar/src/skills.ts`, `packages/cezar/src/skills-remote.ts`, `packages/cezar/src/workflows/run.ts`, `packages/cezar/src/ui-state.ts`                                                                                                                                                                                                       | A skill is a `.md` file with optional YAML frontmatter (`name`, `description`); its body becomes the agent's extra system prompt. Discovery precedence is local-first: `.ai/cezar/skills` → `.ai/skills` → `.agents/skills` + agent mirrors → global → team repo. Missing dirs are fine; team-skill loading never blocks on the network (background cache in `~/.cache/cez/`). A skill list has two kinds of reader. Fresh discovery goes through `discoverSkills` (`skills.ts`), which applies the project's team-skill off-list (`disabledTeamSkills` in `ui-state.json`) itself. Its callers are the `GET /skills` and `POST /skills/refresh` routes, the planner (`planner.ts`), a worker's `--skill` lookup (`delegation/service.ts`) and auto-naming (`autoNameRun` in `workflows/run.ts`). `GET /skills/importable` returns the unfiltered team list on purpose, so the Skills catalog can switch a skill back on. The run's saved list, `state.skills` in `workflows/run.ts`, is discovered when the run starts or continues, so it can predate a change made during the run. Two methods read it and apply the off-list as it is at that moment. `provisionRunSkills` installs the step skill, a leading `/name` and their companions. `enabledSkills` feeds live `/name` expansion in `deliverMessage`, a later step's skill lookup and prompt in `runAgentStep`, and the Continue skill lookup and opening prompt in `runContinuation`. A change to which skills a run may use needs a [reader sweep](#reader-sweep) over every reader listed here, or the spec says why a reader leaves it out (hearsay-tools/cezarion#1494: PR hearsay-tools/cezarion#1541 applied the off-list to provisioning first, and review then found the `state.skills` readers still sending a switched-off skill). A state file that a synchronous reader reads is written atomically: a temporary file, then a rename, as `writeProjectUiState` (`ui-state.ts`) does. `enabledSkills` reads `ui-state.json` synchronously (`readProjectUiStateSync`), and a write in place lets it see a partial file, which parses as `{}`: an empty off-list. |
 | Runs store / state persistence                                                                                                                                                                                | `packages/cezar/src/runs/store.ts`                                                                                                                                                                                                                           | One embedded SQLite file per project, `.ai/cezar/runs.db` (`node:sqlite`, WAL; Node 24.21.0 is the floor, verified by build/package CI), plus one append-only NDJSON event file per run. **Read first, in this order: `runs/run-database.ts` (the only SQL; schema, `transaction()`, claims, fenced writes), `runs/run-row.ts` (record to row: columns, summary, `isLiveRecord`), `runs/raw-record.ts` (keeps unknown fields across a write), `runs/store.ts` (`RunStore`, import, open), then `runs/run-index.ts` (read-only cold reader), `runs/legacy-index.ts` and `runs/store-open-error.ts`.** Each row holds the complete `RunRecord` JSON plus a stored `toRunSummary()` column and the few columns the store queries; `RunRecord` stays a zod schema, so new fields must still be optional or defaulted and rows written by an older cezar still parse. **Only the live set is in memory**: queued, running and waiting runs, runs a `RunManager` holds, pending wake timers and parents waiting on workers (`isLiveRecord`, plus `pin`). Finished runs load from the row on demand as fresh copies (frozen under vitest), so never keep or mutate one, and never rebuild a full scan of `runs`: add an indexed column. A delegation family is held, claimed and released as one unit (`run_claims`: session UUID, pid and start identity, checked inside the write transaction), so two processes on one project never both write a run. A foreign live run is readable and every control answers 409 `{ error }` (`requireRunControl`); `run_claims` and `run_conflicts` are private. `runs.json` is imported once on first open into `runs.db` (exact bytes kept in `runs.json.pre-sqlite.bak`, completion marker in the same transaction), never written again and never deleted; there is no dual-write, so an older cezar sees only history up to the import. **A store that cannot open never reads as empty**: `RunStore.open` throws a typed `RunStoreOpenError` (`corrupt`, `busy`, `permission`, `disk-full`, `unsupported-schema`, `legacy-writer`, `other`), a damaged file is left byte-for-byte alone, and `serve` answers 409 `{ error }` for that project's routes instead of treating it as no runs. Recovery steps live in `BACKWARD_COMPATIBILITY.md` section 3. Cold readers (`readRunIndexFromDisk`) open `runs.db` read-only and never build a context. Spec: `.ai/specs/2026-10-05-sqlite-run-store.md`. A **queued** run's prompt stays editable until the scheduler picks it up (open-mercato/cezar#472): `task` plus the optional `queuedMessages` stack are folded into `{{task}}` at dequeue, and that fold is read-only — never write it back to the record. The store is also the in-process event bus for SSE.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Task handoff journal (`CEZ_HANDOFF_FILE`, `.ai/cezar/runs/<runId>.handoff.md`) | `packages/cezar/src/handoff.ts`, then the two readers' files `packages/cezar/src/server/server.ts` and `packages/cezar/src/server/forge/github.ts` | A per-task journal at `.ai/cezar/runs/<runId>.handoff.md` (spec 007, `.ai/specs/007-handoff-file-todos.md`), outside the worktree so it survives worktree removal. `seedHandoffFile` writes the skeleton. The agent finds the file through `CEZ_HANDOFF_FILE` and the `HANDOFF_ONLY_INSTRUCTIONS` system-prompt fragment, and keeps `## Progress log` (newest at the top) and `## Resume notes`. **The top of `## Progress log` belongs to the agent.** Two features read its first lines as the agent's own summary: `handoffProgressExcerpt` (`handoff.ts`) feeds the variants compare column (`handoffExcerpt` in the `GET /groups/:groupId` route of `server/server.ts`, spec 010), and `buildPrBody` (`server/forge/github.ts`) writes the body of a draft PR opened from the cockpit (Goal plus the first lines of the Progress log). **cezar writes its own records to a cezar-owned section, never the Progress log**, as `## Autosave (cezar)` does since hearsay-tools/cezarion#1111: `appendHandoffAutosaveReport` and `recordHandoffPeriodicAutosave` write there, and the first report creates the section right before `## Progress log`. One exception exists on purpose: `appendHandoffHeartbeat`'s lifecycle lines (`turn complete — …` and `step "…" complete — …` from `workflows/run.ts`, plus `picked from N variants` in `server.ts`) go to the top of the Progress log as the fallback that keeps the journal current when the agent writes nothing. `handoffProgressExcerpt` skips the lifecycle lines (and `session idle-closed — …`) whenever the agent wrote a line of its own, because the no-wait nudge's extra turn writes more of them (hearsay-tools/cezarion#1234). A new cezar record does not join them. The first design of hearsay-tools/cezarion#1004 wrote the autosave report at the top of the Progress log, and only CI's cockpit E2E (`variants-compare.e2e.ts`) caught it. |
 | Web UI (cockpit)                                                                                                                                                                                              | `packages/web/src/app.tsx`, then `packages/web/src/routes.tsx`, `packages/web/src/api/`, and the affected component/route                                                                                                                                    | React 19 + Vite + Tailwind v4 + shadcn/ui; source lives in `packages/web/` (its own npm workspace, `@open-mercato/cezar-web`, with the React/Vite/Tailwind deps in ITS manifest, not the root's), build output in ignored `packages/cezar/web/dist/`. Anything the server and the cockpit BOTH speak — the v2 protocol types, the `/api/v1/p/:projectId` scope helpers, and (as it grows) the typed API client — lives in the third workspace `packages/api-client/` (`@open-mercato/cezar-api-client`), which stays Node-free (§ Repository layout). Keep one global SSE connection and patch the TanStack Query cache in place; authoritative refetch happens on reconnect/visibility. Preserve light/dark/system theming, mobile safe areas, keyboard access, and unit coverage. The legacy vanilla web app was deleted in R7; when `packages/cezar/web/dist` is missing the server answers every shell route with a built-in "run `npm run build:web`" hint page (`packages/cezar/src/server/static-ui.ts`). **Query strings:** write query updates through `useSearchParamsWriter`, never the raw `useSearchParams` setter: render-bound setters can lose earlier writes before a transition renders, and unchanged late navigation can return the reader to a page they left. Read-only `useSearchParams` is valid. The sole approved exception is file selection in `routes/task-git/task-files.tsx`: it pushes history so Back restores the previous file; the writer always replaces history. `packages/web/src/test/search-params-discipline.test.ts` guards raw setter bindings (including aliases) against a reasoned baseline that may only shrink. **Virtualized lists (`virtua`):** `Virtualizer` wraps each child, so put row styling and flags on the rendered item element, never on `ul > li` or `li + li` selectors. The GitHub examples (hearsay-tools/cezarion#1189) are `gh-row-item` in `packages/web/src/routes/github/github.tsx` and `github-layout.css`. In jsdom unit tests, supply scroll-element geometry through a `ResizeObserver` stub and a non-null `offsetParent`; see `packages/web/src/routes/github/github-geometry.testkit.ts`. In browser specs, scroll and collect rows (`allRowNumbersJs` in `packages/web/e2e/github-sidebar.e2e.ts`), or wait for one row, never a total DOM row count. Before virtualizing a list, grep `packages/web/e2e/*.e2e.ts` for `> li` and the list's `data-slot`. Small text on card-2: follow the [measured token table and lint rule](packages/web/docs/card-2-contrast.md). |
@@ -645,134 +605,14 @@ The scan cannot see a shrunk product budget, so review checks that one.
 
 ### Before opening a PR
 
-Before opening a PR that changes dry-run turn-end behavior — the
-`packages/cezar/scripts/mock-*.mjs` mocks, the turn-end rule, attention, or the
-human-ask summary — select the browser and packaged fixtures that drive a dry-run
-task to a park, from the repo root:
-
-```bash
-P="waitForStatus\([^)]*'waiting'|hasPendingHumanAsk|attentionLabel|'mock:"
-grep -lE "$P" packages/web/e2e/*.e2e.ts packages/cezar/test/e2e/*.test.ts
-```
-
-Require passing results for these matches alongside the unit parity suites in
-[Runner regressions ship with shared coverage](#runner-regressions-ship-with-shared-coverage)
-(hearsay-tools/cezarion#1251). A `mock-*.mjs` edit triggers this rule when it
-changes the frames that an existing `mock:<scenario>` sends, or where that
-scenario's turn ends, for the configuration a runner sends at shipped defaults.
-A new scenario does not trigger it. A branch that the shipped configuration never
-reaches does not trigger it either, for example a branch for a misconfigured
-runner or for a configuration no runner sends yet. In hearsay-tools/cezarion#1334,
-the Codex mock's new MCP tool gate asks only when cezar's own MCP server is not
-in `approve` mode, and the Codex runner sends `approve` whenever it registers
-that server. When a mock edit does not trigger this rule, the PR's Verification
-section says why. With Squeal validating, read and wait for the
-selected browser files through `squeal status --wait 60000 <files>`; if slow
-results are not current, use `squeal run --slow --wait 60000`. Without Squeal,
-run the browser matches with `npm run test:e2e -- <specs>` from the repo root.
-Run every packaged match by hand, as *Packaged CLI E2E runs by hand* says.
-
-Before opening a PR that renames, moves or removes a `RunRecord` field, also
-search the packaged and browser fixtures for each changed field name, including
-its old and new names or paths. From the repo root, replace the example names
-below with the changed field's names:
-
-```bash
-rg -l -F -e 'delegation.wait' -e 'waits' packages/cezar/test/e2e/*.test.ts packages/web/e2e/*.e2e.ts
-```
-
-Inspect the matches to identify fixtures that read the changed field; common
-names can also match unrelated text. Require passing results for the affected
-fixtures: browser fixtures through the Squeal or focused npm paths above, and
-packaged fixtures by hand, after a fresh build. This selection supplements
-the dry-run park-fixture and runner-parity requirements above
-(hearsay-tools/cezarion#1300).
-
-Before pushing a change that renames an enum or discriminant value — a wait
-kind, outcome, status or attention label — search test files for the quoted old
-value. From the repo root, replace `ci` below with that value:
-
-```bash
-rg -n -F -e "'ci'" -e '"ci"' packages --glob '*.test.*' --glob '*.e2e.ts'
-```
-
-Inspect every match. Update assertions and fixtures that should use the new
-value. Preserve intentional refusal tests, legacy-row conversion tests and
-unrelated uses. A rejection test that passes only because the old value is now
-unknown must be updated to test its intended constraint. In
-hearsay-tools/cezarion#1504, a deadline test still used `ci` after the kind became
-`pr`, so it could pass without checking the deadline requirement.
-
-Before opening a PR that removes a default — a catalog, a source or a seeded
-entry — search the browser specs for what that default supplied. Search for its
-entry names and source names, and for the `data-slot` of each list or view that
-renders those entries: a spec can depend on how many entries a list holds
-without naming any of them. From the repo root, replace the example values below
-with the removed default's values:
-
-```bash
-rg -l -F -e 'open-mercato/skills' -e 'skill-row' packages/web/e2e/*.e2e.ts
-```
-
-Check each match. A spec that counts, lists or scrolls the default's entries
-must seed its own, as
-[the e2e README](packages/web/e2e/README.md#seed-the-catalog-entries-a-spec-relies-on)
-says. In hearsay-tools/cezarion#1541, removing the `open-mercato/skills` default
-team catalog broke `settings-skills.e2e.ts`, and only in CI: its scroll case
-needed that catalog's skills to make the skills list overflow on CI's runner.
-The spec named neither the catalog nor its skills, so a search for the names
-alone matched no spec; the `skill-row` slot matches it
-(hearsay-tools/cezarion#1572).
-
-No tool maps a cockpit source change to the browser specs it affects, with or
-without Squeal: `npm run test:changed` runs `npm test`, whose four unit projects
-hold no browser spec, and Squeal's browser-spec inputs include all of
-`packages/web/src/**`, so an edit marks every spec stale and names none. Grep
-`packages/web/e2e/*.e2e.ts` for the `data-slot`, `data-streamdown` and
-`data-testid` values and distinctive class names that the changed file and the
-local components it imports render. Walk down to what the file renders, never up
-to what renders it: going up reaches most of the suite. When Squeal is
-unavailable, run the matches with `npm run test:e2e -- <spec>.e2e.ts` (one call
-takes several specs); otherwise those specs' results come from Squeal. Shared
-renderers such as `packages/web/src/routes/task-thread/markdown.tsx` and
-`packages/web/src/components/diff/*` matter most, because one edit reaches specs
-written for other features. `markdown.tsx` renders no `data-slot`, yet an edit to
-it broke `artifact-project-links.e2e.ts` (hearsay-tools/cezarion#1076) through
-its siblings `task-link.tsx` and `link-safety-dialog.tsx`; this grep, run from
-the repo root, lists that spec:
-
-```bash
-grep -lE 'link-safety|data-streamdown|thread-markdown' packages/web/e2e/*.e2e.ts
-```
-
-Specs also assert on visible text, and the attribute grep does not find those
-assertions. When a cockpit change adds, renames or removes visible copy (a label,
-a tab, a heading, a button, an empty state), also grep the specs for that copy.
-Grep both the new and the old string: a spec can assert that text is present,
-and a spec can assert that it is absent. In hearsay-tools/cezarion#1335 the
-sidebar got a new tab labelled "Automations". The attribute grep found
-`quick-list.e2e.ts` and `mobile-task-controls.e2e.ts`, and both passed locally.
-`automations.e2e.ts` asserts that the sidebar does not show "Automations" while
-the feature is off, and it failed only in CI. This grep, run from the repo root,
-lists that spec:
-
-```bash
-grep -lF 'Automations' packages/web/e2e/*.e2e.ts
-```
-
-When a cockpit change renames or removes a control, also search server and
-contract sources for its old label and the navigation text that led to it.
-Review the matches and update messages that tell users where to find the
-control, including API errors, CLI output and agent prompts. Preserve valid
-compatibility names, fixtures and historical references; do not replace every
-match blindly. In hearsay-tools/cezarion#1639, the cockpit replaced "Task webhook"
-with "Webhooks", but the server's `NO_WEBHOOK_ERROR` still directed users to the
-removed control until review caught it. Run this search from the repo root,
-substituting the affected label and navigation text:
-
-```bash
-rg -n -F -e 'Task webhook' -e 'Settings → General →' packages/cezar/src packages/contract/src
-```
+1. Finish the [reader sweep](#reader-sweep) for every shared name, value or default the
+   change alters, and require passing results for the specs and fixtures it selects.
+2. For a change to `packages/cezar/src/workflows/run.ts`'s wait, turn-end, failure or
+   step-settlement paths, verify the parity suites
+   ([Runner regressions ship with shared coverage](#runner-regressions-ship-with-shared-coverage)).
+3. Run the root `npm run typecheck` once when declarations matter (*Typecheck* above).
+4. Run the code-quality check and the auto-merge decision that the Dev flow bindings
+   name.
 
 ### CI owns the final gate
 
