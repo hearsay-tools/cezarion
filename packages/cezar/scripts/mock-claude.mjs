@@ -165,6 +165,7 @@ async function respond(userText, imageCount, uuid) {
   respondingUuid = uuid;
   if (delivery) await delivery.holdResponse(userText);
   // Native refusal and crash handling stay before deferred input and replay.
+  // hearsay-tools/cezarion#1351: native refusals before any model work.
   if (userText.startsWith('mock:model-refusal')) {
     const { modelRefusalReply } = await import('./mock-claude-model-refusal.mjs');
     await modelRefusalReply(userText, uuid, emit, emitReplay);
@@ -174,6 +175,7 @@ async function respond(userText, imageCount, uuid) {
     const { crashWithStderr } = await import('./mock-runner-crash.mjs');
     if (crashWithStderr(userText, '{"type":"assistant","message":')) return;
   }
+  // hearsay-tools/cezarion#1112: the line waits in the pipe before the model reads it.
   if (userText.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
   emitReplay(uuid, userText);
   // Early scenarios do not advance the ordinary turn counter.
@@ -181,6 +183,7 @@ async function respond(userText, imageCount, uuid) {
   turn += 1;
   await sleep(250);
   const markers = markersFor(userText);
+  // `mock:slow` → hold the turn for ~25 s so queue states are observable.
   if (userText.includes('mock:slow')) await sleep(25_000);
   if (await dispatchReply(timedReplies, userText, uuid)) return;
   // Failure selection stays after timed holds and before markdown/naming.
@@ -454,7 +457,12 @@ async function replyWithGatedHold(userText, uuid) {
   return;
 }
 
+// `mock:hold` → pause, THEN stream the content and the terminal `result`.
+// The harness parity matrix's S2 row asserts turn-end follows the last
+// content event, so the pause has to sit BEFORE the content: a runner that
+// closed the turn on a timer after writing the prompt would report it early.
 async function replyWithHold(userText, uuid) {
+  // Short on purpose — `mock:slow` above is the 25 s queue-state hold.
   await sleep(250);
   const held = 'parity hold: content after the pause';
   emit({
@@ -540,6 +548,7 @@ async function replyWithSubagents(userText, uuid) {
     message: { role: 'assistant', content: [{ type: 'text', text: summary }], usage: { input_tokens: 400, output_tokens: 60 } },
     parent_tool_use_id: null,
   });
+  // #149: a child assistant frame can arrive after the parent's final marker.
   emit({
     type: 'assistant',
     message: { role: 'assistant', content: [{ type: 'text', text: 'Child review finished.' }] },
@@ -556,6 +565,8 @@ async function replyWithSubagents(userText, uuid) {
   return;
 }
 
+// Both spawns first — that is what makes it a FAN-OUT rather than two
+// sequential agents, and what the dock's "N/M" odometer counts.
 async function replyWithSubagentSpawns(agents) {
   for (const agent of agents) {
     emit({
@@ -578,6 +589,7 @@ async function replyWithSubagentSpawns(agents) {
   }
 }
 
+// Children, interleaved across agents so the activity lines visibly race.
 async function replyWithSubagentSteps(agents) {
   const maxSteps = Math.max(...agents.map((agent) => agent.steps.length));
   for (let i = 0; i < maxSteps; i += 1) {
@@ -616,6 +628,7 @@ async function replyWithSubagentStep(agent, step) {
   await sleep(250);
 }
 
+// The spawns settle — `parent_tool_use_id: null`, they belong to the main turn.
 async function replyWithSubagentResults(agents) {
   for (const agent of agents) {
     emit({
@@ -811,6 +824,9 @@ async function replyWithFollowup(userText, imageCount, { refsMarkers, doneMarker
   });
 }
 
+// Mirrors the real Claude Code 2.1.148 revoked-token envelope: the CLI puts
+// the credential failure in an `is_error` result even though its subtype is
+// `success`, rather than emitting a dedicated error frame.
 async function replyWithAuthenticationFailure(userText, uuid) {
   emit({
     type: 'result',
