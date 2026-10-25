@@ -1,6 +1,7 @@
 import { runWorkflowLabel } from '@open-mercato/cezar-api-client/contract/run-labels'
 import type { ArchiveFinishedScope, ProcessUsage, RunRecord, RunSummary, RunStatus } from '@open-mercato/cezar-api-client'
-import { isScheduledResume } from '@/lib/read-state'
+import { isSweepable } from '@open-mercato/cezar-api-client/contract/run-predicates'
+import { isUsageLimitHold } from '@open-mercato/cezar-api-client/contract/waits'
 import { isOwnedWorker, runTitle, type ListView } from '@/lib/task-groups'
 
 /**
@@ -19,10 +20,6 @@ const USAGE_LIVE_STATUSES: ReadonlySet<RunStatus> = new Set(['running', 'waiting
 /** Nothing left to observe: these runs can never report a live sample again. Legacy
  *  `TERMINAL_STATUSES` — `review` is terminal because the agent is done and a human is not. */
 export const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(['done', 'failed', 'review', 'cancelled'])
-
-/** What "Archive finished" archives (`POST /api/runs/archive-finished` server-side): outcomes,
- *  not gates — a `review` run still wants a human and must not be swept away. */
-const FINISHED_STATUSES: ReadonlySet<RunStatus> = new Set(['done', 'failed', 'cancelled'])
 
 /**
  * Humanized RSS — `612 MB`, `1.2 GB`. Ported from the legacy `fmtBytes` (ps gives KB, the store
@@ -59,7 +56,7 @@ export function scheduledResume(
   run: Pick<RunSummary, 'status' | 'autoResumeAt'>,
   now: Date = new Date(),
 ): { label: string; title: string } | undefined {
-  if (run.status !== 'waiting' || !run.autoResumeAt) return undefined
+  if (!isUsageLimitHold(run)) return undefined
   const at = new Date(run.autoResumeAt)
   if (!Number.isFinite(at.getTime())) return undefined
   const sameDay = at.toDateString() === now.toDateString()
@@ -114,22 +111,8 @@ export function matchesTaskReferenceNumber(run: TaskReferenceInput, token: strin
   return match !== null && taskReferences(run).some((reference) => reference.number === Number(match[1]))
 }
 
-/**
- * Whether the sweep (`POST /runs/archive-finished`, `isSweepable` in `runs/store.ts`) would take
- * this run, clause for clause: finished, not archived, not a scheduled resume, not an owned
- * worker (those leave with their parent), and `scope` picks pinned or unpinned (absent = both).
- */
-export function isSweepable(run: RunSummary, scope?: ArchiveFinishedScope): boolean {
-  if (run.archived || !FINISHED_STATUSES.has(run.status)) return false
-  if (isScheduledResume(run)) return false
-  if (isOwnedWorker(run)) return false
-  if (scope === 'unpinned') return !run.pinned
-  if (scope === 'pinned') return run.pinned === true
-  return true
-}
-
-/** How many runs the sweep would archive in `scope`. The sidebar's group buttons only exist when
- *  this is nonzero — a broom over an empty floor is noise. */
+/** How many runs the sweep (`isSweepable`, the server's own predicate) would archive in `scope`.
+ *  The sidebar's group buttons only exist when this is nonzero — a broom over an empty floor is noise. */
 export function sweepableRunCount(runs: readonly RunSummary[], scope?: ArchiveFinishedScope): number {
   return runs.filter((run) => isSweepable(run, scope)).length
 }

@@ -18,6 +18,8 @@ export function isLiveStatus(status: string): boolean {
  */
 export function isLiveRecord(run: RunRecord): boolean {
   if (LIVE_STATUSES.has(run.status)) return true;
+  // Any resume time, not `isUsageLimitHold`: an older row can keep one on a finished status, and
+  // the store's open must load that row to correct it.
   if (run.autoResumeAt !== undefined || run.waits?.some((wait) => wait.phase === 'open' || wait.phase === 'resolved')) return true;
   // A worker wait, Cezar's completion wait included, is a list entry, covered above: store schema 7
   // reads every wait stored in the delegation state into the list on open, so none is left to ask about

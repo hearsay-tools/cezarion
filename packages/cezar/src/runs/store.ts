@@ -23,7 +23,6 @@ import {
 import {
   automationIdOf,
   continuationMessageSchema,
-  isAutomationTask,
   toRunSummary,
   runRecordSchema as contractRunRecordSchema,
   runPullRequestSchema,
@@ -31,12 +30,14 @@ import {
 } from '@open-mercato/cezar-contract/runs';
 import { previewServerSchema } from '@open-mercato/cezar-contract/preview';
 import {
+  isUsageLimitHold,
   waitSchema,
   LAST_WAITS_LIMIT,
   TIMER_MAX_SECONDS,
   TIMER_MIN_SECONDS,
   WAIT_LIMIT,
 } from '@open-mercato/cezar-contract/waits';
+import { engineOwnsRun, isSweepable } from '@open-mercato/cezar-contract/run-predicates';
 import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, PrWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry, WorkerWait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { matchesRunQuery, sqlPrefilterTokens, type AutomationNames } from './run-search.ts';
 import { storedDelegationStateSchema } from './delegation-state.ts';
@@ -886,12 +887,27 @@ function promptNamesRepo(url: string, task: string): boolean {
 function clearPendingAutoResume(run: RunRecord): void {
   // A withdrawn appointment settles the run failed with its kept error (hearsay-tools/cezarion#1236),
   // the state a usage-limited run was in before it waited.
-  if (run.status === 'waiting' && run.autoResumeAt !== undefined) {
+  if (isUsageLimitHold(run)) {
     run.status = 'failed';
     run.finishedAt ??= new Date().toISOString();
   }
   run.autoResumeAt = undefined;
   run.autoResumeAttempts = undefined;
+}
+
+/**
+ * The write rule (hearsay-tools/cezarion#1496): a resume time is the appointment of a `waiting`
+ * run, so every commit takes it off a record that is not `waiting`. A copy, set to `undefined`
+ * and never deleted: a caller may stage the held record itself. `autoResumeAttempts` stays, since
+ * `MAX_AUTO_RESUMES` counts attempts across resumes.
+ */
+function withoutStaleResumes(input: ReadonlyMap<string, RunRecord | null>): ReadonlyMap<string, RunRecord | null> {
+  let staged: Map<string, RunRecord | null> | undefined;
+  for (const [id, run] of input) {
+    if (run?.autoResumeAt === undefined || isUsageLimitHold(run)) continue;
+    (staged ??= new Map(input)).set(id, { ...run, autoResumeAt: undefined });
+  }
+  return staged ?? input;
 }
 
 /**
@@ -1160,12 +1176,8 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
   // restarts on purpose: the gate is pure data (worktree + branch + record)
   // with no live process, so the diff panel, Send back (resume) and Draft PR
   // all still work.
-  if (
-    !opts?.keepLive &&
-    (run.status === 'running' || run.status === 'queued' || run.status === 'waiting') &&
-    // A usage-limit park runs no process, so no exit interrupted it: its appointment stands.
-    !(run.status === 'waiting' && run.autoResumeAt !== undefined)
-  ) {
+  // A usage-limit hold runs no process, so no exit interrupted it: its appointment stands.
+  if (!opts?.keepLive && engineOwnsRun(run)) {
     run.status = 'failed';
     run.error = 'interrupted — cezar process exited during the run';
     run.finishedAt = run.finishedAt ?? new Date().toISOString();
@@ -1588,23 +1600,6 @@ const recordedProcessSchema = z.object({ pid: z.number().int().positive(), start
 const workerProcessRecordSchema = z.object({ generation: z.string().uuid(), controller: recordedProcessSchema,
   processes: z.array(recordedProcessSchema).max(WORKER_PROCESS_CAP) }).strict();
 const startToken = (pid: number) => { const token = processStartToken(pid); return token === undefined ? {} : { startToken: token }; };
-
-/** The bulk-archive sweep's one predicate (#780): finished (a run waiting out a usage limit is
- *  `waiting`, hearsay-tools/cezarion#1236), not archived, not an owned worker (those leave with their parent),
- *  then filtered by pin state. Mirrored clause for clause by `isSweepable` in the cockpit's
- *  `lib/tasks-table.ts`. */
-export function isSweepable(
-  run: Pick<RunRecord, 'archived' | 'status' | 'autoResumeAt' | 'pinned'> & { delegation?: { role: string } | undefined; automationId?: string | undefined },
-  scope?: ArchiveFinishedScope,
-  automation?: boolean,
-): boolean {
-  if (run.archived || !['done', 'failed', 'cancelled'].includes(run.status)) return false;
-  if (run.delegation?.role === 'worker') return false;
-  if (automation !== undefined && isAutomationTask(run) !== automation) return false;
-  if (scope === 'unpinned') return !run.pinned;
-  if (scope === 'pinned') return run.pinned === true;
-  return true;
-}
 
 /**
  * Run rows in runs.db plus append-only NDJSON events and an in-process event bus. Hold live,
@@ -2920,7 +2915,7 @@ export class RunStore extends EventEmitter {
   commitAutoResumeWithdrawal(id: string): void {
     const run = this.peek(id);
     if (!run || (run.autoResumeAt === undefined && run.autoResumeAttempts === undefined)) return;
-    const held = run.status === 'waiting' && run.autoResumeAt !== undefined;
+    const held = isUsageLimitHold(run);
     this.commitIndex(new Map([[id, { ...run, autoResumeAt: undefined, autoResumeAttempts: undefined,
       ...(held ? { status: 'failed' as const, finishedAt: new Date().toISOString() } : {}) }]]));
   }
@@ -3222,7 +3217,7 @@ export class RunStore extends EventEmitter {
    * remains best-effort.
    */
   private commitIndex(input: ReadonlyMap<string, RunRecord | null>, source?: CommitSource): void {
-    const staged = this.prepareCompletionActions(input);
+    const staged = this.prepareCompletionActions(withoutStaleResumes(input));
     if (!this.db) throw this.openFailure ?? new Error('runs database unavailable: nothing can be saved');
     this.assertWritable(staged);
     this.persist(staged);
@@ -3398,12 +3393,6 @@ export class RunStore extends EventEmitter {
     }
     // Waits are not cleared here: RunManager cancels them explicitly when a run ends (spec
     // 2026-10-17-unified-waits), so a terminal patch never retires one as a side effect.
-    // …and the mirror image for the usage-limit resume (spec
-    // 2026-08-03-auto-resume-after-usage-limit): it is the appointment of a `waiting` run
-    // (hearsay-tools/cezarion#1236), so a run coming back to life — the resume itself, a user
-    // Continue, a re-queue — or settling retires it. The manager's timer re-checks the record
-    // before it fires, so a cleared field is enough.
-    if (normalized.status && normalized.status !== 'waiting') normalized.autoResumeAt = undefined;
     const archived = Object.prototype.hasOwnProperty.call(normalized, 'archived')
       ? Boolean(normalized.archived)
       : undefined;
@@ -3423,6 +3412,9 @@ export class RunStore extends EventEmitter {
       return this.record(id);
     }
     Object.assign(run, this.redactPatch(normalized));
+    // The usage-limit resume is the appointment of a `waiting` run (hearsay-tools/cezarion#1236),
+    // so a run coming back to life or settling retires it. `commitIndex` applies the same rule to
+    // every commit (`withoutStaleResumes`); this debounced path mutates the held record without it.
     if (run.status !== 'waiting') run.autoResumeAt = undefined;
     if (normalized.task !== undefined) this.resolveEditedTaskRefs(run);
     if (archived !== undefined) this.applyArchived(run, archived);

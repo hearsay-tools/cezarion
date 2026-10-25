@@ -2,6 +2,7 @@ import { ArchiveIcon, ChevronDownIcon, ChevronRightIcon } from '@/components/des
 import { SendIcon } from 'lucide-react'
 import { useQueries } from '@tanstack/react-query'
 import * as React from 'react'
+import { isSweepable } from '@open-mercato/cezar-api-client/contract/run-predicates'
 import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 import { useSidebarArchive } from '@/components/sidebar-archive'
 import { useSidebarNavigate } from '@/components/app-shell'
@@ -32,7 +33,7 @@ import {
   type QuickListBucket,
   type QuickListRow,
 } from '@/lib/task-groups'
-import { isSweepable, sweepableRunCount, isOwnRepoReference, taskReferences } from '@/lib/tasks-table'
+import { sweepableRunCount, isOwnRepoReference, taskReferences } from '@/lib/tasks-table'
 import { useNow } from '@/lib/use-now'
 import { useSidebarSections } from '@/lib/use-sidebar-sections'
 import { cn } from '@/lib/utils'

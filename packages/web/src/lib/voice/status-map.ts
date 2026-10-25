@@ -1,5 +1,5 @@
 import { bucketOf } from '@/lib/task-groups'
-import { deriveAttention } from '@/lib/attention'
+import { deriveAttention, type AttentionRung } from '@/lib/attention'
 import { isUnread } from '@/lib/read-state'
 import type { VoiceStatus } from '@open-mercato/cezar-api-client/contract/voice'
 import type { RunSummary } from '@open-mercato/cezar-api-client'
@@ -13,10 +13,29 @@ import type { RunSummary } from '@open-mercato/cezar-api-client'
  * unread run is also in Finished, so it answers to `failed`, `finished` and `unread`.
  */
 
-/** `deriveAttention`'s label for a status id: `waiting-for-ci` → `waiting for ci`, compared
- *  case-insensitively against the label `waiting for CI`. */
-const labelIs = (run: RunSummary, id: string): boolean =>
-  deriveAttention(run).label.toLowerCase() === id.replaceAll('-', ' ')
+/** The status id that names each rung, or `null` when none does: `needs-you` names the sidebar
+ *  group (`bucketOf`) rather than the rung, and the dot's merge and command waits have no id of
+ *  their own. A booked resume keeps the sidebar's word, `scheduled` (`SCHEDULED_WEIGHT` in
+ *  `lib/task-groups.ts`), though the dot names it after its cause (hearsay-tools/cezarion#1236).
+ *  Exhaustive: a new rung fails to compile until it says (hearsay-tools/cezarion#1496). */
+const VOICE_STATUS_OF_RUNG: Record<AttentionRung, VoiceStatus | null> = {
+  'needs-permission': 'needs-permission',
+  failed: 'failed',
+  'needs-you': null,
+  'needs-review': 'needs-review',
+  running: 'running',
+  'usage-limit': 'scheduled',
+  'waiting-on-workers': 'waiting-on-workers',
+  'waiting-for-ci': 'waiting-for-ci',
+  'waiting-for-merge': null,
+  'waiting-for-command': null,
+  monitoring: 'monitoring',
+  'waiting-for-capacity': 'waiting-for-capacity',
+  queued: 'queued',
+  done: 'done',
+  cancelled: 'cancelled',
+  unseen: null,
+}
 
 export function voiceStatusMatches(status: VoiceStatus, run: RunSummary): boolean {
   switch (status) {
@@ -38,13 +57,9 @@ export function voiceStatusMatches(status: VoiceStatus, run: RunSummary): boolea
     case 'monitoring':
     case 'waiting-for-capacity':
     case 'queued':
-      return labelIs(run, status)
-    // The dot names a booked resume after its cause (hearsay-tools/cezarion#1236); the status id
-    // keeps the sidebar's word for it (`SCHEDULED_WEIGHT` in `lib/task-groups.ts`).
     case 'scheduled':
-      return deriveAttention(run).label === 'usage limit'
     case 'waiting-on-workers':
-      return deriveAttention(run).label.startsWith('waiting on ')
+      return VOICE_STATUS_OF_RUNG[deriveAttention(run).rung] === status
     case 'done':
     case 'cancelled':
       return run.status === status

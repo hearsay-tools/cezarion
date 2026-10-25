@@ -1,5 +1,6 @@
 import { ATTENTION_RANK, deriveAttention } from './attention'
 import { isAutomationTask } from '@open-mercato/cezar-api-client/contract/runs'
+import { isUsageLimitHold } from '@open-mercato/cezar-api-client/contract/waits'
 import { normalizeSidebarLimits, type SidebarLimits } from '@open-mercato/cezar-api-client/contract/workspace'
 import type { RunSummary } from '@open-mercato/cezar-api-client'
 
@@ -47,14 +48,12 @@ const STATUS_ORDER: Partial<Record<RunSummary['status'], number>> = {
   cancelled: 7,
 }
 
-/** Not a status of its own: `scheduled` is a `waiting` run holding a live resume deadline (a
- *  usage-limit hold, hearsay-tools/cezarion#1236), the rule the status pill reads (`lib/attention.ts`). */
+/** Not a status of its own: `scheduled` is a usage-limit hold (`isUsageLimitHold`,
+ *  hearsay-tools/cezarion#1236), the rule the status pill reads (`lib/attention.ts`). */
 const SCHEDULED_WEIGHT = 3
 
 const statusWeight = (run: RunSummary): number =>
-  run.status === 'waiting' && run.autoResumeAt !== undefined
-    ? SCHEDULED_WEIGHT
-    : STATUS_ORDER[run.status] ?? 9
+  isUsageLimitHold(run) ? SCHEDULED_WEIGHT : STATUS_ORDER[run.status] ?? 9
 
 /**
  * The run a set of runs shows the dot of (#617 01a), such as a sidebar section header: the loudest
@@ -211,9 +210,9 @@ export function sortRuns(runs: readonly RunSummary[], view: ListView): RunSummar
       }
       const weight = statusWeight(a) - statusWeight(b)
       if (weight !== 0) return weight
-      // Equal weights, and that weight is the scheduled one — so both sides carry an
-      // `autoResumeAt` (nothing else earns the rank), and the appointment is the answer.
-      if (statusWeight(a) === SCHEDULED_WEIGHT && a.autoResumeAt && b.autoResumeAt) {
+      // Equal weights, and both are holds (nothing else earns the scheduled rank): the
+      // appointment is the answer.
+      if (isUsageLimitHold(a) && isUsageLimitHold(b)) {
         const order = a.autoResumeAt.localeCompare(b.autoResumeAt)
         if (order !== 0) return order
       }
