@@ -3662,10 +3662,6 @@ export class RunManager {
       const settling = this.recoverLiveRun(run);
       if (settling) await settling;
     }
-    // Re-arm usage-limit resumes (spec 2026-08-03-auto-resume-after-usage-limit): the wait is
-    // routinely longer than a cezar session, so the deadline is durable and the timer is rebuilt
-    // from it. `pump()` reconciles again on every sweep, so this is the fast path, not the only
-    // one — see `reconcileAutoResumes`.
     if (familyRootId === undefined) await this.reconcileRecoveryWorkerFamilies();
     if (this.disposed) return;
     } finally {
@@ -3682,6 +3678,10 @@ export class RunManager {
     // The rest re-arms wakes from durable state and is idempotent, so it runs for every live run
     // even after one adopted family: anything the recovery window held back goes out now.
     this.rearmRecoveredWakes();
+    // Re-arm usage-limit resumes (spec 2026-08-03-auto-resume-after-usage-limit): the wait is
+    // routinely longer than a cezar session, so the deadline is durable and the timer is rebuilt
+    // from it. `pump()` reconciles again on every sweep, so this is the fast path, not the only
+    // one — see `reconcileAutoResumes`.
     this.reconcileAutoResumes();
     void this.pump();
   }
