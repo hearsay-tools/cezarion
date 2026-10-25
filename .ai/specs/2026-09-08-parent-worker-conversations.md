@@ -183,9 +183,10 @@ parent slept until the deadline (or forever, on Cezar's deadline-less completion
 wait). Cezar now sends the parent a **park notice** from the worker.
 
 - When: a worker is `waiting`, not stopping, destroyed or complete, and has no
-  pending question, while its parent has an open `worker` wait that selects it,
-  by worker ID or by a request sent to it. Any park counts except a question,
-  which already reaches the parent as a routed request (#505).
+  pending question and no queued input, while its parent has an open `worker`
+  wait that selects it, by worker ID or by a request sent to it. Any park counts
+  except a question, which already reaches the parent as a routed request (#505).
+  Queued input wakes the worker, so the turn that takes it decides at its park.
 - Who fires it: the worker's turn-end park (`settleTurn`, every entry), the
   parent's worker-wait registration and completion wait, and the recovery sweep.
   The last one posts a notice that a crash lost before its commit.
