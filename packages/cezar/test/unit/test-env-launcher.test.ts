@@ -59,6 +59,10 @@ function makeFixture(withSetsid: boolean): { root: string; path: string } {
   copyFileSync(join(repoRoot, '.ai/scripts/test-env-down.sh'), join(root, '.ai/scripts/test-env-down.sh'));
   copyFileSync(join(repoRoot, '.ai/scripts/e2e.sh'), join(root, '.ai/scripts/e2e.sh'));
   copyFileSync(join(repoRoot, '.ai/scripts/test-env-lease.mjs'), join(root, '.ai/scripts/test-env-lease.mjs'));
+  // The lease imports the process-group helper from source; the marker makes it an ES module.
+  mkdirSync(join(root, 'packages/cezar/src'), { recursive: true });
+  copyFileSync(join(repoRoot, 'packages/cezar/src/detached-process.ts'), join(root, 'packages/cezar/src/detached-process.ts'));
+  writeFileSync(join(root, 'packages/cezar/src/package.json'), '{"type":"module"}\n');
   if (process.platform === 'darwin') symlinkSync(commandPath('ps'), join(root, 'bin/ps'));
   copyFileSync(join(repoRoot, '.ai/scripts/resolve-browser-launch.mjs'), join(root, '.ai/scripts/resolve-browser-launch.mjs'));
   copyFileSync(join(repoRoot, '.ai/scripts/build-e2e.sh'), join(root, '.ai/scripts/build-e2e.sh'));
@@ -97,6 +101,11 @@ const http = require('node:http');
 const port = Number(process.argv[process.argv.indexOf('--port') + 1]);
 require('node:fs').writeFileSync('.ai/app-argv', process.argv.slice(2).join('\\n'));
 require('node:fs').writeFileSync('.ai/app-cez-env', Object.keys(process.env).filter((key) => key.startsWith('CEZ_')).sort().map((key) => key + '=' + process.env[key]).join('\\n'));
+// A member of the app's process group that ignores SIGTERM, as a dev server's child can.
+if (process.env.FIXTURE_APP_MEMBER) {
+  const member = "process.on('SIGTERM', () => {}); const fs = require('node:fs'); fs.writeFileSync('.ai/app-member.pid.tmp', String(process.pid)); fs.renameSync('.ai/app-member.pid.tmp', '.ai/app-member.pid'); setInterval(() => {}, 1000);";
+  require('node:child_process').spawn(process.execPath, ['-e', member], { stdio: 'ignore' });
+}
 http.createServer((req, res) => {
   res.writeHead(200, { 'content-type': req.url === '/api/health' ? 'application/json' : 'text/html' });
   res.end(req.url === '/api/health' ? '{"ok":true}' : '<!doctype html>');
@@ -1081,6 +1090,23 @@ test('a changed watcher setting refuses reuse, so the new policy reaches a fresh
   launchedPids.add(descriptor(root).app.pid);
   const stopped = spawnSync('/bin/sh', [join(root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
   assert.equal(stopped.status, 0, stopped.stderr);
+});
+
+test('test-env-down.sh stops the server\'s whole process group, a member that ignores SIGTERM included', async () => {
+  const { root, env, pid } = bootWatched({ FIXTURE_APP_MEMBER: '1' });
+  const memberFile = join(root, '.ai/app-member.pid');
+  // bound: the app forks its member as it starts, before the health check that up waited for.
+  const deadline = Date.now() + 10_000;
+  while (readPid(memberFile) === undefined) {
+    assert.ok(Date.now() < deadline, `the app never started its member: ${memberFile}`);
+    await delay(20);
+  }
+  const member = requirePid(memberFile);
+  launchedPids.add(member);
+  const stopped = spawnSync('/bin/sh', [join(root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 30_000 });
+  assert.equal(stopped.status, 0, stopped.stderr);
+  assert.ok(!alive(pid));
+  await waitForExit(member, 'the member that ignores SIGTERM', () => stopped.stderr);
 });
 
 test('test-env-down.sh stopping the server also ends its watcher', async () => {

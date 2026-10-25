@@ -24,6 +24,10 @@ for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
     mkdirSync(join(root, '.ai/scripts'), { recursive: true });
     const localHelper = join(root, '.ai/scripts/test-env-lease.mjs');
     copyFileSync(helper, localHelper);
+    // The lease imports the process-group helper from source; the marker makes it an ES module.
+    mkdirSync(join(root, 'packages/cezar/src'), { recursive: true });
+    copyFileSync(resolve(import.meta.dirname, '../../src/detached-process.ts'), join(root, 'packages/cezar/src/detached-process.ts'));
+    writeFileSync(join(root, 'packages/cezar/src/package.json'), '{"type":"module"}\n');
     writeFileSync(join(root, 'mutator.mjs'), `
       import { writeFileSync } from 'node:fs';
       writeFileSync('mutator.pid', String(process.pid));
