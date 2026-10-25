@@ -242,61 +242,79 @@ const closesFence = (fence, { width, text }) =>
 const openItems = (items, depth, line) => (line.depth === depth ? items.filter((column) => column <= line.width) : []);
 
 /**
- * Tells, line by line, whether a Markdown line is code: in a fenced code block, or in an
- * indented one. Indentation counts from the content column of the list item that holds the
- * line. An indented code block cannot interrupt a paragraph, so a paragraph's indented next
- * line stays prose.
+ * Reads Markdown line by line and names each line's part in the block structure: `code` in a
+ * fenced or indented code block, `blank`, `start` for the first line of a paragraph or
+ * heading, or `continue` for a paragraph's next line. Indentation counts from the content
+ * column of the list item that holds the line.
  */
-function markdownCodeReader() {
-  let fence = null;
-  let indented = null; // the base column of an open indented code block
-  let items = []; // the content column of each open list item
-  let depth = 0;
-  let paragraph = false;
+function markdownLineReader() {
+  const state = { fence: null, indented: null, items: [], depth: 0, paragraph: false };
   return (raw) => {
     const line = markdownLine(raw);
-    if (fence) {
-      if (closesFence(fence, line)) fence = null;
-      return true;
+    if (state.fence) {
+      if (closesFence(state.fence, line)) state.fence = null;
+      return 'code';
     }
     if (line.text === '') {
-      paragraph = false;
-      return indented !== null;
+      state.paragraph = false;
+      return state.indented === null ? 'blank' : 'code';
     }
-    if (indented !== null && line.width >= indented + 4) return true;
-    indented = null;
-    const marker = HEADING_OR_BREAK.test(line.text) ? undefined : LIST_MARKER.exec(line.text)?.[0];
-    if (!paragraph || marker) {
-      items = openItems(items, depth, line);
-      depth = line.depth;
-    }
-    const base = items.at(-1) ?? 0;
-    if (line.width - base >= 4) {
-      if (!paragraph) indented = base;
-      return !paragraph;
-    }
-    if (marker) items.push(line.width + marker.length);
-    const opened = fenceOf(line.text.slice(marker?.length ?? 0));
-    if (opened) fence = { marker: opened, base: items.at(-1) ?? 0 };
-    paragraph = !opened && !HEADING_OR_BREAK.test(line.text);
-    return Boolean(opened);
+    if (state.indented !== null && line.width >= state.indented + 4) return 'code';
+    state.indented = null;
+    return blockLine(state, line);
   };
 }
 
-/** Markdown outside fenced and indented code blocks. */
+/**
+ * A non-blank line outside code: it opens code, starts a block or continues a paragraph. A
+ * heading, a thematic break, a list item, a fence or a deeper block quote interrupts a
+ * paragraph; an indented code block cannot, so an indented line continues it, as a lazy
+ * line does.
+ */
+function blockLine(state, line) {
+  const breakLine = HEADING_OR_BREAK.test(line.text);
+  const marker = breakLine ? undefined : LIST_MARKER.exec(line.text)?.[0];
+  const interrupts = breakLine || Boolean(marker) || line.depth > state.depth;
+  if (!state.paragraph || interrupts) {
+    state.items = openItems(state.items, state.depth, line);
+    state.depth = line.depth;
+  }
+  const base = state.items.at(-1) ?? 0;
+  if (line.width - base >= 4) {
+    if (state.paragraph) return 'continue';
+    state.indented = base;
+    return 'code';
+  }
+  if (marker) state.items.push(line.width + marker.length);
+  const opened = fenceOf(line.text.slice(marker?.length ?? 0));
+  if (opened) {
+    state.fence = { marker: opened, base: state.items.at(-1) ?? 0 };
+    state.paragraph = false;
+    return 'code';
+  }
+  const continues = state.paragraph && !interrupts;
+  state.paragraph = !breakLine;
+  return continues ? 'continue' : 'start';
+}
+
+/** Markdown prose outside code, one span per paragraph or heading, since a code span
+ *  never crosses a block. */
 function proseSpans(text) {
   const spans = [];
-  const isCode = markdownCodeReader();
-  let start = 0;
+  const kindOf = markdownLineReader();
+  let start = null;
   let offset = 0;
+  const close = () => {
+    if (start !== null) spans.push({ start, end: Math.min(offset, text.length), context: 'Markdown prose' });
+    start = null;
+  };
   for (const line of text.split('\n')) {
-    if (isCode(line)) {
-      if (start < offset) spans.push({ start, end: offset, context: 'Markdown prose' });
-      start = offset + line.length + 1;
-    }
+    const kind = kindOf(line);
+    if (kind !== 'continue') close();
+    if (kind === 'start') start = offset;
     offset += line.length + 1;
   }
-  if (start < text.length) spans.push({ start, end: text.length, context: 'Markdown prose' });
+  close();
   return spans;
 }
 

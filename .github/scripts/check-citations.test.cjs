@@ -52,6 +52,22 @@ test('a code span does not cross a blank line, as CommonMark and GitHub read it'
   assert.deepEqual(cites('notes.md', '`example\n\n#123\n`\n'), ['3:123:Markdown prose']);
 });
 
+test('a code span stays inside one paragraph, heading or list item, and a lazy line joins its paragraph', () => {
+  const text = [
+    '`open',
+    '# Heading',
+    'Text #124',
+    '`',
+    '',
+    '- `item',
+    '- next #125 `',
+    '',
+    '> `quote',
+    'lazy #126 `',
+  ].join('\n');
+  assert.deepEqual(cites('notes.md', text), ['3:124:Markdown prose', '7:125:Markdown prose']);
+});
+
 test('leaves code, string literals and JSX text alone, and reads JSX comments', () => {
   const text = [
     "const chip = '#790';",
