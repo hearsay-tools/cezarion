@@ -201,382 +201,498 @@ function handle(command) {
   return delivery && command.type === 'prompt' ? handleControlled(command) : handleCommand(command);
 }
 
-async function handleCommand(command) {
-  if (command.type === 'prompt' && (command.message.includes('mock:autonomous') || command.message.startsWith('Continue working autonomously until the task is fully complete.'))) {
-    const { autonomousReply } = await import('./mock-autonomous.mjs');
-    // Recorded like every other prompt, so a test can count the autonomous nudges pi received.
-    if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: rawMessage(command), imageCount: 0 })}\n`);
+async function respondAutonomous(command) {
+  const { autonomousReply } = await import('./mock-autonomous.mjs');
+  // Recorded like every other prompt, so a test can count the autonomous nudges pi received.
+  if (process.env.CEZ_MOCK_STDIN_FILE) appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: rawMessage(command), imageCount: 0 })}\n`);
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  sendText([autonomousReply(command.message)]);
+  sendTurnEnd();
+  return;
+}
+
+async function respondSilentTail(command) {
+  const silent = await import('./mock-silent-tail.mjs');
+  silent.noteSilentTailPrompt(command.message);
+  if (silent.isFinalMessageNudge(command.message)) return respondFinalNudge(command, silent);
+  if (silent.isSilentTailScenario(command.message)) {
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' });
     send({ type: 'turn_start' });
-    sendText([autonomousReply(command.message)]);
+    sendText([silent.SILENT_TAIL_OPENING]);
+    send({ type: 'tool_execution_start', toolCallId: 'tool-silent-gh', toolName: 'bash', args: { command: 'gh issue create' } });
+    send({ type: 'tool_execution_end', toolCallId: 'tool-silent-gh', toolName: 'bash', result: { content: [{ type: 'text', text: 'created' }] }, isError: false });
+    sendThinking(silent.SILENT_TAIL_REASONING, 1);
     sendTurnEnd();
     return;
   }
-  if (command.type === 'prompt' && (command.message.includes('mock:silent-tail') || command.message.includes('mock:tool-tail') || silentNudge(command.message))) {
-    const silent = await import('./mock-silent-tail.mjs');
-    silent.noteSilentTailPrompt(command.message);
-    if (silent.isFinalMessageNudge(command.message)) {
-      send({ id: command.id, type: 'response', command: 'prompt', success: true });
-      const kind = silent.finalMessageNudgeKind();
-      if (kind === 'ack-only') return;
-      if (kind === 'late') await waitForMockRelease(silent.LATE_REPLY_MS);
-      send({ type: 'agent_start' });
-      send({ type: 'turn_start' });
-      if (kind === 'silent') sendThinking(silent.SILENT_TAIL_REASONING);
-      else if (kind === 'slow-done') {
-        sendText([silent.SLOW_DONE_PREFIX]);
-        await silent.sleep(silent.SLOW_DONE_TAIL_MS);
-        sendText([silent.SILENT_TAIL_DONE]);
-      } else sendText([kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE]);
-      sendTurnEnd();
-      return;
-    }
-    if (silent.isSilentTailScenario(command.message)) {
-      send({ id: command.id, type: 'response', command: 'prompt', success: true });
-      send({ type: 'agent_start' });
-      send({ type: 'turn_start' });
-      sendText([silent.SILENT_TAIL_OPENING]);
-      send({ type: 'tool_execution_start', toolCallId: 'tool-silent-gh', toolName: 'bash', args: { command: 'gh issue create' } });
-      send({ type: 'tool_execution_end', toolCallId: 'tool-silent-gh', toolName: 'bash', result: { content: [{ type: 'text', text: 'created' }] }, isError: false });
-      sendThinking(silent.SILENT_TAIL_REASONING, 1);
-      sendTurnEnd();
-      return;
-    }
-    if (silent.isToolTailScenario(command.message)) {
-      send({ id: command.id, type: 'response', command: 'prompt', success: true });
-      send({ type: 'agent_start' });
-      send({ type: 'turn_start' });
-      sendText([silent.TOOL_TAIL_OPENING]);
-      send({ type: 'tool_execution_start', toolCallId: 'tool-tail-git', toolName: 'bash', args: { command: 'git status --short' } });
-      send({ type: 'tool_execution_end', toolCallId: 'tool-tail-git', toolName: 'bash', result: { content: [{ type: 'text', text: ' M src/example.ts' }] }, isError: false });
-      sendTurnEnd();
-      return;
-    }
+  if (silent.isToolTailScenario(command.message)) {
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+    send({ type: 'agent_start' });
+    send({ type: 'turn_start' });
+    sendText([silent.TOOL_TAIL_OPENING]);
+    send({ type: 'tool_execution_start', toolCallId: 'tool-tail-git', toolName: 'bash', args: { command: 'git status --short' } });
+    send({ type: 'tool_execution_end', toolCallId: 'tool-tail-git', toolName: 'bash', result: { content: [{ type: 'text', text: ' M src/example.ts' }] }, isError: false });
+    sendTurnEnd();
+    return;
   }
-  if (command.type === 'prompt' && command.message.includes('mock:crash-stderr')) {
-    const { crashWithStderr } = await import('./mock-runner-crash.mjs');
-    if (crashWithStderr(command.message, '{"type":"tool_execution_update","toolCallId":"truncated')) return;
+  return false;
+}
+
+async function respondCrash(command) {
+  const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+  if (crashWithStderr(command.message, '{"type":"tool_execution_update","toolCallId":"truncated')) return;
+  return false;
+}
+
+function respondState(command) {
+  send({
+    id: command.id,
+    type: 'response',
+    command: 'get_state',
+    success: true,
+    data: {
+      sessionId,
+      thinkingLevel: 'medium',
+      isStreaming: false,
+      isCompacting: false,
+      steeringMode,
+      followUpMode: 'one-at-a-time',
+      autoCompactionEnabled: true,
+      messageCount: 0,
+      pendingMessageCount: 0,
+    },
+  });
+}
+
+async function respondCezarTool(command) {
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' }); send({ type: 'turn_start' });
+  const { toolPrompt } = await import('./mock-ci-tool.mjs');
+  sendText([await toolPrompt('pi', process.argv.slice(2), command.message)]);
+  sendTurnEnd();
+}
+
+async function respondCiWait(command) {
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' }); send({ type: 'turn_start' });
+  const { ciPrompt } = await import('./mock-ci-tool.mjs');
+  sendText([await ciPrompt('pi', process.argv.slice(2), command.message)]);
+  sendTurnEnd();
+}
+
+async function respondSteerTool(command) {
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' }); send({ type: 'turn_start' });
+  send({ type: 'tool_execution_start', toolCallId: 'tool-steer', toolName: 'bash', args: { command: 'wait' } });
+  await sleep(Number(process.env.CEZ_MOCK_STEER_MS ?? 600));
+  send({ type: 'tool_execution_end', toolCallId: 'tool-steer', toolName: 'bash', result: { content: [{ type: 'text', text: 'waited' }] }, isError: false });
+  sendText(['steer tool done']);
+  sendTurnEnd();
+}
+
+async function respondSteerLate(command) {
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' }); send({ type: 'turn_start' });
+  sendText(['late window: final message already sent']);
+  activeTurn.late = true;
+  await sleep(300);
+  sendTurnEnd();
+}
+
+async function respondMultiPrRefs(command) {
+  const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' }); send({ type: 'turn_start' });
+  send({ type: 'tool_execution_start', toolCallId: 'multi-read', toolName: 'read', args: { path: 'other.txt' } });
+  send({ type: 'tool_execution_end', toolCallId: 'multi-read', toolName: 'read', result: { content: [{ type: 'text', text: unrelatedPr }] }, isError: false });
+  send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'thinking', thinking: unrelatedPr }], stopReason: 'stop' } });
+  const text = multiPrText(command.message);
+  sendText([text.slice(0, 5), text.slice(5)]);
+  sendTurnEnd();
+}
+
+async function respondTurnMessages(command) {
+  const { turnMessages } = await import('./mock-turn-messages.mjs');
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' }); send({ type: 'turn_start' });
+  for (const text of turnMessages(command.message)) sendText([text]);
+  sendTurnEnd();
+}
+
+function respondAgentEcho(command) {
+  // rpc-lifecycle.ndjson's normal prompt/assistant/settled sequence.
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  sendText([command.message]);
+  sendTurnEnd();
+}
+
+function respondSplitText(command) {
+  // Pi streams one text_delta per token (#2's root cause), so the marker is
+  // split across deltas. Only a coalescer reassembles `CEZ:MONITORING`;
+  // one v1 `text` per delta joins them with a newline and the park is lost
+  // (harness parity S8).
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  sendText(['parity split text', '\n\n', 'CEZ:', 'MONITORING']);
+  sendTurnEnd();
+}
+
+function respondProviderError(command) {
+  // An assistant `message_end` whose stopReason is `error`, carrying the
+  // transport diagnostic — wire shape copied from
+  // `src/core/__fixtures__/pi/provider-error.ndjson`. #54: this arrived
+  // before `agent_settled` and the run parked as "Needs You" instead of
+  // failing (harness parity S7).
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  send({ type: 'message_end', message: {
+    role: 'assistant',
+    content: [],
+    api: 'openai-codex-responses',
+    provider: 'openai-codex',
+    model: 'gpt-5.6-sol',
+    usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } },
+    stopReason: 'error',
+    diagnostics: [{ type: 'provider_transport_failure', error: { name: 'Error', message: 'WebSocket error' } }],
+    errorMessage: 'Not Found',
+  } });
+  send({ type: 'agent_settled' });
+}
+
+async function respondHoldDone(command) {
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  await waitForMockRelease(400);
+  sendText(['parity hold-done: content after the pause\n\nCEZ:DONE']);
+  sendTurnEnd();
+}
+
+async function respondHoldAsk(command) {
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  await waitForMockRelease(400);
+  sendText(['Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}']);
+  sendTurnEnd();
+}
+
+function respondDone(command) {
+  resumeAfterAsk = false;
+  // Declares the task complete so the run reaches cezar's review gate; a
+  // markerless turn-end correctly parks as `waiting` instead (harness
+  // parity R1).
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  sendText(['parity done: the task is complete\n\nCEZ:DONE']);
+  sendTurnEnd();
+}
+
+function respondAskSnapshot(command) {
+  // #401: authoritative text_end without deltas, using rpc-lifecycle frames.
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  send({ type: 'message_update', message: {}, assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: command.message.includes('mock:ask-snapshot-bad') ? 'CEZ:ASK {not valid json' : 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', partial: {} } });
+  sendTurnEnd();
+}
+
+function respondAskProse(command) {
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  sendText(['Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json']);
+  sendTurnEnd();
+}
+
+function respondBadAsk(command) {
+  // A marker whose JSON body is invalid. `parseAskMarker` must render no card
+  // and the turn must still end (harness parity R4) — pi has no native ask
+  // wire, so the `CEZ:ASK` marker is its only ask path, same as claude's.
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  sendText(['Pick one.\n\nCEZ:ASK {not valid json']);
+  sendTurnEnd();
+}
+
+function respondAsk(command) {
+  resumeAfterAsk = command.message.includes('mock:resume-done');
+  // A well-formed `CEZ:ASK` marker, split so the marker and its JSON body land
+  // in separate deltas — the #2 boundary that used to break assembly, and the
+  // reason an ask row is worth driving through the real coalescer.
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  sendText(['Pick one.\n\n', 'CEZ:ASK', ' ', ASK_MARKER_BODY]);
+  sendTurnEnd();
+}
+
+async function respondProgress(command) {
+  const gated = command.message.includes('mock:gate-prompt-ack');
+  if (gated) {
+    watchdogStall(command.message);
+    while (!promptAckReleased('input-ack.release')) await sleep(10);
   }
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' }); send({ type: 'turn_start' });
+  if (!gated) watchdogStall(command.message);
+  if (command.message.includes('mock:busy-progress')) {
+    return respondBusyProgress();
+  }
+}
+
+async function respondBusyProgress() {
+  for (let i = 0; i < 24; i++) { send({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'working' }] } }); await sleep(100); }
+  sendText(['busy complete\n\nCEZ:DONE']);
+  sendTurnEnd();
+}
+
+async function respondHoldGated(command) {
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  await waitForMockRelease(250);
+  sendText(['parity hold-gated: content after the pause']);
+  await sleep(250);
+  sendTurnEnd();
+}
+
+async function respondHold(command) {
+  // The `response` below is the ack. Holding the content AND the terminal
+  // quartet behind it is what makes harness parity S2 meaningful: a runner
+  // deriving turn-end from the ack reports it before this content arrives
+  // (the #4 failure mode on pi's wire).
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  await sleep(250);
+  sendText(['parity hold: content after the pause']);
+  await sleep(250);
+  sendTurnEnd();
+}
+
+async function respondDefault(command) {
+  const monitoringMarker = command.message.includes('mock:monitoring') ? '\n\nCEZ:MONITORING' : '';
+  const responseText = `Investigating: ${command.message}${monitoringMarker}`;
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late. A late-ack
+  // steer's run reports agent_start first: pi's mapper reports no turn for it, so the hold
+  // must outlast it until the run's first activity.
+  const lateAck = command.message.includes('mock:deferred-turn-start:late-ack');
+  if (lateAck) send({ type: 'agent_start' });
+  if (command.message.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
+  if (!lateAck) send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  send({
+    type: 'message_update',
+    message: {},
+    assistantMessageEvent: { type: 'text_start', contentIndex: 0, partial: {} },
+  });
+  send({
+    type: 'message_update',
+    message: {},
+    assistantMessageEvent: {
+      type: 'text_delta',
+      contentIndex: 0,
+      delta: responseText,
+      partial: {},
+    },
+  });
+  send({
+    type: 'message_update',
+    message: {},
+    assistantMessageEvent: {
+      type: 'text_end',
+      contentIndex: 0,
+      content: responseText,
+      partial: {},
+    },
+  });
+  send({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'read', args: { path: 'README.md' } });
+  send({
+    type: 'tool_execution_end',
+    toolCallId: 'tool-1',
+    toolName: 'read',
+    result: { content: [{ type: 'text', text: 'mock file' }] },
+    isError: false,
+  });
+  if (!monitoringMarker) sendText(['Done with the first pass.']);
+  send({
+    type: 'message_end',
+    message: {
+      role: 'assistant',
+      usage: {
+        input: 10,
+        output: 5,
+        cacheRead: 0,
+        cacheWrite: 0,
+        cost: { total: 0.001 },
+      },
+    },
+  });
+  send({ type: 'turn_end', message: {}, toolResults: [] });
+  send({ type: 'agent_end', messages: [], willRetry: false });
+  send({ type: 'agent_settled' });
+  if (command.message.includes('mock:backend-resume-text')) {
+    setTimeout(() => {
+      send({
+        type: 'message_update',
+        message: {},
+        assistantMessageEvent: { type: 'text_start', contentIndex: 0, partial: {} },
+      });
+      send({
+        type: 'message_update',
+        message: {},
+        assistantMessageEvent: {
+          type: 'text_delta',
+          contentIndex: 0,
+          delta: 'Pi resumed without a prompt',
+          partial: {},
+        },
+      });
+      send({
+        type: 'message_update',
+        message: {},
+        assistantMessageEvent: {
+          type: 'text_end',
+          contentIndex: 0,
+          content: 'Pi resumed without a prompt',
+          partial: {},
+        },
+      });
+    }, 250);
+  } else if (command.message.includes('mock:backend-resume')) {
+    setTimeout(() => {
+      send({
+        type: 'tool_execution_start',
+        toolCallId: 'pi-autonomous-edit',
+        toolName: 'edit',
+        args: { path: 'src/a.ts', oldText: 'old', newText: 'new' },
+      });
+      send({
+        type: 'tool_execution_end',
+        toolCallId: 'pi-autonomous-edit',
+        toolName: 'edit',
+        result: { content: [{ type: 'text', text: 'updated' }] },
+        isError: false,
+      });
+    }, 250);
+  }
+}
+
+function respondSteeringMode(command) {
+  if (command.mode === 'all' || command.mode === 'one-at-a-time') steeringMode = command.mode;
+  if (process.env.CEZ_MOCK_STDIN_FILE) {
+    try { appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ type: 'set_steering_mode', mode: command.mode })}\n`); } catch { /* best effort */ }
+  }
+  send({ ...(command.id ? { id: command.id } : {}), type: 'response', command: 'set_steering_mode', success: true });
+}
+
+async function respondFinalNudge(command, silent) {
+  send({ id: command.id, type: 'response', command: 'prompt', success: true });
+  const kind = silent.finalMessageNudgeKind();
+  if (kind === 'ack-only') return;
+  if (kind === 'late') await waitForMockRelease(silent.LATE_REPLY_MS);
+  send({ type: 'agent_start' });
+  send({ type: 'turn_start' });
+  return finishFinalNudge(silent, kind);
+}
+
+async function finishFinalNudge(silent, kind) {
+  if (kind === 'silent') sendThinking(silent.SILENT_TAIL_REASONING);
+  else if (kind === 'slow-done') {
+    sendText([silent.SLOW_DONE_PREFIX]);
+    await silent.sleep(silent.SLOW_DONE_TAIL_MS);
+    sendText([silent.SILENT_TAIL_DONE]);
+  } else sendText([kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE]);
+  sendTurnEnd();
+}
+
+function recordPrompt(command) {
   // Testability hook, mirroring mock-claude: CEZ_MOCK_STDIN_FILE=<path> appends
   // each inbound prompt's text and image count, so tests can assert what the
   // runner actually wrote onto the RPC (harness parity's AgentRunSpec probes).
-  if (command.type === 'prompt' && process.env.CEZ_MOCK_STDIN_FILE) {
+  if (process.env.CEZ_MOCK_STDIN_FILE) {
     try {
       appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ userText: rawMessage(command), imageCount: (command.images ?? []).length })}\n`);
     } catch {
       // best effort — never break the mock over the hook
     }
   }
-  if (command.type === 'prompt') command.message = answerNudge(command.message);
-  // `mock:ack-only` → the prompt is accepted and no agent run starts (hearsay-tools/cezarion#1301).
-  if (command.type === 'prompt' && command.message.includes('mock:ack-only')) {
+}
+
+// These scenarios run before recording or rewriting an ordinary prompt.
+// Silent-tail and clean crashes may fall through. Keep their original priority.
+const earlyPromptScenarios = [
+  { matches: command => command.message.includes('mock:autonomous') || command.message.startsWith('Continue working autonomously until the task is fully complete.'), respond: respondAutonomous },
+  { matches: command => command.message.includes('mock:silent-tail') || command.message.includes('mock:tool-tail') || silentNudge(command.message), respond: respondSilentTail },
+  { matches: command => command.message.includes('mock:crash-stderr'), respond: respondCrash },
+];
+
+// First match wins. These scenarios run before the configured failure control.
+const promptScenarios = [
+  { matches: command => command.message.includes('mock:cezar-tool'), respond: respondCezarTool },
+  { matches: command => command.message.includes('mock:ci-wait'), respond: respondCiWait },
+  { matches: command => command.message.includes('mock:steer-tool'), respond: respondSteerTool },
+  { matches: command => command.message.includes('mock:steer-late'), respond: respondSteerLate },
+  { matches: command => command.message.includes('mock:multi-pr-refs'), respond: respondMultiPrRefs },
+  { matches: command => command.message.includes('mock:turn-messages:'), respond: respondTurnMessages },
+  { matches: command => command.message.includes('mock:agent-echo'), respond: respondAgentEcho },
+  { matches: command => command.message.includes('mock:split-text'), respond: respondSplitText },
+];
+
+// A provider failure takes priority over these trailing scenarios.
+const tailPromptScenarios = [
+  { matches: command => command.message.includes('mock:hold-done'), respond: respondHoldDone },
+  { matches: command => command.message.includes('mock:hold-ask'), respond: respondHoldAsk },
+  { matches: command => (command.message.includes('mock:done') || (resumeAfterAsk && command.message.trim() === 'Library: Vitest')), respond: respondDone },
+  { matches: command => command.message.includes('mock:ask-snapshot'), respond: respondAskSnapshot },
+  { matches: command => command.message.includes('mock:ask-prose'), respond: respondAskProse },
+  { matches: command => command.message.includes('mock:ask-bad'), respond: respondBadAsk },
+  { matches: command => command.message.includes('mock:ask'), respond: respondAsk },
+  { matches: command => /mock:(no-progress|busy-progress)/.test(command.message), respond: respondProgress },
+  { matches: command => command.message.includes('mock:hold-gated'), respond: respondHoldGated },
+  { matches: command => command.message.includes('mock:hold'), respond: respondHold },
+];
+
+async function handlePromptCommand(command) {
+  for (const scenario of earlyPromptScenarios) {
+    if (!scenario.matches(command)) continue;
+    const result = scenario.respond(command);
+    const handled = result instanceof Promise ? await result : result;
+    if (handled !== false) return;
+  }
+  recordPrompt(command);
+  command.message = answerNudge(command.message);
+  // `mock:ack-only` accepts the prompt without opening a native agent turn.
+  if (command.message.includes('mock:ack-only')) {
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
     return;
   }
-  if (command.type === 'get_state') {
-    send({
-      id: command.id,
-      type: 'response',
-      command: 'get_state',
-      success: true,
-      data: {
-        sessionId,
-        thinkingLevel: 'medium',
-        isStreaming: false,
-        isCompacting: false,
-        steeringMode,
-        followUpMode: 'one-at-a-time',
-        autoCompactionEnabled: true,
-        messageCount: 0,
-        pendingMessageCount: 0,
-      },
-    });
-  } else if (command.type === 'prompt' && command.message.includes('mock:cezar-tool')) {
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' }); send({ type: 'turn_start' });
-    const { toolPrompt } = await import('./mock-ci-tool.mjs');
-    sendText([await toolPrompt('pi', process.argv.slice(2), command.message)]);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && command.message.includes('mock:ci-wait')) {
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' }); send({ type: 'turn_start' });
-    const { ciPrompt } = await import('./mock-ci-tool.mjs');
-    sendText([await ciPrompt('pi', process.argv.slice(2), command.message)]);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && command.message.includes('mock:steer-tool')) {
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' }); send({ type: 'turn_start' });
-    send({ type: 'tool_execution_start', toolCallId: 'tool-steer', toolName: 'bash', args: { command: 'wait' } });
-    await sleep(Number(process.env.CEZ_MOCK_STEER_MS ?? 600));
-    send({ type: 'tool_execution_end', toolCallId: 'tool-steer', toolName: 'bash', result: { content: [{ type: 'text', text: 'waited' }] }, isError: false });
-    sendText(['steer tool done']);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && command.message.includes('mock:steer-late')) {
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' }); send({ type: 'turn_start' });
-    sendText(['late window: final message already sent']);
-    activeTurn.late = true;
-    await sleep(300);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && command.message.includes('mock:multi-pr-refs')) {
-    const { multiPrText, unrelatedPr } = await import('./mock-multi-pr.mjs');
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' }); send({ type: 'turn_start' });
-    send({ type: 'tool_execution_start', toolCallId: 'multi-read', toolName: 'read', args: { path: 'other.txt' } });
-    send({ type: 'tool_execution_end', toolCallId: 'multi-read', toolName: 'read', result: { content: [{ type: 'text', text: unrelatedPr }] }, isError: false });
-    send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'thinking', thinking: unrelatedPr }], stopReason: 'stop' } });
-    const text = multiPrText(command.message);
-    sendText([text.slice(0, 5), text.slice(5)]);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && command.message.includes('mock:turn-messages:')) {
-    const { turnMessages } = await import('./mock-turn-messages.mjs');
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' }); send({ type: 'turn_start' });
-    for (const text of turnMessages(command.message)) sendText([text]);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && command.message.includes('mock:agent-echo')) {
-    // rpc-lifecycle.ndjson's normal prompt/assistant/settled sequence.
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    sendText([command.message]);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && command.message.includes('mock:split-text')) {
-    // Pi streams one text_delta per token (#2's root cause), so the marker is
-    // split across deltas. Only a coalescer reassembles `CEZ:MONITORING`;
-    // one v1 `text` per delta joins them with a newline and the park is lost
-    // (harness parity S8).
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    sendText(['parity split text', '\n\n', 'CEZ:', 'MONITORING']);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && (failureControl ? (await failureControl.failureFor(command.message)) === 'provider' : command.message.includes('mock:provider-error'))) {
-    // An assistant `message_end` whose stopReason is `error`, carrying the
-    // transport diagnostic — wire shape copied from
-    // `src/core/__fixtures__/pi/provider-error.ndjson`. #54: this arrived
-    // before `agent_settled` and the run parked as "Needs You" instead of
-    // failing (harness parity S7).
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    send({ type: 'message_end', message: {
-      role: 'assistant',
-      content: [],
-      api: 'openai-codex-responses',
-      provider: 'openai-codex',
-      model: 'gpt-5.6-sol',
-      usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { total: 0 } },
-      stopReason: 'error',
-      diagnostics: [{ type: 'provider_transport_failure', error: { name: 'Error', message: 'WebSocket error' } }],
-      errorMessage: 'Not Found',
-    } });
-    send({ type: 'agent_settled' });
-  } else if (command.type === 'prompt' && command.message.includes('mock:hold-done')) {
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    await waitForMockRelease(400);
-    sendText(['parity hold-done: content after the pause\n\nCEZ:DONE']);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && command.message.includes('mock:hold-ask')) {
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    await waitForMockRelease(400);
-    sendText(['Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}']);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && (command.message.includes('mock:done') || (resumeAfterAsk && command.message.trim() === 'Library: Vitest'))) {
-    resumeAfterAsk = false;
-    // Declares the task complete so the run reaches cezar's review gate; a
-    // markerless turn-end correctly parks as `waiting` instead (harness
-    // parity R1).
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    sendText(['parity done: the task is complete\n\nCEZ:DONE']);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && command.message.includes('mock:ask-snapshot')) {
-    // #401: authoritative text_end without deltas, using rpc-lifecycle frames.
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    send({ type: 'message_update', message: {}, assistantMessageEvent: { type: 'text_end', contentIndex: 0, content: command.message.includes('mock:ask-snapshot-bad') ? 'CEZ:ASK {not valid json' : 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}', partial: {} } });
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && command.message.includes('mock:ask-prose')) {
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    sendText(['Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json']);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && command.message.includes('mock:ask-bad')) {
-    // A marker whose JSON body is invalid. `parseAskMarker` must render no card
-    // and the turn must still end (harness parity R4) — pi has no native ask
-    // wire, so the `CEZ:ASK` marker is its only ask path, same as claude's.
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    sendText(['Pick one.\n\nCEZ:ASK {not valid json']);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && command.message.includes('mock:ask')) {
-    resumeAfterAsk = command.message.includes('mock:resume-done');
-    // A well-formed `CEZ:ASK` marker, split so the marker and its JSON body land
-    // in separate deltas — the #2 boundary that used to break assembly, and the
-    // reason an ask row is worth driving through the real coalescer.
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    sendText(['Pick one.\n\n', 'CEZ:ASK', ' ', ASK_MARKER_BODY]);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && /mock:(no-progress|busy-progress)/.test(command.message)) {
-    const gated = command.message.includes('mock:gate-prompt-ack');
-    if (gated) {
-      watchdogStall(command.message);
-      while (!promptAckReleased('input-ack.release')) await sleep(10);
-    }
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' }); send({ type: 'turn_start' });
-    if (!gated) watchdogStall(command.message);
-    if (command.message.includes('mock:busy-progress')) {
-      for (let i = 0; i < 24; i++) { send({ type: 'tool_execution_update', toolCallId: 'busy', toolName: 'bash', partialResult: { content: [{ type: 'text', text: 'working' }] } }); await sleep(100); }
-      sendText(['busy complete\n\nCEZ:DONE']);
-      sendTurnEnd();
-    }
-  } else if (command.type === 'prompt' && command.message.includes('mock:hold-gated')) {
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    await waitForMockRelease(250);
-    sendText(['parity hold-gated: content after the pause']);
-    await sleep(250);
-    sendTurnEnd();
-  } else if (command.type === 'prompt' && command.message.includes('mock:hold')) {
-    // The `response` below is the ack. Holding the content AND the terminal
-    // quartet behind it is what makes harness parity S2 meaningful: a runner
-    // deriving turn-end from the ack reports it before this content arrives
-    // (the #4 failure mode on pi's wire).
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    await sleep(250);
-    sendText(['parity hold: content after the pause']);
-    await sleep(250);
-    sendTurnEnd();
-  } else if (command.type === 'prompt') {
-    const monitoringMarker = command.message.includes('mock:monitoring') ? '\n\nCEZ:MONITORING' : '';
-    const responseText = `Investigating: ${command.message}${monitoringMarker}`;
-    send({ id: command.id, type: 'response', command: 'prompt', success: true });
-    // hearsay-tools/cezarion#1112: the acknowledged prompt opens its native run late. A late-ack
-    // steer's run reports agent_start first: pi's mapper reports no turn for it, so the hold
-    // must outlast it until the run's first activity.
-    const lateAck = command.message.includes('mock:deferred-turn-start:late-ack');
-    if (lateAck) send({ type: 'agent_start' });
-    if (command.message.includes('mock:deferred-turn-start')) await (await import('./mock-deferred-turn-start.mjs')).deferredTurnStart();
-    if (!lateAck) send({ type: 'agent_start' });
-    send({ type: 'turn_start' });
-    send({
-      type: 'message_update',
-      message: {},
-      assistantMessageEvent: { type: 'text_start', contentIndex: 0, partial: {} },
-    });
-    send({
-      type: 'message_update',
-      message: {},
-      assistantMessageEvent: {
-        type: 'text_delta',
-        contentIndex: 0,
-        delta: responseText,
-        partial: {},
-      },
-    });
-    send({
-      type: 'message_update',
-      message: {},
-      assistantMessageEvent: {
-        type: 'text_end',
-        contentIndex: 0,
-        content: responseText,
-        partial: {},
-      },
-    });
-    send({ type: 'tool_execution_start', toolCallId: 'tool-1', toolName: 'read', args: { path: 'README.md' } });
-    send({
-      type: 'tool_execution_end',
-      toolCallId: 'tool-1',
-      toolName: 'read',
-      result: { content: [{ type: 'text', text: 'mock file' }] },
-      isError: false,
-    });
-    if (!monitoringMarker) sendText(['Done with the first pass.']);
-    send({
-      type: 'message_end',
-      message: {
-        role: 'assistant',
-        usage: {
-          input: 10,
-          output: 5,
-          cacheRead: 0,
-          cacheWrite: 0,
-          cost: { total: 0.001 },
-        },
-      },
-    });
-    send({ type: 'turn_end', message: {}, toolResults: [] });
-    send({ type: 'agent_end', messages: [], willRetry: false });
-    send({ type: 'agent_settled' });
-    if (command.message.includes('mock:backend-resume-text')) {
-      setTimeout(() => {
-        send({
-          type: 'message_update',
-          message: {},
-          assistantMessageEvent: { type: 'text_start', contentIndex: 0, partial: {} },
-        });
-        send({
-          type: 'message_update',
-          message: {},
-          assistantMessageEvent: {
-            type: 'text_delta',
-            contentIndex: 0,
-            delta: 'Pi resumed without a prompt',
-            partial: {},
-          },
-        });
-        send({
-          type: 'message_update',
-          message: {},
-          assistantMessageEvent: {
-            type: 'text_end',
-            contentIndex: 0,
-            content: 'Pi resumed without a prompt',
-            partial: {},
-          },
-        });
-      }, 250);
-    } else if (command.message.includes('mock:backend-resume')) {
-      setTimeout(() => {
-        send({
-          type: 'tool_execution_start',
-          toolCallId: 'pi-autonomous-edit',
-          toolName: 'edit',
-          args: { path: 'src/a.ts', oldText: 'old', newText: 'new' },
-        });
-        send({
-          type: 'tool_execution_end',
-          toolCallId: 'pi-autonomous-edit',
-          toolName: 'edit',
-          result: { content: [{ type: 'text', text: 'updated' }] },
-          isError: false,
-        });
-      }, 250);
-    }
-  } else if (command.type === 'set_steering_mode') {
-    if (command.mode === 'all' || command.mode === 'one-at-a-time') steeringMode = command.mode;
-    if (process.env.CEZ_MOCK_STDIN_FILE) {
-      try { appendFileSync(process.env.CEZ_MOCK_STDIN_FILE, `${JSON.stringify({ type: 'set_steering_mode', mode: command.mode })}\n`); } catch { /* best effort */ }
-    }
-    send({ ...(command.id ? { id: command.id } : {}), type: 'response', command: 'set_steering_mode', success: true });
-  } else if (command.type === 'abort') {
-    send({ type: 'response', command: 'abort', success: true });
+  const scenario = promptScenarios.find(scenario => scenario.matches(command));
+  if (scenario) return scenario.respond(command);
+  if (failureControl ? (await failureControl.failureFor(command.message)) === 'provider' : command.message.includes('mock:provider-error')) {
+    return respondProviderError(command);
+  }
+  const tail = tailPromptScenarios.find(scenario => scenario.matches(command));
+  if (tail) return tail.respond(command);
+  return respondDefault(command);
+}
+
+async function handleCommand(command) {
+  switch (command.type) {
+    case 'prompt': return handlePromptCommand(command);
+    case 'get_state': respondState(command); return;
+    case 'set_steering_mode': respondSteeringMode(command); return;
+    case 'abort': send({ type: 'response', command: 'abort', success: true });
   }
 }
