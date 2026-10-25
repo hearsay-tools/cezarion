@@ -12,11 +12,13 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSyn
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, onTestFinished, vi } from 'vitest';
-import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
+import { workerWaitRequestSchema, type WorkerOperation, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
 import { hasWorkerDeadline, workerWaitEntryToLegacy, workerWaitView, type DeadlinedWorkerWaitEntry, type WorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
 import { RunStore, type RunEvent, type RunRecord } from '../runs/store.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
+import { CredentialRegistry, type Caller } from '../delegation/credentials.ts';
+import { DelegationService } from '../delegation/service.ts';
 import { collectWorkerEvidence } from '../delegation/results.ts';
 import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -206,13 +208,50 @@ rl.on('close', () => process.exit(0));
   return { initialReceived: () => existsSync(initial), received: () => existsSync(received) ? readFileSync(received, 'utf8').trim().split('\n').length : 0 };
 }
 
-export async function parent(task = 'mock:hold', runner: RunnerId = 'claude') {
+async function startParent(task: string, runner: RunnerId, permissions: WorkerOperation[]) {
   checkpoint('parent-start');
   const run = manager.startRun(QUICK_TASK_WORKFLOW, { task, runner });
-  store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
-  await until(() => (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(run.id)?.sessionEverOpened === true);
+  store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions, receipts: [] } }]);
+  await until(() => {
+    return (manager as unknown as { active: Map<string, { sessionEverOpened?: boolean }> }).active.get(run.id)?.sessionEverOpened === true;
+  });
   checkpoint('parent-session-open'); return run;
 }
+/** Low-level root builder. It does not enable `CEZ_DELEGATION`: use `delegatingParent`
+ *  for service calls. Recovery and inactive-parent tests may keep explicit service setup. */
+export function parent(task = 'mock:hold', runner: RunnerId = 'claude') {
+  return startParent(task, runner, ['spawn', 'wait']);
+}
+
+/** A service-ready root with exactly the test's permissions, scoped callers and automatic cleanup.
+ *  Call before creating workers: their native sessions inherit the delegation opt-in too.
+ *  A restart needs a new registration for its new store/manager, not this old service. */
+export async function delegatingParent(options: { permissions: WorkerOperation[]; task?: string; runner?: RunnerId }) {
+  process.env.CEZ_DELEGATION = '1';
+  const p = await startParent(options.task ?? 'mock:hold', options.runner ?? 'claude', [...options.permissions]);
+  const service = new DelegationService();
+  const detach = service.registerProject({ id: 'project', root, store, manager });
+  const credentials = new CredentialRegistry();
+  const callers = new Map<string, Caller>();
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    try { detach(); } finally { credentials.close(); callers.clear(); }
+  };
+  onTestFinished(close);
+  const callerFor = (runId: string): Caller => {
+    if (closed) throw Error('Delegating parent fixture is closed');
+    let caller = callers.get(runId);
+    if (!caller) {
+      caller = credentials.authenticate(credentials.issue('project', runId, randomUUID()))!;
+      callers.set(runId, caller);
+    }
+    return caller;
+  };
+  return { p, service, callerFor, close };
+}
+
 export async function worker(parentId: string, task = 'mock:hold', runner: RunnerId = 'claude') {
   checkpoint('worker-plan-start');
   const id = randomUUID();

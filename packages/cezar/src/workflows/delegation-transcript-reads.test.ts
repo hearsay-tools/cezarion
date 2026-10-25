@@ -11,7 +11,7 @@ import { RunStore } from '../runs/store.ts';
 import { countTranscriptReads, restoreTranscriptReads } from '../runs/transcript-reads.testkit.ts';
 import { RunManager } from './run.ts';
 import { seedSettledFamily } from './delegation-reconcile.testkit.ts';
-import { manager as liveManager, parent, store as liveStore, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { delegatingParent, manager as liveManager, store as liveStore, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
 const questions = [{ header: 'Pick', question: 'Which one?', options: [{ label: 'A' }, { label: 'B' }] }];
 type Private = { routedAsk(runId: string): unknown };
@@ -24,6 +24,7 @@ describe('delegation paths read no transcript (#880)', () => {
   let family: ReturnType<typeof seedSettledFamily>;
   let familyPaths: (path: string) => boolean;
   beforeEach(() => {
+    // This index-only fixture seeds a settled family; it must not start a parent session.
     vi.stubEnv('CEZ_DELEGATION', '1');
     root = mkdtempSync(join(tmpdir(), 'cez-transcript-reads-'));
     store = RunStore.open(join(root, '.ai/cezar'));
@@ -106,11 +107,7 @@ describe('delivering a message to a worker reads no transcript (#880)', { timeou
   useWorkerWaitFixture();
 
   it('refuses a human message on a routed question from the index', async () => {
-    process.env.CEZ_DELEGATION = '1';
-    const p = await parent();
-    const delegation = liveStore.getRun(p.id)!.delegation!;
-    if (delegation.role !== 'root') throw Error('missing root');
-    liveStore.commitDelegation([{ id: p.id, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer'] } }]);
+    const { p } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
     await until(() => liveStore.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, 'mock:ask'); liveManager.enqueueOwnedRun(w.id);
     await until(() => liveStore.readEvents(w.id).some((event) => event.type === 'worker-question-routed') && liveStore.getRun(w.id)?.status === 'waiting');

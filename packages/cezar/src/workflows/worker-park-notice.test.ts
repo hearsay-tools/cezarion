@@ -1,13 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConversationMessage } from '@open-mercato/cezar-contract';
-import { CredentialRegistry } from '../delegation/credentials.ts';
-import { DelegationService } from '../delegation/service.ts';
 import { parkNoticeId } from '../delegation/park-notice.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
-import { eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, root, spendWorkerBudget, store, timeline, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
+import { delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, register, restart, root, spendWorkerBudget, store, timeline, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
 
 /** hearsay-tools/cezarion#1327: the single-runner paths of the park notice. The RUNNER_IDS cells
  *  U3n, U3r and U3d (`waits-parity-cells.testkit.ts`) pin it on every native wire. */
@@ -24,18 +22,9 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
   const turnEnds = (id: string) => store.readEvents(id).filter(event => event.type === 'turn-end').length;
   /** A root parent, parked, that may message its workers, with a delegation service for both. */
   async function family() {
-    process.env.CEZ_DELEGATION = '1';
-    const p = await parent();
+    const { p, service, callerFor } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
     await until(() => parked(p.id));
-    const delegation = store.getRun(p.id)!.delegation!;
-    if (delegation.role !== 'root') throw Error('root fixture');
-    store.commitDelegation([{ id: p.id, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer'] } }]);
-    const service = new DelegationService();
-    service.registerProject({ id: 'project', root, store, manager });
-    const credentials = new CredentialRegistry();
-    onTestFinished(() => credentials.close());
-    const callerOf = (id: string) => credentials.authenticate(credentials.issue('project', id, randomUUID()))!;
-    return { p, service, callerOf };
+    return { p, service, callerOf: callerFor };
   }
   /** A worker whose opening turn says `text` and plain-parks, as a spent budget makes it. */
   async function parkedWorker(parentId: string, text: string) {
