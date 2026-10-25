@@ -288,10 +288,16 @@ function finish(why: string): void {
 function onFrame(frame: Frame): void {
   if (finished) return;
   if (frame.type === 'available_commands_update') listed = frame.commands;
-  else if (frame.type === 'response' && frame.command === 'get_commands') { listed = (frame.data as Frame | undefined)?.commands; finish('settled'); }
-  else if (frame.type === 'response' && frame.success === false) rec('rpc-error', frame);
-  else if (frame.type === 'extension_error' || frame.type === 'extension_ui_request') rec(String(frame.type), frame);
-  else if (frame.type === runner.settled) {
+  else if (frame.type === 'response' && frame.success === false) {
+    rec('rpc-error', frame);
+    // A failed listing must not read as a settled probe that found no commands.
+    if (frame.command === 'get_commands') finish('get_commands failed');
+  } else if (frame.type === 'response' && frame.command === 'get_commands') {
+    listed = (frame.data as Frame | undefined)?.commands;
+    finish('settled');
+  } else if (frame.type === 'extension_error' || frame.type === 'extension_ui_request') {
+    rec(String(frame.type), frame);
+  } else if (frame.type === runner.settled) {
     if (runner.listsCommands === 'rpc') write({ id: 'probe-commands', type: 'get_commands' });
     else finish('settled');
   }
