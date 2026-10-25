@@ -943,7 +943,8 @@ with the agent-browser operations in `.ai/browsers/agent-browser.md`. Opt-ins us
 Squeal browser run does not block it. One fixture runs per worktree, and `up` replaces it.
 `node .ai/scripts/qa-fixture.mjs down` stops the server's process group and removes the
 temporary root. A forgotten fixture stops on its own when its worktree, its `.ai/qa` or its
-temporary root is deleted. Linux and macOS only.
+temporary root is deleted, and so does a server whose `up` was interrupted during boot.
+Linux and macOS only.
 
 ## Related documents
 

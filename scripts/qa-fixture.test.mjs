@@ -12,7 +12,8 @@ import { identity } from '../.ai/scripts/test-env-lease.mjs';
 // A stand-in for the e2e build: `dist/index.js` answers like `cezar serve` does for the checks
 // qa-fixture makes. It records its argv and environment, and keeps a child in its own process
 // group, so a test can see what reached the server and that `down` stops the whole group.
-// CEZ_STUB_MODE (passed through --server-env) picks a failure; CEZ_STUB_CHILD=stubborn makes
+// CEZ_STUB_MODE (passed through --server-env) picks a failure, or `hang`, a boot that never
+// prints its banner; CEZ_STUB_CHILD=stubborn makes
 // the child ignore SIGTERM, and CEZ_STUB_CHILD=zombie makes it leave the group without reaping
 // the process it forked, which then stays in the group as a zombie.
 const STUB_SERVER = `
@@ -37,7 +38,8 @@ const server = createServer((req, res) => {
   res.setHeader('content-type', 'application/json');
   res.end(JSON.stringify({ projects, bootProject: 'qa-repo', projectsDir: '' }));
 });
-server.listen(0, '127.0.0.1', () => console.log('\\n  cockpit → http://127.0.0.1:' + server.address().port + '\\n'));
+if (mode === 'hang') setInterval(() => {}, 1000);
+else server.listen(0, '127.0.0.1', () => console.log('\\n  cockpit → http://127.0.0.1:' + server.address().port + '\\n'));
 process.on('SIGTERM', () => process.exit(0));
 `;
 
@@ -188,6 +190,17 @@ test('a failed build fails up with the end of its log and leaves nothing behind'
   assert.deepEqual(readdirSync(f.tmp), []);
 });
 
+const stubStarted = (tmp) => readdirSync(tmp).some((entry) => existsSync(join(tmp, entry, 'home/stub.json')));
+
+/** A stand-in for the process that runs `node qa-fixture.mjs up`, which exits once up returns.
+ *  up runs in this test process, so a test kills the stand-in instead. */
+async function upProcess(t) {
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  await new Promise((done) => child.once('spawn', done));
+  t.after(() => child.kill('SIGKILL'));
+  return { exit: () => child.kill('SIGKILL'), identity: { pid: child.pid, start: identity(child.pid).start } };
+}
+
 function groupAlive(pid) {
   try {
     process.kill(-pid, 0);
@@ -212,13 +225,12 @@ for (const [which, call] of [['server', 1], ['watcher', 2]]) {
   test(`up stops the ${which} when it cannot read the ${which}'s start identity`, async (t) => {
     const f = fixture(t);
     const started = [];
-    const stubStarted = () => readdirSync(f.tmp).some((entry) => existsSync(join(f.tmp, entry, 'home/stub.json')));
     const readIdentity = (pid) => {
       started.push(pid);
       if (started.length !== call) return identity(pid);
       // Read once the stub has started its own child, so that only a stop of the whole group
       // ends it. Earlier, up's cleanup deletes the script before node loads it.
-      if (which === 'server') waitSync(stubStarted, 'the stub server to start');
+      if (which === 'server') waitSync(() => stubStarted(f.tmp), 'the stub server to start');
       return {};
     };
     // Only a failing run leaves a group behind; the descriptor that down would read is gone.
@@ -232,7 +244,9 @@ for (const [which, call] of [['server', 1], ['watcher', 2]]) {
 
 test('the watcher stops the server once its descriptor is gone', async (t) => {
   const f = fixture(t);
-  await up(f.options({ watchIntervalMs: 100 }));
+  const starter = await upProcess(t);
+  await up(f.options({ watchIntervalMs: 100, starter: starter.identity }));
+  starter.exit();
   const { root, server, watcher } = descriptor(f.worktree);
   // What deleting the task worktree, or its .ai/qa, does to the only handle down has.
   rmSync(join(f.worktree, '.ai'), { recursive: true, force: true });
@@ -241,7 +255,9 @@ test('the watcher stops the server once its descriptor is gone', async (t) => {
 
 test('the watcher stops what is left of a server that exited on its own, then cleans up', async (t) => {
   const f = fixture(t);
-  await up(f.options({ watchIntervalMs: 100 }));
+  const starter = await upProcess(t);
+  await up(f.options({ watchIntervalMs: 100, starter: starter.identity }));
+  starter.exit();
   const { root, watcher } = descriptor(f.worktree);
   const { child } = JSON.parse(readFileSync(join(root, 'home/stub.json'), 'utf8'));
   await fetch(`${values(f.stdout.text).QA_FIXTURE_BASE_URL}/exit`).catch(() => {});
@@ -297,10 +313,34 @@ test('down treats a process group of zombies only as stopped, while other proces
 
 test('the watcher stops the server once its temporary root is gone', async (t) => {
   const f = fixture(t);
-  await up(f.options({ watchIntervalMs: 100 }));
+  const starter = await upProcess(t);
+  await up(f.options({ watchIntervalMs: 100, starter: starter.identity }));
+  starter.exit();
   const { root, server } = descriptor(f.worktree);
   rmSync(root, { recursive: true, force: true });
   await until(() => !alive(server.pid) && !existsSync(descriptorPath(f.worktree)), 'the watcher to stop the server');
+});
+
+test('the watcher stops the server when up is interrupted during boot', async (t) => {
+  const f = fixture(t);
+  const starter = await upProcess(t);
+  const started = [];
+  const readIdentity = (pid) => {
+    started.push(pid);
+    return identity(pid);
+  };
+  // Only a failing run leaves a group behind: nothing names it once up's process is gone.
+  t.after(() => started.filter(groupAlive).forEach((pid) => process.kill(-pid, 'SIGKILL')));
+  const booting = up(f.options({ args: ['--server-env=CEZ_STUB_MODE=hang'], starter: starter.identity, readIdentity, watchIntervalMs: 100, bootTimeoutMs: 120_000 }));
+  const failed = assert.rejects(booting);
+  await until(() => stubStarted(f.tmp), 'the stub server to start');
+  // What Ctrl-C or a SIGKILL does to up's process: none of its cleanup runs.
+  starter.exit();
+  await until(() => !groupAlive(started[0]), 'the watcher to stop the server');
+  await failed;
+  await until(() => !started.some(groupAlive), 'the watcher to exit');
+  assert.deepEqual(readdirSync(f.tmp), []);
+  assert.equal(existsSync(descriptorPath(f.worktree)), false);
 });
 
 test('up refuses a bad flag before it creates anything', async (t) => {

@@ -13,7 +13,8 @@
 //
 // `down` stops the server's process group and removes the temporary root. A watcher stops the
 // fixture when nobody runs `down`: when the descriptor goes (the worktree or its `.ai/qa` was
-// deleted) or the temporary root goes. It cleans up after a server that exits on its own.
+// deleted), when the temporary root goes, or when `up` dies before it writes the descriptor. It
+// cleans up after a server that exits on its own.
 // POSIX only: the stop signals a process group.
 import { spawn, spawnSync } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
@@ -241,11 +242,14 @@ function removeRoot(root) {
   if (validRoot(root)) rmSync(root, { recursive: true, force: true });
 }
 
+/** Best effort, so a cleanup that calls it always finishes. */
 function printLogTail(stderr, root) {
-  const name = ['server.log', 'build.log'].find((file) => existsSync(join(root, file)));
-  if (!name) return;
-  const tail = readFileSync(join(root, name), 'utf8').trimEnd().split('\n').slice(-20).join('\n');
-  log(stderr, `last lines of ${name}:\n${tail}`);
+  try {
+    const name = ['server.log', 'build.log'].find((file) => existsSync(join(root, file)));
+    if (!name) return;
+    const tail = readFileSync(join(root, name), 'utf8').trimEnd().split('\n').slice(-20).join('\n');
+    log(stderr, `last lines of ${name}:\n${tail}`);
+  } catch { /* the log went with its root */ }
 }
 
 /** Stops the fixture the descriptor names. The watcher goes first, so it cannot clean up at the
@@ -283,6 +287,8 @@ export async function up({
   watchIntervalMs = WATCH_INTERVAL_MS,
   stopGraceMs = STOP_GRACE_MS,
   readIdentity = identity,
+  // The process the watcher waits for: while it runs, up owns the server. Tests pass a stand-in.
+  starter = { pid: process.pid, start: identity(process.pid).start ?? '' },
 }) {
   const optIns = parseUpArgs(args);
   if (process.platform !== 'linux' && process.platform !== 'darwin') {
@@ -292,6 +298,7 @@ export async function up({
   const root = mkdtempSync(join(realpathSync(tmp), ROOT_PREFIX));
   const repo = join(root, 'repo');
   let server;
+  let watcher;
   try {
     const childEnv = serverEnv(env, root, optIns);
     writeFileSync(join(root, 'gitconfig'), '');
@@ -300,15 +307,15 @@ export async function up({
     await build(join(root, 'build/cezar'), join(root, 'build.log'));
     server = await detach([join(root, 'build/cezar/dist/index.js'), 'serve', '--repo', repo, '--port', '0', '--no-open'],
       { cwd: repo, env: childEnv, logPath: join(root, 'server.log'), readIdentity });
+    // Started at once: an up that dies during the boot, from Ctrl-C or SIGKILL, runs none of its
+    // cleanup. The watcher leaves the server alone while up's process runs, and up writes the
+    // descriptor before it exits, or stops both.
+    watcher = await detach([import.meta.filename, 'watch', repoRoot, root, String(server.pid), server.start, String(watchIntervalMs), String(starter.pid), starter.start],
+      { cwd: dirname(root), env, logPath: join(root, 'watch.log'), readIdentity });
     const baseUrl = await waitForCockpit(server, join(root, 'server.log'), bootTimeoutMs);
     const projectId = await registeredProject(baseUrl, repo);
-    const fixture = { root, baseUrl, projectId, server, startedAt: new Date().toISOString() };
-    // Written before the watcher starts: a watcher that finds no descriptor stops the server.
-    // The owner record goes first each time, so no descriptor exists without its confirmation.
-    writeOwner(repoRoot, fixture);
-    writeDescriptor(repoRoot, fixture);
-    fixture.watcher = await detach([import.meta.filename, 'watch', repoRoot, root, String(server.pid), server.start, String(watchIntervalMs)],
-      { cwd: dirname(root), env, logPath: join(root, 'watch.log'), readIdentity });
+    const fixture = { root, baseUrl, projectId, server, watcher, startedAt: new Date().toISOString() };
+    // The owner record goes first, so no descriptor exists without its confirmation.
     writeOwner(repoRoot, fixture);
     writeDescriptor(repoRoot, fixture);
     stdout.write([
@@ -321,6 +328,8 @@ export async function up({
       'QA_FIXTURE_STOP=node .ai/scripts/qa-fixture.mjs down',
     ].join('\n') + '\n');
   } catch (error) {
+    // The watcher first, so it cannot clean up at the same time.
+    if (watcher) await stopGroup(watcher, stopGraceMs);
     if (server) await stopGroup(server, stopGraceMs);
     printLogTail(stderr, root);
     removeRoot(root);
@@ -329,12 +338,14 @@ export async function up({
   }
 }
 
-/** The fixture's end when nobody runs `down`. The descriptor is the only handle `down` has, so
- *  the server stops once the descriptor no longer names it, or its temporary root is gone. A
- *  server that exits on its own leaves nothing behind, members of its group included. */
-export async function watch({ repoRoot, root, server, intervalMs = WATCH_INTERVAL_MS }) {
+/** The fixture's end when nobody runs `down`. While `starter`, up's process, runs, up owns the
+ *  server. After that the descriptor is the only handle `down` has, so the server stops once the
+ *  descriptor no longer names it, or its temporary root is gone. A server that exits on its own
+ *  leaves nothing behind, members of its group included. */
+export async function watch({ repoRoot, root, server, starter, intervalMs = WATCH_INTERVAL_MS }) {
   while (true) {
     await delay(intervalMs);
+    if (isRunning(starter)) continue;
     const current = identity(server.pid);
     // An unreadable identity proves nothing either way: look again at the next poll.
     if (!current.dead && current.start === undefined) continue;
@@ -352,9 +363,11 @@ async function main([command, ...args]) {
   const repoRoot = resolve(import.meta.dirname, '../..');
   if (command === 'up') return up({ repoRoot, args });
   if (command === 'down' && args.length === 0) return down({ repoRoot });
-  if (command === 'watch' && args.length === 5) {
-    const [worktree, root, pid, start, intervalMs] = args;
-    return watch({ repoRoot: worktree, root, server: { pid: Number(pid), start }, intervalMs: Number(intervalMs) });
+  if (command === 'watch' && args.length === 7) {
+    const [worktree, root, pid, start, intervalMs, starterPid, starterStart] = args;
+    return watch({
+      repoRoot: worktree, root, server: { pid: Number(pid), start }, starter: { pid: Number(starterPid), start: starterStart }, intervalMs: Number(intervalMs),
+    });
   }
   throw new Error('usage: node .ai/scripts/qa-fixture.mjs up [--server-env=CEZ_NAME=value]... | down');
 }
