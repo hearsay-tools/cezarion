@@ -57,6 +57,102 @@ export function projectSwitchTarget(
   }
 }
 
+/** What one existence check reads: the matched route, and the request options for the target project. */
+type EntityCheck = {
+  projectId: string
+  pattern: string
+  params: Record<string, string | undefined>
+  /** The project's repository base, which decides which task references are its own. */
+  repoBase: string | undefined
+  opts: { projectId: string; signal: AbortSignal }
+}
+
+/** `true`/`false` on an authoritative answer, `null` when nothing proves it either way. A request
+ *  that fails throws instead; `entityExists` maps the error through `isMissing`. */
+type EntityChecker = (check: EntityCheck) => Promise<boolean | null>
+
+/** The task's run record. Every task page needs the run before anything it holds. */
+const taskRun = (check: EntityCheck) =>
+  getProjectRun(check.opts.projectId, check.params.id ?? '', { signal: check.opts.signal })
+
+/** An issue/PR number from a route segment; null unless it is a positive safe integer. */
+function itemNumber(segment: string | undefined): number | null {
+  const number = Number(segment)
+  return Number.isSafeInteger(number) && number >= 1 ? number : null
+}
+
+/** A forge item answers `true` when it exists, `false` when the forge has no such number, and
+ *  `null` when the forge is not available. */
+async function forgeItemExists(kind: 'issue' | 'pr', number: number, check: EntityCheck): Promise<boolean | null> {
+  const item = await getGithubItem(kind, number, {}, check.opts)
+  return item.available ? item.item !== null : null
+}
+
+const checkTask: EntityChecker = async (check) => {
+  await taskRun(check)
+  return true
+}
+
+/** The run is there; its commit may not be (a rebased or amended commit). */
+const checkTaskCommit: EntityChecker = async (check) => {
+  await taskRun(check)
+  await getRunCommit(check.params.id ?? '', check.params.sha ?? '', check.opts)
+  return true
+}
+
+/** The run is there; its issue/PR number may not be (a detached number). */
+async function checkTaskItem(check: EntityCheck, kind: 'issue' | 'pr'): Promise<boolean | null> {
+  const run = await taskRun(check)
+  const number = itemNumber(check.params.n)
+  if (number === null) return false
+  // The route only opens items the TASK references (`taskItemTabs`), judged against the
+  // project's repository. Without that identity a detached link cannot be proven.
+  const linked = taskItemTabs(run, check.repoBase).some((tab) => tab.kind === kind && tab.number === number)
+  if (!linked) return check.repoBase === undefined ? null : false
+  return forgeItemExists(kind, number, check)
+}
+
+const checkRepoCommit: EntityChecker = async (check) => {
+  await getRepoCommit(check.params.sha ?? '', check.opts)
+  return true
+}
+
+async function checkForgeItem(check: EntityCheck, kind: 'issue' | 'pr'): Promise<boolean | null> {
+  const number = itemNumber(check.params.n)
+  return number === null ? false : forgeItemExists(kind, number, check)
+}
+
+const checkWorkflow: EntityChecker = async (check) => {
+  const { workflows, issues } = await getWorkflows(check.opts)
+  if (workflows.some((workflow) => workflow.name === check.params.name)) return true
+  // A file that failed to load (unreadable, unparseable) may be the very workflow in the
+  // URL, so an absent name proves nothing while the catalog reports problems.
+  return issues.length > 0 ? null : false
+}
+
+const checkAutomation: EntityChecker = async (check) => {
+  const list = await getAutomations(check.opts)
+  return list.available ? list.automations.some((entry) => entry.id === check.params.automationId) : null
+}
+
+/**
+ * The checker for each routed entity page, tried in this order; the first whose pattern matches
+ * answers. The task children come before `/tasks/:id`, which is a prefix of every task pattern. A
+ * routed page with no entry (`/compare/:groupId`, the retired page's redirect) has nothing to
+ * verify.
+ */
+const ENTITY_CHECKERS: readonly { matches: (pattern: string) => boolean; check: EntityChecker }[] = [
+  { matches: (pattern) => pattern === '/tasks/:id/commits/:sha', check: checkTaskCommit },
+  { matches: (pattern) => pattern === '/tasks/:id/issue/:n', check: (check) => checkTaskItem(check, 'issue') },
+  { matches: (pattern) => pattern === '/tasks/:id/pr/:n', check: (check) => checkTaskItem(check, 'pr') },
+  { matches: (pattern) => pattern.startsWith('/tasks/:id'), check: checkTask },
+  { matches: (pattern) => pattern === '/git/commits/:sha', check: checkRepoCommit },
+  { matches: (pattern) => pattern === '/github/issues/:n', check: (check) => checkForgeItem(check, 'issue') },
+  { matches: (pattern) => pattern.startsWith('/github/prs/:n'), check: (check) => checkForgeItem(check, 'pr') },
+  { matches: (pattern) => pattern === '/workflows/:name', check: checkWorkflow },
+  { matches: (pattern) => pattern.startsWith('/automations/:automationId'), check: checkAutomation },
+]
+
 /**
  * Does the page's entity exist? `true`/`false` only on an authoritative answer (a 200, a 404, or a
  * list that loaded and lacks the name); `null` for anything else — offline, a forge that is not
@@ -70,50 +166,15 @@ async function entityExists(
   signal: AbortSignal,
   repoBase: string | undefined,
 ): Promise<boolean | null> {
-  const opts = { projectId, signal }
   let pattern = ''
   try {
     const route = matchProjectRoute(pathname, capabilities)
     if (route === null) return false
-    const { params } = route
     pattern = route.pattern
-    if (pattern.startsWith('/tasks/:id')) {
-      const run = await getProjectRun(projectId, params.id ?? '', { signal })
-      // The run is there; its child entity may not be (a rebased or amended commit, a
-      // detached issue/PR number).
-      if (pattern === '/tasks/:id/commits/:sha') {
-        await getRunCommit(params.id ?? '', params.sha ?? '', opts)
-      } else if (pattern === '/tasks/:id/issue/:n' || pattern === '/tasks/:id/pr/:n') {
-        const number = Number(params.n)
-        if (!Number.isSafeInteger(number) || number < 1) return false
-        const kind = pattern.endsWith('/issue/:n') ? 'issue' : 'pr'
-        // The route only opens items the TASK references (`taskItemTabs`), judged against the
-        // project's repository. Without that identity a detached link cannot be proven.
-        const linked = taskItemTabs(run, repoBase).some((tab) => tab.kind === kind && tab.number === number)
-        if (!linked) return repoBase === undefined ? null : false
-        const item = await getGithubItem(pattern.endsWith('/issue/:n') ? 'issue' : 'pr', number, {}, opts)
-        return item.available ? item.item !== null : null
-      }
-    } else if (pattern === '/git/commits/:sha') {
-      await getRepoCommit(params.sha ?? '', opts)
-    } else if (pattern === '/github/issues/:n' || pattern.startsWith('/github/prs/:n')) {
-      const number = Number(params.n)
-      if (!Number.isSafeInteger(number) || number < 1) return false
-      const item = await getGithubItem(pattern.startsWith('/github/issues') ? 'issue' : 'pr', number, {}, opts)
-      return item.available ? item.item !== null : null
-    } else if (pattern === '/workflows/:name') {
-      const { workflows, issues } = await getWorkflows(opts)
-      if (workflows.some((workflow) => workflow.name === params.name)) return true
-      // A file that failed to load (unreadable, unparseable) may be the very workflow in the
-      // URL, so an absent name proves nothing while the catalog reports problems.
-      return issues.length > 0 ? null : false
-    } else if (pattern.startsWith('/automations/:automationId')) {
-      const list = await getAutomations(opts)
-      return list.available ? list.automations.some((entry) => entry.id === params.automationId) : null
-    } else {
-      return null
-    }
-    return true
+    const entry = ENTITY_CHECKERS.find((candidate) => candidate.matches(route.pattern))
+    if (entry === undefined) return null
+    // Awaited here, inside the try, so a failing request reaches the catch below.
+    return await entry.check({ projectId, pattern, params: route.params, repoBase, opts: { projectId, signal } })
   } catch (error) {
     return isMissing(error, pattern) ? false : null
   }
