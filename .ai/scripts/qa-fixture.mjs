@@ -15,14 +15,16 @@
 // fixture when nobody runs `down`: when the descriptor goes (the worktree or its `.ai/qa` was
 // deleted), when the temporary root goes, or when `up` dies before it writes the descriptor. It
 // cleans up after a server that exits on its own.
-// POSIX only: the stop signals a process group.
-import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+// POSIX only: the stop signals a process group. Starting, stopping and watching both processes goes
+// through packages/cezar/src/detached-process.ts (hearsay-tools/cezarion#1717).
+import { spawnSync } from 'node:child_process';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
+import { leaderRunning, startOwnedGroup, stopGroup, watchGroup } from '../../packages/cezar/src/detached-process.ts';
 import { identity } from './test-env-lease.mjs';
 
 const DESCRIPTOR = '.ai/qa/qa-fixture.json';
@@ -94,89 +96,19 @@ function buildE2e(repoRoot, out, logPath) {
   } finally { closeSync(fd); }
 }
 
+/** The start identity test-env-lease.mjs reads, so a reused pid is never signalled. */
+const readStart = (pid) => identity(pid).start;
+
 /** Starts `cmd` detached, so it leads its own process group, with its output in `logPath`. */
 async function detach(cmd, { cwd, env, logPath, readIdentity }) {
   const fd = openSync(logPath, 'a');
   try {
-    const child = spawn(process.execPath, cmd, { cwd, env, detached: true, stdio: ['ignore', fd, fd] });
-    await new Promise((done, fail) => { child.once('spawn', done); child.once('error', fail); });
-    child.unref();
-    const { start } = readIdentity(child.pid);
-    if (!start) {
-      // Without a start identity no later stop can name it, so stop it now. The event loop has
-      // not run since the spawn, so the child is not reaped and its pid still names its group.
-      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* the group already ended */ }
-      throw new Error(`cannot read the start identity of pid ${child.pid}`);
-    }
-    return { pid: child.pid, start };
-  } finally { closeSync(fd); }
-}
-
-const isRunning = ({ pid, start }) => {
-  const current = identity(pid);
-  return !current.dead && current.start === start;
-};
-
-/** True while the process group `leader` started still has a member, zombies included. A group
- *  outlives its leader while any member is unreaped, and the kernel never hands out a pid that
- *  still names a group, so `-pid` reaches only this group until then. A live process with the
- *  leader's pid and another start identity means the group ended and the pid was reused. */
-function groupExists(leader) {
-  const current = identity(leader.pid);
-  if (current.start !== undefined && current.start !== leader.start) return false;
-  try {
-    process.kill(-leader.pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/** True when one look at the process table finds a member of group `pgid` that is not a zombie,
- *  or cannot read the table. Linux reads /proc, macOS asks ps. */
-function liveMember(pgid) {
-  if (process.platform === 'darwin') {
-    const ps = spawnSync('ps', ['-axo', 'pgid=,stat='], { encoding: 'utf8', timeout: 2000 });
-    if (ps.status !== 0) return true;
-    return ps.stdout.split('\n').some((line) => {
-      const [group, state] = line.trim().split(/\s+/);
-      return Number(group) === pgid && !state?.startsWith('Z');
+    const { child, leader } = await startOwnedGroup(process.execPath, cmd, {
+      cwd, env, stdio: ['ignore', fd, fd], readStart: (pid) => readIdentity(pid).start, requireStart: true,
     });
-  }
-  for (const name of readdirSync('/proc')) {
-    if (!/^\d+$/.test(name)) continue;
-    try {
-      const stat = readFileSync(`/proc/${name}/stat`, 'utf8');
-      const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
-      if (Number(fields[2]) === pgid && fields[0] !== 'Z' && fields[0] !== 'X') return true;
-    } catch (error) {
-      // A process that exited after the listing is no member; one it cannot read may be.
-      if (error.code !== 'ENOENT' && error.code !== 'ESRCH') return true;
-    }
-  }
-  return false;
-}
-
-/** True while the group `leader` started may still hold a running process. Zombies do not count:
- *  one whose parent never reaps it, such as a container init that does not wait, keeps the group
- *  forever. Before SIGKILL a scan can miss a member forked while it ran, by a member that exited
- *  before the scan reached it. After SIGKILL no member can fork, so a scan that finds none is
- *  final, and the answer only goes from true to false. */
-function groupRunning(leader) {
-  return groupExists(leader) && liveMember(leader.pid);
-}
-
-/** Stops the process group `leader` started: SIGTERM, then SIGKILL for whatever outlives the
- *  grace, the leader or any other member. True once no member runs. SIGKILL goes to every group
- *  that still exists, zombies only included, so it also reaches a member a scan missed. */
-async function stopGroup(leader, graceMs = STOP_GRACE_MS) {
-  for (const [signal, waitMs] of [['SIGTERM', graceMs], ['SIGKILL', 1000]]) {
-    if (!groupExists(leader)) return true;
-    try { process.kill(-leader.pid, signal); } catch { /* the group already ended */ }
-    const deadline = performance.now() + waitMs;
-    while (groupRunning(leader) && performance.now() < deadline) await delay(100);
-  }
-  return !groupRunning(leader);
+    child.unref();
+    return leader;
+  } finally { closeSync(fd); }
 }
 
 async function waitForCockpit(server, logPath, timeoutMs) {
@@ -184,7 +116,7 @@ async function waitForCockpit(server, logPath, timeoutMs) {
   while (performance.now() < deadline) {
     const url = BANNER.exec(readFileSync(logPath, 'utf8'))?.[1];
     if (url) return url;
-    if (!isRunning(server)) throw new Error('the server exited during boot');
+    if (!leaderRunning(server, readStart)) throw new Error('the server exited during boot');
     await delay(200);
   }
   throw new Error(`the server did not announce its address within ${timeoutMs / 1000} s`);
@@ -262,9 +194,9 @@ async function stopFixture(repoRoot, stderr, graceMs) {
     // watcher, which stops it once this descriptor no longer names it.
     log(stderr, `ignoring ${DESCRIPTOR}: the temporary root it names does not confirm it`);
   } else {
-    if (fixture.watcher) await stopGroup(fixture.watcher, graceMs);
+    if (fixture.watcher) await stopGroup(fixture.watcher, { graceMs, readStart });
     log(stderr, `stopping cezar (pid ${fixture.server.pid})`);
-    if (!await stopGroup(fixture.server, graceMs)) throw new Error(`cezar pid ${fixture.server.pid} did not stop`);
+    if (!await stopGroup(fixture.server, { graceMs, readStart })) throw new Error(`cezar pid ${fixture.server.pid} did not stop`);
     removeRoot(fixture.root);
   }
   rmSync(join(repoRoot, DESCRIPTOR), { force: true });
@@ -329,8 +261,8 @@ export async function up({
     ].join('\n') + '\n');
   } catch (error) {
     // The watcher first, so it cannot clean up at the same time.
-    if (watcher) await stopGroup(watcher, stopGraceMs);
-    if (server) await stopGroup(server, stopGraceMs);
+    if (watcher) await stopGroup(watcher, { graceMs: stopGraceMs, readStart });
+    if (server) await stopGroup(server, { graceMs: stopGraceMs, readStart });
     printLogTail(stderr, root);
     removeRoot(root);
     rmSync(join(repoRoot, DESCRIPTOR), { force: true });
@@ -343,20 +275,12 @@ export async function up({
  *  descriptor no longer names it, or its temporary root is gone. A server that exits on its own
  *  leaves nothing behind, members of its group included. */
 export async function watch({ repoRoot, root, server, starter, intervalMs = WATCH_INTERVAL_MS }) {
-  while (true) {
-    await delay(intervalMs);
-    if (isRunning(starter)) continue;
-    const current = identity(server.pid);
-    // An unreadable identity proves nothing either way: look again at the next poll.
-    if (!current.dead && current.start === undefined) continue;
-    const owned = sameProcess(readDescriptor(repoRoot)?.server, server) && existsSync(root);
-    if (owned && current.start === server.start) continue;
-    // Retried at the next poll when the group would not stop.
-    if (!await stopGroup(server)) continue;
-    removeRoot(root);
-    if (sameProcess(readDescriptor(repoRoot)?.server, server)) rmSync(join(repoRoot, DESCRIPTOR), { force: true });
-    return;
-  }
+  await watchGroup({
+    leader: server, starter, intervalMs, readStart,
+    decide: () => (sameProcess(readDescriptor(repoRoot)?.server, server) && existsSync(root) ? undefined : { reason: 'unowned' }),
+  });
+  removeRoot(root);
+  if (sameProcess(readDescriptor(repoRoot)?.server, server)) rmSync(join(repoRoot, DESCRIPTOR), { force: true });
 }
 
 async function main([command, ...args]) {
