@@ -1935,6 +1935,27 @@ session transcript. Codex filters both child message deltas and completions;
 Claude excludes child assistant text from v1 and its result fallback buffer;
 the v2 fallback uses the same parent-only guard.
 
+**Text that cezar adds can change the scenario** (hearsay-tools/cezarion#1643). A native
+mock picks its scenario with `includes('mock:<scenario>')` over all of the native user text
+it receives, not over the task alone. That text also holds what cezar adds to the message:
+the system instructions of an in-thread runner, the resume context, and the session-start
+`<cezar-context>` blocks ([docs/context-injection.md](docs/context-injection.md),
+hearsay-tools/cezarion#1584). The handoff block repeats the task's Goal. So a Continue
+message also carries the first task's `mock:` token, and the mock replays the first task's
+scenario. When a change adds text to an opening message, strip that text before the mock
+matches a scenario. Do this in `packages/cezar/scripts/mock-session-context.mjs`, or in a
+helper next to it. The mock must still record the raw native text in its recording
+(`CEZ_MOCK_STDIN_FILE` or `CEZ_MOCK_ARGS_FILE`), because tests assert what cezar sent.
+Record first and strip after, as `mock-claude.mjs` does, or keep the raw text next to the
+stripped text, as `stripCommandMessage` and `rawMessage` do for Pi and OMP. An OpenCode
+request body is JSON, and JSON escapes the quote of an attribute. So a check for
+`<cezar-context id="` never matches that body. Check for `<cezar-context id=` without the
+quote, as `withoutSessionContextBody` does. The Cursor print mock matches only the text
+after the last `\n\n---\n\n` divider, so the blocks never reach its match. In
+hearsay-tools/cezarion#1638, the handoff replayed `mock:ask-snapshot` in the OpenCode cells
+of `workflow-ask-parity` rows Q5 and Q10. The cause showed only after a temporary debug log
+in `mock-opencode-serve.mjs`.
+
 R36–R39 (hearsay-tools/cezarion#399) record the shared monitoring wrap-up contract on every native
 prompt channel for fresh, Continue and restart-recovered sessions, and the
 automatic monitoring wake. Every runner honors `cezarTools`, so since
@@ -2122,6 +2143,12 @@ pin the same through delayed ACK admission with live workers; M28 preserves ordi
 rejected-ASK autonomous nudging. Active ASK lines use the existing payload parser
 unchanged.
 
+Each text-form row keeps one or two representative forms on every native wire, on
+fresh and Continue sessions (M2, M3, M6, M18, M20, and M30's earlier gate). The other
+quoted, fenced, indented, example and Markdown forms are read by the shared turn-end
+rule directly in `workflows/turn-end-text.test.ts`, with identical channels and the
+`missing` and `refresh` channel shapes (hearsay-tools/cezarion#1665).
+
 M9, M10, M15, M16 and M25 are retired (hearsay-tools/cezarion#1234). They pinned
 the prose gate and the rejected-ASK fallback gate, which raised Needs you beside a
 monitoring line, live workers or a dependency wait and held later worker input until
@@ -2135,7 +2162,8 @@ partial channels on fresh/Continue. Native Codex completion refreshes and
 Codex/OpenCode omitted completion text exercise actual channel divergence;
 the native observer pins each capability. Claude/Pi/OMP/Cursor carry coupled
 completion text; OpenCode also deduplicates refreshed completed parts. Those
-named executable wire controls assert equality rather than inject divergence.
+named executable wire controls assert equality rather than inject divergence; a
+runner runs one coupled control, not one per direction it lacks.
 When one channel is an ordered expansion of the other, classify its raw text
 once; neither channel always wins. Incomparable transcripts retain the existing
 conservative gate policy. This partial/replayed-frame coverage differs from
@@ -2735,6 +2763,17 @@ offered for cezar's per-run server. Codex reads `cancel` as the same skipped cal
 as `decline`, so it is not offered. If Codex still asks before a cezar tool (an
 older Codex that ignores the key, say), the request reaches Needs you like any
 other; it is never answered silently. Elicitations carry no item ID.
+
+`.ai/scripts/probe-approvals.ts` checks this routing against the installed Codex
+in one paid turn (hearsay-tools/cezarion#1343). It builds a scratch `CODEX_HOME`
+from the user's provider settings only, with no `approval_policy`, and runs
+cezar's own runner and tool socket beside a second, marker MCP server. The model
+calls the marker tool and then `cezar_wait`. The probe prints the thread's
+`approvalPolicy`, every server request with cezar's reply, and each
+`mcpToolCall` status. A default run shows the cezar call completed with no
+approval request, and the marker call's `permission.requested` answered with
+"Allow once". With `--answer decline`, the marker call is rejected. CI never
+runs the probe.
 
 Approvals emit the `permission.requested` event with an opaque, fresh
 request ID, item ID when present, a title, full action/scope details and offered

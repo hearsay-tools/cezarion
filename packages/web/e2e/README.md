@@ -5,7 +5,8 @@ The specs in this directory drive the built cockpit in a real Chrome through the
 Squeal's slow tier when installed. The root Vitest config exposes the browser project,
 and its `environment.ts` globalSetup uses the same environment bootstrap as the wrapper.
 `npm test` and `npm run test:watch` select only the four unit projects. Browser results
-are keyed by the built server and cockpit in `squeal.config.json`; CI owns the full gate.
+are keyed by the server, cockpit and e2e sources that `squeal.config.json` lists as their
+inputs, not by built output; CI owns the full gate.
 This page is about one thing: how a spec waits. Most red shards on `main`
 and on unrelated pull requests have been sampling races, not product bugs (#369, #393, #394,
 #405, #409), and every one of them looked like a flake until the page state was in hand.
@@ -347,6 +348,29 @@ attached to the old env's dead `baseUrl` and repeated its browser notes.
 
 Seeded NDJSON transcripts must go through `seedTranscript` from `seed-transcript.ts`; every nonblank line needs `seq` and `ts` (and `type`), and validation reports the line number and event type before writing.
 
+## Seed the catalog entries a spec relies on
+
+A spec seeds every catalog entry whose count or presence it relies on: skills, workflows,
+registered projects and the like. It never relies on a catalog it did not write: the skills
+installed on the host, a default that cezar ships, or the skills this checkout keeps in
+`.ai/skills`. Those catalogs differ between a developer machine and CI's runner, and a change can
+remove a default without touching a spec. On the shared server, write the entries under
+`servedRoot()`, and registered projects through `workspace-registry.ts`. A spec that boots its own
+server writes them into its fixture repository. Remove them in `afterAll`. Host entries can still
+show up next to the seeded ones, so scope each assertion to the seeded entries.
+
+`settings-skills.e2e.ts` shows the failure (hearsay-tools/cezarion#1572). Its scroll case needs a
+skills list long enough to overflow. On CI's runner, only the default team catalog made the list
+that long, and the spec's comment gave "the host's real global catalog" as the reason.
+hearsay-tools/cezarion#1541 removed that catalog, and the case failed only in CI (run
+39983148239 attempt 1, job 120515509286). The spec now seeds 40 filler skills.
+`skill-search-ranking.e2e.ts` shows the pattern: it seeds its 24 browse rows, and it checks
+membership against its own fixture skills only, because global skills can match the same query.
+
+A built-in that a spec tests as product behavior, such as the `quick-task` workflow a new task
+runs, is not a catalog entry in this sense. A change that removes one still searches the specs
+first, as [AGENTS.md § Validation](../../../AGENTS.md#validation) says.
+
 ## A plain dry-run reply parks on a "Next step" card
 
 A dry-run task whose reply has no marker does not park with the composer alone. Cezar's no-wait
@@ -384,9 +408,14 @@ Shard output, boot logs, descriptors, app logs, and failure bundles remain under
 `TEST_E2E_STATUS=failed`; an unavailable browser prints `TEST_E2E_STATUS=skipped`.
 Both statuses exit nonzero for this final local gate.
 
+## Forcing a race with a delayed route
+
 To force a race that CI hits and your machine does not, delay the built route that the
 spec races. The shared env and specs that boot their own cezar (`cezarCli`) both run
-`.ai/qa/build/cezar`. Use the shared env in this order, from the repository root:
+`.ai/qa/build/cezar`, but the environment-variable delay below reaches only the shared
+server. For a spec that boots its own server, use
+[the file-read delay](#specs-that-boot-their-own-server). Use the shared env in this order,
+from the repository root:
 
 1. Boot once so the build exists:
 
@@ -450,6 +479,75 @@ loading state, then `touch /tmp/cez-e2e-1276.ready` from another shell to releas
 response and mount the late UI piece. Choose a route other than health so bootstrap can
 finish before release. Remove the file afterwards and use step 4's rebuild to drop the
 patch. This variable is temporary instrumentation in the ignored build, not a cezar setting.
+
+### Specs that boot their own server
+
+The recipes above reach only the shared server. A spec that boots its own cezar with
+`spawnFixtureServer` and `fixtureServeEnv(...)`, such as `composer-defaults.e2e.ts`, gives
+that server no ambient `CEZ_*` variable: `fixtureServeEnv` removes them all and adds back
+only the values the spec passes in its `extra` argument. `--server-env` sets only the shared
+server's environment. So `process.env.CEZ_E2E_DELAY_MS` and `process.env.CEZ_E2E_GATE_FILE`
+are unset in the fixture server, the patch never waits, and the test passes without
+reproducing anything. Read the delay from a file instead. The same patch works for the
+shared env and for fixture servers, and the spec stays unchanged.
+
+1. Boot once so the build exists, as in step 1 above. Keep a copy of the built module, and
+   print the absolute path of a directory for the delay file in this checkout's ignored
+   `.ai/qa`:
+
+   ```bash
+   mkdir -p .ai/qa/<issue>
+   cp .ai/qa/build/cezar/dist/server/server.js .ai/qa/<issue>/server.js.orig
+   realpath .ai/qa/<issue>
+   ```
+
+2. Patch the handler in `.ai/qa/build/cezar/dist/server/server.js`, before it answers
+   (make the handler `async` if needed). Write the delay file's absolute path into the
+   patch: the server's working directory depends on how it was started, so a relative path
+   can miss the file.
+
+   ```js
+   {
+     const { readFile } = await import('node:fs/promises')
+     const ms = Number(await readFile('/abs/path/.ai/qa/<issue>/delay-ms', 'utf8').catch(() => '0'))
+     if (ms > 0) await new Promise((r) => setTimeout(r, ms))
+   }
+   ```
+
+   The handler reads the file on every request. A missing file means no delay, and a new
+   value applies to the next request without a restart. While the file exists, every server
+   that runs this build gets the delay, Squeal's browser runs in this checkout included. For
+   a file gate, put the gate file's absolute path in the gate snippet above, in place of
+   `process.env.CEZ_E2E_GATE_FILE`.
+
+3. Write a delay, then run the focused test:
+
+   ```bash
+   echo 100 > .ai/qa/<issue>/delay-ms
+   npm run test:e2e -- <spec>.e2e.ts -t '<test name>'
+   ```
+
+   A fixture server loads the patched module when the spec boots it. The shared server
+   loads it only after one restart, `sh .ai/scripts/test-env-up.sh --force`, with no
+   `--server-env`.
+
+4. Sweep the delay in small steps, because a race window can be narrow. In
+   hearsay-tools/cezarion#1605, `/repo` delayed 75–125 ms failed about 1 run in 4, while
+   0 ms and 150–3000 ms all passed, so a sweep in large steps missed the window. Step
+   through the time between the two spec actions that the race falls between, for example
+   25 ms at a time, and run each value several times before you move on.
+
+5. When finished, restore the module and delete the delay file:
+
+   ```bash
+   cp .ai/qa/<issue>/server.js.orig .ai/qa/build/cezar/dist/server/server.js
+   rm .ai/qa/<issue>/delay-ms
+   ```
+
+   If the shared server loaded the patch, restart it with
+   `sh .ai/scripts/test-env-up.sh --force`. Instead of the copy,
+   `sh .ai/scripts/test-env-up.sh --force --force-rebuild` also removes the patch, because
+   it rebuilds.
 
 ## Observable completion and budgets (#764)
 

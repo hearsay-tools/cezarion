@@ -54,6 +54,8 @@ dependency was named in the spec, so neither was replaced, and `monitoring` beca
 with no exit. Before deleting a timer, lock, cap or timeout, grep for everything that
 reaches a terminal state *because* of it.
 
+**Name the guarantee before changing a test’s expected outcome.** When a change edits the expected outcome of an existing parity or regression test, the plan—or the PR body when no plan exists—must name the guarantee the old outcome pinned. Explain how the change replaces that guarantee, or why it is dropped and where the follow-up is tracked. Recording a follow-up does not itself authorize dropping a guarantee. hearsay-tools/cezarion#1662 is the worked example: the P8 `permission-late` cell changed from requiring a late permission card and answer to completing before the card could pend. Review identified the lost guarantee, and the owner chose a follow-up in hearsay-tools/cezarion#1680.
+
 **Preserve queue-head reads when changing queue boundaries.** When splitting,
 merging or re-keying a queue, list every value the old task read when it reached
 the queue head, and read each one again at the head of the new queue. Carry stable
@@ -109,6 +111,31 @@ enumerating their inputs. Reviews then found extra MCP names, extra non-default
 names and hand-written default copies with different access implications. The
 table makes those cases explicit for design review; it does not decide which
 ones should share a policy.
+
+**Enumerate worktree cases before changing a running task's files.** A spec or
+plan that adds, replaces or removes files in a running task's worktree MUST carry
+a **Worktree cases** table, reviewed with the spec or plan before implementation
+starts. Skill copies from `packages/cezar/src/skills-provision.ts` and the
+personal config layer from `packages/cezar/src/agent-config/seed.ts` are such
+files. Use one row per case: **Case | Files written, kept or removed | Worktree
+state at the next step, Continue and restart**. State when a case cannot happen,
+and why.
+
+Cover all of these cases: a catalog or source that has not loaded yet; the same
+name from two sources; records written by an older cezar version; a crash between
+two writes (see *Commit an outcome with what it depends on, or after it*); edits
+the agent made to the files, including files it added; and the source removing
+the item.
+
+hearsay-tools/cezarion#1494 and hearsay-tools/cezarion#1539 are the worked
+example. The hearsay-tools/cezarion#1494 design enforced switched-off team skills
+in provisioning, but did not say what happens to copies already in a running
+task's worktree. Three fix rounds tried to remove them on Continue, and each
+review found a new case: an enabled copy deleted while its source was still
+loading, duplicate names across sources, older manifest entries with no recorded
+source, a crash between the removal and the replacement write, and agent edits
+lost to a full re-install. The code was reverted, and hearsay-tools/cezarion#1539
+now holds the five cases.
 
 **Commit an outcome with what it depends on, or after it.** A write that records
 an outcome (`delivered`, `charged`, `settled`, `answered`) must commit atomically
@@ -387,7 +414,7 @@ Rules that follow from that:
 | Workflows (YAML chains, steps, retries)                                                                                                                                                                       | `packages/cezar/src/workflows/types.ts`, then `packages/cezar/src/workflows/load.ts`, `packages/cezar/src/workflows/run.ts`                                                                                                                                                                | A step is agent (`prompt`/`skill`) XOR check (`command`); a file has `steps` XOR the portable `skills` shorthand — both enforced by zod refinements. `onFail.retry` may only reference an _earlier_ step (`stepsIssue`). `{{task}}` is the substitution token. `quick-task` is the built-in zero-config workflow; built-ins always come back after delete.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
 | Run search (project tasks, All tasks, archived pages and ⌘K) | `packages/web/src/lib/tasks-table.ts`, `packages/web/src/routes/tasks-overview.tsx`, `packages/web/src/lib/global-tasks.ts`, `packages/web/src/routes/global-tasks.tsx`, then `packages/cezar/src/runs/run-search.ts`, `packages/cezar/src/server/server.ts`, `packages/cezar/src/runs/store.ts`, `packages/cezar/src/runs/run-index.ts` | `filterRuns` (`tasks-table.ts`) filters the project task list in `tasks-overview.tsx`. `haystack`, `filterGlobalTasks` and `tasksExcludingFacet` (`global-tasks.ts`) feed the All tasks list and its facet counts in `global-tasks.tsx`. On the server, `matchesRunQuery` and `sqlPrefilterTokens` (`run-search.ts`) serve `GET /api/v1/run-summaries/archived` (`server.ts`), `RunStore.searchRunSummaries` (`store.ts`) and the cold reader `searchRunIndexFromDisk` (`run-index.ts`) for the ⌘K palette. A new search field must reach every reader, or the change must explain why a reader leaves it out. Preserve intentional differences: the palette excludes automation names because it shows no origin line, and the SQL prefilter must not discard a match the final predicate accepts. hearsay-tools/cezarion#1637 is the worked example: archived pages, All tasks facet counts and server archive search each needed a follow-up fix. |
 | Pending asks (`cezar_ask`, the ask card, a new field on the ask) | `packages/cezar/src/workflows/run.ts`, then `packages/cezar/src/runs/transcript-facts-fold.ts`, `packages/cezar/src/delegation/questions.ts`, `packages/web/src/routes/task-thread/thread-state.ts`, `packages/cezar/src/task-cli/projections.ts` | A pending ask has four kinds of reader. `workflows/run.ts` opens the human wait and emits the `ask.requested` event. `runs/transcript-facts-fold.ts` and `delegation/questions.ts` route a worker's question to its parent. `routes/task-thread/thread-state.ts` builds the cockpit ask card. `task-cli/projections.ts` (`projectStatus`, fed by `pendingQuestion` in `task-cli/cli.ts` and `runs/webhook.ts`) feeds `cez task status` and the task webhook; these read the `ask.requested` event, not the human wait, so a design that follows the wait misses them. A field added to the ask card must reach every reader, or the spec must say why a reader leaves it out. hearsay-tools/cezarion#1471 is the worked example: its `context` field missed the CLI and webhook projections until review round 1. |
-| Skills (Markdown playbooks, team repos)                                                                                                                                                                       | `packages/cezar/src/skills.ts`, `packages/cezar/src/skills-remote.ts`                                                                                                                                                                                                       | A skill is a `.md` file with optional YAML frontmatter (`name`, `description`); its body becomes the agent's extra system prompt. Discovery precedence is local-first: `.ai/cezar/skills` → `.ai/skills` → `.agents/skills` + agent mirrors → global → team repo. Missing dirs are fine; team-skill loading never blocks on the network (background cache in `~/.cache/cez/`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| Skills (Markdown playbooks, team repos)                                                                                                                                                                       | `packages/cezar/src/skills.ts`, `packages/cezar/src/skills-remote.ts`, `packages/cezar/src/workflows/run.ts`, `packages/cezar/src/ui-state.ts`                                                                                                                                                                                                       | A skill is a `.md` file with optional YAML frontmatter (`name`, `description`); its body becomes the agent's extra system prompt. Discovery precedence is local-first: `.ai/cezar/skills` → `.ai/skills` → `.agents/skills` + agent mirrors → global → team repo. Missing dirs are fine; team-skill loading never blocks on the network (background cache in `~/.cache/cez/`). A skill list has two kinds of reader. Fresh discovery goes through `discoverSkills` (`skills.ts`), which applies the project's team-skill off-list (`disabledTeamSkills` in `ui-state.json`) itself. Its callers are the `GET /skills` and `POST /skills/refresh` routes, the planner (`planner.ts`), a worker's `--skill` lookup (`delegation/service.ts`) and auto-naming (`autoNameRun` in `workflows/run.ts`). `GET /skills/importable` returns the unfiltered team list on purpose, so the Skills catalog can switch a skill back on. The run's saved list, `state.skills` in `workflows/run.ts`, is discovered when the run starts or continues, so it can predate a change made during the run. Two methods read it and apply the off-list as it is at that moment. `provisionRunSkills` installs the step skill, a leading `/name` and their companions. `enabledSkills` feeds live `/name` expansion in `deliverMessage`, a later step's skill lookup and prompt in `runAgentStep`, and the Continue skill lookup and opening prompt in `runContinuation`. A change to which skills a run may use must reach every reader listed here, or the spec must say why a reader leaves it out. hearsay-tools/cezarion#1494 is the worked example: PR hearsay-tools/cezarion#1541 applied the off-list to provisioning first, and two review rounds then found the `state.skills` readers still sending a switched-off skill to the agent. A state file that a synchronous reader reads is written atomically: a temporary file, then a rename, as `writeProjectUiState` (`ui-state.ts`) does. `enabledSkills` reads `ui-state.json` synchronously (`readProjectUiStateSync`), and a write in place lets it see a partial file, which parses as `{}`: an empty off-list. |
 | Runs store / state persistence                                                                                                                                                                                | `packages/cezar/src/runs/store.ts`                                                                                                                                                                                                                           | One embedded SQLite file per project, `.ai/cezar/runs.db` (`node:sqlite`, WAL; Node 24.21.0 is the floor, verified by build/package CI), plus one append-only NDJSON event file per run. **Read first, in this order: `runs/run-database.ts` (the only SQL; schema, `transaction()`, claims, fenced writes), `runs/run-row.ts` (record to row: columns, summary, `isLiveRecord`), `runs/raw-record.ts` (keeps unknown fields across a write), `runs/store.ts` (`RunStore`, import, open), then `runs/run-index.ts` (read-only cold reader), `runs/legacy-index.ts` and `runs/store-open-error.ts`.** Each row holds the complete `RunRecord` JSON plus a stored `toRunSummary()` column and the few columns the store queries; `RunRecord` stays a zod schema, so new fields must still be optional or defaulted and rows written by an older cezar still parse. **Only the live set is in memory**: queued, running and waiting runs, runs a `RunManager` holds, pending wake timers and parents waiting on workers (`isLiveRecord`, plus `pin`). Finished runs load from the row on demand as fresh copies (frozen under vitest), so never keep or mutate one, and never rebuild a full scan of `runs`: add an indexed column. A delegation family is held, claimed and released as one unit (`run_claims`: session UUID, pid and start identity, checked inside the write transaction), so two processes on one project never both write a run. A foreign live run is readable and every control answers 409 `{ error }` (`requireRunControl`); `run_claims` and `run_conflicts` are private. `runs.json` is imported once on first open into `runs.db` (exact bytes kept in `runs.json.pre-sqlite.bak`, completion marker in the same transaction), never written again and never deleted; there is no dual-write, so an older cezar sees only history up to the import. **A store that cannot open never reads as empty**: `RunStore.open` throws a typed `RunStoreOpenError` (`corrupt`, `busy`, `permission`, `disk-full`, `unsupported-schema`, `legacy-writer`, `other`), a damaged file is left byte-for-byte alone, and `serve` answers 409 `{ error }` for that project's routes instead of treating it as no runs. Recovery steps live in `BACKWARD_COMPATIBILITY.md` section 3. Cold readers (`readRunIndexFromDisk`) open `runs.db` read-only and never build a context. Spec: `.ai/specs/2026-10-05-sqlite-run-store.md`. A **queued** run's prompt stays editable until the scheduler picks it up (open-mercato/cezar#472): `task` plus the optional `queuedMessages` stack are folded into `{{task}}` at dequeue, and that fold is read-only — never write it back to the record. The store is also the in-process event bus for SSE.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
 | Task handoff journal (`CEZ_HANDOFF_FILE`, `.ai/cezar/runs/<runId>.handoff.md`) | `packages/cezar/src/handoff.ts`, then the two readers' files `packages/cezar/src/server/server.ts` and `packages/cezar/src/server/forge/github.ts` | A per-task journal at `.ai/cezar/runs/<runId>.handoff.md` (spec 007, `.ai/specs/007-handoff-file-todos.md`), outside the worktree so it survives worktree removal. `seedHandoffFile` writes the skeleton. The agent finds the file through `CEZ_HANDOFF_FILE` and the `HANDOFF_ONLY_INSTRUCTIONS` system-prompt fragment, and keeps `## Progress log` (newest at the top) and `## Resume notes`. **The top of `## Progress log` belongs to the agent.** Two features read its first lines as the agent's own summary: `handoffProgressExcerpt` (`handoff.ts`) feeds the variants compare column (`handoffExcerpt` in the `GET /groups/:groupId` route of `server/server.ts`, spec 010), and `buildPrBody` (`server/forge/github.ts`) writes the body of a draft PR opened from the cockpit (Goal plus the first lines of the Progress log). **cezar writes its own records to a cezar-owned section, never the Progress log**, as `## Autosave (cezar)` does since hearsay-tools/cezarion#1111: `appendHandoffAutosaveReport` and `recordHandoffPeriodicAutosave` write there, and the first report creates the section right before `## Progress log`. One exception exists on purpose: `appendHandoffHeartbeat`'s lifecycle lines (`turn complete — …` and `step "…" complete — …` from `workflows/run.ts`, plus `picked from N variants` in `server.ts`) go to the top of the Progress log as the fallback that keeps the journal current when the agent writes nothing. `handoffProgressExcerpt` skips the lifecycle lines (and `session idle-closed — …`) whenever the agent wrote a line of its own, because the no-wait nudge's extra turn writes more of them (hearsay-tools/cezarion#1234). A new cezar record does not join them. The first design of hearsay-tools/cezarion#1004 wrote the autosave report at the top of the Progress log, and only CI's cockpit E2E (`variants-compare.e2e.ts`) caught it. |
 | Web UI (cockpit)                                                                                                                                                                                              | `packages/web/src/app.tsx`, then `packages/web/src/routes.tsx`, `packages/web/src/api/`, and the affected component/route                                                                                                                                    | React 19 + Vite + Tailwind v4 + shadcn/ui; source lives in `packages/web/` (its own npm workspace, `@open-mercato/cezar-web`, with the React/Vite/Tailwind deps in ITS manifest, not the root's), build output in ignored `packages/cezar/web/dist/`. Anything the server and the cockpit BOTH speak — the v2 protocol types, the `/api/v1/p/:projectId` scope helpers, and (as it grows) the typed API client — lives in the third workspace `packages/api-client/` (`@open-mercato/cezar-api-client`), which must stay Node-free: no `node:*` import and no `@types/node`, because it is bundled into the browser AND imported by the Node service. Keep one global SSE connection and patch the TanStack Query cache in place; authoritative refetch happens on reconnect/visibility. Preserve light/dark/system theming, mobile safe areas, keyboard access, and unit coverage. The legacy vanilla web app was deleted in R7; when `packages/cezar/web/dist` is missing the server answers every shell route with a built-in "run `npm run build:web`" hint page (`packages/cezar/src/server/static-ui.ts`). **Query strings:** write query updates through `useSearchParamsWriter`, never the raw `useSearchParams` setter: render-bound setters can lose earlier writes before a transition renders, and unchanged late navigation can return the reader to a page they left. Read-only `useSearchParams` is valid. The sole approved exception is file selection in `routes/task-git/task-files.tsx`: it pushes history so Back restores the previous file; the writer always replaces history. `packages/web/src/test/search-params-discipline.test.ts` guards raw setter bindings (including aliases) against a reasoned baseline that may only shrink. **Virtualized lists (`virtua`):** `Virtualizer` wraps each child, so put row styling and flags on the rendered item element, never on `ul > li` or `li + li` selectors. The GitHub examples in hearsay-tools/cezarion#1189 (pending merge) are `gh-row-item` in `packages/web/src/routes/github/github.tsx` and `github-layout.css`. In jsdom unit tests, supply scroll-element geometry through a `ResizeObserver` stub and a non-null `offsetParent`; see `packages/web/src/routes/github/github-geometry.testkit.ts` in that PR. In browser specs, scroll and collect rows (`allRowNumbersJs` in `packages/web/e2e/github-sidebar.e2e.ts` in that PR), or wait for one row, never a total DOM row count. Before virtualizing a list, grep `packages/web/e2e/*.e2e.ts` for `> li` and the list's `data-slot`. Small text on card-2: follow the [measured token table and lint rule](packages/web/docs/card-2-contrast.md). |
@@ -409,10 +436,12 @@ A fresh task worktree (`.ai/cezar/worktrees/<runId>`) has no `node_modules`. Run
 **If Squeal is installed and validating this worktree, use it for iteration.**
 Read the `SQUEAL` reports and follow its installed skill. `squeal.config.json`
 covers the four unit Vitest projects, both fast `node:test` groups from
-`npm run test:unit`, and both E2E suites in its slow tier: packaged CLI
-(`npm run test:package`) and cockpit browser (`npm run test:e2e`).
+`npm run test:unit`, and the cockpit browser suite (`npm run test:e2e`) in its
+slow tier. It does not cover packaged CLI E2E (`npm run test:package`,
+`packages/cezar/test/e2e/*.test.ts`): run those tests yourself, with or without
+Squeal (hearsay-tools/cezarion#1281 removed them from the config).
 Do not duplicate those background runs with `npm test`,
-`npm run test:unit`, `npm run test:package`, `npm run test:e2e`, or `npm run test:changed`.
+`npm run test:unit`, `npm run test:e2e`, or `npm run test:changed`.
 Use `squeal why <check>` for failure details and, when a result is needed,
 `squeal status --wait 60000`.
 Lease messages show executable and interpreter script names, with other arguments
@@ -430,11 +459,11 @@ Squeal is optional. If it is absent, no daemon is validating, or a needed result
 is unknown, run affected test files/test names through npm. Inspect
 `npm run test:changed -- --plan` before using `npm run test:changed`; if the plan
 falls back to a full run, choose focused checks and leave the full gate to CI.
-Packaged CLI E2E exercises built output: run `npm run build` after relevant source
-changes before relying on its results. The config declares the server and cockpit
-build artifacts as inputs. The browser project's globalSetup uses the existing
-test environment bootstrap to prepare or reuse the app and Chrome; a missing
-browser is an error in a Squeal run. `npm test` and `npm run test:watch` select
+Packaged CLI E2E exercises built output, and Squeal never runs it: run
+`npm run build` after relevant source changes, then run the packaged tests by
+hand before relying on their results. The browser project's globalSetup uses
+the existing test environment bootstrap to prepare or reuse the app and Chrome;
+a missing browser is an error in a Squeal run. `npm test` and `npm run test:watch` select
 only the four unit projects. Typecheck and build remain separate checks;
 run them when the change needs them. When Squeal is unavailable, use focused
 browser specs for affected UI flows, e.g.
@@ -463,9 +492,12 @@ the Codex mock's new MCP tool gate asks only when cezar's own MCP server is not
 in `approve` mode, and the Codex runner sends `approve` whenever it registers
 that server. When a mock edit does not trigger this rule, the PR's Verification
 section says why. With Squeal validating, read and wait for the
-selected files through `squeal status --wait 60000 <files>`; if slow results are
-not current, use `squeal run --slow --wait 60000`. Without Squeal, run the browser
-matches with `npm run test:e2e -- <specs>` from the repo root. Packaged matches
+selected browser files through `squeal status --wait 60000 <files>`; if slow
+results are not current, use `squeal run --slow --wait 60000`. Without Squeal,
+run the browser matches with `npm run test:e2e -- <specs>` from the repo root.
+Squeal does not run packaged CLI E2E, so run every packaged match by hand, with
+or without Squeal. Do not pass packaged paths to `squeal status`: it gives them
+no result and no warning (hearsay-tools/squeal#83). Packaged matches
 require `npm run build` from the repo root first; then, from `packages/cezar`, run
 `node --import ../../scripts/test-git-env.mjs --import tsx --test <files>` with
 those packaged paths relative to that directory (e.g. `test/e2e/task-cli.test.ts`).
@@ -481,9 +513,10 @@ rg -l -F -e 'delegation.wait' -e 'waits' packages/cezar/test/e2e/*.test.ts packa
 
 Inspect the matches to identify fixtures that read the changed field; common
 names can also match unrelated text. Require passing results for the affected
-fixtures through the Squeal or focused npm paths above. Run `npm run build`
-from the repo root before validating matching packaged fixtures, including with
-Squeal, so they exercise the current built output. This selection supplements
+fixtures: browser fixtures through the Squeal or focused npm paths above, and
+packaged fixtures by hand, as above. Run `npm run build` from the repo root
+before running matching packaged fixtures, so they exercise the current built
+output. This selection supplements
 the dry-run park-fixture and runner-parity requirements above
 (hearsay-tools/cezarion#1300).
 
@@ -502,10 +535,31 @@ unknown must be updated to test its intended constraint. In
 hearsay-tools/cezarion#1504, a deadline test still used `ci` after the kind became
 `pr`, so it could pass without checking the deadline requirement.
 
-In an unbuilt worktree, only a `Cannot find module` error naming a missing
-`dist/` module is the known Squeal limitation. An assertion failure in
-`test:package` is a real failure that needs investigation; do not dismiss it
-alongside missing-`dist` errors.
+Before opening a PR that removes a default — a catalog, a source or a seeded
+entry — search the browser specs for what that default supplied. Search for its
+entry names and source names, and for the `data-slot` of each list or view that
+renders those entries: a spec can depend on how many entries a list holds
+without naming any of them. From the repo root, replace the example values below
+with the removed default's values:
+
+```bash
+rg -l -F -e 'open-mercato/skills' -e 'skill-row' packages/web/e2e/*.e2e.ts
+```
+
+Check each match. A spec that counts, lists or scrolls the default's entries
+must seed its own, as
+[the e2e README](packages/web/e2e/README.md#seed-the-catalog-entries-a-spec-relies-on)
+says. In hearsay-tools/cezarion#1541, removing the `open-mercato/skills` default
+team catalog broke `settings-skills.e2e.ts`, and only in CI: its scroll case
+needed that catalog's skills to make the skills list overflow on CI's runner.
+The spec named neither the catalog nor its skills, so a search for the names
+alone matched no spec; the `skill-row` slot matches it
+(hearsay-tools/cezarion#1572).
+
+In an unbuilt worktree, packaged CLI tests fail with a `Cannot find module`
+error naming a missing `dist/` module: run `npm run build` first. An assertion
+failure in `test:package` is a real failure that needs investigation; do not
+dismiss it alongside missing-`dist` errors.
 
 No tool maps a cockpit source change to the browser specs it affects, with or
 without Squeal: `npm run test:changed` runs `npm test`, whose four unit projects

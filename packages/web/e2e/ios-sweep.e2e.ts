@@ -1,8 +1,9 @@
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 
 import { waitForSettledSample } from './visual-ready'
-import { AgentBrowser, readTestEnv } from './agent-browser'
+import { AgentBrowser, readTestEnv, servedRoot } from './agent-browser'
 import { waitForStatus } from './poll'
 
 /**
@@ -35,6 +36,18 @@ const sessionId = `e2e-ios-${process.pid}`
 
 const IPHONE = { width: 390, height: 844 } // iPhone 14/15 CSS pixels
 
+/** The skills view needs one skill row. This spec seeds it rather than counting on the skills
+ *  the host or this checkout happens to have (README.md, "Seed the catalog entries a spec
+ *  relies on"). Evidence: with no `.ai/skills` in the checkout and no global skills in the
+ *  server's HOME, the unseeded `/settings/skills` case failed with "predicate never became
+ *  truthy: document.querySelector("[data-slot=\"skill-row\"]") !== null" (bundle
+ *  .ai/qa/failures/ios-sweep/settings-skills-1/: probe.json URL /p/tree/skills, snapshot.txt an
+ *  empty "Skills" region; recorded in hearsay-tools/cezarion#1683 comment 6391215912).
+ *  Reproduce with `npm run test:e2e -- ios-sweep.e2e.ts -t 'settings/skills'` under those two
+ *  conditions — 1 of 1 failed before, 1 of 1 passed after. */
+const skillsDir = resolve(servedRoot(), '.ai/skills')
+const SKILL = 'e2e-ios-sweep-skill'
+
 /** The entry point to the project drawer below `md` on list screens (see app-shell.tsx MobileTopBar). */
 const MENU_BUTTON = '[data-slot="mobile-top-bar"] button[aria-label^="Open projects"]'
 
@@ -44,6 +57,7 @@ const BACK_BUTTON = '[data-slot="mobile-top-bar"] [data-slot="mobile-back"]'
 let browser: AgentBrowser
 let baseUrl: string
 let forgeAvailable = false
+let createdSkillsDir = false
 /** The task-thread view's subject — an existing run when the env has one, else a dry run
  *  started (and settled) by this spec. */
 let threadRunId: string
@@ -66,6 +80,14 @@ beforeAll(async () => {
   baseUrl = readTestEnv().baseUrl
   const health = (await api<{ forge: { available: boolean } | null }>('/api/v1/health'))
   forgeAvailable = health.forge?.available === true
+
+  createdSkillsDir = !existsSync(skillsDir)
+  mkdirSync(skillsDir, { recursive: true })
+  writeFileSync(
+    resolve(skillsDir, `${SKILL}.md`),
+    `---\nname: ${SKILL}\ndescription: An e2e-seeded project skill\n---\n\nDo the sweep thing.\n`,
+    'utf8',
+  )
 
   // The thread view needs a run. Prefer whatever the shared env already holds (newest live
   // record); only when the list is empty does this spec start one dry run — and then settles it
@@ -100,6 +122,9 @@ beforeAll(async () => {
 }, 180_000)
 
 afterAll(() => {
+  // Never leave test skills in a developer's catalog.
+  rmSync(resolve(skillsDir, `${SKILL}.md`), { force: true })
+  if (createdSkillsDir) rmSync(skillsDir, { recursive: true, force: true })
   browser?.close()
 })
 
@@ -178,8 +203,8 @@ describe('iOS sweep — every primary view at 390×844', () => {
   })
 
   it('/settings/skills', () => {
-    // The route div renders around a "Loading…" list — wait for a real skill row (this repo's
-    // `.ai/skills` is never empty), so the overflow check measures actual content.
+    // The route div renders around a "Loading…" list — wait for a real skill row (the seeded
+    // SKILL guarantees one), so the overflow check measures actual content.
     sweep('settings-skills', '/settings/skills', '[data-slot="skill-row"]')
   })
 

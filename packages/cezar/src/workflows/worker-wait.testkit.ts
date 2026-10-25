@@ -116,8 +116,11 @@ export function track() {
  * By default they ignore it in plain text: a run then reaches Cezar's no-wait human wait (the gate
  * a markerless question raised before) and a worker its plain park, so a suite about delegation or
  * CI decides what it tests. `card` keeps the mocks' own answer, a `cezar_ask` card.
+ * `mockNotes` keeps the Claude mock's `notes.md` trace. Without it, task worktrees stay clean, so
+ * no turn-end or finalize autosave has a commit to make: each one cost about 20 Git calls behind
+ * its process-holder scans, most of a waits cell's cleanup (hearsay-tools/cezarion#1665).
  */
-export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply?: 'card' | 'plain' } = {}): void {
+export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply?: 'card' | 'plain'; mockNotes?: true } = {}): void {
   beforeEach(() => {
     // Native mock children belong to this fixture; specialized holder tests supply their own scope.
     if (options.processScope !== false) onTestFinished(scopeFixtureProcesses());
@@ -125,6 +128,7 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
     onTestFailed(() => console.error('WORKER_WAIT_FAILURE_STATE', JSON.stringify(failureState ?? captureState())));
     process.env.CEZ_DRY_RUN = '1'; process.env.CEZ_AUTONAME = '0';
     if (options.nudgeReply === 'card') delete process.env.CEZ_MOCK_NUDGE_REPLY; else process.env.CEZ_MOCK_NUDGE_REPLY = 'plain';
+    if (options.mockNotes) delete process.env.CEZ_MOCK_NOTES; else process.env.CEZ_MOCK_NOTES = '0';
     root = mkdtempSync(join(tmpdir(), 'cez-worker-wait-'));
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: root });
     execFileSync('git', ['config', 'gc.auto', '0'], { cwd: root });

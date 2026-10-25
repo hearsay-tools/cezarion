@@ -70,6 +70,20 @@ async function afterParityPark(prompt) {
 }
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+/** Leave a visible trace in the cwd (the task worktree under spec 006) so
+ *  the Diff view has something real to show in dry runs. Exactly one line
+ *  per spawned session: tests read this file back as a per-step trace, so
+ *  a multi-line prompt must not become multiple lines here. CEZ_MOCK_NOTES=0 leaves the
+ *  worktree clean, so a suite that never reads it pays no autosave commit (hearsay-tools/cezarion#1665). */
+function writeNotesTrace(userText) {
+  if (process.env.CEZ_MOCK_NOTES === '0') return;
+  try {
+    const head = userText.replace(/\s+/g, ' ').trim().slice(0, 400);
+    appendFileSync('notes.md', `mock notes — ${new Date().toISOString()}: ${head}\n`);
+  } catch {
+    // read-only cwd — the mock still works, just without a diff
+  }
+}
 // `mock:steer-tool` holds its tool call for CEZ_MOCK_STEER_MS, or, with CEZ_MOCK_STEER_LINES=<n>,
 // until it has read n steered lines, so a loaded host cannot close the turn first (hearsay-tools/cezarion#1280).
 async function holdSteerTool() {
@@ -772,16 +786,7 @@ async function respond(userText, imageCount, uuid) {
   }
 
   if (turn === 1) {
-    // Leave a visible trace in the cwd (the task worktree under spec 006) so
-    // the Diff view has something real to show in dry runs. Exactly one line
-    // per spawned session: tests read this file back as a per-step trace, so
-    // a multi-line prompt must not become multiple lines here.
-    try {
-      const head = userText.replace(/\s+/g, ' ').trim().slice(0, 400);
-      appendFileSync('notes.md', `mock notes — ${new Date().toISOString()}: ${head}\n`);
-    } catch {
-      // read-only cwd — the mock still works, just without a diff
-    }
+    writeNotesTrace(userText);
     writeHandoff();
     emit({
       type: 'assistant',
