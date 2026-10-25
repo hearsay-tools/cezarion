@@ -54,6 +54,8 @@ dependency was named in the spec, so neither was replaced, and `monitoring` beca
 with no exit. Before deleting a timer, lock, cap or timeout, grep for everything that
 reaches a terminal state *because* of it.
 
+**Name the guarantee before changing a test’s expected outcome.** When a change edits the expected outcome of an existing parity or regression test, the plan—or the PR body when no plan exists—must name the guarantee the old outcome pinned. Explain how the change replaces that guarantee, or why it is dropped and where the follow-up is tracked. Recording a follow-up does not itself authorize dropping a guarantee. hearsay-tools/cezarion#1662 is the worked example: the P8 `permission-late` cell changed from requiring a late permission card and answer to completing before the card could pend. Review identified the lost guarantee, and the owner chose a follow-up in hearsay-tools/cezarion#1680.
+
 **Preserve queue-head reads when changing queue boundaries.** When splitting,
 merging or re-keying a queue, list every value the old task read when it reached
 the queue head, and read each one again at the head of the new queue. Carry stable
