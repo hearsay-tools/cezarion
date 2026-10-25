@@ -35,7 +35,7 @@ export function ImagePreview({
   onOpenInApp,
 }: {
   file: DiffFileChange
-  imageSrc?: (path: string) => string
+  imageSrc?: ((path: string) => string) | undefined
   onOpenInApp?: (path: string) => void
 }) {
   if (file.status === 'deleted') {

@@ -12,7 +12,7 @@ export interface LivePort {
 export interface LiveOwnerDeps {
   stream(kind: 'workspace' | 'runs', runs: LiveRunDemand[], frame: (frame: LiveFrame) => void, signal: AbortSignal): Promise<void>
   topic(topic: string, value: (value: unknown) => void): () => void
-  read(path: string, signal: AbortSignal): Promise<{ value: unknown; error?: string }>
+  read(path: string, signal: AbortSignal): Promise<{ value: unknown; error?: string | undefined }>
 }
 interface Entry {
   id: string

@@ -23,10 +23,10 @@ export function TabLink({
    *  intercept it; `<Link>` still navigates unless the handler itself prevents it. */
   onClick?: () => void
   /** A quiet trailing tally ("Changes 12"). Omitted, not zeroed, when the caller has no number. */
-  count?: number
+  count?: number | undefined
   /** Swap the current history entry instead of pushing one. */
-  replace?: boolean
-  className?: string
+  replace?: boolean | undefined
+  className?: string | undefined
   children: ReactNode
 }) {
   return (

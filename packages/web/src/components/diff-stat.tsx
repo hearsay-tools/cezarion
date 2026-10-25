@@ -45,7 +45,7 @@ export function DiffStatLabel({
   compact = false,
 }: {
   stat: DiffStat
-  className?: string
+  className?: string | undefined
   /** A bounded table representation; the exact counts remain in the tooltip and accessible name. */
   compact?: boolean
 }) {

@@ -20,7 +20,7 @@ import {
 
 let seq = 0
 
-function run(over: Partial<RunRecord> & { automationId?: string } = {}): RunSummary {
+function run(over: Partial<RunRecord> & { automationId?: string | undefined } = {}): RunSummary {
   seq += 1
   return summaryOf({
     id: `r${seq}`,

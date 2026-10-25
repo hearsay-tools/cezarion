@@ -106,7 +106,7 @@ function FallbackFile({
 }: {
   file: DiffFileChange
   wrap: boolean
-  imageSrc?: (path: string) => string
+  imageSrc?: ((path: string) => string) | undefined
   onOpenInApp?: (path: string) => void
 }) {
   return (

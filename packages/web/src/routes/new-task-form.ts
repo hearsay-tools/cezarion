@@ -327,14 +327,14 @@ export function buildCreateRunBody(opts: {
   runner: Runner
   /** True when the draft contains a sticky/user runner choice rather than an untouched default. */
   runnerExplicit?: boolean
-  defaultRunner?: Runner
+  defaultRunner?: Runner | undefined
   /** Per-task agent account (spec 2026-07-29-agent-profiles) — the composer's override of the
    *  project's own selection, applying to `runner`. Absent/empty follows the project. */
   agentProfile?: string | null
   images: readonly AttachmentInput[]
   /** false → run in the repo working tree, no worktree (single runs only). Sent only when
    *  explicitly off; the default (isolated worktree) stays implicit. */
-  worktree?: boolean
+  worktree?: boolean | undefined
   /** true → autonomous run (never pauses for the user). Sent only when on. */
   autonomous?: boolean
   archiveWhenDone?: boolean

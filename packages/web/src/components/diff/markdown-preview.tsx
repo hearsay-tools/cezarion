@@ -24,8 +24,8 @@ export function MarkdownPreview({
   imageSrc,
 }: {
   file: DiffFileChange
-  loadFileText?: (path: string) => Promise<string | null>
-  imageSrc?: (path: string) => string
+  loadFileText?: ((path: string) => Promise<string | null>) | undefined
+  imageSrc?: ((path: string) => string) | undefined
 }) {
   const fromPatch = useMemo(() => newSideFromPatch(file), [file])
   // Consumers pass inline arrows: refs keep them out of the deps, so a parent re-render neither

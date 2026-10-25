@@ -137,7 +137,7 @@ export async function waitForStatus(
       // one spec before the helpers were folded together.
       const response = await fetch(`${baseUrl}/api/v1/runs/${id}`, { signal })
       if (!response.ok) throw new Error(`GET run ${id} answered ${response.status}`)
-      const record = (await response.json()) as { status?: string }
+      const record = (await response.json()) as { status?: string | undefined }
       lastState = record.status
       return record.status !== undefined && wanted.includes(record.status) ? record.status : undefined
     },

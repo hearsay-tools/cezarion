@@ -110,7 +110,7 @@ export function useThreadScroll(
   viewKey: string,
   options: {
     surface?: 'document' | 'panel'
-    onLoadOlder?: () => Promise<void>
+    onLoadOlder?: (() => Promise<void>) | undefined
     onJumpToLatest?: () => Promise<void>
     rowKeys?: readonly string[]
   } = {},

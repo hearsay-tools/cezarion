@@ -53,7 +53,7 @@ export function RunRowActions({
   unread: boolean
   /** References are inert on a device that cannot hover, and in the mobile shell. */
   inertReferences: boolean
-  onTogglePin?: (run: RunSummary, pinned: boolean) => void
+  onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
   onArchiveRun?: (run: RunSummary) => void | Promise<unknown>
 }) {
   // The trailing slot — reserved on every row, whether or not anything is in it (#617).

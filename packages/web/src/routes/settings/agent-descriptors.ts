@@ -27,7 +27,7 @@ export interface AgentGroup {
   id: 'settings' | 'mcp' | 'memory'
   label: string
   /** Group-level caveat — e.g. where this agent keeps its MCP servers. */
-  note?: string
+  note?: string | undefined
   /**
    * Shown instead of the file list when the group has nothing to list — why it is empty and
    * what to try. A group without it renders nothing when empty (Claude's MCP group, absent
@@ -41,7 +41,7 @@ export interface AgentDescriptor {
   id: Runner
   label: string
   /** Pane-level caveat shown under the agent's heading. */
-  note?: string
+  note?: string | undefined
   groups: AgentGroup[]
 }
 

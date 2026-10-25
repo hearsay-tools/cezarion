@@ -92,7 +92,7 @@ export function buildPlannedRunBody(opts: {
   runner: Runner
   /** True when the draft contains a sticky/user runner choice rather than an untouched default. */
   runnerExplicit?: boolean
-  defaultRunner?: Runner
+  defaultRunner?: Runner | undefined
   images: readonly AttachmentInput[]
   archiveWhenDone?: boolean
   autoMergePr?: boolean

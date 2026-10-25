@@ -174,7 +174,7 @@ interface OwnedFixture {
   poll: PollOptions
   sample: ReturnType<typeof captureFixtureServer>
   origin?: string
-  failure?: Error
+  failure?: Error | undefined
 }
 const ownedFixtures = new WeakMap<ChildProcess, OwnedFixture>()
 

@@ -10,7 +10,7 @@ import type { HighlighterCore } from 'shiki/core'
 export interface SynToken {
   content: string
   /** A `var(--syn-*)` reference, or undefined for plaintext runs. */
-  color?: string
+  color?: string | undefined
 }
 
 export interface SynHighlight {
@@ -205,7 +205,7 @@ export interface HighlightOptions {
    * their wall clock is shared with every parallel worker vitest spawned — under full-suite
    * load the budget trips on trivial lines and the assertion flakes.
    */
-  tokenizeTimeLimit?: number
+  tokenizeTimeLimit?: number | undefined
 }
 
 /**

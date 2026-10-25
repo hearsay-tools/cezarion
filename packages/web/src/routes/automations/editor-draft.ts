@@ -30,9 +30,9 @@ export interface AutomationDraft {
   intervalSeconds: number
   filters: AutomationFilters
   prompt: string
-  workflow?: string
-  runner?: Runner
-  model?: string
+  workflow?: string | undefined
+  runner?: Runner | undefined
+  model?: string | undefined
   autonomous: boolean
   archiveWhenDone: boolean
   autoMergePr: boolean

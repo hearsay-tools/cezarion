@@ -225,14 +225,14 @@ export type TaskReferenceInput = Pick<
   | 'issueNumber'
   | 'referencedIssueUrl'
   | 'markerRefs'
-> & { projectId?: string }
+> & { projectId?: string | undefined }
 
 export interface TaskReference {
   kind: 'PR' | 'Issue'
   number: number
-  url?: string
+  url?: string | undefined
   /** Required for bare references crossing project boundaries. */
-  projectId?: string
+  projectId?: string | undefined
 }
 
 /**
@@ -244,7 +244,7 @@ export interface TaskReference {
  * a single-project caller; cross-project callers must supply projectId. The group row's line 2 and
  * every variant's own-reference filter use this one key.
  */
-export function referenceKey(reference: { kind: string; number?: number; url?: string; projectId?: string }): string {
+export function referenceKey(reference: { kind: string; number?: number | undefined; url?: string | undefined; projectId?: string | undefined }): string {
   const base = `${reference.kind}#${reference.number}`
   if (!reference.url) return `${base}@project:${reference.projectId ?? 'default'}`
   try {
@@ -306,7 +306,7 @@ export function referenceKey(reference: { kind: string; number?: number; url?: s
 export function taskReferences(run: TaskReferenceInput, repoBase?: string, projectId = run.projectId): TaskReference[] {
   const prs = prUrls(run)
   const declared = run.markerRefs?.pr
-  const sources: { kind: TaskReference['kind']; url?: string; number?: number; authoritative?: boolean }[] = [
+  const sources: { kind: TaskReference['kind']; url?: string | undefined; number?: number | undefined; authoritative?: boolean }[] = [
     // The uncorroborated declaration, ahead of everything (see above). When a URL below does name
     // it, this entry is omitted entirely rather than added and deduped — that keeps the ORDER the
     // ordinary case had, with the created PR first.

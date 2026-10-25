@@ -322,14 +322,14 @@ function DiffFileCard({
   /** Render this (Markdown) file as a document — already narrowed by `canPreviewMarkdown`. */
   preview: boolean
   /** Present only on a previewable Markdown card of a diff that offers the preview. */
-  onPreviewChange?: (preview: boolean) => void
-  loadFileText?: (path: string) => Promise<string | null>
+  onPreviewChange?: ((preview: boolean) => void) | undefined
+  loadFileText?: ((path: string) => Promise<string | null>) | undefined
   expanded: ExpandedGaps
   onExpand: (gap: ContextGap) => void
   mode: 'unified' | 'split'
   wrap: boolean
   canExpand: boolean
-  imageSrc?: (path: string) => string
+  imageSrc?: ((path: string) => string) | undefined
   onOpenInApp?: (path: string) => void
 }) {
   const badge = STATUS_BADGE[file.status]
@@ -439,7 +439,7 @@ function DiffFileBody({
   mode: 'unified' | 'split'
   wrap: boolean
   canExpand: boolean
-  imageSrc?: (path: string) => string
+  imageSrc?: ((path: string) => string) | undefined
   onOpenInApp?: (path: string) => void
 }) {
   const parsed = useMemo(() => parsePatch(file.patch), [file.patch])
@@ -582,7 +582,7 @@ function HunkHeaderRow({ hunk }: { hunk: Hunk }) {
 }
 
 /** "⋯ N unchanged lines" — a button when expansion is wired, a separator otherwise. */
-function GapRow({ gap, onExpand }: { gap: ContextGap; onExpand?: (gap: ContextGap) => void }) {
+function GapRow({ gap, onExpand }: { gap: ContextGap; onExpand?: ((gap: ContextGap) => void) | undefined }) {
   const label = gap.count === undefined ? '⋯ unchanged lines to end of file' : `⋯ ${gap.count} unchanged ${gap.count === 1 ? 'line' : 'lines'}`
   if (!onExpand) {
     return (
@@ -641,7 +641,7 @@ function UnifiedRowView({
   row: UnifiedRow
   wrap: boolean
   tokensFor: (line: HunkLine) => SynToken[] | null
-  onExpand?: (gap: ContextGap) => void
+  onExpand?: ((gap: ContextGap) => void) | undefined
 }) {
   if (row.type === 'hunk') return <HunkHeaderRow hunk={row.hunk} />
   if (row.type === 'gap') return <GapRow gap={row.gap} onExpand={onExpand} />
@@ -665,7 +665,7 @@ function SplitRowView({
   row: SplitRow
   wrap: boolean
   tokensFor: (line: HunkLine) => SynToken[] | null
-  onExpand?: (gap: ContextGap) => void
+  onExpand?: ((gap: ContextGap) => void) | undefined
 }) {
   if (row.type === 'hunk') return <HunkHeaderRow hunk={row.hunk} />
   if (row.type === 'gap') return <GapRow gap={row.gap} onExpand={onExpand} />
@@ -683,7 +683,7 @@ function SplitCell({
   tokensFor,
   wrap,
 }: {
-  cell?: DiffCell
+  cell?: DiffCell | undefined
   side: 'old' | 'new'
   tokensFor: (line: HunkLine) => SynToken[] | null
   wrap: boolean

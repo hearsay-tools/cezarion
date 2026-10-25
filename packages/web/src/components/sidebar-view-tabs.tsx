@@ -12,8 +12,8 @@ const MAX_PRIMARY_WITH_MORE = 5
 export function SidebarViewTabs({ items, activeTo, needsYou = false, onNavigate }: {
   items: NavItem[]
   activeTo: string | null
-  needsYou?: boolean
-  onNavigate?: () => void
+  needsYou?: boolean | undefined
+  onNavigate?: (() => void) | undefined
 }) {
   const [open, setOpen] = useState(false)
   const nav = useRef<HTMLElement>(null)

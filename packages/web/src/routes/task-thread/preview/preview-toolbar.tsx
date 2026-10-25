@@ -72,7 +72,7 @@ export interface PreviewToolbarProps {
   url: string
   servers: readonly PreviewServer[]
   /** The registered server being shown. Absent for a typed URL. */
-  current?: PreviewServer
+  current?: PreviewServer | undefined
   /** The page comes from a server cezar did not start (5.18). */
   adopted: boolean
   viewport: PreviewViewport
@@ -87,9 +87,9 @@ export interface PreviewToolbarProps {
   /** The Experimental badge. False where the stage carries it instead (5.14). */
   badge?: boolean
   /** Present while frames flow. */
-  stats?: PreviewStatsValue
+  stats?: PreviewStatsValue | undefined
   /** Shown in the stats' place when nothing streams: `server exited`, `offline`, `not started`. */
-  status?: { tone: StatusDotTone; label: string }
+  status?: { tone: StatusDotTone; label: string } | undefined
   urlInputRef?: RefObject<HTMLInputElement | null>
   /** Set where the pane replaces the transcript; the control returns to it. */
   onSession?: () => void

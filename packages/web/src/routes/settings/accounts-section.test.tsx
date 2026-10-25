@@ -65,7 +65,7 @@ function serve(
     openStatus?: number
     openError?: string
     targets?: unknown
-    status?: unknown
+    status?: unknown | undefined
   } = {},
 ) {
   requests = []

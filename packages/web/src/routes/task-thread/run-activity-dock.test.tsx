@@ -92,7 +92,7 @@ function renderDock(
   // Activity starts folded (hearsay-tools/cezarion#1601); most cases read the open card.
   { open = true, readerScroll, sticky = false }: {
     open?: boolean
-    readerScroll?: (listener: ReaderScrollListener) => () => void
+    readerScroll?: ((listener: ReaderScrollListener) => () => void) | undefined
     sticky?: boolean
   } = {},
 ) {

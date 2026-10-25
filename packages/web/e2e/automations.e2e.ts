@@ -90,7 +90,7 @@ describe('automations on the shared environment', () => {
       body: JSON.stringify({ mode: 'preview' }),
     }).then((response) => response.json()) as { checkId: string }
     const check = await pollFor(async signal => {
-      const check = await pollJson<{ status: string; matches?: number; error?: string }>(`${baseUrl}/api/v1/automation-checks/${preview.checkId}`, signal)
+      const check = await pollJson<{ status: string; matches?: number; error?: string | undefined }>(`${baseUrl}/api/v1/automation-checks/${preview.checkId}`, signal)
       return ['complete', 'error'].includes(check.status) ? check : undefined
     }, () => `automation check ${preview.checkId} never completed`, { timeoutMs: 30_000, intervalMs: 500 })
     expect(check.status, check.error).toBe('complete')

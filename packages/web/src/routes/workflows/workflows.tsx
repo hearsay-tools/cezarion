@@ -886,7 +886,7 @@ function StepCard({
   /** The drop indicator sits in the gap above this card. */
   insertBefore: boolean
   onRemove: () => void
-  onMoveUp?: () => void
+  onMoveUp?: (() => void) | undefined
   onMoveDown?: () => void
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
@@ -939,7 +939,7 @@ function StepCardBody({
   index: number
   skills: readonly Skill[]
   onRemove?: () => void
-  onMoveUp?: () => void
+  onMoveUp?: (() => void) | undefined
   onMoveDown?: () => void
   gripProps?: Record<string, unknown>
   overlay?: boolean

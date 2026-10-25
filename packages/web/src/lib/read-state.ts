@@ -18,7 +18,7 @@ const UNREAD_ELIGIBLE: readonly RunSummary['status'][] = ['done', 'failed']
 export type ReadStateInput = Pick<
   RunSummary,
   'status' | 'finishedAt' | 'seenAt' | 'archived' | 'autoResumeAt'
-> & { delegation?: { role?: string } | null }
+> & { delegation?: { role?: string } | null | undefined }
 
 /**
  * A run stopped by a provider usage limit with a resume already scheduled (spec

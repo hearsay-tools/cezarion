@@ -13,7 +13,7 @@
 export interface DiffFileChange {
   path: string
   /** Rename/copy source — present only when `status` is renamed/copied. */
-  oldPath?: string
+  oldPath?: string | undefined
   status: 'added' | 'modified' | 'deleted' | 'renamed' | 'copied'
   adds: number
   dels: number
@@ -65,14 +65,14 @@ export interface DiffProps {
    * Resolve `null` when unavailable (binary, deleted, too large); the gap stays collapsed.
    * Absent ⇒ gaps render as static "N unchanged lines" separators.
    */
-  loadFileText?: (path: string) => Promise<string | null>
+  loadFileText?: ((path: string) => Promise<string | null>) | undefined
   /**
    * Raw-bytes URL for an image path (#365) — given a path, resolve the same-origin URL an
    * `<img>` can load it from (the Changes tab wires `runFileRawUrl`). Absent ⇒ image files
    * still show the plain "Binary file" note, so consumers that never serve bytes for their
    * files (repo view, commit diffs) need no change to keep working.
    */
-  imageSrc?: (path: string) => string
+  imageSrc?: ((path: string) => string) | undefined
   /**
    * "Open in default app" (#365, LOCAL MODE ONLY): given a path, hand it off to the OS's
    * default application. Absent ⇒ the action is hidden, not disabled — the doctrine every
@@ -86,5 +86,5 @@ export interface DiffProps {
    * their DOM-based scroll there).
    */
   viewRef?: { current: DiffHandle | null }
-  className?: string
+  className?: string | undefined
 }

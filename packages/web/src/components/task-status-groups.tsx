@@ -182,11 +182,11 @@ export function TaskPreview({
   open,
 }: {
   /** Another project's run (All tasks); absent reads the active project. */
-  projectId?: string
+  projectId?: string | undefined
   runId: string
   /** The status label the row's pill shows, repeated as the preview's first fact. */
   status: string
-  error?: string
+  error?: string | undefined
   /** The Open task link, built by the caller's router. */
   open: React.ReactNode
 }) {

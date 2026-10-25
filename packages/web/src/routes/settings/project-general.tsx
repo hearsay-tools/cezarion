@@ -48,7 +48,7 @@ function fullDate(iso: string): string {
   return at.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' })
 }
 
-export function ProjectGeneral({ capabilities }: { capabilities?: Pick<Capabilities, 'singleProject'> }) {
+export function ProjectGeneral({ capabilities }: { capabilities?: Pick<Capabilities, 'singleProject'> | undefined }) {
   const projectId = useActiveProjectId()
   const projects = useProjects()
   const config = useWorkspaceConfig()

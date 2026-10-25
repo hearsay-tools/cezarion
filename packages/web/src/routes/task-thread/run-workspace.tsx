@@ -213,7 +213,7 @@ export function OpenInMenuForRun({
   run: ApiRun
   canResume: boolean
   onResume: () => void
-  onOpen?: () => void
+  onOpen?: (() => void) | undefined
   onClose?: () => void
 }) {
   const { canResumeHere, choices } = useOpenInChoices(run, canResume)

@@ -35,7 +35,7 @@ const shikiPlugin: CodeHighlighterPlugin = {
 interface MdastNode {
   type: string
   value?: string
-  url?: string
+  url?: string | undefined
   children?: MdastNode[]
 }
 
@@ -142,7 +142,7 @@ export const Markdown = memo(function Markdown({
   breaks?: boolean
   inline?: boolean
   document?: boolean
-  imageSrc?: (src: string) => string | null
+  imageSrc?: ((src: string) => string | null) | undefined
 }) {
   const fileContext = useContext(TaskFileContext)
   const contextual = useMemo(() => {

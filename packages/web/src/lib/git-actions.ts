@@ -17,11 +17,11 @@ export interface GitActionState {
    *  `/changes` must flip this false even when `worktreePath` is set. */
   hasWorktree: boolean
   /** The run's branch (absent on worktree-less runs). */
-  branch?: string
+  branch?: string | undefined
   /** `stat.files` from `/changes`; undefined while the answer is still loading/unknown. */
-  changedFiles?: number
+  changedFiles?: number | undefined
   /** The repo's remote from `/api/health` (`repo.remote`); undefined when none configured. */
-  remote?: string
+  remote?: string | undefined
   /** `/api/v1/health` `forge` — null means no supported forge remote (plain-git features only).
    *  The DTO rather than a local copy: `available` is OPTIONAL there (absent until the
    *  availability probe warms), and re-declaring it here is what hid that. */
@@ -42,7 +42,7 @@ export interface GitAction {
   label: string
   enabled: boolean
   /** Present exactly when disabled — the human sentence the button shows as its tooltip. */
-  reason?: string
+  reason?: string | undefined
   /** `view-pr` only: the PR's web URL. */
   href?: string
 }

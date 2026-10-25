@@ -233,7 +233,7 @@ function serve(overrides: {
   skills?: Skill[]
   workflows?: WorkflowsResponse
   /** `GET /api/v1/repo` — a payload, or a handler for a delayed answer. */
-  repo?: RepoResponse | (() => Promise<Response>)
+  repo?: RepoResponse | (() => Promise<Response>) | undefined
   uiState?: Record<string, unknown>
   /** Non-2xx `GET /api/v1/ui-state` answers (the query-errored path: `data` stays undefined). */
   uiStateStatus?: number

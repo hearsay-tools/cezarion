@@ -45,7 +45,7 @@ export interface CommitListItem {
   shaLabel: string
 }
 
-export function CommitList({ slot, commits, className, heading }: { slot: string; commits: CommitListItem[]; className?: string; heading?: ReactNode }) {
+export function CommitList({ slot, commits, className, heading }: { slot: string; commits: CommitListItem[]; className?: string | undefined; heading?: ReactNode }) {
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLowerCase()
   const filtered = normalizedQuery ? commits.filter(commit => commit.subject.toLowerCase().includes(normalizedQuery)) : commits

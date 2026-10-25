@@ -26,7 +26,7 @@ export function PinToggle({
   pinned: boolean
   /** Called with the state the user is asking for — `true` to pin, `false` to unpin. */
   onToggle: (pinned: boolean) => void
-  className?: string
+  className?: string | undefined
 }) {
   return (
     <button

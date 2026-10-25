@@ -32,7 +32,7 @@ export interface ThreadNote {
   delivery?: 'queued' | 'delivered' | 'consumed'
   /** A task-webhook hand-off line (#589), or a sent agent report (#1576) — rendered with the send
    *  glyph, not the dim bullet. */
-  icon?: 'handoff'
+  icon?: 'handoff' | undefined
 }
 
 export type ThreadConversationDelivery = 'queued' | 'delivered' | 'consumed' | 'not-delivered'
@@ -46,7 +46,7 @@ export interface ThreadConversationMessage {
   senderRunId: string
   recipientRunId: string
   messageKind: ConversationMessage['kind']
-  requestId?: string
+  requestId?: string | undefined
   delivery: ThreadConversationDelivery
   deliveredAt?: string
   /** When the recipient's harness reported the model read it (#505). */
@@ -54,7 +54,7 @@ export interface ThreadConversationMessage {
   recordedAt?: string
   instruction?: string
   resumed?: true
-  state?: ConversationMessage['state']
+  state?: ConversationMessage['state'] | undefined
   createdAt?: string
   requestHash?: string
   deadline?: string
@@ -66,7 +66,7 @@ export interface ThreadImage {
   kind: 'image'
   id: string
   url: string
-  name?: string
+  name?: string | undefined
 }
 
 /**
@@ -95,7 +95,7 @@ export interface ThreadAsk {
   closed?: 'finish' | 'superseded'
   /** View-only, set by `mainTranscriptSections` (hearsay-tools/cezarion#1495), never by the
    *  reducer: the pending ask's answerable copy after the newest entry, or its original place. */
-  placement?: 'origin' | 'pinned'
+  placement?: 'origin' | 'pinned' | undefined
 }
 
 /** Native approvals belong to the live request that offered the choices, never a later turn. */
@@ -104,7 +104,7 @@ export type ThreadPermission = Omit<UiPermissionRequestedEvent, 'type'> & {
   id: string
   status: 'pending' | 'resolved' | 'expired'
   optionId?: string
-  reason?: string
+  reason?: string | undefined
 }
 
 /** A persisted, cezar-owned recovery marker for a provider's runtime authentication failure. */
@@ -128,11 +128,11 @@ export interface ThreadPreviewServer {
   /** When `state` was last set: the registration, or the latest state event. */
   stateAt?: string
   exitCode?: number
-  reason?: 'user' | 'idle'
+  reason?: 'user' | 'idle' | undefined
 }
 
 /** Event time belongs to the web transcript, not the backend UiItem protocol. */
-export type ThreadMessage = Extract<UiItem, { kind: 'message' }> & { ts?: string }
+export type ThreadMessage = Extract<UiItem, { kind: 'message' }> & { ts?: string | undefined }
 export type ThreadEntry = Exclude<UiItem, { kind: 'message' }> | ThreadMessage | ThreadNote | ThreadImage | ThreadAsk | ThreadPermission | ThreadProviderAuthRequired | ThreadConversationMessage | ThreadPreviewServer
 
 export interface ThreadTurn {
@@ -144,7 +144,7 @@ export interface ThreadTurn {
   /** The v1 `user-message` that opened this turn. The FIRST turn usually has none — the initial
    *  prompt is the run's `task`, which the view renders from the run record. `ts` is when that
    *  line was persisted (#941). */
-  userMessage?: { text: string; imageCount: number; images: string[]; ts?: string; ask?: ThreadAsk }
+  userMessage?: { text: string; imageCount: number; images: string[]; ts?: string | undefined; ask?: ThreadAsk | undefined }
   /** Wall clock of the event that OPENED this turn — the `user-message` line when there is one,
    *  otherwise `turn.started` (#941). First stamp wins, so the v1 line and the v2 event that
    *  follow each other for the same turn produce one coherent start rather than two. This is the
@@ -153,7 +153,7 @@ export interface ThreadTurn {
   items: ThreadEntry[]
   /** Latest `plan.updated` snapshot seen during this turn (full-replacement semantics). */
   planEntries?: PlanEntry[]
-  completed?: { stopReason: StopReason; costUsd?: number; ts?: string }
+  completed?: { stopReason: StopReason; costUsd?: number; ts?: string | undefined }
 }
 
 export interface ThreadState {

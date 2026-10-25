@@ -36,7 +36,7 @@ export function ProjectStateWords({
   maxParts?: number
   slot: string
   /** Size, gap and wrapping: the drawer wraps at 11.5px, the rail stays on one 11px line. */
-  className?: string
+  className?: string | undefined
 }) {
   const parts = projectSignalParts(signal).slice(0, maxParts)
   return (

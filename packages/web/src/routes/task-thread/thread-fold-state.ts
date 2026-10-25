@@ -31,7 +31,7 @@ export interface DraftTurn {
   startedAt?: string
   entries: DraftEntry[]
   planEntries?: PlanEntry[]
-  completed?: { stopReason: StopReason; costUsd?: number; ts?: string }
+  completed?: { stopReason: StopReason; costUsd?: number; ts?: string | undefined }
   /** True once any v2 `item.*` event landed in this turn — the dedup latch. */
   v2Items: boolean
 }
@@ -192,8 +192,8 @@ export interface ConversationUpsert {
   senderRunId: string
   recipientRunId: string
   kind: ConversationMessage['kind']
-  requestId?: string
-  state?: ConversationMessage['state']
+  requestId?: string | undefined
+  state?: ConversationMessage['state'] | undefined
   createdAt?: string
   requestHash?: string
   deadline?: string

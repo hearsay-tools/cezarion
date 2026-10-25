@@ -43,10 +43,10 @@ function CommandDialog({
   ...props
 }: React.ComponentProps<typeof Dialog> & {
   title?: string
-  description?: string
-  className?: string
+  description?: string | undefined
+  className?: string | undefined
   showCloseButton?: boolean
-  overlayClassName?: string
+  overlayClassName?: string | undefined
   /** Extra props for the dialog content element, such as `data-*` attributes; the props above
    *  stay the dialog root's. */
   contentProps?: Omit<React.ComponentProps<typeof DialogContent>, "children" | "className" | "showCloseButton" | "overlayClassName"> &
@@ -54,7 +54,7 @@ function CommandDialog({
   /** Forwarded to the inner `Command`. Without this seam a dialog cannot rank its own results —
    *  cmdk's default fuzzy score is subsequence-based, which a hidden id in an item's value turns
    *  into noise (see `paletteScore` in `command-palette.tsx`). */
-  filter?: React.ComponentProps<typeof CommandPrimitive>["filter"]
+  filter?: React.ComponentProps<typeof CommandPrimitive>["filter"] | undefined
   /** The selected item, forwarded to the inner `Command` for a dialog that controls it. */
   value?: string
   onValueChange?: (value: string) => void

@@ -1682,7 +1682,7 @@ describe('useGlobalEvents — reconcile doctrine', () => {
     source.open()
 
     const predicates = invalidate.mock.calls
-      .map((call) => (call[0] as { predicate?: (query: { queryKey: unknown[] }) => boolean }).predicate)
+      .map((call) => (call[0] as { predicate?: ((query: { queryKey: unknown[] }) => boolean) | undefined }).predicate)
       .filter((predicate): predicate is (query: { queryKey: unknown[] }) => boolean => typeof predicate === 'function')
     expect(predicates.some((predicate) => predicate({ queryKey: ['default', 'runs', 'list'] }))).toBe(true)
     expect(predicates.some((predicate) => predicate({ queryKey: ['shop', 'runs', 'list'] }))).toBe(true)

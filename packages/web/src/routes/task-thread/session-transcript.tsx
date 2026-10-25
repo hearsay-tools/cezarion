@@ -38,11 +38,11 @@ import { ConversationNavigation, type ConversationTarget } from './conversation-
 
 export interface TranscriptUserMessage {
   text: string
-  ask?: ThreadAsk
-  imageCount?: number
+  ask?: ThreadAsk | undefined
+  imageCount?: number | undefined
   images?: readonly string[]
   /** When this message was sent — or, for a still-queued one, when it was queued (#941). */
-  ts?: string
+  ts?: string | undefined
 }
 
 export interface TranscriptSection {
@@ -85,14 +85,14 @@ export interface SessionTranscriptProps {
   mode: 'document' | 'panel'
   empty?: ReactNode
   /** Injects the run-aware reply behavior without coupling this view to run data or stores. */
-  renderAsk?: (ask: ThreadAsk) => ReactNode
+  renderAsk?: ((ask: ThreadAsk) => ReactNode) | undefined
   renderPermission?: (permission: ThreadPermission) => ReactNode
-  messageActions?: Readonly<Record<string, TranscriptMessageActions>>
+  messageActions?: Readonly<Record<string, TranscriptMessageActions>> | undefined
   /** Main-document integration preserves the shell's existing dock-owned jump pill. */
   scrollControls?: ThreadScrollControls
   renderMode?: 'flat' | 'virtual'
-  taskTitles?: TaskTitleMap
-  recipientBackends?: RecipientBackendMap
+  taskTitles?: TaskTitleMap | undefined
+  recipientBackends?: RecipientBackendMap | undefined
 }
 
 function overlayAgentInputDelivery(input: AgentInput): 'queued' | 'delivered' | 'consumed' {
@@ -421,7 +421,7 @@ function TranscriptUserBubble({
   actions,
 }: {
   message: TranscriptUserMessage
-  actions?: TranscriptMessageActions
+  actions?: TranscriptMessageActions | undefined
 }) {
   return (
     <UserBubble
@@ -450,11 +450,11 @@ function ThreadBlockRenderer({
 }: {
   block: ThreadBlock
   scope: string
-  renderAsk?: (ask: ThreadAsk) => ReactNode
+  renderAsk?: ((ask: ThreadAsk) => ReactNode) | undefined
   renderPermission?: (permission: ThreadPermission) => ReactNode
   runId: string
-  taskTitles?: TaskTitleMap
-  recipientBackends?: RecipientBackendMap
+  taskTitles?: TaskTitleMap | undefined
+  recipientBackends?: RecipientBackendMap | undefined
 }): ReactNode {
   switch (block.kind) {
     case 'entry':
@@ -498,11 +498,11 @@ function GroupedEntries({
 }: {
   entries: readonly ThreadEntry[]
   scope: string
-  renderAsk?: (ask: ThreadAsk) => ReactNode
+  renderAsk?: ((ask: ThreadAsk) => ReactNode) | undefined
   renderPermission?: (permission: ThreadPermission) => ReactNode
   runId: string
-  taskTitles?: TaskTitleMap
-  recipientBackends?: RecipientBackendMap
+  taskTitles?: TaskTitleMap | undefined
+  recipientBackends?: RecipientBackendMap | undefined
 }) {
   return groupThreadItems([...entries]).map((block) => (
     <ThreadBlockRenderer key={block.id} block={block} scope={scope} renderAsk={renderAsk} renderPermission={renderPermission} runId={runId} taskTitles={taskTitles} recipientBackends={recipientBackends} />
@@ -520,11 +520,11 @@ function ThreadEntryRenderer({
 }: {
   entry: ThreadEntry
   scope: string
-  renderAsk?: (ask: ThreadAsk) => ReactNode
+  renderAsk?: ((ask: ThreadAsk) => ReactNode) | undefined
   renderPermission?: (permission: ThreadPermission) => ReactNode
   runId: string
-  taskTitles?: TaskTitleMap
-  recipientBackends?: RecipientBackendMap
+  taskTitles?: TaskTitleMap | undefined
+  recipientBackends?: RecipientBackendMap | undefined
 }): ReactNode {
   switch (entry.kind) {
     case 'message':

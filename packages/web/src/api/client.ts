@@ -200,7 +200,7 @@ export class ApiError extends Error {
   /** HTTP status, or 0 when the request never reached the server (offline, server stopped). */
   readonly status: number
   /** `POST /api/runs/:id/pr`: the `git merge <branch>` to run by hand when the PR failed. */
-  readonly manual?: string
+  readonly manual?: string | undefined
   /** `POST /api/runs/:id/open-in-cli`: the resume command, when no terminal could be opened. */
   readonly command?: string
   /** `POST /api/workflows`: the file is already there — the caller may retry with `overwrite`. */
@@ -209,7 +209,7 @@ export class ApiError extends Error {
   constructor(
     status: number,
     message: string,
-    extras: { manual?: string; command?: string; exists?: boolean; cause?: unknown } = {},
+    extras: { manual?: string | undefined; command?: string; exists?: boolean; cause?: unknown } = {},
   ) {
     super(message, extras.cause !== undefined ? { cause: extras.cause } : undefined)
     this.name = 'ApiError'
@@ -222,10 +222,10 @@ export class ApiError extends Error {
 
 export type ReadOptions = {
   /** Wired to TanStack Query's per-query signal, so an unmounted view stops its fetch. */
-  signal?: AbortSignal
+  signal?: AbortSignal | undefined
   /** Read another project than the active one — only for the functions that say so (the
    *  project-switch existence checks); everything else follows `queryScope()`. */
-  projectId?: string
+  projectId?: string | undefined
 }
 
 type Json = Record<string, unknown>
@@ -527,7 +527,7 @@ export async function getRuns(opts?: ReadOptions): Promise<RunSummary[]> {
 /** One page of the active project's archived runs past the run list's window, newest first
  *  (`GET /run-summaries/archived`, #864). `before` is the previous page's `nextCursor`. */
 export async function getArchivedRuns(
-  params: { before?: string; limit?: number; q?: string },
+  params: { before?: string | undefined; limit?: number | undefined; q?: string },
   opts?: ReadOptions,
 ): Promise<ArchivedRunsResponse> {
   const query = {
@@ -899,7 +899,7 @@ export async function getGithub(
   /** `projectId` is for callers that render outside the routed view's scope (the shell's sidebar
    *  list, which sits above the provider); everyone else leaves it to `queryScope()`. */
   params: {
-    limit?: number; refresh?: boolean; projectId?: string
+    limit?: number | undefined; refresh?: boolean; projectId?: string | undefined
     /** One page (hearsay-tools/cezarion#1183): each side's cursor, or that side done. */
     issuesCursor?: string; prsCursor?: string; issuesDone?: boolean; prsDone?: boolean
   } = {},
@@ -974,7 +974,7 @@ export async function getGithubChecks(
 export async function getGithubSearch(
   kind: 'issue' | 'pr',
   query: string,
-  params: { limit?: number; projectId?: string } = {},
+  params: { limit?: number | undefined; projectId?: string | undefined } = {},
   opts?: ReadOptions,
 ): Promise<GithubSearchData> {
   return unwrap(
@@ -1631,10 +1631,10 @@ export async function finishRun(id: string): Promise<FinishResponse> {
  *  backend/model/account. `text`/`images` are the prompt the reopened session starts on — omitted,
  *  the engine opens with its plain "Continue.". */
 export interface ContinueOptions {
-  text?: string
+  text?: string | undefined
   images?: AttachmentInput[]
-  runner?: Runner
-  model?: string
+  runner?: Runner | undefined
+  model?: string | undefined
   /** Reasoning-effort pin (#45). Omitted keeps the run's pin; empty string clears it. */
   effort?: string
   /** Which login of that agent reopens it (spec 2026-07-29-agent-profiles). Switching account
@@ -2102,7 +2102,7 @@ export async function getWorkspaceUiState(opts?: ReadOptions): Promise<Workspace
  *  objects (`{ sidebar: {...} }`), never a nested leaf alone. Answers the merged state. */
 export async function putWorkspaceUiState(
   patch: SetWorkspaceUiStateInput,
-  opts: { keepalive?: boolean } = {},
+  opts: { keepalive?: boolean | undefined } = {},
 ): Promise<WorkspaceUiState> {
   return unwrap(
     await cez.api.v1.workspace['ui-state'].$put(

@@ -58,8 +58,8 @@ const MESSAGE_SURFACE = {
 export type ConversationMessageProps = {
   role: 'user' | 'agent'
   children: ReactNode
-  className?: string
-  ts?: string
+  className?: string | undefined
+  ts?: string | undefined
   /** Always-visible controls in the header row (label + timestamp), e.g. reply copy. */
   headerActions?: ReactNode
 } & Omit<ComponentPropsWithoutRef<'article'>, 'role' | 'children' | 'className'>
@@ -126,10 +126,10 @@ export function UserBubble({
   children,
 }: {
   text: string
-  imageCount?: number
+  imageCount?: number | undefined
   images?: readonly string[]
   /** When it was sent (#941) — in the bubble's top-right corner; omitted if invalid. */
-  ts?: string
+  ts?: string | undefined
   onEdit?: (text: string) => Promise<void>
   onRemove?: () => Promise<void>
   editLabel?: string
@@ -396,7 +396,7 @@ async function writeReplyClipboard(kind: 'html' | 'markdown', source: string, ro
  * An assistant message item, as markdown. `breaks` keeps the agent's single newlines visible
  * (#730): replies are chat prose, and CommonMark's newline-as-space flattened them into one line.
  */
-export function AssistantMessage({ text, ts }: { text: string; ts?: string }) {
+export function AssistantMessage({ text, ts }: { text: string; ts?: string | undefined }) {
   const markdownRef = useRef<HTMLDivElement>(null)
   const [copied, setCopied] = useState<'html' | 'markdown' | null>(null)
   const [copyError, setCopyError] = useState<string | null>(null)
@@ -476,8 +476,8 @@ export function WorkerConversationGroup({
 }: {
   block: WorkerConversationBlock
   runId: string
-  taskTitles?: TaskTitleMap
-  recipientBackends?: RecipientBackendMap
+  taskTitles?: TaskTitleMap | undefined
+  recipientBackends?: RecipientBackendMap | undefined
 }) {
   return (
     <div data-slot="worker-conversation" className="flex min-w-0 flex-col gap-2">
@@ -496,8 +496,8 @@ function WorkerConversationBatchCard({
 }: {
   batch: WorkerConversationBatch
   runId: string
-  taskTitles?: TaskTitleMap
-  recipientBackends?: RecipientBackendMap
+  taskTitles?: TaskTitleMap | undefined
+  recipientBackends?: RecipientBackendMap | undefined
 }) {
   const direction = conversationDirection(batch.messages[0] ?? { senderRunId: batch.senderRunId }, runId)
   const surface = CONVERSATION_SURFACE[direction]
@@ -631,7 +631,7 @@ function ConversationReference({
 }: {
   message: ThreadConversationMessage
   runId: string
-  taskTitles?: TaskTitleMap
+  taskTitles?: TaskTitleMap | undefined
 }) {
   const { targets, replies, navigate } = useContext(ConversationNavigation)
   const request = message.requestId ? targets.get(message.requestId) : undefined
@@ -993,7 +993,7 @@ export function ToolCard({
 }: {
   item: UiToolItem
   nested?: readonly ThreadEntry[]
-  cacheKey?: string
+  cacheKey?: string | undefined
   renderNested?: (entries: readonly ThreadEntry[], scope: string) => ReactNode
 }) {
   const cache = useThreadCardCache()
@@ -1117,7 +1117,7 @@ export function hookDetail(item: UiHookItem): string {
  * shows the extracted entries (what the agent received); the raw stdout/stderr sit behind a
  * second, smaller toggle.
  */
-export function HookCard({ item, cacheKey }: { item: UiHookItem; cacheKey?: string }) {
+export function HookCard({ item, cacheKey }: { item: UiHookItem; cacheKey?: string | undefined }) {
   const cache = useThreadCardCache()
   const [userOpen, setUserOpenState] = useState<boolean>(
     () => (cacheKey !== undefined ? (cache?.get(cacheKey) ?? false) : false),

@@ -60,8 +60,8 @@ function PermissionChoices({ permission, state, offline = false, error, onSelect
   permission: ThreadPermission
   state: 'pending' | 'sending' | 'resolved' | 'expired'
   offline?: boolean
-  error?: string
-  onSelect?: (optionId: string) => void
+  error?: string | undefined
+  onSelect?: ((optionId: string) => void) | undefined
 }) {
   const titleId = useId()
   const selected = permission.options.find(option => option.id === permission.optionId)

@@ -87,7 +87,7 @@ function SettingsMainHeader({ scope, title, mobileTitle }: { scope: SettingsScop
 function SectionPills({ scope, activeId, capabilities }: {
   scope: SettingsScope
   activeId: SettingsSection['id'] | null
-  capabilities?: Pick<Capabilities, 'singleProject'>
+  capabilities?: Pick<Capabilities, 'singleProject'> | undefined
 }) {
   const { NavLink } = navComponents(scope)
   const sections = visibleSettingsSections(scope, capabilities)
@@ -117,7 +117,7 @@ export function SettingsSectionRoute({
 }: {
   section: SettingsSection
   scope: SettingsScope
-  capabilities?: Pick<Capabilities, 'singleProject'>
+  capabilities?: Pick<Capabilities, 'singleProject'> | undefined
 }) {
   const Body = section.component
   return (
@@ -145,7 +145,7 @@ export function SettingsSectionRoute({
  *  as a stacked list of cards (the mobile drill-in page; desktop navigation lives in the app
  *  sidebar). The global area has none — see the header comment. */
 export function SettingsIndexRoute({ capabilities }: {
-  capabilities?: Pick<Capabilities, 'singleProject'>
+  capabilities?: Pick<Capabilities, 'singleProject'> | undefined
 }) {
   return (
     <div data-route="settings" className="settings-route mx-auto flex min-h-full w-full flex-col">

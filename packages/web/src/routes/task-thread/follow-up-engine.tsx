@@ -26,7 +26,7 @@ export interface ContinueAction {
   /** Whether provider discovery currently permits reopening the session. */
   canContinue: boolean
   /** Fixed recovery copy when no provider can continue the run. */
-  reason?: string
+  reason?: string | undefined
   /** True while provider status is still loading. */
   providerPending: boolean
   startsNewConversation: boolean

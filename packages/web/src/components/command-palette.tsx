@@ -96,7 +96,7 @@ export function paletteScore(value: string, search: string, keywords?: string[])
  * What cmdk filters a row on. A row's `CommandItem` spreads this object and `rankGroups` scores
  * it, so the group order always ranks exactly what cmdk filters.
  */
-export type PaletteMatch = { value: string; keywords?: string[] }
+export type PaletteMatch = { value: string; keywords?: string[] | undefined }
 
 /**
  * Orders the palette's ranked groups during a search: the group with the best-scoring row first.

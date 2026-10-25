@@ -21,7 +21,7 @@ import { Markdown } from '@/routes/task-thread/markdown'
  */
 
 /** The source tag every skill listing shows — project sources read emphasized (#377). */
-export function SkillSourceTag({ source, className }: { source: Skill['source']; className?: string }) {
+export function SkillSourceTag({ source, className }: { source: Skill['source']; className?: string | undefined }) {
   const project = isProjectSkill({ source })
   return (
     <span

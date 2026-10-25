@@ -5,11 +5,11 @@ import { LOAD_AHEAD_PX, resolveListScrollOwner, useLoadMoreSentinel } from './gi
 
 /** jsdom has no IntersectionObserver; this one records each observer's root, margin and target
  *  and lets a test say "the sentinel scrolled into view". */
-let observers: { target: Element | null; root: Element | null; rootMargin?: string; fire: (visible: boolean) => void }[]
+let observers: { target: Element | null; root: Element | null; rootMargin?: string | undefined; fire: (visible: boolean) => void }[]
 beforeEach(() => {
   observers = []
   vi.stubGlobal('IntersectionObserver', class {
-    constructor(cb: (entries: { isIntersecting: boolean }[]) => void, opts: { root?: Element | null; rootMargin?: string }) {
+    constructor(cb: (entries: { isIntersecting: boolean }[]) => void, opts: { root?: Element | null | undefined; rootMargin?: string | undefined }) {
       const record = { target: null as Element | null, root: opts.root ?? null, rootMargin: opts.rootMargin, fire: (v: boolean) => cb([{ isIntersecting: v }]) }
       observers.push(record)
       this.observe = (el: Element) => { record.target = el }

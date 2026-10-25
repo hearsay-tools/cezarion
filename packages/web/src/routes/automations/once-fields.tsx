@@ -41,7 +41,7 @@ function knownZones(): string[] {
  * `latestStartMinutes`; a past time or an unknown zone sets the field's custom validity, so Save
  * is blocked and the draft stays as typed.
  */
-export function OnceFields({ value, stored, onChange }: { value: NormalizedSchedule; stored?: AutomationSchedule; onChange: (next: NormalizedSchedule) => void }) {
+export function OnceFields({ value, stored, onChange }: { value: NormalizedSchedule; stored?: AutomationSchedule | undefined; onChange: (next: NormalizedSchedule) => void }) {
   const set = (patch: Partial<NormalizedSchedule>) => onChange({ ...value, ...patch })
   const wall = value.at ? onceWallParts(value.at) : null
   const date = value.at?.slice(0, 10) ?? ''

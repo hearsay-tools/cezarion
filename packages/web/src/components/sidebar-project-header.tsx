@@ -40,7 +40,7 @@ export function useActiveProjectIdentity() {
 
 /** This project's identity and actions. Workspace health describes only the boot project;
  * the registry is authoritative for every other project's name, root and branch. */
-export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void } = {}) {
+export function SidebarProjectHeader({ onNavigate }: { onNavigate?: (() => void) | undefined } = {}) {
   const markRef = useRef<HTMLSpanElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   const [menuOffset, setMenuOffset] = useState(0)
@@ -90,14 +90,14 @@ export function SidebarProjectHeader({ onNavigate }: { onNavigate?: () => void }
  */
 export function ProjectMenu({ projectId, onNavigate, triggerRef, triggerClassName, align = 'start', alignOffset, side, onOpenChange }: {
   projectId: string | null
-  onNavigate?: () => void
+  onNavigate?: (() => void) | undefined
   triggerRef?: React.Ref<HTMLButtonElement>
   /** Size classes for the trigger; its colours and states are shared. */
   triggerClassName?: string
   align?: 'start' | 'center' | 'end'
   alignOffset?: number
-  side?: 'top' | 'right' | 'bottom' | 'left'
-  onOpenChange?: (open: boolean) => void
+  side?: 'top' | 'right' | 'bottom' | 'left' | undefined
+  onOpenChange?: ((open: boolean) => void) | undefined
 }) {
   const sidebarNavigate = useSidebarNavigate()
   const health = useHealth()

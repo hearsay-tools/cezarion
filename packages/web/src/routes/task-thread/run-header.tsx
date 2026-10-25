@@ -160,7 +160,7 @@ export function RunHeader({
   /** Fired the moment "Mark unread" is invoked, BEFORE the mutation — the Session tab uses it
    *  to suppress its auto-mark-read effect for the rest of the visit (#775). Optional because
    *  the three `task-git` tabs render this same header and run no such effect. */
-  onMarkedUnread?: () => void
+  onMarkedUnread?: (() => void) | undefined
 }) {
   const attention = deriveAttention(run)
   const flags = runActionFlags(run)

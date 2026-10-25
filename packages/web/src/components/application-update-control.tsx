@@ -12,10 +12,10 @@ import { isNewerVersion } from '@/lib/is-newer-version'
 export type ApplicationUpdateControlProps = {
   version: string | null
   latestVersion: string | null
-  state?: ApplicationUpdateState
+  state?: ApplicationUpdateState | undefined
   onApplyUpdate?: () => Promise<void>
   onRestart?: () => Promise<void>
-  error?: string | null
+  error?: string | null | undefined
   busy?: boolean
   offline?: boolean
 }

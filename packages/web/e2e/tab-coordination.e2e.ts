@@ -131,7 +131,7 @@ it('blocked SharedWorker uses finite HTTP in ten visible windows and aborts on p
   await browser.withCdp(async (request, subscribe) => {
     const pages: Array<{ targetId: string; sessionId: string }> = []
     const persistent: string[] = []
-    const projects = new Map<string, { url: string; status?: number; failure?: unknown }>()
+    const projects = new Map<string, { url: string; status?: number | undefined; failure?: unknown | undefined }>()
     const off = subscribe(event => {
       if (event.method === 'Network.webSocketCreated' || event.method === 'Network.responseReceived' && event.params.response.mimeType === 'text/event-stream') persistent.push(event.method)
       const key = `${event.sessionId}:${event.params.requestId}`

@@ -1088,7 +1088,7 @@ function ReferenceChips({
  * where it earns attention instead — the status dot, the reference chips, and a tag chip in the
  * FILTER bar, where being selected is a state worth seeing.
  */
-export function TagChip({ tag, className }: { tag: string; className?: string }) {
+export function TagChip({ tag, className }: { tag: string; className?: string | undefined }) {
   return (
     <span
       data-slot="project-tag"

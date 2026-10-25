@@ -48,7 +48,7 @@ export function useTitleEditor(title: string, onCommit: (next: string) => void):
 
 /** The in-place input, wired to the machine: Enter commits, Escape abandons, blur commits.
  *  Sizing/typography come from the surface via `className`; the chrome is shared. */
-export function TitleEditInput({ editor, className }: { editor: TitleEditor; className?: string }) {
+export function TitleEditInput({ editor, className }: { editor: TitleEditor; className?: string | undefined }) {
   return (
     <input
       data-slot="title-input"

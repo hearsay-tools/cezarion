@@ -92,7 +92,7 @@ function toSpans(tokens: string[], kept: boolean[]): WordSpan[] {
 export interface RenderSegment {
   text: string
   /** A `var(--syn-*)` reference from the Shiki singleton, when highlighting is resident. */
-  color?: string
+  color?: string | undefined
   changed: boolean
 }
 

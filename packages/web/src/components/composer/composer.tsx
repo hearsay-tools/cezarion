@@ -62,7 +62,7 @@ export interface ComposerProps {
   /** Keep text and attachments visible until submission succeeds. */
   retainDraftUntilSuccess?: boolean
   /** Execution actions stay in the composer; keyboard submission never invokes Stop. */
-  onStop?: () => Promise<unknown>
+  onStop?: (() => Promise<unknown>) | undefined
   stopOnEmpty?: boolean
   stopping?: boolean
   /**
@@ -86,7 +86,7 @@ export interface ComposerProps {
   /** Idle guidance occupies the already-reserved submission status space. */
   idleFeedback?: ReactNode
   pendingLabel?: string
-  failureHint?: string
+  failureHint?: string | undefined
   clearOnSuccess?: boolean
   onPendingChange?: (pending: boolean) => void
   /**
@@ -309,7 +309,7 @@ export function Composer({
     value: string
     insert: string
     label: string
-    description?: string
+    description?: string | undefined
     emphasized: boolean
   }
 

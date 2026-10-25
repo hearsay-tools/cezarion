@@ -36,7 +36,7 @@ export interface FacetOption {
   /** How many rows this value would leave. Rendered right-aligned and quiet; `0` still shows,
    *  because "this would empty the table" is exactly what a filter should say before it is
    *  clicked rather than after. */
-  count?: number
+  count?: number | undefined
 }
 
 export function FacetFilter({
@@ -163,7 +163,7 @@ export function ToggleChip({
   tone = 'neutral',
 }: {
   label: string
-  count?: number
+  count?: number | undefined
   selected: boolean
   onToggle: () => void
   slot?: string

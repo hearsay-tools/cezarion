@@ -73,12 +73,12 @@ export function askDeliveryMode(run: RunRecord): AskDeliveryMode {
 export interface AskAnswerDelivery {
   mode: AskDeliveryMode
   /** Set when the answer cannot be delivered at all; the card renders `reason` and stays inert. */
-  blockedBy?: AskBlockedReason
-  reason?: string
+  blockedBy?: AskBlockedReason | undefined
+  reason?: string | undefined
   /** A delivery is in flight — the option chips and Send stay disabled until it settles. */
   isPending: boolean
   /** The server's own words for the last failed delivery, cleared when a new one starts. */
-  error?: string
+  error?: string | undefined
   /**
    * Deliver the answer. Never rejects: a failure lands in `error` AND comes back from the call,
    * which is one fact offered two ways because two kinds of caller need it differently. The ask

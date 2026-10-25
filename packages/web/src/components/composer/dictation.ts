@@ -40,7 +40,7 @@ export interface SpeechRecognitionLike {
   stop(): void
   abort(): void
   onresult: ((event: SpeechResultEventLike) => void) | null
-  onerror: ((event: { error?: string; message?: string }) => void) | null
+  onerror: ((event: { error?: string | undefined; message?: string }) => void) | null
   onend: (() => void) | null
 }
 

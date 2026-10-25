@@ -61,7 +61,7 @@ export function PreviewStage({
   /** 5.11: the last frame stays, dimmed. */
   dimmed?: boolean
   /** The CSS cursor the page asked for. It sits on the surface, so the input layer over the canvas shows it too. */
-  cursor?: string
+  cursor?: string | undefined
   /** The stage's box changed (CSS pixels). Fit sends this to the browser as its viewport. */
   onSize?: (size: StageSize) => void
   renderInput?: (geometry: StageGeometry) => ReactNode

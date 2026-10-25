@@ -263,7 +263,7 @@ function nameQueryScore(name: string, query: string): number {
  *  built-in score-sort, which does not reliably re-order the list in this app (React
  *  re-renders reset cmdk's imperative DOM ordering), so before #484 an (almost-)exact match
  *  could sit below weaker ones. */
-function rankByQuery<T extends { name: string; description?: string | null }>(
+function rankByQuery<T extends { name: string; description?: string | null | undefined }>(
   items: readonly T[],
   query: string,
   usage?: Readonly<Record<string, number>>,
@@ -288,7 +288,7 @@ function rankByQuery<T extends { name: string; description?: string | null }>(
  *  tie-break when `usage` is given. Grouped pickers go through `searchSkillsForDisplay`
  *  so a typed query is not re-tiered. Accepts any name/description row so the workflow
  *  Add-step picker and the skills import panel share this ranker. */
-export function searchSkills<T extends { name: string; description?: string | null }>(
+export function searchSkills<T extends { name: string; description?: string | null | undefined }>(
   skills: readonly T[],
   query: string,
   usage?: Readonly<Record<string, number>>,
