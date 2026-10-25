@@ -16,7 +16,8 @@ import { setTimeout as delay } from 'node:timers/promises';
  * So it imports only Node builtins and uses only TypeScript syntax that strips to JavaScript.
  */
 
-/** A process's start identity: one incarnation, so a reused pid never matches. */
+/** A process's start identity: one incarnation, so a reused pid never matches. It reads a zombie
+ *  too: a zombie leader still holds its group's id, and its start alone proves the group is its own. */
 export type ReadStart = (pid: number) => string | undefined;
 
 /** A group leader as its starter recorded it; `start` is absent where it could not be read. Such a
@@ -134,13 +135,10 @@ export function leaderRunning(leader: GroupLeader, readStart: ReadStart = proces
   return leaderStatus(leader, readStart) === 'running';
 }
 
-/** True while the group `leader` started still has a member, zombies included. A group outlives
- *  its leader while any member is unreaped, and the kernel never hands out a pid that still names
- *  a group, so `-pid` reaches only this group until then. A live process with the leader's pid
- *  and another start identity means the group ended and the pid was reused. */
-/** Whether the group `leader` started may still have members. `unknown` when its pid names a live
- *  process the record cannot verify, which may lead another group now. A leader that is gone leaves
- *  its group's id reserved while any member lives, so a group by that id is still its own. */
+/** Whether the group `leader` started may still have members. `unknown` when its pid names a
+ *  process, live or zombie, that the record cannot verify, which may lead another group now. A
+ *  leader that is gone leaves its group's id reserved while any member lives, so a group by that id
+ *  is still its own. */
 function groupStatus(leader: GroupLeader, readStart: ReadStart): 'exists' | 'gone' | 'unknown' {
   // Windows has no process groups: the recorded leader is all there is.
   if (process.platform === 'win32') {
@@ -159,6 +157,10 @@ function groupStatus(leader: GroupLeader, readStart: ReadStart): 'exists' | 'gon
   }
   return answers() ? 'exists' : 'gone';
 }
+/** True while the group `leader` started still has a member, zombies included. A group outlives
+ *  its leader while any member is unreaped, and the kernel never hands out a pid that still names
+ *  a group, so `-pid` reaches only this group until then. A process with the leader's pid and
+ *  another start identity means the group ended and the pid was reused. */
 export function groupExists(leader: GroupLeader, readStart: ReadStart = processStartToken): boolean {
   return groupStatus(leader, readStart) !== 'gone';
 }

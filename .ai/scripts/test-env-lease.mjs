@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
-import { groupExists, startOwnedGroup, stopGroup, watchGroup } from '../../packages/cezar/src/detached-process.ts';
+import { groupExists, processStartToken, startOwnedGroup, stopGroup, watchGroup } from '../../packages/cezar/src/detached-process.ts';
 
 const windowsScript = resolve(import.meta.dirname, 'test-env-windows.ps1');
 function windowsProbe(mode, payload, timeout = 15_000) {
@@ -52,7 +52,9 @@ export function identity(pid, timeout = 15_000) {
   }
   return {};
 }
-const readStart = pid => identity(pid).start;
+// The app's start identity. `identity` reads a zombie as dead and gives no start, but a zombie app
+// leader still holds its group's id, and only its start proves that the group is the app's.
+const readStart = pid => process.platform === 'win32' ? identity(pid).start : processStartToken(pid);
 
 // Diagnostics are transient and never participate in ownership or reclamation.
 // Limit reads as well as display size; command lines can contain arbitrary arguments.

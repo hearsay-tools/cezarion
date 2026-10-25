@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -9,7 +9,8 @@ import { test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { acquireTestEnvLease } from '../../../../.ai/scripts/test-env-lease.mjs';
 import * as leaseDiagnostics from '../../../../.ai/scripts/test-env-lease.mjs';
-import { requirePid } from '../../src/pid-file.testkit.ts';
+import { processStartToken } from '../../src/detached-process.ts';
+import { readPid, requirePid } from '../../src/pid-file.testkit.ts';
 import { checkZombieGroupChurn } from './test-env-lease-churn.testkit.mjs';
 
 // A temporary checkout cannot join the daemon caller's lease in another checkout.
@@ -139,6 +140,45 @@ test('a same-group fork and exit during process enumeration retains the lease', 
 
 // Keep fs scheduling hooks and stopped child ownership out of the test runner.
 test('zombie-only groups under churn retain unknown leases and reclaim stable snapshots', { skip: process.platform !== 'linux' }, checkZombieGroupChurn);
+
+/** One `/proc/<pid>/stat` read: the state and the process group, or undefined once the pid is gone. */
+function procStat(pid: number): { state: string; pgrp: number } | undefined {
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const [state, , pgrp] = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
+    return { state: state!, pgrp: Number(pgrp) };
+  } catch { return undefined; }
+}
+
+// The lease's own reader: `identity` reads a zombie as dead, and stop-app once refused this group.
+test('stop-app stops a group whose leader is an unreaped zombie, a member that ignores SIGTERM included', { skip: process.platform !== 'linux' }, async () => {
+  const root = mkdtempSync(join(tmpdir(), 'cez-env-zombie-'));
+  // The outer shell execs into sleep, which never reaps, so the leader it forked stays a zombie.
+  // setsid makes that leader a group of its own, and the member it forks ignores SIGTERM.
+  const parent = spawn('sh', ['-c', `setsid sh -c 'trap "" TERM; sleep 1000 & echo $! > member.pid; echo $$ > leader.pid' & exec sleep 1000`], { cwd: root, stdio: 'ignore' });
+  let member: number | undefined;
+  try {
+    const deadline = Date.now() + 10_000; // bound: the shells start in milliseconds; this guards a hang
+    let leader: number | undefined;
+    while ((leader = readPid(join(root, 'leader.pid'))) === undefined || procStat(leader)?.state !== 'Z') {
+      assert.ok(Date.now() < deadline, 'the leader must exit and stay a zombie');
+      await delay(20);
+    }
+    member = requirePid(join(root, 'member.pid'));
+    assert.equal(procStat(member)?.pgrp, leader, 'the member must be in the leader\'s group');
+    const start = processStartToken(leader);
+    assert.ok(start, 'a zombie keeps its start identity');
+    const stop = spawnSync(process.execPath, [helper, 'stop-app', '1000', String(leader), start], { env: fixtureEnv, encoding: 'utf8', timeout: 30_000 });
+    assert.equal(stop.status, 0, stop.stderr);
+    assert.match(stop.stderr, /stopping cezar/);
+    const state = procStat(member)?.state;
+    assert.ok(state === undefined || state === 'Z', `the member must stop, not stay in state ${state}`);
+  } finally {
+    if (member) { try { process.kill(member, 'SIGKILL'); } catch {} }
+    parent.kill('SIGKILL');
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('lease diagnostics name every holder command in both wait and timeout', async () => {
   const root = mkdtempSync(join(tmpdir(), 'cez-env-diagnostics-'));
