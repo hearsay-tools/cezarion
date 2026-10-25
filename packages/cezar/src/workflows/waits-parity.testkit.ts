@@ -47,6 +47,10 @@ export const WAIT_CRITERIA = [
   { id: 'U2t', scenario: 'baseline', name: 'timer and worker open: the timer resolving wakes the agent with the worker wait still open and in the footer, and the later worker result is delivered' },
   { id: 'U2c', scenario: 'baseline', name: 'ci and worker open: the ci result wakes the agent with the worker wait still open and in the footer, and the later worker result is delivered' },
   { id: 'U3w', scenario: 'baseline', name: 'a worker message during a worker wait wakes the parent and the worker wait stays open' },
+  // hearsay-tools/cezarion#1327: a worker that parks while its parent waits on it tells the parent why.
+  { id: 'U3n', scenario: 'turn-messages', name: 'a worker that parks on the monitoring line while its parent waits on it wakes the parent with one notice naming its timer, the wait stays open, a second park sends none, and settlement resolves the wait' },
+  { id: 'U3r', scenario: 'turn-messages', name: 'a worker parked before its parent waits on it sends its notice when the wait opens' },
+  { id: 'U3d', scenario: 'turn-messages', name: 'a worker that finishes while its parent waits on it sends no notice' },
   { id: 'U7w', scenario: 'baseline', name: 'cez worker wait and cezar_wait kind worker land in the same wait list' },
   { id: 'U9w', scenario: 'provider-error', name: 'provider failure and clean close with a worker wait open leave the run recoverable and the next resolution delivers' },
   { id: 'U14m', scenario: 'provider-error', name: 'a message-only wake beside a worker wait whose sessions persistently fail stops at the delivery bound keeping the message, Continue delivers it once, and a delivered message clears the failure count' },
@@ -152,5 +156,16 @@ export function ciNativeMessages(runner: RunnerId, dir: string): string[] {
       : runner === 'cursor' && row.method === 'session/prompt' ? row.params?.prompt
       : runner === 'opencode' && /\/(message|prompt_async)$/.test(row.url ?? '') ? row.body?.parts : undefined;
     return parts ? [parts.map((part: { text?: string }) => part.text ?? '').join('\n')] : [];
+  });
+}
+
+/** Input the Codex mock took into an open turn through `turn/steer`, which `ciNativeMessages`
+ *  leaves out. Every other runner returns none. */
+export function ciNativeSteers(runner: RunnerId, dir: string): string[] {
+  const path = join(dir, 'args');
+  if (runner !== 'codex' || !existsSync(path)) return [];
+  return readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).flatMap(line => {
+    const row = JSON.parse(line) as NativeInput;
+    return row.method === 'turn/steer' && row.params?.input ? [row.params.input.map(part => part.text ?? '').join('\n')] : [];
   });
 }

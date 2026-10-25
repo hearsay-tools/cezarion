@@ -566,14 +566,18 @@ The full root typecheck runs web first, preparing declarations once for all four
 workspace checks.
 
 To typecheck without rebuilding `packages/cezar/dist`, for example while Squeal
-is validating, run both server configs from `packages/cezar`. The root
+is validating, run the three server configs from `packages/cezar`. The root
 `npm run typecheck` rebuilds `dist` first, and Squeal then marks dozens of
 passing checks UNKNOWN (hearsay-tools/squeal#33).
 
 ```bash
-./node_modules/.bin/tsc --noEmit -p tsconfig.json       # shipped sources only
-./node_modules/.bin/tsc --noEmit -p tsconfig.test.json  # adds every test file
+./node_modules/.bin/tsc --noEmit -p tsconfig.json          # shipped sources only
+./node_modules/.bin/tsc --noEmit -p tsconfig.test.json     # adds every test file
+./node_modules/.bin/tsc --noEmit -p tsconfig.scripts.json  # .ai/scripts/*.ts probes
 ```
+
+The `.ai/scripts/*.ts` probes import server internals and CI never runs them,
+so `tsconfig.scripts.json` is their only check (hearsay-tools/cezarion#1702).
 
 `tsconfig.json` leaves out every test file: on hearsay-tools/cezarion#1291 a
 TS2353 in `src/runs/waits-store.test.ts` passed it and failed CI.
