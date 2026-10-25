@@ -358,6 +358,33 @@ function orderedTurnText(v1: string, v2: string): string | undefined {
   if (contains(v1, v2)) return v1;
   return undefined;
 }
+/** A turn's markers, as `classifyTurnEnd` reads them: each channel's ask line, and its done and
+ *  monitoring lines. */
+type TurnMarkers = { v1Ask: AskMarkerParseResult; v2Ask: AskMarkerParseResult; doneLine: boolean; monitoringLine: boolean };
+/** How a turn end reads its turn (`classifyTurnEnd`). */
+type TurnEndRead = AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean; waitCard: boolean };
+/** Read the turn's markers once from the channel that holds the whole turn, or from each channel
+ *  when neither holds the other (`orderedTurnText`). A done line counts only when no channel
+ *  carries an ask line. */
+function readTurnMarkers(turnText: string, completedAssistantText: string): TurnMarkers {
+  const complete = orderedTurnText(turnText, completedAssistantText);
+  const v1 = turnParkSignals(complete ?? turnText);
+  const v2 = complete === undefined ? turnParkSignals(completedAssistantText) : v1;
+  return {
+    v1Ask: v1.askResult, v2Ask: v2.askResult,
+    doneLine: (v1.done || v2.done) && v1.askResult.kind === 'none' && v2.askResult.kind === 'none',
+    monitoringLine: v1.monitoring || v2.monitoring,
+  };
+}
+/** Read the turn's ask: its ask line, else the card of the human wait it registered, else the
+ *  human gate when that wait has no card. A done reads no ask. */
+function readTurnAsk(markers: TurnMarkers, options: { sessionOpen: boolean; humanWait?: Pick<HumanWaitEntry, 'questions' | 'context'> },
+  done: boolean): AskTurnOutcome & { humanGate: boolean; waitCard: boolean } {
+  const askTurn = resolveAskTurn(markers.v1Ask, markers.v2Ask, options.sessionOpen && !done);
+  const surfaced = options.humanWait && options.sessionOpen && !done && !askTurn.ask ? options.humanWait : undefined;
+  const waitCard = !!surfaced?.questions;
+  return { ...askTurn, ask: askTurn.ask ?? humanWaitCard(surfaced) ?? null, humanGate: !!surfaced && !waitCard, waitCard };
+}
 /** One turn-end decision for fresh and Continue, also retained until an input
  * ACK settles. DONE and human gates take precedence over a quiet
  * declaration or live workers; a false pending-ASK flag alone proves nothing.
@@ -370,21 +397,14 @@ export function classifyTurnEnd(turnText: string, completedAssistantText: string
   sessionOpen: boolean; pendingHumanAsk: boolean;
   scheduledWake: boolean; liveWorkers: boolean;
   humanWait?: Pick<HumanWaitEntry, 'questions' | 'context'>; doneRequested?: boolean;
-}): AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean; waitCard: boolean } {
-  const complete = orderedTurnText(turnText, completedAssistantText);
-  const v1 = turnParkSignals(complete ?? turnText);
-  const v2 = complete === undefined ? turnParkSignals(completedAssistantText) : v1;
-  const doneLine = (v1.done || v2.done) && v1.askResult.kind === 'none' && v2.askResult.kind === 'none';
-  const done = options.sessionOpen && (!!options.doneRequested || doneLine);
-  const askTurn = resolveAskTurn(v1.askResult, v2.askResult, options.sessionOpen && !done);
-  const surfaced = options.humanWait && options.sessionOpen && !done && !askTurn.ask ? options.humanWait : undefined;
-  const waitCard = !!surfaced?.questions;
-  const ask = askTurn.ask ?? humanWaitCard(surfaced) ?? null;
-  const humanGate = !!surfaced && !waitCard;
-  const monitoring = options.sessionOpen && !done && !ask &&
+}): TurnEndRead {
+  const markers = readTurnMarkers(turnText, completedAssistantText);
+  const done = options.sessionOpen && (!!options.doneRequested || markers.doneLine);
+  const { humanGate, waitCard, ...askTurn } = readTurnAsk(markers, options, done);
+  const monitoring = options.sessionOpen && !done && !askTurn.ask &&
     !options.pendingHumanAsk && !humanGate &&
-    (v1.monitoring || v2.monitoring || options.scheduledWake || options.liveWorkers);
-  return { ...askTurn, ask, done, monitoring, humanGate, waitCard };
+    (markers.monitoringLine || options.scheduledWake || options.liveWorkers);
+  return { ...askTurn, done, monitoring, humanGate, waitCard };
 }
 /** An active ASK marker — valid card or rejected payload — means the user
  *  must answer. Drop follow-ups queued mid-turn so they cannot start a new
@@ -482,6 +502,16 @@ type SettledTurn = {
   scheduleWakeup?: number | null;
 };
 type CompletionRefusal = NonNullable<ReturnType<RunManager['completionRefusal']>>;
+/** What `carryOutTurnEnd` hands the method for a decision kind. `session` is the session as the
+ *  decision found it. */
+type TurnEndCarry = {
+  runId: string; state: ActiveRun; session: AgentSession | undefined; stepId: string | undefined;
+  refused: CompletionRefusal | undefined; noteRefusal: () => void;
+  /** The refusal settles this turn end, so Cezar's own human waits are already withdrawn. */
+  settlesRefusal: boolean;
+};
+/** One method per decision kind of `decideTurnEnd` (`RunManager.turnEndCarriers`). */
+type TurnEndCarriers = { [K in TurnEndDecision['kind']]: (carry: TurnEndCarry, decision: Extract<TurnEndDecision, { kind: K }>) => TurnEndOutcome };
 
 interface ActiveRun {
   /** Last cumulative Claude report per provider session during this process. */
@@ -9342,7 +9372,7 @@ export class RunManager {
       liveWorkers: this.monitorsLiveWorkers(runId),
       humanWait, doneRequested: !!doneRequest,
     });
-    const { monitoring, humanGate, ask, notes: askNotes, waitCard } = read;
+    const { monitoring, humanGate, ask } = read;
     this.latchAskLineCard(runId, humanWait, read);
     discardQueuedMessagesOnAsk(state.session, read);
     // The turn that just ended answered a nudge: one flag per cause (hearsay-tools/cezarion#1234,
@@ -9351,15 +9381,7 @@ export class RunManager {
     state.noWaitNudged = undefined;
     state.completionNudgeAnswered = state.completionNudged === state.session ? state.session : undefined;
     state.completionNudged = undefined;
-    for (const note of askNotes) this.store.appendEvent(runId, { type: 'note', stepId: turn.stepId, ...note });
-    this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
-    // An autonomous run registers no newly parsed ask line before the budget, as `cezar_ask`
-    // refuses it (hearsay-tools/cezarion#1234): the autonomous nudge goes instead. Do this before
-    // prepareHumanAsk latches it; an existing/native ask or a human wait's card still blocks the helper.
-    const askNudged = !!ask && !waitCard && sessionOpen && this.tryAutonomousNudge(runId, state, turn.stepId, ask);
-    if (ask && !askNudged) this.prepareHumanAsk(state);
-    if (humanGate && !ask && !state.pendingHumanAsk) this.raiseHumanGate(runId, state);
-    if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, humanWait, null);
+    const askNudged = this.prepareTurnAsk(runId, state, { stepId: turn.stepId, sessionOpen, humanWait }, read);
     state.parkAfterAck = sessionOpen && state.session
       ? { session: state.session, monitoring, humanGate, nudgedLastTurn, scheduleWakeup: turn.scheduleWakeup } : undefined;
     const settled = this.settleTurn(runId, state, 'turn-end', {
@@ -9374,6 +9396,24 @@ export class RunManager {
     if (settled && this.store.getRun(runId)?.autoResumeAttempts !== undefined) {
       this.store.updateRun(runId, { autoResumeAttempts: undefined });
     }
+  }
+
+  /** Prepare the turn's ask before the turn end settles (`endTurn`): its notes, the `invalidAsk`
+   *  flag, and the ask or human gate the run parks on. True when the autonomous nudge went instead
+   *  of the ask line. */
+  private prepareTurnAsk(runId: string, state: ActiveRun, turn: { stepId: string; sessionOpen: boolean; humanWait: HumanWaitEntry | undefined },
+    read: TurnEndRead): boolean {
+    const { humanGate, ask, notes: askNotes, waitCard } = read;
+    for (const note of askNotes) this.store.appendEvent(runId, { type: 'note', stepId: turn.stepId, ...note });
+    this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
+    // An autonomous run registers no newly parsed ask line before the budget, as `cezar_ask`
+    // refuses it (hearsay-tools/cezarion#1234): the autonomous nudge goes instead. Do this before
+    // prepareHumanAsk latches it; an existing/native ask or a human wait's card still blocks the helper.
+    const askNudged = !!ask && !waitCard && turn.sessionOpen && this.tryAutonomousNudge(runId, state, turn.stepId, ask);
+    if (ask && !askNudged) this.prepareHumanAsk(state);
+    if (humanGate && !ask && !state.pendingHumanAsk) this.raiseHumanGate(runId, state);
+    if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, turn.humanWait, null);
+    return askNudged;
   }
 
   /** The turn end an entry settles after it (`settleIdleBoundary`, `handleAgentInputReady`), and
@@ -9496,81 +9536,113 @@ export class RunManager {
     return true;
   }
 
-  /** Carry out what the turn-end rule decided, and report how it left the run. */
+  /** Carry out what the turn-end rule decided, and report how it left the run. A refusal the
+   *  decision follows is noted first; then the decision kind's own method runs (`turnEndCarriers`). */
   private carryOutTurnEnd(runId: string, state: ActiveRun, stepId: string | undefined, decision: TurnEndDecision,
     refused: CompletionRefusal | undefined, noteRefusal: () => void): TurnEndOutcome {
     const session = state.session;
-    // Every branch returns this once its park is carried out, so a worker's park notice goes here
-    // whichever branch parked it (hearsay-tools/cezarion#1327).
-    const parked = (): TurnEndOutcome => {
-      this.noticeParkedWorker(runId);
-      return { kind: 'park', keepsSlot: this.monitoring.has(runId) };
-    };
-    if ('refused' in decision && decision.refused) noteRefusal();
+    const decisionRefused = 'refused' in decision && !!decision.refused;
+    if (decisionRefused) noteRefusal();
     // A refusal that settles the turn end replaces Cezar's own human wait, as the agent's own wait would.
-    const settlesRefusal = !!refused && !('refused' in decision && decision.refused) && !(decision.kind === 'defer' && decision.keepDone);
+    const settlesRefusal = !!refused && !decisionRefused && !(decision.kind === 'defer' && decision.keepDone);
     if (settlesRefusal) this.withdrawCezarHumanWaits(runId);
-    switch (decision.kind) {
-      case 'closed': case 'input': case 'take-input':
-        return { kind: 'running' };
-      case 'defer':
-        // A refused autonomous nudge waits for readiness at this boundary, bounded by the idle timer.
-        return !decision.keepDone && session && state.autonomousNudgePending === session ? { kind: 'readiness' } : { kind: 'running' };
-      case 'done':
-        this.closeAsDone(runId, state, session);
-        return { kind: 'done' };
-      case 'park':
-        // A human wait is shown and parks for the user; CI and timer waits keep their slot. A
-        // question with no wait parks for the user, and the freed slot can start a queued run.
-        if (!this.parkOnWaits(runId, state)) this.parkForUser(runId, state, stepId);
-        return parked();
-      case 'completion-wait':
-        // One nudge per cycle: Cezar waits on the live workers for the agent.
-        noteRefusal();
-        this.registerCompletionWait(runId, refused!.liveWorkerIds);
-        if (!this.parkOnWaits(runId, state)) this.parkForUser(runId, state, stepId);
-        return parked();
-      case 'human-wait': {
-        if (decision.via === 'completion') {
-          noteRefusal();
-          const wait = this.openHumanAlias(runId, state, 'completion');
-          if (wait?.source === 'cezar' && wait.askSeq === undefined) this.showCezarHumanWait(runId, state, wait, refused!.message);
-          this.parkForUser(runId, state, stepId);
-          return parked();
-        }
-        const capNote = state.autonomous ? `autonomous — safety cap reached (${MAX_AUTO_CONTINUES}); automatic continuation paused`
-          : `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you`;
-        if (settlesRefusal) {
-          noteRefusal();
-          this.openTurnEndHumanWait(runId, state, stepId, 'budget', capNote);
-          return parked();
-        }
-        // Stopping, finishing, parent completion and owed input keep today's plain park.
-        if (!this.canAutoContinue(runId, state)) this.parkForUser(runId, state, stepId);
-        else this.openTurnEndHumanWait(runId, state, stepId, decision.via, decision.via === 'no-wait' ? NO_WAIT_NOTE : capNote, true);
-        return parked();
-      }
-      case 'nudge': {
-        if (decision.cause === 'completion') {
-          const text = refused!.liveWorkerIds.length ? `${refused!.message} ${COMPLETION_WILL_WAIT}` : refused!.message;
-          state.noWaitNudgeSawContent = false;
-          if (!session || !this.canAutoContinue(runId, state) || !this.submitAgentInput(runId, state, [{ type: 'text', text }])) {
-            noteRefusal();
-            this.parkForUser(runId, state, stepId);
-            return parked();
-          }
-          this.awaitCompletionNudgeReply(runId, state, session);
-          const spent = this.chargeAutomaticWake(runId);
-          this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: `${COMPLETION_NUDGE_NOTE} (${spent}/${MAX_AUTO_CONTINUES}): ${refused!.code}` });
-          return { kind: 'nudge', cause: 'completion', autonomous: !!state.autonomous };
-        }
-        if (this.sendTurnEndNudge(runId, state, stepId, decision.text!)) return { kind: 'nudge', cause: 'no-wait', autonomous: !!state.autonomous };
-        if (session && state.autonomousNudgePending === session) return { kind: 'readiness' };
-        if (!this.canAutoContinue(runId, state)) this.parkForUser(runId, state, stepId);
-        else this.openTurnEndHumanWait(runId, state, stepId, 'no-wait', NO_WAIT_NOTE, true);
-        return parked();
-      }
+    const carryOut = this.turnEndCarriers[decision.kind] as (carry: TurnEndCarry, decision: TurnEndDecision) => TurnEndOutcome;
+    return carryOut({ runId, state, session, stepId, refused, noteRefusal, settlesRefusal }, decision);
+  }
+
+  /** The method for each decision kind (`carryOutTurnEnd`). A closed session settles elsewhere, and
+   *  owed input runs as the session's next turn: the run keeps running. */
+  private readonly turnEndCarriers: TurnEndCarriers = {
+    closed: () => ({ kind: 'running' }),
+    input: () => ({ kind: 'running' }),
+    'take-input': () => ({ kind: 'running' }),
+    defer: (carry, decision) => this.carryOutDefer(carry, decision),
+    done: carry => this.carryOutDone(carry),
+    park: carry => this.carryOutPark(carry),
+    'completion-wait': carry => this.carryOutCompletionWait(carry),
+    'human-wait': (carry, { via }) => via === 'completion' ? this.carryOutCompletionHumanWait(carry) : this.carryOutHumanWait(carry, via),
+    nudge: (carry, decision) => decision.cause === 'completion' ? this.carryOutCompletionNudge(carry) : this.carryOutNoWaitNudge(carry, decision.text!),
+  };
+
+  /** Every park returns this once it is carried out, so a worker's park notice goes here whichever
+   *  decision parked it (hearsay-tools/cezarion#1327). */
+  private parkedOutcome(runId: string): TurnEndOutcome {
+    this.noticeParkedWorker(runId);
+    return { kind: 'park', keepsSlot: this.monitoring.has(runId) };
+  }
+
+  /** A refused autonomous nudge waits for readiness at this boundary, bounded by the idle timer. */
+  private carryOutDefer({ state, session }: TurnEndCarry, decision: Extract<TurnEndDecision, { kind: 'defer' }>): TurnEndOutcome {
+    return !decision.keepDone && session && state.autonomousNudgePending === session ? { kind: 'readiness' } : { kind: 'running' };
+  }
+
+  private carryOutDone({ runId, state, session }: TurnEndCarry): TurnEndOutcome {
+    this.closeAsDone(runId, state, session);
+    return { kind: 'done' };
+  }
+
+  /** A human wait is shown and parks for the user; CI and timer waits keep their slot. A question
+   *  with no wait parks for the user, and the freed slot can start a queued run. */
+  private carryOutPark({ runId, state, stepId }: TurnEndCarry): TurnEndOutcome {
+    if (!this.parkOnWaits(runId, state)) this.parkForUser(runId, state, stepId);
+    return this.parkedOutcome(runId);
+  }
+
+  /** One nudge per cycle: Cezar waits on the live workers for the agent, then parks as `park` does. */
+  private carryOutCompletionWait(carry: TurnEndCarry): TurnEndOutcome {
+    carry.noteRefusal();
+    this.registerCompletionWait(carry.runId, carry.refused!.liveWorkerIds);
+    return this.carryOutPark(carry);
+  }
+
+  /** The completion cause's human wait: the refusal is its note, and Cezar's own wait shows it. */
+  private carryOutCompletionHumanWait({ runId, state, stepId, refused, noteRefusal }: TurnEndCarry): TurnEndOutcome {
+    noteRefusal();
+    const wait = this.openHumanAlias(runId, state, 'completion');
+    if (wait?.source === 'cezar' && wait.askSeq === undefined) this.showCezarHumanWait(runId, state, wait, refused!.message);
+    this.parkForUser(runId, state, stepId);
+    return this.parkedOutcome(runId);
+  }
+
+  /** The no-wait and budget human waits. A refusal that settles the turn end opens the budget wait. */
+  private carryOutHumanWait({ runId, state, stepId, noteRefusal, settlesRefusal }: TurnEndCarry, via: 'no-wait' | 'budget'): TurnEndOutcome {
+    const capNote = state.autonomous ? `autonomous — safety cap reached (${MAX_AUTO_CONTINUES}); automatic continuation paused`
+      : `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you`;
+    if (settlesRefusal) {
+      noteRefusal();
+      this.openTurnEndHumanWait(runId, state, stepId, 'budget', capNote);
+      return this.parkedOutcome(runId);
     }
+    // Stopping, finishing, parent completion and owed input keep today's plain park.
+    if (!this.canAutoContinue(runId, state)) this.parkForUser(runId, state, stepId);
+    else this.openTurnEndHumanWait(runId, state, stepId, via, via === 'no-wait' ? NO_WAIT_NOTE : capNote, true);
+    return this.parkedOutcome(runId);
+  }
+
+  /** The completion cause's nudge: the refusal message, which names the worker wait when live
+   *  workers block the done. A nudge that cannot go parks for the user. */
+  private carryOutCompletionNudge({ runId, state, session, stepId, refused, noteRefusal }: TurnEndCarry): TurnEndOutcome {
+    const text = refused!.liveWorkerIds.length ? `${refused!.message} ${COMPLETION_WILL_WAIT}` : refused!.message;
+    state.noWaitNudgeSawContent = false;
+    if (!session || !this.canAutoContinue(runId, state) || !this.submitAgentInput(runId, state, [{ type: 'text', text }])) {
+      noteRefusal();
+      this.parkForUser(runId, state, stepId);
+      return this.parkedOutcome(runId);
+    }
+    this.awaitCompletionNudgeReply(runId, state, session);
+    const spent = this.chargeAutomaticWake(runId);
+    this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: `${COMPLETION_NUDGE_NOTE} (${spent}/${MAX_AUTO_CONTINUES}): ${refused!.code}` });
+    return { kind: 'nudge', cause: 'completion', autonomous: !!state.autonomous };
+  }
+
+  /** The no-wait cause's nudge. One the wire refuses waits for input readiness when it is
+   *  autonomous, else opens Cezar's no-wait human wait. */
+  private carryOutNoWaitNudge({ runId, state, session, stepId }: TurnEndCarry, text: string): TurnEndOutcome {
+    if (this.sendTurnEndNudge(runId, state, stepId, text)) return { kind: 'nudge', cause: 'no-wait', autonomous: !!state.autonomous };
+    if (session && state.autonomousNudgePending === session) return { kind: 'readiness' };
+    if (!this.canAutoContinue(runId, state)) this.parkForUser(runId, state, stepId);
+    else this.openTurnEndHumanWait(runId, state, stepId, 'no-wait', NO_WAIT_NOTE, true);
+    return this.parkedOutcome(runId);
   }
 
   /** `turn complete — status=<word>` (spec 007): the handoff stays current when the agent writes
