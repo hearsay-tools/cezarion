@@ -230,4 +230,53 @@ describe('Stop during CI-tool prelaunch setup (#493)', { timeout: 30_000 }, () =
     expect(launches.mock.calls[0]![0].cezarTools).toEqual(provision.mock.results[0]!.value.descriptor);
     expect(launches.mock.results[0]!.value).not.toBeInstanceOf(Promise);
   });
+
+  // hearsay-tools/cezarion#1632: the revalidation after provisioning also holds a launch whose root
+  // Finish arrives during setup. Only that check sees the Finish, and only it revokes the
+  // delegation the launch was given: Stop and `dropActive` do not reach it here.
+  it.each(modes)('%s holds the launch when a root Finish arrives during setup, and revokes what it provisioned', async mode => {
+    const p = project(new WorkspaceSemaphore({ initial: { maxParallel: 1 } }));
+    const revokeDelegation = vi.fn();
+    p.manager.setDelegationProvisioner(() => ({ env: {}, instructions: '', restrictNativeDelegation: true, revoke: revokeDelegation }));
+    const provision = controller.provision.bind(controller);
+    let revokeCiTools: Mock<() => void> | undefined;
+    vi.spyOn(controller, 'provision').mockImplementation(register => {
+      const capability = provision(register);
+      revokeCiTools = vi.fn(capability.revoke);
+      return { ...capability, revoke: revokeCiTools };
+    });
+    const execution = watchExecution(p, mode);
+    const id = start(p, mode);
+    await setupEntered;
+    const stepId = p.store.getRun(id)!.currentStepId!;
+    p.store.commitDelegation([{ id, delegation: { role: 'root', permissions: [], receipts: [], finishRequestedAt: new Date().toISOString() } }]);
+    releaseSetup();
+    await Promise.race([execution.mock.results[0]!.value, launchEntered]);
+    expect(launches.mock.calls.length).toBe(0);
+    expect(revokeCiTools).toHaveBeenCalled();
+    expect(revokeDelegation).toHaveBeenCalledTimes(1);
+    expect(p.store.getRun(id)?.status).toBe('queued');
+    expect(p.store.getRun(id)?.steps.find(step => step.id === stepId)?.status).toBe('pending');
+    // Held in the queue for the Finish, with no session state left behind.
+    const engine = p.manager as unknown as { active: Map<string, unknown>; queue: string[] };
+    expect(engine.active.has(id)).toBe(false);
+    expect(engine.queue).toContain(id);
+  });
+
+  // hearsay-tools/cezarion#1632: a run whose execution stops during setup (here an invalid
+  // delegation, one of the stops `workerExecutionStopped` reads) settles cancelled and never launches.
+  it.each(modes)('%s never launches when its execution stops during setup', async mode => {
+    const p = project(new WorkspaceSemaphore({ initial: { maxParallel: 1 } }));
+    const execution = watchExecution(p, mode);
+    const id = start(p, mode);
+    await setupEntered;
+    const stepId = p.store.getRun(id)!.currentStepId!;
+    p.store.updateRun(id, { delegation: { role: 'invalid' } });
+    releaseSetup();
+    await Promise.race([execution.mock.results[0]!.value, launchEntered]);
+    expect(launches.mock.calls.length).toBe(0);
+    expect(p.store.getRun(id)?.status).toBe('cancelled');
+    expect(p.store.getRun(id)?.steps.find(step => step.id === stepId)?.status).toBe('cancelled');
+    expect(p.manager.isActive(id)).toBe(false);
+  });
 });
