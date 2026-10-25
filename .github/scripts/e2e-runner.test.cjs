@@ -18,7 +18,7 @@ function run(t, args = [], { installed = true, exit = 0, bootExit = 0, inherited
   // The lease imports the process-group helper from source; the marker makes it an ES module.
   fs.mkdirSync(path.join(root, 'packages/cezar/src'), { recursive: true });
   fs.copyFileSync(path.join(__dirname, '../../packages/cezar/src/detached-process.ts'), path.join(root, 'packages/cezar/src/detached-process.ts'));
-  fs.writeFileSync(path.join(root, 'packages/cezar/package.json'), '{"type":"module"}\n');
+  fs.writeFileSync(path.join(root, 'packages/cezar/src/package.json'), '{"type":"module"}\n');
   fs.writeFileSync(path.join(root, '.ai/qa/test-env.json'), JSON.stringify({ browser: { installed } }));
   fs.writeFileSync(path.join(root, '.ai/scripts/test-env-up.sh'), `#!/bin/sh\nfor arg do\n case "$arg" in --force|--force-rebuild|--server-env=*) ;; *) exit 2;; esac\ndone\nprintf "%s\\n" "$@" > boot-args\nexit ${bootExit}\n`);
   for (const name of ['npm', 'npx']) {

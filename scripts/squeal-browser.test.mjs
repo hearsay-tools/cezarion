@@ -50,7 +50,7 @@ function bootstrap(t, { installed = true, bootExit = 0, tmp, registryFailure, bo
   mkdirSync(join(fixture, 'packages/cezar/src'), { recursive: true });
   copyFileSync(new URL('../packages/cezar/src/detached-process.ts', import.meta.url),
     join(fixture, 'packages/cezar/src/detached-process.ts'));
-  writeFileSync(join(fixture, 'packages/cezar/package.json'), '{"type":"module"}\n');
+  writeFileSync(join(fixture, 'packages/cezar/src/package.json'), '{"type":"module"}\n');
   // Replace only the server-dependent registry pin. Check committed ownership at
   // its restoration boundary, where releasing the lease too early would race.
   writeFileSync(join(fixture, 'packages/web/e2e/workspace-registry.ts'), `
