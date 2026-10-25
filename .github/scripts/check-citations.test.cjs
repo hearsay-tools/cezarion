@@ -86,6 +86,11 @@ test('a shell quote opens mid-word, and a YAML quote only at the start of a toke
   assert.deepEqual(cites('ci.yml', "note: the fork's rail # see #14\n"), ['1:14:comment']);
 });
 
+test('a shell comment can start right after a control operator, and a YAML one cannot', () => {
+  assert.deepEqual(cites('up.sh', 'cmd;# relates to #123\nfoo|# see #124\n(a)# see #125\n'), ['1:123:comment', '2:124:comment', '3:125:comment']);
+  assert.deepEqual(cites('ci.yml', 'key: a;# not a comment #126\n'), []);
+});
+
 test('reads Markdown prose but not code fences, inline code or qualified links', () => {
   const text = [
     '# Notes',

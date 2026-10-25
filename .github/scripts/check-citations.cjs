@@ -91,9 +91,10 @@ function cssSpans(text) {
   return spans;
 }
 
-/** `#` comments in YAML and shell. A shell quote opens anywhere (`pre' #12'`), and a backslash
- *  escapes the next character; a YAML quote opens only at the start of a token, so the
- *  apostrophe in a plain value such as `the fork's rail` stays prose. */
+/** `#` comments in YAML and shell. A shell quote opens anywhere (`pre' #12'`), a backslash
+ *  escapes the next character, and a comment can start after a control operator (`cmd;#`).
+ *  A YAML quote opens only at the start of a token, so the apostrophe in a plain value such
+ *  as `the fork's rail` stays prose, and a YAML comment needs whitespace before it. */
 function hashCommentSpans(text, file) {
   const shell = /\.(?:sh|bash)$/.test(file);
   const spans = [];
@@ -108,7 +109,7 @@ function hashCommentSpans(text, file) {
       i++;
     } else if ((char === '"' || char === "'") && (shell || /[\s=:([{,]/.test(before))) {
       quote = char;
-    } else if (char === '#' && /\s/.test(before)) {
+    } else if (char === '#' && (shell ? /[\s;&|()<>]/ : /\s/).test(before)) {
       const newline = text.indexOf('\n', i);
       const end = newline === -1 ? text.length : newline;
       // After the comment marker, so `#1310: …` as a whole comment is not read as a citation.
