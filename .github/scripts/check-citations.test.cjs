@@ -46,6 +46,12 @@ test('passes text in backticks: test filters, protocol and UI sample values', ()
   assert.deepEqual(cites('notes.md', 'The chip shows `#777`, and ``a `#1` b`` too.\n'), []);
 });
 
+test('a code span does not cross a blank line, as CommonMark and GitHub read it', () => {
+  // A blank line ends the paragraph, so the first backtick stays literal, and GitHub
+  // renders `#123` in the next paragraph as an issue link.
+  assert.deepEqual(cites('notes.md', '`example\n\n#123\n`\n'), ['3:123:Markdown prose']);
+});
+
 test('leaves code, string literals and JSX text alone, and reads JSX comments', () => {
   const text = [
     "const chip = '#790';",
