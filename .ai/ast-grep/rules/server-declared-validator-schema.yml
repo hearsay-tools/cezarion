@@ -1,0 +1,36 @@
+id: server-declared-validator-schema
+language: typescript
+severity: warning
+message: >-
+  Declare the request schema in packages/contract and import its value from
+  @open-mercato/cezar-contract/<module> (AGENTS.md § The HTTP API); server.ts only chains routes.
+files:
+  - packages/cezar/src/server/server.ts
+rule:
+  all:
+    # The schema argument of a validator call. Starting here keeps the rule cheap: the same rule
+    # started from every `const` in the file and searched the file for a call, and took 11 s, not 1 s.
+    - nthChild: 1
+    - inside:
+        kind: arguments
+        inside:
+          kind: call_expression
+          has: { field: function, regex: '^(json|param|query)ZodValidator$' }
+    - any:
+        # Written in the call: `jsonZodValidator(z.object({ … }))`.
+        - all:
+            - kind: call_expression
+            - regex: '^z\.'
+        # A name this file declares: `jsonZodValidator(fooSchema)` or `jsonZodValidator(() => fooSchema)`.
+        # `$NAME` binds in the argument and is read again by the `inside` rule below.
+        - all:
+            - any:
+                - { kind: identifier, pattern: $NAME }
+                - { kind: arrow_function, has: { field: body, kind: identifier, pattern: $NAME } }
+            - inside:
+                kind: program
+                stopBy: end
+                has:
+                  stopBy: end
+                  kind: variable_declarator
+                  has: { field: name, kind: identifier, pattern: $NAME }

@@ -394,11 +394,10 @@ Rules that follow from that:
   can import it from `packages/cezar/dist/core/shell-env.js` after a build, or keep a local copy
   with a test that runs its output through `sh` and checks that spaces, apostrophes, dollar
   signs, `$()` and backticks stay literal.
-- **Source scanning.** The pinned TypeScript 7 package is the native compiler and offers no
-  stable JavaScript compiler API (`typescript` exports only version fields). For
-  source-scanning tests, reuse regex scans over `blank()` from
-  `packages/cezar/src/test-wait-discipline.testkit.ts`; see
-  `contract-import-boundaries.test.ts` and `test-wait-discipline.test.ts` for examples.
+- **Source scanning.** TypeScript 7 has no stable JavaScript compiler API. To pin a construction
+  site or reader, add an ast-grep rule (`.ai/ast-grep/README.md`); for text, reuse the regex scans
+  over `blank()` in `packages/cezar/src/test-wait-discipline.testkit.ts`, as
+  `contract-import-boundaries.test.ts` and `test-wait-discipline.test.ts` do.
 
 ## Task routing
 

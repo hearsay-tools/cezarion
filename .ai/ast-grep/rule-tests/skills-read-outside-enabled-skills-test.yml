@@ -1,0 +1,19 @@
+id: skills-read-outside-enabled-skills
+valid:
+  # A write, and a read inside the one owner.
+  - 'state.skills = []'
+  - 'this.active.get(runId).skills = skills'
+  - 'class A { private enabledSkills(state: ActiveRun) { return filter(state.skills ?? []) } }'
+  # Not an ActiveRun: `launch.skills` and a bare local are other objects' fields.
+  - 'const skills = await this.discoverSkills()'
+  - 'launch.skills.files'
+  - 'const { skills } = launch'
+invalid:
+  - 'const x = state.skills'
+  - 'const x = state?.skills ?? []'
+  - 'state.skills = state.skills ?? []'
+  - 'const x = active.skills'
+  - 'const x = execution.state.skills'
+  - "const x = state['skills']"
+  - 'const { skills } = state'
+  - 'class A { other(state: ActiveRun) { return state.skills } }'
