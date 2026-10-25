@@ -21,7 +21,7 @@ import { visibleSettingsSections, type SettingsScope } from './registry'
 export function SettingsSidebar({ projectId, projectName, capabilities }: {
   projectId: string
   projectName: string | null
-  capabilities?: Pick<Capabilities, 'singleProject'>
+  capabilities?: Pick<Capabilities, 'singleProject'> | undefined
 }) {
   return (
     <div data-slot="settings-sidebar" className={SIDEBAR_LIST_BODY_CLASS}>

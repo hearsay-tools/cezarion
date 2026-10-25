@@ -166,5 +166,5 @@ it('uses URL project runs above the route provider even when the mutable scope i
   expect(mark.textContent).toContain('2 unread')
   fireEvent.click(mark)
   await waitFor(() => expect(requests.filter(r => r.method === 'POST').map(r => r.url)).toEqual(['/api/v1/p/other/runs/done/read', '/api/v1/p/other/runs/failed/read']))
-  expect(client.getQueryData<{ seenAt?: string }[]>(['previous', 'runs', 'list'])?.[0]?.seenAt).toBeUndefined()
+  expect(client.getQueryData<{ seenAt?: string | undefined }[]>(['previous', 'runs', 'list'])?.[0]?.seenAt).toBeUndefined()
 })

@@ -219,7 +219,7 @@ export function DrawerProjects({ nav, currentProjectId, onNavigate }: {
 
 /** The bottom rows: Tools, Global settings and the theme cycle. Pinned below the scroll; the home
  *  indicator's inset is theirs, since the drawer runs under it. */
-export function DrawerGlobal({ onNavigate, tools }: { onNavigate: () => void; tools?: DrawerTools | null }) {
+export function DrawerGlobal({ onNavigate, tools }: { onNavigate: () => void; tools?: DrawerTools | null | undefined }) {
   const { theme, setTheme } = useTheme()
   const next = NEXT_THEME[theme]
   const label = theme.charAt(0).toUpperCase() + theme.slice(1)

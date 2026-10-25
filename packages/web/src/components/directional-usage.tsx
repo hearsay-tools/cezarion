@@ -2,13 +2,13 @@ import { compactTokens } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 interface DirectionalUsageProps {
-  inputTokens?: number
-  outputTokens?: number
+  inputTokens?: number | undefined
+  outputTokens?: number | undefined
   /** Compact prose (`IN … · OUT …`) or the desktop table's denser (`… / …`) form. */
   variant?: 'compact' | 'table'
   /** Historical compact surfaces disappear when neither direction was persisted. */
   omitWhenUnknown?: boolean
-  className?: string
+  className?: string | undefined
   title?: string
 }
 

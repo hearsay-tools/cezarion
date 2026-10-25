@@ -10,7 +10,7 @@ import { usageMetricVisibility } from './token-metrics'
 // absent field, which `Capabilities` no longer permits now that the server always sends it.
 const health = (
   capabilities: Partial<HealthResponse['capabilities']> = {},
-): { capabilities?: Partial<HealthResponse['capabilities']> } => ({
+): { capabilities?: Partial<HealthResponse['capabilities']> | undefined } => ({
   capabilities: {
     localHandoff: true,
     singleProject: false,

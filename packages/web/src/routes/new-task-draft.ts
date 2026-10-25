@@ -45,7 +45,7 @@ export interface ComposerRunModeInput {
   planFirst: boolean
   explicitAutonomous: boolean | null
   explicitWorktree: boolean | null
-  interactive?: boolean
+  interactive?: boolean | undefined
   configuredAutonomous: boolean | 'source-dependent'
   configuredWorktree: boolean
   source: TaskSource['source']

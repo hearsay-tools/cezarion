@@ -38,7 +38,7 @@ function sectionOf(message: string): Section {
   return 'form'
 }
 
-function Section({ title, failure, section, children }: { title: string; failure?: Failure; section: Section; children: ReactNode }) {
+function Section({ title, failure, section, children }: { title: string; failure?: Failure | undefined; section: Section; children: ReactNode }) {
   return (
     <fieldset className="grid min-w-0 gap-4 rounded-xl border p-5 max-md:p-4!">
       <legend className="px-0">{title}</legend>
@@ -50,7 +50,7 @@ function Section({ title, failure, section, children }: { title: string; failure
 
 export function AutomationEditor({ automation, forge, timeZone, onSaved, onReload }: {
   automation?: AutomationDefinition
-  forge: { available: boolean; reason?: string }
+  forge: { available: boolean; reason?: string | undefined }
   timeZone: string
   onSaved: () => void
   onReload?: () => void

@@ -17,7 +17,7 @@ export interface AgentAccountChoices {
   accounts: readonly RunnerAccountChoice[]
   /** What the active project's selection resolves to per runner — the row selected until the
    *  surface's own override replaces it. */
-  repoAccount?: Partial<Record<Runner, string>>
+  repoAccount?: Partial<Record<Runner, string>> | undefined
 }
 
 export function useAgentAccounts(): AgentAccountChoices {

@@ -217,7 +217,7 @@ export const queryKeys = {
   get worktrees() {
     return [queryScope(), 'worktrees'] as const
   },
-  github: (params: { limit?: number } = {}) => [queryScope(), 'github', params.limit ?? null] as const,
+  github: (params: { limit?: number | undefined } = {}) => [queryScope(), 'github', params.limit ?? null] as const,
   /** The paged list (hearsay-tools/cezarion#1183): one infinite query per page size. */
   githubPages: (pageSize: number) => [queryScope(), 'github', 'pages', pageSize] as const,
   /** Page 1 as the live read last saw it; reconciled into `githubPages`, never rendered. */
@@ -1570,7 +1570,7 @@ export function useMarkRunSeen(projectId?: string, cacheScope?: string) {
     onError: (_error, { id, listKey, detailKey }, snapshot) => {
       // Roll back only the receipt. The stream may have advanced unrelated fields or
       // inserted another run while the request was in flight; those changes belong to it.
-      const restore = <T extends { seenAt?: string }>(current: T, previous: { seenAt?: string }): T => {
+      const restore = <T extends { seenAt?: string | undefined }>(current: T, previous: { seenAt?: string | undefined }): T => {
         const { seenAt: _receipt, ...rest } = current
         return (previous.seenAt === undefined ? rest : { ...rest, seenAt: previous.seenAt }) as T
       }
@@ -1586,7 +1586,7 @@ export function useMarkRunSeen(projectId?: string, cacheScope?: string) {
     onSuccess: (updated, { id, listKey, detailKey }) => {
       // A receipt response is an older snapshot: accept its receipt only, preserving
       // newer stream fields such as autoResumeAt and token totals (#auto-resume).
-      const stampReceipt = <T extends { id: string; seenAt?: string }>(run: T): T =>
+      const stampReceipt = <T extends { id: string; seenAt?: string | undefined }>(run: T): T =>
         run.id === id ? { ...run, seenAt: updated.seenAt } : run
       queryClient.setQueryData<RunSummary[]>(listKey, (list) => list?.map(stampReceipt))
       queryClient.setQueryData<RunRecord>(detailKey, (current) => current ? stampReceipt(current) : updated)
@@ -1658,7 +1658,7 @@ export function useMarkRunUnseen() {
       // finished run is quieter than a just-finished one, but it is not silent — the janitor still
       // discovers PR links, titles still get summarized, and a `failed` run still publishes its
       // `autoResumeAt`. Clearing the one field this mutation owns cannot lose any of them.
-      const clearReceipt = <T extends { id: string; seenAt?: string }>(run: T): T =>
+      const clearReceipt = <T extends { id: string; seenAt?: string | undefined }>(run: T): T =>
         run.id === updated.id ? withoutReceipt(run) : run
       queryClient.setQueryData<RunSummary[]>(queryKeys.runs.list(), (list) => list?.map(clearReceipt))
       queryClient.setQueryData<RunRecord>(queryKeys.runs.detail(updated.id), (current) =>
@@ -1670,7 +1670,7 @@ export function useMarkRunUnseen() {
 }
 
 /** A copy of the record with the read receipt gone — the optimistic half of `useMarkRunUnseen`. */
-function withoutReceipt<T extends { seenAt?: string }>(run: T): T {
+function withoutReceipt<T extends { seenAt?: string | undefined }>(run: T): T {
   const { seenAt: _dropped, ...rest } = run
   return rest as T
 }
@@ -1776,7 +1776,7 @@ export function useRemoveQueuedMessage(id: string) {
  * Revisit/focus after a minute also refetches. Automatic reads retain the server's 60 s
  * cache, so an upstream edit appears within 120 s plus request time while online/visible.
  * Explicit Refresh remains the only list-cache bypass. */
-export function useGithub(params: { limit?: number } = {}, enabled = true) {
+export function useGithub(params: { limit?: number | undefined } = {}, enabled = true) {
   const client = useQueryClient()
   const key = queryKeys.github(params)
   useLiveRead(`/api/v1/p/${queryScope()}/github${params.limit === undefined ? '' : `?limit=${params.limit}`}`, key, liveRefetchInterval(enabled ? 60_000 : false))
@@ -1823,7 +1823,7 @@ export function useGithub(params: { limit?: number } = {}, enabled = true) {
  * names the PREVIOUS project. Read-only on purpose — no polling and no project-board metadata
  * follow-up; the routed view's own `useGithub` owns both, and this just shares what it stores.
  */
-export function useProjectGithub(scope: string, params: { limit?: number } = {}, enabled = true) {
+export function useProjectGithub(scope: string, params: { limit?: number | undefined } = {}, enabled = true) {
   return useQuery({
     queryKey: [scope, 'github', params.limit ?? null] as const,
     queryFn: ({ signal }) => getGithub({ limit: params.limit, projectId: scope }, { signal }),
@@ -2055,7 +2055,7 @@ export interface ReferenceStatusEntry {
   /** The last status we ever learned for this reference. Kept across refetches, re-keyed batches
    *  and forge failures — only ever REPLACED by a newer answer, never cleared by one that failed
    *  to arrive. */
-  status?: ReferenceStatus
+  status?: ReferenceStatus | undefined
   /**
    * What the request covering this reference is doing right now:
    *  - `idle` — nothing has asked about it (no provider, or past the per-project cap);
@@ -2066,7 +2066,7 @@ export interface ReferenceStatusEntry {
    */
   state: 'idle' | 'loading' | 'ready' | 'unknown' | 'unavailable'
   /** Only on `unavailable` — the server's human hint ("gh CLI not found…"). */
-  reason?: string
+  reason?: string | undefined
   /**
    * Does this pull request's branch refuse to merge into its base? The second axis the status
    * cannot carry (`conflicts` in the contract), remembered on exactly the same terms as `status`.
@@ -2075,7 +2075,7 @@ export interface ReferenceStatusEntry {
    * — and is not the same as `false`, which is the forge having told us it merges cleanly. Only
    * `true` may paint anything.
    */
-  conflicting?: boolean
+  conflicting?: boolean | undefined
 }
 
 export type ReferenceStatusLookup = (ref: ReferenceStatusRequest) => ReferenceStatusEntry
@@ -2312,7 +2312,7 @@ export function useReferenceStatuses(
       // changed by the run stream; GitHub is outside that stream and pushes the cockpit nothing,
       // so a chip that says "checks running" has no other way to ever stop saying it. WHEN to ask
       // is the server's call (`recheckAfterMs`), never a constant here.
-      staleTime: (query: { state: { data?: GithubRefStatusData } }) =>
+      staleTime: (query: { state: { data?: GithubRefStatusData | undefined } }) =>
         refStatusRecheckAfter(query.state.data) ?? Infinity,
       // `refetchIntervalInBackground` stays at its default, so a hidden tab schedules nothing.
       refetchInterval: false,

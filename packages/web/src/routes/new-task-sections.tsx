@@ -283,7 +283,7 @@ function WorktreeToggle({
 }: {
   on: boolean
   disabled?: boolean
-  disabledReason?: string
+  disabledReason?: string | undefined
   onChange: (on: boolean) => void
 }) {
   return (

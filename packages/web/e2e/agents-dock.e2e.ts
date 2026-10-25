@@ -166,7 +166,7 @@ describe('the Agents dock against a replayed fan-out', () => {
         type: row.querySelector('[data-slot="agent-type"]')?.textContent,
         tools: row.querySelector('[data-slot="agent-tools"]')?.textContent,
       })))`) as string,
-    ) as Array<{ text: string; type?: string; tools?: string }>
+    ) as Array<{ text: string; type?: string; tools?: string | undefined }>
 
     expect(rows[0]!.text).toContain('Audit the auth flow')
     expect(rows[0]!.type).toBe('general-purpose')
@@ -332,7 +332,7 @@ describe('the Agents dock against a dry-run OMP sub-agent', () => {
           tools: row.querySelector('[data-slot="agent-tools"]')?.textContent,
         }
       })())`) as string,
-    ) as { text: string; type?: string; tools?: string }
+    ) as { text: string; type?: string; tools?: string | undefined }
     expect(row.text).toContain('Review the change')
     // OMP carries the type in `input.agent`, not claude's `subagent_type`.
     expect(row.type).toBe('explore')

@@ -18,7 +18,7 @@ export function TaskGithubItemLoading({
   heading = 'h1',
 }: {
   kind: 'issue' | 'pr'
-  number?: number
+  number?: number | undefined
   heading?: 'h1' | 'h2'
 }) {
   const state = (

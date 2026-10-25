@@ -12,12 +12,12 @@ import { isNewerVersion } from '@/lib/is-newer-version'
 export type ApplicationUpdateControlProps = {
   version: string | null
   latestVersion: string | null
-  state?: ApplicationUpdateState
-  onApplyUpdate?: () => Promise<void>
-  onRestart?: () => Promise<void>
-  error?: string | null
-  busy?: boolean
-  offline?: boolean
+  state?: ApplicationUpdateState | undefined
+  onApplyUpdate?: (() => Promise<void>) | undefined
+  onRestart?: (() => Promise<void>) | undefined
+  error?: string | null | undefined
+  busy?: boolean | undefined
+  offline?: boolean | undefined
 }
 
 /** The same compact control is rendered in the desktop sidebar and mobile drawer. */

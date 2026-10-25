@@ -17,7 +17,7 @@ export function usageMetricVisibility(
   // always sends it, so the absent case cannot be spelled with `Capabilities` itself. This helper
   // is the one place that tolerates version skew — a newer cockpit reading an older server — so
   // it is where the looser shape belongs.
-  health: { capabilities?: Partial<HealthResponse['capabilities']> } | undefined,
+  health: { capabilities?: Partial<HealthResponse['capabilities']> | undefined } | undefined,
 ): UsageMetricVisibility {
   const capabilities = health?.capabilities
   const legacy = capabilities?.tokenMetrics !== false

@@ -21,7 +21,7 @@ const IN_FLIGHT: readonly ApiRun['status'][] = ['running', 'queued', 'waiting']
 
 export function runStatusLine(
   run: ApiRun,
-  { queuePosition, now = new Date() }: { queuePosition?: number; now?: Date },
+  { queuePosition, now = new Date() }: { queuePosition?: number | undefined; now?: Date },
 ): RunStatusLine {
   const attention = deriveAttention(run)
   const base = attention.label.charAt(0).toUpperCase() + attention.label.slice(1)

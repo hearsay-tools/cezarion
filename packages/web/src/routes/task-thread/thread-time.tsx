@@ -116,7 +116,7 @@ export function MessageTime({ ts }: { ts: string }) {
  * has landed: a live turn shows nothing rather than a running clock or a placeholder that would
  * jump when it fills in.
  */
-export function TurnTime({ startedAt, completedAt }: { startedAt?: string; completedAt: string }) {
+export function TurnTime({ startedAt, completedAt }: { startedAt?: string | undefined; completedAt: string }) {
   const label = clockLabel(completedAt)
   if (label === undefined) return null
   const duration = turnDuration(startedAt, completedAt)

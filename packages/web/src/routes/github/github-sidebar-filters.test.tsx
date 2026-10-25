@@ -59,7 +59,7 @@ interface Stub {
   runs?: RunRecord[] | 'error'
   uiState?: Record<string, unknown>
   /** `decoded query → response` for qualifier searches. */
-  search?: (query: string) => GithubSearchData | Response
+  search?: ((query: string) => GithubSearchData | Response) | undefined
 }
 
 function stub(opts: Stub = {}) {

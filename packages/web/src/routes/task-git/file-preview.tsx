@@ -19,7 +19,7 @@ import { Markdown } from '../task-thread/markdown'
  * say "binary", and a 409 comes back in the server's own words. Text goes through the ONE
  * Shiki singleton with `langForPath`, plaintext fallback included.
  */
-export function FilePreview({ runId, path, className }: { runId: string; path: string | null; className?: string }) {
+export function FilePreview({ runId, path, className }: { runId: string; path: string | null; className?: string | undefined }) {
   const entry = useRunFile(runId, path ?? undefined)
 
   if (path === null) {
@@ -88,7 +88,7 @@ export function FileEntryView({
 }: {
   runId: string
   entry: Extract<WorktreeEntry, { type: 'file' }>
-  className?: string
+  className?: string | undefined
   imageUrl?: string
   downloadUrl?: string
   snapshot?: string
@@ -148,7 +148,7 @@ export function FileEntryView({
 }
 
 /** The preview card — same bordered grammar as the diff facade's file cards. */
-function Pane({ className, children }: { className?: string; children: React.ReactNode }) {
+function Pane({ className, children }: { className?: string | undefined; children: React.ReactNode }) {
   return (
     <section data-slot="file-preview" className={cn('flex flex-col overflow-hidden rounded-lg border border-border bg-card', className)}>
       {children}

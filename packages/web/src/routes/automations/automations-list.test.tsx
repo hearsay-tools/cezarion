@@ -31,7 +31,7 @@ function mount(data: AutomationsResponse | undefined, error = '', refresh = vi.f
 }
 
 it('shows a schedule row with its label and next run and runs it by hand', async () => {
-  const calls: { path: string; method?: string }[] = []
+  const calls: { path: string; method?: string | undefined }[] = []
   routed((path, init) => {
     calls.push({ path, method: init?.method })
     return path.endsWith('/run') ? json({ runId: 'run-7' }, 202) : undefined
@@ -118,7 +118,7 @@ it('shows the once label and Waiting badge', () => {
 })
 
 it('Cancel confirms and posts', async () => {
-  const calls: { path: string; method?: string }[] = []
+  const calls: { path: string; method?: string | undefined }[] = []
   routed((path, init) => {
     calls.push({ path, method: init?.method })
     return path.endsWith('/cancel') ? json({ automation: { ...once, archived: { at: '2026-10-22T13:00:00Z', outcome: 'cancelled' } } }) : undefined

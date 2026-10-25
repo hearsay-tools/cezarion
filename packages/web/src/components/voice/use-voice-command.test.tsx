@@ -70,7 +70,7 @@ afterEach(() => {
 })
 
 /** `selected` stands for cmdk's selection; the Will do row unless a test moves it. */
-function setup({ enabled = true, text = '' }: { enabled?: boolean; text?: string } = {}) {
+function setup({ enabled = true, text = '' }: { enabled?: boolean; text?: string | undefined } = {}) {
   const close = vi.fn()
   const hook = renderHook(() => {
     const [current, setText] = useState(text)

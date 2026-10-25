@@ -53,7 +53,7 @@ function useAutomationLog(automationId: string) {
   useEffect(() => { void refresh() }, [refresh])
   useEffect(() => onLiveReconcile(refresh), [refresh])
   useEffect(() => onWorkspaceEvent((name, payload) => {
-    if (name === 'automation-change' && (payload as { automationId?: unknown }).automationId === automationId) void refresh()
+    if (name === 'automation-change' && (payload as { automationId?: unknown | undefined }).automationId === automationId) void refresh()
   }), [automationId, refresh])
   return { records, error, refresh }
 }

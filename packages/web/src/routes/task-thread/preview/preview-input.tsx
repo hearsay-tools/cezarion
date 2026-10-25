@@ -20,7 +20,7 @@ export function PreviewInput({ scale, send, onLeave }: {
   scale: number
   send: (message: PreviewClientMessage) => void
   /** Shift+Esc: hand the keyboard back to the cockpit. Without it the layer only blurs. */
-  onLeave?: () => void
+  onLeave?: (() => void) | undefined
 }) {
   const layer = useRef<HTMLDivElement>(null)
   const state = useRef(createPointerState({ left: 0, top: 0 }, scale))

@@ -10,7 +10,7 @@ export interface LiveHandlers {
   ready?(): void
   reset?(reason: string, signal: AbortSignal): Promise<Pick<LiveRunDemand, 'cursor' | 'afterSeq'> | void> | void
 }
-interface Subscription extends FallbackEntry { handlers: LiveHandlers; bootAlias: boolean; recovering: boolean; released: boolean; recovery?: AbortController }
+interface Subscription extends FallbackEntry { handlers: LiveHandlers; bootAlias: boolean; recovering: boolean; released: boolean; recovery?: AbortController | undefined }
 interface LiveSession { local: boolean; bootProject: string; apiBase: string }
 type ReconcileListener = (signal: AbortSignal, periodic: boolean) => void | Promise<void>
 const reconciliations = new Set<ReconcileListener>()

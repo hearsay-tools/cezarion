@@ -739,7 +739,7 @@ describe('scroll-driven paging (hearsay-tools/cezarion#1183, port of open-mercat
     vi.stubGlobal(
       'IntersectionObserver',
       class {
-        constructor(cb: (entries: { isIntersecting: boolean }[]) => void, opts: { root?: Element | null }) {
+        constructor(cb: (entries: { isIntersecting: boolean }[]) => void, opts: { root?: Element | null | undefined }) {
           const record = { target: null as Element | null, root: opts.root ?? null, fire: (v: boolean) => cb([{ isIntersecting: v }]) }
           observers.push(record)
           this.observe = (el: Element) => { record.target = el }
@@ -1866,8 +1866,8 @@ describe('the hand-to-agent backend pills (#401)', () => {
 
     await waitFor(() => expect(postedRun(sent)).toBeDefined())
     expect(postedRun(sent)).toMatchObject({ workflow: 'quick-task' })
-    expect((postedRun(sent) as { runner?: string }).runner).toBe('claude')
-    expect((postedRun(sent) as { model?: string }).model).toBeUndefined()
+    expect((postedRun(sent) as { runner?: string | undefined }).runner).toBe('claude')
+    expect((postedRun(sent) as { model?: string | undefined }).model).toBeUndefined()
   })
 
   it('sends the connected runner explicitly when provider status resolves before health', async () => {
@@ -1923,7 +1923,7 @@ describe('the hand-to-agent backend pills (#401)', () => {
     await waitFor(() => expect(postedRun(sent)).toBeDefined())
     expect(postedRun(sent)).toMatchObject({ runner: 'codex' })
     // Back to auto for the new runner, so no model at all.
-    expect((postedRun(sent) as { model?: string }).model).toBeUndefined()
+    expect((postedRun(sent) as { model?: string | undefined }).model).toBeUndefined()
   })
 
   it('the pick survives switching to another issue (it is a way of working, not a property of one item)', async () => {
@@ -2517,7 +2517,7 @@ describe('the hand-to-agent run (legacy three-way body)', () => {
       expect(sent.some((request) => request.method === 'POST' && request.path === '/api/v1/runs')).toBe(true),
     )
     const body = sent.find((request) => request.method === 'POST' && request.path === '/api/v1/runs')
-      ?.body as { workflow?: string; steps?: Array<{ id: string; skill: string; prompt: string }> }
+      ?.body as { workflow?: string | undefined; steps?: Array<{ id: string; skill: string; prompt: string }> }
     expect(body.workflow).toBeUndefined()
     expect(body.steps).toEqual([
       { id: 'om-fix', name: 'om-fix', skill: 'om-fix', prompt: '{{task}}' },

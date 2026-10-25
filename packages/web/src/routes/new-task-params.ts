@@ -30,7 +30,7 @@ export function parseNewTaskParams(search: string | URLSearchParams): NewTaskPar
  * editable composer so the user can review before launching.
  *
  */
-export function newTaskPrefillHref(params: { skill?: string; ref?: string }): string {
+export function newTaskPrefillHref(params: { skill?: string | undefined; ref?: string }): string {
   const search = new URLSearchParams()
   if (params.skill) search.set('skill', params.skill)
   if (params.ref) search.set('ref', params.ref)

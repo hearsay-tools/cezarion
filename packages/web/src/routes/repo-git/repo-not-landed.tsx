@@ -30,7 +30,7 @@ import { queryScope } from '@open-mercato/cezar-api-client/utils/project-scope'
 /** The note the whole Git view shows when the forge could not answer (issue 08 §A). */
 export const NO_FORGE_NOTE = 'Squash-merged branches may show as not landed without GitHub'
 
-type Group = { key: 'no-pr' | 'pr-open' | 'deleted'; title: string; note?: string; rows: RepoBranchEntry[] }
+type Group = { key: 'no-pr' | 'pr-open' | 'deleted'; title: string; note?: string | undefined; rows: RepoBranchEntry[] }
 
 /** Not landed's three groups, in the board's order; an empty group is not drawn. */
 export function notLandedGroups(branches: readonly RepoBranchEntry[]): Group[] {
@@ -161,7 +161,7 @@ export function RepoNotLandedSection() {
 }
 
 /** The squash-merge caveat, shown when `prStateKnown` is false. Information, never an error. */
-export function ForgeNote({ className }: { className?: string }) {
+export function ForgeNote({ className }: { className?: string | undefined }) {
   return (
     <p data-slot="git-no-forge" className={cn('flex items-start gap-[6px] px-[10px] pt-[6px] text-[11.5px] leading-[17px] text-soft-foreground', className)}>
       <InfoIcon aria-hidden="true" className="mt-[2.5px] size-[12px] shrink-0" />

@@ -75,9 +75,9 @@ export function PreviewStates({
   state: PreviewStageState
   actions: PreviewStateActions
   /** The page being opened, for 5.10. */
-  url?: string
+  url?: string | undefined
   /** The run's worktree path, for 5.15. */
-  worktree?: string
+  worktree?: string | undefined
 }) {
   switch (state.stage) {
     case 'chromium-missing': return <ChromiumMissing state={state} actions={actions} />
@@ -477,7 +477,7 @@ function Loading({ step, url }: { step: (typeof STEPS)[number]; url: string | un
 
 // ---- gone -------------------------------------------------------------------------------------
 
-function WorktreeRemoved({ state, actions, worktree }: StageProps<'worktree-removed'> & { worktree?: string }) {
+function WorktreeRemoved({ state, actions, worktree }: StageProps<'worktree-removed'> & { worktree?: string | undefined }) {
   const where = worktree ? /\.ai\/cezar\/worktrees\/[^/]+/.exec(worktree)?.[0] : undefined
   const label = state.server?.label
   return (
@@ -579,7 +579,7 @@ export function PreviewEmptyState({
 }: {
   servers: readonly PreviewServer[]
   /** Where each server stands now; a server missing here reads as just registered. */
-  states?: ReadonlyMap<number, ThreadPreviewServer>
+  states?: ReadonlyMap<number, ThreadPreviewServer> | undefined
   onOpen: (port: number) => void
 }) {
   return (
