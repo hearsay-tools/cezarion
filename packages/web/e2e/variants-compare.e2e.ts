@@ -48,8 +48,14 @@ beforeAll(async () => {
 afterAll(async () => {
   browser?.close()
   await stopFixtureServer(server)
-  // CI ENOTEMPTY evidence: run 40167184339 attempt 1, job 121090612395 (hearsay-tools/cezarion#1731).
   // Retry transient directory-writer races after shutdown; persistent failures still throw.
+  // Evidence: this rmSync failed with "ENOTEMPTY, Directory not empty" in run 40167184339
+  // attempt 1, job 121090612395 (hearsay-tools/cezarion#1731). It failed in afterAll, so no
+  // failure bundle exists ("No files were found" for cockpit-failures-shard-3). The writer is not
+  // reproduced locally (0 of 15 instrumented runs of
+  // `npm run test:e2e -- variants-compare.e2e.ts`). A controlled late writer
+  // (https://github.com/hearsay-tools/cezarion/pull/1743#issuecomment-6394675751) failed 20 of 20
+  // removals before this change; 20 of 20 passed after.
   if (root) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 })
 
