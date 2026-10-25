@@ -158,3 +158,14 @@ export function ciNativeMessages(runner: RunnerId, dir: string): string[] {
     return parts ? [parts.map((part: { text?: string }) => part.text ?? '').join('\n')] : [];
   });
 }
+
+/** Input the Codex mock took into an open turn through `turn/steer`, which `ciNativeMessages`
+ *  leaves out. Every other runner returns none. */
+export function ciNativeSteers(runner: RunnerId, dir: string): string[] {
+  const path = join(dir, 'args');
+  if (runner !== 'codex' || !existsSync(path)) return [];
+  return readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).flatMap(line => {
+    const row = JSON.parse(line) as NativeInput;
+    return row.method === 'turn/steer' && row.params?.input ? [row.params.input.map(part => part.text ?? '').join('\n')] : [];
+  });
+}

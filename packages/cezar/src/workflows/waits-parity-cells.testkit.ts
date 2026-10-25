@@ -26,7 +26,7 @@ import { ASK_TEXT, messagesPrompt, MONITORING_TEXT } from './monitoring-turn.tes
 import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 import { withHeldAck, withRejectedInput } from '../core/owned-input-delivery.testkit.ts';
-import { ciNativeMessages, gatedProviderFailure, MESSAGE_WAKE_OPENING, persistentWakeFailure, thenSay, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
+import { ciNativeMessages, ciNativeSteers, gatedProviderFailure, MESSAGE_WAKE_OPENING, persistentWakeFailure, thenSay, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
 
 // hearsay-tools/cezarion#1233: every runner opens, cancels and survives CI and timer waits on its
 // own native wire. The production tool controller, bundled tool, runner, store and scheduler stay
@@ -1609,8 +1609,11 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(parkNotices(p.id, w.id)).toEqual([]);
         await parentTurn(p.id, toolCall('cezar_wait', { kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }), () => workerWaits(p.id)[0]?.phase === 'open');
         const workers = workerWaits(p.id)[0]!;
-        await until(() => prompted(runner, `Cezar notice: your worker ${w.id}`).length > 0 && parkedOn(p.id, workerWaits(p.id)[0]));
+        // The wait opens inside the parent's turn, so the notice reaches that open turn: Codex
+        // takes it as a steer, every other wire as a prompt.
         const [notice, ...more] = parkNotices(p.id, w.id);
+        const reached = (text: string) => [...ciNativeMessages(runner, root), ...ciNativeSteers(runner, root)].some(input => input.includes(text));
+        await until(() => !!notice && delivered(p.id, notice.id) && reached(`Cezar notice: your worker ${w.id}`) && parkedOn(p.id, workerWaits(p.id)[0]), () => timeline(p.id));
         expect(more).toEqual([]);
         expect(notice).toMatchObject({ id: parkNoticeId(w.id, workers.id), senderRunId: w.id, recipientRunId: p.id });
         expect(notice!.text).toContain('It has no open wait: it waits for a message from you.');
