@@ -469,26 +469,19 @@ Rules that follow from that:
 
 A fresh task worktree (`.ai/cezar/worktrees/<runId>`) has no `node_modules`. Run `pnpm install --frozen-lockfile` in that worktree before the commands below, unless the project's `worktreeSetup` already ran it — otherwise Node walks up to the main checkout, `@open-mercato/*` workspace packages resolve there, and typecheck/tests compile against that tree's sources, not this one.
 
-**If Squeal is installed and validating this worktree, use it for iteration.**
-Read the `SQUEAL` reports and follow its installed skill. `squeal.config.json`
+### Iterate
+
+**With Squeal.** If Squeal is installed and validating this worktree, it runs the
+tests after each edit: follow its installed skill and its `SQUEAL` reports, and
+leave those runs to it rather than starting `npm test`, `npm run test:unit`,
+`npm run test:e2e` or `npm run test:changed` yourself. `squeal.config.json`
 covers the four unit Vitest projects, both fast `node:test` groups from
 `npm run test:unit`, and the cockpit browser suite (`npm run test:e2e`) in its
 slow tier. It does not cover packaged CLI E2E (hearsay-tools/cezarion#1281
 removed it from the config); see *Packaged CLI E2E runs by hand* below.
-Do not duplicate those background runs with `npm test`,
-`npm run test:unit`, `npm run test:e2e`, or `npm run test:changed`.
-Use `squeal why <check>` for failure details and, when a result is needed,
-`squeal status --wait 60000`.
-Lease messages show executable and interpreter script names, with other arguments
-omitted to avoid logging credentials. The timeout reuses the initial diagnostic
-snapshot; it does not start more command probes after the acquisition deadline.
-For a test-env lease held by a Squeal daemon, use this guidance:
-“If Squeal covers this spec, read its result with `squeal status --wait 60000`;
-do not start a duplicate run.”
-If test-first work intentionally makes a previously passing check fail, Squeal denies the next edit once; resend the same edit unchanged (a newly added test’s first observed failure does not trigger this denial).
 Under Codex, use the absolute Squeal command printed in its messages when
-`squeal` is not on PATH. Fix regressions and report known failures, pending,
-stale, or unknown results accurately; zero known failures is not a full pass.
+`squeal` is not on PATH. Report known failures, pending, stale and unknown
+results accurately; zero known failures is not a full pass.
 
 <a id="squeal-wait-bound"></a>
 
@@ -524,7 +517,7 @@ the change edited a document it reads. For example, an edit to
 `npm test -- packages/cezar/src/core/harness-parity.test.ts -t "counted roster"`
 (hearsay-tools/cezarion#1326).
 
-Squeal is optional. If it is absent, no daemon is validating, or a needed result
+**Without Squeal.** Squeal is optional. If it is absent, no daemon is validating, or a needed result
 is unknown, run affected test files/test names through npm. Inspect
 `npm run test:changed -- --plan` before using `npm run test:changed`; if the plan
 falls back to a full run, choose focused checks and leave the full gate to CI.
@@ -536,6 +529,37 @@ run them when the change needs them. When Squeal is unavailable, use focused
 browser specs for affected UI flows, e.g.
 `npm run test:e2e -- smoke.e2e.ts -t 'test name'` (see `packages/web/e2e/README.md`).
 
+**When a manual Vitest run is needed, use npm, never `npx vitest`.** It is a devDependency of this repo, so `npm test`
+uses the installed, version-pinned binary; `npx` will happily reach past it and fetch a different
+version from the registry, which is a slow, networked, silently-different test run. To narrow a run,
+pass vitest's own arguments after `--`:
+
+```bash
+npm test -- packages/web/src/routes/settings   # one directory
+npm test -- --testTimeout=30000 path/to/one.test.ts
+npm test -- -t "the name of one test"
+```
+
+When Squeal is unavailable, `npm run test:changed` compares the branch against
+the merge-base with local `origin/main` (or `main`), including staged, unstaged,
+and untracked files. Use
+`-- --base=<ref>` to override, or `-- --plan` to inspect without running tests.
+It selects Vitest tests through the import graph for ordinary source changes;
+shared/configuration/unknown inputs, deletions, or unavailable Git/base information
+fall back to full Vitest. Clean changes, and changes confined to CI's docs-only
+list, explicitly skip iteration tests. `isDocsPath` in
+`.github/scripts/change-surface.cjs` is the exact definition. To classify the
+current branch's commits as CI does, run
+`git diff --name-only --no-renames origin/main...HEAD | jq -R . | node .github/scripts/change-surface.cjs`;
+it prints `docs-only`, `infra-only` or `full-matrix`. Markdown that a Vitest
+test or cockpit browser spec reads (`testReadDocuments`) is never docs-only.
+`.github/scripts/change-surface-readers.test.cjs` fails
+when package code names a docs-only Markdown file by path. No matching tests is
+an error: select the relevant test files explicitly and report any coverage gap
+rather than treating it as a pass. Import graphs do not cover every runtime
+dependency, so this command is only iteration feedback, never a replacement for
+CI's final gate.
+
 **Packaged CLI E2E runs by hand.** Packaged tests (`npm run test:package`,
 `packages/cezar/test/e2e/*.test.ts`) exercise built output, and Squeal never runs
 them, with or without its daemon. Run `npm run build` from the repo root after
@@ -546,6 +570,80 @@ paths to `node --test`, never to `squeal status`: it gives them no result and no
 warning (hearsay-tools/squeal#83). In an unbuilt worktree they fail with a
 `Cannot find module` error naming a missing `dist/` module; an assertion failure
 is a real failure that needs investigation.
+
+**Browser E2E.** Cockpit browser E2E is a separate command from packaged CLI E2E — it boots the real app and
+drives it in a real Chrome through the `agent-browser` provider (`.ai/browsers/agent-browser.md`):
+
+```bash
+npm run test:e2e    # .ai/scripts/e2e.sh → test-env-up.sh + vitest (packages/web/e2e/)
+npm run test:e2e:local # explicitly requested full local browser run, four lanes (~8 GiB peak)
+```
+
+Use `npm run test:e2e` for focused local specs and CI's serial shards. Reserve
+`npm run test:e2e:local` for an explicitly requested full local browser run or CI
+failure investigation. Both print a `TEST_E2E_STATUS` marker: `skipped` means
+agent-browser could not be provisioned and is not a pass, and a filtered run's
+`passed` is not a full-suite pass. The server runs under `CEZ_DRY_RUN=1` from a
+separate e2e build against an isolated clone, never this checkout or its
+production build; stop it with `.ai/scripts/test-env-down.sh`. A red spec leaves a
+failure bundle under `.ai/qa/failures/`: read it before theorizing about a flake.
+Start at `packages/web/e2e/README.md` to write or fix a spec; it also holds the
+exit contract, the served clone, the bundle contents and the four-lane run.
+
+`CEZ_DRY_RUN=1 npm run dev` still exercises the whole cockpit offline for manual verification.
+To check a UI change by hand in a real browser, run `node .ai/scripts/qa-fixture.mjs up`
+(hearsay-tools/cezarion#1406); `packages/web/e2e/README.md` § Checking a UI change by hand
+says what it serves and how it stops.
+
+**Typecheck.** For web-only verification, use `npm run typecheck:web` or
+`npm run typecheck -w @open-mercato/cezar-web`. Both rebuild server declarations
+from this worktree before checking web sources; direct `tsc --noEmit` does not.
+The full root typecheck runs web first, preparing declarations once for all four
+workspace checks.
+
+To typecheck without rebuilding `packages/cezar/dist`, for example while Squeal
+is validating, run both server configs from `packages/cezar`. The root
+`npm run typecheck` rebuilds `dist` first, and Squeal then marks dozens of
+passing checks UNKNOWN (hearsay-tools/squeal#33).
+
+```bash
+./node_modules/.bin/tsc --noEmit -p tsconfig.json       # shipped sources only
+./node_modules/.bin/tsc --noEmit -p tsconfig.test.json  # adds every test file
+```
+
+`tsconfig.json` leaves out every test file: on hearsay-tools/cezarion#1291 a
+TS2353 in `src/runs/waits-store.test.ts` passed it and failed CI.
+`tsconfig.test.json` sets `rootDir` to `.`, so only `tsconfig.json` reports a
+shipped file that imports from outside `src/`. `tsconfig.test.json` also
+compiles the `test/e2e/` imports of `../../dist/`, so in a worktree that was
+never built it fails with TS2307: run `npm run build -w @wjarka/cezarion` once
+first. For contract edits, also run `npm run typecheck:contract` from the repo
+root. It checks `packages/contract/tsconfig.test.json`, because that package's
+`tsconfig.json` leaves out its tests too. Run the root `npm run typecheck` once
+before a PR when declarations matter: a cockpit edit, or a server change that
+the cockpit reads through `AppType` or that a `test/e2e/` file imports from
+`dist`. Expect the UNKNOWN burst then.
+
+**In a unit test, a timeout is a hang guard, never the thing the test waits on.**
+Wait for the product's own signal: an event, a callback, a store write, a file
+the fixture publishes. A test that proves something did NOT happen moves past
+the window with fake timers, or says at the call site why it needs real time.
+Size a bound per step, not per row or sequence: a loop of N turns gets a
+per-turn budget, or a window that restarts on each sign of progress
+(hearsay-tools/cezarion#1145). A product budget a test shrinks, such as a Git
+timeout or an autosave budget, applies only to the step it exercises and never
+races its own fixture's startup (hearsay-tools/cezarion#1144,
+hearsay-tools/cezarion#1146). Any bound that remains states its reason at the
+call site, as a `// bound: <reason>` comment. In the server unit tests,
+`packages/cezar/src/test-wait-discipline.test.ts` flags bare sleeps and wait
+bounds under 10 s against a baseline that only shrinks; Vitest's 1 s default
+for `vi.waitFor` and `expect.poll` counts as one. A new site gets the product's
+signal or a `// bound:` reason, never a baseline entry. After fixing a site,
+shrink the baseline with
+`TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts`.
+The scan cannot see a shrunk product budget, so review checks that one.
+
+### Before opening a PR
 
 Before opening a PR that changes dry-run turn-end behavior — the
 `packages/cezar/scripts/mock-*.mjs` mocks, the turn-end rule, attention, or the
@@ -676,94 +774,7 @@ substituting the affected label and navigation text:
 rg -n -F -e 'Task webhook' -e 'Settings → General →' packages/cezar/src packages/contract/src
 ```
 
-### One-CPU load reproduction
-
-For a failure that appears under CPU contention, use this optional diagnostic
-from the repo root. It needs **Linux**, Bash, `taskset` (util-linux), and GNU
-`timeout` (coreutils). Choose a focused test file and name; replace both
-placeholders below. This is a controlled reproduction, not a routine test rerun
-or a replacement for the failure bundle. With Squeal validating, read its failure
-report first and follow its installed skill: use this command only when the
-controlled-load result is needed and unknown, not to duplicate background checks.
-
-```bash
-# Select the first CPU allowed to this shell, including inside a cpuset.
-
-cpu=$(awk '/^Cpus_allowed_list:/ { split($2, cpus, /[,-]/); print cpus[1] }' /proc/self/status)
-LOOPS=2 timeout --kill-after=5s 120s taskset -c "$cpu" bash <<'BASH'
-set -eu
-pids=()
-cleanup() {
-  if ((${#pids[@]})); then
-    kill "${pids[@]}" 2>/dev/null || true
-    wait "${pids[@]}" 2>/dev/null || true
-  fi
-}
-trap cleanup EXIT
-trap 'exit 130' INT
-trap 'exit 143' TERM HUP
-for ((i = 0; i < LOOPS; i++)); do
-  sh -c 'while :; do :; done' &
-  pids+=("$!")
-done
-npm test -- <test-file> -t '<test-name>'
-BASH
-```
-
-The shell, busy loops, test command and its children inherit the same logical
-CPU affinity unless a child explicitly changes it. Together they can consume
-one logical CPU, not the whole host; other sessions using that CPU still compete
-with them. Start with `LOOPS=2`, then increase in small steps only as needed.
-For CPU-bound work, the failing host's load average divided by its available
-logical CPU count gives a rough starting point for runnable work per CPU.
-Each busy loop adds one runnable competitor, and the test adds its own work.
-For example, load 48 over 24 CPUs suggests roughly two runnable tasks per CPU,
-not an exact prescription of two loops. Load average includes I/O waits; CPU
-quotas, priorities and test parallelism also change the result. Record the CPU,
-loop count, command, revision and observed outcome. Eight loops reproduced the
-reported R24/R25 failures in hearsay-tools/cezarion#1392; it is no universal
-threshold or guarantee of reproduction.
-
-Normal completion or test failure runs the EXIT cleanup, which stops and reaps
-only the recorded loop PIDs. Ctrl-C uses the same cleanup. The 120-second limit
-sends SIGTERM to the command group, including test descendants. If Bash remains
-alive five seconds later, GNU `timeout` sends SIGKILL. If Bash exits first,
-`timeout` exits too: a descendant that ignores SIGTERM can survive. This bounds
-the reproduction command, not every possible descendant. After an interrupted
-or timed-out test, check for remaining test processes and stop those you own
-before another attempt. A timeout normally returns 124 (or 137 after SIGKILL),
-not a test assertion result. Do not add `--foreground`: it would exclude children
-from the timeout's group handling. Increase the limit only for a known longer
-focused test, and keep it finite. Traps cannot run after SIGKILL of the shell
-itself; do not kill the outer timeout to stop the reproduction.
-
-**In a unit test, a timeout is a hang guard, never the thing the test waits on.**
-Wait for the product's own signal: an event, a callback, a store write, a file
-the fixture publishes. A test that proves something did NOT happen moves past
-the window with fake timers, or says at the call site why it needs real time.
-Size a bound per step, not per row or sequence: a loop of N turns gets a
-per-turn budget, or a window that restarts on each sign of progress
-(hearsay-tools/cezarion#1145). A product budget a test shrinks, such as a Git
-timeout or an autosave budget, applies only to the step it exercises and never
-races its own fixture's startup (hearsay-tools/cezarion#1144,
-hearsay-tools/cezarion#1146). Any bound that remains states its reason at the
-call site, as a `// bound: <reason>` comment. In the server unit tests,
-`packages/cezar/src/test-wait-discipline.test.ts` flags bare sleeps and wait
-bounds under 10 s against a baseline that only shrinks; Vitest's 1 s default
-for `vi.waitFor` and `expect.poll` counts as one. A new site gets the product's
-signal or a `// bound:` reason, never a baseline entry. After fixing a site,
-shrink the baseline with
-`TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts`.
-The scan cannot see a shrunk product budget, so review checks that one.
-
-When a PR adds or splits a Vitest unit test file taking longer than about one
-minute on CI, add or update its repository-relative path and measured duration
-in milliseconds under `durationsMs` in `.github/test-durations.json`. Use the
-passed per-file Vitest suite-summary line in the CI log, not an individual test
-timing or total job duration; record the source run and commit in provenance.
-For split files, measure each resulting file separately. Keep browser E2E weights
-in their separate manifest. See [the Vitest sequencer](docs/sdlc/ci.md) for its
-balancing-only role and median fallback for unlisted files.
+### CI owns the final gate
 
 **The final gate and full-suite runs belong in CI.** Do not run the entire local
 gate, `squeal run --all`, or the full Vitest or browser suite just to finish a
@@ -781,99 +792,6 @@ affected checks. A targeted run, skipped browser suite, or old pass for changed
 inputs never counts as a full pass. CI independently enforces the complete gate
 in `.github/workflows/ci.yml`; check its required aggregate before merge.
 
-A PR that edits `ci.yml`, or a workflow it calls, does not run its own definition.
-CI triggers on `pull_request_target`, which loads the workflow from the base branch,
-so every check on the PR can pass while a new step never ran. To prove a `ci.yml`
-change before merge, push the branch and run `gh workflow run ci.yml --ref <branch>`
-without `-f pr_number`, which only bot release PRs take. The dispatched run uses the
-branch's `ci.yml` on the pushed head, with the full matrix. It skips both publishing
-jobs, so it publishes nothing: `publish-snapshot` runs only on a push to `main`, and
-`prepare-pr-snapshot` only on `pull_request_target`. It also skips `review` and
-`review-result`, so it never exercises `automated-code-review.yml`, the one workflow
-`ci.yml` calls. The dispatched run does not satisfy the PR's required checks (see
-`docs/sdlc/ci.md` § Diagnostic dispatch), so cite its run ID in the PR's
-Verification section. Run `38979957113` proved the new `Lint workflows` step of
-hearsay-tools/cezarion#1199.
-
-Dispatch again after each later edit to `ci.yml` or a workflow it calls. Cite
-only a successful run whose head carries the final workflow files. From the
-final pushed PR head, compare the cited run's workflow files with `HEAD`:
-
-```bash
-sha=$(gh run view <run-id> --repo hearsay-tools/cezarion --json headSha --jq .headSha)
-git diff --quiet "$sha" HEAD -- .github/workflows/ && echo current || echo stale
-```
-
-The lookup must succeed and the run's commit must be available locally; resolve
-any lookup or Git error before using the result. `current` means the workflow
-files match, not that the run passed or exercised the skipped jobs above.
-`stale` requires a fresh dispatch and an updated citation. This directory-wide
-comparison also treats edits to unrelated workflows as stale; later commits
-that leave the workflow files unchanged do not invalidate the proof.
-
-A full local Vitest run (or one shard) that fails only under host load can still
-back a PR. Record the load average (`uptime`) and the failed files, rerun those
-files (`npm test -- <files>`) until they pass, state both in the PR's
-Verification, and let CI's Vitest shards decide. Squeal reports and
-`squeal why <check>` output are the same evidence. The rerun is not a full pass;
-green CI shards are. A failure in a file the branch touches never qualifies: fix it.
-
-Count a test file's observed CI failure annotations across rerun attempts with:
-
-```bash
-node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/cezarion --runs 20
-# Or select runs by creation time (inclusive UTC timestamps):
-
-node .github/scripts/count-test-ci-failures.cjs live-preview.e2e.ts --repo hearsay-tools/cezarion --since 2026-10-22T00:00:00Z --until 2026-10-23T00:00:00Z
-```
-
-The command uses authenticated `gh` reads and defaults to the current repository's
-latest 20 `ci.yml` runs. It scans every attempt, including runs whose latest
-conclusion is success. Use a literal file name or path; matching uses annotation
-paths and titles, not stack references in messages. It prints each matching
-failure and separate totals for failing runs, failing attempts and runs scanned.
-These are observed annotated failures: no matching annotation does not prove a
-test ran or passed, and the count is not a pass rate. Missing data, unfinished
-attempts, changed run metadata, GitHub's date-query cap, or the 1,500-request /
-12-minute limits produce an incomplete report and exit 1. Narrow the range and
-repeat an incomplete scan. This evidence does not replace the reproduction or
-before/after verification required for a changed wait.
-
-**Cite a CI failure by run, attempt and job ID**, for example
-`run 39253390769 attempt 1, job 118062500873`. "Re-run failed jobs" adds an
-attempt to the same run, so a run ID alone can lead a reader to a passing
-rerun. `count-test-ci-failures.cjs` prints each failure in this form.
-
-`gh run view <run-id> --log` and `--log-failed` read the latest attempt unless
-you pass `--attempt <n>`. `--job <job-id>` does not select that job's attempt:
-`gh` reads the latest attempt and takes the job with the same name, so after a
-rerun it can show the passing log. Read a failed attempt that a rerun replaced
-by its job ID:
-
-```bash
-gh api --allow-escape-sequences repos/hearsay-tools/cezarion/actions/jobs/<job-id>/logs > job.log
-# List the job IDs of one attempt of a run:
-gh api repos/hearsay-tools/cezarion/actions/runs/<run-id>/attempts/<n>/jobs --jq '.jobs[] | {id, name, conclusion}'
-```
-
-Without `--allow-escape-sequences`, `gh api` exits 1 and writes no log.
-`gh run view <run-id> --attempt <n> --log-failed` also reads the failed attempt.
-
-**When filing a load-dependent test failure, preserve the diagnostic evidence.**
-Quote the full error line verbatim, with nothing cut, including any list after
-its `;`. Name the stack frame that throws the error, rather than an operation
-named in the message. Give the full log location: the originating repo's
-`.ai/cezar/runs/<runId>.ndjson` (or `.ndjson.br`), `squeal why <check>`
-with the check identifier and its worktree path, or the CI run, attempt and
-job IDs.
-
-Plain text searches do not read Brotli-compressed `.ndjson.br` logs. To read one,
-replace `<file.ndjson.br>` with its path:
-
-```bash
-node -e "process.stdout.write(require('node:zlib').brotliDecompressSync(require('node:fs').readFileSync(process.argv[1])))" '<file.ndjson.br>'
-```
-
 CI's final gate covers:
 
 ```bash
@@ -885,134 +803,16 @@ npm run test:package # pack/install the release tarball and exercise the built C
 npm run test:e2e     # cockpit browser E2E in CI shards; skipped is not a pass
 ```
 
-For web-only verification, use `npm run typecheck:web` or
-`npm run typecheck -w @open-mercato/cezar-web`. Both rebuild server declarations
-from this worktree before checking web sources; direct `tsc --noEmit` does not.
-The full root typecheck runs web first, preparing declarations once for all four
-workspace checks.
-
-To typecheck without rebuilding `packages/cezar/dist`, for example while Squeal
-is validating, run both server configs from `packages/cezar`. The root
-`npm run typecheck` rebuilds `dist` first, and Squeal then marks dozens of
-passing checks UNKNOWN (hearsay-tools/squeal#33).
-
-```bash
-./node_modules/.bin/tsc --noEmit -p tsconfig.json       # shipped sources only
-./node_modules/.bin/tsc --noEmit -p tsconfig.test.json  # adds every test file
-```
-
-`tsconfig.json` leaves out every test file: on hearsay-tools/cezarion#1291 a
-TS2353 in `src/runs/waits-store.test.ts` passed it and failed CI.
-`tsconfig.test.json` sets `rootDir` to `.`, so only `tsconfig.json` reports a
-shipped file that imports from outside `src/`. `tsconfig.test.json` also
-compiles the `test/e2e/` imports of `../../dist/`, so in a worktree that was
-never built it fails with TS2307: run `npm run build -w @wjarka/cezarion` once
-first. For contract edits, also run `npm run typecheck:contract` from the repo
-root. It checks `packages/contract/tsconfig.test.json`, because that package's
-`tsconfig.json` leaves out its tests too. Run the root `npm run typecheck` once
-before a PR when declarations matter: a cockpit edit, or a server change that
-the cockpit reads through `AppType` or that a `test/e2e/` file imports from
-`dist`. Expect the UNKNOWN burst then.
-
 `npm test` and `npm run test:unit` are the fast unit gate: no server, no browser. They must stay that way. `npm run test:package` needs a completed `npm run build` (it packs the tarball). Pull request CI runs packaged CLI E2E and cockpit browser E2E as separate checks; the required aggregate fails if the cockpit suite is skipped or failed.
 
-**When a manual Vitest run is needed, use npm, never `npx vitest`.** It is a devDependency of this repo, so `npm test`
-uses the installed, version-pinned binary; `npx` will happily reach past it and fetch a different
-version from the registry, which is a slow, networked, silently-different test run. To narrow a run,
-pass vitest's own arguments after `--`:
+Read [`docs/sdlc/ci.md`](docs/sdlc/ci.md) before you:
 
-```bash
-npm test -- packages/web/src/routes/settings   # one directory
-npm test -- --testTimeout=30000 path/to/one.test.ts
-npm test -- -t "the name of one test"
-```
-
-When Squeal is unavailable, `npm run test:changed` compares the branch against
-the merge-base with local `origin/main` (or `main`), including staged, unstaged,
-and untracked files. Use
-`-- --base=<ref>` to override, or `-- --plan` to inspect without running tests.
-It selects Vitest tests through the import graph for ordinary source changes;
-shared/configuration/unknown inputs, deletions, or unavailable Git/base information
-fall back to full Vitest. Clean changes, and changes confined to CI's docs-only
-list, explicitly skip iteration tests. `isDocsPath` in
-`.github/scripts/change-surface.cjs` is the exact definition. To classify the
-current branch's commits as CI does, run
-`git diff --name-only --no-renames origin/main...HEAD | jq -R . | node .github/scripts/change-surface.cjs`;
-it prints `docs-only`, `infra-only` or `full-matrix`. Markdown that a Vitest
-test or cockpit browser spec reads (`testReadDocuments`) is never docs-only.
-`.github/scripts/change-surface-readers.test.cjs` fails
-when package code names a docs-only Markdown file by path. No matching tests is
-an error: select the relevant test files explicitly and report any coverage gap
-rather than treating it as a pass. Import graphs do not cover every runtime
-dependency, so this command is only iteration feedback, never a replacement for
-CI's final gate.
-
-Cockpit browser E2E is a separate command from packaged CLI E2E — it boots the real app and
-drives it in a real Chrome through the `agent-browser` provider (`.ai/browsers/agent-browser.md`):
-
-```bash
-npm run test:e2e    # .ai/scripts/e2e.sh → test-env-up.sh + vitest (packages/web/e2e/)
-npm run test:e2e:local # explicitly requested full local browser run, four lanes (~8 GiB peak)
-```
-
-Use `npm run test:e2e` for focused local specs and CI's serial shards. Reserve
-`npm run test:e2e:local` for an explicitly requested full local browser run or CI
-failure investigation. The four-lane command prints the same
-`TEST_E2E_STATUS` marker, exits nonzero on `skipped` or `failed`, and retains per-lane
-logs under `.ai/qa/local-runs/`; see
-`packages/web/e2e/README.md` for its isolation and cleanup details.
-
-It boots the app on a free port with `CEZ_DRY_RUN=1` (agent CLIs mocked — no login, no
-network) from the `VITE_CEZ_E2E=1` build that `.ai/scripts/build-e2e.sh` writes into the
-ignored `.ai/qa/build/cezar` — never `packages/cezar/dist` or `packages/cezar/web/dist`, which
-stay the production build — serves an isolated clone of the checkout at `.ai/qa/served/<name>`, never
-the checkout itself, whose `.ai/cezar` may be the live cockpit's (specs seed state under
-`servedRoot()`), reuses an already-healthy instance instead of double-booting, and writes
-`.ai/qa/test-env.json` so QA skills attach to the same instance. Stop it with
-`.ai/scripts/test-env-down.sh`. The server also stops on its own (hearsay-tools/cezarion#1448):
-a watcher next to it stops it when its checkout or served clone is deleted, or after
-30 minutes with no test-env lease holder. `TEST_ENV_IDLE_EXIT_MINUTES` changes that idle
-period, and `0` turns the idle exit off, for example for a long QA session that attaches
-without a lease. `TEST_ENV_WATCH_INTERVAL_SECONDS` (default 30, from 0.1 to 3600) sets how often it checks.
-A run with other values for either variable boots a new server rather than reusing the running one.
-Local exit contract:
-
-| Exit     | Marker                    | Meaning                                                                                                           |
-| -------- | ------------------------- | ----------------------------------------------------------------------------------------------------------------- |
-| 0        | `TEST_E2E_STATUS=passed`  | every selected spec passed; a filtered run is not a full-suite pass                                                                                                 |
-| 0        | `TEST_E2E_STATUS=skipped` | agent-browser could not be provisioned (no network / unsupported platform); prints a loud banner — **not** a pass |
-| non-zero | `TEST_E2E_STATUS=failed`  | a spec failed, or the env could not boot                                                                          |
-
-Pull request CI pipes that log through `.github/scripts/require-e2e-passed.cjs` and fails
-on skipped or failed.
-
-A red spec leaves evidence behind (hearsay-tools/cezarion#408): the seam in `packages/web/e2e/agent-browser.ts`
-writes `.ai/qa/failures/<spec>/<test>-<n>/` — viewport `screenshot.png`, `snapshot.txt`
-(`snapshot -i`) and `probe.json` (URL, the selector or predicate that timed out, focused
-element, the target's count/rect/computed style and the element under its centre) — when a
-`wait` gives up, and `packages/web/e2e/failure-setup.ts` writes the same bundle from
-`onTestFailed` for a plain `expect` failure. The thrown error names the directory; CI
-uploads it as the `cockpit-failures-shard-<n>` artifact and lists it in the step summary.
-Read the bundle before theorizing about a flake. For CPU-dependent failures, see
-[One-CPU load reproduction](#one-cpu-load-reproduction). Writing or fixing a spec starts at
-`packages/web/e2e/README.md`: the wait rules the `e2e-wait-discipline` unit test enforces,
-how to read a bundle, and the single-test reproduction with an env-gated server delay.
-
-`CEZ_DRY_RUN=1 npm run dev` still exercises the whole cockpit offline for manual verification.
-
-To check a UI change by hand in a real browser, run `node .ai/scripts/qa-fixture.mjs up`
-(hearsay-tools/cezarion#1406). It builds the `VITE_CEZ_E2E=1` cockpit into a temporary root
-and serves it under `CEZ_DRY_RUN=1` on a new Git repository with its own `CEZ_HOME`. That
-repository is a registered project, so project settings and project routes work from a task
-worktree too; the clone the shared test env serves is not registered there. It prints
-`QA_FIXTURE_BASE_URL`, `QA_FIXTURE_PROJECT_ID` and `QA_FIXTURE_PROJECT_URL`; drive that URL
-with the agent-browser operations in `.ai/browsers/agent-browser.md`. Opt-ins use
-`--server-env=CEZ_NAME=value`, as for `test-env-up.sh`. It takes no test-env lease, so a
-Squeal browser run does not block it. One fixture runs per worktree, and `up` replaces it.
-`node .ai/scripts/qa-fixture.mjs down` stops the server's process group and removes the
-temporary root. A forgotten fixture stops on its own when its worktree, its `.ai/qa` or its
-temporary root is deleted, and so does a server whose `up` was interrupted during boot.
-Linux and macOS only.
+- investigate, cite or file a CI or load-dependent test failure, or back a PR
+  with a full local run that failed only under load (§ Investigating a CI or load
+  failure, which includes the one-CPU load reproduction);
+- edit `ci.yml` or a workflow it calls (§ Proving a `ci.yml` change);
+- add or split a Vitest unit test file that takes longer than about one minute
+  on CI (the duration manifest, after the Vitest sequencer paragraph).
 
 ## Related documents
 
