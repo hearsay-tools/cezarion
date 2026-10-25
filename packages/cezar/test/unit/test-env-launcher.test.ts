@@ -483,7 +483,7 @@ test('ambient CEZ_* never reaches the shared server; --server-env does and keys 
   boot();
   assert.deepEqual(appEnv(), ['CEZ_DRY_RUN=1']);
   const plain = JSON.parse(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8')) as { environment: unknown };
-  assert.deepEqual(plain.environment, { singleProject: false, serverEnv: 'none', watch: 'idle=30 interval=30' });
+  assert.deepEqual(plain.environment, { singleProject: false, serverEnv: 'none', watch: 'idle=30 interval=30', serverHome: '.ai/qa/server-home' });
 
   const opted = boot('--server-env=CEZ_FOLLOWUPS=1', '--server-env=CEZ_AUTOMATIONS=1');
   assert.match(opted.stdout, /TEST_ENV_REUSED=0/);
@@ -496,7 +496,7 @@ test('ambient CEZ_* never reaches the shared server; --server-env does and keys 
   const single = boot('--server-env=CEZ_SINGLE_PROJECT=1');
   assert.match(single.stdout, /TEST_ENV_REUSED=0/);
   assert.deepEqual(JSON.parse(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8')).environment,
-    { singleProject: true, serverEnv: 'CEZ_SINGLE_PROJECT=1', watch: 'idle=30 interval=30' });
+    { singleProject: true, serverEnv: 'CEZ_SINGLE_PROJECT=1', watch: 'idle=30 interval=30', serverHome: '.ai/qa/server-home' });
 
   for (const bad of [
     ['--server-env=CEZ_HOME=/elsewhere'], ['--server-env=PATH=/x'], ['--server-env=CEZ_X=a b'],
