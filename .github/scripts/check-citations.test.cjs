@@ -80,6 +80,12 @@ test('reads YAML and shell comments but not values, strings or $#', () => {
   assert.deepEqual(cites('up.sh', '#!/bin/sh\n#1310: not a citation, the comment marker\n# returns (#36)\n'), ['3:36:comment']);
 });
 
+test('a shell quote opens mid-word, and a YAML quote only at the start of a token', () => {
+  const shell = "printf pre' # see #12'\nx=a\" # see #13\"\necho it\\'s # (#37)\n# real (#36)\n";
+  assert.deepEqual(cites('up.sh', shell), ['3:37:comment', '4:36:comment']);
+  assert.deepEqual(cites('ci.yml', "note: the fork's rail # see #14\n"), ['1:14:comment']);
+});
+
 test('reads Markdown prose but not code fences, inline code or qualified links', () => {
   const text = [
     '# Notes',
