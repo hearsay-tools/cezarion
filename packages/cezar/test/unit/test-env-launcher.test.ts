@@ -1109,6 +1109,19 @@ test('test-env-down.sh stops the server\'s whole process group, a member that ig
   await waitForExit(member, 'the member that ignores SIGTERM', () => stopped.stderr);
 });
 
+test('test-env-down.sh leaves a server whose descriptor records no start identity: its pid may name another process', () => {
+  const { root, env, pid } = bootWatched({});
+  // A descriptor written before hearsay-tools/cezarion#1717 records the pid alone.
+  const file = join(root, '.ai/qa/test-env.json');
+  const recorded = JSON.parse(readFileSync(file, 'utf8'));
+  delete recorded.app.start;
+  writeFileSync(file, JSON.stringify(recorded, null, 2) + '\n');
+  const stopped = spawnSync('/bin/sh', [join(root, '.ai/scripts/test-env-down.sh')], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(stopped.status, 0, stopped.stderr);
+  assert.match(stopped.stderr, /not stopping cezar pid \d+: its descriptor records no start identity/);
+  assert.ok(alive(pid));
+});
+
 test('test-env-down.sh stopping the server also ends its watcher', async () => {
   const { root, env, pid } = bootWatched({});
   const watcher = await watcherPid(root);

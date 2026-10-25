@@ -288,15 +288,15 @@ export async function acquireTestEnvLease(root, { token, pid = process.pid, grou
 
 // Only the supervisor outside the mutation job can start the cached app.
 // This local pipe admits the existing detach-app operation, never a shell command.
-// The app starts through packages/cezar/src/detached-process.ts (hearsay-tools/cezarion#1717): on
-// POSIX a start identity nothing can read stops it again, since no later stop could name it.
+// The app starts through packages/cezar/src/detached-process.ts (hearsay-tools/cezarion#1717): a
+// start identity nothing can read stops it again, since no later stop could name it.
 async function detachApp(args, root, effectiveEnv = process.env) {
   const fd = openSync(resolve(root, args[0]), 'w');
   const env = { ...effectiveEnv };
   for (const key of Object.keys(env)) if (key.startsWith('TEST_ENV_LEASE_')) delete env[key];
   try {
     const { child, leader } = await startOwnedGroup(process.execPath, args.slice(1), {
-      cwd: root, stdio: ['ignore', fd, fd], env, readStart, requireStart: process.platform !== 'win32',
+      cwd: root, stdio: ['ignore', fd, fd], env, readStart, requireStart: true,
     });
     child.unref();
     // The app has no end of its own (#1448): a sibling watcher stops it once nothing uses it.
@@ -304,17 +304,15 @@ async function detachApp(args, root, effectiveEnv = process.env) {
     const repo = args.indexOf('--repo');
     const served = repo >= 0 && args[repo + 1] ? resolve(root, args[repo + 1]) : root;
     // Its own log, next to the app's, so the app log holds only the app's output.
-    if (leader.start) {
-      let watchFd;
-      try {
-        watchFd = openSync(resolve(dirname(resolve(root, args[0])), 'test-env-watch.log'), 'a');
-        const watcher = await startOwnedGroup(process.execPath, [import.meta.filename, 'watch-app', String(leader.pid), leader.start, root, served], {
-          cwd: tmpdir(), stdio: ['ignore', watchFd, watchFd], env, windowsHide: true, readStart,
-        });
-        watcher.child.unref();
-      } catch { /* best effort: the caller must still record the app it started */ }
-      finally { if (watchFd !== undefined) closeSync(watchFd); }
-    }
+    let watchFd;
+    try {
+      watchFd = openSync(resolve(dirname(resolve(root, args[0])), 'test-env-watch.log'), 'a');
+      const watcher = await startOwnedGroup(process.execPath, [import.meta.filename, 'watch-app', String(leader.pid), leader.start, root, served], {
+        cwd: tmpdir(), stdio: ['ignore', watchFd, watchFd], env, windowsHide: true, readStart,
+      });
+      watcher.child.unref();
+    } catch { /* best effort: the caller must still record the app it started */ }
+    finally { if (watchFd !== undefined) closeSync(watchFd); }
     return leader;
   } finally { closeSync(fd); }
 }
@@ -332,7 +330,7 @@ function envNumber(env, name, fallback, min, max) {
 }
 
 /** The app `.ai/qa/test-env.json` names, when this checkout started it. A descriptor written before
- * hearsay-tools/cezarion#1717 has no `app.start`, so its app is stopped by its pid alone, as before. */
+ * hearsay-tools/cezarion#1717 has no `app.start`; `stopApp` leaves its app to its watcher. */
 function recordedApp(root) {
   try {
     const descriptor = JSON.parse(readFileSync(resolve(root, '.ai/qa/test-env.json'), 'utf8'));
@@ -346,6 +344,11 @@ function recordedApp(root) {
 async function stopApp(app, graceMs) {
   const log = message => console.error(`[test-env] ${message}`);
   if (!app || !groupExists(app, readStart)) { log('app is already stopped'); return; }
+  if (!app.start) {
+    // Its pid may name another process now, and nothing tells them apart.
+    log(`not stopping cezar pid ${app.pid}: its descriptor records no start identity (written before hearsay-tools/cezarion#1717); its watcher stops it once idle`);
+    return;
+  }
   log(`stopping cezar (pid ${app.pid})`);
   if (!await stopGroup(app, { graceMs, readStart })) throw new Error(`cezar pid ${app.pid} did not stop`);
 }

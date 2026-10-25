@@ -19,7 +19,8 @@ import { setTimeout as delay } from 'node:timers/promises';
 /** A process's start identity: one incarnation, so a reused pid never matches. */
 export type ReadStart = (pid: number) => string | undefined;
 
-/** A group leader as its starter recorded it; `start` is absent where it could not be read. */
+/** A group leader as its starter recorded it; `start` is absent where it could not be read. Such a
+ *  leader is never signalled: nothing tells its incarnation from a process that reused its pid. */
 export interface GroupLeader {
   readonly pid: number;
   readonly start?: string | undefined;
@@ -122,7 +123,7 @@ function processState(pid: number): ProcessState {
  *  process. `unknown`: it runs but its start identity cannot be read, which proves nothing. */
 function leaderStatus(leader: GroupLeader, readStart: ReadStart): 'running' | 'gone' | 'unknown' {
   if (processState(leader.pid) !== 'live') return 'gone';
-  if (leader.start === undefined) return 'running';
+  if (leader.start === undefined) return 'unknown';
   const current = readStart(leader.pid);
   if (current === undefined) return 'unknown';
   return current === leader.start ? 'running' : 'gone';
@@ -194,7 +195,8 @@ export interface StopOptions {
 /** Stops the process group `leader` started: SIGTERM, then SIGKILL for whatever outlives the
  *  grace, the leader or any other member. True once no member runs. SIGKILL goes to every group
  *  that still exists, zombies only included, so it also reaches a member a scan missed. On
- *  Windows it ends the recorded leader's process tree at once, then waits `killWaitMs`. */
+ *  Windows it ends the recorded leader's process tree at once, then waits `killWaitMs`. A leader
+ *  with no recorded start is never signalled; the stop reports it stopped only once no member runs. */
 export async function stopGroup(leader: GroupLeader, options: StopOptions = {}): Promise<boolean> {
   const { graceMs = 10_000, killWaitMs = 1_000, readStart = processStartToken } = options;
   if (process.platform === 'win32') {
@@ -206,6 +208,8 @@ export async function stopGroup(leader: GroupLeader, options: StopOptions = {}):
     while (processState(leader.pid) !== 'gone' && performance.now() < deadline) await delay(POLL_MS);
     return processState(leader.pid) === 'gone';
   }
+  // With no recorded identity the pid may now lead another group: report, never signal.
+  if (leader.start === undefined) return !groupRunning(leader, readStart);
   for (const [signal, waitMs] of [['SIGTERM', graceMs], ['SIGKILL', killWaitMs]] as const) {
     if (!groupExists(leader, readStart)) return true;
     try { process.kill(-leader.pid, signal); } catch { /* the group already ended */ }
@@ -234,7 +238,8 @@ export interface WatchOptions {
 
 /** Watches a group nobody else will stop, and stops it when `decide` says so. A leader that exits
  *  on its own leaves nothing behind: the rest of its group is stopped too, for the reason
- *  `exited`. A stop that fails is tried again at the next poll. Resolves with the reason. */
+ *  `exited`. A stop that fails is tried again at the next poll. Resolves with the reason. The
+ *  leader needs a recorded start: without one, nothing is ever decided or stopped. */
 export async function watchGroup(options: WatchOptions): Promise<string> {
   const { leader, intervalMs, readStart = processStartToken, starter, decide, stop = {} } = options;
   while (true) {

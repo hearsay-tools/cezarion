@@ -173,6 +173,14 @@ require('node:fs').writeFileSync(out('sleeper.pid'), sh.pid + '\\n'); ${IDLE}`);
     expect(await stopGroup(forged, { graceMs: 200 })).toBe(true);
     expect(alive(other.pid)).toBe(true);
   });
+
+  it('never signals a leader whose start identity was not recorded: its pid may name another process', async () => {
+    const { leader } = await startLeader(IDLE);
+    const unrecorded: GroupLeader = { pid: leader.pid };
+    expect(leaderRunning(unrecorded)).toBe(false);
+    expect(await stopGroup(unrecorded, { graceMs: 200 })).toBe(false);
+    expect(alive(leader.pid)).toBe(true);
+  });
 });
 
 describe.runIf(posix)('watchGroup', () => {
@@ -263,6 +271,13 @@ describe.runIf(posix)('on Windows', () => {
     expect(await asWindows(() => stopGroup(forged, { readStart }))).toBe(true);
     expect(taskkills).toEqual([]);
     expect(alive(other.pid)).toBe(true);
+  });
+
+  it('never ends the tree of a leader whose start identity was not recorded', async () => {
+    const { leader } = await startLeader(IDLE);
+    expect(await asWindows(() => stopGroup({ pid: leader.pid }, { readStart }))).toBe(false);
+    expect(taskkills).toEqual([]);
+    expect(alive(leader.pid)).toBe(true);
   });
 
   it('leaves a process whose start identity cannot be read, and does not report it stopped', async () => {
