@@ -37,9 +37,9 @@ function ownSource(fn, functions, source, from = fn.start) {
 // name or in another file hashes alike, so a move or rename can be paired up.
 const bodyHash = (fn, functions, source) =>
   createHash('sha256').update(ownSource(fn, functions, source, fn.bodyStart)).digest('hex');
-// The distinct trimmed lines of a function's own body: what two copies of one function share.
+// The trimmed lines of a function's own body, repeats included: what two copies of one function share.
 const bodyLines = (fn, functions, source) =>
-  [...new Set(ownSource(fn, functions, source, fn.bodyStart).split('\n').map(line => line.trim()).filter(line => line.length > 3))];
+  ownSource(fn, functions, source, fn.bodyStart).split('\n').map(line => line.trim()).filter(line => line.length > 3);
 const summary = ({ name, line, complexity }) => ({ name, line, complexity });
 
 /**

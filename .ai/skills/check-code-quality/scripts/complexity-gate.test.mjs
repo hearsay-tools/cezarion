@@ -5,7 +5,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import test from 'node:test';
-import { findGrowth, pairMoves, runComplexityGate } from './complexity-gate.mjs';
+import { findGrowth, pairMoves, runComplexityGate, similarity } from './complexity-gate.mjs';
 
 const OWNER_NOTE = 'For an owner-approved increase, the owner adds the baseline-growth label, then re-runs the failed complexity-gate job.';
 
@@ -193,6 +193,31 @@ test('--allow-growth prints the findings as warnings and passes; Actions annotat
   const failed = gate(f, head, [], { GITHUB_ACTIONS: 'true' });
   assert.match(failed.output, /^::error file=a\.ts,line=\d+,title=Function complexity::/m);
   assert.doesNotMatch(gate(f, head).output, /^::error/m, 'plain runs print no annotations');
+});
+
+test('a same-named function is paired with its closest origin, and with none when two origins are equally close', () => {
+  const body = prefix => Array.from({ length: 10 }, (_, i) => `${prefix}${i}()`);
+  const shared = body('shared');
+  const fn = { name: 'run', complexity: 30, bodyHash: 'new', lines: shared, change: 'added' };
+  const donor = (file, complexity, lines) => ({ file, name: 'run', line: 1, complexity, bodyHash: file, lines });
+  const near = donor('near.ts', 21, [...shared, 'extra()']);
+  const far = donor('far.ts', 40, [...shared, ...body('other')]);
+
+  const closest = pairMoves([fn], [near, far]);
+  assert.equal(closest.pairs.get(fn), near, 'the closest origin wins, not the most complex one');
+
+  const tied = pairMoves([fn], [donor('a.ts', 21, [...shared, ...body('left')]), donor('b.ts', 40, [...shared, ...body('right')])]);
+  assert.equal(tied.pairs.has(fn), false, 'two equally close origins leave the function new');
+  assert.equal(tied.free.size, 2);
+});
+
+test('similarity counts repeated lines, so a long function and a shorter one are not equally close to a third', () => {
+  const lines = (line, count) => Array.from({ length: count }, () => line);
+  assert.equal(similarity(lines('if (x)', 20), lines('if (x)', 20)), 1);
+  assert.ok(similarity(lines('if (x)', 20), lines('if (x)', 34)) < similarity(lines('if (x)', 27), lines('if (x)', 34)));
+  assert.equal(similarity(lines('if (x)', 20), lines('if (x)', 1)), 2 / 21);
+  assert.equal(similarity(lines('if (x)', 1), lines('if (x)', 20)), 2 / 21);
+  assert.equal(similarity(), 0);
 });
 
 test('one removed function serves one pair, so a copy of a long function is still new', () => {

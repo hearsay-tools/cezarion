@@ -14,7 +14,7 @@ const OWNER_NOTE = 'For an owner-approved increase, the owner adds the baseline-
 const APPROVED_NOTE = 'Complexity growth approved by the baseline-growth label; owner merge required.';
 const MAX_POINTS = 40;
 const MAX_HINTS = 10;
-// Two functions that share this fraction of their distinct body lines are one function moved and edited.
+// Two functions that share this fraction of their body lines can be one function moved and edited.
 const MIN_SIMILARITY = 0.5;
 const HELP = `Usage: node <skill>/scripts/complexity-gate.mjs --base <ref> --head <rev> [--allow-growth]
 
@@ -31,30 +31,41 @@ Exit codes: 0 pass, 1 complexity grew, 2 the check could not run (bad revision, 
 
 const isNamed = name => !name.startsWith('anonymous@');
 const simpleName = name => name.split('.').at(-1);
-/** Dice coefficient of two functions' distinct body lines: 1 for one body, 0 for none in common. */
+const tally = lines => lines.reduce((counts, line) => counts.set(line, (counts.get(line) ?? 0) + 1), new Map());
+
+/** Dice coefficient of two functions' body lines, repeats counted: 1 for one body, 0 for none in common. */
 export function similarity(a = [], b = []) {
-  const other = new Set(b);
-  return a.length + b.length ? (2 * a.filter(line => other.has(line)).length) / (a.length + b.length) : 0;
+  const counts = tally(b);
+  let shared = 0;
+  for (const [line, count] of tally(a)) shared += Math.min(count, counts.get(line) ?? 0);
+  return a.length + b.length ? (2 * shared) / (a.length + b.length) : 0;
+}
+
+/** The one donor closest to `fn` by body, at least MIN_SIMILARITY close; none when two are equally close. */
+function closestDonor(fn, donors) {
+  const scored = donors.map(item => ({ item, score: similarity(item.lines, fn.lines) })).filter(({ score }) => score >= MIN_SIMILARITY);
+  const best = Math.max(...scored.map(({ score }) => score));
+  const top = scored.filter(({ score }) => score === best);
+  return top.length === 1 ? top[0].item : undefined;
 }
 const mostComplex = (best, item) => (!best || item.complexity > best.complexity ? item : best);
 
 /**
  * Pair each added function, which has no counterpart in its own file, with a function the change
- * removed: first one with an identical body (a move or rename), then one with the same
- * name and at least half of its body lines (a move with edits). A removed function serves one pair,
- * so a clone is still new, and a same-named function with another body is still new.
+ * removed: first one with an identical body (a move or rename), then the one same-named function
+ * that shares the most of its body lines, at least half of them (a move with edits). Two equally close
+ * origins leave it new. A removed function serves one pair, so a clone is still new, and a
+ * same-named function with another body is still new.
  */
 export function pairMoves(candidates, removed) {
   const free = new Set(removed);
   const pairs = new Map();
-  const take = (fn, matches) => {
-    const donor = matches.reduce(mostComplex, undefined);
+  const take = (fn, donor) => {
     if (donor) { free.delete(donor); pairs.set(fn, donor); }
   };
-  for (const fn of candidates) take(fn, [...free].filter(item => item.bodyHash === fn.bodyHash));
+  for (const fn of candidates) take(fn, [...free].filter(item => item.bodyHash === fn.bodyHash).reduce(mostComplex, undefined));
   for (const fn of candidates.filter(item => !pairs.has(item) && isNamed(item.name))) {
-    take(fn, [...free].filter(item => isNamed(item.name) && simpleName(item.name) === simpleName(fn.name)
-      && similarity(item.lines, fn.lines) >= MIN_SIMILARITY));
+    take(fn, closestDonor(fn, [...free].filter(item => isNamed(item.name) && simpleName(item.name) === simpleName(fn.name))));
   }
   return { pairs, free };
 }
