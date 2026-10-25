@@ -48,7 +48,9 @@ beforeAll(async () => {
 afterAll(async () => {
   browser?.close()
   await stopFixtureServer(server)
-  if (root) rmSync(root, { recursive: true, force: true })
+  // CI ENOTEMPTY evidence: run 40167184339 attempt 1, job 121090612395 (hearsay-tools/cezarion#1731).
+  // Retry transient directory-writer races after shutdown; persistent failures still throw.
+  if (root) rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 })
 })
 
 describe('retired parallel variants', () => {
