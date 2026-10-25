@@ -21,6 +21,7 @@ Options:
   --coverage <path> Read an Istanbul coverage-final.json report
   --test <path>     Run a Vitest test file (*.test, *.spec, *.e2e) for fresh coverage; repeatable
   --project <name>  Select a Vitest project for --test; repeatable
+  --breakdown       List each function's decision points as "line kind"; rows plus one is its complexity
   --json            Print a JSON report; test output goes to stderr
   -h, --help        Show this help
 
@@ -70,13 +71,22 @@ function textReport(report) {
   const table = [headers, ...rows].map(row => row.map((value, i) => value.padEnd(widths[i])).join('  ').trimEnd());
   const reasons = [...new Set(report.functions.filter(fn => fn.coverage.status !== 'available').map(fn => fn.coverage.reason))];
   return [report.file, ...table, ...(rows.length ? [] : ['No implemented functions found.']),
+    ...breakdownLines(report.functions),
     '', 'Complexity: classic. Coverage: function body lines.', ...reasons].join('\n') + '\n';
+}
+
+/** One block per function: its decision points as "line kind", so the rows plus one are its complexity. */
+function breakdownLines(functions) {
+  return functions.filter(fn => fn.decisionPoints).flatMap(fn => [
+    '', `${fn.name} (line ${fn.line}): complexity ${fn.complexity} = 1 + ${fn.decisionPoints.length} decision points`,
+    ...fn.decisionPoints.map(point => `  ${point.line} ${point.kind}`),
+  ]);
 }
 
 function parseInput(args, cwd) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     function: { type: 'string' }, line: { type: 'string' }, coverage: { type: 'string' },
-    test: { type: 'string', multiple: true }, json: { type: 'boolean' },
+    test: { type: 'string', multiple: true }, json: { type: 'boolean' }, breakdown: { type: 'boolean' },
     project: { type: 'string', multiple: true }, help: { type: 'boolean', short: 'h' },
   } });
   if (values.help) return { values };
@@ -143,7 +153,7 @@ export async function runMetrics(args, { cwd = process.cwd(), stdout = process.s
       schemaVersion: 1, file, sourceHash: hash(source), complexityVariant: 'classic',
       coverageMetric: 'function-body-lines', coverageSource: values.test ? 'test-run' : coveragePath ? 'report' : null,
       coverageReport: values.test ? null : coveragePath ?? null,
-      functions: functionResults(selected, measurements, reason),
+      functions: functionResults(selected, measurements, reason, Boolean(values.breakdown)),
     };
     stdout.write(json ? JSON.stringify(report, null, 2) + '\n' : textReport(report));
     return 0;

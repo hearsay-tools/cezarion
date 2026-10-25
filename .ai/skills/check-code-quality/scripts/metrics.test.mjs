@@ -224,6 +224,50 @@ test('CLI validates selection and arguments before running tests', async t => {
   }
 });
 
+// One decision point of each kind the issue names, and a nested function whose own point is not listed.
+const breakdownSource = `export function pick(xs: number[], o?: { v?: number }) {
+  let n = 0;
+  for (const x of xs) {
+    if (x > 0 && x < 9) n += x;
+  }
+  const v = o?.v ?? 0;
+  const inner = (y: number) => (y ? 1 : 2);
+  return n + v + inner(n);
+}`;
+const pickRows = [
+  '3 ForOfStatement', '4 IfStatement', '4 LogicalExpression &&', '6 LogicalExpression ??', '6 OptionalMemberExpression ?.',
+];
+const breakdownRows = output => output.split('\n').filter(line => /^\s+\d+ \S/.test(line)).map(line => line.trim());
+
+test('--breakdown lists one row per decision point of the selected function, so rows plus one is its complexity', async t => {
+  const f = fixture(t);
+  writeFileSync(join(f.cwd, 'pick.ts'), breakdownSource);
+  const functions = analyzeSource(breakdownSource, 'pick.ts');
+  assert.deepEqual(functions.map(fn => [fn.name, fn.complexity, fn.points.length]), [['pick', 6, 5], ['inner', 2, 1]]);
+
+  const text = await invoke(['pick.ts', '--function', 'pick', '--breakdown'], { cwd: f.cwd });
+  assert.equal(text.code, 0, text.error);
+  assert.deepEqual(breakdownRows(text.output), pickRows);
+  assert.match(text.output, /pick \(line 1\)/);
+  assert.doesNotMatch(text.output, /ConditionalExpression/, 'the nested arrow keeps its own point');
+
+  const json = JSON.parse((await invoke(['pick.ts', '--function', 'pick', '--breakdown', '--json'], { cwd: f.cwd })).output);
+  assert.equal(json.functions[0].decisionPoints.length + 1, json.functions[0].complexity);
+  assert.deepEqual(json.functions[0].decisionPoints.map(point => `${point.line} ${point.kind}`), pickRows);
+
+  const nested = await invoke(['pick.ts', '--function', 'inner', '--breakdown'], { cwd: f.cwd });
+  assert.deepEqual(breakdownRows(nested.output), ['7 ConditionalExpression']);
+});
+
+test('without --breakdown the report neither lists decision points nor changes its JSON shape', async t => {
+  const f = fixture(t);
+  writeFileSync(join(f.cwd, 'pick.ts'), breakdownSource);
+  const text = await invoke(['pick.ts', '--function', 'pick'], { cwd: f.cwd });
+  assert.deepEqual(breakdownRows(text.output), []);
+  const json = JSON.parse((await invoke(['pick.ts', '--function', 'pick', '--json'], { cwd: f.cwd })).output);
+  assert.equal('decisionPoints' in json.functions[0], false);
+});
+
 test('project selection requires tests and supplies target cwd to the coverage runner', async t => {
   const f = fixture(t);
   for (const args of [['--project', 'unit'], ['--project', '', '--test', 'source.spec.ts']]) {

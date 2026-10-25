@@ -24,7 +24,10 @@ node <skill>/scripts/metrics.mjs <file> --line <line> --json
 ```
 
 Choose the matching command. Use `--line` to disambiguate a repeated function
-name. For several files, run one measurement per file. The command reports
+name. Add `--breakdown` to list the decision points behind each complexity as
+`line kind` rows, for example `1091 LogicalExpression ??`. The rows plus one
+equal the complexity, and a nested function's points appear only under that
+function. For several files, run one measurement per file. The command reports
 complexity immediately and discovers existing Istanbul coverage. It runs no tests
 without `--test`. A known current report can be selected with `--coverage <path>`.
 
