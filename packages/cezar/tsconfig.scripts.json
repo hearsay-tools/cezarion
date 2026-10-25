@@ -1,0 +1,14 @@
+{
+  // Typecheck-only view of the TypeScript probes under `.ai/scripts`, with the server's options.
+  // They import server internals, but CI never runs them, so this is their only check
+  // (hearsay-tools/cezarion#1702). It lives here, not under `.ai/scripts`, because pnpm installs
+  // `@types/node` in this package's node_modules, and `types: ["node"]` resolves from this file's
+  // directory. Never emits.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": "../.."
+  },
+  "include": ["../../.ai/scripts/**/*.ts"],
+  "exclude": []
+}
