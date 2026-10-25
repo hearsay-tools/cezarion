@@ -1983,19 +1983,16 @@ export class RunManager {
     const notes: string[] = [];
     const filesDir = new Map<string, string>();
     const wantedNames = [...new Set([wanted.stepSkill, wanted.slash].filter((name): name is string => Boolean(name)))];
-    // A prompt without a slash names no skill.
-    const prompt = wanted.prompt?.includes('/') ? wanted.prompt : undefined;
     // Stop can land during an earlier await (Continue's team-cache wait): a stopped run writes
     // nothing, here or between the pass's own steps.
     const stopped = () => Boolean(state.cancelled) || this.workerExecutionStopped(runId);
-    if ((wantedNames.length === 0 && !prompt) || stopped()) return { notes, filesDir, installed: [] };
     // The off-list as it is now, applied to every input: the saved registry predates a switch
     // made during the run, so it is filtered as well as the fresh team list.
     const disabled = readDisabledTeamSkills(await readProjectUiState(this.repoRoot));
     const registry = filterDisabledTeamSkills(state.skills ?? [], disabled);
     // A skill the prompt names as `/name` is a root after the selected ones, so a capped closure
     // never leaves it out (#1672). It installs only in the task worktree, like a companion.
-    const named = prompt ? registry.filter((skill) => namesSkillCommand(prompt, skill.name)).map((skill) => skill.name) : [];
+    const named = registry.filter((skill) => namesSkillCommand(wanted.prompt ?? '', skill.name)).map((skill) => skill.name);
     const roots = [...new Set([...wantedNames, ...named])]
       .flatMap((name) => registry.filter((skill) => skill.name === name).slice(0, 1));
     if (roots.length === 0 || stopped()) return { notes, filesDir, installed: [] };
