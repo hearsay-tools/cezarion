@@ -27,13 +27,17 @@ const CANDIDATE = /#([1-9]\d*)(?![\w-])/g;
 // also covers `owner/repo#N` (`PR#12`, `file.md#12`, `&#8212;`, `$#`, `${#a}`, `\#12`).
 const JOINED = /[\w$&{/.\\#@]/;
 const FORK_OR_UPSTREAM = /\b(?:fork|upstream)\s+(?:(?:issue|PR|pull request)\s+)?$/i;
-// Code spans, which hold test filters, sample values and shell, and Markdown links to a
-// repository-qualified GitHub URL. Neither crosses a blank line.
+// Code spans, which hold test filters, sample values and shell; they do not cross a
+// blank line. A Markdown link to a GitHub issue or PR qualifies the same number in its
+// text, in any repository, so `[#46842](https://github.com/anomalyco/opencode/issues/46842)`
+// passes and `[#12](https://github.com/o/r/issues/34)` does not.
 const CODE_SPAN = /(?<!`)(`+)(?!`)(?:(?!\n[ \t]*\n)[\s\S])*?(?<!`)\1(?!`)/g;
-const QUALIFIED_LINK = /\[[^\]\n]*\]\(https:\/\/github\.com\/[\w.-]+\/[\w.-]+(?:[/#?][^)\s]*)?\)/g;
+const ISSUE_LINK = /\[([^\]\n]*)\]\(https:\/\/github\.com\/[\w.-]+\/[\w.-]+\/(?:issues|pull)\/(\d+)(?:[/#?][^)\s]*)?\)/g;
 const TEST_FUNCTION = /^(?:describe\w*|it|test)$/;
 
 const blank = (text) => text.replace(/[^\n]/g, ' ');
+const qualifyLink = (link, text, number) =>
+  `[${text.replace(new RegExp(`#${number}(?!\\d)`, 'g'), blank)}]${blank(link.slice(text.length + 2))}`;
 
 function lineOf(starts, offset) {
   let low = 0;
@@ -147,7 +151,7 @@ function bareCitations(file, text) {
   for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) starts.push(i + 1);
   const found = [];
   for (const { start, end, context } of readerOf(file)?.(text, file) ?? []) {
-    const span = text.slice(start, end).replace(CODE_SPAN, blank).replace(QUALIFIED_LINK, blank);
+    const span = text.slice(start, end).replace(CODE_SPAN, blank).replace(ISSUE_LINK, qualifyLink);
     for (const match of span.matchAll(CANDIDATE)) {
       const before = span.slice(0, match.index);
       if (JOINED.test(before.at(-1) ?? ' ') || FORK_OR_UPSTREAM.test(before)) continue;

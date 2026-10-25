@@ -26,6 +26,16 @@ test('passes qualified citations and the documented fork and upstream forms', ()
   assert.deepEqual(cites('src/a.ts', text), []);
 });
 
+test('a GitHub link qualifies only the number of the issue or PR it opens', () => {
+  const text = [
+    'See [#46842](https://github.com/anomalyco/opencode/issues/46842) and [#16](https://github.com/o/r/pull/16/files).',
+    'Wrong: [#12](https://github.com/example/project/issues/34).',
+    'Not an issue: [#13](https://github.com/o/r/blob/main/a.md).',
+    'Two: [#14, #15](https://github.com/o/r/issues/14).',
+  ].join('\n');
+  assert.deepEqual(cites('notes.md', text), ['2:12:Markdown prose', '3:13:Markdown prose', '4:15:Markdown prose']);
+});
+
 test('passes colors, entities, shell syntax, anchors and a # joined to a word or path', () => {
   const text = '// #000 #0f0 #12ab &#8212; $# ${#args[@]} README.md#12 https://x.test/page#12 (#12-step) PR#12\n';
   assert.deepEqual(cites('src/a.ts', text), []);
