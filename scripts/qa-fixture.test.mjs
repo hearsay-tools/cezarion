@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -7,6 +7,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { test } from 'node:test';
 
 import { down, parseUpArgs, up } from '../.ai/scripts/qa-fixture.mjs';
+import { identity } from '../.ai/scripts/test-env-lease.mjs';
 
 // A stand-in for the e2e build: `dist/index.js` answers like `cezar serve` does for the checks
 // qa-fixture makes. It records its argv and environment, and keeps a child in its own process
@@ -236,4 +237,35 @@ test('up refuses a bad flag before it creates anything', async (t) => {
   }
   assert.deepEqual(readdirSync(f.tmp), []);
   assert.deepEqual(parseUpArgs(['--server-env=CEZ_AUTOMATIONS=1', '--server-env=CEZ_PREVIEW=']), { CEZ_AUTOMATIONS: '1', CEZ_PREVIEW: '' });
+});
+
+test('down acts on no descriptor that the temporary root it names does not confirm', async (t) => {
+  const f = fixture(t);
+  // A process group this script never started, with its real start identity.
+  const foreign = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+  foreign.unref();
+  t.after(() => { try { process.kill(-foreign.pid, 'SIGKILL'); } catch { /* already gone */ } });
+  await until(() => identity(foreign.pid).start !== undefined, 'the foreign process to start');
+  const foreignIdentity = { pid: foreign.pid, start: identity(foreign.pid).start };
+  const bareRoot = mkdtempSync(join(f.tmp, 'cez-qa-fixture-'));
+  const rootWithOtherOwner = mkdtempSync(join(f.tmp, 'cez-qa-fixture-'));
+  writeFileSync(join(rootWithOtherOwner, 'owner.json'), JSON.stringify({ repoRoot: '/elsewhere', server: foreignIdentity }));
+
+  for (const crafted of [
+    { root: bareRoot, server: foreignIdentity },
+    { root: rootWithOtherOwner, server: foreignIdentity },
+    { root: bareRoot, server: { pid: 0, start: 'x' } },
+    { root: '/', server: foreignIdentity },
+  ]) {
+    mkdirSync(join(f.worktree, '.ai/qa'), { recursive: true });
+    writeFileSync(descriptorPath(f.worktree), JSON.stringify(crafted));
+    const stopped = sink();
+    await down(f.options({ stdout: stopped, stopGraceMs: 300 }));
+    assert.equal(values(stopped.text).QA_FIXTURE_STATUS, 'stopped');
+    assert.equal(existsSync(descriptorPath(f.worktree)), false, 'an unconfirmed descriptor stayed behind');
+  }
+  assert.equal(alive(foreign.pid), true, 'down signalled a process group it never started');
+  assert.equal(existsSync(bareRoot), true, 'down deleted a directory no fixture owns');
+  assert.equal(existsSync(rootWithOtherOwner), true, 'down deleted a directory another worktree owns');
+  assert.match(f.stderr.text, /does not confirm/);
 });

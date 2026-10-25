@@ -25,6 +25,8 @@ import { pathToFileURL } from 'node:url';
 import { identity } from './test-env-lease.mjs';
 
 const DESCRIPTOR = '.ai/qa/qa-fixture.json';
+// Inside the temporary root: what `up` started there, which confirms the descriptor.
+const OWNER = 'owner.json';
 const ROOT_PREFIX = 'cez-qa-fixture-';
 // test-env-up.sh's default health budget: a boot on a loaded host is CPU-bound.
 const BOOT_TIMEOUT_MS = 180_000;
@@ -172,12 +174,31 @@ function writeDescriptor(repoRoot, fixture) {
 }
 
 const sameProcess = (a, b) => a?.pid === b.pid && a?.start === b.start;
+const validProcess = (entry) => Number.isSafeInteger(entry?.pid) && entry.pid > 1 && typeof entry.start === 'string' && entry.start !== '';
+const validRoot = (root) => typeof root === 'string' && resolve(root) === root && basename(root).startsWith(ROOT_PREFIX);
 
-/** Only a root this script made: a corrupt descriptor never names a path to delete. */
-function removeRoot(root) {
-  if (typeof root === 'string' && resolve(root) === root && basename(root).startsWith(ROOT_PREFIX)) {
-    rmSync(root, { recursive: true, force: true });
+function writeOwner(repoRoot, fixture) {
+  writeFileSync(join(fixture.root, OWNER), JSON.stringify({ repoRoot, server: fixture.server, watcher: fixture.watcher }) + '\n');
+}
+
+/** True when the descriptor is well formed and the temporary root it names confirms it with the
+ *  same worktree and process identities. Only then may `down` signal or delete what it names. */
+function confirmed(repoRoot, fixture) {
+  if (!validRoot(fixture?.root) || !validProcess(fixture.server)) return false;
+  if (fixture.watcher !== undefined && !validProcess(fixture.watcher)) return false;
+  let owner;
+  try {
+    owner = JSON.parse(readFileSync(join(fixture.root, OWNER), 'utf8'));
+  } catch {
+    return false;
   }
+  return owner?.repoRoot === repoRoot && sameProcess(owner.server, fixture.server)
+    && (fixture.watcher === undefined || sameProcess(owner.watcher, fixture.watcher));
+}
+
+/** Only a root this script made: a prefix check on top of the callers' own. */
+function removeRoot(root) {
+  if (validRoot(root)) rmSync(root, { recursive: true, force: true });
 }
 
 function printLogTail(stderr, root) {
@@ -192,12 +213,16 @@ function printLogTail(stderr, root) {
 async function stopFixture(repoRoot, stderr, graceMs) {
   const fixture = readDescriptor(repoRoot);
   if (!fixture) return log(stderr, 'no fixture is running');
-  if (fixture.watcher) await stopGroup(fixture.watcher, graceMs);
-  if (fixture.server) {
+  if (!confirmed(repoRoot, fixture)) {
+    // Removed without acting on it. A server whose temporary root is gone still has its
+    // watcher, which stops it once this descriptor no longer names it.
+    log(stderr, `ignoring ${DESCRIPTOR}: the temporary root it names does not confirm it`);
+  } else {
+    if (fixture.watcher) await stopGroup(fixture.watcher, graceMs);
     log(stderr, `stopping cezar (pid ${fixture.server.pid})`);
     if (!await stopGroup(fixture.server, graceMs)) throw new Error(`cezar pid ${fixture.server.pid} did not stop`);
+    removeRoot(fixture.root);
   }
-  removeRoot(fixture.root);
   rmSync(join(repoRoot, DESCRIPTOR), { force: true });
 }
 
@@ -238,9 +263,12 @@ export async function up({
     const projectId = await registeredProject(baseUrl, repo);
     const fixture = { root, baseUrl, projectId, server, startedAt: new Date().toISOString() };
     // Written before the watcher starts: a watcher that finds no descriptor stops the server.
+    // The owner record goes first each time, so no descriptor exists without its confirmation.
+    writeOwner(repoRoot, fixture);
     writeDescriptor(repoRoot, fixture);
     fixture.watcher = await detach([import.meta.filename, 'watch', repoRoot, root, String(server.pid), server.start, String(watchIntervalMs)],
       { cwd: dirname(root), env, logPath: join(root, 'watch.log') });
+    writeOwner(repoRoot, fixture);
     writeDescriptor(repoRoot, fixture);
     stdout.write([
       'QA_FIXTURE_STATUS=running',
