@@ -233,8 +233,10 @@ test('CLI emits exactly one supported classification line', () => {
   assert.equal(result.stderr, '');
 });
 
-test('CLI fails closed and exits cleanly for malformed or blank stdin', () => {
-  for (const input of ['not json\n', '']) {
+// Empty input still means no paths. Malformed input now explains the input
+// contract on stderr, while retaining the fail-closed stdout and exit status.
+test('CLI fails closed and stays silent when stdin has no paths', () => {
+  for (const input of ['', '\n']) {
     const result = spawnSync(process.execPath, ['./change-surface.cjs'], {
       cwd: __dirname,
       input,
@@ -242,6 +244,38 @@ test('CLI fails closed and exits cleanly for malformed or blank stdin', () => {
     });
     assert.equal(result.status, 0, JSON.stringify(input));
     assert.equal(result.stdout, 'full-matrix\n', JSON.stringify(input));
+    assert.equal(result.stderr, '', JSON.stringify(input));
+  }
+});
+
+test('CLI prints usage once for malformed or non-string JSON lines', () => {
+  for (const input of [
+    'AGENTS.md\n', 'not json\n', '{\n', 'null\n', '42\n',
+    '{}\n', '["README.md"]\n', '"README.md"\nnot json\n',
+    'not json\nnot json\n', '\n\n', '"README.md"\n\n', '   \n',
+  ]) {
+    const result = spawnSync(process.execPath, ['./change-surface.cjs'], {
+      cwd: __dirname, input, encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, JSON.stringify(input));
+    assert.equal(result.stdout, 'full-matrix\n', JSON.stringify(input));
+    assert.equal(result.stderr, usage, JSON.stringify(input));
+  }
+});
+
+test('CLI keeps valid JSON string classifications silent', () => {
+  for (const [input, surface] of [
+    ['"AGENTS.md"\n', 'docs-only'],
+    ['".github/workflows/sweep-ci-failures.yml"\n', 'infra-only'],
+    ['"package.json"\n', 'full-matrix'],
+    ['"docs/../README.md"\n', 'full-matrix'],
+    ['""\n', 'full-matrix'],
+  ]) {
+    const result = spawnSync(process.execPath, ['./change-surface.cjs'], {
+      cwd: __dirname, input, encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, JSON.stringify(input));
+    assert.equal(result.stdout, `${surface}\n`, JSON.stringify(input));
     assert.equal(result.stderr, '', JSON.stringify(input));
   }
 });
