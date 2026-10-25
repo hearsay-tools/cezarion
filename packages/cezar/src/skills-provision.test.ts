@@ -9,6 +9,7 @@ import {
   MAX_SKILL_CLOSURE,
   PROVISION_IGNORE_MARK,
   mentionsSkill,
+  namesSkillCommand,
   provisionSkills,
   removeProvisionedSkills,
   skillClosure,
@@ -58,6 +59,37 @@ describe('mentionsSkill', () => {
   it('keeps matching a hyphenated name inside quotes as a word', () => {
     expect(mentionsSkill('run "om-code-review" now', 'om-code-review')).toBe(true);
     expect(mentionsSkill('run "om-code-reviewer" now', 'om-code-review')).toBe(false);
+  });
+});
+
+// hearsay-tools/cezarion#1672: a task prompt names a skill only as a typed `/name`.
+describe('namesSkillCommand', () => {
+  it('matches /name at the start of the text and of a word', () => {
+    expect(namesSkillCommand('/check-code-quality first', 'check-code-quality')).toBe(true);
+    expect(namesSkillCommand('When done, run the /check-code-quality skill', 'check-code-quality')).toBe(true);
+    expect(namesSkillCommand('then (/auto-merge)', 'auto-merge')).toBe(true);
+    expect(namesSkillCommand('then `/auto-merge`', 'auto-merge')).toBe(true);
+    expect(namesSkillCommand('line one\n/fix it', 'fix')).toBe(true);
+  });
+
+  it('matches /name before punctuation', () => {
+    expect(namesSkillCommand('run /auto-merge, then stop', 'auto-merge')).toBe(true);
+    expect(namesSkillCommand('then run /auto-merge.', 'auto-merge')).toBe(true);
+  });
+
+  it('never matches a path segment', () => {
+    expect(namesSkillCommand('read .ai/skills/check-code-quality/SKILL.md', 'check-code-quality')).toBe(false);
+    expect(namesSkillCommand('see src/fix', 'fix')).toBe(false);
+    expect(namesSkillCommand('see https://example.test/fix', 'fix')).toBe(false);
+    expect(namesSkillCommand('see ~/fix', 'fix')).toBe(false);
+  });
+
+  it('never matches a bare word, a quoted name, a longer name or another case', () => {
+    expect(namesSkillCommand('fix the auto-merge label', 'auto-merge')).toBe(false);
+    expect(namesSkillCommand('run `fix` or "fix"', 'fix')).toBe(false);
+    expect(namesSkillCommand('run /auto-merger', 'auto-merge')).toBe(false);
+    expect(namesSkillCommand('run /auto-merge-x', 'auto-merge')).toBe(false);
+    expect(namesSkillCommand('run /Auto-Merge', 'auto-merge')).toBe(false);
   });
 });
 

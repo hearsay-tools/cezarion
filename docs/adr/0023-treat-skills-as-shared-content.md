@@ -12,7 +12,9 @@ project’s `disabledTeamSkills` list matches source repo and name. Read it for 
 provisioning pass, and apply it to roots and companions. Skills disabled during a run are not
 installed on later passes; existing copies stay until the task ends.
 
-Provision selected roots and the catalog skills their bodies name into the run’s own worktree.
+Provision selected roots, the skills an agent step’s prompt names as a typed `/name`, and the
+catalog skills their bodies name into the run’s own worktree. Prompt-named skills follow the
+selected roots, so the closure cap never leaves them out.
 The companion scan is a bounded heuristic, not a guarantee that every dependency was discovered.
 Runs without an owned worktree retain a cache fallback.
 

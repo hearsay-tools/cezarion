@@ -91,7 +91,7 @@ import { agentWebhooksPrompt, webhookCliCommand } from '../webhooks/prompt.ts';
 import { agentWebhooks } from '../workspace/webhooks.ts';
 import { createAutomationSkill } from '../automations/builtin-skill.ts';
 import { getTeamSkillsCached, materializeSkillToCache, TEAM_SKILL_AGENT_DIRS, waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
-import { MAX_SKILL_CLOSURE, provisionSkills } from '../skills-provision.ts';
+import { MAX_SKILL_CLOSURE, namesSkillCommand, provisionSkills } from '../skills-provision.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
@@ -1953,7 +1953,8 @@ export class RunManager {
 
   /**
    * Provision the step skill and leading registry slash skill for start, Continue, recovery and
-   * live input. Native slashes that are not registry skills install nothing.
+   * live input, and at a step's start every registry skill its prompt names as a typed `/name`
+   * (#1672). Native slashes that are not registry skills install nothing.
    *
    * The run's OWN task worktree gets every root and the companions their bodies name
    * (`provisionSkills`): links to local and global skills, generated `SKILL.md` files, and marked
@@ -1967,8 +1968,9 @@ export class RunManager {
    *
    * Any other cwd — worktree off, a non-git project, a Continue whose worktree is gone — is the
    * main checkout or unknown, where those directories are LOCAL skills to `discoverSkills` that
-   * would shadow the team source for every later run. A directory team root gets a per-commit
-   * cache copy there instead, and nothing else is installed. So does a worktree where no copy of
+   * would shadow the team source for every later run. A selected or leading-slash directory team
+   * root gets a per-commit cache copy there instead, and nothing else is installed: a skill only
+   * the prompt names gets nothing there, like a companion. So does a worktree where no copy of
    * it landed, such as one whose three agent dirs all link out of it; one that took only some
    * copies names the first that landed, since the runner's own dir may be the one skipped.
    * Returns the step-start notes and, per team root, the directory its prompt must name.
@@ -1976,22 +1978,28 @@ export class RunManager {
   private async provisionRunSkills(
     runId: string,
     state: ActiveRun,
-    wanted: { stepSkill?: string; slash?: string },
+    wanted: { stepSkill?: string; slash?: string; prompt?: string },
   ): Promise<{ notes: string[]; filesDir: Map<string, string>; installed: string[] }> {
     const notes: string[] = [];
     const filesDir = new Map<string, string>();
     const wantedNames = [...new Set([wanted.stepSkill, wanted.slash].filter((name): name is string => Boolean(name)))];
+    // A prompt without a slash names no skill.
+    const prompt = wanted.prompt?.includes('/') ? wanted.prompt : undefined;
     // Stop can land during an earlier await (Continue's team-cache wait): a stopped run writes
     // nothing, here or between the pass's own steps.
     const stopped = () => Boolean(state.cancelled) || this.workerExecutionStopped(runId);
-    if (wantedNames.length === 0 || stopped()) return { notes, filesDir, installed: [] };
+    if ((wantedNames.length === 0 && !prompt) || stopped()) return { notes, filesDir, installed: [] };
     // The off-list as it is now, applied to every input: the saved registry predates a switch
     // made during the run, so it is filtered as well as the fresh team list.
     const disabled = readDisabledTeamSkills(await readProjectUiState(this.repoRoot));
     const registry = filterDisabledTeamSkills(state.skills ?? [], disabled);
-    const roots = wantedNames.flatMap((name) => registry.filter((skill) => skill.name === name).slice(0, 1));
+    // A skill the prompt names as `/name` is a root after the selected ones, so a capped closure
+    // never leaves it out (#1672). It installs only in the task worktree, like a companion.
+    const named = prompt ? registry.filter((skill) => namesSkillCommand(prompt, skill.name)).map((skill) => skill.name) : [];
+    const roots = [...new Set([...wantedNames, ...named])]
+      .flatMap((name) => registry.filter((skill) => skill.name === name).slice(0, 1));
     if (roots.length === 0 || stopped()) return { notes, filesDir, installed: [] };
-    const teamRoots = roots.filter((skill) => skill.source === 'team' && skill.team?.dir);
+    const teamRoots = roots.filter((skill) => wantedNames.includes(skill.name) && skill.source === 'team' && skill.team?.dir);
     const cacheCopy = async (skill: Skill): Promise<void> => {
       const dir = await materializeSkillToCache(skill).catch(() => null);
       if (!dir) return;
@@ -8011,8 +8019,11 @@ export class RunManager {
   ): Promise<string | null> {
     let systemPrompt: string | undefined;
     const rawPrompt = applyTemplate(step.prompt ?? '{{task}}', input.task);
-    // The selected skill, a leading `/name`, and their companions go where the agent looks (#1408).
-    const provisioned = await this.provisionRunSkills(runId, state, { stepSkill: step.skill, slash: leadingSlashSkillName(rawPrompt) });
+    // The selected skill, a leading `/name`, every skill the prompt names as `/name`, and their
+    // companions go where the agent looks (#1408, #1672).
+    const provisioned = await this.provisionRunSkills(runId, state, {
+      stepSkill: step.skill, slash: leadingSlashSkillName(rawPrompt), prompt: rawPrompt,
+    });
     for (const message of provisioned.notes) emit({ type: 'note', stepId: step.id, message });
     if (step.skill) {
       const skill = this.enabledSkills(state).find((s) => s.name === step.skill);

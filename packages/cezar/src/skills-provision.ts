@@ -9,8 +9,9 @@ import { excludeFromGit, landsInside, materializeSkillDir, TEAM_SKILL_AGENT_DIRS
 const execFileAsync = promisify(execFile);
 
 /**
- * Provision selected skills and heuristically discovered catalog companions in the run’s own
- * worktree. This is not a promise that every enabled skill is installed.
+ * Provision selected skills, the skills a step's prompt names as `/name`, and heuristically
+ * discovered catalog companions in the run’s own worktree. This is not a promise that every
+ * enabled skill is installed.
  */
 
 /** Bound on one closure: a skill that names the whole catalog must not install all of it. */
@@ -30,6 +31,16 @@ export function mentionsSkill(body: string, name: string): boolean {
     ? `(?<![A-Za-z0-9_.-])${escaped}(?![A-Za-z0-9_-])`
     : `(?:/${escaped}|\`${escaped}\`|"${escaped}"|'${escaped}'|\u201c${escaped}\u201d|\u2018${escaped}\u2019)(?![A-Za-z0-9_-])`;
   return new RegExp(pattern).test(body);
+}
+
+/**
+ * True when a human's `text` names `name` as a typed `/name`, at the start of a word and never
+ * inside a path (`a/name`, `~/name`, a URL). Stricter than `mentionsSkill`: a prompt is prose and
+ * paths, where a bare hyphenated word is not a request to run a skill (hearsay-tools/cezarion#1672).
+ */
+export function namesSkillCommand(text: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![A-Za-z0-9_.~/-])/${escaped}(?![A-Za-z0-9_-])`).test(text);
 }
 
 /**
