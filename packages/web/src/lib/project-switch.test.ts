@@ -197,3 +197,304 @@ describe('resolveProjectSwitch', () => {
     expect(client.getProjectRun).not.toHaveBeenCalled()
   })
 })
+
+/** The existence answer per entity kind, as a table (hearsay-tools/cezarion#1775). The exported
+ *  API shows only `false` (the project home) against everything else (the saved page), so a row
+ *  says which of the two a click lands on and which requests were made. */
+describe('resolveProjectSwitch: the answer for each entity kind', () => {
+  const HOME = '/p/other/'
+  const REPO = 'https://github.com/acme/widgets'
+  const withRepo = (pathname: string) =>
+    resolveProjectSwitch('other', saved(pathname), { ...ctx, repoBaseOf: () => REPO })
+  const landing = async (pathname: string, resolver: (pathname: string) => Promise<string> = (to) => resolveProjectSwitch('other', saved(to), ctx)) => {
+    const to = await resolver(pathname)
+    return to === HOME ? 'home' : to === pathname ? 'kept' : to
+  }
+  const signalOf = expect.objectContaining({ signal: expect.any(AbortSignal) })
+  const targetOf = expect.objectContaining({ projectId: 'other', signal: expect.any(AbortSignal) })
+
+  /** Failures that every existence request maps the same way: only a 404 proves absence. */
+  const FAILURES: [label: string, error: Error, landing: 'home' | 'kept'][] = [
+    ['404', apiError(404), 'home'],
+    ['500', apiError(500), 'kept'],
+    ['403', apiError(403), 'kept'],
+    ['a dead connection', apiError(0, 'offline'), 'kept'],
+    ['a 409 off the commit routes', apiError(409, 'fatal: bad object deadbeef'), 'kept'],
+  ]
+  /** Segments the item routes refuse before any item request: not a positive safe integer. */
+  const BAD_NUMBERS = ['0', '-1', '1.5', 'x', '99999999999999999999']
+
+  describe.each([
+    '/p/other/tasks/run-1',
+    '/p/other/tasks/run-1/changes',
+    '/p/other/tasks/run-1/files',
+    '/p/other/tasks/run-1/commits',
+  ])('task page %s', (pathname) => {
+    it('is kept while the run exists, and asks for nothing else', async () => {
+      vi.mocked(client.getProjectRun).mockResolvedValue({} as never)
+      expect(await landing(pathname)).toBe('kept')
+      expect(client.getProjectRun).toHaveBeenCalledWith('other', 'run-1', signalOf)
+      expect(client.getRunCommit).not.toHaveBeenCalled()
+      expect(client.getGithubItem).not.toHaveBeenCalled()
+    })
+
+    it.each(FAILURES)('answers a run lookup that fails with %s', async (_label, error, expected) => {
+      vi.mocked(client.getProjectRun).mockRejectedValue(error)
+      expect(await landing(pathname)).toBe(expected)
+    })
+  })
+
+  describe('task commit /tasks/:id/commits/:sha', () => {
+    const pathname = '/p/other/tasks/run-1/commits/abc'
+
+    it('asks for the run, then for the commit, in the target project', async () => {
+      vi.mocked(client.getProjectRun).mockResolvedValue({} as never)
+      vi.mocked(client.getRunCommit).mockResolvedValue({} as never)
+      expect(await landing(pathname)).toBe('kept')
+      expect(client.getRunCommit).toHaveBeenCalledWith('run-1', 'abc', targetOf)
+      expect(vi.mocked(client.getProjectRun).mock.invocationCallOrder[0]).toBeLessThan(
+        vi.mocked(client.getRunCommit).mock.invocationCallOrder[0] ?? 0,
+      )
+    })
+
+    it.each([
+      ['404', apiError(404), 'home'],
+      ['500', apiError(500), 'kept'],
+      ['a dead connection', apiError(0, 'offline'), 'kept'],
+    ] as [string, Error, 'home' | 'kept'][])('never asks for the commit when the run lookup fails with %s', async (_label, error, expected) => {
+      vi.mocked(client.getProjectRun).mockRejectedValue(error)
+      expect(await landing(pathname)).toBe(expected)
+      expect(client.getRunCommit).not.toHaveBeenCalled()
+    })
+
+    it.each([
+      ['404', apiError(404), 'home'],
+      ['500', apiError(500), 'kept'],
+      ['403', apiError(403), 'kept'],
+      ['a dead connection', apiError(0, 'offline'), 'kept'],
+    ] as [string, Error, 'home' | 'kept'][])('answers a commit lookup that fails with %s', async (_label, error, expected) => {
+      vi.mocked(client.getProjectRun).mockResolvedValue({} as never)
+      vi.mocked(client.getRunCommit).mockRejectedValue(error)
+      expect(await landing(pathname)).toBe(expected)
+    })
+  })
+
+  describe.each(['issue', 'pr'] as const)('task %s page', (kind) => {
+    const pathname = `/p/other/tasks/run-1/${kind}/7`
+    const otherKind = kind === 'issue' ? { prNumber: 7 } : { issueNumber: 7 }
+
+    beforeEach(() => {
+      vi.mocked(client.getProjectRun).mockResolvedValue((kind === 'issue' ? { issueNumber: 7 } : { prNumber: 7 }) as never)
+    })
+
+    it('keeps an item the task links and the forge has', async () => {
+      vi.mocked(client.getGithubItem).mockResolvedValue({ available: true, item: { number: 7 } } as never)
+      expect(await landing(pathname, withRepo)).toBe('kept')
+      expect(client.getGithubItem).toHaveBeenCalledWith(kind, 7, {}, targetOf)
+    })
+
+    it('goes home when the forge has no such item', async () => {
+      vi.mocked(client.getGithubItem).mockResolvedValue({ available: true, item: null } as never)
+      expect(await landing(pathname, withRepo)).toBe('home')
+    })
+
+    it('keeps the page while the forge is unavailable', async () => {
+      vi.mocked(client.getGithubItem).mockResolvedValue({ available: false, reason: 'no gh' } as never)
+      expect(await landing(pathname, withRepo)).toBe('kept')
+    })
+
+    it.each(FAILURES)('answers an item request that fails with %s', async (_label, error, expected) => {
+      vi.mocked(client.getGithubItem).mockRejectedValue(error)
+      expect(await landing(pathname, withRepo)).toBe(expected)
+    })
+
+    it.each([
+      ['404', apiError(404), 'home'],
+      ['500', apiError(500), 'kept'],
+    ] as [string, Error, 'home' | 'kept'][])('never asks for the item when the run lookup fails with %s', async (_label, error, expected) => {
+      vi.mocked(client.getProjectRun).mockRejectedValue(error)
+      expect(await landing(pathname, withRepo)).toBe(expected)
+      expect(client.getGithubItem).not.toHaveBeenCalled()
+    })
+
+    it.each(BAD_NUMBERS)('goes home for the number %s, after the run lookup and with no item request', async (bad) => {
+      expect(await landing(`/p/other/tasks/run-1/${kind}/${bad}`, withRepo)).toBe('home')
+      expect(client.getProjectRun).toHaveBeenCalledTimes(1)
+      expect(client.getGithubItem).not.toHaveBeenCalled()
+    })
+
+    it('goes home for a number the task does not link, when the repository is known', async () => {
+      expect(await landing(`/p/other/tasks/run-1/${kind}/8`, withRepo)).toBe('home')
+      expect(client.getGithubItem).not.toHaveBeenCalled()
+    })
+
+    it('goes home for a number the task links as the other kind', async () => {
+      vi.mocked(client.getProjectRun).mockResolvedValue(otherKind as never)
+      expect(await landing(pathname, withRepo)).toBe('home')
+      expect(client.getGithubItem).not.toHaveBeenCalled()
+    })
+
+    it('keeps an unlinked number when the repository is unknown', async () => {
+      expect(await landing(`/p/other/tasks/run-1/${kind}/8`)).toBe('kept')
+      expect(client.getGithubItem).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('repository commit /git/commits/:sha', () => {
+    const pathname = '/p/other/git/commits/abc'
+
+    it('keeps a commit the repository has', async () => {
+      vi.mocked(client.getRepoCommit).mockResolvedValue({} as never)
+      expect(await landing(pathname)).toBe('kept')
+      expect(client.getRepoCommit).toHaveBeenCalledWith('abc', targetOf)
+    })
+
+    it.each([
+      ['404', apiError(404), 'home'],
+      ['500', apiError(500), 'kept'],
+      ['403', apiError(403), 'kept'],
+      ['a dead connection', apiError(0, 'offline'), 'kept'],
+    ] as [string, Error, 'home' | 'kept'][])('answers a lookup that fails with %s', async (_label, error, expected) => {
+      vi.mocked(client.getRepoCommit).mockRejectedValue(error)
+      expect(await landing(pathname)).toBe(expected)
+    })
+  })
+
+  describe.each([
+    ['/p/other/github/issues/4', 'issue', 4],
+    ['/p/other/github/prs/9', 'pr', 9],
+    ['/p/other/github/prs/9/changes', 'pr', 9],
+  ] as [string, 'issue' | 'pr', number][])('GitHub item %s', (pathname, kind, number) => {
+    it('keeps an item the forge has', async () => {
+      vi.mocked(client.getGithubItem).mockResolvedValue({ available: true, item: { number } } as never)
+      expect(await landing(pathname)).toBe('kept')
+      expect(client.getGithubItem).toHaveBeenCalledWith(kind, number, {}, targetOf)
+    })
+
+    it('goes home when the forge has no such item', async () => {
+      vi.mocked(client.getGithubItem).mockResolvedValue({ available: true, item: null } as never)
+      expect(await landing(pathname)).toBe('home')
+    })
+
+    it('keeps the page while the forge is unavailable', async () => {
+      vi.mocked(client.getGithubItem).mockResolvedValue({ available: false, reason: 'no gh' } as never)
+      expect(await landing(pathname)).toBe('kept')
+    })
+
+    it.each(FAILURES)('answers an item request that fails with %s', async (_label, error, expected) => {
+      vi.mocked(client.getGithubItem).mockRejectedValue(error)
+      expect(await landing(pathname)).toBe(expected)
+    })
+
+    it.each(BAD_NUMBERS)('goes home for the number %s with no request', async (bad) => {
+      expect(await landing(pathname.replace(`/${number}`, `/${bad}`))).toBe('home')
+      expect(client.getGithubItem).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('workflow /workflows/:name', () => {
+    const pathname = '/p/other/workflows/deploy'
+
+    it('keeps a listed workflow even when the catalog reports unreadable files', async () => {
+      vi.mocked(client.getWorkflows).mockResolvedValue({
+        workflows: [{ name: 'deploy' }],
+        issues: [{ path: '.ai/cezar/workflows/other.yaml', message: 'EACCES' }],
+      } as never)
+      expect(await landing(pathname)).toBe('kept')
+      expect(client.getWorkflows).toHaveBeenCalledWith(targetOf)
+    })
+
+    it.each(FAILURES)('answers a catalog request that fails with %s', async (_label, error, expected) => {
+      vi.mocked(client.getWorkflows).mockRejectedValue(error)
+      expect(await landing(pathname)).toBe(expected)
+    })
+  })
+
+  describe.each(['/p/other/automations/a1', '/p/other/automations/a1/log'])('automation %s', (pathname) => {
+    it('keeps a listed automation', async () => {
+      vi.mocked(client.getAutomations).mockResolvedValue({ available: true, automations: [{ id: 'a1' }] } as never)
+      expect(await landing(pathname)).toBe('kept')
+      expect(client.getAutomations).toHaveBeenCalledWith(targetOf)
+    })
+
+    it('goes home when the list lacks it', async () => {
+      vi.mocked(client.getAutomations).mockResolvedValue({ available: true, automations: [{ id: 'a2' }] } as never)
+      expect(await landing(pathname)).toBe('home')
+    })
+
+    it('keeps the page while automations are unavailable', async () => {
+      vi.mocked(client.getAutomations).mockResolvedValue({ available: false, automations: [] } as never)
+      expect(await landing(pathname)).toBe('kept')
+    })
+
+    it.each(FAILURES)('answers a list request that fails with %s', async (_label, error, expected) => {
+      vi.mocked(client.getAutomations).mockRejectedValue(error)
+      expect(await landing(pathname)).toBe(expected)
+    })
+  })
+
+  it('keeps a routed page that no existence check covers, with no request', async () => {
+    // `/compare/:groupId` is the retired page's redirect: it has a param, so it is verified, and
+    // nothing in the checker table claims it.
+    expect(await landing('/p/other/compare/g1')).toBe('kept')
+    for (const request of [client.getProjectRun, client.getRunCommit, client.getRepoCommit, client.getGithubItem, client.getWorkflows, client.getAutomations]) {
+      expect(request).not.toHaveBeenCalled()
+    }
+  })
+
+  describe('the abort signal', () => {
+    const requestSignals = () => [
+      ...vi.mocked(client.getProjectRun).mock.calls.map(([, , opts]) => opts?.signal),
+      ...vi.mocked(client.getRunCommit).mock.calls.map(([, , opts]) => opts?.signal),
+      ...vi.mocked(client.getRepoCommit).mock.calls.map(([, opts]) => opts?.signal),
+      ...vi.mocked(client.getGithubItem).mock.calls.map(([, , , opts]) => opts?.signal),
+      ...vi.mocked(client.getWorkflows).mock.calls.map(([opts]) => opts?.signal),
+      ...vi.mocked(client.getAutomations).mock.calls.map(([opts]) => opts?.signal),
+    ]
+
+    it.each([
+      ['/p/other/tasks/run-1', 1],
+      ['/p/other/tasks/run-1/commits/abc', 2],
+      ['/p/other/tasks/run-1/issue/7', 2],
+      ['/p/other/tasks/run-1/pr/7', 2],
+      ['/p/other/git/commits/abc', 1],
+      ['/p/other/github/issues/4', 1],
+      ['/p/other/github/prs/9', 1],
+      ['/p/other/workflows/deploy', 1],
+      ['/p/other/automations/a1', 1],
+    ] as [string, number][])('reaches every request for %s', async (pathname, requests) => {
+      vi.mocked(client.getProjectRun).mockResolvedValue({ prNumber: 7, issueNumber: 7 } as never)
+      vi.mocked(client.getRunCommit).mockResolvedValue({} as never)
+      vi.mocked(client.getRepoCommit).mockResolvedValue({} as never)
+      vi.mocked(client.getGithubItem).mockResolvedValue({ available: true, item: { number: 1 } } as never)
+      vi.mocked(client.getWorkflows).mockResolvedValue({ workflows: [{ name: 'deploy' }], issues: [] } as never)
+      vi.mocked(client.getAutomations).mockResolvedValue({ available: true, automations: [{ id: 'a1' }] } as never)
+      expect(await landing(pathname, withRepo)).toBe('kept')
+      const signals = requestSignals()
+      expect(signals).toHaveLength(requests)
+      expect(signals[0]).toBeInstanceOf(AbortSignal)
+      for (const signal of signals) expect(signal).toBe(signals[0])
+    })
+
+    it('aborts the pending request at the check timeout and keeps the page', async () => {
+      // Fake timers: the 2 500 ms check timeout is moved past, never waited for.
+      vi.useFakeTimers()
+      try {
+        vi.mocked(client.getProjectRun).mockResolvedValue({} as never)
+        vi.mocked(client.getRunCommit).mockImplementation(
+          (_id, _sha, opts) =>
+            new Promise((_resolve, reject) => {
+              const abort = () => reject(new DOMException('aborted', 'AbortError'))
+              if (opts?.signal?.aborted) abort()
+              else opts?.signal?.addEventListener('abort', abort)
+            }),
+        )
+        const pending = landing('/p/other/tasks/run-1/commits/abc')
+        await vi.advanceTimersByTimeAsync(2_500)
+        await expect(pending).resolves.toBe('kept')
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+  })
+})
