@@ -178,6 +178,13 @@ test('a here-document closes only at its exact delimiter line', () => {
   assert.deepEqual(cites('ci.yml', workflow), ['7:145:comment', '12:147:comment']);
 });
 
+test('`<<` in shell arithmetic is a shift, and opens no here-document', () => {
+  const shell = ['mask=$((1 << WIDTH))', '# see (#164)', '(( n <<= SHIFT ))', '# see (#165)'].join('\n');
+  assert.deepEqual(cites('up.sh', shell), ['2:164:comment', '4:165:comment']);
+  // An unclosed `((` is no arithmetic, so the rest of the line is read as usual.
+  assert.deepEqual(cites('up.sh', 'x=((a # see (#170)\n'), ['1:170:comment']);
+});
+
 test('reads Markdown prose but not code fences, inline code or qualified links', () => {
   const text = [
     '# Notes',

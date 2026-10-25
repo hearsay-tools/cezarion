@@ -109,11 +109,23 @@ function hereDocEnd(text, from, end, doc, indent) {
   return end;
 }
 
-/** Steps over what shell reads as data at `i`: an escaped character, a here-document
- *  operator, and at the end of its command line each pending here-document body. Returns
- *  `i` when the character there is none of them. */
+/** The `)` that closes an arithmetic `$((…))` or `((…))` opening at `i`, where `<<` is a
+ *  shift; `i` when none opens there. */
+function arithmeticEnd(text, i, end) {
+  if (!text.startsWith('((', i)) return i;
+  for (let j = i + 2, depth = 2; j < end; j++) {
+    if (text[j] === '(') depth++;
+    else if (text[j] === ')' && --depth === 0) return j;
+  }
+  return i;
+}
+
+/** Steps over what shell reads as data at `i`: an escaped character, an arithmetic
+ *  expression, a here-document operator, and at the end of its command line each pending
+ *  here-document body. Returns `i` when the character there is none of them. */
 function shellDataEnd(text, i, end, here) {
   if (text[i] === '\\') return i + 1;
+  if (text[i] === '(') return arithmeticEnd(text, i, end);
   if (text[i] === '\n') return here.pending.splice(0).reduce((at, doc) => hereDocEnd(text, at + 1, end, doc, here.indent), i);
   HERE_DOC.lastIndex = i;
   const match = text[i] === '<' ? HERE_DOC.exec(text) : null;
