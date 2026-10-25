@@ -101,7 +101,6 @@ import {
   MODEL_DISCOVERY_RUNNERS,
   modelDiscoveryRunnerSchema,
   openProjectInSchema,
-  runnerDiscoversModels,
 } from '@open-mercato/cezar-contract/workspace';
 import {
   attachmentInputSchema,
@@ -132,13 +131,10 @@ import { detectEnvironment } from '../core/backend-detect.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import type { ContentBlock } from '../core/agent-runner.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
-import { hostModelCatalogAdapters } from '../core/host-model-catalog.ts';
 import {
   PROVIDER_IDS,
   ProviderAuthService,
-  providerAuthChecksDisabled,
   type ProviderId,
-  type ProviderStatusResponse,
 } from '../core/provider-auth.ts';
 import { applyProviderEnablement } from '../core/provider-availability.ts';
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
@@ -273,7 +269,6 @@ import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
 import { parseRemote, resolveForge, forgeWebRoot, type ForgeAvailability } from './forge/index.ts';
 import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubCommentCounts, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
-import { ensureLaunchKey } from './launch-key.ts';
 import { CockpitAlreadyRunningError, type CockpitOwnership } from './cockpit-ownership.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
@@ -284,8 +279,14 @@ import {
   providerForActiveRun,
   providerForExistingRun,
   providersRequiredByWorkflow,
-  unavailableProviderMessage,
 } from './provider-action-gate.ts';
+import {
+  attachProjectWebhooks,
+  createBootContext,
+  createProviderStatus,
+  resolveServerDeps,
+  watchProviderRuntimeAuth,
+} from './server-deps.ts';
 import {
   ASSET_CACHE_CONTROL,
   BUILD_HINT_HTML,
@@ -1086,51 +1087,11 @@ export function createApp(deps: ServerDeps) {
   // turns into a compile error instead.
   const bootRoot = deps.repoRoot;
   const bootDataDir = join(bootRoot, '.ai/cezar');
-  // One adapter per contract-advertised runner; the map is typed over `modelDiscoveryRunnerSchema`
-  // so a runner added to the contract without an adapter fails typecheck (AGENT_PROTOCOL.md §10).
-  const modelCatalog = deps.modelCatalog ?? new RunnerModelCatalog({ adapters: hostModelCatalogAdapters(bootRoot) });
-  const invalidateHostModels = (provider: ProviderId): void => {
-    if (runnerDiscoversModels(provider)) modelCatalog.invalidate(provider);
-  };
-  const providerAuth = deps.providerAuth ?? new ProviderAuthService();
-  const workspaceConfig = deps.workspaceConfig ?? {
-    load: loadWorkspaceConfig,
-    mergeWrite: mergeWriteWorkspaceConfig,
-  };
-  const providerStatus = async (options?: { refresh?: boolean }): Promise<ProviderStatusResponse> => {
-    if (providerAuthChecksDisabled()) {
-      return applyProviderEnablement(
-        await providerAuth.status(options?.refresh ? { refresh: true } : undefined),
-        [],
-      );
-    }
-    const [discovered, workspace] = await Promise.all([
-      providerAuth.status(options?.refresh ? { refresh: true } : undefined),
-      workspaceConfig.load(),
-    ]);
-    return applyProviderEnablement(discovered, workspace.disabledProviders);
-  };
-  /**
-   * Verify cached provider unavailability before refusing a start. Settings-disabled providers
-   * need no probe. Runtime incidents remain authoritative until an explicit retry or matching
-   * native verification clears them.
-   */
-  const providerActionError = async (
-    required: readonly ProviderId[],
-  ): Promise<string | null> => {
-    const known = await providerStatus();
-    const message = unavailableProviderMessage(required, known);
-    if (message === null) return null;
-    // A DISABLED provider is a settings fact, not a probe result — re-probing it learns nothing and
-    // would spawn a CLI to re-read something the user typed.
-    const disabled = required.some((provider) =>
-      known.providers.find((row) => row.provider === provider)?.enabled === false);
-    if (disabled) return message;
-    return unavailableProviderMessage(required, await providerStatus({ refresh: true }));
-  };
-  const openTerminal = deps.openTerminal ?? openInTerminal;
-  const openFile = deps.openFile ?? openFileInDefaultApp;
-  const openApp = deps.openApp ?? openInApp;
+  // The host-wide services and the provider closures built on them live in `./server-deps.ts`.
+  const { modelCatalog, providerAuth, workspaceConfig, openTerminal, openFile, openApp } =
+    resolveServerDeps(deps, bootRoot);
+  const { providerStatus, providerActionError, invalidateHostModels } =
+    createProviderStatus({ modelCatalog, providerAuth, workspaceConfig });
 
   // ---- workspace boot-project identity (multi-project spec) ----------------
   // The boot flow (`initWorkspace` in src/index.ts) registers the boot repo
@@ -1192,21 +1153,8 @@ export function createApp(deps: ServerDeps) {
   // SSE subscription (and torn down with the last), nothing to start here.
 
   // ---- project contexts (multi-project spec, step 2.2) ---------------------
-  // The boot project's context is SEEDED from the deps the caller already
-  // built (src/index.ts `serveCommand` did the recover/prune/launch-key work
-  // at startup — observable boot behavior unchanged); it never enters the
-  // lazy map, so its `.ai/cezar` state is never double-opened. `id` starts as
-  // the reserved alias when registration was suppressed — handlers never read
-  // it; API payloads name the boot project via `resolveBootProject` instead.
-  const bootContext: ProjectContext = {
-    id: bootProjectId ?? 'default',
-    root: bootRoot,
-    dataDir: bootDataDir,
-    store: deps.store,
-    manager: deps.manager,
-    automationStore: deps.automationStore ?? AutomationStore.open(bootDataDir),
-    launchKey: ensureLaunchKey(bootDataDir), // bookmarklet auto-start secret (spec 011)
-  };
+  // The boot project's context is SEEDED from the deps the caller already built (`createBootContext`).
+  const bootContext: ProjectContext = createBootContext(deps, bootRoot, bootDataDir);
   // The task webhook (#589): attached before any recovery — the boot store by `index.ts`, lazy
   // projects through `prepareManager` below. Attaching is idempotent, so the calls here only
   // cover an app built without boot's wiring (tests, embedded servers).
@@ -1253,20 +1201,9 @@ export function createApp(deps: ServerDeps) {
       workspaceEvents.emit('provider-status', status);
     });
 
-  providerRuntimeAuth.watch(bootContext.store);
-  for (const id of contexts.ids()) {
-    const ctx = contexts.peek(id);
-    if (ctx) providerRuntimeAuth.watch(ctx.store);
-  }
-  contexts.onStoreCreated((store) => providerRuntimeAuth.watch(store));
-  contexts.onContextBuilt((ctx) => providerRuntimeAuth.watch(ctx.store));
+  watchProviderRuntimeAuth(providerRuntimeAuth, bootContext, contexts);
 
-  // Injected contexts (tests) skip `prepareManager`; attach those when they are built.
-  for (const id of contexts.ids()) {
-    const ctx = contexts.peek(id);
-    if (ctx) taskWebhooks.attach(ctx);
-  }
-  contexts.onContextBuilt((ctx) => taskWebhooks.attach(ctx));
+  attachProjectWebhooks(taskWebhooks, contexts);
   // #667: recovery ran inside the build, before any workspace stream attached to this project's
   // store, so the runs it resumed sent no `run` event. Until a cockpit refetches, its cross-project
   // index keeps the cold read's answer: every run the restart interrupted, shown as failed.
