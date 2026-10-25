@@ -16,7 +16,7 @@ import type { ThreadPreviewServer } from '../thread-state'
  */
 export interface PreviewOpenRequest {
   /** The registered server to show. Absent opens the pane on its empty state to pick one. */
-  port?: number
+  port?: number | undefined
   /** The owner pressed Run and open or Start again: the pane may send `run` for `port`. */
   run?: boolean
 }
@@ -27,7 +27,7 @@ export interface PreviewPane {
   /** The pane is streaming frames right now (the toggle's green dot). */
   live: boolean
   /** The server the pane is showing, when it is showing one. */
-  port?: number
+  port?: number | undefined
   /** The task's worktree is gone: every card reads 5.15 "worktree removed" and offers nothing. */
   worktreeRemoved?: boolean
   openPane(request: PreviewOpenRequest): void

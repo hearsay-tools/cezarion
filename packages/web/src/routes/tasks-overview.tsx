@@ -85,7 +85,7 @@ export type ArchivedPages = {
   failed?: boolean
   /** Whether the unfiltered archive has an older page, whatever text these pages answer; absent
    *  while no unfiltered page has loaded. */
-  plainHasMore?: boolean
+  plainHasMore?: boolean | undefined
 }
 
 /**
@@ -144,26 +144,26 @@ export function TasksOverview({
   /** Pin/unpin one task (#935). Pinned rows sort to the top of the table — `sortRuns` does that
    *  for every surface at once — so the row's own control is also the only thing on this page
    *  that explains why one is up there. */
-  onTogglePin?: (run: RunSummary, pinned: boolean) => void
+  onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
   /** Injected so the ages are not racing the clock in tests. */
   now?: number
   /** Presentation capability; defaults visible for older health responses and direct renders. */
   showTokens?: boolean
   showCost?: boolean
   /** The current registered project; omitted until the registry is available. */
-  projectName?: string
+  projectName?: string | undefined
   /** Workspace-global desktop column choices; absent ids use registry defaults. */
   expandedColumns?: NormalizedExpandedColumns
   onToggleColumn?: (id: TaskColumnId) => void
   /** Prevent a shallow write before the authoritative workspace state can preserve siblings. */
   columnsPending?: boolean
-  error?: string
-  onRetry?: () => void
+  error?: string | undefined
+  onRetry?: (() => void) | undefined
   /** Archived runs older than the list's window (#864), from `GET /run-summaries/archived`: for
    *  the search text when there is one, otherwise the newest pages. */
-  archivedPages?: ArchivedPages
+  archivedPages?: ArchivedPages | undefined
   /** Every archived task, when the server has counted them; until then a full window reads `200+`. */
-  archivedTotal?: number
+  archivedTotal?: number | undefined
   /** The search text as typed, so the route can ask the server for archived matches too. */
   onArchivedSearch?: (needle: string) => void
   /** All / Direct tasks / Automations (hearsay-tools/cezarion#1616), held by the route in the URL.
@@ -319,7 +319,7 @@ function useUrlQuery(urlQuery: string, onQueryChange: TasksQueryWriter | undefin
   return [query, setQuery] as const
 }
 
-function TasksHeading({ projectName, detailedTable }: { projectName?: string; detailedTable: boolean }) {
+function TasksHeading({ projectName, detailedTable }: { projectName?: string | undefined; detailedTable: boolean }) {
   return (
     <div className="flex flex-col gap-2"><h1 className="text-[30px] font-semibold tracking-tight">Project tasks</h1><p className="text-[13px] text-muted-foreground">{projectName ? `${projectName} · ` : ''}{detailedTable ? 'Every resource column shown. Fold columns without losing the saved view.' : 'Review runs, pull requests and resource usage.'}</p></div>
   )
@@ -586,7 +586,7 @@ function ProjectTaskResults({ view, query, origin, onShowAll, caption, captionOn
   )
 }
 
-function TasksLoading({ error, onRetry }: { error?: string; onRetry?: () => void }) {
+function TasksLoading({ error, onRetry }: { error?: string | undefined; onRetry?: (() => void) | undefined }) {
   return error ? (
     <div role="alert" className="rounded-xl border border-border bg-card p-6"><h2 className="text-lg">Could not load tasks</h2><p className="mt-2 text-sm text-muted-foreground">{error}</p><Button variant="outline" className="mt-4" onClick={onRetry}>Retry</Button></div>
   ) : (
@@ -673,7 +673,7 @@ function TasksEmptyState({ view, query, origin = 'all', onShowAll }: { view: Lis
 function SummaryTasksTable({ rows, onRename, onTogglePin, now, showTokens, showCost, automationName }: {
   rows: readonly GroupedTask[]
   onRename: (id: string, title: string) => void
-  onTogglePin?: (run: RunSummary, pinned: boolean) => void
+  onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
   now: number
   showTokens: boolean
   showCost: boolean
@@ -745,7 +745,7 @@ function GroupedTasks({
   onToggleColumn: (id: TaskColumnId) => void
   columnsPending: boolean
   onRename: (id: string, title: string) => void
-  onTogglePin?: (run: RunSummary, pinned: boolean) => void
+  onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
   now: number
   showTokens: boolean
   showCost: boolean
@@ -925,7 +925,7 @@ function TaskColumnHeader({
   )
 }
 
-function TaskColumnIconView({ icon }: { icon?: TaskColumnIcon }) {
+function TaskColumnIconView({ icon }: { icon?: TaskColumnIcon | undefined }) {
   const className = 'size-3.5'
   switch (icon) {
     case 'workflow':
@@ -974,7 +974,7 @@ function TableRow({
   run: RunSummary
   queuePosition: number | null
   onRename: (id: string, title: string) => void
-  onTogglePin?: (run: RunSummary, pinned: boolean) => void
+  onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
   now: number
   columns: readonly TaskColumnDefinition[]
   expandedColumns: NormalizedExpandedColumns
@@ -1066,7 +1066,7 @@ function TaskTableCell({
   cost: string
   to: string
   onRename: (id: string, title: string) => void
-  onTogglePin?: (run: RunSummary, pinned: boolean) => void
+  onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
   now: number
   automationName: (automationId: string) => string | undefined
 }) {
@@ -1197,7 +1197,7 @@ function TitleCell({
   run: RunSummary
   to: string
   onRename: (id: string, title: string) => void
-  onTogglePin?: (run: RunSummary, pinned: boolean) => void
+  onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
 }) {
   const title = runTitle(run)
   const editor = useTitleEditor(title, (next) => onRename(run.id, next))
@@ -1309,7 +1309,7 @@ function UsageTd({ column, cell }: { column: 'cpu' | 'memory'; cell: UsageCell }
   )
 }
 
-function BoundedMetric({ text, accessibleText }: { text: string; accessibleText?: string }) {
+function BoundedMetric({ text, accessibleText }: { text: string; accessibleText?: string | undefined }) {
   return (
     <span
       data-slot="bounded-metric"
@@ -1336,7 +1336,7 @@ function TaskCard({
   now: number
   showTokens: boolean
   showCost: boolean
-  onTogglePin?: (run: RunSummary, pinned: boolean) => void
+  onTogglePin?: ((run: RunSummary, pinned: boolean) => void) | undefined
   automationName: (automationId: string) => string | undefined
 }) {
   const navigate = useNavigate()

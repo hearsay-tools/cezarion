@@ -30,7 +30,7 @@ const actions = (): PreviewStateActions => ({
   copy: vi.fn(),
 })
 
-function show(state: PreviewStageState, a: PreviewStateActions = actions(), extra: { url?: string; worktree?: string } = {}) {
+function show(state: PreviewStageState, a: PreviewStateActions = actions(), extra: { url?: string | undefined; worktree?: string | undefined } = {}) {
   render(<PreviewStates state={state} actions={a} {...extra} />)
   return a
 }

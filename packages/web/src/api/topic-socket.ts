@@ -115,7 +115,7 @@ export function createTopicSocket(url?: string): TopicSocket {
         return
       }
       if (typeof frame !== 'object' || frame === null) return
-      const { type, topic, data } = frame as { type?: unknown; topic?: unknown; data?: unknown }
+      const { type, topic, data } = frame as { type?: unknown; topic?: unknown; data?: unknown | undefined }
       if (type !== 'event' || typeof topic !== 'string') return
       const held = listeners.get(topic)
       if (!held) return // an unsubscribe raced an in-flight event — drop it

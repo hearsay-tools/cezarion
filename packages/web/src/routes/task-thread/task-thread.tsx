@@ -185,11 +185,11 @@ export function ThreadView({
   run: ApiRun
   thread: ThreadState
   currentThread?: ThreadState
-  history?: RunHistoryState
+  history?: RunHistoryState | undefined
   /** Passed straight through to the header's "Mark unread" (#775) so the route can suppress its
    *  auto-mark-read effect. Optional: every test that drives this view with a fixture, and the
    *  header's other three tabs, have no such effect to suppress. */
-  onMarkedUnread?: (runId: string) => void
+  onMarkedUnread?: ((runId: string) => void) | undefined
 }) {
   const projectId = useActiveProjectId()
   const runs = useRuns()
@@ -502,7 +502,7 @@ type ThreadTranscriptProps = {
   recipientBackends: ReturnType<typeof recipientBackendsFromRuns>
   run: ApiRun
   thread: ThreadState
-  history?: RunHistoryState
+  history?: RunHistoryState | undefined
   footer: ReturnType<typeof threadFooter>
   issueUrl: string | undefined
   scroll: ThreadScrollControls
@@ -795,7 +795,7 @@ function HistoryBoundary({
 }: {
   hasOlder: boolean
   loading: boolean
-  error?: string
+  error?: string | undefined
   fallback: boolean
   retainedPages: number
   onLoad: () => void

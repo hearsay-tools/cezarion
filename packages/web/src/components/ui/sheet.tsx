@@ -52,9 +52,9 @@ function SheetContent({
   overlayClassName,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
-  side?: "top" | "right" | "bottom" | "left"
+  side?: "top" | "right" | "bottom" | "left" | undefined
   showCloseButton?: boolean
-  overlayClassName?: string
+  overlayClassName?: string | undefined
 }) {
   return (
     <SheetPortal>

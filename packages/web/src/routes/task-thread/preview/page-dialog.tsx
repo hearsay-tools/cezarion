@@ -9,7 +9,7 @@ export function PageDialog({
   onResult,
 }: {
   dialog: Extract<PreviewServerMessage, { t: 'dialog' }>
-  onResult: (result: { accept: boolean; text?: string }) => void
+  onResult: (result: { accept: boolean; text?: string | undefined }) => void
 }) {
   const [text, setText] = useState(dialog.defaultPrompt ?? '')
   const leaving = dialog.type === 'beforeunload'

@@ -46,7 +46,7 @@ function run(over: Partial<RunRecord> = {}): RunRecord {
 
 /** A Notification stand-in: records constructions, throws never. */
 function stubNotification(permission: NotificationPermission = 'granted') {
-  const constructed: Array<{ title: string; options?: NotificationOptions }> = []
+  const constructed: Array<{ title: string; options?: NotificationOptions | undefined }> = []
   function FakeNotification(this: unknown, title: string, options?: NotificationOptions) {
     constructed.push({ title, options })
   }

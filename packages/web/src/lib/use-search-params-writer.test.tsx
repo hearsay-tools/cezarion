@@ -13,7 +13,7 @@ function set(key: string, value: string | null): SearchParamsUpdate {
 }
 
 function renderWriter(initial = '/p/x/') {
-  const handle: { write?: (update: SearchParamsUpdate) => void; search?: string; params?: string; key?: string } = {}
+  const handle: { write?: (update: SearchParamsUpdate) => void; search?: string | undefined; params?: string; key?: string } = {}
   function Probe() {
     const [params, write] = useSearchParamsWriter()
     handle.write = write

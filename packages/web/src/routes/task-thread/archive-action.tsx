@@ -89,7 +89,7 @@ export function ArchiveConfirmDialog({
  * does. `outline` rather than a CTA on purpose: filing a finished task away is housekeeping, and
  * the gold in this row belongs to the verb that moves the task forward.
  */
-export function ArchiveButton({ run, className, compactOnMobile = false }: { run: ApiRun; className?: string; compactOnMobile?: boolean }) {
+export function ArchiveButton({ run, className, compactOnMobile = false }: { run: ApiRun; className?: string | undefined; compactOnMobile?: boolean }) {
   const [confirming, setConfirming] = useState(false)
   const archive = useArchiveRun(run.id)
   const label = archiveActionLabel(run)

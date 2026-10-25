@@ -71,7 +71,7 @@ it('persists column choices, filters projects, and expands mobile resources thro
   browser.click('[data-column-toggle="branch"]')
   browser.press('Escape')
   const state = await pollFor(async signal => {
-    const state = await pollJson<{ taskTable?: { expandedColumns?: { branch?: boolean } } }>(`${base}/api/v1/workspace/ui-state`, signal)
+    const state = await pollJson<{ taskTable?: { expandedColumns?: { branch?: boolean | undefined } } }>(`${base}/api/v1/workspace/ui-state`, signal)
     return state.taskTable?.expandedColumns?.branch === true ? state : undefined
   }, () => 'workspace UI state never persisted expanded branch column', { timeoutMs: 10_000 })
   expect(state.taskTable?.expandedColumns?.branch).toBe(true)

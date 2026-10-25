@@ -24,7 +24,7 @@ export function ZoomableImage({
 }: {
   src: string
   alt?: string
-  className?: string
+  className?: string | undefined
 } & Omit<ImgHTMLAttributes<HTMLImageElement>, 'src' | 'alt' | 'className' | 'onClick'>) {
   const [open, setOpen] = useState(false)
   const src = resolveApiUrl(rawSrc)

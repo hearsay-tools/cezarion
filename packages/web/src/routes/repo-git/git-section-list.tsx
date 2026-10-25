@@ -46,7 +46,7 @@ export function GitSectionList({ branch, counts, variant, active, onNavigate }: 
   counts: Record<GitListSection, string | null>
   variant: 'sidebar' | 'screen'
   active?: GitSection | null
-  onNavigate?: () => void
+  onNavigate?: (() => void) | undefined
 }) {
   const screen = variant === 'screen'
   return (

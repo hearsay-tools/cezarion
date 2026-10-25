@@ -58,8 +58,8 @@ export function ActivityRow({
   aside?: ReactNode
   open: boolean
   /** Absent: the row has nothing to disclose and renders as a plain, non-interactive line. */
-  onToggle?: () => void
-  className?: string
+  onToggle?: (() => void) | undefined
+  className?: string | undefined
   children?: ReactNode
 }) {
   const head = (

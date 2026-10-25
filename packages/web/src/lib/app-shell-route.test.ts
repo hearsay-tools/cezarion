@@ -4,7 +4,7 @@ import { shellRoute } from './app-shell-route'
 
 type Row = {
   pathname: string
-  search?: string
+  search?: string | undefined
   keyboardOpen?: boolean
   activeTo: string | null
   label: string | null

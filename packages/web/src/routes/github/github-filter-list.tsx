@@ -49,7 +49,7 @@ export function GithubFilterList({ model, variant, activeId, onNavigate }: {
   model: Model
   variant: 'sidebar' | 'screen'
   activeId?: GithubRowId | null
-  onNavigate?: () => void
+  onNavigate?: (() => void) | undefined
 }) {
   const screen = variant === 'screen'
   const groups = [

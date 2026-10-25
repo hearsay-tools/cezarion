@@ -20,7 +20,7 @@ let requests: Array<{ method: string; url: string; body?: unknown }> = []
 
 /** Only the two routes this pane talks to answer — the open-target list and the launch itself.
  *  Everything else the routes fetch stays honestly pending. */
-function serve(targets: Array<{ id: string; label: string; icon?: string }> = OPEN_TARGETS) {
+function serve(targets: Array<{ id: string; label: string; icon?: string | undefined }> = OPEN_TARGETS) {
   requests = []
   vi.stubGlobal(
     'fetch',

@@ -67,7 +67,7 @@ export function DefaultAgentPicker({
   /** The account currently in force for a runner, or null for the discovered one. */
   accountFor: (runner: Runner) => string | null
   providerStatus: {
-    data?: ProviderStatusResponse
+    data?: ProviderStatusResponse | undefined
     isPending: boolean
     isError: boolean
   }

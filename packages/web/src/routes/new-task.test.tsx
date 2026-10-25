@@ -233,7 +233,7 @@ function serve(overrides: {
   skills?: Skill[]
   workflows?: WorkflowsResponse
   /** `GET /api/v1/repo` — a payload, or a handler for a delayed answer. */
-  repo?: RepoResponse | (() => Promise<Response>)
+  repo?: RepoResponse | (() => Promise<Response>) | undefined
   uiState?: Record<string, unknown>
   /** Non-2xx `GET /api/v1/ui-state` answers (the query-errored path: `data` stays undefined). */
   uiStateStatus?: number
@@ -598,7 +598,7 @@ describe('picker data flows', () => {
     fireEvent.change(textarea(), { target: { value: 'use supported effort only' } })
     await startTask()
     expect(postedBody()).toMatchObject({ runner: 'codex', model: 'gpt-lean' })
-    expect((postedBody() as { effort?: string }).effort).toBeUndefined()
+    expect((postedBody() as { effort?: string | undefined }).effort).toBeUndefined()
   })
 
   it('shows the runner pill with >1 backend, and switching runner swaps the model presets', async () => {

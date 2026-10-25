@@ -46,7 +46,7 @@ function serve({
   retry = status,
   retryCode = 200,
 }: {
-  status?: unknown
+  status?: unknown | undefined
   refreshStatus?: unknown
   statusCode?: number
   refreshStatusCode?: number

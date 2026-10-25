@@ -1,3 +1,4 @@
+import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import { CheckIcon, FolderOpenIcon, LayersIcon, PlusIcon } from '@/components/design-icons'
 import { SunMoonIcon } from '@/components/design-icons'
 import * as React from 'react'
@@ -157,7 +158,7 @@ const projectMatch = (project: ProjectListEntry): PaletteMatch => ({
  *  name — both stay selectable. */
 const skillMatch = (skill: Skill): PaletteMatch => ({
   value: `skill ${skill.name} ${skill.path}`,
-  keywords: skill.description ? [skill.description] : undefined,
+  ...defined({ keywords: skill.description ? [skill.description] : undefined }),
 })
 
 const THEME_ACTION_MATCH: PaletteMatch = { value: 'action toggle theme' }

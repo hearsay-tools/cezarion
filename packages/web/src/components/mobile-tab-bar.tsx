@@ -34,8 +34,8 @@ export function MobileTabBar({
   items: readonly NavItem[]
   activeTo: string | null
   /** The current project's signal; undefined while unknown or outside a project. */
-  signal?: ProjectSignal
-  projectName?: string | null
+  signal?: ProjectSignal | undefined
+  projectName?: string | null | undefined
   /** The floating New task button. Off on `/new`, where it would point at the page it is on. */
   showNewTask?: boolean
 }) {

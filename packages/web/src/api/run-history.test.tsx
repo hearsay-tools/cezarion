@@ -14,7 +14,7 @@ vi.mock('./client', () => ({
 }))
 
 // Progressive-history tests inject the coordinator seam; transport lifecycle has its own suite.
-vi.mock('./live-coordinator', () => ({ subscribeLive: (demand: { projectId: string; runId: string; cursor?: string; afterSeq: number }, handlers: { frame(frame: unknown): void }) => {
+vi.mock('./live-coordinator', () => ({ subscribeLive: (demand: { projectId: string; runId: string; cursor?: string | undefined; afterSeq: number }, handlers: { frame(frame: unknown): void }) => {
   const params = new URLSearchParams()
   if (demand.cursor) params.set('cursor', demand.cursor)
   if (demand.cursor || demand.afterSeq > 0) params.set('afterSeq', String(demand.afterSeq))

@@ -48,7 +48,7 @@ export interface CodeEditorProps {
   /** Highlighter fence language (the catalog's `format`: json | jsonc | toml | yaml | markdown). */
   language: string
   readOnly?: boolean
-  className?: string
+  className?: string | undefined
   'aria-label'?: string
 }
 

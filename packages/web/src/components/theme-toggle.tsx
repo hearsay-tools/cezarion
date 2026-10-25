@@ -15,7 +15,7 @@ const LABEL: Record<Theme, string> = { light: 'light', dark: 'dark', system: 'sy
 
 /** `showLabel`: the expanded project rail (#711) spells the choice out beside the icon,
  *  "Theme · System". The accessible name is the same either way. */
-export function ThemeToggle({ className, showLabel = false, labelClassName }: { className?: string; showLabel?: boolean; labelClassName?: string }) {
+export function ThemeToggle({ className, showLabel = false, labelClassName }: { className?: string | undefined; showLabel?: boolean; labelClassName?: string }) {
   const { theme, setTheme } = useTheme()
   const next = NEXT_THEME[theme]
   const Icon = SunMoonIcon

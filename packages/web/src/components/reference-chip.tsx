@@ -105,14 +105,14 @@ export function ReferenceChip({
   plain = false,
   inert = false,
 }: {
-  reference: { kind: 'PR' | 'Issue'; number?: number; url?: string }
+  reference: { kind: 'PR' | 'Issue'; number?: number | undefined; url?: string | undefined }
   taskTitle: string
   /** Absent = nothing known (not fetched, forge unreachable, number not found) — NOT "fine".
    *  Normally left unset: the chip reads its own status from `ReferenceStatusProvider`. */
-  status?: ReferenceStatus
+  status?: ReferenceStatus | undefined
   /** The mergeability axis, same escape hatch as `status` and the same rule: absent means nothing
    *  is known, never "merges cleanly". Only `true` paints. */
-  conflicting?: boolean
+  conflicting?: boolean | undefined
   /** What to offer the user about a conflict — rendered INSIDE the panel, and only when this
    *  chip is conflicting, so it is mounted only while the panel is open. Passed by the surfaces
    *  that have something to offer (the task page and the tasks tables, which can send the agent
@@ -120,12 +120,12 @@ export function ReferenceChip({
   conflictAction?: ReactNode
   /** Only the global Tasks page needs this: its rows come from different projects, and two of
    *  them may each have a #42. Elsewhere the provider's own project is right. */
-  projectId?: string
-  repoBase?: string
+  projectId?: string | undefined
+  repoBase?: string | undefined
   /** An in-app destination (#692): the chip becomes a router link opening in the same tab instead
    *  of an external GitHub link. Set only for a reference in the project's own repository. */
-  to?: string
-  className?: string
+  to?: string | undefined
+  className?: string | undefined
   /**
    * The narrow sidebar row (#788, option C): the number ALONE — `#402` — with no `Issue ` word
    * and no `PR` label. There the chip is the row's leading identifier and every glyph it spends
@@ -303,7 +303,7 @@ function ChipAnchor({
   url,
   children,
   ...props
-}: { to?: string; url?: string } & Omit<React.ComponentProps<'a'>, 'href'>) {
+}: { to?: string | undefined; url?: string | undefined } & Omit<React.ComponentProps<'a'>, 'href'>) {
   if (to) return <RouterLink to={to} {...props}>{children}</RouterLink>
   return (
     <a href={url} target="_blank" rel="noopener noreferrer" {...props}>
@@ -543,7 +543,7 @@ export function ReferenceStatusGlyph({
 }: {
   kind: 'PR' | 'Issue'
   number: number
-  className?: string
+  className?: string | undefined
 }) {
   const entry = useReferenceStatus(kind, number)
   const statusPresentation = referenceStatusPresentation(entry.status)
@@ -572,7 +572,7 @@ export function ReferenceStatusGlyph({
 
 /** The status channel that is not color: an icon, or — for checks still running — the pulsing dot
  *  the design system reserves for a transitioning state, inside its now-amber chip. */
-function StatusGlyph({ status, className }: { status?: ReferenceStatus; className?: string }) {
+function StatusGlyph({ status, className }: { status?: ReferenceStatus | undefined; className?: string | undefined }) {
   if (!status) return null
   if (status === 'checks-pending') {
     return <CircleIcon data-slot="status-dot" data-tone="pending" className={cn('size-3 animate-pulse motion-reduce:animate-none', className)} aria-hidden="true" />

@@ -20,9 +20,9 @@ export function ReferenceOverflow({
   taskTitle: string
   visibleCount: number
   plain?: boolean
-  projectId?: string
+  projectId?: string | undefined
   runId: string
-  repoBase?: string
+  repoBase?: string | undefined
 }) {
   const [open, setOpen] = React.useState(false)
   // How it was opened decides whether focus moves into the list. A CLICK should hand the keyboard
@@ -146,8 +146,8 @@ export function ReferenceOverflow({
 export function ReferenceList({ references, maxVisible, taskTitle, projectId, runId, repoBase,
   plain = false, compact = false, inertInline = false, fitContainer = false, overflowContainer,
 }: {
-  references: readonly TaskReference[]; maxVisible: number; taskTitle: string; projectId?: string;
-  runId: string; repoBase?: string; plain?: boolean; compact?: boolean; inertInline?: boolean; fitContainer?: boolean; overflowContainer?: HTMLElement | null;
+  references: readonly TaskReference[]; maxVisible: number; taskTitle: string; projectId?: string | undefined;
+  runId: string; repoBase?: string | undefined; plain?: boolean; compact?: boolean; inertInline?: boolean; fitContainer?: boolean; overflowContainer?: HTMLElement | null;
 }) {
   const container = React.useRef<HTMLSpanElement>(null)
   const [visibleCount, setVisibleCount] = React.useState(maxVisible)

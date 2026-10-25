@@ -185,8 +185,8 @@ export function PickerPill({
   ariaLabel: string
   label: ReactNode
   /** Optional engine-control presentation; compact composer pills keep their defaults. */
-  icon?: ReactNode
-  fieldLabel?: boolean
+  icon?: ReactNode | undefined
+  fieldLabel?: boolean | undefined
   value: string
   options: ReadonlyArray<{ value: string; label: string; desc?: string }>
   onPick: (value: string) => void
@@ -195,9 +195,9 @@ export function PickerPill({
   readOnly?: boolean
   /** Hover explanation for the enabled pill — what the setting does (e.g. the model pill). */
   hint?: string
-  disabledHint?: string
+  disabledHint?: string | undefined
   /** Quiet non-selectable catalog state, kept inside the menu's accessible reading order. */
-  status?: string
+  status?: string | undefined
   /** Add a name filter above longer option catalogs. */
   searchPlaceholder?: string
 }) {
@@ -395,8 +395,8 @@ export function RunnerPill({
   fieldLabel,
 }: {
   runners: readonly Runner[]
-  icon?: ReactNode
-  fieldLabel?: boolean
+  icon?: ReactNode | undefined
+  fieldLabel?: boolean | undefined
   value: Runner
   /** `account` is `null` only while the repo's own choice is still the one in force. */
   onPick: (runner: Runner, account: string | null) => void
@@ -406,7 +406,7 @@ export function RunnerPill({
   /** The per-task override. */
   account?: string | null
   /** What the repo's setting resolves to per runner — the row that is selected until overridden. */
-  repoAccount?: Partial<Record<Runner, string>>
+  repoAccount?: Partial<Record<Runner, string>> | undefined
 }) {
   const available = RUNNERS.filter((r) => runners.includes(r.id))
   const options = available.flatMap((runner) => {

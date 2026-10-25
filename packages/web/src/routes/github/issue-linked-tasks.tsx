@@ -11,13 +11,13 @@ import { runTitle, withArchivedPages } from '@/lib/task-groups'
 import { linkedIssueTasks } from './github-sidebar-model'
 
 /** Shares the project runs cache with the sidebar and its existing live updates. */
-export function IssueLinkedTasks({ number, repo }: { number: number; repo?: string }) {
+export function IssueLinkedTasks({ number, repo }: { number: number; repo?: string | undefined }) {
   const scope = queryScope()
   // Reset disclosure state on identity changes without interrupting the shared query cache.
   return <LinkedTasks key={JSON.stringify([scope, repo, number])} number={number} repo={repo} scope={scope} />
 }
 
-function LinkedTasks({ number, repo, scope }: { number: number; repo?: string; scope: string }) {
+function LinkedTasks({ number, repo, scope }: { number: number; repo?: string | undefined; scope: string }) {
   const headingId = useId()
   const contentId = useId()
   const [expanded, setExpanded] = useState(false)

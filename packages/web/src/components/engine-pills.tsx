@@ -60,7 +60,7 @@ export interface ResolvedEngine {
   /** The backends this host offers — the runner pill renders only when there is a choice. */
   runners: readonly Runner[]
   /** What the active project's server context would pick from its authoritative config. */
-  defaultRunner?: Runner
+  defaultRunner?: Runner | undefined
   /** True only after provider status confirms at least one connected backend. */
   canRun: boolean
   /** Native agent settings are authoritative; model overrides must be omitted. */
@@ -73,7 +73,7 @@ export interface ResolvedEngine {
   /** The per-task account override, already filtered to the RESOLVED runner — see the hook. */
   account: string | null
   /** What the project's setting resolves to per runner, i.e. the row selected until overridden. */
-  repoAccount?: Partial<Record<Runner, string>>
+  repoAccount?: Partial<Record<Runner, string>> | undefined
 }
 
 export function useResolvedEngine(pick: EnginePick): ResolvedEngine {

@@ -42,7 +42,7 @@ const REPLAY_ID = 'aaaaaaaa-1111-4222-8333-bbbbbbbbdddd'
 // #795: genuine wire data, short prefix / longer tail makes lost size estimates observable.
 const replayEvents = largeThreadEvents(TURNS).map(line => {
   if (line.seq > 650) return line
-  if (line.type === 'item.completed' && (line.item as { kind?: string })?.kind === 'tool') {
+  if (line.type === 'item.completed' && (line.item as { kind?: string | undefined })?.kind === 'tool') {
     return { ...line, item: { ...(line.item as object), output: 'ok' } }
   }
   return line.type === 'tool-result' ? { ...line, result: 'ok' } : line
