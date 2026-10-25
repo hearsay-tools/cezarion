@@ -91,15 +91,14 @@ function cssSpans(text) {
   return spans;
 }
 
-/** `#` comments in YAML and shell. A shell quote opens anywhere (`pre' #12'`), a backslash
- *  escapes the next character, and a comment can start after a control operator (`cmd;#`).
- *  A YAML quote opens only at the start of a token, so the apostrophe in a plain value such
- *  as `the fork's rail` stays prose, and a YAML comment needs whitespace before it. */
-function hashCommentSpans(text, file) {
-  const shell = /\.(?:sh|bash)$/.test(file);
+/** `#` comments between `start` and `end`. A shell quote opens anywhere (`pre' #12'`), a
+ *  backslash escapes the next character, and a comment can start after a control operator
+ *  (`cmd;#`). A YAML quote opens only at the start of a token, so the apostrophe in a plain
+ *  value such as `the fork's rail` stays prose, and a YAML comment needs whitespace before it. */
+function scanHashComments(text, start, end, shell) {
   const spans = [];
   let quote = null;
-  for (let i = 0; i < text.length; i++) {
+  for (let i = start; i < end; i++) {
     const char = text[i];
     const before = i === 0 ? '\n' : text[i - 1];
     if (quote) {
@@ -111,12 +110,39 @@ function hashCommentSpans(text, file) {
       quote = char;
     } else if (char === '#' && (shell ? /[\s;&|()<>]/ : /\s/).test(before)) {
       const newline = text.indexOf('\n', i);
-      const end = newline === -1 ? text.length : newline;
+      const stop = newline === -1 || newline > end ? end : newline;
       // After the comment marker, so `#1310: …` as a whole comment is not read as a citation.
-      spans.push({ start: i + 1, end, context: 'comment' });
-      i = end;
+      spans.push({ start: i + 1, end: stop, context: 'comment' });
+      i = stop;
     }
   }
+  return spans;
+}
+
+// A GitHub Actions `run:` block scalar holds shell: the lines indented past its `run` key.
+const RUN_BLOCK = /^( *)(- +)?run: *[|>][-+0-9]* *(?:#.*)?$/;
+
+/** YAML comments with YAML rules, and the shell in each `run:` block with shell rules. */
+function yamlCommentSpans(text) {
+  const spans = [];
+  let regionStart = 0;
+  let runColumn = null;
+  let offset = 0;
+  for (const line of text.split('\n')) {
+    if (runColumn !== null && line.trim() !== '' && /^ */.exec(line)[0].length <= runColumn) {
+      spans.push(...scanHashComments(text, regionStart, offset, true));
+      regionStart = offset;
+      runColumn = null;
+    }
+    const block = runColumn === null ? RUN_BLOCK.exec(line) : null;
+    offset += line.length + 1;
+    if (block) {
+      spans.push(...scanHashComments(text, regionStart, offset, false));
+      regionStart = offset;
+      runColumn = block[1].length + (block[2]?.length ?? 0);
+    }
+  }
+  spans.push(...scanHashComments(text, regionStart, text.length, runColumn !== null));
   return spans;
 }
 
@@ -146,7 +172,8 @@ function proseSpans(text) {
 const READERS = [
   [/\.(?:[cm]?[jt]s|[jt]sx)$/, scriptSpans],
   [/\.css$/, cssSpans],
-  [/\.(?:ya?ml|sh|bash)$/, hashCommentSpans],
+  [/\.ya?ml$/, yamlCommentSpans],
+  [/\.(?:sh|bash)$/, (text) => scanHashComments(text, 0, text.length, true)],
   [/\.md$/, proseSpans],
 ];
 const readerOf = (file) => READERS.find(([type]) => type.test(file))?.[1];

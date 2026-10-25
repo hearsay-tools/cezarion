@@ -91,6 +91,21 @@ test('a shell comment can start right after a control operator, and a YAML one c
   assert.deepEqual(cites('ci.yml', 'key: a;# not a comment #126\n'), []);
 });
 
+test('reads a GitHub Actions `run:` block with shell rules and the rest of the file as YAML', () => {
+  const workflow = [
+    'steps:',
+    '  - name: a # see #11',
+    '    run: |',
+    "      printf pre' # #123'",
+    '      cmd;# relates to #124',
+    '      echo "it\'s" # (#125)',
+    '  - run: echo one # (#126)',
+    '    name: b;# not a comment #128',
+    "note: the fork's rail # see #127",
+  ].join('\n');
+  assert.deepEqual(cites('ci.yml', workflow), ['2:11:comment', '5:124:comment', '6:125:comment', '7:126:comment', '9:127:comment']);
+});
+
 test('reads Markdown prose but not code fences, inline code or qualified links', () => {
   const text = [
     '# Notes',
