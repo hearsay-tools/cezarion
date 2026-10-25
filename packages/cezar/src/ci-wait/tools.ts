@@ -120,12 +120,14 @@ export async function invokeCancelWaitTool(input: unknown) {
 /** hearsay-tools/cezarion#1234: the explicit form of the done line. */
 export const doneToolDefinition = {
   name: 'cezar_done',
-  description: 'Finish the task. Call it when the goal is fully achieved and verified and you have no question for the user; end your turn after it answers. Cezar closes the session at the end of this turn and cancels every open wait. It refuses, naming what to do first, while owned workers are live or uncollected, a worker question is unanswered, or your question to the user is still pending.',
+  description: 'Finish the task, or in a workflow step that is not the last, finish that step. Call it when the goal is fully achieved and verified and you have no question for the user; end your turn after it answers. Cezar closes the session at the end of this turn and cancels every open wait; after a step, Cezar starts the next step, and the answer names it. It refuses, naming what to do first, while owned workers are live or uncollected, a worker question is unanswered, or your question to the user is still pending.',
   inputSchema: { ...z.toJSONSchema(cezarDoneRequestSchema, { io: 'input' }), type: 'object' as const },
 };
 export async function invokeDoneTool(input: unknown) {
   const answer = await callCezarDone(input);
-  const hint = answer.ok ? 'Accepted. End your turn; Cezar finishes the task at its end.' : 'Not finished. Do what the message says, then call cezar_done again.';
+  const hint = !answer.ok ? 'Not finished. Do what the message says, then call cezar_done again.'
+    : answer.completes === 'step' ? `Accepted. End your turn; Cezar completes this step at its end and starts "${answer.next_step}".`
+    : 'Accepted. End your turn; Cezar finishes the task at its end.';
   return { content: [{ type: 'text' as const, text: `${JSON.stringify(answer)}\n${hint}` }], isError: !answer.ok, details: answer };
 }
 

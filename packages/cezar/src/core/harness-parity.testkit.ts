@@ -175,7 +175,7 @@ export const MODEL_REFUSAL_CRITERIA = [
 /** #427: portable intermediate asks, through every native message wire. */
 export const WORKFLOW_ASK_CRITERIA = [
   { id: 'Q1', scenario: 'ask-snapshot', name: 'holds the same intermediate session until answered, then runs the tail' },
-  { id: 'Q2', scenario: 'ask-snapshot-bad', name: 'notes a malformed intermediate marker and runs the tail' },
+  { id: 'Q2', scenario: 'ask-snapshot-bad', name: 'notes a malformed intermediate marker and keeps the step open until done' },
   { id: 'Q3', scenario: 'ask-snapshot', name: 'preserves final interactive asks' },
   { id: 'Q4', scenario: 'ask-snapshot', name: 'idle close and a second question on Continue retain the workflow tail' },
   { id: 'Q5', scenario: 'ask-snapshot', name: 'restart preserves the unanswered question and resumes the tail after an answer' },
@@ -186,13 +186,26 @@ export const WORKFLOW_ASK_CRITERIA = [
   { id: 'Q10', scenario: 'ask-snapshot', name: 'an unanswered clean session close stays resumable without success' },
 ] as const;
 
+/** hearsay-tools/cezarion#1620: workflow-step-completion-parity.test.ts, every native wire. An
+ *  earlier agent step completes only on an accepted done; the tail never starts without one. */
+export const STEP_COMPLETION_CRITERIA = [
+  { id: 'C1', scenario: 'baseline', name: 'an earlier step without done is nudged once, then waits for the user; a reply with done runs the tail' },
+  { id: 'C2', scenario: 'done', name: 'the done line completes an earlier step without a nudge and runs the tail' },
+  { id: 'C3', scenario: 'baseline', name: 'a clean session close without done leaves the earlier step waiting; Continue with done runs the tail' },
+  { id: 'C4', scenario: 'baseline', name: 'an idle close leaves the earlier step waiting; a Continue without done parks on it again' },
+  { id: 'C5', scenario: 'baseline', name: 'restart recovery keeps the parked earlier step; Continue with done runs the tail' },
+  { id: 'C6', scenario: 'autonomous', name: 'an autonomous earlier step is nudged to its done, then the tail runs' },
+] as const;
+
 /** #470: exercised in workflow-timeout-parity.test.ts against every native wire. */
+// T1, T2 and T5 hold their turn and then signal done, which an earlier step needs
+// since hearsay-tools/cezarion#1620.
 export const WORKFLOW_TIMEOUT_CRITERIA = [
-  { id: 'T1', scenario: 'hold', name: 'default non-final steps outlive the runner deadline' },
-  { id: 'T2', scenario: 'hold', name: 'explicit zero disables the workflow deadline' },
+  { id: 'T1', scenario: 'hold-done', name: 'default non-final steps outlive the runner deadline' },
+  { id: 'T2', scenario: 'hold-done', name: 'explicit zero disables the workflow deadline' },
   { id: 'T3', scenario: 'hold', name: 'authored positive deadlines fail without running trailing checks' },
   { id: 'T4', scenario: 'hold', name: 'standalone sessions retain the default deadline' },
-  { id: 'T5', scenario: 'hold', name: 'an authored longer limit replaces the runner default' },
+  { id: 'T5', scenario: 'hold-done', name: 'an authored longer limit replaces the runner default' },
   { id: 'T6', scenario: 'hold', name: 'default tasks remain unlimited' },
 ] as const;
 
@@ -299,7 +312,7 @@ export const PERMISSION_CRITERIA = [
   { id: 'P5', scenario: 'approval-reply-fails', name: 'keeps a native request answerable when its answer is not accepted' },
   { id: 'P6', scenario: 'approval-malformed', name: 'refuses a malformed native request instead of hanging on it' },
   { id: 'P7', scenario: 'permission-classify', name: 'holds agent input from receipt and shows no card for a request settled before it' },
-  { id: 'P8', scenario: 'permission-late', name: 'reopens the turn for a request that arrives after it ended, and closes the step once it is answered' },
+  { id: 'P8', scenario: 'permission-late', name: 'reopens the turn for a request that arrives after it ended, and closes the session once it is answered' },
   { id: 'P9', scenario: 'mcp-approval', name: 'routes an MCP tool approval for another server and settles the turn (hearsay-tools/cezarion#1294)' },
 ] as const;
 

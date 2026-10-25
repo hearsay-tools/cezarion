@@ -135,7 +135,7 @@ async function prompt(id, content) {
   if (watchdogStall(input)) return;
   if (input.includes('mock:busy-progress')) {
     for (let i = 0; i < 24; i++) { text('working\n'); await new Promise(r => setTimeout(r, 100)); }
-    complete(id); return;
+    text('busy complete\n\nCEZ:DONE'); complete(id); return;
   }
   if (input.includes('mock:hold-done')) {
     await waitForMockRelease(400);

@@ -77,6 +77,7 @@ import {
   FINAL_MESSAGE_CRITERIA,
   WORKER_PROGRESS_WAIT_CRITERIA,
   WORKFLOW_ASK_CRITERIA,
+  STEP_COMPLETION_CRITERIA,
   FOLLOWUP_CRITERIA,
   ANSWER_DELIVERY_CRITERIA,
   SKILL_RESUME_CRITERIA,
@@ -2070,6 +2071,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         ...MONITORING_ORDER_CRITERIA.map(c => c.id),
         ...WAIT_CRITERIA.map(c => c.id),
         ...WORKFLOW_ASK_CRITERIA.map(c => c.id),
+        ...STEP_COMPLETION_CRITERIA.map(c => c.id),
         ...FOLLOWUP_CRITERIA.map(c => c.id),
         ...ANSWER_DELIVERY_CRITERIA.map(c => c.id),
         ...SKILL_RESUME_CRITERIA.map(c => c.id),
@@ -2086,46 +2088,19 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         ...CONTROL_CRITERIA.map((c) => c.id),
         ...RUN_CRITERIA.map((c) => c.id),
       ];
+      const rows: readonly { id: string; scenario: ScenarioName }[] = [
+        ...PERMISSION_CRITERIA, ...MODEL_REFUSAL_CRITERIA, ...SHUTDOWN_CRITERIA,
+        ...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA,
+        ...WAIT_CRITERIA, ...WORKFLOW_ASK_CRITERIA, ...STEP_COMPLETION_CRITERIA, ...FOLLOWUP_CRITERIA,
+        ...ANSWER_DELIVERY_CRITERIA, ...SKILL_RESUME_CRITERIA, ...SKILL_PROVISION_CRITERIA,
+        ...WORKTREE_SETUP_CRITERIA, ...AUTONOMOUS_CRITERIA, ...WORKER_PROGRESS_WAIT_CRITERIA,
+        ...FINAL_MESSAGE_CRITERIA, ...NO_PROGRESS_CRITERIA, ...WORKFLOW_TIMEOUT_CRITERIA,
+        ...SEAM_CRITERIA, ...INPUT_CRITERIA, FOLLOW_ON_CRITERION, ...CONTROL_CRITERIA, ...RUN_CRITERIA,
+      ];
       const scenarioOf = (id: string): ScenarioName => {
-        const permission = PERMISSION_CRITERIA.find(c => c.id === id);
-        if (permission) return permission.scenario;
-        const refusal = MODEL_REFUSAL_CRITERIA.find(c => c.id === id);
-    if (refusal) return refusal.scenario;
-    const shutdown = SHUTDOWN_CRITERIA.find(c => c.id === id);
-        if (shutdown) return shutdown.scenario;
-        const monitor = [...MONITORING_TURN_CRITERIA, ...MONITORING_ACK_CRITERIA, ...MONITORING_ORDER_CRITERIA].find(c => c.id === id);
-        if (monitor) return monitor.scenario;
-        const wait = WAIT_CRITERIA.find(c => c.id === id);
-        if (wait) return wait.scenario;
-        const ask = WORKFLOW_ASK_CRITERIA.find(c => c.id === id);
-        if (ask) return ask.scenario;
-        const followup = FOLLOWUP_CRITERIA.find(c => c.id === id);
-        if (followup) return followup.scenario;
-        const answerDelivery = ANSWER_DELIVERY_CRITERIA.find(c => c.id === id);
-        if (answerDelivery) return answerDelivery.scenario;
-        const skillResume = SKILL_RESUME_CRITERIA.find(c => c.id === id);
-        if (skillResume) return skillResume.scenario;
-        const skillProvision = SKILL_PROVISION_CRITERIA.find(c => c.id === id);
-        if (skillProvision) return skillProvision.scenario;
-        const worktreeSetup = WORKTREE_SETUP_CRITERIA.find(c => c.id === id);
-        if (worktreeSetup) return worktreeSetup.scenario;
-        const autonomous = AUTONOMOUS_CRITERIA.find(c => c.id === id);
-        if (autonomous) return autonomous.scenario;
-        const workerProgress = WORKER_PROGRESS_WAIT_CRITERIA.find(c => c.id === id);
-        if (workerProgress) return workerProgress.scenario;
-        const finalMessage = FINAL_MESSAGE_CRITERIA.find(c => c.id === id);
-        if (finalMessage) return finalMessage.scenario;
-        const inactivity = NO_PROGRESS_CRITERIA.find(c => c.id === id);
-        if (inactivity) return inactivity.scenario;
-        const timeout = WORKFLOW_TIMEOUT_CRITERIA.find(c => c.id === id);
-        if (timeout) return timeout.scenario;
-        const seam = SEAM_CRITERIA.find((c) => c.id === id) ?? INPUT_CRITERIA.find((c) => c.id === id) ?? (id === FOLLOW_ON_CRITERION.id ? FOLLOW_ON_CRITERION : undefined);
-        if (seam) return seam.scenario;
-        const control = CONTROL_CRITERIA.find((c) => c.id === id);
-        if (control) return control.scenario;
-        const runRow = RUN_CRITERIA.find((c) => c.id === id);
-        if (runRow) return runRow.scenario;
-        throw new Error(`unknown criterion id "${id}"`);
+        const row = rows.find(c => c.id === id);
+        if (!row) throw new Error(`unknown criterion id "${id}"`);
+        return row.scenario;
       };
 
       // AC #6: a new id in RUNNER_IDS fails here until every row is addressed.
@@ -2497,7 +2472,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         const controller = await CiToolController.start();
         const dir = mkdtempSync(join(tmpdir(), 'cez-tools-list-'));
         try {
-          const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'pr', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'pr', source: 'agent', via: 'cezar_wait', phase: 'open' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', open_waits: [] }) });
+          const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'pr', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'pr', source: 'agent', via: 'cezar_wait', phase: 'open' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: [] }) });
           const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, allowedTools, env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
           expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
           const waits = ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'];
@@ -3208,28 +3183,17 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
       // bound: per-cell hang guard above driveRun's own 30 s settle bound, sized for a parity cell under host load.
       }, 45_000);
 
-      // Through RunManager only a non-final step closes on its own; the second step proves it did.
-      it(`${backend} P8 lets the workflow advance past a non-final step whose late card is answered`, async () => {
-        let repoRoot = '';
-        const { pick } = HARNESS_ADAPTERS[backend].approvalDecisions![0]!;
+      // Through RunManager a step's done closes its session at once (hearsay-tools/cezarion#1620),
+      // as a final step's done already did: the late card never pends and the next step runs.
+      it(`${backend} P8 completes a non-final step on its done before a late card can pend`, async () => {
         const workflowDef: WorkflowDef = {
           name: 'permission-late', source: 'built-in',
           steps: [{ id: 'first', name: 'First', prompt: '{{task}}' }, { id: 'second', name: 'Second', prompt: promptFor(backend, 'done') }],
         };
         // bound: hang guard for the live mock run; the predicate waits on the run settling, and a stuck card fails here instead of at the test timeout.
-        const observation = await driveRun(backend, 'permission-late', run => !!run && ['done', 'review'].includes(run.status), 30_000, undefined, {
-          workflowDef,
-          beforeStart: context => { repoRoot = context.repoRoot; },
-          during: async ({ store, manager, runId }) => {
-            await waitFor(() => store.readEvents(runId).some(event => event.type === 'permission.requested'));
-            expect(store.getRun(runId)).toMatchObject({ status: 'waiting', hasPendingPermission: true });
-            const request = store.readEvents(runId).find(event => event.type === 'permission.requested')!;
-            const response = await answerThroughRoute(repoRoot, store, manager, runId, request, optionPicked(request, pick).id);
-            expect(response.status).toBe(200);
-          },
-        });
-        expect(permissionResolutionsOf(observation.events)).toEqual([expect.objectContaining({ optionId: expect.any(String) })]);
-        expect(observation.record?.hasPendingPermission).toBe(false);
+        const observation = await driveRun(backend, 'permission-late', run => !!run && ['done', 'review', 'waiting'].includes(run.status), 30_000, undefined, { workflowDef });
+        expect(observation.record?.status).toBe('done');
+        expect(observation.record?.hasPendingPermission).toBeFalsy();
         expect(observation.record?.steps.map(step => [step.id, step.status])).toEqual([['first', 'done'], ['second', 'done']]);
       // bound: per-cell hang guard above driveRun's own 30 s settle bound, sized for a parity cell under host load.
       }, 45_000);

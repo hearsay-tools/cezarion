@@ -479,7 +479,8 @@ describe('provider availability preserves existing execution', () => {
       name: 'mixed-existing',
       source: 'built-in',
       steps: [
-        { id: 'claude', name: 'Claude', prompt: '{{task}}', runner: 'claude' },
+        // The earlier step signals done, which it needs to advance (hearsay-tools/cezarion#1620).
+        { id: 'claude', name: 'Claude', prompt: '{{task}} mock:done', runner: 'claude' },
         { id: 'codex', name: 'Codex', prompt: '{{task}}', runner: 'codex' },
       ],
     };

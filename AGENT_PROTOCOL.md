@@ -315,7 +315,7 @@ checkpoint retain the documented crash ambiguity below.
 Already accepted input precedes automatic `CEZ:DONE` closure at a safe boundary,
 not explicit Finish, cancellation, destruction or fatal failure. Empty queues
 preserve ordinary completion. A completed turn with an outstanding ACK retains its
-DONE intent and nonfinal auto-end hold; acknowledgement rechecks that exact idle
+DONE intent; acknowledgement rechecks that exact idle
 boundary, without requiring a phantom turn. Worker-wake reservation acquires real
 capacity immediately, while only positive ACK plus checkpoint retires the durable
 wait. A wake turn completed before ACK does not become running again at ACK. A temporary refusal during a late OpenCode HTTP ack
@@ -330,13 +330,14 @@ not exactly-once delivery); it must never silently drop it or claim success.
 
 `SessionOptions`:
 
-- `autoEndAfterFirstTurn?` — single-turn behavior for non-interactive workflow
-  steps; interactive sessions control `end()` themselves.
+- `autoEndAfterFirstTurn?` — single-turn behavior for a headless one-shot
+  `run()`. `RunManager` never sets it: every workflow agent step, the last and
+  the earlier ones, controls `end()` itself and completes only on an accepted
+  done (hearsay-tools/cezarion#1620).
 - `shouldAutoEnd?: () => boolean` — internal synchronous veto checked when the
   auto-end timer executes, including waits accepted after it was armed. False
-  holds that auto-end; a later turn may auto-end normally. RunManager holds the
-  exact current session across accepted worker waits and the admitted wake's
-  reply turn and pending delivery acknowledgement, including nonfinal agent steps. Explicit end/interrupt and provider
+  holds that auto-end; a later turn may auto-end normally. `RunManager` sets no
+  auto-end, so it passes no veto. Explicit end/interrupt and provider
   failures keep their existing semantics; a timer is never termination proof.
 - `onAgentInputConsumed?: (inputIds) => void` — the model received these inputs
   (hearsay-tools/cezarion#505). At most once per ID; never from a transport acknowledgement.
@@ -894,19 +895,23 @@ reaches its parent, and an open question asks the parent for its own words. Unti
 phase 4, the transcript's question facts stay authoritative for attention, and
 `computeWaitingOn` reads both them and the human wait.
 
-`cezar_done({ summary? })` finishes the task at the end of the current turn; `summary` is at
-most 2,000 characters and unknown keys are `invalid_request`. It answers
-`{ ok: true, finishes: 'at_turn_end', open_waits }`, or `{ ok: false, code, message,
-workers?, open_waits? }`. It is refused, in this order, by the session refusals
-`cezar_wait` answers, then `not_final_step` (a workflow step that is not the last, whose turn
-end runs the next step), `root_finish_pending`,
+`cezar_done({ summary? })` finishes the task at the end of the current turn. In a workflow
+agent step that is not the last, it finishes that step instead, and Cezar then starts the next
+step (hearsay-tools/cezarion#1620). `summary` is at most 2,000 characters and unknown keys are
+`invalid_request`. It answers `{ ok: true, finishes: 'at_turn_end', completes: 'task',
+open_waits }`, `{ ok: true, finishes: 'at_turn_end', completes: 'step', next_step, open_waits }`
+with the next step's name, or `{ ok: false, code, message, workers?, open_waits? }`. It is
+refused, in this order, by the session refusals `cezar_wait` answers, then `root_finish_pending`,
 `human_question_pending` (an earlier turn's question is unanswered), and for a root parent
 `worker_questions`, `workers_outstanding` and `workers_uncollected`, each listing up to 64
 `{ worker_id, reason }` and naming the command that clears them (a general form of the
 command when listing every worker would pass `WAIT_MESSAGE_MAX`, 4,096 characters). The answer
 a Continue opened with is not a pending question while its turn runs. The turn end that reads an
-accepted done takes it, and a human message clears it. A non-interactive workflow step still
-ignores the done line. `worker_wait_pending` stays in the code enum for old clients and is never
+accepted done takes it, and a human message clears it. An earlier workflow step's turn that ends
+without a done is handled as the last step's is: the no-wait nudge, then Cezar's human wait. A
+session that closes without a done leaves the step `waiting`, and Continue resumes that step.
+`not_final_step` stays in the code enum for old clients and is never returned since
+hearsay-tools/cezarion#1620. `worker_wait_pending` stays in the code enum for old clients and is never
 returned (it was the old completion wait's refusal, removed by hearsay-tools/cezarion#1301). A done
 refused at the turn end becomes the refusal nudge described below. The close writes `summary` as a `note`, then the
 lifecycle event `goal achieved — session closed` with `via: 'cezar_done'` (or
@@ -1232,8 +1237,9 @@ OpenCode settles in that window. P8 sends a card after the turn ended. OpenCode
 asks only from a running session loop, so the runner reopens the turn
 (`turn.started`) for a main-session ask; the answer resumes that run, and its own
 `session.idle` ends the turn. At the seam, a self-closing session
-(`autoEndAfterFirstTurn`) then closes. Through `RunManager`, a non-final
-workflow step with such a card advances to the next step.
+(`autoEndAfterFirstTurn`) then closes. Through `RunManager`, a step's done
+closes its session at once (hearsay-tools/cezarion#1620), so the late card never
+pends and the next workflow step runs.
 Codex carries named exemptions for P5 (a JSON-RPC response gets no reply that
 could refuse it), P7 (its request is shown on receipt, with nothing to read
 first) and P8 (a request arrives only inside the turn it names). Wires with no
@@ -1326,8 +1332,9 @@ both timers, as recovery fires overdue ones: each is cancelled, the last opens a
 human wait that is shown and reads Needs you with no session, and Continue answers it. U9c
 puts a failure count on the record and blocks the store's writes: Finish still stops the
 run, because the counter writes outside a delivery are best-effort. U6s calls `cezar_done`
-in the first of two workflow steps: it is refused with `not_final_step`, nothing closes, and
-the second step runs. U10 also reads the committed row as the charge note is written: the
+in the first of two workflow steps: it is accepted with `completes: 'step'` and the second
+step's name, the first step's session closes as done, and the second step runs
+(hearsay-tools/cezarion#1620). U10 also reads the committed row as the charge note is written: the
 delivery, the charge and the cleared failure count are there together. U7h lands the ask line, `cezar_ask` (its card holding an open
 question) and a native ask in the same list with their `via`, and the user's answer delivers each; Claude, Pi,
 Cursor (print) and OMP are exempt from the native case as `native ask arrives as the portable

@@ -921,7 +921,13 @@ const server = createServer((req, res) => {
         let ticks = 0;
         const timer = setInterval(() => {
           send({ type: 'server.heartbeat', properties: {} });
-          if (++ticks === 24) { clearInterval(timer); send({ type: 'session.idle', properties: { sessionID: SESSION_ID } }); }
+          if (++ticks === 24) {
+            clearInterval(timer);
+            send({ type: 'message.updated', properties: { info: info({}) } });
+            textPart('prt_busy_done', 'busy complete\n\nCEZ:DONE');
+            send({ type: 'message.updated', properties: { info: info({ cost: 0.0001, tokens: { input: 20, output: 10, reasoning: 0, cache: { read: 0, write: 0 } } }) } });
+            send({ type: 'session.idle', properties: { sessionID: SESSION_ID } });
+          }
         }, 100);
         return;
       }
