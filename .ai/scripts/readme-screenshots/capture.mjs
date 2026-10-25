@@ -128,9 +128,8 @@ export async function waitUntil(probe, what, timeoutMs, interval = 500) {
 }
 
 /** A cockpit server this command started, in its own process group. */
-class Cockpit {
-  static async start({ repo, env, logFile }) {
-    const cli = join(REPO_ROOT, 'packages/cezar/dist/index.js');
+export class Cockpit {
+  static async start({ repo, env, logFile, cli = join(REPO_ROOT, 'packages/cezar/dist/index.js') }) {
     const child = spawn(process.execPath, [cli, 'serve', '--repo', repo, '--port', '0', '--no-open'], { env, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
     const cockpit = new Cockpit(child);
     open.add(cockpit);
@@ -138,8 +137,14 @@ class Cockpit {
     const record = (chunk) => { output += chunk; writeFileSync(logFile, output); };
     child.stdout.setEncoding('utf8').on('data', record);
     child.stderr.setEncoding('utf8').on('data', record);
-    cockpit.url = await waitUntil(() => child.exitCode === null ? /cockpit → (http:\/\/127\.0\.0\.1:\d+)/.exec(output)?.[1] : Promise.reject(new Error(`the cockpit exited; see ${logFile}`)), 'the cockpit to listen', 60_000, 200);
-    cockpit.project = (await cockpit.api('/projects')).bootProject;
+    try {
+      cockpit.url = await waitUntil(() => child.exitCode === null ? /cockpit → (http:\/\/127\.0\.0\.1:\d+)/.exec(output)?.[1] : Promise.reject(new Error(`the cockpit exited; see ${logFile}`)), 'the cockpit to listen', 60_000, 200);
+      cockpit.project = (await cockpit.api('/projects')).bootProject;
+    } catch (error) {
+      // The caller gets no cockpit to stop, so a failed start stops its own server.
+      await cockpit.stop();
+      throw error;
+    }
     return cockpit;
   }
 
@@ -321,8 +326,9 @@ function writeAgentLauncher(work) {
 async function captureBoot({ name, cells, repo, env, work, browserBin, shots, prepare, log }) {
   log(`booting the ${name} cockpit`);
   const cockpit = await Cockpit.start({ repo, env, logFile: join(work, `${name}-cockpit.log`) });
-  const browser = new Browser(browserBin, `cez-readme-${name}-${process.pid}`);
+  let browser;
   try {
+    browser = new Browser(browserBin, `cez-readme-${name}-${process.pid}`);
     const seeded = await prepare(cockpit);
     for (const cell of cells) {
       log(`capturing ${cell.name}`);
@@ -330,7 +336,7 @@ async function captureBoot({ name, cells, repo, env, work, browserBin, shots, pr
       await shoot(browser, cell, shots);
     }
   } finally {
-    browser.close();
+    browser?.close();
     await cockpit.stop();
   }
 }

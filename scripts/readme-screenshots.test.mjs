@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
 
-import { findAgentBrowser, ghConfigDir, missingPrerequisites, parseOptions, REPO_ROOT, serverEnv, USAGE, waitUntil } from '../.ai/scripts/readme-screenshots/capture.mjs';
+import { Cockpit, findAgentBrowser, ghConfigDir, missingPrerequisites, parseOptions, REPO_ROOT, serverEnv, USAGE, waitUntil } from '../.ai/scripts/readme-screenshots/capture.mjs';
 import { applyChange, controlResponse, HELP_TEXT, main, parseLine, playTurn, VERSION_TEXT } from '../.ai/scripts/readme-screenshots/demo-agent.mjs';
 import { cezarFiles, createDemoRepos, DEMO_SKILLS, DEMO_WORKFLOWS, STOREFRONT_FILES } from '../.ai/scripts/readme-screenshots/demo-repos.mjs';
 import { CELLS, editedText, findMockText, FOLLOW_UP_REPLY, GITHUB_REPO, LIVE_RUN_TASK, pickScenario, SCENARIOS, SEED_TASKS, testText, turnScript } from '../.ai/scripts/readme-screenshots/scenarios.mjs';
@@ -257,4 +257,34 @@ test('waitUntil returns the first value and names what timed out', async () => {
   let calls = 0;
   assert.equal(await waitUntil(() => (++calls === 3 ? 'ready' : null), 'three calls', 5_000, 1), 'ready');
   await assert.rejects(waitUntil(() => null, 'nothing', 0, 1), /timed out after 0 s waiting for nothing/);
+});
+
+test('Cockpit.start stops the server it spawned when the start fails', async (t) => {
+  const dir = scratch(t, 'cez-readme-cockpit-');
+  const pidFile = join(dir, 'pid');
+  const cli = join(dir, 'cli.mjs');
+  // A server that announces itself as a cockpit, then answers every API call with 500.
+  writeFileSync(cli, [
+    "import { writeFileSync } from 'node:fs';",
+    "import { createServer } from 'node:http';",
+    'writeFileSync(process.env.PID_FILE, String(process.pid));',
+    "const server = createServer((request, response) => { response.writeHead(500, { 'content-type': 'application/json' }); response.end('{\"error\":\"boom\"}'); });",
+    "server.listen(0, '127.0.0.1', () => console.log(`cockpit → http://127.0.0.1:${server.address().port}`));",
+  ].join('\n'));
+  const alive = (id) => {
+    try {
+      process.kill(id, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  // The scratch directory, and the pid file in it, can be gone before this hook runs.
+  let pid;
+  t.after(() => {
+    if (pid && alive(pid)) process.kill(-pid, 'SIGKILL');
+  });
+  await assert.rejects(Cockpit.start({ repo: dir, env: { ...process.env, PID_FILE: pidFile }, logFile: join(dir, 'cockpit.log'), cli }), /GET \/projects answered 500: boom/);
+  pid = Number(readFileSync(pidFile, 'utf8'));
+  assert.equal(alive(pid), false);
 });
