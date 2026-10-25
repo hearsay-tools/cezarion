@@ -431,7 +431,9 @@ Before you change or review code in an area, read its *Read first* files. An are
 
 ## Validation
 
-A fresh task worktree (`.ai/cezar/worktrees/<runId>`) has no `node_modules`. Run `pnpm install --frozen-lockfile` in that worktree before the commands below, unless the project's `worktreeSetup` already ran it — otherwise Node walks up to the main checkout, `@open-mercato/*` workspace packages resolve there, and typecheck/tests compile against that tree's sources, not this one.
+In a fresh task worktree (`.ai/cezar/worktrees/<runId>`), run `pnpm install --frozen-lockfile` unless `worktreeSetup` already did. Without local `node_modules`, Node resolves `@open-mercato/*` in the main checkout, so typecheck/tests use its sources.
+
+Before adding a YAML, shell or Markdown reader, read [Script readers](docs/sdlc/script-readers.md).
 
 ### Iterate
 
