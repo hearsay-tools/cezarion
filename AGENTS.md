@@ -799,6 +799,22 @@ jobs, so it publishes nothing: `publish-snapshot` runs only on a push to `main`,
 Verification section. Run `38979957113` proved the new `Lint workflows` step of
 hearsay-tools/cezarion#1199.
 
+Dispatch again after each later edit to `ci.yml` or a workflow it calls. Cite
+only a successful run whose head carries the final workflow files. From the
+final pushed PR head, compare the cited run's workflow files with `HEAD`:
+
+```bash
+sha=$(gh run view <run-id> --repo hearsay-tools/cezarion --json headSha --jq .headSha)
+git diff --quiet "$sha" HEAD -- .github/workflows/ && echo current || echo stale
+```
+
+The lookup must succeed and the run's commit must be available locally; resolve
+any lookup or Git error before using the result. `current` means the workflow
+files match, not that the run passed or exercised the skipped jobs above.
+`stale` requires a fresh dispatch and an updated citation. This directory-wide
+comparison also treats edits to unrelated workflows as stale; later commits
+that leave the workflow files unchanged do not invalidate the proof.
+
 A full local Vitest run (or one shard) that fails only under host load can still
 back a PR. Record the load average (`uptime`) and the failed files, rerun those
 files (`npm test -- <files>`) until they pass, state both in the PR's
