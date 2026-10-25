@@ -1,9 +1,9 @@
-import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createFailureControl, type FailureControlOptions } from '../../scripts/mock-failure-control.mjs';
 import { expect } from 'vitest';
 import type { RunnerId } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
+import { readMockRecords } from '../mock-records.testkit.ts';
 
 // hearsay-tools/cezarion#1233: the wait list's RUNNER_IDS cells. U0 (tool admission) lives in
 // `core/ci-tools.test.ts`.
@@ -142,10 +142,7 @@ type NativeInput = {
 
 /** Read the prompts admitted by each runner's native mock, not normalized events. */
 export function ciNativeMessages(runner: RunnerId, dir: string): string[] {
-  const records = (name: string): Array<NativeInput | string[]> => {
-    const path = join(dir, name);
-    return existsSync(path) ? readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line)) : [];
-  };
+  const records = (name: string) => readMockRecords<NativeInput | string[]>(join(dir, name));
   const stdin = runner === 'claude' || runner === 'pi' || runner === 'omp';
   const rows = runner === 'cursor' ? [...records('args'), ...records('stdin')] : records(stdin ? 'stdin' : 'args');
   return rows.flatMap(row => {
@@ -162,10 +159,7 @@ export function ciNativeMessages(runner: RunnerId, dir: string): string[] {
 /** Input the Codex mock took into an open turn through `turn/steer`, which `ciNativeMessages`
  *  leaves out. Every other runner returns none. */
 export function ciNativeSteers(runner: RunnerId, dir: string): string[] {
-  const path = join(dir, 'args');
-  if (runner !== 'codex' || !existsSync(path)) return [];
-  return readFileSync(path, 'utf8').trim().split('\n').filter(Boolean).flatMap(line => {
-    const row = JSON.parse(line) as NativeInput;
-    return row.method === 'turn/steer' && row.params?.input ? [row.params.input.map(part => part.text ?? '').join('\n')] : [];
-  });
+  if (runner !== 'codex') return [];
+  return readMockRecords<NativeInput>(join(dir, 'args')).flatMap(row =>
+    row.method === 'turn/steer' && row.params?.input ? [row.params.input.map(part => part.text ?? '').join('\n')] : []);
 }
