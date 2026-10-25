@@ -32,7 +32,7 @@ import { workerCapacity } from '../delegation/capacity.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
 import { githubItemParamsSchema } from '@open-mercato/cezar-contract/github';
-import { singleRunVariantsSchema, toRunSummary } from '@open-mercato/cezar-contract/runs';
+import { createRunInputSchema, toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { workerEmptyRequestSchema, runRelationshipsSchema } from '@open-mercato/cezar-contract/delegation';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -641,58 +641,8 @@ const streamSSENoBuffer: typeof streamSSE = (c, cb, onError) => {
   return res;
 };
 
-// A run starts from a named workflow OR an inline chain of steps (spec 008 —
-// the approved plan is posted as-is, never written to a file).
-const startRunSchema = z
-  .object({
-    workflow: z.string().min(1).optional(),
-    steps: z.array(workflowStepSchema).min(1).max(8).optional(),
-    // The primary agent prompt handed to the spawned runner. Bounded like the
-    // other prompt fields (`systemPrompt` 20k, message `text` 100k) so an
-    // unbounded body can't be piped into a spawned process (#429). 100k chars
-    // (~25k tokens) is well past any hand-written task.
-    task: z.string().min(1).max(100_000, 'must be at most 100000 characters'),
-    model: z.string().optional(),
-    // Reasoning-effort pin (#45). Omit for the harness default.
-    effort: z.string().max(32).optional(),
-    // Agent backend for this task (falls back to config `defaultRunner`).
-    runner: z.enum(RUNNER_IDS).optional(),
-    // Agent account for this task (spec 2026-07-29-agent-profiles). Falls back to the project's
-    // own selection, then the discovered default. Bounded like a profile id in the workspace
-    // schema, so a value this route accepts can never be degraded away by the next load.
-    agentProfile: z.string().max(64).optional(),
-    // Refuse retired multi-candidate requests before any launch side effects.
-    variants: singleRunVariantsSchema,
-    // Composer worktree opt-out: false runs in the repo working tree.
-    worktree: z.boolean().optional(),
-    // Autonomous mode (#autonomous): the run never parks at `waiting` — it
-    // auto-continues until the agent signals done. No "needs you" is raised.
-    autonomous: z.boolean().optional(),
-    archiveWhenDone: z.boolean().optional(),
-    autoMergePr: z.boolean().optional(),
-    // Per-run system-prompt override (R2 2.3) — programmatic callers only
-    // (bookmarklets, scripts); deliberately NOT a composer-UI control. Wins
-    // over the config.json default; whitespace-only degrades to absent.
-    systemPrompt: z
-      .string()
-      .trim()
-      .max(20_000, 'must be at most 20000 characters')
-      .optional()
-      .transform((s) => (s ? s : undefined)),
-    // Attachments pasted into the new-task form — same shape and limits as a
-    // live-session message; delivered with the first agent step's opening.
-    images: z.array(attachmentInputSchema).max(4).optional(),
-    // Idempotent start (#504): the same id and payload answer 200 with the existing run.
-    clientRequestId: z.string().uuid().optional(),
-    // Task webhook opt-in (#589). Absent = off; not part of the idempotency hash.
-    notify: z.boolean().optional(),
-  })
-  .refine((b) => Boolean(b.workflow) !== Boolean(b.steps), {
-    message: 'provide either "workflow" or "steps", not both',
-  });
-
 const planSchema = z.object({
-  // Same bound as `startRunSchema.task` — this flows into `planChain` (#429).
+  // Same bound as `createRunInputSchema.task` — this flows into `planChain` (#429).
   task: z.string().trim().min(1).max(100_000, 'must be at most 100000 characters'),
 });
 
@@ -3897,7 +3847,7 @@ export function createApp(deps: ServerDeps) {
       return run ? c.json(run) : c.json({ error: 'not found' }, 404);
     })
 
-    .post('/runs', jsonZodValidator(startRunSchema), async (c) => {
+    .post('/runs', jsonZodValidator(createRunInputSchema), async (c) => {
       const { id: projectId, root: repoRoot, manager, store } = c.get('project');
       const body = c.req.valid('json');
       const clientRequest = clientRequestOf(body);
