@@ -14,6 +14,8 @@ const OWNER_NOTE = 'For an owner-approved increase, the owner adds the baseline-
 const APPROVED_NOTE = 'Complexity growth approved by the baseline-growth label; owner merge required.';
 const MAX_POINTS = 40;
 const MAX_HINTS = 10;
+// Two functions that share this fraction of their distinct body lines are one function moved and edited.
+const MIN_SIMILARITY = 0.5;
 const HELP = `Usage: node <skill>/scripts/complexity-gate.mjs --base <ref> --head <rev> [--allow-growth]
 
 Fail when a function that the head changes since the merge-base of <ref> and <rev> has
@@ -29,12 +31,18 @@ Exit codes: 0 pass, 1 complexity grew, 2 the check could not run (bad revision, 
 
 const isNamed = name => !name.startsWith('anonymous@');
 const simpleName = name => name.split('.').at(-1);
+/** Dice coefficient of two functions' distinct body lines: 1 for one body, 0 for none in common. */
+export function similarity(a = [], b = []) {
+  const other = new Set(b);
+  return a.length + b.length ? (2 * a.filter(line => other.has(line)).length) / (a.length + b.length) : 0;
+}
 const mostComplex = (best, item) => (!best || item.complexity > best.complexity ? item : best);
 
 /**
  * Pair each added function, which has no counterpart in its own file, with a function the change
  * removed: first one with an identical body (a move or rename), then one with the same
- * name (a move with edits). A removed function serves one pair, so a clone is still new.
+ * name and at least half of its body lines (a move with edits). A removed function serves one pair,
+ * so a clone is still new, and a same-named function with another body is still new.
  */
 export function pairMoves(candidates, removed) {
   const free = new Set(removed);
@@ -45,7 +53,8 @@ export function pairMoves(candidates, removed) {
   };
   for (const fn of candidates) take(fn, [...free].filter(item => item.bodyHash === fn.bodyHash));
   for (const fn of candidates.filter(item => !pairs.has(item) && isNamed(item.name))) {
-    take(fn, [...free].filter(item => isNamed(item.name) && simpleName(item.name) === simpleName(fn.name)));
+    take(fn, [...free].filter(item => isNamed(item.name) && simpleName(item.name) === simpleName(fn.name)
+      && similarity(item.lines, fn.lines) >= MIN_SIMILARITY));
   }
   return { pairs, free };
 }
@@ -100,7 +109,7 @@ function pointLines(fn) {
 
 function lostLines({ growth, lost, limit }) {
   if (!lost.length || !growth.some(({ from }) => !from)) return [];
-  return ['', `The change removed these functions over ${limit}. The gate pairs a moved function only by identical body or by name:`,
+  return ['', `The change removed these functions over ${limit}. The gate pairs a moved function only by identical body, or by name and a mostly shared body:`,
     ...lost.slice(0, MAX_HINTS).map(item => `  ${item.file}:${item.line} ${item.name} (complexity ${item.complexity})`)];
 }
 

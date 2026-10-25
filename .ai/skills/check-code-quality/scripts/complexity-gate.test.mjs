@@ -13,6 +13,10 @@ const OWNER_NOTE = 'For an owner-approved increase, the owner adds the baseline-
 const complex = (name, points, extra = '') =>
   `export function ${name}(x) {\n${'  if (x) { x++; }\n'.repeat(points)}${extra}  return x;\n}\n`;
 
+/** Same shape as `complex`, with a body that shares no line with it: a different function that may bear the same name. */
+const unrelated = (name, points, extra = '') =>
+  `export function ${name}(y) {\n${'  if (y) { y--; }\n'.repeat(points)}${extra}  return y;\n}\n`;
+
 function repo(t, files) {
   const cwd = mkdtempSync(join(tmpdir(), 'cez-gate-test-'));
   t.after(() => rmSync(cwd, { recursive: true, force: true }));
@@ -127,6 +131,25 @@ test('a function moved with edits keeps its name and is compared with the origin
   const result = gate(f, grown);
   assert.equal(result.code, 1);
   assert.match(result.output, /b\.ts:\d+ big: complexity 26 \(was 25 in a\.ts:big at the merge base; limit 20\)/);
+});
+
+test('a new function is not paired with a removed function of the same name whose body it does not share', t => {
+  const f = repo(t, { 'a.ts': complex('keep', 1) + complex('foo', 34) });
+  const head = f.commit({ 'a.ts': complex('keep', 1), 'b.ts': unrelated('foo', 20) });
+  const result = gate(f, head);
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /b\.ts:\d+ foo: complexity 21 \(new function; limit 20\)/);
+  assert.match(result.output, /removed these functions over 20/);
+});
+
+test('with the same name in several files, a moved function is compared with the one it shares its body with', t => {
+  const f = repo(t, { 'a.ts': complex('keep', 1) + complex('run', 34), 'b.ts': unrelated('run', 20) });
+  const level = f.commit({ 'a.ts': complex('keep', 1), 'b.ts': null, 'c.ts': unrelated('run', 20, '  y += 1;\n') });
+  assert.equal(gate(f, level).code, 0);
+  const grown = f.commit({ 'c.ts': unrelated('run', 21, '  y += 1;\n') });
+  const result = gate(f, grown);
+  assert.equal(result.code, 1, result.output);
+  assert.match(result.output, /c\.ts:\d+ run: complexity 22 \(was 21 in b\.ts:run at the merge base; limit 20\)/);
 });
 
 test('a new function with no origin lists the over-limit functions the change removed', t => {

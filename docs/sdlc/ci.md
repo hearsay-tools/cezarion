@@ -253,8 +253,9 @@ complex than at the merge base. A pull request can lower a function's complexity
 fails because a function it does not touch is long. A changed function that is lowered but stays
 over 20 passes; the job lists it as a notice, and the pre-PR check (`check-code-quality`) still
 reports it. A moved or renamed function is compared with
-the function it came from: first one with an identical body, then one with the same name. A copy of
-a long function is still new. The job runs the workflow commit's own scripts and reads the pull
+the function it came from: first one with an identical body, then one with the same name that
+shares at least half of its body lines. A copy of a long function is still new, and so is a function
+that only shares a name with a removed one. The job runs the workflow commit's own scripts and reads the pull
 request head from Git objects, so no head code runs and a pull request cannot change its own gate.
 It uses `github.sha`, not the event's `base.sha`, which stays at the tip from when the PR opened.
 `verify` requires it on every pull request.

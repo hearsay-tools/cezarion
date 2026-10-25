@@ -37,11 +37,14 @@ function ownSource(fn, functions, source, from = fn.start) {
 // name or in another file hashes alike, so a move or rename can be paired up.
 const bodyHash = (fn, functions, source) =>
   createHash('sha256').update(ownSource(fn, functions, source, fn.bodyStart)).digest('hex');
+// The distinct trimmed lines of a function's own body: what two copies of one function share.
+const bodyLines = (fn, functions, source) =>
+  [...new Set(ownSource(fn, functions, source, fn.bodyStart).split('\n').map(line => line.trim()).filter(line => line.length > 3))];
 const summary = ({ name, line, complexity }) => ({ name, line, complexity });
 
 /**
  * Compare one file's functions before and after. `changed` lists the functions whose
- * own source differs. With `details`, each carries its decision `points` and `bodyHash`,
+ * own source differs. With `details`, each carries its decision `points`, `bodyHash` and body `lines`,
  * and `unmatched` lists the functions before that no function after took over. The
  * candidates of an ambiguous match are not unmatched: the comparison keeps them.
  */
@@ -68,11 +71,11 @@ export function matchFunctions(before, after, file, { details = false } = {}) {
         reason: 'Several baseline functions match. Inspect the diff before attributing this change.',
         candidates: candidates.map(summary),
       } : {}),
-      ...(details ? { bodyHash: bodyHash(fn, functions, after), points: fn.points } : {}),
+      ...(details ? { bodyHash: bodyHash(fn, functions, after), lines: bodyLines(fn, functions, after), points: fn.points } : {}),
     }];
   });
   const unmatched = details
-    ? oldFunctions.filter(old => !used.has(old) && !ambiguous.has(old)).map(old => ({ ...summary(old), bodyHash: bodyHash(old, oldFunctions, before) }))
+    ? oldFunctions.filter(old => !used.has(old) && !ambiguous.has(old)).map(old => ({ ...summary(old), bodyHash: bodyHash(old, oldFunctions, before), lines: bodyLines(old, oldFunctions, before) }))
     : [];
   return { changed, unmatched };
 }
