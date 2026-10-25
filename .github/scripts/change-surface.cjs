@@ -1,4 +1,5 @@
 const fs = require('node:fs');
+const tty = require('node:tty');
 
 // Docs: paths no Vitest test or cockpit browser spec reads (testReadDocuments
 // below names the exceptions). A change confined to them skips both suites and
@@ -105,8 +106,20 @@ function classifyJsonLines(input) {
   return classifyPaths(paths);
 }
 
+const usage = `usage: <changed paths, one JSON string per line> | node .github/scripts/change-surface.cjs
+Prints docs-only, infra-only or full-matrix. To classify the current branch:
+  git diff --name-only --no-renames origin/main...HEAD | jq -R . | node .github/scripts/change-surface.cjs
+`;
+
 if (require.main === module) {
-  process.stdout.write(`${classifyJsonLines(fs.readFileSync(0, 'utf8'))}\n`);
+  // A terminal on stdin means no pipe: reading it would wait for input that
+  // never comes (hearsay-tools/cezarion#1640). CI always pipes.
+  if (tty.isatty(0)) {
+    process.stderr.write(usage);
+    process.exitCode = 2;
+  } else {
+    process.stdout.write(`${classifyJsonLines(fs.readFileSync(0, 'utf8'))}\n`);
+  }
 }
 
-module.exports = { classifyPaths, classifyJsonLines, isDocsPath, testReadDocuments };
+module.exports = { classifyPaths, classifyJsonLines, isDocsPath, testReadDocuments, usage };

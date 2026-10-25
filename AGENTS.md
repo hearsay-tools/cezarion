@@ -432,6 +432,8 @@ Rules that follow from that:
 - Cross-package imports go through the package name, never a relative path — the exceptions are test-only reaches for golden fixtures, and they are ugly on purpose.
 - The repo root keeps only what spans workspaces: `scripts/dev.mjs` (boots both halves) and `scripts/release*.mjs` (a release spans every package). Everything else lives in the package that owns it.
 
+To build a POSIX shell word, use `shellQuote` from `packages/cezar/src/core/shell-env.ts`; `JSON.stringify` is not shell quoting, because `$()` and backticks still expand inside double quotes. Scripts in `.ai/scripts/` and root `scripts/` can import it from `packages/cezar/dist/core/shell-env.js` after a build, or keep a local copy with a test that runs its output through `sh` and checks that spaces, apostrophes, dollar signs, `$()` and backticks stay literal.
+
 ## Task routing
 
 | When the task involves…                                                                                                                                                                                       | Read first                                                                                                                                                                                                                                    | Key rules                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -923,7 +925,10 @@ It selects Vitest tests through the import graph for ordinary source changes;
 shared/configuration/unknown inputs, deletions, or unavailable Git/base information
 fall back to full Vitest. Clean changes, and changes confined to CI's docs-only
 list, explicitly skip iteration tests. `isDocsPath` in
-`.github/scripts/change-surface.cjs` is the exact definition. The list includes
+`.github/scripts/change-surface.cjs` is the exact definition. To classify the
+current branch's commits as CI does, run
+`git diff --name-only --no-renames origin/main...HEAD | jq -R . | node .github/scripts/change-surface.cjs`;
+it prints `docs-only`, `infra-only` or `full-matrix`. The list includes
 root Markdown and `LICENSE*`, `docs/`, `.ai/specs/`, `.ai/analysis/`, the
 generated upstream scan data, and Markdown under `packages/` outside
 `fixtures`, `__fixtures__` and `__snapshots__` directories. It excludes
