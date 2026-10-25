@@ -122,6 +122,39 @@ caller's `timeoutMs`. The four `timeoutMs: 20_000` overrides above were removed,
 default is now larger. 45 s fits inside the default 60 s hook timeout with room for fixture
 setup. A child that exits still fails at once.
 
+## Stopping the whole process group (hearsay-tools/cezarion#1764)
+
+`spawnFixtureServer` starts the server in its own process group (`detached`, except on
+Windows), and `stopFixtureServer` waits until no process in that group runs. The server's
+git children outlive its exit. A teardown `rmSync` that runs right after the server exits
+can therefore meet a `git status` that writes `.git/index.lock` into the tree it removes.
+Main CI failed this way with `ENOTEMPTY` in `git-sidebar` (hearsay-tools/cezarion#1764) and
+`variants-compare` (hearsay-tools/cezarion#1731), and a PR run failed this way in `new-task`.
+
+Evidence: a server-only probe (`.ai/qa/1765/probe.mjs`, not tracked) with a git wrapper that
+adds 400 ms per call. After a leader-only stop, 18 to 24 git processes still ran in the
+fixture root (5 of 6 runs). After a group stop, none ran (3 of 3 runs).
+`src/test/fixture-server-stop.test.ts` fails against the leader-only stop.
+
+Children that `spawnFixtureServer` did not start (Vite servers, the fault proxy) keep the
+leader-only stop: their pid does not name a process group.
+
+### Process exits
+
+| Case | What stops it | Behavior at shipped defaults |
+| --- | --- | --- |
+| Normal stop | `stopFixtureServer` sends SIGTERM to the group, then SIGKILL after the grace (5 s) to whatever still runs, the server or any child. | Resolves once the server has exited and no group member runs. Rejects when a member still runs after SIGKILL plus the grace. |
+| Test process interrupted by SIGINT, SIGTERM or SIGHUP after the spawn | A handler that `spawnFixtureServer` installs once per process sends SIGKILL to every group it still owns. | The signal is raised again when no other listener handles it, so the process still ends by it. |
+| Test process interrupted before the spawn | Nothing to stop. | No group exists. The spawn and its registration run in one synchronous step, so no signal handler runs between them. |
+| Test process exits without `afterAll` | The same handler, on `exit`, sends SIGKILL to every group still running. | The server and its children end. |
+| Test process killed by SIGKILL | Nothing can run. | The server and its children keep running, as before this change: children of a SIGKILLed process were never stopped. Only the terminal's Ctrl-C reached them directly before, and the signal handler above replaces it. |
+| Server exits before its children | The same stop, whether the server exited by itself or by the stop. | The stop waits for the remaining members and signals them. |
+| A member ignores SIGTERM | SIGKILL after the grace. | Covered by a test. |
+| Members stay zombies because their new parent never reaps them | Zombies do not count as running: Linux reads `/proc/<pid>/stat`, macOS reads `ps`. | The stop resolves. |
+| The start identity cannot be read | Not used. Node reaps the server before its `exit` event, and the kernel never reuses a pid that still names a group. | Cannot happen. |
+| The server's pid is reused | After the server's `exit`, a live process with its pid means the group ended. | The stop and the handler signal nothing. |
+| The handle the stop reads is deleted or forged | The handle is the in-memory `ChildProcess`; there is no descriptor or lock file. | Cannot happen. |
+
 ## Other server classes audited
 
 - `task-views-layout` fault proxy uses a direct Node HTTP listener; it does not run
