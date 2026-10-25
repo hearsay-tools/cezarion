@@ -1,4 +1,4 @@
-import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, truncateSync, appendFileSync, writeFileSync, fstatSync } from 'node:fs';
 import { Socket } from 'node:net';
@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path';
 import type { PreviewServer } from '@open-mercato/cezar-contract';
 import { buildCommandEnv } from '../core/agent-env.ts';
 import { processStartToken, recordedProcessLive } from '../delegation/process-liveness.ts';
+import { spawnDetached, stopGroup, type GroupLeader } from '../detached-process.ts';
 import { CHROMIUM_PID_FILE } from './chromium.ts';
 
 /**
@@ -47,18 +48,6 @@ export async function probePort(port: number): Promise<boolean> {
 
 const sleep = (ms: number) => new Promise<void>(resolveSleep => setTimeout(resolveSleep, ms));
 
-function signalGroup(pgid: number, signal: 'SIGTERM' | 'SIGKILL'): boolean {
-  if (process.platform === 'win32') {
-    return spawnSync('taskkill', ['/pid', String(pgid), '/t', '/f'], { windowsHide: true, timeout: 5_000 }).status === 0;
-  }
-  try { process.kill(-pgid, signal); return true; } catch { return false; }
-}
-
-function groupAlive(pgid: number): boolean {
-  if (process.platform === 'win32') return false;
-  try { process.kill(-pgid, 0); return true; } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
-}
-
 /** SIGTERM one process, SIGKILL it if it is still there after the grace period. */
 async function terminatePid(pid: number): Promise<void> {
   try { process.kill(pid, 'SIGTERM'); } catch { return; }
@@ -68,17 +57,11 @@ async function terminatePid(pid: number): Promise<void> {
   if (alive()) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone meanwhile */ } }
 }
 
-/** SIGTERM the group, SIGKILL whatever is still there after the grace period. */
-async function terminateGroup(pgid: number): Promise<void> {
-  if (!signalGroup(pgid, 'SIGTERM')) return;
-  const deadline = Date.now() + KILL_GRACE_MS;
-  while (groupAlive(pgid) && Date.now() < deadline) await sleep(50);
-  if (!groupAlive(pgid)) return;
-  signalGroup(pgid, 'SIGKILL');
-  // SIGKILL is delivered, not done: until the kernel tears the processes down they still hold
-  // their sockets. Return once the group is gone, so "stopped" means the port is free.
-  const killDeadline = Date.now() + KILL_SETTLE_MS;
-  while (groupAlive(pgid) && Date.now() < killDeadline) await sleep(20);
+/** SIGTERM the group, SIGKILL whatever is still there after the grace period. SIGKILL is delivered,
+ *  not done: until the kernel tears the processes down they still hold their sockets, so the stop
+ *  resolves once no member runs, and "stopped" means the port is free. On Windows, the leader's tree. */
+async function terminateGroup(leader: GroupLeader): Promise<void> {
+  await stopGroup(leader, { graceMs: KILL_GRACE_MS, killWaitMs: KILL_SETTLE_MS });
 }
 
 /** Keep the last 1 MiB once the log passes 5 MiB. The child holds the file open in append mode, so it keeps writing at the end. */
@@ -149,7 +132,7 @@ export class DevServer extends EventEmitter {
     const env = buildCommandEnv();
     const child = process.platform === 'win32'
       ? spawn(this.server.command, { cwd, env, shell: true, windowsHide: true, stdio: ['ignore', logFd, logFd] })
-      : spawn('/bin/sh', ['-c', this.server.command], { cwd, env, detached: true, stdio: ['ignore', logFd, logFd] });
+      : spawnDetached('/bin/sh', ['-c', this.server.command], { cwd, env, stdio: ['ignore', logFd, logFd] });
     closeSync(logFd);
     this.child = child;
     this.childExited = new Promise<void>(resolveExit => {
@@ -167,7 +150,7 @@ export class DevServer extends EventEmitter {
         // the way a stop does (SIGKILL after the grace period, so a holder that ignores SIGTERM goes
         // too), and keep the pid record until the group is gone: `stop()` awaits the same cleanup.
         this.finish('exited', { keepRecord: true });
-        this.stopping = terminateGroup(pid).finally(() => this.removeRecord(pid));
+        this.stopping = terminateGroup({ pid, child }).finally(() => this.removeRecord(pid));
       });
     });
     if (child.pid !== undefined) {
@@ -198,9 +181,9 @@ export class DevServer extends EventEmitter {
 
   private async terminate(reason: DevServerStopReason): Promise<void> {
     this.stopReason = reason;
-    const pid = this.child?.pid;
-    if (pid === undefined) { this.finish('stopped'); return; }
-    await terminateGroup(pid);
+    const child = this.child;
+    if (child?.pid === undefined) { this.finish('stopped'); return; }
+    await terminateGroup({ pid: child.pid, child });
     await this.childExited;
     this.finish('stopped');
   }
@@ -288,7 +271,7 @@ export async function sweepPreviewLeftovers(dataDir: string, opts: { keep?: ((ru
       // `recordedProcessLive` answers "alive" on any uncertainty; a kill needs an exact token match,
       // so a record without a token, or a pid whose token cannot be read now, is skipped.
       if (!recordedProcessLive({ pid, startToken }) || processStartToken(pid) !== startToken) continue;
-      kills.push(what === 'browser' ? terminatePid(pid) : terminateGroup(pid));
+      kills.push(what === 'browser' ? terminatePid(pid) : terminateGroup({ pid, start: startToken }));
     }
   }
   await Promise.all(kills);
