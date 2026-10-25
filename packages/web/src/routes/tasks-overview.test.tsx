@@ -1705,6 +1705,30 @@ describe('TasksOverview — status groups and origin (hearsay-tools/cezarion#161
     expect(box().value).toBe('Hay ')
   })
 
+  it('keeps a cleared search when the URL renders the earlier write late (hearsay-tools/cezarion#1710)', () => {
+    const props = { runs: [run({ title: 'Needle' }), run({ id: 'r2', title: 'Haystack' })], onQueryChange: vi.fn() }
+    const box = () => screen.getByRole('textbox', { name: 'Search tasks' }) as HTMLInputElement
+    const view = (query: string) => (
+      <QueryClientProvider client={createQueryClient()}>
+        <MemoryRouter>
+          <TasksOverview {...props} urlQuery={query} view="active" now={NOW}
+            onViewChange={vi.fn()} onArchiveFinished={vi.fn()} onMarkAllRead={vi.fn()} onRename={vi.fn()} />
+        </MemoryRouter>
+      </QueryClientProvider>
+    )
+    const { rerender } = render(view(''))
+    fireEvent.change(box(), { target: { value: 'Needle' } })
+    fireEvent.change(box(), { target: { value: '' } })
+    // The router renders the page's `q=Needle` write in a transition, after the clear.
+    rerender(view('Needle'))
+    expect(box().value).toBe('')
+    rerender(view(''))
+    expect(box().value).toBe('')
+    // A change from outside still wins over the box.
+    rerender(view('Haystack'))
+    expect(box().value).toBe('Haystack')
+  })
+
   it('scopes Mark all read to the origin', () => {
     const onMarkAllRead = vi.fn()
     renderOverview({ runs: [run({ finishedAt: ago(0) }), automated({ finishedAt: ago(0) })], onMarkAllRead, origin: 'direct' }, false)

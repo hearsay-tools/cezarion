@@ -288,17 +288,30 @@ export function TasksOverview({
  * The search box's text. It starts from the URL's, follows the URL when something else changes
  * it (a link, Back), and keeps what is being typed while the page's own debounced, trimmed write
  * catches up.
+ *
+ * `sent` holds the trimmed texts handed to the page since the URL last changed, oldest first.
+ * The router renders each write later, in a transition, so the URL can show an older one after
+ * the box has moved on, even after it was cleared: that is the box's own echo, never a change
+ * from outside (hearsay-tools/cezarion#1710). A text typed and erased inside one debounce is
+ * never written, so it stays in `sent` until the next URL change; an outside change to exactly
+ * that text before then is not followed.
  */
 function useUrlQuery(urlQuery: string, onQueryChange: ((query: string) => void) | undefined) {
   const [query, setQuery] = React.useState(urlQuery)
-  const written = React.useRef(urlQuery)
+  const shown = React.useRef(urlQuery)
+  const sent = React.useRef<string[]>([])
   React.useEffect(() => {
-    if (urlQuery !== written.current) setQuery(urlQuery)
-    written.current = urlQuery
+    if (urlQuery === shown.current) return
+    shown.current = urlQuery
+    const own = sent.current.indexOf(urlQuery)
+    if (own === -1) setQuery(urlQuery)
+    sent.current = own === -1 ? [] : sent.current.slice(own + 1)
   }, [urlQuery])
   React.useEffect(() => {
-    written.current = query.trim()
-    onQueryChange?.(query)
+    if (!onQueryChange) return
+    const trimmed = query.trim()
+    if (trimmed !== (sent.current.at(-1) ?? shown.current)) sent.current.push(trimmed)
+    onQueryChange(query)
   }, [onQueryChange, query])
   return [query, setQuery] as const
 }
