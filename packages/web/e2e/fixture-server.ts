@@ -1,10 +1,23 @@
-import { spawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
+import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process'
+import { readdirSync, readFileSync } from 'node:fs'
+import { setTimeout as delay } from 'node:timers/promises'
 
 import { pollFor, type PollOptions } from './poll'
 
-/** Stop a spec-owned server before removing the directory it may still be writing. */
+/**
+ * Stop a spec-owned server before removing the directory it may still be writing.
+ *
+ * A server from `spawnFixtureServer` leads its own process group, and the stop waits for the
+ * whole group, not only the server. The server's git children outlive its exit: with a git
+ * wrapper that adds 400 ms per call, 22 and 24 of them were still running in the fixture root
+ * after the server exited (`.ai/qa/1765/probe.mjs`). A `git status` among them can write
+ * `.git/index.lock` while the spec's teardown `rmSync` walks the tree, which threw `ENOTEMPTY`
+ * in git-sidebar (hearsay-tools/cezarion#1764), variants-compare (hearsay-tools/cezarion#1731)
+ * and new-task. Any other child keeps the old leader-only stop.
+ */
 export async function stopFixtureServer(child: ChildProcess | undefined, timeoutMs = 5_000): Promise<void> {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return
+  if (child?.pid !== undefined && ownedGroups.has(child)) return stopFixtureGroup(child, child.pid, timeoutMs)
+  if (!child || exited(child)) return
 
   await new Promise<void>((resolve, reject) => {
     let forceTimer: ReturnType<typeof setTimeout> | undefined
@@ -27,6 +40,101 @@ export async function stopFixtureServer(child: ChildProcess | undefined, timeout
     }, timeoutMs)
     child.kill('SIGTERM')
   })
+}
+
+const exited = (child: ChildProcess) => child.exitCode !== null || child.signalCode !== null
+
+/** Servers that lead their own process group, still live or not yet stopped. */
+const ownedGroups = new Set<ChildProcess>()
+
+/** SIGTERM to the group, then SIGKILL for whatever outlives the grace, the server or any child. */
+async function stopFixtureGroup(child: ChildProcess, pgid: number, timeoutMs: number): Promise<void> {
+  try {
+    for (const signal of ['SIGTERM', 'SIGKILL'] as const) {
+      if (!groupRunning(child, pgid)) return
+      signalGroup(pgid, signal)
+      const deadline = performance.now() + timeoutMs
+      while (groupRunning(child, pgid) && performance.now() < deadline) await delay(50)
+    }
+    if (groupRunning(child, pgid)) throw new Error('Fixture server group did not exit after SIGKILL')
+  } finally {
+    if (!groupRunning(child, pgid)) ownedGroups.delete(child)
+  }
+}
+
+function signalGroup(pgid: number, signal: NodeJS.Signals) {
+  try { process.kill(-pgid, signal) } catch { /* the group already ended */ }
+}
+
+/**
+ * True while the server runs, or while its group still holds a process that is not a zombie.
+ * Node reaps the server before its `exit` event, and the kernel never hands out a pid that
+ * still names a group. So once the server has exited, a live process with its pid means the
+ * group ended and the pid was reused. Zombies do not count: one whose new parent never reaps
+ * it would keep the group forever.
+ */
+function groupRunning(child: ChildProcess, pgid: number): boolean {
+  if (!exited(child)) return true
+  if (processExists(pgid)) return false
+  if (!processExists(-pgid)) return false
+  return liveMember(pgid)
+}
+
+/** True when signal 0 reaches `target` (a pid, or a group as `-pgid`); EPERM means it exists. */
+function processExists(target: number): boolean {
+  try { process.kill(target, 0); return true }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM' }
+}
+
+/** True when the process table holds a member of group `pgid` that is not a zombie, or cannot
+ *  be read. Linux reads /proc, macOS asks ps (as `.ai/scripts/qa-fixture.mjs` does). */
+function liveMember(pgid: number): boolean {
+  if (process.platform === 'darwin') {
+    const ps = spawnSync('ps', ['-axo', 'pgid=,stat='], { encoding: 'utf8', timeout: 2_000 })
+    if (ps.status !== 0) return true
+    return ps.stdout.split('\n').some((line) => {
+      const [group, state] = line.trim().split(/\s+/)
+      return Number(group) === pgid && !state?.startsWith('Z')
+    })
+  }
+  for (const name of readdirSync('/proc')) {
+    if (!/^\d+$/.test(name)) continue
+    try {
+      const stat = readFileSync(`/proc/${name}/stat`, 'utf8')
+      const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)
+      if (Number(fields[2]) === pgid && fields[0] !== 'Z' && fields[0] !== 'X') return true
+    } catch (error) {
+      // A process that exited after the listing is no member; one it cannot read may be.
+      const code = (error as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT' && code !== 'ESRCH') return true
+    }
+  }
+  return false
+}
+
+/**
+ * A detached server no longer receives the terminal's Ctrl-C with the test run. When this
+ * process ends by a signal or exits, SIGKILL every group it still owns. A signal is then
+ * raised again only when no other listener (Vitest's own, for one) handles it.
+ */
+let interruptHandlersInstalled = false
+function installInterruptHandlers() {
+  if (interruptHandlersInstalled) return
+  interruptHandlersInstalled = true
+  const killOwned = () => {
+    // groupRunning first: a group that ended long ago may have handed its pid to another group.
+    for (const child of ownedGroups) if (child.pid !== undefined && groupRunning(child, child.pid)) signalGroup(child.pid, 'SIGKILL')
+    ownedGroups.clear()
+  }
+  process.once('exit', killOwned)
+  for (const signal of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) {
+    const onSignal = () => {
+      killOwned()
+      process.off(signal, onSignal)
+      if (process.listenerCount(signal) === 0) process.kill(process.pid, signal)
+    }
+    process.on(signal, onSignal)
+  }
 }
 
 
@@ -96,7 +204,13 @@ export function spawnFixtureServer(args: readonly string[], options: SpawnOption
   const budget = readiness.timeoutMs ?? FIXTURE_BOOT_BUDGET_MS
   const poll: PollOptions = { ...readiness, tries: readiness.tries ?? Number.POSITIVE_INFINITY, timeoutMs: budget }
   const deadline = Math.min(Date.now() + budget, poll.deadline ?? Infinity)
-  const child = spawn(process.execPath, [...args], { ...options, stdio: ['ignore', 'pipe', 'pipe'] })
+  // Its own process group, so the stop can wait for the git children it leaves behind.
+  const group = process.platform !== 'win32'
+  const child = spawn(process.execPath, [...args], { ...options, detached: group, stdio: ['ignore', 'pipe', 'pipe'] })
+  if (group && child.pid !== undefined) {
+    installInterruptHandlers()
+    ownedGroups.add(child)
+  }
   child.stdout?.setEncoding('utf8')
   const fixture: OwnedFixture = { deadline, poll, sample: captureFixtureServer(child) }
   ownedFixtures.set(child, fixture)
