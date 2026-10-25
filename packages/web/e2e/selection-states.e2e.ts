@@ -6,7 +6,6 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { waitForSettledSample as rawSettledSample } from './visual-ready'
 import { normalizeColorExpression, normalizeColorSample } from './contrast'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { expectGroupRowHeightMatchesTaskRow } from './row-height'
 import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { applyContrastQaVariant, contrastQaVariants, type ContrastQaVariant, contrastSampleExpression, focusWithKeyboard, hoverVisiblePoint, type ContrastSample } from './contrast'
 // fixture-server starts: 1
@@ -38,13 +37,6 @@ beforeAll(async () => {
     // #729: both rows are handed off, so the glyph is sampled on the selected and the hover fill.
     notify: true,
   })),
-    // A variant group sharing one issue (#617 review round 4): its reference lives on the group
-    // row's line 2 and must stay a real link with the status panel on a pointer device.
-    ...['ga', 'gb'].map((id, index) => ({
-      id, title: `Grouped task (${index ? 'B' : 'A'})`, task: 'Check the work', workflow: 'default', status: 'review', tokensUsed: 0,
-      createdAt: new Date(Date.now() - 3_600_000).toISOString(), finishedAt: new Date(Date.now() - 3_600_000).toISOString(), archived: false, steps: [],
-      groupId: 'g-sel', variant: index ? 'B' : 'A', referencedIssueUrl: 'https://github.com/o/r/issues/425',
-    })),
     // An unread finished run (#617 01c): the flat nav's Tasks `tasks-unread` count. Never opened
     // by this spec, so it stays unread.
     { id: 'fin', title: 'Finished task', task: 'Check the work', workflow: 'default', status: 'done', tokensUsed: 0,
@@ -54,7 +46,7 @@ beforeAll(async () => {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
   baseUrl = await waitForFixtureServer(server)
-  expect((await (await fetch(`${baseUrl}/api/v1/runs`)).json()).map((run: { id: string }) => run.id).sort()).toEqual(['fin', 'ga', 'gb', 'one', 'two'])
+  expect((await (await fetch(`${baseUrl}/api/v1/runs`)).json()).map((run: { id: string }) => run.id).sort()).toEqual(['fin', 'one', 'two'])
   project = await bootProjectId(baseUrl)
   browser = AgentBrowser.open(`states-${process.pid}`)
 })
@@ -383,42 +375,11 @@ describe('selection and control states (#171)', () => {
       checkNavSelection(variant, { base: baseUrl, projectId: project, nav: '[data-slot="view-tabs"]' })
     })
 
-    if (variant.id === 'desktop-dark-comfortable') it(`${variant.id}: the group row's shared foreign reference is a keyboard-accessible external link (#617)`, () => {
-      variantId = variant.id
-      browser.goto(`${baseUrl}/p/${project}/tasks/one`)
-      const group = '[data-slot="group-row"][data-group-id="g-sel"]'
-      const inline = `${group} [data-slot="group-meta"] a[data-slot="issue-chip"]`
-      const overflow = `${group} [data-slot="reference-overflow"]`
-      browser.waitForFunction(`document.querySelector(${JSON.stringify(inline)}) !== null || document.querySelector(${JSON.stringify(overflow)}) !== null`)
-      applyContrastQaVariant(browser, variant)
-      // The shared status text can consume the narrow group's entire metadata budget.
-      // Its protected overflow still gives the reference the same link and keyboard panel.
-      let link = inline
-      if (!colorSample(`document.querySelector(${JSON.stringify(inline)}) !== null`)) {
-        browser.click(overflow)
-        link = '[data-slot="reference-overflow-list"] a[data-slot="issue-chip"]'
-      }
-      browser.waitForFunction(`document.querySelector(${JSON.stringify(link)})?.getBoundingClientRect().width > 0`)
-      expect(colorSample(`(() => { const a = document.querySelector(${JSON.stringify(link)}); return { href: a.getAttribute('href'), inToggle: a.closest('button') !== null, text: a.textContent } })()`))
-        .toEqual({ href: 'https://github.com/o/r/issues/425', inToggle: false, text: '#425' })
-      // This no-Git fixture has no known own repository. Preserve the foreign destination
-      // and keyboard focus without asking the local forge for that repository's status.
-      focusWithKeyboard(browser, link)
-      browser.waitForFunction(`document.querySelector(${JSON.stringify(link)}) === document.activeElement`)
-      browser.waitForFunction(`document.querySelector(${JSON.stringify(link)})?.getAttribute('target') === '_blank'`)
-      expect(colorSample(`document.querySelector('[data-slot="reference-status-card"]') === null`)).toBe(true)
-      // Focusing the link did not toggle the group.
-      expect(colorSample(`document.querySelector('${group} [data-slot="group-tile"]').getAttribute('aria-expanded')`)).toBe('false')
-      browser.press('Escape')
-      browser.waitForFunction(`document.querySelector('[data-slot="reference-status-card"]') === null`)
-    })
-
-    it(`${variant.id}: enabled control icons contrast and retired selectors stay absent`, () => {
+    it(`${variant.id}: enabled control icons contrast`, () => {
       variantId = variant.id
       browser.goto(`${baseUrl}/p/${project}/new`)
       const model = 'button[data-slot="model-pill"]'
       browser.waitForFunction(`document.querySelector('${model}')?.disabled === false`)
-      expect(browser.count('[data-slot="variants-pill"]')).toBe(0)
       applyContrastQaVariant(browser, variant)
       colorSample(`document.querySelector('[data-slot="execution-options"] summary').scrollIntoView({ block: 'center' })`)
       browser.click('[data-slot="execution-options"] summary')
@@ -467,12 +428,6 @@ describe('selection and control states (#171)', () => {
       browser.screenshot(`${artifacts}/states-composer-${variant.id}.png`, { viewport: true })
     })
   }
-  // With a hover-capable pointer (this spec's primaryHoverType=2), the mobile shell still floors
-  // every button at 44px (#166): the group toggle must span both lines there, not grow the row.
-  it("keeps the group row a task row's height at 1440, 520 and 390px with a pointer (#617)", () => {
-    expectGroupRowHeightMatchesTaskRow(browser, { url: `${baseUrl}/p/${project}/tasks/one`, groupId: 'g-sel', widths: [1440, 768] })
-  })
-
   it('keeps the same selection cue in the multi-project navigation', () => {
     const configPath = join(root, '.cez-home/config.json')
     const config = JSON.parse(readFileSync(configPath, 'utf8'))

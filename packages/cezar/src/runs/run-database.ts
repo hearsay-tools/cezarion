@@ -580,7 +580,6 @@ export class RunDatabase {
     listWorkerIds: StatementSync;
     listIdsByParent: StatementSync;
     findByClientRequestId: StatementSync;
-    listByGroup: StatementSync;
     listWithWorktree: StatementSync;
     findResourceHolders: StatementSync;
     listIds: StatementSync;
@@ -621,7 +620,6 @@ export class RunDatabase {
       listWorkerIds: db.prepare('SELECT id FROM runs WHERE parent_run_id IS NOT NULL'),
       listIdsByParent: db.prepare('SELECT id FROM runs WHERE parent_run_id = ?'),
       findByClientRequestId: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE client_request_id = ? LIMIT 1`),
-      listByGroup: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE group_id = ?`),
       listWithWorktree: db.prepare(`SELECT ${ROW_COLUMNS} FROM runs WHERE worktree_path IS NOT NULL ORDER BY coalesce(finished_at, created_at) DESC, created_at DESC, seq`),
       findResourceHolders: db.prepare('SELECT id FROM runs WHERE branch = :branch UNION SELECT id FROM runs WHERE worktree_path = :worktreePath'),
       listIds: db.prepare('SELECT id FROM runs'),
@@ -807,11 +805,6 @@ export class RunDatabase {
   findByClientRequestId(clientRequestId: string): RunRow | undefined {
     const row = this.run(() => this.statements.findByClientRequestId.get(clientRequestId));
     return row ? toRunRow(row) : undefined;
-  }
-
-  /** The members of one variant group, in no particular order. */
-  listByGroup(groupId: string): RunRow[] {
-    return this.run(() => this.statements.listByGroup.all(groupId)).map(toRunRow);
   }
 
   /** Rows with a materialized worktree, most recently finished (else created) first, then newest first. */

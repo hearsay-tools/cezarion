@@ -7,8 +7,7 @@ import { runnerSchema, type Runner } from './health.ts';
  * This file must NOT import `./runs.ts`: the run record embeds a workflow definition
  * (`RunRecord.workflowDef`), so `runs.ts` imports the two definition schemas below, and a second
  * edge back would be a module cycle — one whose top-level `z.object(…)` calls would hit a TDZ at
- * import time, not a type error. The parallel-variant shapes (`/groups/:groupId/*`), which DO
- * embed the record, live with the run family for the same reason.
+ * import time, not a type error.
  */
 
 // ---- workflows (`GET/POST /workflows`, `DELETE /workflows/:name`, `POST /workflows/parse`) ----

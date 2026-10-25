@@ -26,7 +26,7 @@ beforeAll(async () => {
     writeFileSync(join(worktreePath, 'comparison.md'), `# Variant ${variant}\nDifferent implementation ${variant}.\n`)
     execFileSync('git', ['-C', worktreePath, 'add', 'comparison.md'])
     execFileSync('git', ['-C', worktreePath, 'commit', '-qm', `Variant ${variant}`])
-    return { ...record, id: `fixture-${variant}`, title: `Validate task views (${variant})`, status: 'done', groupId: 'fixture-group', variant, archived: false, worktreePath, branch: `cez/fixture-${variant}`, inputTokens: 42000, outputTokens: 6000, costUsd: 0.42, peakRssBytes: 440401920, diffStat: { adds: 2, dels: 0, files: 1 } }
+    return { ...record, id: `fixture-${variant}`, title: `Validate task views (${variant})`, status: 'done', archived: false, worktreePath, branch: `cez/fixture-${variant}`, inputTokens: 42000, outputTokens: 6000, costUsd: 0.42, peakRssBytes: 440401920, diffStat: { adds: 2, dels: 0, files: 1 } }
   })
   writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify(runs))
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], { env: fixtureServeEnv(root, { CEZ_AUTOMATIONS: '1' }), stdio: 'ignore' })
@@ -51,7 +51,7 @@ it('renders assigned task flows at 1440 Wide, 402 and 360 in both themes without
   const pages: Array<[string, string, string]> = [
     ['project', scoped('/'), '[data-slot="tasks-table"]'], ['global', '/tasks?group=project', '[data-slot="global-task-row"]'],
     ['inbox', scoped('/inbox'), '[data-route="inbox"]'], ['automations', scoped('/automations'), '[data-route="automations"] [data-slot="automation-card"]'],
-    ['editor', scoped(`/automations/${automationId}`), '#automation-name'], ['compare', scoped('/compare/fixture-group'), '[data-slot="retained-variant"]'],
+    ['editor', scoped(`/automations/${automationId}`), '#automation-name'],
   ]
   for (const width of [1440, 402, 360]) for (const theme of ['light', 'dark']) for (const [name, path, selector] of pages) {
     browser.goto(base + path)
@@ -84,13 +84,6 @@ it('persists column choices, filters projects, and expands mobile resources thro
   browser.click('[data-action="clear-filters"]')
   browser.waitForFunction(`document.querySelectorAll('[data-slot="global-task-row"]').length === 2`)
 }, 60_000)
-it('keeps retained comparisons read-only', () => {
-  browser.goto(base + scoped('/compare/fixture-group')); prepare(402, 'light')
-  browser.waitForFunction(`document.querySelectorAll('[data-slot="retained-variant"]').length === 2`)
-  expect(browser.count('[data-slot="variant-pick"]')).toBe(0)
-  expect(browser.text('[data-route="compare"]')).toContain('owned workers')
-}, 60_000)
-
 it('renders loading, retryable error, and filtered-empty states in both themes and phone widths', async () => {
   const faultFile = join(root, 'http-fault.txt')
   writeFileSync(faultFile, 'none')

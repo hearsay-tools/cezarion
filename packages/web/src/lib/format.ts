@@ -38,3 +38,21 @@ export function checkTimeText(at: Date, now: Date = new Date()): string {
   const sameDay = at.toDateString() === now.toDateString()
   return new Intl.DateTimeFormat(undefined, sameDay ? { timeStyle: 'short' } : { dateStyle: 'medium', timeStyle: 'short' }).format(at)
 }
+
+/**
+ * A scheduled run's meta word (#617 01b): when it resumes, short enough for a sidebar line —
+ * `resumes in 12m` under an hour, `resumes 14:05` from an hour out (the date too beyond a day).
+ * `scheduled` when the time is missing, unreadable or already due. The auto-resume hint's
+ * medium date + long time is the thread's wording; it does not fit here.
+ */
+export function resumeLabel(autoResumeAt: string | undefined, now: number): string {
+  const at = autoResumeAt ? Date.parse(autoResumeAt) : Number.NaN
+  if (!Number.isFinite(at) || at <= now) return 'scheduled'
+  // Floored like `shortAge`, but never "in 0m": a run a few seconds out still resumes in 1m.
+  const minutes = Math.max(1, Math.floor((at - now) / 60_000))
+  if (minutes < 60) return `resumes in ${minutes}m`
+  const date = new Date(at)
+  const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(date)
+  if (at - now < 86_400_000) return `resumes ${clock}`
+  return `resumes ${new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(date)} ${clock}`
+}

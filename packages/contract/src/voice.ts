@@ -62,7 +62,7 @@ export type VoicePosition = z.infer<typeof voicePositionSchema>;
 export const voiceSidebarViewSchema = z.enum(['active', 'automations']);
 
 /** The kind of page the user is on when they speak (hearsay-tools/cezarion#1463). */
-export const VOICE_VIEWS = ['task', 'compare', 'new-task', 'github', 'git', 'automations', 'inbox', 'settings', 'other'] as const;
+export const VOICE_VIEWS = ['task', 'new-task', 'github', 'git', 'automations', 'inbox', 'settings', 'other'] as const;
 export const voiceViewSchema = z.enum(VOICE_VIEWS);
 export type VoiceView = z.infer<typeof voiceViewSchema>;
 

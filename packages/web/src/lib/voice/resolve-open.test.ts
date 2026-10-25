@@ -79,15 +79,15 @@ describe('resolveOpenTarget', () => {
     expect(resolveOpenTarget({ ...args, openRunId: 'parent', position: 2 })).toEqual({ kind: 'run', runId: 'next' })
   })
 
-  it('a variant group opens as a group', () => {
+  it('a historical variant run opens as its own task (hearsay-tools/cezarion#1760)', () => {
     const a = failed({ id: 'ga', groupId: 'g1', variant: 'A', createdAt: '2026-07-14T12:00:00.000Z' })
-    // One member failed and one done: the group matches `failed` through its failed member.
     const b = voiceRun({ id: 'gb', groupId: 'g1', variant: 'B', status: 'done', createdAt: '2026-07-14T12:01:00.000Z' })
     const solo = failed({ id: 'solo', createdAt: '2026-07-14T09:00:00.000Z' })
     const args = { runs: [a, b, solo], sidebarView: 'active' as const, status: 'failed' as const, openRunId: null }
-    expect(resolveOpenTarget({ ...args, position: 'next' })).toEqual({ kind: 'group', groupId: 'g1' })
-    // A member that is open lights its group's row, so next moves on to the solo run.
-    expect(resolveOpenTarget({ ...args, openRunId: 'gb', position: 'next' })).toEqual({ kind: 'run', runId: 'solo' })
+    expect(resolveOpenTarget({ ...args, position: 'next' })).toEqual({ kind: 'run', runId: 'ga' })
+    // A done sibling neither matches `failed` nor stands in for the failed run.
+    expect(resolveOpenTarget({ ...args, openRunId: 'ga', position: 'next' })).toEqual({ kind: 'run', runId: 'solo' })
+    expect(resolveOpenTarget({ ...args, openRunId: 'gb', position: 'next' })).toEqual({ kind: 'run', runId: 'ga' })
   })
 
   it('archived walks the archived order', () => {

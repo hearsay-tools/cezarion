@@ -41,7 +41,7 @@ const task = (entry: RunIndexEntry) => ({ run: entry })
 
 function shape<R>(groups: TaskStatusGroup<R>[], name: (row: R) => string): string[] {
   return groups.map((group) => `${group.label}: ${group.rows
-    .map((row) => (row.kind === 'group' ? `[${row.members.map(name).join(' ')}]` : name(row.run)))
+    .map((row) => name(row.run))
     .join(', ')}`)
 }
 
@@ -83,15 +83,15 @@ describe('origin filter', () => {
 })
 
 describe('groupTone', () => {
-  it('colours each group, and turns Finished red for a failed variant member', () => {
+  it('colours each group, and turns Finished red for a failed member', () => {
     const done = run()
-    const failedVariant = run({ status: 'failed', groupId: 'g', variant: 'B' })
+    const failed = run({ status: 'failed' })
     expect(groupTone('Needs you', [])).toBe('pending')
     expect(groupTone('Working', [])).toBe('running')
-    expect(groupTone('Archived', [failedVariant])).toBe('neutral')
+    expect(groupTone('Archived', [failed])).toBe('neutral')
     expect(groupTone('Finished', [done])).toBe('success')
 
-    const groups = groupRuns([done, run({ groupId: 'g', variant: 'A' }), failedVariant], 'active')
+    const groups = groupRuns([done, run(), failed], 'active')
     const finished = groups.find((group) => group.label === 'Finished')!
     expect(groupTone('Finished', groupMembers(finished))).toBe('danger')
   })
@@ -129,9 +129,9 @@ describe('groupIndexedTasks', () => {
     expect(queued).toMatchObject({ queuePosition: 1 })
   })
 
-  it('never merges equal task, variant or parent ids from two projects', () => {
-    const a = indexed('alpha', run({ id: 'same', groupId: 'g1', variant: 'A', status: 'done' }))
-    const b = indexed('beta', run({ id: 'same', groupId: 'g1', variant: 'B', status: 'done' }))
+  it('never merges equal task or parent ids from two projects', () => {
+    const a = indexed('alpha', run({ id: 'same', status: 'done' }))
+    const b = indexed('beta', run({ id: 'same', status: 'done' }))
     const parent = indexed('beta', run({ id: 'parent', status: 'running' }))
     // A worker whose parent id exists in ANOTHER project: it is still an owned worker, so not a row.
     const worker = indexed('alpha', run({ id: 'w', status: 'running', delegation: { role: 'worker', parentRunId: 'parent' } } as Partial<RunRecord>))
