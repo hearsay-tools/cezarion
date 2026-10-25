@@ -1,3 +1,4 @@
+import { defined } from '../core/defined.ts';
 import { autosaveCleanupBlocker, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { EventEmitter } from 'node:events';
 import { workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } from './worker-execution.ts';
@@ -746,7 +747,7 @@ interface StoredRow {
   /** The row's insertion order, where it lists among runs created in the same millisecond. */
   seq: number;
   data: string;
-  extras?: RawExtras;
+  extras?: RawExtras | undefined;
 }
 
 /** Just the `StoredRow` part of a `coldBase` entry. */
@@ -796,13 +797,7 @@ export type RunRecord = z.infer<typeof runRecordSchema>;
 export type WakeCounters = Partial<Pick<RunRecord, 'automaticWakes' | 'waitDeliveryFailures'>>;
 
 /** One persisted event line; `type` mirrors AgentEvent plus engine lifecycle. */
-export interface RunEvent {
-  seq: number;
-  ts: string;
-  stepId?: string;
-  type: string;
-  [key: string]: unknown;
-}
+export type RunEvent = import('@open-mercato/cezar-contract').RunEvent;
 
 /** The pauses between open attempts while the database is busy, when `open` may wait (a boot):
  *  about 3.5 s in all, with each attempt's own busy timeout. Long enough for another process to
@@ -1214,7 +1209,7 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
  * Settle an adopted dead owner’s live run without starting work. Untouched runs cancel; started
  * runs become interrupted. Stop explicitly cancels its target. Mutates run.
  */
-export function settleOrphanedRun(run: RunRecord, opts: { stop?: boolean } = {}): RunRecord {
+export function settleOrphanedRun(run: RunRecord, opts: { stop?: boolean | undefined } = {}): RunRecord {
   if (opts.stop && (run.status === 'queued' || run.status === 'running' || run.status === 'waiting')) run.stopping = true;
   if (run.status === 'queued' && !run.startedAt && run.workflowDef !== undefined &&
     run.steps.every((step) => step.status === 'pending' && !step.startedAt && !step.sessionId)) {
@@ -1599,7 +1594,7 @@ const startToken = (pid: number) => { const token = processStartToken(pid); retu
  *  then filtered by pin state. Mirrored clause for clause by `isSweepable` in the cockpit's
  *  `lib/tasks-table.ts`. */
 export function isSweepable(
-  run: Pick<RunRecord, 'archived' | 'status' | 'autoResumeAt' | 'pinned'> & { delegation?: { role: string }; automationId?: string },
+  run: Pick<RunRecord, 'archived' | 'status' | 'autoResumeAt' | 'pinned'> & { delegation?: { role: string } | undefined; automationId?: string | undefined },
   scope?: ArchiveFinishedScope,
   automation?: boolean,
 ): boolean {
@@ -1701,7 +1696,7 @@ export class RunStore extends EventEmitter {
    * only a boot passes it, while nothing else runs yet. Without it a busy database fails after
    * one busy timeout.
    */
-  static open(dataDir: string, opts?: { keepLive?: boolean; retryBusy?: boolean; maintenance?: boolean }): RunStore {
+  static open(dataDir: string, opts?: { keepLive?: boolean | undefined; retryBusy?: boolean; maintenance?: boolean }): RunStore {
     const path = join(dataDir, RUNS_DB_FILE);
     const delays = opts?.retryBusy ? OPEN_RETRY_DELAYS_MS : [];
     const started = Date.now();
@@ -2248,7 +2243,7 @@ export class RunStore extends EventEmitter {
    * decode and could not. A finished row nobody has decoded is served from its summary by both,
    * which decodes nothing; reading it is what finds out (`isUnreadable`).
    */
-  listRunSummaries(options: { archivedWindow?: number; roots?: boolean } = {}): { runs: RunSummary[]; truncated: boolean } {
+  listRunSummaries(options: { archivedWindow?: number | undefined; roots?: boolean } = {}): { runs: RunSummary[]; truncated: boolean } {
     const { archivedWindow, roots = false } = options;
     // Every skipped row may be an archived root, so ask for that many more: one past the window
     // after skipping is how "older ones were left out" is known without counting them.
@@ -2617,26 +2612,26 @@ export class RunStore extends EventEmitter {
 
   createRun(input: {
     title: string;
-    systemPrompt?: string;
+    systemPrompt?: string | undefined;
     workflowDef?: z.infer<typeof workflowDefSchema>;
     workflow: string;
     task: string;
-    model?: string;
+    model?: string | undefined;
     /** Reasoning-effort pin (#45). Absent = harness default. */
-    effort?: string;
-    runner?: RunnerId;
+    effort?: string | undefined;
+    runner?: RunnerId | undefined;
     /** Composer's per-task agent account (spec 2026-07-29-agent-profiles). */
-    agentProfile?: string;
-    autonomous?: boolean;
-    archiveWhenDone?: boolean;
-    autoMergePr?: boolean;
+    agentProfile?: string | undefined;
+    autonomous?: boolean | undefined;
+    archiveWhenDone?: boolean | undefined;
+    autoMergePr?: boolean | undefined;
     /** Task webhook opt-in (#589), set at creation so the first transition is already covered. */
-    notify?: boolean;
-    worktree?: false;
+    notify?: boolean | undefined;
+    worktree?: false | undefined;
     groupId?: string;
     variant?: string;
-    clientRequestId?: string;
-    clientRequestHash?: string;
+    clientRequestId?: string | undefined;
+    clientRequestHash?: string | undefined;
     /** Automation provenance, committed with the row that creates the run (hearsay-tools/cezarion#1465):
      *  a crash before a later write must still let reconciliation find the receipt's task. */
     automation?: RunRecord['automation'];
@@ -3862,7 +3857,7 @@ export class RunStore extends EventEmitter {
     return count;
   }
 
-  appendEvent(runId: string, event: { type: string; stepId?: string; [key: string]: unknown }): RunEvent {
+  appendEvent(runId: string, event: { type: string; stepId?: string | undefined; [key: string]: unknown }): RunEvent {
     const run = this.record(runId);
     if (!run) {
       const ownership = this.runOwnership(runId);
@@ -3873,7 +3868,7 @@ export class RunStore extends EventEmitter {
     // Scrub credentials before the event touches disk or the live wire (#427):
     // tool-result output is persisted verbatim and served back over the API, so
     // a secret in an agent's command output would otherwise land in `.ai/cezar/`.
-    const full: RunEvent = this.redact({ ...event, seq, ts: new Date().toISOString() });
+    const full: RunEvent & { stepId?: string } = this.redact(defined({ ...event, seq, ts: new Date().toISOString() }));
     // Sync append keeps event order without a write queue; local NDJSON
     // appends at agent-event rates are effectively free.
     if (!hasPlainHistory(this.dataDir, runId)) restoreHistory(this.dataDir, runId);
@@ -4013,7 +4008,7 @@ export class RunStore extends EventEmitter {
    * itself created. See `referencedPrDeclaration` — the marker contract asks the agent to
    * re-declare after it opens a PR, and taking that literally cost the task the PR it was about.
    */
-  applyMarkerRefs(runId: string, refs: { pr?: number; prs?: readonly number[]; issue?: number }): RunRecord | undefined {
+  applyMarkerRefs(runId: string, refs: { pr?: number | undefined; prs?: readonly number[] | undefined; issue?: number | undefined }): RunRecord | undefined {
     const run = this.record(runId);
     if (!run || (refs.pr === undefined && refs.issue === undefined)) return run;
     const numbers = [...new Set([...(run.markerRefs?.pr === undefined ? [] : [run.markerRefs.pr]),
@@ -4102,7 +4097,7 @@ export class RunStore extends EventEmitter {
    * Scrub known credential values / token shapes from an event before it is
    * persisted or fanned out. On by default; `CEZ_REDACT_SECRETS=0` opts out.
    */
-  private redact(event: RunEvent): RunEvent {
+  private redact<T extends RunEvent>(event: T): T {
     const safe = this.sessionSecrets.size ? redactDeep(event, [...this.sessionSecrets]) : event;
     if (process.env.CEZ_REDACT_SECRETS === '0') return safe;
     return redactDeep(safe, this.hostSecrets());
@@ -4295,7 +4290,7 @@ export class RunStore extends EventEmitter {
 
   /** `workerResourcesSafe` with the refusal's live PIDs (empty when no PID explains it). */
   workerResourceHolders(id: string, generation: string, resourceId: string,
-    opts: { admittingQueued?: boolean; cwds?: CwdSource } = {}): 'safe' | number[] {
+    opts: { admittingQueued?: boolean; cwds?: CwdSource | undefined } = {}): 'safe' | number[] {
     if (autosaveCleanupBlocker(this.dataDir, id)) return [];
     const run = this.peek(id);
     const proof = this.readWorkerExecution(id);

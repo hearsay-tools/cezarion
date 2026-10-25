@@ -137,7 +137,7 @@ const iso = (ms: number) => new Date(ms).toISOString();
 const REPO = 'https://github.com/example-org/example-repo';
 const MINUTE = 60_000;
 
-interface Draft { record: RunRecord; skillPrompt?: string; extraPrompt?: string }
+interface Draft { record: RunRecord; skillPrompt?: string; extraPrompt?: string | undefined }
 
 /**
  * `runs` finished records plus `liveRunCount(runs)` live ones, newest first (the order `RunStore`

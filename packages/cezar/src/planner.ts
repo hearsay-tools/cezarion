@@ -166,7 +166,7 @@ async function detectVerifyCommands(repoRoot: string): Promise<string[]> {
  * are dropped — the caller falls back when nothing survives.
  */
 function sanitizeSteps(
-  raw: Array<{ skill?: string; name: string; prompt?: string; command?: string }>,
+  raw: Array<{ skill?: string | undefined; name: string; prompt?: string | undefined; command?: string | undefined }>,
   skillNames: Set<string>,
 ): WorkflowStepDef[] {
   const out: WorkflowStepDef[] = [];

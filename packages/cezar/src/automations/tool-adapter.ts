@@ -30,7 +30,7 @@ const fromStatus = (failure: { status: 400 | 404 | 409; error: string }): Refusa
   refuse(failure.status === 400 ? 'invalid_request' : failure.status === 404 ? 'not_found' : 'conflict', failure.error);
 
 /** The `at` a request names: its own, or its `delay` resolved from now in the zone. */
-function wallTime(request: { at?: string; delay?: string }, zone: string, now: number): string | undefined {
+function wallTime(request: { at?: string | undefined; delay?: string | undefined }, zone: string, now: number): string | undefined {
   if (request.at) return request.at;
   return request.delay ? resolveDelay(request.delay, now, zone) : undefined;
 }
@@ -60,7 +60,7 @@ export function createAutomationToolService(
   };
 
   /** The schedule a request asks for, or the refusal that names why it cannot be one. */
-  const scheduleOf = (request: { at?: string; delay?: string; time_zone?: string; latest_start?: string }, stored?: NonNullable<AutomationDefinition['schedule']>) => {
+  const scheduleOf = (request: { at?: string | undefined; delay?: string | undefined; time_zone?: string | undefined; latest_start?: string | undefined }, stored?: NonNullable<AutomationDefinition['schedule']>) => {
     const zone = request.time_zone ?? stored?.timeZone ?? deps.timeZone();
     if (!isValidTimeZone(zone)) return refuse('invalid_request', unknownTimeZoneMessage(zone));
     const at = wallTime(request, zone, now()) ?? stored?.at;

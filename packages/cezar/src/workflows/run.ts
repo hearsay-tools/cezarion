@@ -1,3 +1,5 @@
+import { defined } from '../core/defined.ts';
+import { uiAskQuestions } from '../core/ask.ts';
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { askErrorMessage, doneErrorMessage, scheduleRefusal, waitErrorMessage } from '../ci-wait/errors.ts';
@@ -277,7 +279,7 @@ const ROUTED_QUESTION_REFUSAL = 'This question was sent to the parent task; answ
  *  it as an ask card, #473). Returns the minted request id. */
 function emitAskRequested(sink: UiEventSink, ask: AskRequest): string {
   const requestId = randomUUID();
-  sink.handle({ type: 'ask.requested', requestId, ...askCardFields(ask) });
+  sink.handle({ type: 'ask.requested', requestId, ...defined(askCardFields(ask)), questions: uiAskQuestions(ask.questions) });
   return requestId;
 }
 /** A card's stored fields: its questions and, when it has one, its context (hearsay-tools/cezarion#1458).
@@ -378,7 +380,7 @@ function readTurnMarkers(turnText: string, completedAssistantText: string): Turn
 }
 /** Read the turn's ask: its ask line, else the card of the human wait it registered, else the
  *  human gate when that wait has no card. A done reads no ask. */
-function readTurnAsk(markers: TurnMarkers, options: { sessionOpen: boolean; humanWait?: Pick<HumanWaitEntry, 'questions' | 'context'> },
+function readTurnAsk(markers: TurnMarkers, options: { sessionOpen: boolean; humanWait?: Pick<HumanWaitEntry, 'questions' | 'context'> | undefined },
   done: boolean): AskTurnOutcome & { humanGate: boolean; waitCard: boolean } {
   const askTurn = resolveAskTurn(markers.v1Ask, markers.v2Ask, options.sessionOpen && !done);
   const surfaced = options.humanWait && options.sessionOpen && !done && !askTurn.ask ? options.humanWait : undefined;
@@ -396,7 +398,7 @@ function readTurnAsk(markers: TurnMarkers, options: { sessionOpen: boolean; huma
 export function classifyTurnEnd(turnText: string, completedAssistantText: string, options: {
   sessionOpen: boolean; pendingHumanAsk: boolean;
   scheduledWake: boolean; liveWorkers: boolean;
-  humanWait?: Pick<HumanWaitEntry, 'questions' | 'context'>; doneRequested?: boolean;
+  humanWait?: Pick<HumanWaitEntry, 'questions' | 'context'> | undefined; doneRequested?: boolean | undefined;
 }): TurnEndRead {
   const markers = readTurnMarkers(turnText, completedAssistantText);
   const done = options.sessionOpen && (!!options.doneRequested || markers.doneLine);
@@ -461,24 +463,24 @@ export function repositoryRootLockDisabled(env: NodeJS.ProcessEnv = process.env)
 const REPOSITORY_ROOT_LOCK_DISABLED_NOTE =
   'repository-root lock disabled by CEZ_DISABLE_REPO_LOCK=1 (shared checkout is unsafe)';
 
-export type DelegationExecutionSettings = { cwd: string; runner: RunnerId; model?: string; modelIdentity?: string; effort?: string; agentProfile: string; accountBinding?: WorkerAccountBinding; systemPrompt?: string; allowedTools?: string[]; bashAllowlist?: string[] };
+export type DelegationExecutionSettings = { cwd: string; runner: RunnerId; model?: string | undefined; modelIdentity?: string | undefined; effort?: string | undefined; agentProfile: string; accountBinding?: WorkerAccountBinding | undefined; systemPrompt?: string | undefined; allowedTools?: string[] | undefined; bashAllowlist?: string[] | undefined };
 
 /** What a Continue may carry (`RunManager.continueRun`). */
 type ContinueRunOptions = {
-  text?: string;
+  text?: string | undefined;
   /** Internal: a scheduler-owned continuation that only delivers resolved waits. It may open
    *  beside a pending question, which stays answerable (hearsay-tools/cezarion#1233). */
   waitWake?: true;
-  images?: PastedContent[];
-  runner?: RunnerId;
+  images?: PastedContent[] | undefined;
+  runner?: RunnerId | undefined;
   /** Internal configured fallback for an untouched workflow, resolved by the route. */
   originalRunner?: RunnerId;
-  model?: string;
+  model?: string | undefined;
   /** Reasoning-effort pin (#45). Omitted keeps the run's pin; empty string clears it. */
-  effort?: string;
+  effort?: string | undefined;
   /** Agent account for the reopened session (spec 2026-07-29-agent-profiles). Omitted = the
    *  account the run is already on. */
-  agentProfile?: string;
+  agentProfile?: string | undefined;
   /** #505: the parent reply this continuation delivers as the answer to a routed question. */
   answerInputId?: string;
 };
@@ -493,13 +495,13 @@ type SettledTurn = {
   ask: AskRequest | null;
   /** The ask line's autonomous nudge went instead of the question. */
   askNudged: boolean;
-  humanWait?: HumanWaitEntry;
+  humanWait?: HumanWaitEntry | undefined;
   sink?: UiEventSink;
   done: boolean;
   doneRequest?: ActiveRun['doneRequested'];
   /** The turn answered the no-wait nudge. The completion cause's flag is `completionNudgeAnswered`. */
   nudgedLastTurn: boolean;
-  scheduleWakeup?: number | null;
+  scheduleWakeup?: number | null | undefined;
 };
 type CompletionRefusal = NonNullable<ReturnType<RunManager['completionRefusal']>>;
 /** What `carryOutTurnEnd` hands the method for a decision kind. `session` is the session as the
@@ -516,15 +518,15 @@ type TurnEndCarriers = { [K in TurnEndDecision['kind']]: (carry: TurnEndCarry, d
 interface ActiveRun {
   /** Last cumulative Claude report per provider session during this process. */
   reportedClaudeCost?: Map<string, number>;
-  delegationSettings?: DelegationExecutionSettings;
-  revokeDelegation?: () => void;
-  revokeCiTools?: () => void;
+  delegationSettings?: DelegationExecutionSettings | undefined;
+  revokeDelegation?: (() => void) | undefined;
+  revokeCiTools?: (() => void) | undefined;
   /** hearsay-tools/cezarion#1234: the last session started without cezar tools, so its prompt
    *  taught the lifecycle markers; kept after the session's tools are revoked. */
   toolless?: boolean;
   ciGeneration?: string;
   ciTurnId?: string;
-  waitWakeTurn?: AgentSession;
+  waitWakeTurn?: AgentSession | undefined;
   cancelled: boolean;
   /** Explicit human Finish survives disposal; shutdown-only result callbacks do not settle. */
   finishRequested?: boolean;
@@ -532,7 +534,7 @@ interface ActiveRun {
   /** Where this run's steps execute: the task worktree, or the repo root. */
   cwd: string;
   /** Live claude session of the currently running agent step, if any. */
-  session?: AgentSession;
+  session?: AgentSession | undefined;
   pendingHumanAsk: boolean;
   /** Native grants belong only to this live session generation. */
   pendingPermissions?: Set<string>;
@@ -543,7 +545,7 @@ interface ActiveRun {
     wakeReserved?: boolean;
     /** This batch is an admitted wake (hearsay-tools/cezarion#1235): its acknowledgement spends
      *  the admission, a wake of messages alone included. */
-    admittedWake?: boolean };
+    admittedWake?: boolean } | undefined;
   /** The current session's declared input delivery (#505). */
   inputDelivery?: InputDelivery;
   /** Accepted by this session's harness, not yet reported read (observable backends only).
@@ -552,47 +554,47 @@ interface ActiveRun {
   /** Read before the acceptance checkpoint landed; applied when it does. */
   consumedBeforeAck?: Set<string>;
   /** Conversation input carried by a human answer's own write; read at that turn's end. */
-  bundledInputIds?: string[];
+  bundledInputIds?: string[] | undefined;
   /** Reported unread while their own submission was still unacknowledged. */
   retiredInFlight?: Set<string>;
   /** Liveness bound for unread input (#505): timer, and IDs already resubmitted once. */
-  unreadInputTimer?: NodeJS.Timeout;
+  unreadInputTimer?: NodeJS.Timeout | undefined;
   /** Liveness bound for a no-wait nudge that was acknowledged without a turn (#544,
    *  hearsay-tools/cezarion#1234). */
-  noWaitNudgeReplyTimer?: NodeJS.Timeout;
+  noWaitNudgeReplyTimer?: NodeJS.Timeout | undefined;
   /** Parent-level text/item/tool arrived for this nudge, possibly before the timer armed. */
-  noWaitNudgeSawContent?: boolean;
+  noWaitNudgeSawContent?: boolean | undefined;
   /** The reply bound expired on this session: a late reply from it resumes the run. */
-  noWaitNudgeParked?: AgentSession;
+  noWaitNudgeParked?: AgentSession | undefined;
   unreadRetried?: Set<string>;
   /** #486: re-settle a boundary that deferred only because holdsHumanInput() was true. */
-  heldHumanInputTimer?: NodeJS.Timeout;
-  heldHumanInputSince?: number;
-  heldHumanInputExpired?: boolean;
+  heldHumanInputTimer?: NodeJS.Timeout | undefined;
+  heldHumanInputSince?: number | undefined;
+  heldHumanInputExpired?: boolean | undefined;
   /** Only this older ask is being answered by the current continuation's opening turn. */
-  openingAnswerAskSeq?: number;
-  openingAgentInputId?: string;
-  agentSessionError?: string;
-  doneAtBoundary?: AgentSession;
+  openingAnswerAskSeq?: number | undefined;
+  openingAgentInputId?: string | undefined;
+  agentSessionError?: string | undefined;
+  doneAtBoundary?: AgentSession | undefined;
   /** `cezar_done` accepted in this session since its last turn end (hearsay-tools/cezarion#1234). */
-  doneRequested?: { session: AgentSession; summary?: string };
+  doneRequested?: { session: AgentSession; summary?: string } | undefined;
   /** The session's done completes a workflow step that is not the last, and this step runs next
    *  (hearsay-tools/cezarion#1620). Undefined: the done finishes the task. */
-  nextStep?: { session: AgentSession; label: string };
+  nextStep?: { session: AgentSession; label: string } | undefined;
   /** The step an accepted done closed. A workflow step that is not the last advances only on it. */
-  completedStepId?: string;
+  completedStepId?: string | undefined;
   /** What declared the done `doneAtBoundary` closes on: the closing event names it. */
-  doneClose?: { via: 'cezar_done' | 'done-line'; summary?: string };
-  parkAfterAck?: { session: AgentSession; monitoring: boolean; humanGate?: boolean; nudgedLastTurn?: boolean; scheduleWakeup?: number | null };
+  doneClose?: { via: 'cezar_done' | 'done-line'; summary?: string } | undefined;
+  parkAfterAck?: { session: AgentSession; monitoring: boolean; humanGate?: boolean; nudgedLastTurn?: boolean; scheduleWakeup?: number | null | undefined } | undefined;
   /** Last completed boundary belongs to exactly this still-open session. */
-  atTurnBoundary?: AgentSession;
-  currentStepId?: string;
-  idleTimer?: NodeJS.Timeout;
+  atTurnBoundary?: AgentSession | undefined;
+  currentStepId?: string | undefined;
+  idleTimer?: NodeJS.Timeout | undefined;
   /** The inactivity timer closed the wire; resource teardown must not imply task success. */
   idleClosed?: boolean;
   /** The monitoring-timer cap note was written for this session. */
-  monitoringCapNoted?: boolean;
-  autosaveTimer?: NodeJS.Timeout;
+  monitoringCapNoted?: boolean | undefined;
+  autosaveTimer?: NodeJS.Timeout | undefined;
   /* The screenshot counter lives on `RunManager.queuedImageSeq` (#472), keyed by
    * run id — a queued run persists attachments with no `ActiveRun` at all. */
   /** Has a session EVER opened on this run (#472)? `session` alone cannot answer
@@ -605,16 +607,16 @@ interface ActiveRun {
   autonomous?: boolean;
   /** An eligible boundary nudge refused until the current transport becomes ready.
    * Retains its slot, bounded by the existing idle timer; never represents a sent input. */
-  autonomousNudgePending?: AgentSession;
+  autonomousNudgePending?: AgentSession | undefined;
   /** Session that received the no-wait nudge (hearsay-tools/cezarion#1234): its next no-wait
    *  turn end opens a human wait instead of nudging again. */
-  noWaitNudged?: AgentSession;
+  noWaitNudged?: AgentSession | undefined;
   /** Session that received a refusal nudge for a blocked done (hearsay-tools/cezarion#1301); the
    *  next turn end on it reads and clears it. */
-  completionNudged?: AgentSession;
+  completionNudged?: AgentSession | undefined;
   /** Session whose turn that just ended answered a refusal nudge (hearsay-tools/cezarion#1301): a
    *  blocked done at this turn end takes the second step. Every turn end sets or clears it. */
-  completionNudgeAnswered?: AgentSession;
+  completionNudgeAnswered?: AgentSession | undefined;
   /** Registry snapshot used to expand `/skill` follow-ups before a backend can
    *  mistake them for its own slash commands (#676). */
   skills?: Skill[];
@@ -623,7 +625,7 @@ interface ActiveRun {
   /** Release for exclusive execution in the user's repository working tree.
    *  Worktree-backed runs never need it; root runs ordinarily do unless the
    *  explicit unsafe bypass is active. */
-  releaseRepoRoot?: () => void;
+  releaseRepoRoot?: (() => void) | undefined;
   /** Durable directional-usage accounting state for the current runner
    * invocation. Provider-local turn ids are unique only within this epoch. */
   usageInvocation?: {
@@ -798,42 +800,42 @@ const AUTOMATION_TOOLS_READY_MS = 30_000;
 
 export interface StartRunInput {
   task: string;
-  model?: string;
+  model?: string | undefined;
   /** Reasoning-effort pin (#45). Canonical `low`/`medium`/`high`/`xhigh`/`max`.
    *  Unset = harness default. Same class of override as `model`. */
-  effort?: string;
+  effort?: string | undefined;
   /** Agent backend chosen for this task (GUI). Unset = the config default. */
-  runner?: RunnerId;
+  runner?: RunnerId | undefined;
   /** Agent account for this task (spec 2026-07-29-agent-profiles), applying to steps that run
    *  on `runner`. Unset = the project's own selection. Persisted on the record so the choice
    *  survives into resume and Continue, and so the thread can say which account did the work. */
-  agentProfile?: string;
+  agentProfile?: string | undefined;
   /** Attachments pasted into the new-task form — persisted when the run is created and
    *  delivered once, with the first agent step's opening message. Images ride along as blocks the
    *  model can view; a file (#950) only ever reaches the agent as the path it was written to. */
-  images?: PastedContent[];
+  images?: PastedContent[] | undefined;
   /** Per-run system-prompt override (`POST /api/runs`, programmatic callers).
    *  Replaces the `config.json` default for this run — see
    *  `resolveExtraSystemPrompt` for the precedence contract. */
-  systemPrompt?: string;
+  systemPrompt?: string | undefined;
   /** Composer opt-out (#worktree-toggle): `false` runs the task in the repo
    *  working tree instead of an isolated worktree. Undefined/`true` keeps the
    *  default per-task worktree. */
-  worktree?: boolean;
+  worktree?: boolean | undefined;
   /** Autonomous mode (#autonomous): eligible turn ends auto-continue until done
    *  or the safety cap. Native asks, input delivery and lifecycle waits still apply. */
-  autonomous?: boolean;
-  archiveWhenDone?: boolean;
-  autoMergePr?: boolean;
+  autonomous?: boolean | undefined;
+  archiveWhenDone?: boolean | undefined;
+  autoMergePr?: boolean | undefined;
   /** Task webhook opt-in (#589). Persisted on the record at creation; read from there after. */
-  notify?: boolean;
+  notify?: boolean | undefined;
   /** Attachments from the queued prompt stack (#472), re-encoded from disk by
    *  `hydrateQueuedInput` at dequeue. Kept separate from `images` because those
    *  are persisted into `taskImages` by `startRun()` — folding
    *  the stack's (already-persisted) files in there would write duplicate files
    *  and make the task bubble render the stack's images as its own. In-memory
    *  only: rebuilt from the record on every hydration, never persisted. */
-  stackedImages?: ContentBlock[];
+  stackedImages?: ContentBlock[] | undefined;
   /** Automation provenance (hearsay-tools/cezarion#1465). Written by `createRun` in the row that
    *  creates the run, so a receipt never points at nothing after a crash. */
   automation?: RunRecord['automation'];
@@ -1117,7 +1119,7 @@ type ContinuationSessionLaunch = {
   ciTools: LaunchCiTools;
 };
 /** The workflow remainder a successful Continue queues once its session is released. */
-type ContinuationClose = { resumeWorkflow?: { workflow: WorkflowDef; input: StartRunInput; startAt: number } };
+type ContinuationClose = { resumeWorkflow?: { workflow: WorkflowDef; input: StartRunInput; startAt: number } | undefined };
 
 /** Only an original workflow that has never executed may return to its queue. */
 export function isUntouchedCancelledRun(run: RunRecord): boolean {
@@ -1292,7 +1294,7 @@ export class RunManager {
   private readonly orphanProbes = new Map<string, { generation: string; at: number; probe: GenerationProbe }>();
   /** Pending orphan reprobes by run id. One timer serves them all (hearsay-tools/cezarion#879). */
   private readonly orphanDue = new Map<string, { generation: string; at: number; attempts: number }>();
-  private orphanTimer?: NodeJS.Timeout;
+  private orphanTimer?: NodeJS.Timeout | undefined;
   /** The `at` the timer was armed for; with the clock, it decides what a tick takes. */
   private orphanArmedFor = 0;
   private readonly orphanBlockers = new Map<string, WorkerTerminationBlocker>();
@@ -1553,13 +1555,13 @@ export class RunManager {
   private readonly waitTimers = new Map<string, { runId: string; timer: NodeJS.Timeout }>();
   private readonly ciResources: ReturnType<typeof acquireCiResources>;
   /** #781: the workspace-wide preview host. Absent (`cez run`, tests) means every registration is `headless`. */
-  private readonly preview?: PreviewHostLike;
+  private readonly preview?: PreviewHostLike | undefined;
   /** The same host, for a removal outside this manager that must release a run's preview first. */
   get previewHost(): PreviewHostLike | undefined {
     return this.preview;
   }
   /** #781: cezar's own listening port, which no dev server may register. */
-  private readonly cezarPort?: () => number | undefined;
+  private readonly cezarPort?: (() => number | undefined) | undefined;
   private ciSupervisor: Pick<CiWatcherSupervisor, 'resolve' | 'watch' | 'close'>;
   /** Each family's conversation request deadlines. Every worker wait, Cezar's completion wait
    *  included, parks, wakes and times out through the wait list (hearsay-tools/cezarion#1301). */
@@ -1617,7 +1619,7 @@ export class RunManager {
       this.reconcileWorkerWaits(run.delegation.role === 'root' ? run.id : run.delegation.parentRunId);
     }
   };
-  private readonly pendingJobs = new Map<string, { workflow: WorkflowDef; input: StartRunInput; startAt?: number }>();
+  private readonly pendingJobs = new Map<string, { workflow: WorkflowDef; input: StartRunInput; startAt?: number | undefined }>();
   /** Interrupted agent turns recovered after a process restart. Unlike an
    *  explicit user Continue, these are bulk scheduler work and must re-enter
    *  through `pump()` so both workspace and per-project caps are honored. */
@@ -1691,7 +1693,7 @@ export class RunManager {
   constructor(
     private readonly store: RunStore,
     private readonly repoRoot: string,
-    options: { semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; preview?: PreviewHostLike; cezarPort?: () => number | undefined; cockpit?: { origin: string; projectId: string } } = {},
+    options: { semaphore?: WorkspaceSemaphore; unreadInputGraceMs?: number; noWaitNudgeReplyMs?: number; preview?: PreviewHostLike | undefined; cezarPort?: (() => number | undefined) | undefined; cockpit?: { origin: string; projectId: string } | undefined } = {},
   ) {
     this.dataDir = join(repoRoot, '.ai/cezar');
     this.workerScratchCleanup = new WorkerScratchCleanup(store, this.dataDir, id => this.isActive(id) || this.executions.has(id) || this.reclaiming.has(id) || !!this.autosaveCleanupBlocker(id));
@@ -1929,8 +1931,8 @@ export class RunManager {
   private async agentEnvForStep(
     runId: string,
     backend: RunnerId,
-    options: { recordedProfileId?: string; stepId?: string } = {},
-  ): Promise<{ env: Record<string, string>; profileId: string; accountBinding?: WorkerAccountBinding }> {
+    options: { recordedProfileId?: string | undefined; stepId?: string | undefined } = {},
+  ): Promise<{ env: Record<string, string>; profileId: string; accountBinding?: WorkerAccountBinding | undefined }> {
     // An owned worker binds the account its identity pinned for THIS step (#452); a legacy identity
     // answers every step with its single run-level account, so the one-provider rule still holds there.
     const step = this.workerStep(runId, options.stepId);
@@ -1958,7 +1960,7 @@ export class RunManager {
    * `cez automation` reaches the cockpit without probing ports. A headless `cez run` never
    * sets it, so it is also the "a cockpit is attached" signal for the automations gate.
    */
-  private cockpit?: { origin: string; projectId: string };
+  private cockpit?: { origin: string; projectId: string } | undefined;
   setCockpitAddress(address: { origin: string; projectId: string } | undefined): void {
     this.cockpit = address ? { ...address } : undefined;
   }
@@ -1973,7 +1975,7 @@ export class RunManager {
    * before its context is announced: a resumed session can call a tool in that window. With a
    * cockpit address the call waits for the service, bounded like the CLI's startup retry.
    */
-  private automationTools?: AutomationToolService;
+  private automationTools?: AutomationToolService | undefined;
   private automationToolsWaiters = new Set<() => void>();
   setAutomationTools(tools: AutomationToolService | undefined): void {
     this.automationTools = tools;
@@ -2113,7 +2115,7 @@ export class RunManager {
   private async provisionRunSkills(
     runId: string,
     state: ActiveRun,
-    wanted: { stepSkill?: string; slash?: string; prompt?: string },
+    wanted: { stepSkill?: string | undefined; slash?: string | undefined; prompt?: string },
   ): Promise<{ notes: string[]; filesDir: Map<string, string>; installed: string[] }> {
     const notes: string[] = [];
     const filesDir = new Map<string, string>();
@@ -2173,7 +2175,7 @@ export class RunManager {
     return dir !== undefined && dir === real(worktreePath) && dir !== real(this.repoRoot);
   }
 
-  private delegationProvisioner?: DelegationProvisioner;
+  private delegationProvisioner?: DelegationProvisioner | undefined;
   setDelegationProvisioner(provisioner: DelegationProvisioner): () => void {
     this.delegationProvisioner = provisioner;
     return () => {
@@ -3172,7 +3174,7 @@ export class RunManager {
    * does not know is refused rather than degraded to the default, because a worker silently
    * running on another login is a billing boundary crossed without anyone choosing it.
    */
-  async selectDelegationExecutionSettings(runId: string, selection: { backend?: RunnerId; model?: string; effort?: string; agentProfile?: string }, validateModel?: (settings: DelegationExecutionSettings) => Promise<void>): Promise<DelegationExecutionSettings> {
+  async selectDelegationExecutionSettings(runId: string, selection: { backend?: RunnerId | undefined; model?: string | undefined; effort?: string | undefined; agentProfile?: string }, validateModel?: (settings: DelegationExecutionSettings) => Promise<void>): Promise<DelegationExecutionSettings> {
     const parent = this.delegationExecutionSettings(runId);
     const runner = selection.backend ?? parent.runner;
     const sameBackend = runner === parent.runner;
@@ -5230,7 +5232,7 @@ export class RunManager {
    * Refusals throw `DelegationPolicyError`: `incompatible_state`, `denied_scope` or
    * `capacity_limit`.
    */
-  registerWorkerListWait(runId: string, request: { workerIds?: string[]; requestIds?: string[]; mode?: WorkerWaitRequest['mode']; timeoutSeconds: number },
+  registerWorkerListWait(runId: string, request: { workerIds?: string[]; requestIds?: string[] | undefined; mode?: WorkerWaitRequest['mode']; timeoutSeconds: number },
     via: 'cezar_wait' | 'cez-worker-wait'): DeadlinedWorkerWaitEntry {
     this.reconcileWorkerWaits();
     this.assertCanRegisterWorkerWait(runId);
@@ -5281,7 +5283,7 @@ export class RunManager {
   }
 
   /** The entry's target fields: each worker's revision at registration, or the requests with no outcome yet. */
-  private workerWaitTarget(request: { workerIds?: string[]; requestIds?: string[] }) {
+  private workerWaitTarget(request: { workerIds?: string[]; requestIds?: string[] | undefined }) {
     if (!request.workerIds) return { requestIds: request.requestIds!, requestOutcomes: [] };
     return { workerIds: request.workerIds, outcomes: [], revisions: request.workerIds.map(workerId => {
       const metadata = this.store.getRun(workerId)!.delegation;
@@ -5555,7 +5557,7 @@ export class RunManager {
 
   /** A human answering a worker question its parent handed back (#505): the reviewing parent
    * can no longer answer it, so it must not also block the human. */
-  private answersFallenBackAsk(runId: string, opts: { text?: string; images?: PastedContent[] }, deferred: boolean): boolean {
+  private answersFallenBackAsk(runId: string, opts: { text?: string | undefined; images?: PastedContent[] | undefined }, deferred: boolean): boolean {
     if (deferred || !(opts.text?.trim() || opts.images?.length)) return false;
     return !!this.store.transcriptFacts(runId).pendingAsk?.fallback;
   }
@@ -9020,7 +9022,7 @@ export class RunManager {
   private async stepProfileFor(
     runId: string,
     stepBackend: RunnerId,
-    options: { recordedProfileId?: string; stepId?: string },
+    options: { recordedProfileId?: string | undefined; stepId?: string | undefined },
   ): Promise<StepProfile | string> {
     try {
       return await this.agentEnvForStep(runId, stepBackend, options);
@@ -9621,7 +9623,7 @@ export class RunManager {
     runId: string,
     skillName: string | undefined,
     task: string,
-    live?: { turnText?: string; diffStat?: string },
+    live?: { turnText?: string; diffStat?: string | undefined },
   ): Promise<void> {
     // CEZ_AUTONAME=0 kills all LLM naming; dry-run skips it too unless
     // CEZ_AUTONAME=1 forces the mock path — see autoNamingActive.

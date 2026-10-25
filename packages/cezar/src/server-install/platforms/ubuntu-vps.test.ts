@@ -24,7 +24,7 @@ const okRunner: Runner = { capture: async () => ({ code: 0, stdout: '', stderr: 
 function ctxWith(over: {
   ui?: Ui;
   runner?: Runner;
-  dryRun?: boolean;
+  dryRun?: boolean | undefined;
   state?: Partial<InstallContext['state']>;
 }): InstallContext {
   return {
@@ -645,8 +645,8 @@ describe('ubuntu-vps redeploy npx-cache refresh (#696)', () => {
 
 describe('ubuntu-vps redeploy restart verification (#430)', () => {
   function redeployContext(opts: {
-    before?: string;
-    after?: string;
+    before?: string | undefined;
+    after?: string | undefined;
     final?: string;
     restartCode?: number;
     scope?: 'user' | 'system';
@@ -873,7 +873,7 @@ describe('ubuntu-vps review fixes (PR #423)', () => {
       password: async () => 'longenough',
     } as Ui;
     const interactive = vi.fn(async () => 0);
-    const captured: Array<{ args: string[]; input?: string }> = [];
+    const captured: Array<{ args: string[]; input?: string | undefined }> = [];
     const ctx = {
       ...ctxWith({ ui }),
       runner: {
@@ -895,7 +895,7 @@ describe('ubuntu-vps review fixes (PR #423)', () => {
 
   it('htpasswd credential line goes to sudo stdin, not argv (hash never ps-visible)', async () => {
     const ui = { ...createAutoUi(), text: async () => 'ops', password: async () => 'longenough' } as Ui;
-    const interactiveCalls: Array<{ args: string[]; input?: string }> = [];
+    const interactiveCalls: Array<{ args: string[]; input?: string | undefined }> = [];
     const ctx = {
       ...ctxWith({ ui }),
       runner: {

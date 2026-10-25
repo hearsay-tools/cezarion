@@ -143,7 +143,7 @@ export async function requestRunSummaries(cockpit: Cockpit, timeoutMs?: number, 
 export async function waitForRuns(
   cockpit: Cockpit,
   ids: string[],
-  options: { mode: WaitMode; until: WaitUntil; timeoutMs: number; pollMs?: number },
+  options: { mode: WaitMode; until: WaitUntil; timeoutMs: number; pollMs?: number | undefined },
 ): Promise<WaitResult> {
   const deadline = Date.now() + options.timeoutMs;
   let entries: WaitEntry[] = ids.map((id) => ({ id, status: 'unknown' }));

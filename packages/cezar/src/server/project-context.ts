@@ -61,7 +61,7 @@ export function projectWarmupEnabled(env: NodeJS.ProcessEnv = process.env): bool
 
 export interface ProjectContextDeps {
   /** CLI process ownership, acquired before opening any secondary store. */
-  ownership?: CockpitOwnership;
+  ownership?: CockpitOwnership | undefined;
   /** Install controller session capabilities before recovery starts any backend. */
   prepareManager?: (project: Pick<ProjectContext, 'id' | 'root' | 'store' | 'manager'>) => (() => void) | void;
   /** Arm persisted cleanup only after recovered execution/process state is available. */
@@ -77,12 +77,12 @@ export interface ProjectContextDeps {
    *  project's RunManager counts against the same `resources.maxParallel`.
    *  When omitted, the map still shares one private instance across the
    *  managers it builds (workspace defaults, never refreshed). */
-  semaphore?: WorkspaceSemaphore;
+  semaphore?: WorkspaceSemaphore | undefined;
   /** The ONE workspace preview host (#781, present under `CEZ_PREVIEW=1`): every project's
    *  manager registers against it, because ports are host-global. */
-  preview?: PreviewHost;
+  preview?: PreviewHost | undefined;
   /** The cockpit's listening port, for the preview tool's `cezar_port` refusal. */
-  cezarPort?: () => number | undefined;
+  cezarPort?: (() => number | undefined) | undefined;
 }
 
 /** Data dirs this process has swept: the sweep cleans up after a crashed cezar, never this one. */

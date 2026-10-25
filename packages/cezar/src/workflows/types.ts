@@ -209,7 +209,7 @@ export const HARNESS_EXTRA_TOOLS: { readonly [K in RunnerId]: readonly string[] 
 };
 
 export function allowedToolsForStep(
-  step: { allowedTools?: string[] } | undefined,
+  step: { allowedTools?: string[] | undefined } | undefined,
   backend: AgentBackend | undefined,
 ): string[] {
   if (step?.allowedTools) return [...step.allowedTools];
@@ -233,7 +233,7 @@ export function plannedWorkflow(steps: WorkflowStepDef[]): WorkflowDef {
 }
 
 /** Validate the mutually exclusive skill/workflow flags before discovery. */
-export function skillFlagIssue(flags: { skill?: string; workflow?: string }): string | undefined {
+export function skillFlagIssue(flags: { skill?: string | undefined; workflow?: string | undefined }): string | undefined {
   if (flags.skill !== undefined && flags.workflow !== undefined) {
     return '--skill and --workflow cannot be used together';
   }
@@ -246,7 +246,7 @@ export function skillFlagIssue(flags: { skill?: string; workflow?: string }): st
  * with one value; two different values are a usage error. The caller maps the result onto its
  * own wire field (`runner` on the run API, `backend` on a worker spawn).
  */
-export function runnerFlag(flags: { runner?: string; backend?: string }): { runner?: string; issue?: string } {
+export function runnerFlag(flags: { runner?: string | undefined; backend?: string | undefined }): { runner?: string; issue?: string } {
   const { runner, backend } = flags;
   if (runner !== undefined && backend !== undefined && runner !== backend) {
     return { issue: `--runner ${runner} and --backend ${backend} name different runners; pass one --runner` };

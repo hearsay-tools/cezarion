@@ -32,7 +32,7 @@ export interface AutomationIo {
   readFile?: (path: string) => Promise<string>;
   discover?: (options: DiscoverOptions) => Promise<Cockpit>;
   /** The transport; tests stub it where the test app cannot answer (a check needs a GitHub remote). */
-  http?: (url: string, init?: { method?: string; body?: unknown; responseLimitBytes?: number }) => Promise<HttpResult>;
+  http?: ((url: string, init?: { method?: string; body?: unknown; responseLimitBytes?: number }) => Promise<HttpResult>) | undefined;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
   /** How long `check` polls before exit 3. */

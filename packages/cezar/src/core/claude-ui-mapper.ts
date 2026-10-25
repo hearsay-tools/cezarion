@@ -47,7 +47,7 @@ import { toolDisplay } from './tool-display.ts';
 
 export interface ClaudeUiMapperState {
   /** Used when `system/init` lacks `session_id` (the dry-run mock does). */
-  readonly fallbackSessionId?: string;
+  readonly fallbackSessionId?: string | undefined;
   /** True once `system/init` produced `session.started`. */
   readonly sessionStarted: boolean;
   /** Turns begun before init arrived — their `turn.started` is queued so
@@ -81,7 +81,7 @@ export interface ClaudeUiMapping {
   state: ClaudeUiMapperState;
 }
 
-export function createClaudeUiState(opts: { fallbackSessionId?: string } = {}): ClaudeUiMapperState {
+export function createClaudeUiState(opts: { fallbackSessionId?: string | undefined } = {}): ClaudeUiMapperState {
   return {
     fallbackSessionId: opts.fallbackSessionId,
     sessionStarted: false,

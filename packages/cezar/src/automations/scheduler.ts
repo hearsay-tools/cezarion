@@ -23,7 +23,7 @@ export interface ProjectAutomationHandle {
   /** The zone schedules are evaluated in — the server's own (`localTimeZone()`). */
   timeZone: string;
   github?: { owner: string; repo: string; poller: GithubPoller };
-  launch?: AutomationLauncher;
+  launch?: AutomationLauncher | undefined;
   launchSchedule?: ScheduleLauncher;
   onChange?: (automationId: string, revision: number) => void;
   now?: () => number;
@@ -258,9 +258,9 @@ export class ProjectAutomationScheduler {
 }
 
 function laterCursor(
-  current: { timestamp: string; tieBreaker?: string } | undefined,
+  current: { timestamp: string; tieBreaker?: string | undefined } | undefined,
   observed: { timestamp: string; tieBreaker: string } | undefined,
-): { timestamp: string; tieBreaker?: string } | undefined {
+): { timestamp: string; tieBreaker?: string | undefined } | undefined {
   if (!observed) return current;
   if (!current) return observed;
   const order = observed.timestamp.localeCompare(current.timestamp)
@@ -294,7 +294,7 @@ export interface WorkspaceAutomationSchedulerOptions {
  * project: no timer.
  */
 export class WorkspaceAutomationScheduler {
-  private timer?: ReturnType<typeof setTimeout>;
+  private timer?: ReturnType<typeof setTimeout> | undefined;
   private stopped = true;
   private scheduleGeneration = 0;
   private readonly retryAfter = new Map<string, number>();

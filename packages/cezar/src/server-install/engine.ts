@@ -37,15 +37,15 @@ export interface RunOptions {
   instance?: string;
   /** Public domain for this instance — recorded up front so instance selection
    * and the SSL step share one source of truth. */
-  domain?: string;
+  domain?: string | undefined;
   /** Loopback port for this instance. For a NEW named instance the caller
    * passes an auto-picked free port; a resume keeps the recorded one. */
-  port?: number;
+  port?: number | undefined;
   /** `--external-proxy`: an existing reverse proxy fronts cezar, so the
    * platform installs no nginx/SSL of its own. */
-  externalProxy?: boolean;
+  externalProxy?: boolean | undefined;
   /** `--bind-host`: interface the cockpit binds so that proxy can reach it. */
-  bindHost?: string;
+  bindHost?: string | undefined;
 }
 
 export type RunStatus = 'complete' | 'cancelled' | 'failed';

@@ -100,7 +100,7 @@ async function fixture() {
   return { root, repo, occupy, start, close };
 }
 
-function refused(result: { url?: string; code: number | null; output: string }, port: number) {
+function refused(result: { url?: string | undefined; code: number | null; output: string }, port: number) {
   assert.equal(result.code, 1, `occupied port must refuse, not bounce: ${result.output}`);
   assert.equal(result.url, undefined, result.output);
   assert.match(result.output, new RegExp(`port ${port}.*(in use|occupied)`, 'i'));

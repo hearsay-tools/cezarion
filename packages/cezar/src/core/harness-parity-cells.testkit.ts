@@ -1487,7 +1487,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
               const wake = monitoringWakeOf(store.getRun(runId));
               expect(wake).toBeDefined();
               const before = store.readEvents(runId).length;
-              const changes: Array<{ status: string; monitoringWakeAt?: string }> = [];
+              const changes: Array<{ status: string; monitoringWakeAt?: string | undefined }> = [];
               const recordChange = (record: NonNullable<RunObservation['record']>) => {
                 if (record.id === runId) changes.push({ status: record.status, monitoringWakeAt: monitoringWakeOf(record) });
               };
@@ -1537,7 +1537,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
               const wake = monitoringWakeOf(store.getRun(runId));
               expect(wake).toBeDefined();
               const before = store.readEvents(runId).length;
-              const changes: Array<{ status: string; monitoringWakeAt?: string }> = [];
+              const changes: Array<{ status: string; monitoringWakeAt?: string | undefined }> = [];
               const recordChange = (record: NonNullable<RunObservation['record']>) => {
                 if (record.id === runId) changes.push({ status: record.status, monitoringWakeAt: monitoringWakeOf(record) });
               };
@@ -3059,7 +3059,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             const first = requests()[0]!;
             const firstChoice = optionPicked(first, pick);
             // From the refused answer to the replacement card, the run never stops waiting on a card.
-            const changes: Array<{ status: string; hasPendingPermission?: boolean }> = [];
+            const changes: Array<{ status: string; hasPendingPermission?: boolean | undefined }> = [];
             const recordChange = (record: RunRecord) => {
               if (record.id === runId) changes.push({ status: record.status, hasPendingPermission: record.hasPendingPermission });
             };

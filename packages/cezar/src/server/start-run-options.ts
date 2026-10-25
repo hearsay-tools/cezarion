@@ -47,11 +47,11 @@ type RegistryLookup = (projectId: string) => Promise<WorkspaceProject | undefine
 
 /** The options of a start request that become the run's input. */
 type StartRunOptions = Omit<StartRunInput, 'images' | 'stackedImages' | 'automation' | 'automationTrigger'> & {
-  images?: Parameters<typeof toPastedContent>[0][];
+  images?: Parameters<typeof toPastedContent>[0][] | undefined;
 };
 
 /** The request id and payload hash of an idempotent start; none when the body carries no id. */
-export function clientRequestOf(body: ClientRequestPayload & { clientRequestId?: string }): ClientRequest | undefined {
+export function clientRequestOf(body: ClientRequestPayload & { clientRequestId?: string | undefined }): ClientRequest | undefined {
   return body.clientRequestId ? { id: body.clientRequestId, hash: clientRequestHash(body) } : undefined;
 }
 
@@ -73,7 +73,7 @@ export function replayedRun(
 /** A model or effort pin is refused while the project's models are locked. */
 export function modelLockRefusal(
   repoRoot: string,
-  pins: { model?: string; effort?: string },
+  pins: { model?: string | undefined; effort?: string | undefined },
 ): StartRunRefusal | undefined {
   if (!agentModelsLocked(repoRoot)) return undefined;
   return pins.model?.trim() || pins.effort?.trim() ? { error: AGENT_MODELS_LOCKED_ERROR, status: 409 } : undefined;
@@ -82,7 +82,7 @@ export function modelLockRefusal(
 /** The workflow a start runs: an inline chain (spec 008) or a saved workflow found by name. */
 export async function resolveStartWorkflow(
   repoRoot: string,
-  choice: { workflow?: string; steps?: WorkflowStepDef[] },
+  choice: { workflow?: string | undefined; steps?: WorkflowStepDef[] | undefined },
 ): Promise<{ workflow: WorkflowDef } | StartRunRefusal> {
   if (choice.steps) {
     // Inline chain: an approved plan runs as an ad-hoc workflow.

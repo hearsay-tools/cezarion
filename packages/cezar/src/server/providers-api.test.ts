@@ -1,3 +1,4 @@
+import { defined } from '../core/defined.ts';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -253,11 +254,11 @@ describe('workspace provider API', () => {
     ['/api/v1/providers/claude/enabled', undefined],
     ['/api/v1/providers/claude/enabled', { enabled: false, extra: true }],
   ])('PUT /api/v1/providers/:provider/enabled rejects invalid input %#', async (path, body) => {
-    const response = await apiRequest(app(), path, {
+    const response = await apiRequest(app(), path, defined({
       method: 'PUT',
       headers: body === undefined ? undefined : { 'content-type': 'application/json' },
       body: body === undefined ? undefined : JSON.stringify(body),
-    });
+    }));
 
     expect(response.status).toBe(400);
     expect(await response.json()).toEqual({ error: 'provider and enabled boolean are required' });

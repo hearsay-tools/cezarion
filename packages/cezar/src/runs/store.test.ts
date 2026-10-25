@@ -493,7 +493,7 @@ describe('RunStore — titleSummary + diffStat (#389)', () => {
   it('updateRun fans the new fields out on the run channel (the SSE feed)', () => {
     const store = RunStore.open(dataDir);
     const run = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
-    const seen: Array<{ titleSummary?: string }> = [];
+    const seen: Array<{ titleSummary?: string | undefined }> = [];
     store.on('run', (r: { titleSummary?: string }) => seen.push({ titleSummary: r.titleSummary }));
     store.updateRun(run.id, { titleSummary: 'A real summary of the turn' });
     expect(seen.at(-1)?.titleSummary).toBe('A real summary of the turn');

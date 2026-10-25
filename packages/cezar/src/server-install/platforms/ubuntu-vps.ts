@@ -677,7 +677,7 @@ export function serviceExecStart(opts: {
   entry: string;
   entryExists: boolean;
   npxPath: string;
-  globalBin?: string;
+  globalBin?: string | undefined;
 }): string {
   if (/[/\\]_npx[/\\]/.test(opts.pkgRoot)) return `${opts.npxPath} --yes ${OFFICIAL_CLI_PKG}`;
   if (opts.entryExists) return `${opts.node} ${opts.entry}`;

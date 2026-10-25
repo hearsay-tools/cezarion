@@ -1,3 +1,5 @@
+import { defined } from './defined.ts';
+import type { UiAskQuestion } from './ui-events.ts';
 /**
  * AskUser payload — the structured multiple-choice question an agent asks the
  * user, so the cockpit can render clickable option chips instead of the prose
@@ -245,4 +247,12 @@ export function stripAskMarker(text: string, allowRepair = true): string {
   if (result.kind !== 'valid' || (!allowRepair && result.repaired)) return text;
   const marker = finalAskLine(text);
   return marker ? marker.prefix.trimEnd() : text;
+}
+
+/** Project validated asks to the SSE shape with absent optional fields. */
+export function uiAskQuestions(questions: AskRequest['questions']): UiAskQuestion[] {
+  return questions.map(question => defined({
+    ...question,
+    options: question.options?.map(option => defined(option)),
+  }));
 }

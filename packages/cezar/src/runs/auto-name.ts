@@ -41,7 +41,7 @@ export function autoNamingActive(env: NodeJS.ProcessEnv = process.env): boolean 
  * wins over the built-in ON.
  */
 export function liveTitleUpdatesEnabled(
-  config: { liveTitleUpdates?: boolean },
+  config: { liveTitleUpdates?: boolean | undefined },
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (config.liveTitleUpdates !== undefined) return config.liveTitleUpdates;
@@ -64,12 +64,12 @@ const namerResponseSchema = z.object({
 
 export interface NamerContext {
   task: string;
-  skillName?: string;
-  skillDescription?: string;
+  skillName?: string | undefined;
+  skillDescription?: string | undefined;
   /** Live refresh only (spec step 3): the just-finished turn's text. */
   turnText?: string;
   /** Live refresh only: current `git diff --shortstat` line. */
-  diffStat?: string;
+  diffStat?: string | undefined;
 }
 
 export interface NameResult {
@@ -116,7 +116,7 @@ function clip(text: string, max: number): string {
  * carry through, so a lying model can add nothing and remove nothing.
  */
 export function crossCheckRefs(
-  raw: { pr?: number; issue?: number },
+  raw: { pr?: number | undefined; issue?: number | undefined },
   task: string,
   refs: TaskRefs,
 ): { prNumber?: number; issueNumber?: number } {

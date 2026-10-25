@@ -1,3 +1,4 @@
+import { defined } from '../core/defined.ts';
 import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
@@ -206,9 +207,9 @@ export interface ProjectListEntry extends WorkspaceProjectWithoutWebhook {
 
 export interface RootProbe {
   status: ProjectStatus;
-  branch?: string;
-  forge?: ForgeKind;
-  repoUrl?: string;
+  branch?: string | undefined;
+  forge?: ForgeKind | undefined;
+  repoUrl?: string | undefined;
 }
 
 /**
@@ -220,7 +221,7 @@ export function toProjectListEntry(project: WorkspaceProject, probe: RootProbe):
   const { webhook: _legacy, webhooks: _stored, ...rest } = project;
   const webhooks = projectWebhooks(project);
   const task = webhooks.find((entry) => entry.tasks);
-  return {
+  return defined({
     ...rest,
     ...probe,
     ...(task
@@ -233,7 +234,7 @@ export function toProjectListEntry(project: WorkspaceProject, probe: RootProbe):
         }
       : {}),
     ...(webhooks.length > 0 ? { webhooks: webhooks.map(redactWebhook) } : {}),
-  };
+  });
 }
 
 /** Probe TTL — long enough to coalesce a burst of sidebar renders, short
@@ -290,7 +291,7 @@ async function probeRoot(root: string): Promise<RootProbe> {
  */
 export async function probeProjectStatus(
   root: string,
-): Promise<Pick<ProjectListEntry, 'status' | 'branch' | 'forge' | 'repoUrl'>> {
+): Promise<RootProbe> {
   return probeRoot(root);
 }
 

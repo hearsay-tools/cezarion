@@ -15,9 +15,9 @@ import { readProjectUiState } from './ui-state.ts';
  */
 export interface Skill {
   name: string;
-  description?: string;
+  description?: string | undefined;
   /** Advisory composer hint: untouched run-mode choices default to interactive, in-place execution. */
-  interactive?: true;
+  interactive?: true | undefined;
   body: string;
   path: string;
   source: 'ai' | 'cezar' | 'agents' | 'global' | 'team' | 'builtin';
@@ -29,7 +29,7 @@ export interface Skill {
     /** True for the `SKILL.md` convention — a whole directory (references/…). */
     dir: boolean;
     /** The exact commit `ref` resolved to when the skill was read (#428). */
-    commit?: string;
+    commit?: string | undefined;
   };
 }
 

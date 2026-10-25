@@ -40,7 +40,7 @@ export interface ApplicationUpdateOptions {
   launchEntry: string;
   npmPrefix: string;
   npmCache: string;
-  npmBin?: string;
+  npmBin?: string | undefined;
   home: string;
   targetVersion: () => string | undefined;
   runNpm?: (args: string[], signal?: AbortSignal) => Promise<void>;
@@ -58,8 +58,8 @@ export interface RestartPlan {
   oldVersion: string;
   stage: string;
   recovery: string;
-  recoveryPackage?: string;
-  binLinks?: string;
+  recoveryPackage?: string | undefined;
+  binLinks?: string | undefined;
   recordPath: string;
   claimId: string;
 }
@@ -128,7 +128,7 @@ export class ApplicationUpdateService implements ApplicationUpdateServiceLike {
   private readonly dir: string;
   private readonly recoveryPackage: string | undefined;
   private record: RecordShape;
-  private applying?: Promise<ApplicationUpdateState>;
+  private applying?: Promise<ApplicationUpdateState> | undefined;
   private handoffArmed = false;
   private armingRestart = false;
   private listener?: () => void;

@@ -75,7 +75,7 @@ export async function discoverCursorModels(options: CursorModelDiscoveryOptions)
 
 /** Read native parameter keys/defaults without creating a session or starting inference. */
 export function discoverCursorParameterizedModels(
-  options: CursorModelDiscoveryOptions & { env?: Record<string, string>; signal?: AbortSignal },
+  options: CursorModelDiscoveryOptions & { env?: Record<string, string> | undefined; signal?: AbortSignal | undefined },
 ): Promise<CursorParameterizedModel[]> {
   const bin = resolveCursorExecutable(options.bin);
   return withCursorAutoUpdateFallback(bin, () => probeCursorParameterizedModels(bin, options));
@@ -83,7 +83,7 @@ export function discoverCursorParameterizedModels(
 
 function probeCursorParameterizedModels(
   bin: string,
-  options: CursorModelDiscoveryOptions & { env?: Record<string, string>; signal?: AbortSignal },
+  options: CursorModelDiscoveryOptions & { env?: Record<string, string> | undefined; signal?: AbortSignal | undefined },
 ): Promise<CursorParameterizedModel[]> {
   if (options.signal?.aborted) return Promise.reject(new Error('Cursor model discovery cancelled'));
   const spawn = options.spawn ?? ((bin: string, args: readonly string[], cwd: string) =>
