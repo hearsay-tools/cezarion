@@ -91,21 +91,53 @@ function cssSpans(text) {
   return spans;
 }
 
+// `<<WORD`, `<<-WORD`, `<<'WORD'` or `<<"WORD"` opens a here-document; `<<<` is a
+// here-string and `1<<2` a shift.
+const HERE_DOC = /(?<!<)<<(?!<)-?[ \t]*(?:'([^'\n]+)'|"([^"\n]+)"|\\?([A-Za-z_][\w-]*))/y;
+
+/** The end of the here-document body that starts at `from`: the line that holds only its
+ *  delimiter. Indentation may come first, because a `run:` block indents every line. */
+function hereDocEnd(text, from, end, word) {
+  for (let lineStart = from; lineStart < end; ) {
+    const newline = text.indexOf('\n', lineStart);
+    const lineEnd = newline === -1 || newline > end ? end : newline;
+    if (text.slice(lineStart, lineEnd).trimStart() === word) return lineEnd;
+    lineStart = lineEnd + 1;
+  }
+  return end;
+}
+
+/** Steps over what shell reads as data at `i`: an escaped character, a here-document
+ *  operator, and at the end of its command line each pending here-document body. Returns
+ *  `i` when the character there is none of them. */
+function shellDataEnd(text, i, end, hereDocs) {
+  if (text[i] === '\\') return i + 1;
+  if (text[i] === '\n') return hereDocs.splice(0).reduce((at, word) => hereDocEnd(text, at + 1, end, word), i);
+  HERE_DOC.lastIndex = i;
+  const match = text[i] === '<' ? HERE_DOC.exec(text) : null;
+  if (!match) return i;
+  hereDocs.push(match[1] ?? match[2] ?? match[3]);
+  return HERE_DOC.lastIndex - 1;
+}
+
 /** `#` comments between `start` and `end`. A shell quote opens anywhere (`pre' #12'`), a
- *  backslash escapes the next character, and a comment can start after a control operator
- *  (`cmd;#`). A YAML quote opens only at the start of a token, so the apostrophe in a plain
- *  value such as `the fork's rail` stays prose, and a YAML comment needs whitespace before it. */
+ *  backslash escapes the next character, a comment can start after a control operator
+ *  (`cmd;#`), and a here-document body is data. A YAML quote opens only at the start of a
+ *  token, so the apostrophe in a plain value such as `the fork's rail` stays prose, and a
+ *  YAML comment needs whitespace before it. */
 function scanHashComments(text, start, end, shell) {
   const spans = [];
+  const hereDocs = [];
   let quote = null;
   for (let i = start; i < end; i++) {
     const char = text[i];
     const before = i === 0 ? '\n' : text[i - 1];
+    const dataEnd = shell && !quote ? shellDataEnd(text, i, end, hereDocs) : i;
     if (quote) {
       if (char === '\\' && quote === '"') i++;
       else if (char === quote) quote = null;
-    } else if (shell && char === '\\') {
-      i++;
+    } else if (dataEnd !== i) {
+      i = dataEnd;
     } else if ((char === '"' || char === "'") && (shell || /[\s=:([{,]/.test(before))) {
       quote = char;
     } else if (char === '#' && (shell ? /[\s;&|()<>]/ : /\s/).test(before)) {
@@ -113,7 +145,8 @@ function scanHashComments(text, start, end, shell) {
       const stop = newline === -1 || newline > end ? end : newline;
       // After the comment marker, so `#1310: …` as a whole comment is not read as a citation.
       spans.push({ start: i + 1, end: stop, context: 'comment' });
-      i = stop;
+      // Before the newline, which ends a command line that opened a here-document.
+      i = stop - 1;
     }
   }
   return spans;

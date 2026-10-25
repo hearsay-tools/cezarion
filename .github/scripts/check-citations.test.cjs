@@ -106,6 +106,47 @@ test('reads a GitHub Actions `run:` block with shell rules and the rest of the f
   assert.deepEqual(cites('ci.yml', workflow), ['2:11:comment', '5:124:comment', '6:125:comment', '7:126:comment', '9:127:comment']);
 });
 
+test('a shell here-document body is data, in a shell file and in a `run:` block', () => {
+  const shell = [
+    "cat <<'EOF'",
+    'x # see #123',
+    'EOF',
+    '# after (#124)',
+    'cat <<-EOF > out # writes (#125)',
+    '\tx # see #126',
+    '\tEOF',
+    'cat <<"END" <<NEXT',
+    'x # see #127',
+    'END',
+    'x # see #128',
+    'NEXT',
+    'echo $((1<<2)) # shift (#129)',
+    'cat <<< "a # #130" # here-string (#131)',
+    'echo "<<EOF" # quoted (#132)',
+    '# no body: #133',
+  ].join('\n');
+  assert.deepEqual(cites('up.sh', shell), [
+    '4:124:comment',
+    '5:125:comment',
+    '13:129:comment',
+    '14:131:comment',
+    '15:132:comment',
+    '16:133:comment',
+  ]);
+  const workflow = [
+    'steps:',
+    '  - run: |',
+    '      cat <<EOF > body.md',
+    '      ## Fixes #140',
+    '      EOF',
+    '      # after (#141)',
+    '  - run: echo "#142" # (#143)',
+  ].join('\n');
+  assert.deepEqual(cites('ci.yml', workflow), ['6:141:comment', '7:143:comment']);
+  // Shell reads a body with no delimiter line to the end of the file.
+  assert.deepEqual(cites('up.sh', 'cat <<EOF\nx # see #150\n# and #151'), []);
+});
+
 test('reads Markdown prose but not code fences, inline code or qualified links', () => {
   const text = [
     '# Notes',
