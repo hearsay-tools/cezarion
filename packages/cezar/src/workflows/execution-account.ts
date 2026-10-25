@@ -7,7 +7,7 @@ import type { RunRecord } from '../runs/store.ts';
  */
 export function executionAccount(
   run: Pick<RunRecord, 'runner' | 'agentProfile' | 'steps'>,
-  continuation?: { backend: RunnerId; sessionId?: string },
+  continuation?: { backend: RunnerId; sessionId?: string | undefined },
   live?: { runner: RunnerId; agentProfile?: string },
 ): Pick<RunRecord, 'runner' | 'agentProfile'> {
   if (live) return { runner: live.runner, agentProfile: live.agentProfile };

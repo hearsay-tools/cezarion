@@ -25,7 +25,7 @@ const reportedUnreadable = new Set<string>();
  */
 export function readRunIndexFromDisk(
   dataDir: string,
-  options: { handle?: RepoHandle | null; archivedWindow?: number; roots?: boolean } = {},
+  options: { handle?: RepoHandle | null | undefined; archivedWindow?: number; roots?: boolean } = {},
 ): ColdRunIndex {
   return readCold(dataDir, EMPTY, (db) => readDatabase(db, dataDir, options), () => readLegacyIndex(dataDir, options));
 }
@@ -38,7 +38,7 @@ export function readRunIndexFromDisk(
 export function searchRunIndexFromDisk(
   dataDir: string,
   query: string,
-  options: { handle?: RepoHandle | null; limit: number },
+  options: { handle?: RepoHandle | null | undefined; limit: number },
 ): ColdRunIndex {
   return readCold(dataDir, EMPTY, (db) => searchDatabase(db, dataDir, query, options), () => {
     const { runs } = readLegacyIndex(dataDir, options);
@@ -86,13 +86,13 @@ function applyWindow<T extends { archived: boolean }>(runs: T[], archivedWindow:
   return { runs: kept, truncated: archived > archivedWindow };
 }
 
-function readDatabase(db: RunDatabase, dataDir: string, { handle, archivedWindow, roots }: { handle?: RepoHandle | null; archivedWindow?: number; roots?: boolean }): ColdRunIndex {
+function readDatabase(db: RunDatabase, dataDir: string, { handle, archivedWindow, roots }: { handle?: RepoHandle | null | undefined; archivedWindow?: number; roots?: boolean }): ColdRunIndex {
   // One archived root past the window is how "there are older ones" is known without counting.
   const rows = archivedWindow === undefined ? db.listSummaries() : db.listWindowSummaries(archivedWindow + 1, { roots });
   return applyWindow(projectRows(db, rows, dataDir, handle), archivedWindow);
 }
 
-function searchDatabase(db: RunDatabase, dataDir: string, query: string, { handle, limit }: { handle?: RepoHandle | null; limit: number }): ColdRunIndex {
+function searchDatabase(db: RunDatabase, dataDir: string, query: string, { handle, limit }: { handle?: RepoHandle | null | undefined; limit: number }): ColdRunIndex {
   // Match on the stored summary first, so only candidates pay for a decode; each candidate is
   // projected and matched again as it is read, because reading it cold can drop a foreign
   // reference it matched on. The scan stops at one match past the limit counted AFTER that, so
@@ -178,7 +178,7 @@ function needsRecord(summary: RunSummary, handle?: RepoHandle | null): boolean {
   return summary.delegation?.role === 'root' && summary.delegation.wait !== undefined;
 }
 
-function readLegacyIndex(dataDir: string, { handle, archivedWindow, roots }: { handle?: RepoHandle | null; archivedWindow?: number; roots?: boolean }): ColdRunIndex {
+function readLegacyIndex(dataDir: string, { handle, archivedWindow, roots }: { handle?: RepoHandle | null | undefined; archivedWindow?: number; roots?: boolean }): ColdRunIndex {
   const indexPath = join(dataDir, LEGACY_INDEX_FILE);
   if (!existsSync(indexPath)) return EMPTY;
   try {

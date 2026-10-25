@@ -1285,7 +1285,7 @@ export async function withOwnedInputRun(
   }) => Promise<void>,
   options: {
     /** A persisted catalog definition the worker runs instead of quick-task (#451). */
-    workflowDef?: WorkflowDef;
+    workflowDef?: WorkflowDef | undefined;
     /** The private identity evidence to write instead of the internal marker (#452); its run-level
      *  account must match `runner`/`agentProfile` on the record, as acceptance guarantees. */
     identity?: WorkerExecutionIdentity;

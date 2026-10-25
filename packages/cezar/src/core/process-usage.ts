@@ -100,7 +100,7 @@ export const SAMPLE_INTERVAL_MS = 2_000;
 
 interface Entry {
   pid: number;
-  last?: ProcessUsage;
+  last?: ProcessUsage | undefined;
   peakRssBytes: number;
   peakProcCount: number;
 }

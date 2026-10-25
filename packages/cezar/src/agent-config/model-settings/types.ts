@@ -1,7 +1,7 @@
 import type { RunnerId } from '../../core/agent-runner.ts';
 
 export interface AgentModelSettings {
-  model?: string;
+  model?: string | undefined;
   provider?: string;
 }
 

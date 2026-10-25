@@ -133,7 +133,7 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     writeFileSync(gate, 'end');
     await until(() => store.getRun(run.id)?.status === 'waiting' && store.readEvents(run.id).some(event => event.type === 'ask.requested'));
     const engine = manager as unknown as {
-      active: Map<string, { session: AgentSession; atTurnBoundary?: AgentSession }>;
+      active: Map<string, { session: AgentSession; atTurnBoundary?: AgentSession | undefined }>;
       queue: string[]; waitWakeQueuedAt: Map<string, number>; pump(): Promise<void>;
     };
     const state = engine.active.get(run.id)!;

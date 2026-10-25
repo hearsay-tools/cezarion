@@ -38,8 +38,8 @@ export type CezarToolHandlers = {
   /** `cezar_done` (hearsay-tools/cezarion#1234): accepted means the run, or a workflow step that is not the last, finishes at this turn's end (hearsay-tools/cezarion#1620). */
   finishTurn: (request: CezarDoneRequest, signal: AbortSignal) => Promise<CezarDoneAnswer>;
   /** #781: absent where no cockpit owns the run, which the route answers as `headless`. */
-  registerPreview?: PreviewRegistration;
-  stopPreview?: PreviewStop;
+  registerPreview?: PreviewRegistration | undefined;
+  stopPreview?: PreviewStop | undefined;
   /** hearsay-tools/cezarion#1465: absent where no cockpit serves the project, answered as `unavailable`. */
   scheduleTask?: (request: ScheduleTaskRequest, signal: AbortSignal) => Promise<ScheduleTaskAnswer>;
   scheduledTasks?: (request: ScheduledTasksRequest, signal: AbortSignal) => Promise<ScheduledTasksAnswer>;

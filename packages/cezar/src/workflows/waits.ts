@@ -100,7 +100,7 @@ export function identicalWait(waits: readonly Wait[], request: CezarWaitRequestI
  * The open worker wait a registration repeats (hearsay-tools/cezarion#1235): the same target kind,
  * the same ids in any order and the same mode (`any` when omitted), whatever its timeout.
  */
-export function identicalWorkerWait(waits: readonly Wait[], target: { workerIds?: readonly string[]; requestIds?: readonly string[]; mode?: string }): WorkerWaitEntry | undefined {
+export function identicalWorkerWait(waits: readonly Wait[], target: { workerIds?: readonly string[]; requestIds?: readonly string[] | undefined; mode?: string | undefined }): WorkerWaitEntry | undefined {
   const key = (ids: readonly string[] | undefined) => ids ? [...ids].sort().join(',') : undefined;
   return waits.find((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && wait.phase === 'open' &&
     key(wait.workerIds) === key(target.workerIds) && key(wait.requestIds) === key(target.requestIds) && (wait.mode ?? 'any') === (target.mode ?? 'any'));

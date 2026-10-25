@@ -40,15 +40,15 @@ export const CURSOR_PRINT_SPEC_SUPPORT: AgentRunSpecSupport = {
 };
 
 export interface CursorPrintRunnerOptions {
-  bin?: string;
+  bin?: string | undefined;
   timeoutMs?: number;
   /** The selected account's read-only model catalog, supplied by the facade. */
-  models?: readonly ModelOption[];
+  models?: readonly ModelOption[] | undefined;
   /** Exact canonical selection validated by the selected-account preflight. */
-  resolvedModel?: string;
+  resolvedModel?: string | undefined;
   /** The safe native tools the installed build advertises, from the capability preflight.
    * A restricted turn allows exactly these; absent, the whole qualified safe catalog. */
-  allowedTools?: readonly string[];
+  allowedTools?: readonly string[] | undefined;
   /** Test override; production retains the shared 30-minute no-progress cap. */
   noProgressTimeoutMs?: number;
   processOptions?: Pick<CursorPrintProcessOptions, 'drainMs' | 'termGraceMs' | 'killGraceMs'>;
@@ -87,7 +87,7 @@ interface ActiveTurn {
   modelWorkSeen: boolean;
   turnText: string;
   stderr: string;
-  receipt?: { resolve(): void; reject(error: Error): void; settled: boolean };
+  receipt?: { resolve(): void; reject(error: Error): void; settled: boolean } | undefined;
   /** A queued human follow-up this process carries, still held until its init frame
    *  opens the native turn (hearsay-tools/cezarion#1112). */
   heldHuman: boolean;
@@ -103,21 +103,21 @@ class CursorPrintSession implements AgentSession {
   private closing = false;
   private finished = false;
   private busy = false;
-  private nativeId?: string;
+  private nativeId?: string | undefined;
   private sessionEventEmitted = false;
   private turnCount = 0;
-  private active?: ActiveTurn;
+  private active?: ActiveTurn | undefined;
   private queue: ContentBlock[][] = [];
   private uiState = createCursorPrintUiState();
   private texts: string[] = [];
   private toolCalls: AgentToolCallRecord[] = [];
   private tokensUsed = 0;
   private deadline?: NodeJS.Timeout;
-  private noProgress?: NodeJS.Timeout;
-  private autoEnd?: NodeJS.Timeout;
+  private noProgress?: NodeJS.Timeout | undefined;
+  private autoEnd?: NodeJS.Timeout | undefined;
   private errorReported = false;
   private markerAsk = false;
-  private model?: string;
+  private model?: string | undefined;
   private scratch?: string;
   private pluginDir?: string;
   private imageIndex = 0;

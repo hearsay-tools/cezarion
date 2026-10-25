@@ -581,7 +581,7 @@ const SUMMARY_OPTIONAL_KEYS = [
  * through `runDelegationSummarySchema`, which strips paths, permissions and receipts; `usage` is
  * the live sample a caller attached, never persisted.
  */
-export function toRunSummary(run: RunRecord & { usage?: ProcessUsage }): RunSummary {
+export function toRunSummary(run: RunRecord & { usage?: ProcessUsage | undefined }): RunSummary {
   const summary: Record<string, unknown> = {
     id: run.id,
     title: run.title,

@@ -1,3 +1,4 @@
+import { defined } from '../../core/defined.ts';
 import { activeWorkflowRunsArgs, parseActiveWorkflowRuns } from '../../ci-wait/github.ts';
 import type { ArchivePullRequestIdentity, MergedPullRequest } from '@open-mercato/cezar-contract/runs';
 import { pullRequestKey } from '../../runs/pull-requests.ts';
@@ -1100,7 +1101,7 @@ const COMMENT_BODY_CAP = 8_000;
 
 /** `gh api …/issues/{n}/comments` JSON → `ForgeComment[]`. Exported for unit tests. */
 export function normalizeComments(raw: unknown): ForgeComment[] {
-  return z.array(ghIssueCommentSchema).parse(raw).map((c) => ({
+  return z.array(ghIssueCommentSchema).parse(raw).map((c) => defined({
     id: c.id,
     author: c.user?.login ?? '?',
     avatarUrl: c.user?.avatar_url ?? undefined,
@@ -1123,7 +1124,7 @@ export function normalizeReviews(raw: unknown): ForgeComment[] {
       const emptyBody = (r.body ?? '').trim().length === 0;
       return !(emptyBody && (state === 'COMMENTED' || state === 'PENDING'));
     })
-    .map((r) => ({
+    .map((r) => defined({
       id: r.id,
       author: r.user?.login ?? '?',
       avatarUrl: r.user?.avatar_url ?? undefined,
@@ -2004,21 +2005,21 @@ function refStatusQuery(numbers: number[]): string {
  */
 export function derivePrReferenceStatus(pr: {
   state: string;
-  isDraft?: boolean | null;
-  reviewDecision?: string | null;
+  isDraft?: boolean | null | undefined;
+  reviewDecision?: string | null | undefined;
   checks: ChecksGlyph;
   /** ISO-8601 commit date of the head commit. `committedDate`, not a push time: GitHub's
    *  `pushedDate` is deprecated and comes back null on new PRs. */
-  headCommittedAt?: string | null;
+  headCommittedAt?: string | null | undefined;
   /** How many parents the head commit has. 2+ means a MERGE — "Update branch" pulling the base in,
    *  not work on the review. See `answered` below. Absent reads as an ordinary commit: the push
    *  rule is the common path and must not switch off on a field GitHub declined to send. */
-  headParentCount?: number | null;
+  headParentCount?: number | null | undefined;
   /** ISO-8601 `committedDate` of the head's FIRST parent, which on a merge is the branch's previous
    *  tip — the newest commit that is actual work. Only read when the head is a merge. */
-  headFirstParentCommittedAt?: string | null;
+  headFirstParentCommittedAt?: string | null | undefined;
   /** ISO-8601 `submittedAt` of the most recent CHANGES_REQUESTED review, when there is one. */
-  changesRequestedAt?: string | null;
+  changesRequestedAt?: string | null | undefined;
   /** Is a reviewer currently ON THE HOOK — `reviewRequests.totalCount > 0`? True after the author
    *  clicks re-request, which is the one thing that says so while `reviewDecision` still reads
    *  `CHANGES_REQUESTED` — but also true of a reviewer asked long ago who never looked, hence
@@ -2120,7 +2121,7 @@ function isAfter(later?: string | null, earlier?: string | null): boolean {
  */
 export function deriveIssueReferenceStatus(issue: {
   state: string;
-  stateReason?: string | null;
+  stateReason?: string | null | undefined;
 }): ReferenceStatus {
   if (issue.state.toUpperCase() !== 'CLOSED') return 'open';
   return (issue.stateReason ?? '').toUpperCase() === 'NOT_PLANNED' ? 'not-planned' : 'completed';
@@ -2710,7 +2711,10 @@ export async function fetchGithubComments(
         const checks = await fetchCommitChecks(runGraphql, handle.owner, handle.name, commitShas);
         for (const event of events ?? []) {
           if (event.kind !== 'committed' || !event.sha) continue;
-          if (event.sha in checks) event.checks = checks[event.sha];
+          if (event.sha in checks) {
+            delete event.checks;
+            Object.assign(event, defined({ checks: checks[event.sha] }));
+          }
         }
       }
     }
@@ -2721,13 +2725,13 @@ export async function fetchGithubComments(
       parts.push(normalizeReviews(JSON.parse(reviewsOut)));
     }
     const { comments, truncated } = mergeThread(parts);
-    const data: ForgeCommentsData = {
-      available: true,
+    const data: ForgeCommentsData = defined({
+      available: true as const,
       comments,
       // OR-folded exactly as before, so the pre-existing >200-comments trigger is preserved
       // rather than replaced.
       truncated: truncated || eventsTruncated || stoppedShort || undefined,
-    };
+    });
     if (events) data.events = events;
     const itemDetail = await detail;
     if (itemDetail) data.detail = itemDetail;

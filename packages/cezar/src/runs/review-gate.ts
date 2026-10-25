@@ -14,7 +14,7 @@
  * `worktreeHasDiff && reviewGateEnabled(config) && !run.autonomous`.
  */
 export function reviewGateEnabled(
-  config: { reviewGate?: boolean },
+  config: { reviewGate?: boolean | undefined },
   env: NodeJS.ProcessEnv = process.env,
 ): boolean {
   if (config.reviewGate !== undefined) return config.reviewGate;

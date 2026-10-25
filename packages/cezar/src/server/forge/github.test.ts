@@ -637,7 +637,7 @@ const listSide = (argv: string[]): 'issues' | 'pullRequests' | null => {
 const listReply = (
   side: 'issues' | 'pullRequests',
   nodes: unknown[],
-  opts: { total?: number; next?: string | null } = {},
+  opts: { total?: number | undefined; next?: string | null | undefined } = {},
 ): string => JSON.stringify({ data: { repository: { [side]: {
   totalCount: opts.total ?? nodes.length,
   pageInfo: { hasNextPage: opts.next != null, endCursor: opts.next ?? null },
@@ -1210,8 +1210,8 @@ describe('fetchGithubComments timeline integration (#525)', () => {
 
   /** Route each `gh` invocation by the api path in its args. */
   const routeGh = (handlers: {
-    timeline?: (page: number) => unknown;
-    comments?: () => unknown;
+    timeline?: ((page: number) => unknown) | undefined;
+    comments?: (() => unknown) | undefined;
     reviews?: () => unknown;
   }) =>
     execFileMock.mockImplementation((...args: unknown[]) => {

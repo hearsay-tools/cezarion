@@ -158,8 +158,8 @@ export class GithubCiClient {
   private readonly queries = new CiSemaphore(CI_QUERY_LIMIT);
   private readonly command: CiCommandOptions;
   private readonly env: NodeJS.ProcessEnv;
-  private readonly cwd?: string;
-  constructor(options: { command?: CiCommandOptions; env?: NodeJS.ProcessEnv; cwd?: string } = {}) {
+  private readonly cwd?: string | undefined;
+  constructor(options: { command?: CiCommandOptions; env?: NodeJS.ProcessEnv; cwd?: string | undefined } = {}) {
     this.env = options.env ?? process.env;
     this.command = options.command ?? (this.env.CEZ_DRY_RUN === '1' ? { file: process.execPath, args: ['-e', dryRunCommand] } : { file: 'gh', args: [] });
     this.cwd = options.cwd;

@@ -126,7 +126,7 @@ function editorAvailable(editor: EditorDef): boolean {
 /** Coding-agent CLIs a session can be handed off to (#cli-handoff). Selecting one opens a
  *  terminal that resumes THIS run's session when the runner matches, or launches a fresh CLI in
  *  the worktree otherwise. The actual command is built server-side (needs the run's session). */
-const AGENT_CLIS: Array<{ runner: RunnerId; label: string; icon: string; bin: string; envBin?: string }> = [
+const AGENT_CLIS: Array<{ runner: RunnerId; label: string; icon: string; bin: string; envBin?: string | undefined }> = [
   { runner: 'claude', label: 'Claude CLI', icon: 'claude', bin: 'claude', envBin: process.env.CEZ_CLAUDE_BIN },
   { runner: 'codex', label: 'Codex CLI', icon: 'codex', bin: 'codex', envBin: process.env.CEZ_CODEX_BIN },
   { runner: 'opencode', label: 'OpenCode', icon: 'opencode', bin: 'opencode', envBin: process.env.CEZ_OPENCODE_BIN },

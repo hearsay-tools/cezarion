@@ -574,7 +574,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     f.close();
     const events = eventCheckpoint();
     for (const [path, content] of events) events.set(path, content.split('\n').filter(line => !line.includes('"worker-question-routed"')).join('\n'));
-    type DiskRun = { id: string; agentInputs?: Array<{ id: string }>; delegation?: { conversation?: { messages: Array<{ id: string }> } } };
+    type DiskRun = { id: string; agentInputs?: Array<{ id: string }> | undefined; delegation?: { conversation?: { messages: Array<{ id: string }> } } };
     const disk = readPersistedRuns(join(root, '.ai/cezar')) as DiskRun[];
     for (const run of disk) if (run.id === f.p.id) {
       run.agentInputs = run.agentInputs?.filter(input => input.id !== f.questionId);

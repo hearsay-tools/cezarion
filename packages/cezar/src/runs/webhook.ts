@@ -22,14 +22,14 @@ export type TaskWebhookEvent = 'task.status' | 'task.question' | 'task.subscribe
 
 export interface WebhookEndpoint {
   url: string;
-  token?: string;
+  token?: string | undefined;
 }
 
 export interface TaskWebhookTarget extends WebhookEndpoint {
   id: string;
   name: string;
   /** Absent = `DEFAULT_WEBHOOK_TRIGGERS`; `[]` = only `task.subscribed` and `task.test`. */
-  triggers?: readonly WebhookTrigger[];
+  triggers?: readonly WebhookTrigger[] | undefined;
 }
 
 export interface TaskWebhookPayload {
@@ -74,7 +74,7 @@ export interface TaskWebhookOptions {
   dataDir: string;
   /** `CEZ_DRY_RUN=1` by default: log the payload as a run event, send nothing. */
   dryRun?: boolean;
-  fetch?: typeof fetch;
+  fetch?: typeof fetch | undefined;
   sleep?: (ms: number) => Promise<void>;
   timeoutMs?: number;
 }
@@ -83,7 +83,7 @@ export interface TaskWebhookOptions {
 export async function deliverOnce(
   target: WebhookEndpoint,
   payload: unknown,
-  options: { fetch?: typeof fetch; timeoutMs?: number } = {},
+  options: { fetch?: typeof fetch | undefined; timeoutMs?: number | undefined } = {},
 ): Promise<DeliveryResult> {
   try {
     const response = await (options.fetch ?? fetch)(target.url, {
@@ -128,7 +128,7 @@ interface Pending {
   /** Set on `task.status` and `task.question`: what `deliver()` filters on. */
   state?: WebhookTrigger;
   occurredAt: string;
-  message?: string;
+  message?: string | undefined;
 }
 
 const seenOf = (run: AttentionInput): Seen => ({ status: run.status, state: deriveWebhookState(run) });
@@ -139,7 +139,7 @@ const sleepFor = (ms: number) => new Promise<void>((done) => setTimeout(done, ms
 async function deliverWithRetries(
   target: WebhookEndpoint,
   payload: unknown,
-  options: { fetch?: typeof fetch; timeoutMs?: number; sleep?: (ms: number) => Promise<void> },
+  options: { fetch?: typeof fetch | undefined; timeoutMs?: number; sleep?: (ms: number) => Promise<void> },
 ): Promise<{ result: DeliveryResult; attempts: number }> {
   const sleep = options.sleep ?? sleepFor;
   let result: DeliveryResult = { ok: false, error: 'not attempted' };
@@ -362,7 +362,7 @@ export interface AgentReportPayload {
   webhook: { id: string; name: string };
   runId?: string;
   /** The reporting task's cockpit thread. */
-  url?: string;
+  url?: string | undefined;
   title?: string;
   /** Markdown. */
   message: string;
@@ -374,13 +374,13 @@ export interface AgentReportPayload {
 export interface AgentReportOptions {
   projectId: string;
   webhook: TaskWebhookTarget;
-  input: { runId?: string; title?: string; message: string; data?: Record<string, unknown> };
+  input: { runId?: string | undefined; title?: string | undefined; message: string; data?: Record<string, unknown> | undefined };
   /** The reporting run's store, when the run is known: its thread gets a `webhook.report` line. */
   store?: RunStore;
-  origin?: string;
+  origin?: string | undefined;
   dataDir?: string;
   dryRun?: boolean;
-  fetch?: typeof fetch;
+  fetch?: typeof fetch | undefined;
   sleep?: (ms: number) => Promise<void>;
   timeoutMs?: number;
 }
@@ -450,7 +450,7 @@ export class TaskWebhooks {
   private markReady!: () => void;
   private readonly ready = new Promise<void>((done) => { this.markReady = done; });
 
-  constructor(private readonly options: { fetch?: typeof fetch; origin?: string } = {}) {
+  constructor(private readonly options: { fetch?: typeof fetch | undefined; origin?: string } = {}) {
     if (options.origin !== undefined) this.setOrigin(options.origin);
   }
 

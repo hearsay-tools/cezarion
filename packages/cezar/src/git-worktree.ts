@@ -846,7 +846,7 @@ export function parseShortstat(s: string): DiffStat {
 export async function worktreeShortstat(
   worktreePath: string,
   baseBranch: string,
-  opts: { taskBranch?: string; runStartedAt?: string } = {},
+  opts: { taskBranch?: string | undefined; runStartedAt?: string | undefined } = {},
 ): Promise<DiffStat | null> {
   if (!isSafeGitRef(baseBranch)) return null;
   // Private index (#1080): this runs at every turn end, beside the turn-end autosave.

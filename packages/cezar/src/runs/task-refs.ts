@@ -7,11 +7,11 @@
  */
 
 export interface TaskRefs {
-  prNumber?: number;
-  issueNumber?: number;
+  prNumber?: number | undefined;
+  issueNumber?: number | undefined;
   /** A number present in the task whose kind (PR vs issue) is not determinable —
    *  a bare `469` argument or a plain `#469`. Still usable as a title prefix. */
-  ambiguousNumber?: number;
+  ambiguousNumber?: number | undefined;
 }
 
 export const MAX_REF = 10_000_000; // sanity bound — GitHub numbers are far below this

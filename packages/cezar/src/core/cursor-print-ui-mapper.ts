@@ -1,3 +1,4 @@
+import { defined } from './defined.ts';
 /**
  * Cursor Agent CLI `stream-json` → protocol v2 mapper (+ v1 helpers).
  * Adapted from open-mercato/cezar PR #807's fresh-turn print mapper. This
@@ -41,7 +42,7 @@ import { toolDisplay } from './tool-display.ts';
 // ---- v2 state ---------------------------------------------------------------
 
 export interface CursorPrintUiState {
-  readonly fallbackSessionId?: string;
+  readonly fallbackSessionId?: string | undefined;
   readonly sessionStarted: boolean;
   readonly turnSeq: number;
   readonly currentTurnId: string | null;
@@ -381,7 +382,7 @@ function editArtifacts(
             ? input.fileText
             : undefined;
     if (oldText !== null || newText !== undefined) {
-      return { diffs: [{ path, oldText, newText }], locations };
+      return { diffs: [defined({ path, oldText, newText })], locations };
     }
     return { locations };
   }
@@ -472,7 +473,7 @@ function nativeTodoUpdate(input: unknown, prior: ReadonlyMap<string, PlanEntry>)
       typeof raw.content !== 'string' || !PLAN_STATUSES.includes(raw.status as PlanStatus)) return undefined;
     const entry: PlanEntry = { content: raw.content, status: raw.status as PlanStatus };
     if (typeof raw.priority === 'string' && ['high', 'medium', 'low'].includes(raw.priority)) {
-      entry.priority = raw.priority as PlanEntry['priority'];
+      entry.priority = raw.priority as NonNullable<PlanEntry['priority']>;
     }
     todos.set(raw.id, entry);
   }

@@ -24,7 +24,7 @@ export type TurnEndFacts = {
   inputQueued: boolean;
   /** The result of delivering owed input at this turn end. Undefined: not tried yet, and the rule
    *  answers `take-input` when it needs it. False when the entry delivers nothing of its own. */
-  inputTaken?: boolean;
+  inputTaken?: boolean | undefined;
   /** An autonomous nudge the wire refused waits for input readiness at this boundary. */
   nudgePending: boolean;
   /** This turn's ask: an ask line, or the card of a human wait it registered. Owed input waits

@@ -29,7 +29,7 @@ function reopenWith(patch: Record<string, unknown>): RunStore {
   return store;
 }
 
-const human = (record: { waits?: ReadonlyArray<{ kind: string; phase: string }> } | undefined) =>
+const human = (record: { waits?: ReadonlyArray<{ kind: string; phase: string }> | undefined } | undefined) =>
   (record?.waits ?? []).filter((wait) => wait.kind === 'human' && wait.phase === 'open');
 
 it('reads a waiting run\'s stored pending question into one open human wait and drops the summary', () => {

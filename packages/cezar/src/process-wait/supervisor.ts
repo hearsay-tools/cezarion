@@ -12,7 +12,7 @@ import { readExitCode, type ExitFileRoots } from './exit-file.ts';
 export const PROCESS_POLL_MS = 5_000;
 const DIAGNOSTIC_MAX = 512;
 
-export type ProcessWatchRequest = { pid: number; startToken?: string; exitFile?: string; deadline: string; roots: ExitFileRoots };
+export type ProcessWatchRequest = { pid: number; startToken?: string | undefined; exitFile?: string; deadline: string; roots: ExitFileRoots };
 
 /** One check, or undefined while the process still runs before its deadline. Never throws. */
 export function probeProcessWait(request: ProcessWatchRequest, now: number): ProcessWaitResult | undefined {

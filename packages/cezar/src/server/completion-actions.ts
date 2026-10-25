@@ -12,7 +12,7 @@ export interface CompletionActionDeps {
 
 /** Durable task intent drives bounded background work. No browser, agent, or recovery is needed. */
 export class CompletionActionCoordinator {
-  private timer?: ReturnType<typeof setTimeout>;
+  private timer?: ReturnType<typeof setTimeout> | undefined;
   private stopped = false;
   private busy = false;
   private projectCursor = 0;

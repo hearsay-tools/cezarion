@@ -1842,7 +1842,7 @@ function workersCells(runners: RunnerId[]): void {
         // The human message below restarts the automatic-wake budget: the nudge spends its first unit.
         const wakes = 0;
         // The run as the nudge note is written: the note follows the submission and the charge.
-        let atNudge: { status?: string; waits?: Wait[]; automaticWakes?: number; delegation?: unknown } | undefined;
+        let atNudge: { status?: string; waits?: Wait[]; automaticWakes?: number | undefined; delegation?: unknown } | undefined;
         const append = store.appendEvent.bind(store);
         vi.spyOn(store, 'appendEvent').mockImplementation((id, event) => {
           if (id === p.id && event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE) && !atNudge) {

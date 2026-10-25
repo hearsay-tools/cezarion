@@ -1,3 +1,4 @@
+import { defined } from '../core/defined.ts';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -28,7 +29,7 @@ describe('generated inbox retirement — hearsay-tools/cezarion#1543', () => {
     const app = createApp({ repoRoot: root, store, manager: {} as RunManager, version: '0.0.0-test' });
     for (const prefix of ['/api/v1', '/api/v1/p/default']) {
       for (const [method, path] of [['GET', '/todos'], ['DELETE', '/todos/old'], ['POST', '/todos/old/start']]) {
-        const response = await apiRequest(app, `${prefix}${path}`, { method });
+        const response = await apiRequest(app, `${prefix}${path}`, defined({ method }));
         expect(response.status, `${method} ${prefix}${path}`).toBe(404);
         expect(readFileSync(join(root, '.ai/cezar/todos.json'), 'utf8')).toBe(bytes);
       }

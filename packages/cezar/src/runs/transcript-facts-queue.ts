@@ -11,10 +11,10 @@ interface Job<T> {
   resolve: (value: T) => void;
   reject: (error: Error) => void;
   attempts: number;
-  value?: T;
-  error?: Error;
-  port?: MessagePort;
-  signal?: Int32Array;
+  value?: T | undefined;
+  error?: Error | undefined;
+  port?: MessagePort | undefined;
+  signal?: Int32Array | undefined;
   timer?: NodeJS.Timeout;
 }
 
@@ -22,10 +22,10 @@ interface Job<T> {
 export class TranscriptFactsQueue<T> {
   private readonly jobs = new Map<string, Job<T>>();
   private pending: Job<T>[] = [];
-  private active?: Job<T>;
-  private worker?: Worker;
-  private workerLifecycle?: Int32Array;
-  private dispatch?: NodeJS.Immediate;
+  private active?: Job<T> | undefined;
+  private worker?: Worker | undefined;
+  private workerLifecycle?: Int32Array | undefined;
+  private dispatch?: NodeJS.Immediate | undefined;
   private stopped = false;
 
   constructor(

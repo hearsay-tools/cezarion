@@ -119,8 +119,8 @@ export class DevServer extends EventEmitter {
   private readonly waitMs: number;
   private child?: ChildProcess;
   private childExited?: Promise<void>;
-  private probeTimer?: NodeJS.Timeout;
-  private waitTimer?: NodeJS.Timeout;
+  private probeTimer?: NodeJS.Timeout | undefined;
+  private waitTimer?: NodeJS.Timeout | undefined;
   private logTimer?: NodeJS.Timeout;
   private probing = false;
   private stopping?: Promise<void>;
@@ -266,7 +266,7 @@ export class DevServer extends EventEmitter {
  * The record goes either way, except one `keep` claims: a server or browser the live host still runs.
  * Returns how many processes were killed.
  */
-export async function sweepPreviewLeftovers(dataDir: string, opts: { keep?: (runId: string, what: number | 'browser') => boolean } = {}): Promise<number> {
+export async function sweepPreviewLeftovers(dataDir: string, opts: { keep?: ((runId: string, what: number | 'browser') => boolean) | undefined } = {}): Promise<number> {
   const root = join(dataDir, 'preview');
   if (!existsSync(root)) return 0;
   const kills: Promise<void>[] = [];

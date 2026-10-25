@@ -20,7 +20,7 @@ const record = (id: string, over: Partial<RunRecord> = {}): RunRecord => ({
 
 let dataDir: string;
 const stores: RunStore[] = [];
-const open = (opts?: { keepLive?: boolean }) => {
+const open = (opts?: { keepLive?: boolean | undefined }) => {
   const store = RunStore.open(dataDir, opts);
   stores.push(store);
   return store;

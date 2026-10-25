@@ -27,10 +27,10 @@ export interface PreviewHostLike {
 
 export type PreviewRegistrationInput = {
   request: PreviewServeRequest;
-  worktreePath?: string;
-  cezarPort?: number;
+  worktreePath?: string | undefined;
+  cezarPort?: number | undefined;
   existing: PreviewServer[];
-  owner?: { runId: string; title: string };
+  owner?: { runId: string; title: string } | undefined;
   runId: string;
   enabled: boolean;
   headless: boolean;
@@ -73,7 +73,7 @@ export function validateRegistration(input: PreviewRegistrationInput): { code: P
  * `withoutWorktree` marks a run that never had a worktree (composer opt-out, non-Git directory):
  * still `worktree_missing`, but not "no longer exists".
  */
-export type PreviewHintContext = { command: string; port: number; label?: string; ownerTitle?: string; withoutWorktree?: boolean };
+export type PreviewHintContext = { command: string; port: number; label?: string | undefined; ownerTitle?: string | undefined; withoutWorktree?: boolean };
 
 const EXAMPLE_CALL = '{ "command": "npm run dev -- --port 5173 --strictPort", "port": 5173 }';
 

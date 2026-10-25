@@ -174,7 +174,7 @@ export async function prepareWorkerContext(options: {
 
 /** Restart/Continue trusts intact owned bytes; a missing copy can only be rebuilt from identical source bytes. */
 export async function verifyWorkerContext(options: {
-  dataDir: string; parentId: string; workspace: WorkerWorkspace; context?: WorkerInputRecipe;
+  dataDir: string; parentId: string; workspace: WorkerWorkspace; context?: WorkerInputRecipe | undefined;
   /** The parent's worktree, the only source a missing `parent-file` snapshot may be rebuilt from. */
   parentCwd?: string;
 }): Promise<void> {
@@ -228,7 +228,7 @@ export async function verifyWorkerContext(options: {
  * content or restore deleted files on Continue. Require baseline ignore rules and recheck the
  * whole batch; remove this call’s copies on failure.
  */
-export async function placeWorkerAttachments(options: { dataDir: string; workspace: WorkerWorkspace; context?: WorkerInputRecipe }): Promise<void> {
+export async function placeWorkerAttachments(options: { dataDir: string; workspace: WorkerWorkspace; context?: WorkerInputRecipe | undefined }): Promise<void> {
   const { dataDir, workspace, context } = options;
   const root = await realpath(workspace.path);
   const notIgnored = (path: string) => refuse(`--attach path is not ignored by the worker baseline: ${path}; commit it and spawn from that commit instead of attaching it`);

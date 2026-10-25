@@ -19,8 +19,8 @@ export interface CursorRunnerOptions {
 }
 
 interface CursorSelection {
-  transport: SessionTransport; note?: string; models?: readonly ModelOption[]; model?: string; resolvedModel?: string;
-  allowedTools?: readonly string[];
+  transport: SessionTransport; note?: string; models?: readonly ModelOption[] | undefined; model?: string | undefined; resolvedModel?: string | undefined;
+  allowedTools?: readonly string[] | undefined;
 }
 
 /** Selects one Cursor transport before inference; persisted identity always wins over defaults. */

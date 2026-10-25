@@ -17,7 +17,7 @@ export interface WorkspaceResourceLimits {
   /** Automatic monitoring re-check cadence in minutes. Default ON at
    *  `DEFAULT_MONITORING_WAKE_MINUTES`; explicit `null` means stay parked; absent means
    *  "this loader predates the key" and reads as the default. */
-  monitoringWakeIntervalMinutes?: number | null;
+  monitoringWakeIntervalMinutes?: number | null | undefined;
   /** Resume a run stopped by a provider usage limit when that limit resets. Default ON. */
   autoResumeOnUsageLimit?: boolean;
   /** Per-task process-tree memory ceiling in MiB; null = no limit. */

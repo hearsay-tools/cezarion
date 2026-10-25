@@ -13,7 +13,7 @@ import type { PreviewHostLike } from './preview/registration.ts';
  * inside those two. A failed release never blocks the removal.
  */
 export async function releaseThenRemoveWorktree(
-  deps: { previewHost?: Pick<PreviewHostLike, 'release'> },
+  deps: { previewHost?: Pick<PreviewHostLike, 'release'> | undefined },
   runId: string,
   repoRoot: string,
   worktreePath: string,
@@ -31,7 +31,7 @@ export async function releaseThenRemoveWorktree(
 
 /** A destroyed owned worker's checkout: the same rule, through the delegation cleanup's own fenced removal. */
 export async function releaseThenRemoveOwnedWorkspace(
-  deps: { previewHost?: Pick<PreviewHostLike, 'release'> },
+  deps: { previewHost?: Pick<PreviewHostLike, 'release'> | undefined },
   repoRoot: string,
   workspace: WorkerWorkspace,
   assertCurrent?: () => void,

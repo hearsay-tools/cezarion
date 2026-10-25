@@ -28,16 +28,15 @@ import type { ProviderRuntimeAuthObserver } from './provider-auth-runtime.ts';
 import type { ServerDeps } from './server.ts';
 
 /** The host-wide services `createApp` always has: the injected one, or the real default. */
-type HostServices = Required<
-  Pick<ServerDeps, 'modelCatalog' | 'providerAuth' | 'workspaceConfig' | 'openTerminal' | 'openFile' | 'openApp'>
->;
+type HostServiceKey = 'modelCatalog' | 'providerAuth' | 'workspaceConfig' | 'openTerminal' | 'openFile' | 'openApp';
+type HostServices = { [K in HostServiceKey]: Exclude<ServerDeps[K], undefined> };
 
 /**
  * Resolve each host-wide service to the injected dependency or its real default. A default is
  * built only when its dependency is absent (`??` short-circuits), in the order below, so a test
  * that injects a service never pays for the real one.
  */
-export function resolveServerDeps(deps: Partial<HostServices>, bootRoot: string): HostServices {
+export function resolveServerDeps(deps: Pick<ServerDeps, HostServiceKey>, bootRoot: string): HostServices {
   return {
     // One adapter per contract-advertised runner; the map is typed over `modelDiscoveryRunnerSchema`
     // so a runner added to the contract without an adapter fails typecheck (AGENT_PROTOCOL.md §10).
