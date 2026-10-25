@@ -8,6 +8,8 @@ import { afterEach, describe, expect, it } from 'vitest'
 import { spawnFixtureServer, stopFixtureServer } from '../../e2e/fixture-server'
 
 const children: ChildProcess[] = []
+// spawnFixtureServer starts no process group on Windows, so these tests are POSIX-only.
+const groupIt = it.runIf(process.platform !== 'win32')
 const grandchildren: number[] = []
 
 /** True while `pid` runs; a zombie waiting for its reaper has stopped (Linux reads its state). */
@@ -96,7 +98,7 @@ describe('stopFixtureServer', () => {
 
   // hearsay-tools/cezarion#1764: the server's git children outlived its exit, and one wrote
   // into the fixture root while the spec's teardown removed it.
-  it("waits for the server's own children, not only the server", async () => {
+  groupIt("waits for the server's own children, not only the server", async () => {
     const { child, grandchild } = await serverWithChild('')
 
     // The default grace: at load ~70 a 1 s grace let SIGKILL reach the server before its own exit.
@@ -106,7 +108,7 @@ describe('stopFixtureServer', () => {
     expect(running(grandchild)).toBe(false)
   })
 
-  it('escalates to SIGKILL for a child that ignores SIGTERM', async () => {
+  groupIt('escalates to SIGKILL for a child that ignores SIGTERM', async () => {
     const { child, grandchild } = await serverWithChild("process.on('SIGTERM', () => {})")
 
     await stopFixtureServer(child, 100)
@@ -114,7 +116,7 @@ describe('stopFixtureServer', () => {
     expect(running(grandchild)).toBe(false)
   })
 
-  it('stops the children of a server that already exited', async () => {
+  groupIt('stops the children of a server that already exited', async () => {
     const { child, grandchild } = await serverWithChild('', { exitAfterReady: true })
     if (child.exitCode === null) await once(child, 'exit')
 
@@ -123,7 +125,7 @@ describe('stopFixtureServer', () => {
     expect(running(grandchild)).toBe(false)
   })
 
-  it('kills its server groups when the test process ends by a signal', async () => {
+  groupIt('kills its server groups when the test process ends by a signal', async () => {
     // A detached server no longer receives the terminal's Ctrl-C with the test run.
     const helper = fileURLToPath(new URL('../../e2e/fixture-server.ts', import.meta.url))
     const runner = spawn(process.execPath, ['--import', 'tsx', '--input-type=module', '-e', `
