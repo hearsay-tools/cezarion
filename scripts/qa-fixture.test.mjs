@@ -185,6 +185,48 @@ test('a failed build fails up with the end of its log and leaves nothing behind'
   assert.deepEqual(readdirSync(f.tmp), []);
 });
 
+function groupAlive(pid) {
+  try {
+    process.kill(-pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function waitSync(predicate, what) {
+  // bound: hang guard only; the stub server starts in well under a second.
+  const deadline = performance.now() + 20_000;
+  const sleeper = new Int32Array(new SharedArrayBuffer(4));
+  while (!predicate()) {
+    if (performance.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    Atomics.wait(sleeper, 0, 0, 50);
+  }
+}
+
+// up starts the server first and the watcher second; `call` picks whose start identity reads empty.
+for (const [which, call] of [['server', 1], ['watcher', 2]]) {
+  test(`up stops the ${which} when it cannot read the ${which}'s start identity`, async (t) => {
+    const f = fixture(t);
+    const started = [];
+    const stubStarted = () => readdirSync(f.tmp).some((entry) => existsSync(join(f.tmp, entry, 'home/stub.json')));
+    const readIdentity = (pid) => {
+      started.push(pid);
+      if (started.length !== call) return identity(pid);
+      // Read once the stub has started its own child, so that only a stop of the whole group
+      // ends it. Earlier, up's cleanup deletes the script before node loads it.
+      if (which === 'server') waitSync(stubStarted, 'the stub server to start');
+      return {};
+    };
+    // Only a failing run leaves a group behind; the descriptor that down would read is gone.
+    t.after(() => started.filter(groupAlive).forEach((pid) => process.kill(-pid, 'SIGKILL')));
+    await assert.rejects(up(f.options({ readIdentity })), /cannot read the start identity/);
+    await until(() => !started.some(groupAlive), `the ${which}'s process group to exit`);
+    assert.deepEqual(readdirSync(f.tmp), []);
+    assert.equal(existsSync(descriptorPath(f.worktree)), false);
+  });
+}
+
 test('the watcher stops the server once its descriptor is gone', async (t) => {
   const f = fixture(t);
   await up(f.options({ watchIntervalMs: 100 }));

@@ -94,14 +94,19 @@ function buildE2e(repoRoot, out, logPath) {
 }
 
 /** Starts `cmd` detached, so it leads its own process group, with its output in `logPath`. */
-async function detach(cmd, { cwd, env, logPath }) {
+async function detach(cmd, { cwd, env, logPath, readIdentity }) {
   const fd = openSync(logPath, 'a');
   try {
     const child = spawn(process.execPath, cmd, { cwd, env, detached: true, stdio: ['ignore', fd, fd] });
     await new Promise((done, fail) => { child.once('spawn', done); child.once('error', fail); });
     child.unref();
-    const { start } = identity(child.pid);
-    if (!start) throw new Error(`cannot read the start identity of pid ${child.pid}`);
+    const { start } = readIdentity(child.pid);
+    if (!start) {
+      // Without a start identity no later stop can name it, so stop it now. The event loop has
+      // not run since the spawn, so the child is not reaped and its pid still names its group.
+      try { process.kill(-child.pid, 'SIGKILL'); } catch { /* the group already ended */ }
+      throw new Error(`cannot read the start identity of pid ${child.pid}`);
+    }
     return { pid: child.pid, start };
   } finally { closeSync(fd); }
 }
@@ -242,6 +247,7 @@ export async function up({
   bootTimeoutMs = BOOT_TIMEOUT_MS,
   watchIntervalMs = WATCH_INTERVAL_MS,
   stopGraceMs = STOP_GRACE_MS,
+  readIdentity = identity,
 }) {
   const optIns = parseUpArgs(args);
   if (process.platform !== 'linux' && process.platform !== 'darwin') {
@@ -258,7 +264,7 @@ export async function up({
     log(stderr, `building the e2e cockpit into ${join(root, 'build/cezar')}`);
     await build(join(root, 'build/cezar'), join(root, 'build.log'));
     server = await detach([join(root, 'build/cezar/dist/index.js'), 'serve', '--repo', repo, '--port', '0', '--no-open'],
-      { cwd: repo, env: childEnv, logPath: join(root, 'server.log') });
+      { cwd: repo, env: childEnv, logPath: join(root, 'server.log'), readIdentity });
     const baseUrl = await waitForCockpit(server, join(root, 'server.log'), bootTimeoutMs);
     const projectId = await registeredProject(baseUrl, repo);
     const fixture = { root, baseUrl, projectId, server, startedAt: new Date().toISOString() };
@@ -267,7 +273,7 @@ export async function up({
     writeOwner(repoRoot, fixture);
     writeDescriptor(repoRoot, fixture);
     fixture.watcher = await detach([import.meta.filename, 'watch', repoRoot, root, String(server.pid), server.start, String(watchIntervalMs)],
-      { cwd: dirname(root), env, logPath: join(root, 'watch.log') });
+      { cwd: dirname(root), env, logPath: join(root, 'watch.log'), readIdentity });
     writeOwner(repoRoot, fixture);
     writeDescriptor(repoRoot, fixture);
     stdout.write([
