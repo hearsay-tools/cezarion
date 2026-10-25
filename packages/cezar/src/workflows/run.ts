@@ -5265,9 +5265,10 @@ export class RunManager {
   private noticeParkedWorker(workerId: string): void {
     const worker = this.store.getRun(workerId);
     // A question goes to the parent through `routeWorkerQuestion`; a prose gate does not, so it gets a notice.
+    // Queued input wakes the worker, so the turn that takes it decides at its own park.
     if (worker?.delegation?.role !== 'worker' || worker.status !== 'waiting' || worker.stopping || worker.delegation.destroy ||
       this.store.transcriptFacts(workerId).pendingAsk || this.active.get(workerId)?.pendingHumanAsk ||
-      this.store.readWorkerExecution(workerId)?.phase === 'complete') return;
+      this.store.readWorkerExecution(workerId)?.phase === 'complete' || this.hasQueuedAgentInputs(workerId)) return;
     const parentId = worker.delegation.parentRunId;
     const root = this.store.getRun(parentId);
     if (root?.delegation?.role !== 'root' || !this.parentTakesMessages(root) ||

@@ -100,6 +100,25 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     expect(notice!.text).toContain('Its last message:\nRead it; still blocked.');
   });
 
+  it('a worker with queued input sends no notice when the wait opens, and the turn that takes the input sends it at its park', async () => {
+    const { p, service, callerOf } = await family();
+    const w = await parkedWorker(p.id, 'Parked before the request.');
+    // The scheduler holds the request, so it stays queued on the parked worker.
+    const engine = manager as unknown as { pump(): Promise<void> };
+    const pump = vi.spyOn(engine, 'pump').mockResolvedValue();
+    const request = randomUUID();
+    await service.send(callerOf(p.id), { id: request, recipientRunId: w.id, kind: 'request', text: messagesPrompt('claude', ['Took the request; still blocked.']), timeoutSeconds: 600 });
+    const wait = manager.registerWorkerListWait(p.id, { requestIds: [request], timeoutSeconds: 600 }, 'cez-worker-wait');
+    expect(notices(p.id, w.id)).toEqual([]);
+    pump.mockRestore();
+    await engine.pump();
+    await until(() => notices(p.id, w.id).length > 0 && parked(w.id), () => timeline(w.id));
+    const [notice, ...more] = notices(p.id, w.id);
+    expect(more).toEqual([]);
+    expect(notice).toMatchObject({ id: parkNoticeId(w.id, wait.id) });
+    expect(notice!.text).toContain('Its last message:\nTook the request; still blocked.');
+  });
+
   it('a full parent inbox sends no notice and notes it on the worker once', async () => {
     const { p } = await family();
     const now = new Date().toISOString();

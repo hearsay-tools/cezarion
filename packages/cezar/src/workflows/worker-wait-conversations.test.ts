@@ -7,6 +7,7 @@ import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runn
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
+import { parkNoticeId } from '../delegation/park-notice.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 import {
   checkpoint, controlledWire, manager, parent, restart, root, semaphore, spendWorkerBudget,
@@ -106,9 +107,15 @@ describe('parent and worker conversation waits through RunManager', { timeout: 3
   it('inbox ACK of progress preserves a parked worker wait and its terminal wake', async () => {
     const f = await conversationPair();
     const engine = manager as unknown as { pump(): Promise<void>; queue: string[] };
+    // The wait opens on a parked worker, which sends its park notice (hearsay-tools/cezarion#1327).
+    // The parent takes it and parks again before the progress this test acknowledges.
+    const turns = turnEnds(f.p.id);
+    const wait = manager.registerWorkerWait(f.p.id, { workerIds: [f.w.id], timeoutSeconds: 600 });
+    const notice = parkNoticeId(f.w.id, wait.id);
+    await until(() => turnEnds(f.p.id) > turns && waitOf(store.getRun(f.p.id))?.phase === 'parked' &&
+      !!store.getRun(f.p.id)?.agentInputs?.find(input => input.id === notice)?.deliveredAt);
     const pump = vi.spyOn(engine, 'pump').mockResolvedValue();
     try {
-      const wait = manager.registerWorkerWait(f.p.id, { workerIds: [f.w.id], timeoutSeconds: 600 });
       const id = randomUUID();
       await f.service.send(f.workerCaller, { id, recipientRunId: f.p.id, kind: 'progress', text: 'Still working mock:hold', timeoutSeconds: 600 });
       const generation = randomUUID();
