@@ -133,6 +133,11 @@
     "packages/cezar/test/unit/cursor-hang-stdin.test.ts": [
       "packages/cezar/scripts/mock-cursor-hang-stdin.mjs"
     ],
+    "packages/cezar/src/inline-contract-check.test.ts": [
+      "packages/cezar/scripts/inline-contract.mjs",
+      "packages/contract/src/**",
+      "packages/contract/tsconfig.json"
+    ],
     "packages/cezar/test/unit/test-env-launcher.test.ts": [
       ".ai/scripts/test-env-up.sh",
       ".ai/scripts/test-env-down.sh",
