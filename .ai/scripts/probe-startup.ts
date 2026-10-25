@@ -14,10 +14,10 @@
 // TMPDIR, the scratch HOME, PI_CODING_AGENT_DIR and PI_OFFLINE=1: no provider keys, no XDG_* and no
 // OMP_PROFILE, PI_PROFILE or PI_CONFIG_DIR. The probe refuses to start when cezar's own
 // agentHomePaths() resolves the agent dir outside the scratch root. pi and omp also search every
-// ancestor of project/ (pi for AGENTS.md and CLAUDE.md, omp for .omp/agents, .claude/agents and
-// more), so the scratch root never sits under the real home: when TMPDIR does, the probe uses
-// /tmp. A run therefore reads and writes nothing under the real ~/.pi or ~/.omp. The
-// ancestor-context record lists any AGENTS.md or CLAUDE.md that pi still finds above project/.
+// ancestor of project/ (pi for context files such as AGENTS.md, omp for .omp/agents,
+// .claude/agents and more), so the scratch root never sits under the real home: when TMPDIR does,
+// the probe uses /tmp. A run therefore reads and writes nothing under the real ~/.pi or ~/.omp.
+// The ancestor-context record lists every context file pi still finds above project/.
 //
 // The argv is cezar's: buildPiArgs or buildOmpArgs on a spec with the shipped default tools
 // (allowedToolsForStep), model spy/spy-model and PROBE_SYSTEM_PROMPT. pi also gets --offline.
@@ -209,11 +209,13 @@ function describeCommands(commands: unknown): { skills: string[]; commands: stri
   return { skills: list.filter((c) => c.source === 'skill').map(describe), commands: list.filter((c) => c.source !== 'skill').map(describe) };
 }
 
-/** Context files above `dir`: pi reads AGENTS.md and CLAUDE.md from every ancestor, not only the project. */
+/** Context files above `dir`, under the names pi 1.0.4 reads from every ancestor (resource-loader.js). */
 function ancestorContextFiles(dir: string): string[] {
   const found: string[] = [];
   for (let parent = dirname(dir); ; parent = dirname(parent)) {
-    for (const name of ['AGENTS.md', 'CLAUDE.md']) if (existsSync(join(parent, name))) found.push(join(parent, name));
+    for (const name of ['AGENTS.override.md', 'AGENTS.md', 'AGENTS.MD', 'CLAUDE.md', 'CLAUDE.MD']) {
+      if (existsSync(join(parent, name))) found.push(join(parent, name));
+    }
     if (dirname(parent) === parent) return found;
   }
 }
