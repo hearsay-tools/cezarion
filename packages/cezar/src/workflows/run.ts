@@ -9834,96 +9834,129 @@ export class RunManager {
     const stepId = turn.stepId;
     // A done goes to the completion gate first (hearsay-tools/cezarion#1301). A refused done is not a done.
     const gate = refusal ?? (turn.done && session?.open ? this.completionGate(runId) : 'accept');
-    if (gate === 'held') {
-      // A stopped root, or a question that parked for the user: the done stays at the boundary.
-      if (entry === 'turn-end') {
-        this.recordDoneAtBoundary(state, true, turn.doneRequest);
-        this.clearHeldHumanInputTimer(state);
-        if (state.agentInputError) return false;
-      }
-      this.writeTurnHeartbeat(runId, entry, { kind: 'park', keepsSlot: this.monitoring.has(runId) });
-      return true;
-    }
+    if (gate === 'held') return this.settleHeldTurn(runId, state, entry, turn);
     const refused = typeof gate === 'object' ? gate : undefined;
     if (entry === 'ready') state.autonomousNudgePending = undefined;
-    const facts = (inputTaken: boolean | undefined): TurnEndFacts => {
-      const run = this.store.getRun(runId);
-      return {
-        sessionOpen: !state.cancelled && !!session?.open,
-        done: turn.done,
-        ...(refused ? { doneRefused: { liveWorkers: refused.liveWorkerIds.length > 0 } } : {}),
-        inputInFlight: !!state.agentInputFlight,
-        inputQueued: this.hasQueuedAgentInputs(runId, state.agentInputFlight?.inputIds),
-        inputTaken,
-        nudgePending: !!session && state.autonomousNudgePending === session,
-        turnAsk: !!turn.ask,
-        nativeAsk: !!state.pendingHumanAsk,
-        question: !!turn.ask || turn.humanGate || !!state.pendingHumanAsk || this.hasPendingHumanAsk(runId),
-        agentWaits: this.holdsAgentWaits(runId),
-        cezarHumanWait: (run?.waits ?? []).some(isCezarHumanWait),
-        stepScope: !!session && state.nextStep?.session === session,
-        noWaitNudgedLastTurn: turn.nudgedLastTurn,
-        completionNudgedLastTurn: !!session && state.completionNudgeAnswered === session,
-        autonomous: !!state.autonomous,
-        budgetSpent: this.automaticWakes(runId) >= MAX_AUTO_CONTINUES,
-        tools: !state.toolless,
-      };
-    };
     let noted = false;
     const noteRefusal = () => {
       if (!refused || noted) return;
       noted = true;
       this.store.appendEvent(runId, { type: 'note', tone: 'warning', ...(stepId ? { stepId } : {}), message: `Completion blocked: ${refused.message}` });
     };
-    // The monitoring line and `ScheduleWakeup` open their timer before the rule reads the waits, as
-    // the `cezar_wait` timer they alias. An autonomous nudge waiting for readiness keeps precedence.
-    const openAlias = () => {
-      if (turn.monitoring && session?.open && state.autonomousNudgePending !== session) this.openTimerAlias(runId, state, turn.scheduleWakeup);
-    };
-    if (turn.askNudged) {
-      // The ask line's autonomous nudge went instead of the question: its turn is the next one.
-      this.recordDoneAtBoundary(state, false, turn.doneRequest);
-      this.clearHeldHumanInputTimer(state);
-      if (state.agentInputError) return false;
-      this.writeTurnHeartbeat(runId, entry, { kind: 'nudge', cause: 'no-wait', autonomous: true });
-      return true;
-    }
-    // A turn end opens it once owed input was tried; this turn's ask keeps that input back, so its
-    // monitoring line opens the timer now. A refused done decides before any alias, as before.
-    if (entry !== 'turn-end' || (turn.ask && !refused)) openAlias();
-    // The turn end and the gate deliver owed input; an acknowledgement or readiness finds it already tried.
-    let decision = decideTurnEnd(facts(entry === 'turn-end' || entry === 'gate' ? undefined : false));
-    const keepDone = turn.done && (!refused || (decision.kind === 'defer' && !!decision.keepDone));
-    if (entry === 'turn-end') this.recordDoneAtBoundary(state, keepDone, turn.doneRequest);
-    else if (entry === 'ack' && turn.done && !keepDone) state.doneAtBoundary = undefined;
-    let tried = false;
-    if (decision.kind === 'take-input') {
-      if (decision.refused) noteRefusal();
-      tried = true;
-      // #505: input the harness accepted but has not read yet runs as its next turn. An in-flight
-      // submission is settled by its acknowledgement (parkAfterAck), not here.
-      const taken = this.flushAgentInputs(runId) || (!turn.humanGate && this.harnessOwesInput(state)) ||
-        !!state.agentInputFlight || this.harnessHoldsHumanInput(state);
-      if (!taken) openAlias();
-      decision = decideTurnEnd(facts(taken));
-    }
-    if (entry === 'turn-end') {
-      if (tried) this.armUnreadInputTimer(runId, state);
-      if (tried && this.harnessHoldsHumanInput(state)) this.armHeldHumanInputTimer(runId, state);
-      else this.clearHeldHumanInputTimer(state);
-      if (state.agentInputError) return false;
-      // `CEZ:ASK` surfaces the structured question as an ask card (#473) before the rule parks on it.
-      if (turn.ask && turn.sink && decision.kind !== 'closed' && decision.kind !== 'input' && !this.humanWaitShown(runId, turn.humanWait)) {
-        emitAskRequested(turn.sink, turn.ask);
-        this.recordTurnEndQuestion(runId, state, turn.humanWait, turn.ask);
-        this.routeWorkerQuestion(runId);
-      }
-    }
+    if (turn.askNudged) return this.settleAskNudgedTurn(runId, state, entry, turn);
+    const { decision, tried } = this.decideSettledTurn(runId, state, session, entry, turn, refused, noteRefusal);
+    if (entry === 'turn-end' && !this.settleTurnEndInput(runId, state, turn, tried, decision)) return false;
     // A run an earlier entry already parked keeps that park: a second one would free its slot twice.
     if (entry !== 'turn-end' && decision.kind === 'park' && this.waiting.has(runId)) return true;
     const outcome = this.carryOutTurnEnd(runId, state, stepId, decision, refused, noteRefusal);
     if (outcome.kind === 'done') return false;
     this.writeTurnHeartbeat(runId, entry, outcome);
+    return true;
+  }
+
+  /** The completion gate held the done (`settleTurn`). A stopped root, or a question that parked
+   *  for the user: the done stays at the boundary. False when the input checkpoint failed. */
+  private settleHeldTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn): boolean {
+    if (entry === 'turn-end') {
+      this.recordDoneAtBoundary(state, true, turn.doneRequest);
+      this.clearHeldHumanInputTimer(state);
+      if (state.agentInputError) return false;
+    }
+    this.writeTurnHeartbeat(runId, entry, { kind: 'park', keepsSlot: this.monitoring.has(runId) });
+    return true;
+  }
+
+  /** The ask line's autonomous nudge went instead of the question (`settleTurn`): its turn is the
+   *  next one. False when the input checkpoint failed. */
+  private settleAskNudgedTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn): boolean {
+    this.recordDoneAtBoundary(state, false, turn.doneRequest);
+    this.clearHeldHumanInputTimer(state);
+    if (state.agentInputError) return false;
+    this.writeTurnHeartbeat(runId, entry, { kind: 'nudge', cause: 'no-wait', autonomous: true });
+    return true;
+  }
+
+  /** What the turn-end rule decides for a settled turn (`settleTurn`): the timer alias the rule
+   *  reads, the first decision and the done it keeps, then the owed input a `take-input` decision
+   *  tries and the decision after it. `tried` is true when that input was tried. */
+  private decideSettledTurn(runId: string, state: ActiveRun, session: AgentSession | undefined, entry: 'turn-end' | 'ack' | 'ready' | 'gate',
+    turn: SettledTurn, refused: CompletionRefusal | undefined, noteRefusal: () => void): { decision: TurnEndDecision; tried: boolean } {
+    // A turn end opens it once owed input was tried; this turn's ask keeps that input back, so its
+    // monitoring line opens the timer now. A refused done decides before any alias, as before.
+    if (entry !== 'turn-end' || (turn.ask && !refused)) this.openTurnTimerAlias(runId, state, session, turn);
+    // The turn end and the gate deliver owed input; an acknowledgement or readiness finds it already tried.
+    const decision = decideTurnEnd(this.turnEndFacts(runId, state, session, turn, refused, entry === 'turn-end' || entry === 'gate' ? undefined : false));
+    this.keepSettledDone(state, entry, turn, refused, decision);
+    if (decision.kind !== 'take-input') return { decision, tried: false };
+    if (decision.refused) noteRefusal();
+    const taken = this.takeOwedInput(runId, state, turn);
+    if (!taken) this.openTurnTimerAlias(runId, state, session, turn);
+    return { decision: decideTurnEnd(this.turnEndFacts(runId, state, session, turn, refused, taken)), tried: true };
+  }
+
+  /** The facts the turn-end rule reads for a settled turn (`decideSettledTurn`). `session` is the
+   *  session `settleTurn` found. */
+  private turnEndFacts(runId: string, state: ActiveRun, session: AgentSession | undefined, turn: SettledTurn,
+    refused: CompletionRefusal | undefined, inputTaken: boolean | undefined): TurnEndFacts {
+    const run = this.store.getRun(runId);
+    return {
+      sessionOpen: !state.cancelled && !!session?.open,
+      done: turn.done,
+      ...(refused ? { doneRefused: { liveWorkers: refused.liveWorkerIds.length > 0 } } : {}),
+      inputInFlight: !!state.agentInputFlight,
+      inputQueued: this.hasQueuedAgentInputs(runId, state.agentInputFlight?.inputIds),
+      inputTaken,
+      nudgePending: !!session && state.autonomousNudgePending === session,
+      turnAsk: !!turn.ask,
+      nativeAsk: !!state.pendingHumanAsk,
+      question: !!turn.ask || turn.humanGate || !!state.pendingHumanAsk || this.hasPendingHumanAsk(runId),
+      agentWaits: this.holdsAgentWaits(runId),
+      cezarHumanWait: (run?.waits ?? []).some(isCezarHumanWait),
+      stepScope: !!session && state.nextStep?.session === session,
+      noWaitNudgedLastTurn: turn.nudgedLastTurn,
+      completionNudgedLastTurn: !!session && state.completionNudgeAnswered === session,
+      autonomous: !!state.autonomous,
+      budgetSpent: this.automaticWakes(runId) >= MAX_AUTO_CONTINUES,
+      tools: !state.toolless,
+    };
+  }
+
+  /** The monitoring line and `ScheduleWakeup` open their timer before the rule reads the waits, as
+   *  the `cezar_wait` timer they alias. An autonomous nudge waiting for readiness keeps precedence. */
+  private openTurnTimerAlias(runId: string, state: ActiveRun, session: AgentSession | undefined, turn: SettledTurn): void {
+    if (turn.monitoring && session?.open && state.autonomousNudgePending !== session) this.openTimerAlias(runId, state, turn.scheduleWakeup);
+  }
+
+  /** The done the first decision keeps at the boundary (`decideSettledTurn`): a turn end records
+   *  it, and an acknowledgement drops a refused done the rule does not keep. */
+  private keepSettledDone(state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn,
+    refused: CompletionRefusal | undefined, decision: TurnEndDecision): void {
+    const keepDone = turn.done && (!refused || (decision.kind === 'defer' && !!decision.keepDone));
+    if (entry === 'turn-end') this.recordDoneAtBoundary(state, keepDone, turn.doneRequest);
+    else if (entry === 'ack' && turn.done && !keepDone) state.doneAtBoundary = undefined;
+  }
+
+  /** The owed input a `take-input` decision tries (`decideSettledTurn`). True when input was taken.
+   *  #505: input the harness accepted but has not read yet runs as its next turn. An in-flight
+   *  submission is settled by its acknowledgement (parkAfterAck), not here. */
+  private takeOwedInput(runId: string, state: ActiveRun, turn: SettledTurn): boolean {
+    return this.flushAgentInputs(runId) || (!turn.humanGate && this.harnessOwesInput(state)) ||
+      !!state.agentInputFlight || this.harnessHoldsHumanInput(state);
+  }
+
+  /** A turn end's own steps after the rule decided (`settleTurn`): the unread and held input timers,
+   *  then the `CEZ:ASK` card. False when the input checkpoint failed. */
+  private settleTurnEndInput(runId: string, state: ActiveRun, turn: SettledTurn, tried: boolean, decision: TurnEndDecision): boolean {
+    if (tried) this.armUnreadInputTimer(runId, state);
+    if (tried && this.harnessHoldsHumanInput(state)) this.armHeldHumanInputTimer(runId, state);
+    else this.clearHeldHumanInputTimer(state);
+    if (state.agentInputError) return false;
+    // `CEZ:ASK` surfaces the structured question as an ask card (#473) before the rule parks on it.
+    if (turn.ask && turn.sink && decision.kind !== 'closed' && decision.kind !== 'input' && !this.humanWaitShown(runId, turn.humanWait)) {
+      emitAskRequested(turn.sink, turn.ask);
+      this.recordTurnEndQuestion(runId, state, turn.humanWait, turn.ask);
+      this.routeWorkerQuestion(runId);
+    }
     return true;
   }
 
