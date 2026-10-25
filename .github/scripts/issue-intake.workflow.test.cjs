@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const { INBOX } = require('./friction-policy.cjs');
 
 const workflowPath = path.join(__dirname, '..', 'workflows', 'issue-intake.yml');
 const schemaPath = path.join(__dirname, '..', 'schemas', 'issue-intake.schema.json');
@@ -127,7 +128,10 @@ test('issue intake workflow keeps its provider, permission, and fail-closed cont
   assert.match(apply, /github\.event\.issue\.number/);
 
   const aggregate = job(workflow, 'issue-intake');
-  assert.match(aggregate, /if: \$\{\{ always\(\) \}\}/);
+  // always() keeps the aggregate running after a failed or skipped provider
+  // path, so that path fails the run. Its one exception, inbox issues, is
+  // pinned in its own test below.
+  assert.match(aggregate, /if: \$\{\{ always\(\) && [^\n]+ \}\}\n/);
   assert.match(aggregate, /\[ "\$VALIDATE_RESULT" = 'success' \] \|\| exit 1/);
   assert.match(aggregate, /\[ "\$CLAUDE_RESULT" = 'success' \] \|\| exit 1/);
   assert.match(aggregate, /\[ "\$CODEX_RESULT" = 'success' \] \|\| exit 1/);
@@ -141,6 +145,17 @@ test('issue intake workflow keeps its provider, permission, and fail-closed cont
   assert.equal((workflow.match(/secrets\.TYPESAFE_API_KEY/g) || []).length, 1, 'only the Jev job may read the TYPESAFE_API_KEY secret');
   assert.ok(fs.existsSync(schemaPath), 'Codex intake schema must exist');
   assertCodexEnvironment(fs.readFileSync(promptPath, 'utf8'));
+});
+
+// The provider jobs need validate-provider, so skipping it skips them; the
+// aggregate runs on always() and would fail on a skipped validator unless it
+// skips too.
+test('friction inbox issues skip every intake job, the aggregate included', () => {
+  const workflow = fs.readFileSync(workflowPath, 'utf8');
+  const skip = `!contains(github.event.issue.labels.*.name, '${INBOX.label}')`;
+  assert.ok(job(workflow, 'validate-provider').includes(`\n    if: \${{ ${skip} }}\n`));
+  assert.ok(job(workflow, 'issue-intake').includes(`\n    if: \${{ always() && ${skip} }}\n`));
+  for (const name of ['claude-intake', 'codex-intake', 'jev-intake']) assert.match(job(workflow, name), /needs: validate-provider\n/);
 });
 
 test('each issue-intake provider interpolates only its own model and effort variables', () => {

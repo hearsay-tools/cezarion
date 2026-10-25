@@ -5,7 +5,12 @@ on:
     types: [opened]
 
 jobs:
+  # A friction inbox issue is a daily container for findings, not a report:
+  # skip triage, so it gets no labels and is never closed as a duplicate of
+  # an earlier inbox (docs/sdlc/friction.md § Friction inbox). Only a user
+  # with triage access can set a label when an issue is opened.
   validate-provider:
+    if: ${{ !contains(github.event.issue.labels.*.name, 'friction-inbox') }}
     runs-on: ubuntu-latest
     permissions: {}
     outputs:
@@ -272,7 +277,7 @@ jobs:
 
   issue-intake:
     needs: [validate-provider, claude-intake, codex-intake, jev-intake, apply-intake]
-    if: ${{ always() }}
+    if: ${{ always() && !contains(github.event.issue.labels.*.name, 'friction-inbox') }}
     runs-on: ubuntu-latest
     permissions: {}
     steps:

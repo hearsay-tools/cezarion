@@ -2598,7 +2598,7 @@ To be first-class:
      stderr, a command line, env or config content. A stale cache is served with the
      reason attached, not dropped.
    - **Invalidation** — `RunnerModelCatalog.invalidate(runner)` after provider
-     Connect / Check / refresh (`invalidateHostModels` in `server.ts`, hearsay-tools/cezarion#18), so an
+     Connect / Check / refresh (`invalidateHostModels` in `server-deps.ts`, hearsay-tools/cezarion#18), so an
      `unavailable` answer is never cached across a login. Retry is the same call.
 
    The pin is `packages/cezar/src/core/model-discovery-guard.test.ts`: every `RUNNER_IDS`
