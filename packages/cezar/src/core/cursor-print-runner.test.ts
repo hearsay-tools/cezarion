@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentEvent, AgentRunSpec } from './agent-runner.ts';
 import { CursorPrintRunner } from './cursor-print-runner.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const mock = fileURLToPath(new URL('../../scripts/mock-cursor-print.mjs', import.meta.url));
 const scratch: string[] = [];
@@ -15,7 +16,7 @@ function fixture(mode = 'normal'): { spec: AgentRunSpec; log: string } {
   scratch.push(cwd);
   const log = join(cwd, 'turns.jsonl');
   return { log, spec: {
-    cwd, userPrompt: 'initial', model: 'gpt-5.4-mini-medium',
+    cwd, userPrompt: 'initial', model: 'gpt-5.4-mini-medium', toolGrant: UNSET_TOOL_GRANT,
     env: { CEZ_MOCK_CURSOR_PRINT_LOG: log, CEZ_MOCK_CURSOR_PRINT_MODE: mode },
   } };
 }

@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, AgentRunner, AgentRunResult, AgentSession, SessionOptions } from './agent-runner.ts';
 import { startManagedSession } from './managed-session.ts';
 import { DEFAULT_NO_PROGRESS_TIMEOUT_MS as LIMIT } from './runner-runtime.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 function fixture(respondPermission?: (requestId: string, optionId: string) => boolean) {
   vi.useFakeTimers();
@@ -18,7 +19,7 @@ function fixture(respondPermission?: (requestId: string, optionId: string) => bo
     startSession(_spec, onEvent, opts) { emit = onEvent!; options = opts!; return live; },
   };
   const events: AgentEvent[] = [];
-  const session = startManagedSession(runner, { userPrompt: 'work', cwd: '.', timeoutMs: 0 }, e => events.push(e), {});
+  const session = startManagedSession(runner, { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'work', cwd: '.', timeoutMs: 0 }, e => events.push(e), {});
   return { session, live, emit, options, events, settle: () => settle({ text: '', toolCalls: [], tokensUsed: 0 }) };
 }
 afterEach(() => vi.useRealTimers());

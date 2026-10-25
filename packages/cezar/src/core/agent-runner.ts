@@ -34,19 +34,17 @@ export interface AgentRunSpec {
   images?: ContentBlock[] | undefined;
   /** The directory the agent runs in — also the only writable root. */
   cwd: string;
-  /** Tool allowlist; the CLI is default-deny for anything not listed — but
-   *  the zero-config default (`DEFAULT_ALLOWED_TOOLS`) includes `Bash`
-   *  unrestricted unless `bashAllowlist` is set, so treat the default as
-   *  full shell access in `cwd`, not a sandboxed allowlist (#430). */
-  allowedTools?: string[] | undefined;
+  /** The tool list and how it reached the runner. The zero-config default
+   *  (`DEFAULT_ALLOWED_TOOLS`) includes `Bash` unrestricted unless the grant
+   *  carries a `bashAllowlist`, so treat it as full shell access in `cwd`, not
+   *  a sandboxed allowlist (#430). */
+  toolGrant: ToolGrant;
   /** Prefer governed cezar workers: suppress verified native delegation entry
    * points for this invocation only. Adapters map this intent; absent preserves
    * ordinary harness settings. Custom tools, unrestricted shell and Claude
    * forked skills (`context: fork`) are not hard-isolated. See
    * AGENT_PROTOCOL.md's D1 capability limits. */
   restrictNativeDelegation?: boolean;
-  /** When `Bash` is allowed, restrict it to commands starting with one of these. */
-  bashAllowlist?: string[] | undefined;
   /** Extra directories the agent may read/write besides `cwd`. */
   additionalDirectories?: string[];
   /** Extra env vars for the agent process (merged over `process.env`) —
@@ -89,9 +87,8 @@ const AGENT_RUN_SPEC_FIELD_SET: Readonly<Record<keyof AgentRunSpec, true>> = {
   userPrompt: true,
   images: true,
   cwd: true,
-  allowedTools: true,
+  toolGrant: true,
   restrictNativeDelegation: true,
-  bashAllowlist: true,
   additionalDirectories: true,
   env: true,
   model: true,
@@ -103,6 +100,42 @@ const AGENT_RUN_SPEC_FIELD_SET: Readonly<Record<keyof AgentRunSpec, true>> = {
 };
 export type AgentRunSpecField = keyof AgentRunSpec;
 export const AGENT_RUN_SPEC_FIELDS = Object.keys(AGENT_RUN_SPEC_FIELD_SET) as readonly AgentRunSpecField[];
+
+/** A tool list a runner receives, with the command prefixes `Bash` is limited to. */
+type ToolList = { readonly tools: readonly string[]; readonly bashAllowlist?: readonly string[] | undefined };
+
+/**
+ * A step's tool list as the runner receives it, resolved once before the runner
+ * (hearsay-tools/cezarion#1810). The kind says where the list came from, so a
+ * runner can tell no list from the step default, a worker's inherited grant and
+ * a list someone wrote out. Each runner maps every kind in an exhaustive switch
+ * that ends in `unknownToolGrant`, so a new kind fails to compile in each one.
+ */
+export type ToolGrant =
+  /** No list: the harness keeps its own tool set. */
+  | { readonly kind: 'unset'; readonly bashAllowlist?: readonly string[] | undefined }
+  /** The step sets no `allowedTools`: `allowedToolsForStep`'s default for this runner. */
+  | ({ readonly kind: 'step-default' } & ToolList)
+  /** An owned worker's grant, pinned at spawn from its parent's. The identity keeps
+   *  only the list, so the parent's default and its written list look the same. */
+  | ({ readonly kind: 'inherited' } & ToolList)
+  /** A list a workflow step or a cezar caller wrote out, an empty one included. */
+  | ({ readonly kind: 'explicit' } & ToolList);
+export type ToolGrantKind = ToolGrant['kind'];
+
+/** Every `ToolGrant` kind, as a runtime list; a `Record`, so a new kind is a compile error here. */
+const TOOL_GRANT_KIND_SET: Readonly<Record<ToolGrantKind, true>> = {
+  unset: true,
+  'step-default': true,
+  inherited: true,
+  explicit: true,
+};
+export const TOOL_GRANT_KINDS = Object.keys(TOOL_GRANT_KIND_SET) as readonly ToolGrantKind[];
+
+/** The `default` of a runner's switch over `ToolGrant['kind']`: only a kind it does not map reaches here. */
+export function unknownToolGrant(grant: never): never {
+  throw new Error(`Unknown tool grant kind: ${String((grant as { kind?: unknown }).kind)}`);
+}
 
 /**
  * What one runner does with one `AgentRunSpec` field. `honored` means setting

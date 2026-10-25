@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, AgentRunSpec, AgentRunner, AgentSession } from './agent-runner.ts';
 import { CursorRunner } from './cursor-runner.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
-const spec: AgentRunSpec = { cwd: '/tmp', userPrompt: 'start' };
+const spec: AgentRunSpec = { cwd: '/tmp', userPrompt: 'start', toolGrant: UNSET_TOOL_GRANT };
 function fakeRunner(transport: 'cursor-acp' | 'cursor-print', starts: string[], specs: AgentRunSpec[]): AgentRunner {
   return {
     backend: 'cursor', specSupport: {} as AgentRunner['specSupport'], systemPromptOnResume: 'in-thread',

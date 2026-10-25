@@ -11,6 +11,7 @@ import { isSignalTerminationExit, prependSystemPrompt } from './agent-runner.ts'
 import { buildClaudeArgs, ClaudeCliRunner, claudeHelpFeatures } from './claude-cli-runner.ts';
 import { EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS, KILL_GRACE_MS } from './runner-runtime.ts';
 import type { UiEvent } from './ui-events.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 /** Only the escalation tests below swap the child out; every other test in this
  *  file keeps spawning its real stub binary through the untouched `spawn`. */
@@ -32,7 +33,7 @@ vi.mock('node:child_process', async (importOriginal) => {
  * shared by both runners).
  */
 describe('buildClaudeArgs systemPrompt', () => {
-  const spec = { userPrompt: 'do it', cwd: '/tmp' };
+  const spec = { userPrompt: 'do it', cwd: '/tmp', toolGrant: UNSET_TOOL_GRANT };
 
   it('emits --append-system-prompt with the exact text', () => {
     const args = buildClaudeArgs({ ...spec, systemPrompt: 'Extra rules.\n\n---\n\nContract.' });
@@ -47,7 +48,7 @@ describe('buildClaudeArgs systemPrompt', () => {
 });
 
 describe('buildClaudeArgs hook events (#961)', () => {
-  const spec = { userPrompt: 'p', cwd: '/tmp' };
+  const spec = { userPrompt: 'p', cwd: '/tmp', toolGrant: UNSET_TOOL_GRANT };
 
   it('passes --include-hook-events when the CLI supports it', () => {
     expect(buildClaudeArgs(spec, {}, { replayUserMessages: true, includeHookEvents: true })).toContain('--include-hook-events');
@@ -75,7 +76,7 @@ describe('buildClaudeArgs hook events (#961)', () => {
 });
 
 describe('buildClaudeArgs effort (#45)', () => {
-  const spec = { userPrompt: 'do it', cwd: '/tmp' };
+  const spec = { userPrompt: 'do it', cwd: '/tmp', toolGrant: UNSET_TOOL_GRANT };
 
   it('emits --effort next to --model when a canonical pin is set', () => {
     const args = buildClaudeArgs({ ...spec, model: 'opus', effort: 'xhigh' });
@@ -95,7 +96,7 @@ describe('buildClaudeArgs effort (#45)', () => {
 });
 
 describe('buildClaudeArgs approval gate', () => {
-  const spec = { userPrompt: 'do it', cwd: '/tmp' };
+  const spec = { userPrompt: 'do it', cwd: '/tmp', toolGrant: UNSET_TOOL_GRANT };
 
   it('denies unapproved tools without prompting by default', () => {
     const args = buildClaudeArgs(spec, {});
@@ -111,7 +112,7 @@ describe('buildClaudeArgs approval gate', () => {
 });
 
 describe('buildClaudeArgs permission mode', () => {
-  const spec = { userPrompt: 'do it', cwd: '/tmp' };
+  const spec = { userPrompt: 'do it', cwd: '/tmp', toolGrant: UNSET_TOOL_GRANT };
 
   it('selects bypass with --dangerously-skip-permissions and no --permission-mode', () => {
     const args = buildClaudeArgs(spec, { CEZ_CLAUDE_PERMISSION_MODE: 'bypass' });
@@ -203,7 +204,7 @@ describe('a teardown cezar initiated', () => {
       sawText = resolve;
     });
     const session = runner.startSession(
-      { userPrompt: 'do it', cwd: process.cwd() },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'do it', cwd: process.cwd() },
       (event) => {
         events.push(event);
         if (event.type === 'text') sawText();
@@ -285,7 +286,7 @@ describe('SIGTERM→SIGKILL escalation for a CLI that survives SIGTERM', () => {
 
   it('escalates after end() even though Node already flagged the child as killed', () => {
     withFakeChild((fake) => {
-      const session = new ClaudeCliRunner({ bin: 'claude', timeoutMs: 0 }).startSession({
+      const session = new ClaudeCliRunner({ bin: 'claude', timeoutMs: 0 }).startSession({ toolGrant: UNSET_TOOL_GRANT,
         userPrompt: 'do it',
         cwd: process.cwd(),
       });
@@ -304,7 +305,7 @@ describe('SIGTERM→SIGKILL escalation for a CLI that survives SIGTERM', () => {
 
   it('escalates on the wall-clock timeout path as well', () => {
     withFakeChild((fake) => {
-      const session = new ClaudeCliRunner({ bin: 'claude', timeoutMs: 20 }).startSession({
+      const session = new ClaudeCliRunner({ bin: 'claude', timeoutMs: 20 }).startSession({ toolGrant: UNSET_TOOL_GRANT,
         userPrompt: 'do it',
         cwd: process.cwd(),
       });
@@ -330,7 +331,7 @@ describe('SIGTERM→SIGKILL escalation for a CLI that survives SIGTERM', () => {
         return true;
       };
       const events: AgentEvent[] = [];
-      const session = new ClaudeCliRunner({ bin: 'claude', timeoutMs: 20 }).startSession({
+      const session = new ClaudeCliRunner({ bin: 'claude', timeoutMs: 20 }).startSession({ toolGrant: UNSET_TOOL_GRANT,
         userPrompt: 'do it', cwd: process.cwd(),
       }, event => events.push(event));
       let settled = false;
@@ -350,7 +351,7 @@ describe('SIGTERM→SIGKILL escalation for a CLI that survives SIGTERM', () => {
     spawnHook.override = () => fake.child;
     vi.useFakeTimers();
     try {
-      const session = new ClaudeCliRunner({ bin: 'claude', timeoutMs: 20 }).startSession({
+      const session = new ClaudeCliRunner({ bin: 'claude', timeoutMs: 20 }).startSession({ toolGrant: UNSET_TOOL_GRANT,
         userPrompt: 'do it', cwd: process.cwd(),
       });
       let settled = false;
@@ -372,7 +373,7 @@ describe('SIGTERM→SIGKILL escalation for a CLI that survives SIGTERM', () => {
 
   it('stops escalating once the CLI really exits after SIGTERM', () => {
     withFakeChild((fake) => {
-      const session = new ClaudeCliRunner({ bin: 'claude', timeoutMs: 0 }).startSession({
+      const session = new ClaudeCliRunner({ bin: 'claude', timeoutMs: 0 }).startSession({ toolGrant: UNSET_TOOL_GRANT,
         userPrompt: 'do it',
         cwd: process.cwd(),
       });
@@ -405,7 +406,7 @@ describe('ClaudeCliRunner token usage', () => {
     const cwd = mkdtempSync(join(tmpdir(), 'cez-claude-zero-cost-'));
     try {
       await new ClaudeCliRunner({ bin: mockBin, timeoutMs: 10_000 }).run(
-        { userPrompt: 'mock:auth-error', cwd, sessionId: '5f701b42-382a-4a6e-b831-0ab9e56eff58' },
+        { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'mock:auth-error', cwd, sessionId: '5f701b42-382a-4a6e-b831-0ab9e56eff58' },
         (event) => events.push(event),
       ).catch(() => undefined);
       expect(events.filter((event) => event.type === 'cost')).toEqual([{ type: 'cost', usd: 0 }]);
@@ -422,7 +423,7 @@ describe('ClaudeCliRunner token usage', () => {
 
     try {
       const result = await runner.run(
-        {
+        { toolGrant: UNSET_TOOL_GRANT,
           userPrompt: 'fix the login redirect',
           cwd,
           env: {
@@ -491,7 +492,7 @@ describe('Claude non-human stdin acknowledgement boundary', () => {
     spawnHook.override = () => child;
     const events: AgentEvent[] = [];
     const runner = new ClaudeCliRunner({ bin: 'unused-pipe-fixture' });
-    const session = runner.startSession({ userPrompt: 'opening', cwd: '/tmp', timeoutMs: 0 }, event => events.push(event), { autoEndAfterFirstTurn: true });
+    const session = runner.startSession({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'opening', cwd: '/tmp', timeoutMs: 0 }, event => events.push(event), { autoEndAfterFirstTurn: true });
     const resultFrame = () => stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'turn complete', usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
     try {
       resultFrame();
@@ -556,7 +557,7 @@ describe('Claude auto-end with a prompt turn still pending (#146)', () => {
     spawnHook.override = () => fixture.child;
     const events: AgentEvent[] = [];
     const runner = new ClaudeCliRunner({ bin: 'unused-pipe-fixture' });
-    const session = runner.startSession({ userPrompt: 'opening', cwd: '/tmp', timeoutMs: 0 }, event => events.push(event), opts);
+    const session = runner.startSession({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'opening', cwd: '/tmp', timeoutMs: 0 }, event => events.push(event), opts);
     const turnEnds = () => events.filter(event => event.type === 'turn-end').length;
     return { session, events, turnEnds };
   }
@@ -644,7 +645,7 @@ describe('Claude auto-end with a prompt turn still pending (#146)', () => {
     const turnEnds = () => events.filter(event => event.type === 'turn-end').length;
     let openAtSecondTurnEnd: boolean | undefined;
     const session = runner.startSession(
-      {
+      { toolGrant: UNSET_TOOL_GRANT,
         userPrompt: 'mock:hold opening',
         cwd,
         env: { CEZ_HANDOFF_FILE: '', CEZ_MOCK_ARGS_FILE: '', CEZ_TODOS_FILE: '' },
@@ -685,7 +686,7 @@ describe('agent input steering (#505)', () => {
   const start = (opts: Parameters<ClaudeCliRunner['startSession']>[2] = {}) => {
     const events: AgentEvent[] = [];
     const session = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
-      { userPrompt: 'mock:steer-tool', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'mock:steer-tool', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } },
       event => events.push(event), opts);
     return { session, events };
   };
@@ -736,7 +737,7 @@ describe('agent input steering (#505)', () => {
   });
 
   it('passes --replay-user-messages', () => {
-    expect(buildClaudeArgs({ userPrompt: 'x', cwd: '/tmp' }, {})).toContain('--replay-user-messages');
+    expect(buildClaudeArgs({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'x', cwd: '/tmp' }, {})).toContain('--replay-user-messages');
   });
 });
 
@@ -745,7 +746,7 @@ describe('agent input written after the last model call (#505)', () => {
   it('reports a line the CLI ran as its next queued turn as consumed then', async () => {
     const events: AgentEvent[] = []; const consumed: string[][] = []; const ui: UiEvent[] = [];
     const session = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
-      { userPrompt: 'mock:hold', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'mock:hold', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } },
       event => events.push(event), { onAgentInputConsumed: ids => consumed.push([...ids]), onUiEvent: event => ui.push(event) });
     // The mock answers each stdin line as its own queued turn outside mock:steer-tool.
     await new Promise(resolve => setTimeout(resolve, 100));
@@ -775,7 +776,7 @@ describe('Claude humanUnsettled is not cleared by queued_turn_count fallback (#4
     spawnHook.override = () => child;
     const events: AgentEvent[] = [];
     const session = new ClaudeCliRunner({ bin: 'unused-pipe-fixture' }).startSession(
-      { userPrompt: 'opening', cwd: '/tmp', timeoutMs: 0 }, event => events.push(event));
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'opening', cwd: '/tmp', timeoutMs: 0 }, event => events.push(event));
     return { session, events, stdout, written, close };
   }
 
@@ -848,7 +849,7 @@ describe('Claude result coverage prefers the lines it names (#505 review)', () =
     const close = () => { if (child.exitCode !== null) return; Object.assign(child, { exitCode: 0 }); stdout.end(); emitter.emit('exit', 0, null); emitter.emit('close', 0, null); };
     spawnHook.override = () => child;
     const events: AgentEvent[] = []; const ui: UiEvent[] = []; const consumed: string[][] = [];
-    const session = new ClaudeCliRunner({ bin: 'unused-pipe-fixture' }).startSession({ userPrompt: 'opening', cwd: '/tmp', timeoutMs: 0 },
+    const session = new ClaudeCliRunner({ bin: 'unused-pipe-fixture' }).startSession({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'opening', cwd: '/tmp', timeoutMs: 0 },
       event => events.push(event), { onUiEvent: event => ui.push(event), onAgentInputConsumed: ids => consumed.push([...ids]) });
     try {
       await vi.waitFor(() => expect(written).toHaveLength(1));
@@ -871,7 +872,7 @@ describe('Claude failed result (#505 review)', () => {
   it('never marks a line read by an error result', async () => {
     const events: AgentEvent[] = []; const consumed: string[][] = [];
     const session = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
-      { userPrompt: 'inspect the working tree', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_CLAUDE_NO_REPLAY: '1' } },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'inspect the working tree', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_CLAUDE_NO_REPLAY: '1' } },
       event => events.push(event), { onAgentInputConsumed: ids => consumed.push([...ids]) });
     const start = Date.now();
     while (!events.some(e => e.type === 'turn-end')) { if (Date.now() - start > 10_000) throw new Error('no turn-end'); await new Promise(r => setTimeout(r, 10)); }
@@ -897,7 +898,7 @@ writeFileSync(${JSON.stringify(argsFile)}, JSON.stringify(process.argv.slice(2))
 console.log(JSON.stringify({ type: 'result', subtype: 'success', result: 'ok', usage: { input_tokens: 1, output_tokens: 1 } }));
 `, { mode: 0o755 });
     try {
-      const result = await new ClaudeCliRunner({ bin, timeoutMs: 10_000 }).run({ userPrompt: 'hello', cwd: dir });
+      const result = await new ClaudeCliRunner({ bin, timeoutMs: 10_000 }).run({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'hello', cwd: dir });
       expect(result.text).toBe('ok');
       expect(JSON.parse(readFileSync(argsFile, 'utf8'))).not.toContain('--replay-user-messages');
     } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -910,7 +911,7 @@ describe('Claude queued-turn announcement with a synchronous follow-up (#505 loc
     const ui: UiEvent[] = []; let ends = 0;
     let session!: ReturnType<ClaudeCliRunner['startSession']>;
     session = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
-      { userPrompt: 'inspect the working tree', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'inspect the working tree', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } },
       event => { if (event.type === 'turn-end' && ++ends === 1) session.sendMessage([{ type: 'text', text: 'mock:agent-echo nudge' }]); },
       { onUiEvent: event => ui.push(event) });
     const start = Date.now();

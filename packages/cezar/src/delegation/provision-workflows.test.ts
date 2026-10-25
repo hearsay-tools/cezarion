@@ -240,7 +240,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
       sessions[1]!.finish(); expect(await f.manager.awaitRunTermination(a.child.workerId, 15000)).toBe(true);
       expect(f.manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true); await until(() => sessions.length === 3);
     }
-    expect(sessions.at(-1)!.spec).toMatchObject({ restrictNativeDelegation: true, model: 'gpt-5.1-codex', allowedTools: [], bashAllowlist: [] });
+    expect(sessions.at(-1)!.spec).toMatchObject({ restrictNativeDelegation: true, model: 'gpt-5.1-codex', toolGrant: { kind: 'inherited', tools: [], bashAllowlist: [] } });
     expect(sessions.at(-1)!.spec.effort).toBeUndefined();
     expect(sessions.at(-1)!.spec.env?.CODEX_HOME).toBe(home);
     expect(sessions.at(-1)!.spec.env?.CEZ_DELEGATION_TOKEN).not.toBe(sessions[0]!.spec.env?.CEZ_DELEGATION_TOKEN);
@@ -265,7 +265,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     await until(() => sessions.length === 2);
     const implement = sessions[1]!.spec;
     expect(implement.userPrompt).toContain('Implement: child');
-    expect(implement).toMatchObject({ model: 'gpt-5.1-codex', allowedTools: ['Read'] });
+    expect(implement).toMatchObject({ model: 'gpt-5.1-codex', toolGrant: { kind: 'inherited', tools: ['Read'] } });
     expect(implement.effort).toBeUndefined();
     expect(implement.env?.CODEX_HOME).toBe(codexHome);
     expect(implement.env?.CLAUDE_CONFIG_DIR).not.toBe(a.home);
@@ -274,7 +274,8 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     const review = sessions[2]!.spec;
     expect(review.userPrompt).toContain('Review: child');
     expect(review).toMatchObject({ model: 'haiku', effort: 'high' });
-    expect(review.allowedTools).toEqual(sessions[0]!.spec.allowedTools);
+    // The identity pins the parent's lists, so the worker step resolves them as inherited.
+    expect(review.toolGrant).toEqual({ ...sessions[0]!.spec.toolGrant, kind: 'inherited' });
     expect(review.env?.CLAUDE_CONFIG_DIR).toBe(a.home);
     expect(review.env?.CODEX_HOME).not.toBe(codexHome);
     expect(store.getRun(worker.id)?.steps.map(step => ({ id: step.id, backend: step.backend, profileId: step.profileId }))).toEqual([
@@ -442,8 +443,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     if (mode === 'continue') expect(manager.continueRun(a.child.workerId, { text: 'again' }).ok).toBe(true);
     else await manager.recover();
     await until(() => sessions.length === (mode === 'continue' ? 3 : 2));
-    expect(sessions.at(-1)!.spec.allowedTools).toEqual(grants.allowedTools);
-    expect(sessions.at(-1)!.spec.bashAllowlist).toEqual(grants.bashAllowlist);
+    expect(sessions.at(-1)!.spec.toolGrant).toEqual({ kind: 'inherited', tools: grants.allowedTools, bashAllowlist: grants.bashAllowlist });
   });
 
   it.each(['queued', 'restart', 'continue'].flatMap(mode => ['missing', 'malformed'].map(damage => ({ mode: mode as 'queued' | 'restart' | 'continue', damage }))))('refuses $damage private accepted grants on $mode', async ({ mode, damage }) => {
@@ -761,7 +761,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     await (f.manager as unknown as { pump(): Promise<void> }).pump();
     await until(() => sessions.length === 2);
     const worker = sessions[1]!;
-    expect(worker.spec.allowedTools).toEqual([]); expect(worker.spec.bashAllowlist).toEqual([]);
+    expect(worker.spec.toolGrant).toEqual({ kind: 'inherited', tools: [], bashAllowlist: [] });
     expect(worker.spec.systemPrompt).not.toContain('later config');
     const diff = await fetch(`${controller.url}/${child.workerId}/diff`, { headers: { authorization: `Bearer ${token}` } });
     expect(diff.status).toBe(200);
@@ -769,7 +769,7 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     worker.finish(); expect(await f.manager.awaitRunTermination(child.workerId, 15000)).toBe(true);
     expect(f.manager.continueRun(child.workerId, { text: 'continue worker' }).ok).toBe(true);
     await until(() => sessions.length === 3);
-    expect(sessions[2]!.spec.allowedTools).toEqual([]); expect(sessions[2]!.spec.bashAllowlist).toEqual([]);
+    expect(sessions[2]!.spec.toolGrant).toEqual({ kind: 'inherited', tools: [], bashAllowlist: [] });
     expect(sessions[2]!.spec.systemPrompt).not.toContain('later config');
     expect(controller.credentials.authenticate(sessions[2]!.spec.env?.CEZ_DELEGATION_TOKEN!)).toMatchObject({ runId: child.workerId });
     expect(f.store.getRun(parent.id)?.delegation).toMatchObject({ role: 'root' });

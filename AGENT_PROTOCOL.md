@@ -359,9 +359,12 @@ Notable fields (full doc-comments in the source):
   blocks — pasted screenshots), `cwd` (the run dir and the only writable root),
   `model?`, `timeoutMs?`, `env?` (merged over `process.env` — carries
   `CEZ_HANDOFF_FILE` / `CEZ_ARTIFACTS_DIR` / `CEZ_TASK_ID`).
-- `allowedTools?` / `bashAllowlist?` / `additionalDirectories?` — tool access.
+- `toolGrant` / `additionalDirectories?` — tool access. `toolGrant` is required: a `ToolGrant`
+  of kind `unset`, `step-default`, `inherited` (a worker's pinned grant) or `explicit`, each with
+  an optional `bashAllowlist`. Each runner switches on the kind, so a new kind fails to compile
+  until every runner maps it (hearsay-tools/cezarion#1810).
   **Caveat (open-mercato/cezar#430):** the zero-config default (`DEFAULT_ALLOWED_TOOLS`) includes
-  unrestricted `Bash`, and Codex/OpenCode do not honor `allowedTools` at all.
+  unrestricted `Bash`, and Codex/OpenCode do not honor `toolGrant` at all.
   Treat the default `auto` permission mode as full shell access, not a
   sandbox: unmanaged Codex uses `danger-full-access` and keeps the user's approval
   policy (approvals reach Needs you), and OpenCode's own permission config
@@ -397,8 +400,7 @@ real boundary in both directions. As declared at hearsay-tools/cezarion#284, a r
 | `userPrompt` | first stdin message | `turn/start` input | `prompt_async` text part | RPC `prompt` message |
 | `images` | first stdin message | **dropped** | **dropped** | RPC `prompt` images |
 | `cwd` | spawn cwd | spawn cwd, `thread/start` cwd | spawn cwd | spawn cwd |
-| `allowedTools` | `--allowedTools` | **dropped** | **dropped** | `--tools`, mapped names |
-| `bashAllowlist` | `Bash(<prefix>:*)` | **dropped** | **dropped** | drops `bash` (fail closed) |
+| `toolGrant` | `--allowedTools`; a `bashAllowlist` as `Bash(<prefix>:*)` | **dropped** | **dropped** | `--tools`, mapped names; a `bashAllowlist` drops `bash` (fail closed) |
 | `additionalDirectories` | `--add-dir` | **dropped** | **dropped** | **dropped** |
 | `restrictNativeDelegation` | D1 | D1 | D1 | D1 |
 | `env` | child env | child env | child env | child env |
@@ -408,7 +410,7 @@ real boundary in both directions. As declared at hearsay-tools/cezarion#284, a r
 | `sessionId` | `--session-id` / `--resume` | `thread/resume` threadId | **dropped** | `--session-id` / `--session` |
 | `resume` | `--resume` | `thread/resume` | **dropped** | `--session` |
 
-`OMP_SPEC_SUPPORT` honors every field (it has no column here): `allowedTools` through `--tools` with
+`OMP_SPEC_SUPPORT` honors every field (it has no column here): `toolGrant` through `--tools` with
 OMP names (or `--no-tools`), `additionalDirectories` through `--add-dir` (Pi drops it), `effort`
 through `--thinking`, and `sessionId` only as `--resume <id>`: OMP has no `--session-id`, a fresh
 session mints its own id and the runner reads it from `get_state`.
@@ -2243,7 +2245,9 @@ path, which only a child spawned in `cwd` with the env applied can produce.
 `timeoutMs` is proven by a `hold` turn ending in the runner's own timeout error.
 The assertion runs in both directions, so a runner that declares a field
 dropped and starts mapping it fails too — Codex and OpenCode ignoring
-`allowedTools` is pinned exactly as long as they declare it. A new `RUNNER_IDS`
+`toolGrant` is pinned exactly as long as they declare it. The tool-grant cells
+(`core/tool-grant-parity-cells.testkit.ts`) pin the flags of each Tool-list kinds
+case on every wire. A new `RUNNER_IDS`
 entry fails typecheck without a declaration, and fails these rows when its
 `createRunner` case is missing (the factory's fallback is claude, whose
 `backend` is not the new id).

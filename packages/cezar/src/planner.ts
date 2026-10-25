@@ -81,7 +81,7 @@ export async function planChain(repoRoot: string, task: string, builtin: readonl
         systemPrompt: PLANNER_SYSTEM_PROMPT,
         userPrompt,
         cwd: repoRoot,
-        allowedTools: [],
+        toolGrant: { kind: 'explicit', tools: [] },
         ...(Object.keys(profileEnv).length > 0 ? { env: profileEnv } : {}),
         model: plannerModel,
         timeoutMs: PLANNER_TIMEOUT_MS,

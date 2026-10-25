@@ -15,8 +15,9 @@ import type {
   AgentToolCallRecord,
   ContentBlock,
   SessionOptions,
+  ToolGrant,
 } from './agent-runner.js';
-import { isSignalTerminationExit } from './agent-runner.js';
+import { isSignalTerminationExit, unknownToolGrant } from './agent-runner.js';
 import { signalSession, spawnSessionLeader } from './session-process.js';
 import { buildChildEnv } from './agent-env.js';
 import { cezarToolNames } from '../ci-wait/tools.js';
@@ -41,8 +42,8 @@ export interface PiRunnerOptions {
  */
 /**
  * What the pi CLI receives from each `AgentRunSpec` field (#284). Tool names
- * are mapped onto pi's own through `piTools`, and `allowedTools` takes one of
- * three paths (hearsay-tools/cezarion#1305). A list holding every default
+ * are mapped onto pi's own through `piTools`. An unset grant sends no tool
+ * flags; a grant's list takes one of three paths (hearsay-tools/cezarion#1305). A list holding every default
  * built-in and nothing beyond pi's default set sends no allowlist:
  * `--no-builtin-tools` plus the default-tools extension, which activates the
  * listed built-ins, so MCP and extension tools stay callable. A narrowed list
@@ -50,8 +51,8 @@ export interface PiRunnerOptions {
  * one) narrows it, so that grant stays limited to the named tools. A list that
  * maps to nothing fails closed: `--tools` with
  * only the cezar tools, or `--no-tools`. pi has no command-prefix equivalent
- * for `bashAllowlist`, so a request for one narrows the list and drops `bash`
- * from `--tools` (fail closed) rather than widening. Held against the recorded
+ * for a `bashAllowlist`, so a list with one narrows to `--tools` and drops
+ * `bash` (fail closed) rather than widening. Held against the recorded
  * argv and RPC prompt by the harness parity matrix.
  */
 export const PI_SPEC_SUPPORT: AgentRunSpecSupport = {
@@ -60,9 +61,8 @@ export const PI_SPEC_SUPPORT: AgentRunSpecSupport = {
   userPrompt: { honored: true, via: 'RPC prompt message' },
   images: { honored: true, via: 'RPC prompt images' },
   cwd: { honored: true, via: 'spawn cwd' },
-  allowedTools: { honored: true, via: 'mapped through piTools: the default list sends --no-builtin-tools and names its built-ins to the default-tools extension; a narrowed list, or one naming a tool outside the pi default set, sends --tools; a list that maps to nothing sends --tools with the cezar tools only, or --no-tools' },
+  toolGrant: { honored: true, via: 'mapped through piTools: the default list sends --no-builtin-tools and names its built-ins to the default-tools extension; a narrowed list, or one naming a tool outside the pi default set, sends --tools; a list that maps to nothing sends --tools with the cezar tools only, or --no-tools; a bashAllowlist has no prefix equivalent, so it narrows the list to --tools without bash (fail closed); unset sends no tool flags' },
   restrictNativeDelegation: { honored: true, via: '--exclude-tools subagent (D1)' },
-  bashAllowlist: { honored: true, via: 'no prefix equivalent: an allowlist narrows the list to --tools without bash, or --no-tools when nothing else is left (fail closed)' },
   additionalDirectories: { honored: false, reason: 'pi has no extra-root flag' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
   model: { honored: true, via: '--model provider/model' },
@@ -629,8 +629,21 @@ export function buildPiArgs(spec: AgentRunSpec): string[] {
   // Pi 0.85.1 --exclude-tools covers the shipped subagent extension. Arbitrary
   // custom delegation tool names have no discoverable capability (D1 exemption).
   if (spec.restrictNativeDelegation) args.push('--exclude-tools', 'subagent');
-  if (spec.allowedTools) args.push(...piToolArgs(spec, spec.allowedTools));
+  args.push(...piGrantArgs(spec, spec.toolGrant));
   return args;
+}
+
+/** pi's tool flags for each grant kind. No list keeps pi's own tool set, MCP and extension tools included. */
+function piGrantArgs(spec: AgentRunSpec, grant: ToolGrant): string[] {
+  switch (grant.kind) {
+    case 'unset': return [];
+    case 'step-default':
+    case 'inherited': return piToolArgs(spec, grant.tools, grant.bashAllowlist);
+    // A written copy of the default list takes the default path too, so no list keeps MCP and
+    // extension tools out of a step that names only the default built-ins (hearsay-tools/cezarion#1417).
+    case 'explicit': return piToolArgs(spec, grant.tools, grant.bashAllowlist);
+    default: return unknownToolGrant(grant);
+  }
 }
 
 // The built-ins cezar's default list maps onto (DEFAULT_ALLOWED_TOOLS through piTools), and the
@@ -647,9 +660,9 @@ const PI_DEFAULT_EXTRAS = ['subagent', 'subagent_supervisor', 'subagent_wait'];
  * (an mcp__ tool, WebFetch, a custom tool) or a bashAllowlist narrows the list to the allowlist, so
  * a step that grants named tools gets only those, and a list that maps to nothing fails closed.
  */
-function piToolArgs(spec: AgentRunSpec, allowedTools: string[]): string[] {
-  const narrowedBash = (spec.bashAllowlist?.length ?? 0) > 0;
-  const tools = piTools(allowedTools, spec.bashAllowlist);
+function piToolArgs(spec: AgentRunSpec, allowedTools: readonly string[], bashAllowlist: readonly string[] | undefined): string[] {
+  const narrowedBash = (bashAllowlist?.length ?? 0) > 0;
+  const tools = piTools(allowedTools, bashAllowlist);
   const isDefault = PI_DEFAULT_BUILTINS.every((tool) => tools.includes(tool))
     && tools.every((tool) => PI_DEFAULT_BUILTINS.includes(tool) || PI_DEFAULT_EXTRAS.includes(tool));
   if (!narrowedBash && isDefault) {
@@ -677,7 +690,7 @@ function restorePiDegradedServiceError(errorMessage: string): string {
   return errorMessage.startsWith(retryHint) ? errorMessage.slice(retryHint.length) : errorMessage;
 }
 
-function piTools(tools: string[], bashAllowlist?: string[]): string[] {
+function piTools(tools: readonly string[], bashAllowlist: readonly string[] | undefined): string[] {
   const map: Readonly<Record<string, string>> = {
     Read: 'read',
     Bash: 'bash',
