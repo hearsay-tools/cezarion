@@ -135,7 +135,7 @@ describe('shouldSearchForge', () => {
     expect(shouldSearchForge('142', filterGithubItems(items, { query: '142' }))).toBe(false)
   })
 
-  // Locks what the JSDoc promises about the caller (#837): `github.tsx` counts local matches WITH
+  // Locks what the JSDoc promises about the caller (#837): `use-github-search.ts` counts local matches WITH
   // the label filter applied, so a label filter that empties an otherwise-matching query does reach
   // for the forge. Documented as intentional — the hits are re-narrowed by the same labels before
   // rendering — so this asserts the contract rather than guarding against it.
