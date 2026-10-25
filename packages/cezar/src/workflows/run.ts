@@ -365,7 +365,7 @@ function orderedTurnText(v1: string, v2: string): string | undefined {
  * replaces its card; `waitCard` says the card is the wait's own. An accepted `cezar_done` is DONE
  * whatever the text says, and beats any ask line in it. Only markers and waits count: no prose
  * raises the gate, and a rejected ask line is a turn end with no wait. */
-function classifyTurnEnd(turnText: string, completedAssistantText: string, options: {
+export function classifyTurnEnd(turnText: string, completedAssistantText: string, options: {
   sessionOpen: boolean; interactive: boolean; pendingHumanAsk: boolean;
   scheduledWake: boolean; liveWorkers: boolean;
   humanWait?: Pick<HumanWaitEntry, 'questions' | 'context'>; doneRequested?: boolean;

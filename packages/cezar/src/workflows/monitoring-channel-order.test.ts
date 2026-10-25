@@ -16,9 +16,13 @@ it('enumerates every native channel-divergence capability', () => {
 });
 for (const backend of RUNNER_IDS) describe(`${backend} channel order`, { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
-  for (const direction of ['missing', 'refresh'] as const) {
+  // Each divergent direction the wire has, plus one coupled-wire control when it lacks one: two
+  // controls would drive the same untokened wire twice (hearsay-tools/cezarion#1665).
+  const unsupported = (['missing', 'refresh'] as const).find(direction => !CHANNEL_WIRES[backend][direction]);
+  for (const direction of (['missing', 'refresh'] as const).filter(direction => CHANNEL_WIRES[backend][direction] || direction === unsupported)) {
     const gap = CHANNEL_WIRES[backend][direction] ? '' : `wire exemption: ${CHANNEL_WIRES[backend].reason}`;
-    it(`${direction} observes actual v1/v2 native text ${gap}`, async () => withChannelWire(backend, direction, async token => {
+    const label = gap ? 'coupled control' : direction;
+    it(`${label} observes actual v1/v2 native text ${gap}`, async () => withChannelWire(backend, direction, async token => {
       const seam = await driveSeam(backend, 'turn-messages', { spec: { userPrompt: tokened(messagesPrompt(backend, [GATE, 'CEZ:MONITORING', ACK_TEXT]), token) } });
       const v1 = seam.v1.flatMap(event => event.type === 'text' ? [event.text] : []).join('\n');
       const v2 = seam.v2.flatMap(event => event.type === 'item.completed' && event.item.kind === 'message' && event.item.role === 'assistant' ? [event.item.text] : []).filter(Boolean).join('\n');
@@ -30,11 +34,13 @@ for (const backend of RUNNER_IDS) describe(`${backend} channel order`, { timeout
       }
     }));
     for (const mode of ['fresh', 'continuation'] as const) for (const done of [false, true]) {
-      it(`${mode} ${done ? 'M30' : 'M29'} ${direction} later declaration precedes a stale channel gate ${gap}`, async () => withChannelWire(backend, direction, async token => {
+      it(`${mode} ${done ? 'M30' : 'M29'} ${label} later declaration precedes a stale channel gate ${gap}`, async () => withChannelWire(backend, direction, async token => {
         process.env.CEZ_DRY_RUN = '0';
         process.env.CEZ_REVIEW_GATE = '0';
         process.env[HARNESS_ADAPTERS[backend].binEnv] = HARNESS_ADAPTERS[backend].mockBin;
-        for (const earlier of [GATE, ASK_TEXT, REJECTED_ASK_TEXT]) {
+        // A later DONE ends the run whatever came first, so M30 drives the structured ASK it must
+        // supersede; its prose and rejected-ASK earliers are in turn-end-text.test.ts (hearsay-tools/cezarion#1665).
+        for (const earlier of done ? [ASK_TEXT] : [GATE, ASK_TEXT, REJECTED_ASK_TEXT]) {
           const p = manager.startRun(QUICK_TASK_WORKFLOW, { task: 'mock:hold', runner: backend });
           await until(() => store.getRun(p.id)?.status === 'waiting');
           if (mode === 'continuation') {
