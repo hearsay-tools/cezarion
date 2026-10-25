@@ -14,17 +14,29 @@
 # The server resolves its assets relative to its own module (`resolveWebDir` walks
 # `dist/server/../../web`, the mock CLIs sit at `dist/core/../../scripts`), so this mirror
 # boots exactly like the package. Dependencies must already be installed.
+#
+# An optional argument, an absolute path, builds the same mirror there instead
+# (qa-fixture.mjs builds into its temporary root). The directory is replaced.
 set -eu
 
 SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/../.." && pwd)
 OUT="$REPO_ROOT/.ai/qa/build/cezar"
+# Relative links survive a moved checkout and resolve to this checkout from a lane symlink.
+LINK_BASE=../../../../packages/cezar
+if [ $# -gt 0 ]; then
+  case "$1" in
+    /*) OUT=$1 ;;
+    *) echo "build-e2e.sh: the output directory must be an absolute path: $1" >&2; exit 2 ;;
+  esac
+  # Another directory has another depth, and may sit outside this checkout.
+  LINK_BASE="$REPO_ROOT/packages/cezar"
+fi
 
 rm -rf "$OUT"
 mkdir -p "$OUT/web"
-# Relative links survive a moved checkout and resolve to this checkout from a lane symlink.
 for entry in scripts package.json node_modules; do
-  ln -s "../../../../packages/cezar/$entry" "$OUT/$entry"
+  ln -s "$LINK_BASE/$entry" "$OUT/$entry"
 done
 
 cd "$REPO_ROOT"
