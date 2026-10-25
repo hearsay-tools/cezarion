@@ -1015,6 +1015,30 @@ interface PersistedAttachments {
   attachments: PersistedAttachment[];
 }
 
+/** What `execute` writes to its run's event stream. */
+type ExecutionEmit = (event: { type: string; stepId?: string; [k: string]: unknown }) => void;
+/** One `execute` call: what its phases share. */
+type Execution = { runId: string; workflow: WorkflowDef; input: StartRunInput; startAt: number; state: ActiveRun; emit: ExecutionEmit };
+/** What `startExecution` resolved before the first step. */
+type ExecutionLaunch = {
+  config: Awaited<ReturnType<typeof loadConfig>>;
+  taskBackend: RunnerId;
+  extraSystemPrompt: string | undefined;
+  /** The run record as it was before `startExecution` recorded the start. */
+  ownedRun: RunRecord | undefined;
+  /** An owned worker's workspace. */
+  owned: Extract<NonNullable<RunRecord['delegation']>, { role: 'worker' }>['workspace'] | undefined;
+};
+/** The state of `execute`'s step loop, which `settleExecution` reads once the loop ended. */
+type StepLoop = {
+  /** A failed check's output, handed to the agent step its retry loops back to. */
+  checkFailure: string | null;
+  runError: string | null;
+  deliveryCapped: boolean;
+  /** An earlier step whose session closed without a done (hearsay-tools/cezarion#1620). */
+  incompleteStepId?: string;
+};
+
 /** Only an original workflow that has never executed may return to its queue. */
 export function isUntouchedCancelledRun(run: RunRecord): boolean {
   return run.status === 'cancelled' && !run.startedAt && !!run.workflowDef &&
@@ -7765,150 +7789,11 @@ export class RunManager {
     this.starting.delete(runId);
     const emit = (event: { type: string; stepId?: string; [k: string]: unknown }) =>
       this.store.appendEvent(runId, event);
+    const execution: Execution = { runId, workflow, input, startAt, state, emit };
 
-    // Resolve the agent backend for this run: the task choice (GUI) wins over
-    // the config default. Per-step `runner` can still override it below.
-    const config = await loadConfig(this.repoRoot);
-    if (state.cancelled || this.store.getRun(runId)?.stopping) {
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
-      this.dropActive(runId);
-      return;
-    }
-    const taskBackend: RunnerId = input.runner ?? config.defaultRunner;
-    // The account may have gone into a usage-limit hold since this run was dequeued — the queue
-    // gate cannot be the only one, because dequeue is not the moment of no return. Nothing has
-    // happened yet here, so the run goes back to the queue untouched (spec
-    // 2026-08-03-auto-resume-after-usage-limit).
-    if (this.requeueWhileHeld(runId, workflow, input, taskBackend, undefined, startAt)) return;
-    // Extra system prompt (R2 2.3): POST override > config default; echoed on
-    // the record so the UI/API can show what the run actually used.
-    const extraSystemPrompt = this.store.getRun(runId)?.delegation?.role === 'worker'
-      ? input.systemPrompt
-      : resolveExtraSystemPrompt(input.systemPrompt, config.systemPrompt);
-    // Canonical provider/model identity (#405) — the normalised `provider/model`
-    // the task ran with, persisted for cost attribution / reproducible replay
-    // beside the free-text `model`. Best-effort here (a per-step `runner`/`model`
-    // can still override below); the authoritative fail-loud gate is at spawn.
-    let modelIdentity: string | undefined;
-    try {
-      const normalized = normalizeModelForBackend(
-        taskBackend,
-        agentModelsLocked(this.repoRoot) ? undefined : input.model,
-        { configuredProvider: await configuredModelProvider(taskBackend, this.repoRoot) },
-      );
-      modelIdentity = normalized ? formatModelIdentity(normalized.identity) : undefined;
-    } catch {
-      // An unresolvable task-level model surfaces loudly at the step below; the
-      // metadata echo stays absent rather than guessing.
-    }
-    if (state.cancelled) {
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
-      this.dropActive(runId);
-      return;
-    }
-    const ownedRun = this.store.getRun(runId);
-    const owned = ownedRun?.delegation?.role === 'worker' ? ownedRun.delegation.workspace : undefined;
-    this.store.updateRun(runId, {
-      // A resumed workflow stays durably queued until its next step is actually
-      // entered. If setup crashes, recovery can replay from `startAt` instead
-      // of treating the previous continuation as the interrupted step.
-      status: startAt > 0 ? 'queued' : 'running',
-      invalidAsk: undefined,
-      startedAt: ownedRun?.startedAt ?? new Date().toISOString(),
-      runner: taskBackend,
-      systemPrompt: extraSystemPrompt,
-      modelIdentity,
-    });
-    emit({ type: 'lifecycle', message: `run started — workflow "${workflow.name}" (runner: ${taskBackend})` });
-
-    // Worktree per task (spec 006): the agent works on its own branch in
-    // `.ai/cezar/worktrees/<id>`, never in the user's working tree. A Git task
-    // that requests isolation fails closed if the worktree cannot be
-    // established; only explicit opt-out and non-Git modes run in place.
-    const repo = await getRepoInfo(this.repoRoot);
-    if (repo && input.worktree === false && !owned) {
-      // Composer opt-out: run in the repo working tree, no branch/worktree. The
-      // repository-root lease serializes these runs by default; the explicit
-      // CEZ_DISABLE_REPO_LOCK=1 escape hatch allows unsafe overlap.
-      // Pin the starting commit: the session's Changes and Commits views use it
-      // as their stable lower bound while reading the current working copy.
-      const startingCommit = await getHeadCommit(repo.root);
-      if (startingCommit && !ownedRun?.baseBranch) this.store.updateRun(runId, { baseBranch: startingCommit });
-      emit({ type: 'note', message: 'worktree off — running in the repo working tree' });
-    } else if (repo || owned) {
-      emit({
-        type: 'note',
-        message: `worktree on — using an isolated task worktree (${input.worktree === true ? 'explicit request' : 'default'})`,
-      });
-      // Fork from the configured base branch (config.json `baseBranch`, e.g.
-      // `develop`) — also the target of the eventual draft PR. Unresolvable
-      // (typo, not fetched) → note + the currently checked-out branch.
-      //
-      // A task that already recorded a fork point keeps it: its worktree is
-      // reused as-is, and re-resolving against a since-changed config would
-      // silently re-anchor the `merge-base` every diff/shortstat is measured
-      // from, shifting "what did this task change" under an existing task.
-      const recorded = owned?.baselineSha ?? this.store.getRun(runId)?.baseBranch;
-      let base = recorded ?? repo?.branch ?? 'HEAD';
-      const configured = recorded ? undefined : config.baseBranch;
-      if (configured) {
-        const resolved = await resolveBaseRef(this.repoRoot, configured);
-        if (resolved) {
-          base = resolved;
-        } else {
-          emit({
-            type: 'note',
-            message: `configured base branch "${configured}" not found (locally or on origin) — using "${base}"`,
-          });
-        }
-      }
-      try {
-        if (this.workerExecutionStopped(runId)) { this.dropActive(runId); return; }
-        const ownedWorkspace = owned && ownedRun ? await ensureOwnedWorkspace(this.repoRoot, ownedRun) : undefined;
-        if (ownedRun?.delegation?.role === 'worker') await verifyWorkerContext({ dataDir: this.dataDir, parentId: ownedRun.delegation.parentRunId, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context,
-          parentCwd: this.store.getRun(ownedRun.delegation.parentRunId)?.worktreePath ?? this.repoRoot });
-        // First launch only (hearsay-tools/cezarion#1149): a worker re-queued past its first step and
-        // runContinuation never re-place attachments the worker may have edited or deleted.
-        if (ownedRun?.delegation?.role === 'worker' && startAt === 0) await placeWorkerAttachments({ dataDir: this.dataDir, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context });
-        const wt = ownedWorkspace
-          ? { path: ownedWorkspace.path, branch: ownedWorkspace.branch, baseBranch: ownedWorkspace.baselineSha }
-          : await createWorktree(this.repoRoot, runId, base);
-        state.cwd = wt.path;
-        this.store.updateRun(runId, {
-          worktreePath: wt.path,
-          branch: wt.branch,
-          baseBranch: wt.baseBranch,
-          ...(owned ? { worktree: undefined } : {}),
-        });
-        emit({ type: 'note', message: `worktree ready — branch ${wt.branch} (base ${wt.baseBranch})` });
-        // Seed from this manager's project root: each multi-project context has
-        // its own manager/repoRoot and must never copy another project's layer.
-        // A worker's explicit `--attach` files win over the main checkout's copy (hearsay-tools/cezarion#1149).
-        const attached = new Set(ownedRun?.delegation?.role === 'worker'
-          ? (ownedRun.delegation.context?.inputs ?? []).flatMap(input => input.source.kind === 'parent-file' ? [input.source.path] : [])
-          : []);
-        const seededConfig = await seedAgentConfigLocalLayer(this.repoRoot, state.cwd, process.env, attached).catch(() => []);
-        if (seededConfig.length > 0) {
-          emit({ type: 'note', message: `seeded personal agent config: ${seededConfig.join(', ')}` });
-        }
-        this.armAutosave(runId, state);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        const error = `worktree creation failed: ${message}`;
-        emit({ type: 'note', message: `${error} — task stopped before workflow execution` });
-        this.store.updateRun(runId, {
-          status: 'failed',
-          error,
-          finishedAt: new Date().toISOString(),
-          currentStepId: undefined,
-        });
-        emit({ type: 'lifecycle', message: `run failed — ${error}` });
-        this.dropActive(runId);
-        return;
-      }
-    } else {
-      emit({ type: 'note', message: 'not a git repository — running in place, one task at a time' });
-    }
+    const launch = await this.startExecution(execution);
+    if (!launch) return;
+    if (!(await this.prepareExecutionWorktree(execution, launch))) return;
 
     if (state.cwd === this.repoRoot) {
       if (repositoryRootLockDisabled()) {
@@ -7933,7 +7818,7 @@ export class RunManager {
       // is a spawn, and hand the run back to the queue if the account closed meanwhile. This
       // check also covers the explicit lock-bypass path, where the account may close while the
       // run is preparing its first step.
-      if (this.requeueWhileHeld(runId, workflow, input, taskBackend, state, startAt)) return;
+      if (this.requeueWhileHeld(runId, workflow, input, launch.taskBackend, state, startAt)) return;
     }
 
     // Handoff journal (spec 007) — seeded after the worktree exists so the
@@ -7942,17 +7827,220 @@ export class RunManager {
     if (seeded) seedHandoffFile(this.dataDir, seeded);
     // Worktree setup (#917): before the first step, so the agent starts in a prepared tree. Its
     // note rides the first agent step's opening message only, like the task's attachments.
-    let startSetupNote = await this.prepareWorktree(runId, state, config.worktreeSetup, emit, 'start');
+    const setupNote = await this.prepareWorktree(runId, state, launch.config.worktreeSetup, emit, 'start');
 
     const skills = await this.discoverSkills();
     // Every ActiveRun construction site must carry the registry — `runContinuation` builds
     // its own, and the one that skipped this leaked raw `/skill` text to the backend (#811).
     state.skills = skills;
-    let checkFailure: string | null = null;
-    let runError: string | null = null;
-    let deliveryCapped = false;
-    /** An earlier step whose session closed without a done (hearsay-tools/cezarion#1620). */
-    let incompleteStepId: string | undefined;
+    const loop = await this.runWorkflowSteps(execution, launch, { ...this.openingInputs(execution), setupNote });
+    if (loop) await this.settleExecution(runId, state, loop);
+  }
+
+  /**
+   * The launch half of `execute`: the backend, extra system prompt and model identity the run
+   * starts with, recorded on the run as it starts. Undefined when the run was cancelled or went
+   * back to the queue first.
+   */
+  private async startExecution(execution: Execution): Promise<ExecutionLaunch | undefined> {
+    const { runId, workflow, input, startAt, state, emit } = execution;
+    // Resolve the agent backend for this run: the task choice (GUI) wins over
+    // the config default. Per-step `runner` can still override it at the step.
+    const config = await loadConfig(this.repoRoot);
+    if (state.cancelled || this.store.getRun(runId)?.stopping) {
+      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+      this.dropActive(runId);
+      return undefined;
+    }
+    const taskBackend: RunnerId = input.runner ?? config.defaultRunner;
+    // The account may have gone into a usage-limit hold since this run was dequeued — the queue
+    // gate cannot be the only one, because dequeue is not the moment of no return. Nothing has
+    // happened yet here, so the run goes back to the queue untouched (spec
+    // 2026-08-03-auto-resume-after-usage-limit).
+    if (this.requeueWhileHeld(runId, workflow, input, taskBackend, undefined, startAt)) return undefined;
+    // Extra system prompt (R2 2.3): POST override > config default; echoed on
+    // the record so the UI/API can show what the run actually used.
+    const extraSystemPrompt = this.store.getRun(runId)?.delegation?.role === 'worker'
+      ? input.systemPrompt
+      : resolveExtraSystemPrompt(input.systemPrompt, config.systemPrompt);
+    const modelIdentity = await this.taskModelIdentity(taskBackend, input);
+    if (state.cancelled) {
+      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+      this.dropActive(runId);
+      return undefined;
+    }
+    const ownedRun = this.store.getRun(runId);
+    const owned = ownedRun?.delegation?.role === 'worker' ? ownedRun.delegation.workspace : undefined;
+    this.store.updateRun(runId, {
+      // A resumed workflow stays durably queued until its next step is actually
+      // entered. If setup crashes, recovery can replay from `startAt` instead
+      // of treating the previous continuation as the interrupted step.
+      status: startAt > 0 ? 'queued' : 'running',
+      invalidAsk: undefined,
+      startedAt: ownedRun?.startedAt ?? new Date().toISOString(),
+      runner: taskBackend,
+      systemPrompt: extraSystemPrompt,
+      modelIdentity,
+    });
+    emit({ type: 'lifecycle', message: `run started — workflow "${workflow.name}" (runner: ${taskBackend})` });
+    return { config, taskBackend, extraSystemPrompt, ownedRun, owned };
+  }
+
+  /**
+   * Canonical provider/model identity (#405) — the normalised `provider/model`
+   * the task ran with, persisted for cost attribution / reproducible replay
+   * beside the free-text `model`. Best-effort here (a per-step `runner`/`model`
+   * can still override it); the authoritative fail-loud gate is at spawn.
+   */
+  private async taskModelIdentity(taskBackend: RunnerId, input: StartRunInput): Promise<string | undefined> {
+    try {
+      const normalized = normalizeModelForBackend(
+        taskBackend,
+        agentModelsLocked(this.repoRoot) ? undefined : input.model,
+        { configuredProvider: await configuredModelProvider(taskBackend, this.repoRoot) },
+      );
+      return normalized ? formatModelIdentity(normalized.identity) : undefined;
+    } catch {
+      // An unresolvable task-level model surfaces loudly at the step; the
+      // metadata echo stays absent rather than guessing.
+      return undefined;
+    }
+  }
+
+  /**
+   * Worktree per task (spec 006): the agent works on its own branch in
+   * `.ai/cezar/worktrees/<id>`, never in the user's working tree. A Git task
+   * that requests isolation fails closed if the worktree cannot be
+   * established; only explicit opt-out and non-Git modes run in place.
+   * False when the run stopped here.
+   */
+  private async prepareExecutionWorktree(execution: Execution, launch: ExecutionLaunch): Promise<boolean> {
+    const { runId, input, emit } = execution;
+    const repo = await getRepoInfo(this.repoRoot);
+    if (repo && input.worktree === false && !launch.owned) {
+      // Composer opt-out: run in the repo working tree, no branch/worktree. The
+      // repository-root lease serializes these runs by default; the explicit
+      // CEZ_DISABLE_REPO_LOCK=1 escape hatch allows unsafe overlap.
+      // Pin the starting commit: the session's Changes and Commits views use it
+      // as their stable lower bound while reading the current working copy.
+      const startingCommit = await getHeadCommit(repo.root);
+      if (startingCommit && !launch.ownedRun?.baseBranch) this.store.updateRun(runId, { baseBranch: startingCommit });
+      emit({ type: 'note', message: 'worktree off — running in the repo working tree' });
+    } else if (repo || launch.owned) {
+      emit({
+        type: 'note',
+        message: `worktree on — using an isolated task worktree (${input.worktree === true ? 'explicit request' : 'default'})`,
+      });
+      const base = await this.executionBaseRef(execution, repo, launch);
+      return this.createExecutionWorktree(execution, launch, base);
+    } else {
+      emit({ type: 'note', message: 'not a git repository — running in place, one task at a time' });
+    }
+    return true;
+  }
+
+  /**
+   * Fork from the configured base branch (config.json `baseBranch`, e.g.
+   * `develop`) — also the target of the eventual draft PR. Unresolvable
+   * (typo, not fetched) → note + the currently checked-out branch.
+   *
+   * A task that already recorded a fork point keeps it: its worktree is
+   * reused as-is, and re-resolving against a since-changed config would
+   * silently re-anchor the `merge-base` every diff/shortstat is measured
+   * from, shifting "what did this task change" under an existing task.
+   */
+  private async executionBaseRef(
+    execution: Execution,
+    repo: Awaited<ReturnType<typeof getRepoInfo>>,
+    launch: ExecutionLaunch,
+  ): Promise<string> {
+    const { runId, emit } = execution;
+    const recorded = launch.owned?.baselineSha ?? this.store.getRun(runId)?.baseBranch;
+    let base = recorded ?? repo?.branch ?? 'HEAD';
+    const configured = recorded ? undefined : launch.config.baseBranch;
+    if (configured) {
+      const resolved = await resolveBaseRef(this.repoRoot, configured);
+      if (resolved) {
+        base = resolved;
+      } else {
+        emit({
+          type: 'note',
+          message: `configured base branch "${configured}" not found (locally or on origin) — using "${base}"`,
+        });
+      }
+    }
+    return base;
+  }
+
+  /** Opens the task's worktree and prepares it for the first step. False when the worker stopped
+   *  first, or when the worktree could not be established, which fails the run. */
+  private async createExecutionWorktree(execution: Execution, launch: ExecutionLaunch, base: string): Promise<boolean> {
+    const { runId, state, emit } = execution;
+    const { owned, ownedRun } = launch;
+    try {
+      if (this.workerExecutionStopped(runId)) { this.dropActive(runId); return false; }
+      const wt = await this.openExecutionWorktree(execution, launch, base);
+      state.cwd = wt.path;
+      this.store.updateRun(runId, {
+        worktreePath: wt.path,
+        branch: wt.branch,
+        baseBranch: wt.baseBranch,
+        ...(owned ? { worktree: undefined } : {}),
+      });
+      emit({ type: 'note', message: `worktree ready — branch ${wt.branch} (base ${wt.baseBranch})` });
+      // Seed from this manager's project root: each multi-project context has
+      // its own manager/repoRoot and must never copy another project's layer.
+      // A worker's explicit `--attach` files win over the main checkout's copy (hearsay-tools/cezarion#1149).
+      const attached = new Set(ownedRun?.delegation?.role === 'worker'
+        ? (ownedRun.delegation.context?.inputs ?? []).flatMap(input => input.source.kind === 'parent-file' ? [input.source.path] : [])
+        : []);
+      const seededConfig = await seedAgentConfigLocalLayer(this.repoRoot, state.cwd, process.env, attached).catch(() => []);
+      if (seededConfig.length > 0) {
+        emit({ type: 'note', message: `seeded personal agent config: ${seededConfig.join(', ')}` });
+      }
+      this.armAutosave(runId, state);
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const error = `worktree creation failed: ${message}`;
+      emit({ type: 'note', message: `${error} — task stopped before workflow execution` });
+      this.store.updateRun(runId, {
+        status: 'failed',
+        error,
+        finishedAt: new Date().toISOString(),
+        currentStepId: undefined,
+      });
+      emit({ type: 'lifecycle', message: `run failed — ${error}` });
+      this.dropActive(runId);
+      return false;
+    }
+  }
+
+  /** The task's worktree: an owned worker's verified workspace, or a new worktree forked from `base`. */
+  private async openExecutionWorktree(
+    execution: Execution,
+    launch: ExecutionLaunch,
+    base: string,
+  ): Promise<{ path: string; branch: string; baseBranch: string }> {
+    const { runId, startAt } = execution;
+    const { owned, ownedRun } = launch;
+    const ownedWorkspace = owned && ownedRun ? await ensureOwnedWorkspace(this.repoRoot, ownedRun) : undefined;
+    if (ownedRun?.delegation?.role === 'worker') await verifyWorkerContext({ dataDir: this.dataDir, parentId: ownedRun.delegation.parentRunId, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context,
+      parentCwd: this.store.getRun(ownedRun.delegation.parentRunId)?.worktreePath ?? this.repoRoot });
+    // First launch only (hearsay-tools/cezarion#1149): a worker re-queued past its first step and
+    // runContinuation never re-place attachments the worker may have edited or deleted.
+    if (ownedRun?.delegation?.role === 'worker' && startAt === 0) await placeWorkerAttachments({ dataDir: this.dataDir, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context });
+    return ownedWorkspace
+      ? { path: ownedWorkspace.path, branch: ownedWorkspace.branch, baseBranch: ownedWorkspace.baselineSha }
+      : await createWorktree(this.repoRoot, runId, base);
+  }
+
+  /**
+   * The task's attachments for the first agent step's opening message, and its image blocks.
+   * Both are empty once an agent step of this workflow has run.
+   */
+  private openingInputs(execution: Execution): { attachments: PersistedAttachment[]; images: ContentBlock[] | undefined } {
+    const { runId, workflow, input } = execution;
     // `startRun` already persisted the task's attachments so a queued bubble can render them
     // (#612). Reuse those files for the agent-facing path note instead of minting
     // duplicate pasted files when execution finally begins.
@@ -7966,7 +8054,7 @@ export class RunManager {
       stepKind(definition) === 'agent' &&
       (startRecord?.steps.find(step => step.id === definition.id)?.iterations ?? 0) > 0,
     );
-    let startAttachments: PersistedAttachment[] = openingAlreadyDelivered ? [] : [
+    const attachments: PersistedAttachment[] = openingAlreadyDelivered ? [] : [
       ...(startRecord?.taskImages ?? []),
       ...(startRecord?.queuedMessages ?? []).flatMap((m) => m.images ?? []),
     ]
@@ -7992,10 +8080,27 @@ export class RunManager {
     // File blocks are dropped here — a session only ever sees viewable blocks (#950). An empty
     // result stays `undefined` rather than `[]`, so a task carrying only files hands the runner
     // seam exactly the shape a task carrying nothing always did.
-    const startBlocks = openingAlreadyDelivered
+    const blocks = openingAlreadyDelivered
       ? []
       : contentBlocksOf([...(input.images ?? []), ...(input.stackedImages ?? [])]);
-    let startImages: ContentBlock[] | undefined = startBlocks.length ? startBlocks : undefined;
+    return { attachments, images: blocks.length ? blocks : undefined };
+  }
+
+  /**
+   * The step loop of `execute`, from `startAt`. Returns its outcome for `settleExecution`, or
+   * undefined when the run left this execution: parked, back in the queue, or held by another
+   * owner.
+   */
+  private async runWorkflowSteps(
+    execution: Execution,
+    launch: ExecutionLaunch,
+    opening: { attachments: PersistedAttachment[]; images: ContentBlock[] | undefined; setupNote: string | undefined },
+  ): Promise<StepLoop | undefined> {
+    const { runId, workflow, input, startAt, state, emit } = execution;
+    const loop: StepLoop = { checkFailure: null, runError: null, deliveryCapped: false };
+    let startImages = opening.images;
+    let startAttachments = opening.attachments;
+    let startSetupNote = opening.setupNote;
 
     let i = startAt;
     while (i < workflow.steps.length) {
@@ -8024,12 +8129,12 @@ export class RunManager {
           state,
           step,
           input,
-          checkFailure,
+          loop.checkFailure,
           nextStep,
           emit,
           startImages,
-          taskBackend,
-          extraSystemPrompt,
+          launch.taskBackend,
+          launch.extraSystemPrompt,
           chainStepNote(workflow.steps, i),
           startAttachments,
           startSetupNote,
@@ -8037,104 +8142,161 @@ export class RunManager {
         startImages = undefined;
         startAttachments = [];
         startSetupNote = undefined;
-        checkFailure = null;
-        // Stale setup cannot finalize a replacement owner. Disposal also clears
-        // active, but must still honor a previously accepted Stop/Finish intent.
-        if (this.active.get(runId) !== state &&
-          !(this.disposed && (state.cancelled || state.finishRequested))) return;
-        if (state.cancelled || this.preserveRunAfterDisposal(runId, state)) break;
-        this.withdrawCezarHumanWaits(runId);
-        // An authored step deadline bounds the whole step, its question included (#427 Q8, #470 T3):
-        // once it has passed, the step's human waits expire with it and the failure settles as it
-        // did before questions were waits. CI and timer waits still park the failure below. The
-        // clock starts before session setup, so a failure that close to the deadline counts as it.
-        if (failure && step.timeoutMs && Date.now() - attemptStartedAt >= step.timeoutMs) {
-          const human = openWaits(this.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
-          if (human.length) this.store.commitWaitCancellation(runId, human);
-        }
-        const current = this.store.getRun(runId);
-        if (current && this.executionBlockedByRootFinish(current) && !state.sessionEverOpened) {
-          this.store.updateStep(runId, step.id, { status: 'pending' });
-          this.requeueWhileHeld(runId, workflow, input, taskBackend, state, i);
-          return;
-        }
-        // runAgentStep already emitted session.ended(error). Record the failed
-        // attempt before parking so later successful CI recovery cannot erase it.
-        if (failure) {
-          if (this.holdsClosingWakes(runId)) this.store.updateRun(runId, { workflowResumeStepId: step.id });
-          this.finishStep(runId, step.id, 'failed', failure, emit);
-          runError = `step "${step.id}" failed: ${failure}`;
-        }
-        // A clean close that leaves results undelivered is a failed delivery too.
-        const undelivered = failure ?? (this.owesDelivery(runId) ? WAKE_SESSION_CLOSED_ERROR : undefined);
-        const delivery = this.holdsClosingWakes(runId) && !state.cancelled
-          ? undelivered ? this.failedWakeDelivery(runId, undelivered) : 'park' : 'settle';
-        if (delivery === 'capped') {
-          deliveryCapped = true;
-          if (!failure) {
-            this.finishStep(runId, step.id, 'failed', WAKE_SESSION_CLOSED_ERROR, emit);
-            runError = `step "${step.id}" failed: ${WAKE_SESSION_CLOSED_ERROR}`;
-          }
-        }
-        if (delivery === 'park') {
-          this.surfaceHumanWait(runId, state);
-          this.store.updateRun(runId, { status: 'waiting',
-            ...(failure ? { error: runError! } : {}) });
-          this.store.flush(); // checkpoint the failed attempt and its recoverable workflow cursor before parking
-          this.dropActive(runId);
-          return;
-        }
-        if (failure || deliveryCapped) break;
-        // A session that closed without a done leaves its step resumable; the tail never starts.
-        if (this.stepLeftOpen(state, step.id, nextStep)) { incompleteStepId = step.id; break; }
-        if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) break;
-        this.finishStep(runId, step.id, 'done', undefined, emit);
-        // Finish is an explicit stop, not an answer or permission to run checks.
-        if (state.finishRequested) break;
+        loop.checkFailure = null;
+        const after = this.nextAfterAgentStep(execution, launch, loop, { index: i, step, nextStep, failure, startedAt: attemptStartedAt });
+        if (after === 'handed-off') return undefined;
+        if (after === 'settle') break;
         i++;
         continue;
       }
 
       const { ok, output } = await this.runCheckStep(state, step, emit);
       if (state.cancelled || this.preserveRunAfterDisposal(runId, state)) break;
-      if (ok) {
-        this.finishStep(runId, step.id, 'done', undefined, emit);
-        i++;
-        continue;
-      }
+      const nextIndex = this.settleCheckStep(execution, i, record, { ok, output }, loop);
+      if (nextIndex === undefined) break;
+      i = nextIndex;
+    }
+    return loop;
+  }
 
-      // Retry consumption is distinct from executions: another check may loop
-      // back through this step after it already passed. Persist only the times
-      // this check itself invoked onFail so max remains bounded across restarts.
-      const used = record?.retriesUsed ?? 0;
-      if (step.onFail && used < step.onFail.max) {
-        checkFailure = output;
-        this.finishStep(runId, step.id, 'failed', 'check failed — looping back', emit);
-        const retryIdx = workflow.steps.findIndex((s) => s.id === step.onFail?.retry);
-        emit({
-          type: 'note',
-          stepId: step.id,
-          message: `check failed — retrying from "${step.onFail.retry}" (attempt ${used + 1}/${step.onFail.max})`,
-        });
-        // Steps we're about to re-run go back to pending so the GUI rail
-        // reads top-to-bottom truthfully.
-        for (const s of workflow.steps.slice(retryIdx, i + 1)) {
-          this.store.updateStep(runId, s.id, { status: 'pending' });
-        }
-        this.store.updateStep(runId, step.id, { retriesUsed: used + 1 });
-        this.store.updateRun(runId, { status: 'queued', currentStepId: undefined });
-        // The retry target and its consumed budget form one crash boundary: a
-        // restart must observe the queued target, budget, and cursor together.
-        this.store.flush();
-        i = retryIdx;
-        continue;
-      }
+  /**
+   * What the step loop does once an agent step's session ended: start the next step, settle the
+   * run, or leave the run to what holds it now (another owner, the queue, or a park). Synchronous,
+   * like the loop body it came from, so the loop yields only where it awaits the step itself.
+   */
+  private nextAfterAgentStep(
+    execution: Execution,
+    launch: ExecutionLaunch,
+    loop: StepLoop,
+    attempt: { index: number; step: WorkflowStepDef; nextStep: WorkflowStepDef | undefined; failure: string | null; startedAt: number },
+  ): 'next' | 'settle' | 'handed-off' {
+    const { runId, workflow, input, state, emit } = execution;
+    const { step, failure } = attempt;
+    // Stale setup cannot finalize a replacement owner. Disposal also clears
+    // active, but must still honor a previously accepted Stop/Finish intent.
+    if (this.active.get(runId) !== state &&
+      !(this.disposed && (state.cancelled || state.finishRequested))) return 'handed-off';
+    if (state.cancelled || this.preserveRunAfterDisposal(runId, state)) return 'settle';
+    this.withdrawCezarHumanWaits(runId);
+    this.expireStepDeadlineWaits(runId, step, failure, attempt.startedAt);
+    const current = this.store.getRun(runId);
+    if (current && this.executionBlockedByRootFinish(current) && !state.sessionEverOpened) {
+      this.store.updateStep(runId, step.id, { status: 'pending' });
+      this.requeueWhileHeld(runId, workflow, input, launch.taskBackend, state, attempt.index);
+      return 'handed-off';
+    }
+    if (this.settleAgentStepWakes(execution, step.id, failure, loop)) return 'handed-off';
+    if (failure || loop.deliveryCapped) return 'settle';
+    // A session that closed without a done leaves its step resumable; the tail never starts.
+    if (this.stepLeftOpen(state, step.id, attempt.nextStep)) { loop.incompleteStepId = step.id; return 'settle'; }
+    if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) return 'settle';
+    this.finishStep(runId, step.id, 'done', undefined, emit);
+    // Finish is an explicit stop, not an answer or permission to run checks.
+    return state.finishRequested ? 'settle' : 'next';
+  }
 
-      this.finishStep(runId, step.id, 'failed', `\`${step.command}\` exited non-zero`, emit);
-      runError = `check "${step.id}" failed${step.onFail ? ` after ${used + 1} attempts` : ''}`;
-      break;
+  /**
+   * An authored step deadline bounds the whole step, its question included (#427 Q8, #470 T3):
+   * once it has passed, the step's human waits expire with it and the failure settles as it
+   * did before questions were waits. CI and timer waits still park the failure
+   * (`settleAgentStepWakes`). The clock starts before session setup, so a failure that close to
+   * the deadline counts as it.
+   */
+  private expireStepDeadlineWaits(runId: string, step: WorkflowStepDef, failure: string | null, attemptStartedAt: number): void {
+    if (failure && step.timeoutMs && Date.now() - attemptStartedAt >= step.timeoutMs) {
+      const human = openWaits(this.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
+      if (human.length) this.store.commitWaitCancellation(runId, human);
+    }
+  }
+
+  /**
+   * Records a failed agent step, then settles what the run's closing wakes need. True when the
+   * run parked to deliver them; a capped delivery fails the step and marks the loop capped.
+   */
+  private settleAgentStepWakes(execution: Execution, stepId: string, failure: string | null, loop: StepLoop): boolean {
+    const { runId, state, emit } = execution;
+    // runAgentStep already emitted session.ended(error). Record the failed
+    // attempt before parking so later successful CI recovery cannot erase it.
+    if (failure) {
+      if (this.holdsClosingWakes(runId)) this.store.updateRun(runId, { workflowResumeStepId: stepId });
+      this.finishStep(runId, stepId, 'failed', failure, emit);
+      loop.runError = `step "${stepId}" failed: ${failure}`;
+    }
+    // A clean close that leaves results undelivered is a failed delivery too.
+    const undelivered = failure ?? (this.owesDelivery(runId) ? WAKE_SESSION_CLOSED_ERROR : undefined);
+    const delivery = this.holdsClosingWakes(runId) && !state.cancelled
+      ? undelivered ? this.failedWakeDelivery(runId, undelivered) : 'park' : 'settle';
+    if (delivery === 'capped') {
+      loop.deliveryCapped = true;
+      if (!failure) {
+        this.finishStep(runId, stepId, 'failed', WAKE_SESSION_CLOSED_ERROR, emit);
+        loop.runError = `step "${stepId}" failed: ${WAKE_SESSION_CLOSED_ERROR}`;
+      }
+    }
+    if (delivery !== 'park') return false;
+    this.surfaceHumanWait(runId, state);
+    this.store.updateRun(runId, { status: 'waiting',
+      ...(failure ? { error: loop.runError! } : {}) });
+    this.store.flush(); // checkpoint the failed attempt and its recoverable workflow cursor before parking
+    this.dropActive(runId);
+    return true;
+  }
+
+  /**
+   * A check step's result: a pass goes on to the next step, a failure loops back to its
+   * `onFail.retry` step while retries remain, and otherwise fails the run. Returns the index the
+   * step loop continues from, or undefined when the run fails.
+   */
+  private settleCheckStep(
+    execution: Execution,
+    index: number,
+    record: StepState | undefined,
+    check: { ok: boolean; output: string },
+    loop: StepLoop,
+  ): number | undefined {
+    const { runId, workflow, emit } = execution;
+    const step = workflow.steps[index] as WorkflowStepDef;
+    if (check.ok) {
+      this.finishStep(runId, step.id, 'done', undefined, emit);
+      return index + 1;
     }
 
+    // Retry consumption is distinct from executions: another check may loop
+    // back through this step after it already passed. Persist only the times
+    // this check itself invoked onFail so max remains bounded across restarts.
+    const used = record?.retriesUsed ?? 0;
+    if (step.onFail && used < step.onFail.max) {
+      loop.checkFailure = check.output;
+      this.finishStep(runId, step.id, 'failed', 'check failed — looping back', emit);
+      const retryIdx = workflow.steps.findIndex((s) => s.id === step.onFail?.retry);
+      emit({
+        type: 'note',
+        stepId: step.id,
+        message: `check failed — retrying from "${step.onFail.retry}" (attempt ${used + 1}/${step.onFail.max})`,
+      });
+      // Steps we're about to re-run go back to pending so the GUI rail
+      // reads top-to-bottom truthfully.
+      for (const s of workflow.steps.slice(retryIdx, index + 1)) {
+        this.store.updateStep(runId, s.id, { status: 'pending' });
+      }
+      this.store.updateStep(runId, step.id, { retriesUsed: used + 1 });
+      this.store.updateRun(runId, { status: 'queued', currentStepId: undefined });
+      // The retry target and its consumed budget form one crash boundary: a
+      // restart must observe the queued target, budget, and cursor together.
+      this.store.flush();
+      return retryIdx;
+    }
+
+    this.finishStep(runId, step.id, 'failed', `\`${step.command}\` exited non-zero`, emit);
+    loop.runError = `check "${step.id}" failed${step.onFail ? ` after ${used + 1} attempts` : ''}`;
+    return undefined;
+  }
+
+  /**
+   * Settles the run once the step loop of `execute` ended: the final autosave, then the
+   * cancelled, failed, incomplete-step, idle-closed or success settlement.
+   */
+  private async settleExecution(runId: string, state: ActiveRun, loop: StepLoop): Promise<void> {
     // Final autosave: the task branch ends holding the finished state; on a branch the
     // agent checked out, the work stays uncommitted and the handoff's Autosave section
     // says so (#1004).
@@ -8146,25 +8308,12 @@ export class RunManager {
       this.dropActive(runId);
       return;
     }
-    const finishedAt = new Date().toISOString();
     if (state.cancelled) {
-      const run = this.store.getRun(runId);
-      for (const s of run?.steps ?? []) {
-        if (s.status === 'running' || s.status === 'waiting') {
-          this.store.updateStep(runId, s.id, { status: 'cancelled' });
-        }
-      }
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt, currentStepId: undefined });
-      emit({ type: 'lifecycle', message: 'run cancelled' });
-    } else if (runError) {
-      this.store.updateRun(runId, { status: 'failed', error: runError, finishedAt, currentStepId: undefined });
-      emit({ type: 'lifecycle', message: `run failed — ${runError}` });
-      if (deliveryCapped) emit({ type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
-    } else if (incompleteStepId) {
-      await this.settleIncompleteStep(runId, incompleteStepId);
-      this.clearIdleTimer(state);
-      this.dropActive(runId);
-      return;
+      this.settleCancelledRun(runId);
+    } else if (loop.runError) {
+      this.settleFailedRun(runId, loop.runError, loop.deliveryCapped);
+    } else if (loop.incompleteStepId) {
+      await this.settleIncompleteStep(runId, loop.incompleteStepId);
     } else if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) {
       await this.settleIdleClosedRun(runId, state);
       this.dropActive(runId);
@@ -8174,6 +8323,27 @@ export class RunManager {
     }
     this.clearIdleTimer(state);
     this.dropActive(runId);
+  }
+
+  /** The cancelled settlement: the run and its running and waiting steps become cancelled. */
+  private settleCancelledRun(runId: string): void {
+    const finishedAt = new Date().toISOString();
+    const run = this.store.getRun(runId);
+    for (const s of run?.steps ?? []) {
+      if (s.status === 'running' || s.status === 'waiting') {
+        this.store.updateStep(runId, s.id, { status: 'cancelled' });
+      }
+    }
+    this.store.updateRun(runId, { status: 'cancelled', finishedAt, currentStepId: undefined });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+  }
+
+  /** The failed settlement. A capped wake delivery adds the cap's note. */
+  private settleFailedRun(runId: string, runError: string, deliveryCapped: boolean): void {
+    const finishedAt = new Date().toISOString();
+    this.store.updateRun(runId, { status: 'failed', error: runError, finishedAt, currentStepId: undefined });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: `run failed — ${runError}` });
+    if (deliveryCapped) this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
   }
 
   /** Returns an error message, or null on success. */
