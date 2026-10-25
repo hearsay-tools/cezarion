@@ -72,7 +72,7 @@ test('a function over the limit may fall or stay level but not rise; crossing th
   assert.match(result.output, /grow: complexity 26 \(was 25 at the merge base; limit 20\)/);
   assert.match(result.output, /cross: complexity 21 \(was 15 at the merge base; limit 20\)/);
   assert.doesNotMatch(result.output, /level|lower/);
-  assert.match(result.output, new RegExp(`base: git show ${f.base}:big\\.ts > "\\$\\{TMPDIR:-/tmp\\}/complexity-base\\.ts" && node .*metrics\\.mjs .* --function 'grow' --line 1$`, 'm'));
+  assert.match(result.output, new RegExp(`base: git show '${f.base}:big\\.ts' > "\\$\\{TMPDIR:-/tmp\\}/complexity-base\\.ts" && node .*metrics\\.mjs .* --function 'grow' --line 1$`, 'm'));
   assert.match(result.output, /^2 changed functions are over/m);
 });
 
@@ -161,14 +161,35 @@ test('a new function with no origin lists the over-limit functions the change re
   assert.match(result.output, /a\.ts:\d+ big \(complexity 25\)/);
 });
 
-test('same-named functions that cannot be told apart are compared with the most complex one', t => {
-  const twins = (first, second) => `const a = { ${complex('f', first).replace('export function f(x)', 'f(x)')} };\nconst b = { ${complex('f', second).replace('export function f(x)', 'f(x)')} };\n`;
-  const f = repo(t, { 'a.ts': twins(21, 19) });
-  const grown = gate(f, f.commit({ 'a.ts': twins(22, 19) }));
-  assert.equal(grown.code, 1);
-  assert.match(grown.output, /complexity 23 \(was at most 22 among 2 functions with this name at the merge base/);
-  const level = f.commit({ 'a.ts': twins(21, 19).replace('x++; }', 'x--; }') });
+test('same-named functions that cannot be told apart by identity are compared with the one whose body is closest', t => {
+  const method = text => text.replace('export function ', '');
+  const twins = (first, second) => `const a = { ${method(complex('f', first))} };\nconst b = { ${method(unrelated('f', second))} };\n`;
+  const f = repo(t, { 'a.ts': twins(24, 29) });
+  const grown = gate(f, f.commit({ 'a.ts': twins(26, 29) }));
+  assert.equal(grown.code, 1, grown.output);
+  assert.match(grown.output, /complexity 27 \(was 25 in the closest of 2 functions with this name at the merge base/);
+  const level = f.commit({ 'a.ts': twins(24, 29).replace('x++; }', 'x--; }') });
   assert.equal(gate(f, level).code, 0);
+});
+
+test('when two same-named origins are equally close, the function is compared with the lower one', t => {
+  const method = text => text.replace('export function ', '');
+  const twins = (first, second) => `const a = { ${method(complex('f', first))} };\nconst b = { ${method(complex('f', second))} };\n`;
+  const f = repo(t, { 'a.ts': twins(24, 24) });
+  const grown = gate(f, f.commit({ 'a.ts': twins(26, 24) }));
+  assert.equal(grown.code, 1, grown.output);
+  assert.match(grown.output, /complexity 27 \(origin unclear among 2 functions with this name; the lowest candidate was 25 at the merge base/);
+  const level = f.commit({ 'a.ts': twins(24, 24).replace('x++; }', 'x--; }') });
+  assert.equal(gate(f, level).code, 0);
+});
+
+test('the reproduce command quotes a file name with spaces and quotes', t => {
+  const path = "my dir/it's $(x).ts";
+  const f = repo(t, { [path]: complex('big', 24) });
+  const result = gate(f, f.commit({ [path]: complex('big', 25) }));
+  assert.equal(result.code, 1, result.output);
+  assert.ok(result.output.includes(`git show '${f.base}:my dir/it'\\''s $(x).ts' > "`), result.output);
+  assert.match(result.output, /head: node .*metrics\.mjs 'my dir\/it'\\''s \$\(x\)\.ts' --function 'big'/);
 });
 
 test('an unparseable changed file, a missing argument and an unknown revision stop the check', t => {

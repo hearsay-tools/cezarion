@@ -49,6 +49,7 @@ function closestDonor(fn, donors) {
   return top.length === 1 ? top[0].item : undefined;
 }
 const mostComplex = (best, item) => (!best || item.complexity > best.complexity ? item : best);
+const leastComplex = (best, item) => (!best || item.complexity < best.complexity ? item : best);
 
 /**
  * Pair each added function, which has no counterpart in its own file, with a function the change
@@ -70,12 +71,18 @@ export function pairMoves(candidates, removed) {
   return { pairs, free };
 }
 
-/** The merge-base function a changed function descends from, with how it was found. */
+/**
+ * The merge-base function a changed function descends from, with how it was found. Among several
+ * same-named functions of one identity it is the one closest by body. When none is closest, it is
+ * the least complex, so that an unclear origin never hides growth.
+ */
 function counterpartOf(fn, moved) {
   if (moved) return { kind: 'moved', ...moved };
   if (fn.baseline) return { kind: 'modified', file: fn.file, ...fn.baseline };
   if (!fn.candidates) return undefined;
-  return { kind: 'ambiguous', file: fn.file, count: fn.candidates.length, ...fn.candidates.reduce(mostComplex, undefined) };
+  const closest = closestDonor(fn, fn.candidates);
+  const [kind, from] = closest ? ['closest', closest] : ['unclear', fn.candidates.reduce(leastComplex, undefined)];
+  return { kind, file: fn.file, count: fn.candidates.length, ...from };
 }
 
 export function findGrowth(scan, limit = thresholds.complexity) {
@@ -95,7 +102,8 @@ export function findGrowth(scan, limit = thresholds.complexity) {
 const WAS = {
   moved: from => `was ${from.complexity} in ${from.file}:${from.name} at the merge base`,
   modified: from => `was ${from.complexity} at the merge base`,
-  ambiguous: from => `was at most ${from.complexity} among ${from.count} functions with this name at the merge base`,
+  closest: from => `was ${from.complexity} in the closest of ${from.count} functions with this name at the merge base`,
+  unclear: from => `origin unclear among ${from.count} functions with this name; the lowest candidate was ${from.complexity} at the merge base`,
 };
 const headline = ({ fn, from }, limit) =>
   `${fn.file}:${fn.line} ${fn.name}: complexity ${fn.complexity} (${from ? WAS[from.kind](from) : 'new function'}; limit ${limit})`;
@@ -109,7 +117,7 @@ function reproduce({ fn, from }, { root, base }) {
   const head = `node ${metrics} ${shellWord(fn.file)} ${select(fn.name, fn.line)} --breakdown`;
   if (!from) return [`head: ${head}`];
   const copy = `"\${TMPDIR:-/tmp}/complexity-base${extname(from.file)}"`;
-  return [`head: ${head}`, `base: git show ${base}:${from.file} > ${copy} && node ${metrics} ${copy} ${select(from.name, from.line)}`];
+  return [`head: ${head}`, `base: git show ${shellWord(`${base}:${from.file}`)} > ${copy} && node ${metrics} ${copy} ${select(from.name, from.line)}`];
 }
 
 function pointLines(fn) {

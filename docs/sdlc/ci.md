@@ -255,7 +255,10 @@ over 20 passes; the job lists it as a notice, and the pre-PR check (`check-code-
 reports it. A moved or renamed function is compared with
 the function it came from: first one with an identical body, then the one same-named function that
 shares the most of its body lines, at least half of them. A copy of a long function is still new, and
-so is a function that only shares a name with a removed one or has two equally close origins. The job runs the workflow commit's own scripts and reads the pull
+so is a function that only shares a name with a removed one or has two equally close origins. When
+one file holds several same-named functions that the gate cannot tell apart by their place, a changed one
+is compared with the one closest by body, or with the least complex when none is closest, so an unclear
+origin never hides growth. The job runs the workflow commit's own scripts and reads the pull
 request head from Git objects, so no head code runs and a pull request cannot change its own gate.
 It uses `github.sha`, not the event's `base.sha`, which stays at the tip from when the PR opened.
 `verify` requires it on every pull request.

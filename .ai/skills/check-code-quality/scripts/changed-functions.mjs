@@ -41,11 +41,14 @@ const bodyHash = (fn, functions, source) =>
 const bodyLines = (fn, functions, source) =>
   ownSource(fn, functions, source, fn.bodyStart).split('\n').map(line => line.trim()).filter(line => line.length > 3);
 const summary = ({ name, line, complexity }) => ({ name, line, complexity });
+const describe = (fn, functions, source, details) =>
+  details ? { ...summary(fn), lines: bodyLines(fn, functions, source) } : summary(fn);
 
 /**
  * Compare one file's functions before and after. `changed` lists the functions whose
- * own source differs. With `details`, each carries its decision `points`, `bodyHash` and body `lines`,
- * and `unmatched` lists the functions before that no function after took over. The
+ * own source differs. With `details`, each carries its decision `points`, `bodyHash` and body `lines`
+ * (its ambiguous candidates carry their `lines` too), and `unmatched` lists the functions before that
+ * no function after took over. The
  * candidates of an ambiguous match are not unmatched: the comparison keeps them.
  */
 export function matchFunctions(before, after, file, { details = false } = {}) {
@@ -69,7 +72,7 @@ export function matchFunctions(before, after, file, { details = false } = {}) {
       baseline: old ? summary(old) : null,
       ...(candidates.length > 1 && !old ? {
         reason: 'Several baseline functions match. Inspect the diff before attributing this change.',
-        candidates: candidates.map(summary),
+        candidates: candidates.map(candidate => describe(candidate, oldFunctions, before, details)),
       } : {}),
       ...(details ? { bodyHash: bodyHash(fn, functions, after), lines: bodyLines(fn, functions, after), points: fn.points } : {}),
     }];
