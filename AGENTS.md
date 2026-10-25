@@ -923,7 +923,10 @@ It selects Vitest tests through the import graph for ordinary source changes;
 shared/configuration/unknown inputs, deletions, or unavailable Git/base information
 fall back to full Vitest. Clean changes, and changes confined to CI's docs-only
 list, explicitly skip iteration tests. `isDocsPath` in
-`.github/scripts/change-surface.cjs` is the exact definition. The list includes
+`.github/scripts/change-surface.cjs` is the exact definition. To classify the
+current branch's commits as CI does, run
+`git diff --name-only --no-renames origin/main...HEAD | jq -R . | node .github/scripts/change-surface.cjs`;
+it prints `docs-only`, `infra-only` or `full-matrix`. The list includes
 root Markdown and `LICENSE*`, `docs/`, `.ai/specs/`, `.ai/analysis/`, the
 generated upstream scan data, and Markdown under `packages/` outside
 `fixtures`, `__fixtures__` and `__snapshots__` directories. It excludes
