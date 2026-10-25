@@ -329,9 +329,13 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       # Fail a change that adds a bare `#N` issue or PR citation
-      # (hearsay-tools/cezarion#1310). HEAD^1 is the base the PR merged into, or
-      # the previous commit on a push or a bare dispatch.
+      # (hearsay-tools/cezarion#1310). HEAD^1 is the base the PR or merge group
+      # merged into, or the previous commit on a bare dispatch. A push reaches
+      # main only through a PR this step already checked, and HEAD^1 there is
+      # only its last commit, so a push run would re-check part of it after the
+      # merge, where a failure cannot be fixed first.
       - name: Check issue citations
+        if: github.event_name != 'push'
         run: node .github/scripts/check-citations.cjs --base HEAD^1
 
       - name: Typecheck
