@@ -207,14 +207,14 @@ describe('systemPrompt end-to-end (dry run)', () => {
     rmSync(repoRoot, { recursive: true, force: true });
   });
 
-  // Agent step + trailing check so the agent step is non-interactive — the
-  // session auto-ends after the mock's turn and the run reaches a terminal
-  // status instead of parking at `waiting`.
+  // Agent step + trailing check. The prompt's `mock:done` makes the mock's turn signal done, which
+  // completes the agent step (hearsay-tools/cezarion#1620), so the run reaches a terminal status
+  // instead of parking at `waiting`.
   const workflow: WorkflowDef = {
     name: 'sysprompt-test',
     source: 'built-in',
     steps: [
-      { id: 'work', prompt: '{{task}}' },
+      { id: 'work', prompt: '{{task}} mock:done' },
       { id: 'verify', command: 'true' },
     ],
   };
@@ -223,7 +223,7 @@ describe('systemPrompt end-to-end (dry run)', () => {
     name: '(planned)',
     source: 'built-in',
     steps: [
-      { id: 'review', name: 'om-auto-review-pr', skill: 'om-auto-review-pr', prompt: '{{task}}' },
+      { id: 'review', name: 'om-auto-review-pr', skill: 'om-auto-review-pr', prompt: '{{task}} mock:done' },
       { id: 'verify', command: 'true' },
     ],
   };
@@ -466,7 +466,8 @@ describe('systemPrompt end-to-end (dry run)', () => {
     // than being swallowed by title construction.
     const worktreePath = record?.worktreePath;
     if (!worktreePath) throw new Error('run did not create its worktree');
-    expect(readFileSync(join(worktreePath, 'notes.md'), 'utf8')).toContain(': 432\n');
+    // The step's prompt adds `mock:done` after the task, so the step signals done.
+    expect(readFileSync(join(worktreePath, 'notes.md'), 'utf8')).toContain(': 432 mock:done\n');
   }, 30_000);
 
 });

@@ -424,9 +424,9 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     expect(lastCiWaitOf(run.id)?.result?.outcome).toBe('passed');
   });
 
-  it('a CI wait prevents nonfinal auto-end and advances the workflow only after the resumed turn', async () => {
+  it('a CI wait keeps an earlier step open, and the step advances only on a done after the resumed turn', async () => {
     const external = github();
-    const gate = join(root, 'nonfinal-boundary'); controlledWire({ firstResultGate: gate });
+    const gate = join(root, 'nonfinal-boundary'); controlledWire({ firstResultGate: gate, replay: true });
     const run = manager.startRun({ name: 'ci-chain', source: 'built-in', steps: [
       { id: 'first', prompt: 'hold' }, { id: 'check', command: 'node -e "process.exit(0)"' },
     ] }, { task: 'CI chain', runner: 'claude' });
@@ -435,6 +435,10 @@ describe('CI wait lifecycle through real runner turns', { timeout: 30_000 }, () 
     await until(() => parked(run.id));
     expect(store.getRun(run.id)?.steps.find(step => step.id === 'check')?.status).toBe('pending');
     external.settle(success());
+    await until(() => !!lastCiWaitOf(run.id)?.deliveredAt);
+    // The wake turn signals nothing; the earlier step completes only on a done (hearsay-tools/cezarion#1620).
+    expect(store.getRun(run.id)?.steps.find(step => step.id === 'check')?.status).toBe('pending');
+    expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
     await until(() => !manager.isActive(run.id));
     expect(store.getRun(run.id)?.steps.map(step => step.status)).toEqual(['done', 'done']);
   });

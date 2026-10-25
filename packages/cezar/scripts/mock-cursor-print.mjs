@@ -202,6 +202,11 @@ if (prompt.includes('mock:no-progress')) {
   setInterval(() => {}, 1000);
   await new Promise(() => {});
 }
+if (prompt.includes('mock:busy-progress')) {
+  // N2: a long turn whose native output keeps it alive, then a done (hearsay-tools/cezarion#1620).
+  for (let i = 0; i < 24; i++) { assistant('working\n'); await new Promise(resolve => setTimeout(resolve, 100)); }
+  finish('busy complete\n\nCEZ:DONE'); process.exit(0);
+}
 if (prompt.includes('mock:hold-done')) { await waitForRelease(400); finish('parity hold-done: content after the pause\nCEZ:DONE'); process.exit(0); }
 if (prompt.includes('mock:hold-ask')) { await waitForRelease(400); finish('Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}'); process.exit(0); }
 if (prompt.includes('mock:hold-gated')) { await waitForRelease(500); finish('parity hold-gated: content after the pause'); process.exit(0); }

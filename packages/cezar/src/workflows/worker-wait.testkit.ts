@@ -177,7 +177,9 @@ export function useWorkerWaitFixture(options: { processScope?: false; nudgeReply
     if (errors.length) throw errors[0];
   }, 30_000);
 }
-export function controlledWire(options: { firstResultGate?: string; humanAnswerGate?: string } = {}) {
+/** `replay` echoes each consumed line as the real CLI's `--replay-user-messages` does, so a human
+ *  follow-up stops counting as held once its turn reads it. */
+export function controlledWire(options: { firstResultGate?: string; humanAnswerGate?: string; replay?: boolean } = {}) {
   const wire = join(root, 'controlled-claude.cjs'); const received = join(root, 'human-answer-received.ndjson'); const initial = join(root, 'first-input-received');
   writeFileSync(wire, String.raw`#!/usr/bin/env node
 const fs = require('node:fs'); const rl = require('node:readline').createInterface({ input: process.stdin });
@@ -189,11 +191,12 @@ emit({ type: 'system', subtype: 'init', session_id: sessionIndex >= 0 ? args[ses
 rl.on('line', line => { queue = queue.then(async () => {
 const message = JSON.parse(line); const content = message.message?.content ?? [];
 const text = typeof content === 'string' ? content : content.filter(part => part.type === 'text').map(part => part.text).join('\n');
+if (options.replay && message.uuid) emit({ type: 'user', isReplay: true, uuid: message.uuid, message: message.message });
 if (first) { first = false; fs.writeFileSync(${JSON.stringify(initial)}, 'received'); await wait(options.firstResultGate); }
 const humanAnswer = text.includes('human answer mock:hold');
 if (humanAnswer && options.humanAnswerGate) { fs.appendFileSync(received, JSON.stringify({ text }) + '\n'); await wait(options.humanAnswerGate); }
 const ask = !humanAnswer && text.includes('mock:ask') ? '\nCEZ:ASK ' + JSON.stringify({ questions: [{ header: 'Choice', question: 'Which framework?', options: [{ label: 'Vitest' }, { label: 'Other' }] }] }) : '';
-const reply = 'controlled wire reply' + ask;
+const reply = 'controlled wire reply' + ask + (!ask && text.includes('mock:done') ? '\n\nCEZ:DONE' : '');
 emit({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: reply }] } });
 emit({ type: 'result', subtype: 'success', result: reply, usage: { input_tokens: 1, output_tokens: 1 } });
 }); });

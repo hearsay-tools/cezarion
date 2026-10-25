@@ -1,7 +1,8 @@
 /**
  * Shared turn-end decision for initial sessions, Continue and late input ACKs. Owed input
- * defers; done, waits and step completion take precedence. Final no-wait turns use bounded
- * nudges then a human wait; never classify prose.
+ * defers; done and waits take precedence. Every agent step completes only on a done
+ * (hearsay-tools/cezarion#1620): a no-wait turn gets bounded nudges, then a human wait; never
+ * classify prose.
  *
  * A nudge has a cause. No wait: the turn named neither a wait nor a done. Completion: the agent's
  * done was refused by the completion gate (hearsay-tools/cezarion#1301). Each cause keeps its own
@@ -37,8 +38,9 @@ export type TurnEndFacts = {
   agentWaits: boolean;
   /** Cezar's own human wait is open (`no-wait`, `budget`, `completion`). */
   cezarHumanWait: boolean;
-  /** The interactive step (the last agent step), or any continuation. */
-  finalStep: boolean;
+  /** The session's done completes a workflow step that is not the last, not the task
+   *  (hearsay-tools/cezarion#1620). Only the nudge wording reads it. */
+  stepScope: boolean;
   /** The turn that just ended answered Cezar's no-wait nudge. */
   noWaitNudgedLastTurn: boolean;
   /** The turn that just ended answered Cezar's completion nudge. */
@@ -60,7 +62,6 @@ export type TurnEndDecision =
   | { kind: 'defer'; keepDone?: true; refused?: true }
   | { kind: 'done' }
   | { kind: 'park'; refused?: true }
-  | { kind: 'complete-step'; refused?: true }
   | { kind: 'completion-wait' }
   /** `text` is absent for the completion cause: the refusal message is the nudge. A refused
    *  submission waits for input readiness (autonomous), opens Cezar's no-wait human wait, or parks
@@ -78,6 +79,16 @@ export const NO_WAIT_NUDGE =
 /** The no-wait nudge for a session without cezar tools, which was taught the markers. */
 export const NO_WAIT_NUDGE_MARKERS =
   'Your turn ended without a wait or done. End your message with a CEZ:ASK line if you need the user, a CEZ:MONITORING line if you are waiting on something, or a CEZ:DONE line if the task is complete. If you owe the user a reply, write it in the same turn.';
+
+/** Appended to a nudge in a session whose done completes a workflow step, not the task
+ *  (hearsay-tools/cezarion#1620). Appended, so the nudge keeps its opening words. */
+/** A nudge as an earlier workflow step receives it: with the step suffix when `stepScope` holds. */
+export function stepScopedNudge(text: string, stepScope: boolean): string {
+  return stepScope ? `${text} ${STEP_NUDGE_SUFFIX}` : text;
+}
+
+export const STEP_NUDGE_SUFFIX =
+  'In this workflow step, the done signal completes this step\'s own work, and Cezar then starts the next step.';
 
 export function decideTurnEnd(facts: TurnEndFacts): TurnEndDecision {
   if (!facts.sessionOpen) return { kind: 'closed' };
@@ -105,12 +116,12 @@ function decideWithoutDone(facts: TurnEndFacts): TurnEndDecision {
   if (facts.done && !facts.nativeAsk && !facts.inputInFlight && !facts.inputQueued) return { kind: 'done' };
   if (facts.nudgePending) return { kind: 'defer' };
   if (facts.question || facts.agentWaits || facts.cezarHumanWait) return { kind: 'park' };
-  if (!facts.finalStep) return { kind: 'complete-step' };
   if (facts.budgetSpent) return { kind: 'human-wait', via: 'budget' };
   // An autonomous run is nudged on every such turn end until the budget is spent.
-  if (facts.autonomous) return { kind: 'nudge', cause: 'no-wait', text: AUTONOMOUS_NUDGE, ifRefused: 'readiness' };
+  const scoped = (text: string) => stepScopedNudge(text, facts.stepScope);
+  if (facts.autonomous) return { kind: 'nudge', cause: 'no-wait', text: scoped(AUTONOMOUS_NUDGE), ifRefused: 'readiness' };
   if (facts.noWaitNudgedLastTurn) return { kind: 'human-wait', via: 'no-wait' };
-  return { kind: 'nudge', cause: 'no-wait', text: facts.tools ? NO_WAIT_NUDGE : NO_WAIT_NUDGE_MARKERS, ifRefused: 'human-wait' };
+  return { kind: 'nudge', cause: 'no-wait', text: scoped(facts.tools ? NO_WAIT_NUDGE : NO_WAIT_NUDGE_MARKERS), ifRefused: 'human-wait' };
 }
 
 /** How a settled turn end left the run, for its heartbeat line. */

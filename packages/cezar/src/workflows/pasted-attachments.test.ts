@@ -272,11 +272,12 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     writeFileSync(stdinFile, '', 'utf8');
     // Agent step + trailing check so the run reaches a terminal status
     // instead of parking at `waiting` (same shape as system-prompt.test.ts).
+    // The agent step signals done, which an earlier step needs since hearsay-tools/cezarion#1620.
     const workflow: WorkflowDef = {
       name: 'pasted-start-test',
       source: 'built-in',
       steps: [
-        { id: 'work', prompt: '{{task}}' },
+        { id: 'work', prompt: '{{task}} mock:done' },
         { id: 'verify', command: 'true' },
       ],
     };
@@ -337,7 +338,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
       name: 'pasted-files-test',
       source: 'built-in',
       steps: [
-        { id: 'work', prompt: '{{task}}' },
+        { id: 'work', prompt: '{{task}} mock:done' },
         { id: 'verify', command: 'true' },
       ],
     };
@@ -396,7 +397,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
       name: 'stacked-file-test',
       source: 'built-in',
       steps: [
-        { id: 'work', prompt: '{{task}}' },
+        { id: 'work', prompt: '{{task}} mock:done' },
         { id: 'verify', command: 'true' },
       ],
     };
@@ -425,7 +426,7 @@ describe('pasted screenshots materialize to disk and reach the agent as file pat
     writeFileSync(stdinFile, '');
     const holder = slotHolder(repoRoot, 'hold-delete');
     manager.startRun(holder.workflow, { task: 'hold slot', worktree: false });
-    const workflow: WorkflowDef = { name: 'missing-file', source: 'built-in', steps: [{ id: 'work', prompt: '{{task}}' }, { id: 'verify', command: 'true' }] };
+    const workflow: WorkflowDef = { name: 'missing-file', source: 'built-in', steps: [{ id: 'work', prompt: '{{task}} mock:done' }, { id: 'verify', command: 'true' }] };
     const record = manager.startRun(workflow, { task: 'read my missing brief', worktree: false, images: [{ type: 'file', mediaType: 'application/pdf', data: TINY_PDF_B64 }] });
     const path = join(dataDir, 'runs', `${record.id}-images`, 'pasted-1.pdf');
     rmSync(path);

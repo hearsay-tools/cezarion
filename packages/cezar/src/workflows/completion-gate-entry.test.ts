@@ -78,7 +78,7 @@ describe('the completion gate outside a turn end', () => {
   it('a turn end with an ask line and a monitoring line opens the timer alias', () => {
     state.atTurnBoundary = session;
     const ask = { questions: [{ header: 'Choice', question: 'Which framework?', options: [{ label: 'Vitest' }, { label: 'Node' }] }] };
-    manager['settleTurn'](id, state, 'turn-end', { stepId: 'task', finalStep: true, monitoring: true, humanGate: false, ask,
+    manager['settleTurn'](id, state, 'turn-end', { stepId: 'task', monitoring: true, humanGate: false, ask,
       askNudged: false, done: false, nudgedLastTurn: false });
     expect(store.getRun(id)?.waits?.some(wait => wait.kind === 'timer')).toBe(true);
     expect(store.getRun(id)?.status).toBe('waiting');

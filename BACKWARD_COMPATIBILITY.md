@@ -252,9 +252,11 @@ worker question routed to its parent may therefore carry a question without `opt
 with options keeps the 2–4 bound. `POST /api/v1/tools/done` joins the same private family, behind the same bearer capability and
 a 16 KiB body limit. Middleware validates the strict `CezarDoneRequest` (`{ summary? }`, at
 most 2,000 characters). Every answer except a missing or revoked capability (`401`) is `200`
-with the typed `CezarDoneAnswer`: `{ ok: true, finishes: 'at_turn_end', open_waits }` or
-`{ ok: false, code, message, workers?, open_waits? }`, where `code` includes `not_final_step` for a
-workflow step that is not the last, and `workers` lists up to 64
+with the typed `CezarDoneAnswer`: `{ ok: true, finishes: 'at_turn_end', completes, open_waits }`
+or `{ ok: false, code, message, workers?, open_waits? }`. `completes` is `task`, or `step` with
+`next_step` naming the next workflow step (hearsay-tools/cezarion#1620). `code` keeps
+`not_final_step` in its enum for old clients, but no answer returns it since
+hearsay-tools/cezarion#1620. `workers` lists up to 64
 `{ worker_id, reason }` with `reason` one of `outstanding`, `uncollected` or `question`. The MCP
 tools `cezar_ask` and `cezar_done` are listed and admitted on every runner. Their names,
 `cezar_ask`'s card bounds (open questions included) and `cezar_done`'s `summary` bound are
