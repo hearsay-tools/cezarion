@@ -313,11 +313,16 @@ async function seedDemo(cockpit, repos, log) {
   return { liveRunId: live.find((entry) => entry.seed.task === LIVE_RUN_TASK).run.id };
 }
 
+/** `text` as one POSIX shell word: in single quotes, where only `'` itself needs escaping. */
+export function shellQuote(text) {
+  return `'${text.replaceAll("'", "'\\''")}'`;
+}
+
 /** Write the launcher the cockpit runs as `claude`: this Node and the demo agent. */
-function writeAgentLauncher(work) {
+export function writeAgentLauncher(work, { node = process.execPath, agent = join(HERE, 'demo-agent.mjs') } = {}) {
   const launcher = join(work, 'bin', 'claude');
   mkdirSync(dirname(launcher), { recursive: true });
-  writeFileSync(launcher, `#!/bin/sh\nexec ${JSON.stringify(process.execPath)} ${JSON.stringify(join(HERE, 'demo-agent.mjs'))} "$@"\n`);
+  writeFileSync(launcher, `#!/bin/sh\nexec ${shellQuote(node)} ${shellQuote(agent)} "$@"\n`);
   chmodSync(launcher, 0o755);
   return launcher;
 }

@@ -1,12 +1,12 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { PassThrough } from 'node:stream';
 import { test } from 'node:test';
 
-import { Cockpit, findAgentBrowser, ghConfigDir, missingPrerequisites, parseOptions, REPO_ROOT, serverEnv, USAGE, waitUntil } from '../.ai/scripts/readme-screenshots/capture.mjs';
+import { Cockpit, findAgentBrowser, ghConfigDir, missingPrerequisites, parseOptions, REPO_ROOT, serverEnv, USAGE, waitUntil, writeAgentLauncher } from '../.ai/scripts/readme-screenshots/capture.mjs';
 import { applyChange, controlResponse, HELP_TEXT, main, parseLine, playTurn, VERSION_TEXT } from '../.ai/scripts/readme-screenshots/demo-agent.mjs';
 import { cezarFiles, createDemoRepos, DEMO_SKILLS, DEMO_WORKFLOWS, STOREFRONT_FILES } from '../.ai/scripts/readme-screenshots/demo-repos.mjs';
 import { CELLS, editedText, findMockText, FOLLOW_UP_REPLY, GITHUB_REPO, LIVE_RUN_TASK, pickScenario, SCENARIOS, SEED_TASKS, testText, turnScript } from '../.ai/scripts/readme-screenshots/scenarios.mjs';
@@ -287,4 +287,22 @@ test('Cockpit.start stops the server it spawned when the start fails', async (t)
   await assert.rejects(Cockpit.start({ repo: dir, env: { ...process.env, PID_FILE: pidFile }, logFile: join(dir, 'cockpit.log'), cli }), /GET \/projects answered 500: boom/);
   pid = Number(readFileSync(pidFile, 'utf8'));
   assert.equal(alive(pid), false);
+});
+
+test('writeAgentLauncher quotes its paths, so sh expands nothing in them', (t) => {
+  const root = scratch(t, 'cez-readme-launcher-');
+  // Each expansion would create a file in the launcher's working directory.
+  const dir = join(root, "it's $(touch dollar) `touch backtick`");
+  mkdirSync(dir);
+  const agent = join(dir, 'agent.mjs');
+  writeFileSync(agent, 'process.stdout.write(JSON.stringify(process.argv.slice(2)));\n');
+  const launcher = writeAgentLauncher(join(dir, 'work'), { agent });
+  let output;
+  try {
+    output = execFileSync(launcher, ['--version', 'two words'], { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  } catch (error) {
+    output = `failed: ${error.stderr}`;
+  }
+  assert.deepEqual(readdirSync(root), [basename(dir)]);
+  assert.equal(output, JSON.stringify(['--version', 'two words']));
 });
