@@ -103,7 +103,7 @@ async function checkPullRequest({ github, context, core, cwd = process.cwd() }) 
   const mergeBase = git(cwd, 'merge-base', base, fetched).trim();
   const allowGrowth = pr.labels.some(label => label.name === 'baseline-growth');
   const reasons = checkBaselineGrowth({ cwd, base: mergeBase, head: fetched, allowGrowth });
-  if (reasons.length) core.setFailed(reasons.join('\n'));
+  if (reasons.length) core.setFailed(`${reasons.join('\n')}\nFor an owner-approved increase, add the baseline-growth label, then re-run the failed classify-pr job. Deletion readers and invalid JSON must still be fixed.`);
   else core.info(allowGrowth ? 'Baseline growth approved by label; owner merge required.' : 'Baseline ratchets did not grow.');
 }
 

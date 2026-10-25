@@ -116,7 +116,9 @@ test('trusted PR gate uses live labels and head blobs, and refuses changed metad
   const core = { setFailed: message => failures.push(message), info: message => info.push(message) };
   const input = { github, context, core, cwd: r.cwd };
   await checkPullRequest(input);
-  assert.match(failures.pop(), /number grew/);
+  const failure = failures.pop();
+  assert.match(failure, /number grew/);
+  assert.match(failure, /add the baseline-growth label, then re-run the failed classify-pr job/);
   pr.labels = [{ name: 'baseline-growth' }];
   await checkPullRequest(input);
   assert.equal(failures.length, 0);

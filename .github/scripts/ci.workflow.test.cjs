@@ -522,7 +522,7 @@ test('no workflow declares both pull_request and pull_request_target', () => {
   }
 });
 
-test('baseline growth is required through trusted classify-pr and refreshes on label changes', () => {
+test('baseline growth is required through trusted classify-pr with default PR event types', () => {
   const ci = workflow();
   const job = ci.jobs['classify-pr'];
   const checkIndex = job.steps.findIndex(step => step.name === 'Reject baseline growth');
@@ -541,7 +541,5 @@ test('baseline growth is required through trusted classify-pr and refreshes on l
   assert.match(check.with.script, /await checkPullRequest\(\{ github, context, core \}\)/);
   assert.ok(ci.jobs.verify.needs.includes('classify-pr'));
   assert.match(ci.jobs.verify.steps[0].run, /test "\$CLASSIFY_RESULT" = success/);
-  for (const event of ['opened', 'synchronize', 'reopened', 'labeled', 'unlabeled']) {
-    assert.ok(ci.on.pull_request_target.types.includes(event));
-  }
+  assert.equal(ci.on.pull_request_target.types, undefined, 'label changes must not cancel and restart CI');
 });
