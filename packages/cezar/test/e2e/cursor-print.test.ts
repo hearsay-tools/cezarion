@@ -36,7 +36,7 @@ delete process.env.CEZ_CURSOR_BIN;
 for (const [transport, expected] of [[undefined, 'cursor-print'], ['cursor-acp', 'cursor-acp']]) {
   const events = [];
   const runner = createRunner('cursor', transport ? { sessionTransport: transport } : {});
-  const result = await runner.run({ cwd: process.cwd(), userPrompt: 'mock:done', timeoutMs: 10_000 }, event => events.push(event));
+  const result = await runner.run({ cwd: process.cwd(), userPrompt: 'mock:done', toolGrant: { kind: 'unset' }, timeoutMs: 10_000 }, event => events.push(event));
   assert.equal(events.find(event => event.type === 'session')?.sessionTransport, expected);
   assert.match(result.text, /CEZ:DONE/);
   assert.equal(events.some(event => event.type === 'error'), false);

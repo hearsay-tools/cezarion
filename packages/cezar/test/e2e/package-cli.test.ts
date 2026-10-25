@@ -134,7 +134,7 @@ try {
  delete process.env.CEZ_OMP_BIN;
  for (const backend of ['codex', 'opencode', 'omp']) {
    const events = [];
-   await createRunner(backend).run({ cwd:process.cwd(), userPrompt:'mock:ci-wait ' + wait.prUrl, cezarTools:session.descriptor, env:session.env, timeoutMs:10_000 }, event => events.push(event));
+   await createRunner(backend).run({ cwd:process.cwd(), userPrompt:'mock:ci-wait ' + wait.prUrl, toolGrant:{kind:'unset'}, cezarTools:session.descriptor, env:session.env, timeoutMs:10_000 }, event => events.push(event));
    assert.ok(!events.some(event => event.type === 'error'), JSON.stringify(events));
  }
  assert.equal(count, 6);
