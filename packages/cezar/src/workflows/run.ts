@@ -1073,6 +1073,51 @@ type StepSessionLaunch = {
   webhooksPart: string | undefined;
   ciTools: LaunchCiTools;
 };
+/** An owned worker's delegation record. */
+type WorkerDelegationRecord = Extract<NonNullable<RunRecord['delegation']>, { role: 'worker' }>;
+/** A Continue's opening message and what it carries: the checkpoint it replays, whether it is a
+ *  parent's answer to a routed question (#505), and the images and attachments it hands over. */
+type ContinuationOpening = {
+  prompt: string;
+  checkpoint: RunRecord['continuationMessage'];
+  parentAnswer: boolean;
+  openingImages: ContentBlock[];
+  attachments: PersistedAttachment[];
+};
+/** The human ask a Continue's opening message answers, and the human waits that answer settles
+ *  when the opening turn ends. The turn end clears `askSeq`. */
+type OpeningAnswer = { askSeq: number | undefined; waits: string[]; parentAnswer: boolean };
+/** What a Continue resolved before its pre-spawn checks: the step that owns its session, the
+ *  workflow step it extends, and its grants, model, effort and account. */
+type ContinuationSettings = {
+  owningStep: RunRecord['steps'][number] | undefined;
+  toolsStep: WorkflowStepDef | undefined;
+  grants: WorkerStepIdentity['grants'];
+  backendModel: string | undefined;
+  effort: string | undefined;
+  profile: StepProfile;
+  /** The run's extra system prompt, which workers inherit. */
+  extraSystemPrompt: string | undefined;
+};
+/** The continued step's skill playbook, for the system prompt or for the fallback system prompt of
+ *  an in-thread resume, and the skill files the opening message names. */
+type ContinuationSkills = { skillPrompt: string | undefined; fallbackSkillPrompt: string | undefined; files: Map<string, string> };
+/** What `runContinuation` resolved before it starts the Continue's session. */
+type ContinuationSessionLaunch = {
+  stepId: string;
+  sessionId: string | undefined;
+  prompt: string;
+  setupNote: string | undefined;
+  opening: ContinuationOpening;
+  skills: ContinuationSkills;
+  skipSkillOnResume: boolean;
+  settings: ContinuationSettings;
+  delegation: LaunchDelegation;
+  webhooksPart: string | undefined;
+  ciTools: LaunchCiTools;
+};
+/** The workflow remainder a successful Continue queues once its session is released. */
+type ContinuationClose = { resumeWorkflow?: { workflow: WorkflowDef; input: StartRunInput; startAt: number } };
 
 /** Only an original workflow that has never executed may return to its queue. */
 export function isUntouchedCancelledRun(run: RunRecord): boolean {
@@ -7166,78 +7211,22 @@ export class RunManager {
     if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() })) return;
     this.workerIdentity(runId);
     const record = this.store.getRun(runId);
-    let cwd: string;
-    // Retention (#483) rebuilt a reclaimed directory: a bare checkout that needs setup again (#917).
-    let rematerialized = false;
-    if (record?.delegation?.role === 'worker') {
-      try {
-        if (record.delegation.destroy) throw new Error('Worker destruction has begun');
-        cwd = (await verifyOwnedWorkspace(this.repoRoot, record)).path;
-        await verifyWorkerContext({ dataDir: this.dataDir, parentId: record.delegation.parentRunId, workspace: record.delegation.workspace, context: record.delegation.context,
-          parentCwd: this.store.getRun(record.delegation.parentRunId)?.worktreePath ?? this.repoRoot });
-      } catch (error) {
-        const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
-        const finishedAt = new Date().toISOString();
-        this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt });
-        this.store.updateRun(runId, { status: 'failed', error: message, finishedAt, currentStepId: undefined });
-        this.store.appendEvent(runId, { type: 'lifecycle', message });
-        this.starting.delete(runId);
-        this.dropActive(runId);
-        return;
-      }
-    } else {
-      rematerialized = await rematerializeReclaimedWorktree(this.repoRoot, this.store, runId);
-      cwd = record?.worktreePath && existsSync(record.worktreePath) ? record.worktreePath : this.repoRoot;
-    }
-    if (this.store.getRun(runId)?.stopping) {
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
-      this.starting.delete(runId);
-      this.dropActive(runId);
-      return;
-    }
+    const workspace = await this.continuationWorkspace(runId, stepId, record);
+    if (!workspace) return;
+    if (this.settleStoppedContinuation(runId)) return;
     // Continue/recovery constructs a second ActiveRun: hydrate the durable mode here too.
     const state: ActiveRun = {
       delegationSettings: undefined, revokeDelegation: undefined,
-      cancelled: false, interrupt: () => undefined, cwd,
+      cancelled: false, interrupt: () => undefined, cwd: workspace.cwd,
       pendingHumanAsk: this.hasPendingHumanAsk(runId),
       pendingPermissions: new Set(),
       autonomous: record?.autonomous === true,
     };
     this.activate(runId, state);
     this.starting.delete(runId);
-    if (state.cwd === this.repoRoot) {
-      if (repositoryRootLockDisabled()) {
-        this.store.appendEvent(runId, {
-          type: 'note',
-          message: REPOSITORY_ROOT_LOCK_DISABLED_NOTE,
-        });
-      } else {
-        this.store.appendEvent(runId, {
-          type: 'note',
-          message: 'waiting for exclusive access to the repository working tree',
-        });
-        if (!(await this.acquireRepoRoot(runId, state))) {
-          this.store.updateRun(runId, {
-            status: 'cancelled',
-            finishedAt: new Date().toISOString(),
-            currentStepId: undefined,
-          });
-          this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
-          this.dropActive(runId);
-          return;
-        }
-      }
-    }
-    this.armAutosave(runId, state);
-    if (record) seedHandoffFile(this.dataDir, record); // idempotent — normally already there
-    // Worktree setup (#917) for a directory retention rebuilt, or one a restart interrupted.
-    const setupNote = await this.prepareWorktree(
-      runId,
-      state,
-      (await loadConfig(this.repoRoot)).worktreeSetup,
-      (event) => this.store.appendEvent(runId, event),
-      rematerialized ? 'rematerialized' : 'resume',
-    );
+    const lease = this.continuationRepoRootLease(runId, state);
+    if (lease && !(await lease)) return;
+    const setupNote = await this.prepareContinuationWorktree(runId, state, record, workspace.rematerialized);
     // A Stop during setup settles below, at the prelaunch cancellation check before any spawn.
     // Registry snapshot for `/skill` expansion. `execute` loads this for the workflow's own
     // sessions; a continuation builds its OWN ActiveRun, and without this the resumed session
@@ -7245,6 +7234,225 @@ export class RunManager {
     // answered "Unknown skill" (#811). Best-effort — discovery must never break Continue.
     state.skills = await this.discoverSkills().catch(() => [] as Skill[]);
 
+    this.startContinuationStep(runId, stepId, record, sessionId, backend);
+    const opening = this.continuationOpening(runId, stepId, state, record, { prompt, images, persistedImages, persistedAttachments });
+    prompt = opening.prompt;
+    const answer = this.openingAnswer(runId, state, opening);
+    state.pendingHumanAsk = answer.askSeq === undefined && this.hasPendingHumanAsk(runId);
+
+    const turn: SessionTurn = { text: '', completedText: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
+    const sink = this.makeUiSink(runId, stepId);
+    const onEvent = (event: AgentEvent) => {
+      if (this.disposedSessionEvent(runId, state, event)) return;
+      if (event.type === 'image') {
+        const saved = this.persistAttachment(runId, event.mediaType, event.data);
+        if (saved) this.store.appendEvent(runId, { type: 'image', stepId, ...saved });
+        return;
+      }
+      if (event.type === 'text') {
+        this.clearUnreadInputTimer(state); // real content: the harness is working
+        this.clearHeldHumanInputTimer(state);
+        this.noteNoWaitNudgeContent(runId, state, event);
+        turn.text = appendTurnText(turn.text, event.text);
+        const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
+        if (text) this.store.appendEvent(runId, { type: 'text', text, stepId });
+        return;
+      }
+      if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
+      if (event.type === 'tool-call' || event.type === 'tool-result') {
+        this.clearUnreadInputTimer(state);
+        this.clearHeldHumanInputTimer(state);
+        this.noteNoWaitNudgeContent(runId, state, event);
+      }
+      this.store.appendEvent(runId, { ...event, stepId });
+      if (event.type === 'cost') this.recordReportedCost(runId, stepId, state, backend, event.usd);
+      if (event.type === 'error') { this.recordSessionFault(state, turn, event.message); return; }
+      if (turn.sessionError || state.agentInputError) return;
+      if (event.type === 'session') {
+        this.store.updateStep(runId, stepId, { sessionId: event.sessionId, backend,
+          ...(event.sessionTransport ? { sessionTransport: event.sessionTransport } : {}) });
+      }
+      if (event.type === 'token-usage') {
+        this.store.updateStep(runId, stepId, { tokensUsed: event.tokensUsed });
+      }
+      const wakeDelay = claudeScheduleWakeupDelay(event, backend);
+      if (wakeDelay !== undefined) turn.scheduleWakeup = wakeDelay;
+      if (event.type === 'turn-end') {
+        this.markTurnBoundary(runId, state, event);
+        if (!this.acknowledgeOpeningTurn(runId, state, answer)) return;
+        // Belt-and-braces: v2 `turn.completed` already flushed the delta
+        // coalescers; the v1 turn boundary flushes again (idempotent) so no
+        // buffered delta can outlive its turn.
+        sink.flushAll();
+        this.trackTurnEnd(runId, turn.text); // titleSummary + diffStat (#389)
+        const text = turn.text;
+        const completedText = turn.completedText;
+        turn.text = '';
+        turn.completedText = '';
+        turn.tail = 'none';
+        const turnWakeDelay = turn.scheduleWakeup;
+        turn.scheduleWakeup = undefined;
+        this.endTurn(runId, state, sink, { stepId, text, completedText, scheduleWakeup: turnWakeDelay });
+      }
+    };
+
+    const settings = await this.continuationLaunchSettings(runId, stepId, state, record, sessionId, backend, sink);
+    if (!settings) return;
+    if (state.cancelled) { this.settleContinuationPrelaunchCancel(runId, stepId, state); return; }
+    if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() }, state)) return;
+    this.applyContinuationSettings(runId, stepId, state, backend, settings);
+    const { runner, skipSkillOnResume } = this.continuationRunner(backend, sessionId, settings.owningStep);
+    // Re-expand the continued step's skill from the current registry (#790) BEFORE
+    // provisionSession. Materializing the skill used to sit after the pre-launch
+    // revalidation, so Stop during that await still launched with revoked tools.
+    // `record.systemPrompt` is only the extra prompt; the opening session put
+    // `skillSystemPrompt(skill)` in front. Skip that prefix only when this
+    // session resumes into its own thread on an in-thread runner — those
+    // already carry the playbook in history. A missing skill degrades to
+    // today's extra-only prompt with one lifecycle warning; in-thread skips
+    // do not warn. Workers still inherit only the extra prompt (#778).
+    const pendingSkills = this.continuationSkills(runId, state, prompt, settings.toolsStep, skipSkillOnResume);
+    const skills = pendingSkills
+      ? await pendingSkills
+      : { skillPrompt: undefined, fallbackSkillPrompt: undefined, files: new Map<string, string>() };
+    state.currentStepId = stepId;
+    this.beginUsageInvocation(runId, state, stepId);
+    // A continuation's opening message becomes the session's `userPrompt` and never passes
+    // through `deliverMessage`, so it needs the SAME delivery-only `/skill` rewrite the
+    // live path applies (#811). Delivery-only: the `user-message` event above already
+    // persisted the user's original text, and the transcript must keep showing that.
+    state.agentSessionError = undefined;
+    if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
+    const delegation = this.provisionSession(runId, state);
+    // Read before the cancellation checks below, which also cover this await (#1576).
+    const webhooksPart = await this.agentWebhooksPart();
+    const ciTools = await this.provisionCiSession(runId, state);
+    // Stop/Finish can arrive while the local tool controller is starting.
+    if (this.launchStale(runId, state, delegation, ciTools)) {
+      this.settleStaleContinuationLaunch(runId, stepId, state, { stepId, sessionId, backend, prompt, images });
+      return;
+    }
+    state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
+    const session = this.startContinuationSession(runId, state, runner, {
+      stepId, sessionId, prompt, setupNote, opening, skills, skipSkillOnResume, settings, delegation, webhooksPart, ciTools,
+    }, onEvent, turn, sink);
+    return this.awaitContinuationSession(runId, state, session, { stepId, sink, turn, delegation, ciTools });
+  }
+
+  /** Where a Continue runs: an owned worker's verified workspace, or the task's worktree, which
+   *  retention may have reclaimed (#483), else the repository root. Returns undefined after an
+   *  unavailable owned workspace failed the run. */
+  private async continuationWorkspace(
+    runId: string,
+    stepId: string,
+    record: RunRecord | undefined,
+  ): Promise<{ cwd: string; rematerialized: boolean } | undefined> {
+    if (record?.delegation?.role === 'worker') {
+      const cwd = await this.ownedContinuationWorkspace(runId, stepId, record, record.delegation);
+      return cwd === undefined ? undefined : { cwd, rematerialized: false };
+    }
+    // Retention (#483) rebuilt a reclaimed directory: a bare checkout that needs setup again (#917).
+    const rematerialized = await rematerializeReclaimedWorktree(this.repoRoot, this.store, runId);
+    const cwd = record?.worktreePath && existsSync(record.worktreePath) ? record.worktreePath : this.repoRoot;
+    return { cwd, rematerialized };
+  }
+
+  /** An owned worker's workspace for a Continue, verified with its parent's context. Returns
+   *  undefined after it failed the run: owned workers never adopt or recreate an unverified resource. */
+  private async ownedContinuationWorkspace(
+    runId: string,
+    stepId: string,
+    record: RunRecord,
+    delegation: WorkerDelegationRecord,
+  ): Promise<string | undefined> {
+    try {
+      if (delegation.destroy) throw new Error('Worker destruction has begun');
+      const cwd = (await verifyOwnedWorkspace(this.repoRoot, record)).path;
+      await verifyWorkerContext({ dataDir: this.dataDir, parentId: delegation.parentRunId, workspace: delegation.workspace, context: delegation.context,
+        parentCwd: this.store.getRun(delegation.parentRunId)?.worktreePath ?? this.repoRoot });
+      return cwd;
+    } catch (error) {
+      const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
+      const finishedAt = new Date().toISOString();
+      this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt });
+      this.store.updateRun(runId, { status: 'failed', error: message, finishedAt, currentStepId: undefined });
+      this.store.appendEvent(runId, { type: 'lifecycle', message });
+      this.starting.delete(runId);
+      this.dropActive(runId);
+      return undefined;
+    }
+  }
+
+  /** A Stop that arrived while the Continue resolved its workspace cancels the run before it
+   *  becomes active. */
+  private settleStoppedContinuation(runId: string): boolean {
+    if (!this.store.getRun(runId)?.stopping) return false;
+    this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+    this.starting.delete(runId);
+    this.dropActive(runId);
+    return true;
+  }
+
+  /** The repository-root lease of a Continue that runs in the repository root. Returns undefined
+   *  when no lease is needed, so that path does not yield, else whether the lease was granted. */
+  private continuationRepoRootLease(runId: string, state: ActiveRun): Promise<boolean> | undefined {
+    if (state.cwd !== this.repoRoot) return undefined;
+    if (repositoryRootLockDisabled()) {
+      this.store.appendEvent(runId, {
+        type: 'note',
+        message: REPOSITORY_ROOT_LOCK_DISABLED_NOTE,
+      });
+      return undefined;
+    }
+    this.store.appendEvent(runId, {
+      type: 'note',
+      message: 'waiting for exclusive access to the repository working tree',
+    });
+    return this.acquireContinuationRepoRoot(runId, state);
+  }
+
+  /** Wait for the repository-root lease; a Stop during the wait cancels the run. */
+  private async acquireContinuationRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
+    if (await this.acquireRepoRoot(runId, state)) return true;
+    this.store.updateRun(runId, {
+      status: 'cancelled',
+      finishedAt: new Date().toISOString(),
+      currentStepId: undefined,
+    });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+    this.dropActive(runId);
+    return false;
+  }
+
+  /** Arm autosave, seed the handoff file, and run worktree setup. Returns setup's note for the
+   *  opening message. */
+  private async prepareContinuationWorktree(
+    runId: string,
+    state: ActiveRun,
+    record: RunRecord | undefined,
+    rematerialized: boolean,
+  ): Promise<string | undefined> {
+    this.armAutosave(runId, state);
+    if (record) seedHandoffFile(this.dataDir, record); // idempotent — normally already there
+    // Worktree setup (#917) for a directory retention rebuilt, or one a restart interrupted.
+    return this.prepareWorktree(
+      runId,
+      state,
+      (await loadConfig(this.repoRoot)).worktreeSetup,
+      (event) => this.store.appendEvent(runId, event),
+      rematerialized ? 'rematerialized' : 'resume',
+    );
+  }
+
+  /** Mark the run and the Continue's step as running, then open the step. A Cursor session resumes
+   *  on the transport it was opened with. */
+  private startContinuationStep(
+    runId: string,
+    stepId: string,
+    record: RunRecord | undefined,
+    sessionId: string | undefined,
+    backend: RunnerId,
+  ): void {
     this.store.updateRun(runId, {
       status: 'running',
       error: undefined,
@@ -7262,12 +7470,17 @@ export class RunManager {
       } : {}),
     });
     this.store.appendEvent(runId, { type: 'step-start', stepId, name: 'Continue', kind: 'agent', iteration: 1 });
-    // Attachments pasted into the follow-up composer, on the same terms as a live-session
-    // message (#357): persisted to the run's own attachment store so the thread renders the
-    // bubble's images rather than a bare count, and handed to the agent as absolute paths
-    // appended to the prompt (so it can operate on them — and because codex/opencode drop image
-    // blocks before they reach the model). An image ALSO rides along as a base64 block so the
-    // model can view it; a file (#950) has nothing to view and travels as its path alone.
+  }
+
+  /** A Continue's opening message: the checkpoint's agent input with its outcome, its images and
+   *  attachments, and the `user-message` event that shows it. */
+  private continuationOpening(
+    runId: string,
+    stepId: string,
+    state: ActiveRun,
+    record: RunRecord | undefined,
+    input: { prompt: string; images: PastedContent[]; persistedImages: ContentBlock[]; persistedAttachments: PersistedAttachment[] },
+  ): ContinuationOpening {
     const checkpoint = record?.continuationMessage;
     state.openingAgentInputId = checkpoint?.agentInputId;
     const openingInput = record?.agentInputs?.find(input => input.id === checkpoint?.agentInputId);
@@ -7276,12 +7489,9 @@ export class RunManager {
     // A parent's answer to a routed question (#505) is shown as its conversation reply, not
     // as a human message, and its own reply outcome is not news to the worker.
     const parentAnswer = openingInput?.conversation?.kind === 'reply' && this.routedAsk(runId) !== undefined;
+    let prompt = input.prompt;
     if (openingInput && !parentAnswer) prompt += this.agentInputOutcomeText(openingInput);
-    const saved = this.readPersistedAttachments(
-      runId, checkpoint?.id === stepId ? checkpoint.images ?? [] : [], 'continuation',
-    );
-    const openingImages = [...(images.length ? contentBlocksOf(images) : saved.blocks), ...persistedImages];
-    const attachments = [...saved.attachments, ...persistedAttachments];
+    const { openingImages, attachments } = this.continuationImages(runId, stepId, checkpoint, input);
     if (checkpoint?.origin !== 'lifecycle' && !parentAnswer) this.store.appendEvent(runId, {
       type: 'user-message',
       stepId,
@@ -7289,158 +7499,105 @@ export class RunManager {
       imageCount: openingImages.filter((b) => b.type === 'image').length,
       ...(attachments.length ? { images: attachments.map((saved) => saved.url) } : {}),
     });
-    let openingAnswerAskSeq = checkpoint?.origin === 'human' ? this.pendingHumanAskSeq(runId) : undefined;
-    state.openingAnswerAskSeq = openingAnswerAskSeq;
+    return { prompt, checkpoint, parentAnswer, openingImages, attachments };
+  }
+
+  /** A Continue's opening images and attachments. */
+  private continuationImages(
+    runId: string,
+    stepId: string,
+    checkpoint: RunRecord['continuationMessage'],
+    input: { images: PastedContent[]; persistedImages: ContentBlock[]; persistedAttachments: PersistedAttachment[] },
+  ): { openingImages: ContentBlock[]; attachments: PersistedAttachment[] } {
+    // Attachments pasted into the follow-up composer, on the same terms as a live-session
+    // message (#357): persisted to the run's own attachment store so the thread renders the
+    // bubble's images rather than a bare count, and handed to the agent as absolute paths
+    // appended to the prompt (so it can operate on them — and because codex/opencode drop image
+    // blocks before they reach the model). An image ALSO rides along as a base64 block so the
+    // model can view it; a file (#950) has nothing to view and travels as its path alone.
+    const saved = this.readPersistedAttachments(
+      runId, checkpoint?.id === stepId ? checkpoint.images ?? [] : [], 'continuation',
+    );
+    const openingImages = [...(input.images.length ? contentBlocksOf(input.images) : saved.blocks), ...input.persistedImages];
+    const attachments = [...saved.attachments, ...input.persistedAttachments];
+    return { openingImages, attachments };
+  }
+
+  /** The human ask a human Continue answers, and the human waits that answer settles. */
+  private openingAnswer(runId: string, state: ActiveRun, opening: ContinuationOpening): OpeningAnswer {
+    const askSeq = opening.checkpoint?.origin === 'human' ? this.pendingHumanAskSeq(runId) : undefined;
+    state.openingAnswerAskSeq = askSeq;
     // The human waits this answer answers; one the opening turn opens is its next question.
-    const openingAnswerWaits = openingAnswerAskSeq === undefined ? []
+    const waits = askSeq === undefined ? []
       : openWaits(this.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
-    state.pendingHumanAsk = openingAnswerAskSeq === undefined && this.hasPendingHumanAsk(runId);
+    return { askSeq, waits, parentAnswer: opening.parentAnswer };
+  }
 
-    let turnText = '';
-    let completedAssistantText = '';
-    let turnTail: TurnTail = 'none';
-    let scheduleWakeup: number | null | undefined;
-    let sessionError: string | undefined;
-    const sink = this.makeUiSink(runId, stepId);
-    const onEvent = (event: AgentEvent) => {
-      if (this.isDisposedDelegatedRun(runId)) {
-        if (event.type === 'error') state.session?.interrupt();
-        return;
-      }
-      if (event.type === 'image') {
-        const saved = this.persistAttachment(runId, event.mediaType, event.data);
-        if (saved) this.store.appendEvent(runId, { type: 'image', stepId, ...saved });
-        return;
-      }
-      if (event.type === 'text') {
-        this.clearUnreadInputTimer(state); // real content: the harness is working
-        this.clearHeldHumanInputTimer(state);
-        this.noteNoWaitNudgeContent(runId, state, event);
-        turnText = appendTurnText(turnText, event.text);
-        const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
-        if (text) this.store.appendEvent(runId, { type: 'text', text, stepId });
-        return;
-      }
-      if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
-      if (event.type === 'tool-call' || event.type === 'tool-result') {
-        this.clearUnreadInputTimer(state);
-        this.clearHeldHumanInputTimer(state);
-        this.noteNoWaitNudgeContent(runId, state, event);
-      }
-      this.store.appendEvent(runId, { ...event, stepId });
-      if (event.type === 'cost') this.recordReportedCost(runId, stepId, state, backend, event.usd);
-      if (event.type === 'error') {
-        // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
-        sessionError ??= state.agentInputError ?? event.message;
-        state.agentSessionError = sessionError;
-        state.session?.interrupt();
-        return;
-      }
-      if (sessionError || state.agentInputError) return;
-      if (event.type === 'session') {
-        this.store.updateStep(runId, stepId, { sessionId: event.sessionId, backend,
-          ...(event.sessionTransport ? { sessionTransport: event.sessionTransport } : {}) });
-      }
-      if (event.type === 'token-usage') {
-        this.store.updateStep(runId, stepId, { tokensUsed: event.tokensUsed });
-      }
-      const wakeDelay = claudeScheduleWakeupDelay(event, backend);
-      if (wakeDelay !== undefined) scheduleWakeup = wakeDelay;
-      if (event.type === 'turn-end') {
-        this.retireUnreadInputs(runId, state, event.unconsumedInputIds ?? [], false);
-        this.readBundledInputs(runId, state);
-        state.waitWakeTurn = undefined;
-        state.atTurnBoundary = state.session;
-        state.ciTurnId = randomUUID();
-        // A completed turn acknowledges the opening payload. Until then a restart
-        // must replay it, including a crash after startSession but before delivery.
-        if (!state.cancelled) {
-          if (state.openingAgentInputId && state.session?.open) {
-            const id = state.openingAgentInputId;
-            const deliveredAt = new Date().toISOString();
-            try {
-              // The successful opening turn handled its instruction: delivered and read (#505).
-              this.store.commitAgentInputs(runId, (this.store.getRun(runId)?.agentInputs ?? []).map(input => {
-                if (input.id !== id) return input;
-                const { awaitingRead: _awaiting, ...handled } = input;
-                return { ...handled, deliveredAt: input.deliveredAt ?? deliveredAt, consumedAt: input.consumedAt ?? deliveredAt };
-              }), id);
-            } catch (error) {
-              state.agentInputError = `agent input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
-              try { state.session.interrupt(); } finally {
-                try { this.store.appendEvent(runId, { type: 'error', message: state.agentInputError }); }
-                catch { console.error(`[cez] ${state.agentInputError}`); }
-              }
-              return;
-            }
-            state.openingAgentInputId = undefined;
-            this.reconcileWorkerWaits();
-          }
-          if (openingAnswerAskSeq !== undefined && state.session?.open) {
-            this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: openingAnswerAskSeq, ...(parentAnswer ? { source: 'parent' } : {}) });
-            this.settleHumanWaits(runId, openingAnswerWaits);
-            openingAnswerAskSeq = undefined;
-            state.openingAnswerAskSeq = undefined;
-          }
-          this.store.updateRun(runId, { continuationMessage: undefined });
-          this.store.flush();
-        }
-        // Belt-and-braces: v2 `turn.completed` already flushed the delta
-        // coalescers; the v1 turn boundary flushes again (idempotent) so no
-        // buffered delta can outlive its turn.
-        sink.flushAll();
-        this.trackTurnEnd(runId, turnText); // titleSummary + diffStat (#389)
-        const text = turnText;
-        const completedText = completedAssistantText;
-        turnText = '';
-        completedAssistantText = '';
-        turnTail = 'none';
-        const turnWakeDelay = scheduleWakeup;
-        scheduleWakeup = undefined;
-        this.endTurn(runId, state, sink, { stepId, text, completedText, scheduleWakeup: turnWakeDelay });
-      }
-    };
+  /**
+   * A completed turn acknowledges the opening payload. Until then a restart
+   * must replay it, including a crash after startSession but before delivery.
+   * Returns false when the opening input's checkpoint failed, and the turn end stops there.
+   */
+  private acknowledgeOpeningTurn(runId: string, state: ActiveRun, answer: OpeningAnswer): boolean {
+    if (state.cancelled) return true;
+    if (state.openingAgentInputId && state.session?.open) {
+      if (!this.acknowledgeOpeningInput(runId, state, state.session, state.openingAgentInputId)) return false;
+    }
+    if (answer.askSeq !== undefined && state.session?.open) {
+      this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: answer.askSeq, ...(answer.parentAnswer ? { source: 'parent' } : {}) });
+      this.settleHumanWaits(runId, answer.waits);
+      answer.askSeq = undefined;
+      state.openingAnswerAskSeq = undefined;
+    }
+    this.store.updateRun(runId, { continuationMessage: undefined });
+    this.store.flush();
+    return true;
+  }
 
-    // Backend + model come off the record: the run's current backend by default, or the
-    // follow-up override that `continueRun` persisted before scheduling (#401).
-    const continueBackend = backend;
-    /** Settle this turn as a failure before anything is spawned — the shape both
-     *  pre-spawn gates below need (model identity, #405; temp directory, #785). */
-    const failBeforeSpawn = (message: string): void => {
-      const failedAt = new Date().toISOString();
-      sink.sessionEnded('error', message);
-      this.store.updateStep(runId, stepId, {
-        status: 'failed',
-        error: message,
-        finishedAt: failedAt,
-      });
-      this.store.updateRun(runId, {
-        status: 'failed',
-        error: `continue failed: ${message}`,
-        finishedAt: failedAt,
-        currentStepId: undefined,
-      });
-      this.store.appendEvent(runId, {
-        type: 'lifecycle',
-        message: `continue failed — ${message}`,
-      });
-      this.dropActive(runId);
-    };
-    // Apply the SAME canonical-identity gate the first spawn applies (#405, review M1).
-    // A follow-up may switch both runner and model (#401), so without this the record keeps
-    // asserting the identity the run STARTED with while a different model serves the turn —
-    // the exact defect that PR existed to remove — and the raw record string reaches the CLI
-    // in the un-normalised wire form the first step already converted away (`anthropic/opus`
-    // instead of `opus`). Fail loud here too rather than let the backend pick a default.
-    let continueModel: string | undefined;
-    let resumeWorkflow: { workflow: WorkflowDef; input: StartRunInput; startAt: number } | undefined;
+  /** Record the opening agent input as delivered and read. A failed checkpoint records an agent
+   *  input error, interrupts the session and returns false. */
+  private acknowledgeOpeningInput(runId: string, state: ActiveRun, session: AgentSession, id: string): boolean {
+    const deliveredAt = new Date().toISOString();
+    try {
+      // The successful opening turn handled its instruction: delivered and read (#505).
+      this.store.commitAgentInputs(runId, (this.store.getRun(runId)?.agentInputs ?? []).map(input => {
+        if (input.id !== id) return input;
+        const { awaitingRead: _awaiting, ...handled } = input;
+        return { ...handled, deliveredAt: input.deliveredAt ?? deliveredAt, consumedAt: input.consumedAt ?? deliveredAt };
+      }), id);
+    } catch (error) {
+      state.agentInputError = `agent input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
+      try { session.interrupt(); } finally {
+        try { this.store.appendEvent(runId, { type: 'error', message: state.agentInputError }); }
+        catch { console.error(`[cez] ${state.agentInputError}`); }
+      }
+      return false;
+    }
+    state.openingAgentInputId = undefined;
+    this.reconcileWorkerWaits();
+    return true;
+  }
+
+  /**
+   * What a Continue runs with. Backend + model come off the record: the run's current backend by
+   * default, or the follow-up override that `continueRun` persisted before scheduling (#401).
+   * Returns undefined after a pre-spawn gate failed the turn.
+   */
+  private async continuationLaunchSettings(
+    runId: string,
+    stepId: string,
+    state: ActiveRun,
+    record: RunRecord | undefined,
+    sessionId: string | undefined,
+    backend: RunnerId,
+    sink: UiEventSink,
+  ): Promise<ContinuationSettings | undefined> {
     // Resuming reattaches to a session that lives inside ONE account's config dir, so the
     // continuation must run under the account that created it — not whatever the project has
     // been switched to since. The owning step is the one carrying this session id.
     const owningStep = sessionId === undefined
       ? undefined
       : record?.steps.find((s) => s.sessionId === sessionId);
-    const resumedProfileId = owningStep?.profileId;
     // An owned worker's turn runs under the identity pinned for the step it extends (#452).
     const toolsStep = this.continuationDefStep(record, sessionId);
     const stepIdentity = this.workerStep(runId, toolsStep?.id);
@@ -7455,120 +7612,177 @@ export class RunManager {
     // agent step. A legacy record without `workflowDef` (#367), or a session no step owns,
     // keeps today's defaults.
     const grants = stepIdentity?.grants ?? {
-      allowedTools: allowedToolsForStep(toolsStep, continueBackend), bashAllowlist: toolsStep?.bashAllowlist,
+      allowedTools: allowedToolsForStep(toolsStep, backend), bashAllowlist: toolsStep?.bashAllowlist,
     };
+    const model = await this.continuationModel(runId, state, record, toolsStep, stepIdentity, backend);
+    if (typeof model === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, model); return undefined; }
+    const effort = this.continuationEffort(record, toolsStep, stepIdentity);
+    if (typeof effort === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, effort); return undefined; }
+    // The temp-directory preflight (#785) rides along with the account resolution: a resumed
+    // turn hits the same broken `/tmp` a fresh one would, and an agent whose shell silently
+    // returns nothing is worse than a turn that refuses to start and says why. So does an account
+    // that would open another folder than the one its session lives in (#1283).
+    const profile = await this.stepProfileFor(runId, backend, {
+      recordedProfileId: owningStep?.profileId,
+      stepId: toolsStep?.id,
+    });
+    if (typeof profile === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, profile); return undefined; }
+    return {
+      owningStep, toolsStep, grants, backendModel: model.backendModel, effort: effort.effort, profile,
+      extraSystemPrompt: record?.systemPrompt,
+    };
+  }
+
+  /** Settle this turn as a failure before anything is spawned — the shape every
+   *  pre-spawn gate needs (model identity, #405; temp directory, #785). */
+  private failContinuationBeforeSpawn(runId: string, stepId: string, sink: UiEventSink, message: string): void {
+    const failedAt = new Date().toISOString();
+    sink.sessionEnded('error', message);
+    this.store.updateStep(runId, stepId, {
+      status: 'failed',
+      error: message,
+      finishedAt: failedAt,
+    });
+    this.store.updateRun(runId, {
+      status: 'failed',
+      error: `continue failed: ${message}`,
+      finishedAt: failedAt,
+      currentStepId: undefined,
+    });
+    this.store.appendEvent(runId, {
+      type: 'lifecycle',
+      message: `continue failed — ${message}`,
+    });
+    this.dropActive(runId);
+  }
+
+  /**
+   * The model a Continue runs with, or the model identity error's message.
+   * Apply the SAME canonical-identity gate the first spawn applies (#405, review M1).
+   * A follow-up may switch both runner and model (#401), so without this the record keeps
+   * asserting the identity the run STARTED with while a different model serves the turn —
+   * the exact defect that PR existed to remove — and the raw record string reaches the CLI
+   * in the un-normalised wire form the first step already converted away (`anthropic/opus`
+   * instead of `opus`). Fail loud here too rather than let the backend pick a default.
+   */
+  private async continuationModel(
+    runId: string,
+    state: ActiveRun,
+    record: RunRecord | undefined,
+    toolsStep: WorkflowStepDef | undefined,
+    stepIdentity: WorkerStepIdentity | undefined,
+    backend: RunnerId,
+  ): Promise<{ backendModel: string | undefined } | string> {
     // The owning step's authored `model` wins over the run-level pin, exactly as the first
     // spawn resolved `step.model ?? input.model` (#464 review): a catalog worker keeps the
     // parent's inherited model at run level, so reading only the record silently switched a
     // step authored for another model on Continue.
     try {
       const normalized = normalizeModelForBackend(
-        continueBackend,
+        backend,
         agentModelsLocked(this.repoRoot) ? undefined : stepIdentity ? stepIdentity.model : toolsStep?.model ?? record?.model,
-        { configuredProvider: await configuredModelProvider(continueBackend, state.cwd) },
+        { configuredProvider: await configuredModelProvider(backend, state.cwd) },
       );
-      continueModel = normalized?.backendModel;
       this.store.updateRun(runId, {
         modelIdentity: normalized ? formatModelIdentity(normalized.identity) : undefined,
       });
+      return { backendModel: normalized?.backendModel };
     } catch (err) {
       if (!(err instanceof ModelIdentityError)) throw err;
-      failBeforeSpawn(err.message);
-      return;
+      return err.message;
     }
-    let continueEffort: string | undefined;
+  }
+
+  /** The effort a Continue runs at, or the message of the error that refuses it: an owned worker's
+   *  pinned effort, else the continued step's authored one, else the run's; unset when the project
+   *  locks agent models. */
+  private continuationEffort(
+    record: RunRecord | undefined,
+    toolsStep: WorkflowStepDef | undefined,
+    stepIdentity: WorkerStepIdentity | undefined,
+  ): { effort: string | undefined } | string {
     try {
       const modelsLocked = agentModelsLocked(this.repoRoot);
       const authoredStepEffort = toolsStep?.effort !== undefined;
       if (modelsLocked && toolsStep?.effort?.trim()) throw new Error(AGENT_MODELS_LOCKED_ERROR);
       const stepEffort = parseDelegationEffort(toolsStep?.effort);
-      continueEffort = modelsLocked
-        ? undefined
-        : stepIdentity ? stepIdentity.effort : authoredStepEffort ? stepEffort : record?.effort;
+      return {
+        effort: modelsLocked
+          ? undefined
+          : stepIdentity ? stepIdentity.effort : authoredStepEffort ? stepEffort : record?.effort,
+      };
     } catch (err) {
-      failBeforeSpawn(err instanceof Error ? err.message : String(err));
-      return;
+      return err instanceof Error ? err.message : String(err);
     }
-    // The temp-directory preflight (#785) rides along with the account resolution: a resumed
-    // turn hits the same broken `/tmp` a fresh one would, and an agent whose shell silently
-    // returns nothing is worse than a turn that refuses to start and says why. So does an account
-    // that would open another folder than the one its session lives in (#1283).
-    let continueProfile: Awaited<ReturnType<RunManager['agentEnvForStep']>>;
-    try {
-      continueProfile = await this.agentEnvForStep(runId, continueBackend, {
-        recordedProfileId: resumedProfileId,
-        stepId: toolsStep?.id,
-      });
-    } catch (err) {
-      if (!(err instanceof AgentTempDirError || err instanceof AgentAccountUnavailableError)) throw err;
-      failBeforeSpawn(err.message);
-      return;
-    }
-    const settlePrelaunchCancellation = () => {
-      this.store.updateStep(runId, stepId, { status: 'cancelled' });
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentStepId: undefined });
-      this.clearAutosaveTimer(state); this.dropActive(runId);
-    };
-    if (state.cancelled) { settlePrelaunchCancellation(); return; }
-    if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() }, state)) return;
-    this.store.updateStep(runId, stepId, { profileId: continueProfile.profileId });
+  }
 
-    state.delegationSettings = { cwd: state.cwd, runner: continueBackend, model: continueModel,
-      effort: continueEffort, agentProfile: continueProfile.profileId, accountBinding: continueProfile.accountBinding,
-      systemPrompt: record?.systemPrompt, allowedTools: grants.allowedTools, bashAllowlist: grants.bashAllowlist };
-    const sessionTransport = sessionId !== undefined && continueBackend === 'cursor'
+  /** Record the Continue's account on its step and the settings its workers inherit. */
+  private applyContinuationSettings(
+    runId: string,
+    stepId: string,
+    state: ActiveRun,
+    backend: RunnerId,
+    settings: ContinuationSettings,
+  ): void {
+    this.store.updateStep(runId, stepId, { profileId: settings.profile.profileId });
+    state.delegationSettings = { cwd: state.cwd, runner: backend, model: settings.backendModel,
+      effort: settings.effort, agentProfile: settings.profile.profileId, accountBinding: settings.profile.accountBinding,
+      systemPrompt: settings.extraSystemPrompt, allowedTools: settings.grants.allowedTools, bashAllowlist: settings.grants.bashAllowlist };
+  }
+
+  /** The Continue's runner, and whether it resumes into a thread that already holds the skill
+   *  playbook. A resumed Cursor session keeps the transport it was opened with. */
+  private continuationRunner(
+    backend: RunnerId,
+    sessionId: string | undefined,
+    owningStep: RunRecord['steps'][number] | undefined,
+  ): { runner: ReturnType<typeof createRunner>; skipSkillOnResume: boolean } {
+    const sessionTransport = sessionId !== undefined && backend === 'cursor'
       ? owningStep?.sessionTransport ?? 'cursor-acp'
       : undefined;
-    const runner = createRunner(continueBackend, sessionTransport ? { sessionTransport } : {});
-    // Re-expand the continued step's skill from the current registry (#790) BEFORE
-    // provisionSession. Materializing the skill used to sit after the pre-launch
-    // revalidation, so Stop during that await still launched with revoked tools.
-    // `record.systemPrompt` is only the extra prompt; the opening session put
-    // `skillSystemPrompt(skill)` in front. Skip that prefix only when this
-    // session resumes into its own thread on an in-thread runner — those
-    // already carry the playbook in history. A missing skill degrades to
-    // today's extra-only prompt with one lifecycle warning; in-thread skips
-    // do not warn. Workers still inherit only the extra prompt (#778).
-    const skipSkillOnResume = sessionId !== undefined && runner.systemPromptOnResume === 'in-thread';
-    let continuationSkillPrompt: string | undefined;
-    let fallbackSkillPrompt: string | undefined;
+    const runner = createRunner(backend, sessionTransport ? { sessionTransport } : {});
+    return { runner, skipSkillOnResume: sessionId !== undefined && runner.systemPromptOnResume === 'in-thread' };
+  }
+
+  /** The continued step's skill files and playbook, when the step names a skill or the prompt
+   *  starts with a `/name`. Returns undefined otherwise, so that path does not yield. */
+  private continuationSkills(
+    runId: string,
+    state: ActiveRun,
+    prompt: string,
+    toolsStep: WorkflowStepDef | undefined,
+    skipSkillOnResume: boolean,
+  ): Promise<ContinuationSkills> | undefined {
     const continuedSkillName = toolsStep?.skill;
     // The continued step's skill and a leading `/name` in this prompt both get their companions;
     // upstream rebuilt only the slash name, so an ordinary Continue lost the step skill's (#1408).
     const continuationSlash = leadingSlashSkillName(prompt);
-    let continuationFiles = new Map<string, string>();
+    if (!continuedSkillName && !continuationSlash) return undefined;
+    return this.provisionContinuationSkills(runId, state, continuedSkillName, continuationSlash, skipSkillOnResume);
+  }
+
+  /** Reinstall the continued step's skill and a leading `/name`'s, and build the playbook. */
+  private async provisionContinuationSkills(
+    runId: string,
+    state: ActiveRun,
+    continuedSkillName: string | undefined,
+    continuationSlash: string | undefined,
+    skipSkillOnResume: boolean,
+  ): Promise<ContinuationSkills> {
+    let skillPrompt: string | undefined;
+    let fallbackSkillPrompt: string | undefined;
+    let files = new Map<string, string>();
     if (continuedSkillName) {
       let skill = this.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
-      if (!skill) {
-        // Boot recovery can outrun the async team-skills cache (`getTeamSkillsCached`
-        // returns [] until `initialTeamSkillsLoad` resolves). Wait briefly, then
-        // re-discover; never hang Continue on the network. The on-disk clone's
-        // list arrives before the passive fetch (#859), so stop as soon as it
-        // names this skill instead of waiting out a slow first fetch of the day.
-        try {
-          await new Promise<void>((resolve) => {
-            const timeout = setTimeout(resolve, 1_500);
-            timeout.unref?.();
-            const settle = () => { clearTimeout(timeout); resolve(); };
-            waitForTeamSkills(this.repoRoot).then(settle, settle);
-            waitForCachedTeamSkills(this.repoRoot).then((cached) => {
-              if (cached.some((candidate) => candidate.name === continuedSkillName)) settle();
-            }, () => undefined);
-          });
-          state.skills = await this.discoverSkills().catch(() => state.skills ?? []);
-          skill = this.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
-        } catch {
-          // Best-effort — a slow or failing team-skills load must not fail Continue.
-        }
-      }
+      if (!skill) skill = await this.awaitContinuedSkill(state, continuedSkillName);
       if (skill) {
         // Reinstall the skill and its companions — into a #483 rematerialized
         // worktree, or a team skill's cache copy when the worktree is gone — before
         // the playbook, which names a cache copy's directory (#1024, #1408). No note on Continue.
-        continuationFiles = (await this.provisionRunSkills(runId, state, { stepSkill: skill.name, slash: continuationSlash })).filesDir;
-        const playbook = skillSystemPrompt(skill, continuationFiles.get(skill.name));
+        files = (await this.provisionRunSkills(runId, state, { stepSkill: skill.name, slash: continuationSlash })).filesDir;
+        const playbook = skillSystemPrompt(skill, files.get(skill.name));
         if (skipSkillOnResume) fallbackSkillPrompt = playbook;
-        else continuationSkillPrompt = playbook;
+        else skillPrompt = playbook;
       } else if (!skipSkillOnResume) {
         this.store.appendEvent(runId, {
           type: 'lifecycle',
@@ -7577,104 +7791,149 @@ export class RunManager {
       }
     }
     if (!continuedSkillName || !this.enabledSkills(state).some((candidate) => candidate.name === continuedSkillName)) {
-      if (continuationSlash) continuationFiles = (await this.provisionRunSkills(runId, state, { slash: continuationSlash })).filesDir;
+      if (continuationSlash) files = (await this.provisionRunSkills(runId, state, { slash: continuationSlash })).filesDir;
     }
-    state.currentStepId = stepId;
-    this.beginUsageInvocation(runId, state, stepId);
-    // A continuation's opening message becomes the session's `userPrompt` and never passes
-    // through `deliverMessage`, so it needs the SAME delivery-only `/skill` rewrite the
-    // live path applies (#811). Delivery-only: the `user-message` event above already
-    // persisted the user's original text, and the transcript must keep showing that.
-    state.agentSessionError = undefined;
-    let session: AgentSession | undefined;
-    if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
-    const delegation = this.provisionSession(runId, state);
-    // Read before the cancellation checks below, which also cover this await (#1576).
-    const webhooksPart = await this.agentWebhooksPart();
-    const ciTools = await this.provisionCiSession(runId, state);
-    // Stop/Finish can arrive while the local tool controller is starting.
-    const launchRun = this.store.getRun(runId);
-    if (state.cancelled || this.workerExecutionStopped(runId) || this.active.get(runId) !== state ||
-      (launchRun && this.executionBlockedByRootFinish(launchRun))) {
-      ciTools?.revoke();
-      if (state.revokeCiTools === ciTools?.revoke) state.revokeCiTools = undefined;
-      delegation?.revoke();
-      if (state.revokeDelegation === delegation?.revoke) state.revokeDelegation = undefined;
-      if (this.active.get(runId) !== state) return;
-      if (state.cancelled || this.workerExecutionStopped(runId)) {
-        state.cancelled = true;
-        settlePrelaunchCancellation();
-      } else {
-        this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() }, state);
-      }
-      return;
-    }
-    state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
+    return { skillPrompt, fallbackSkillPrompt, files };
+  }
+
+  /** The continued step's skill when the registry did not list it yet. */
+  private async awaitContinuedSkill(state: ActiveRun, continuedSkillName: string): Promise<Skill | undefined> {
+    // Boot recovery can outrun the async team-skills cache (`getTeamSkillsCached`
+    // returns [] until `initialTeamSkillsLoad` resolves). Wait briefly, then
+    // re-discover; never hang Continue on the network. The on-disk clone's
+    // list arrives before the passive fetch (#859), so stop as soon as it
+    // names this skill instead of waiting out a slow first fetch of the day.
     try {
-    // Provisioning determines the actual capability, including a fresh session after recovery.
-    const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !!ciTools });
-    const resumedPrompt = withResumeContext(expandRegistrySlashSkillText(prompt, this.enabledSkills(state), continuationFiles) +
-      (setupNote ? `\n\n${setupNote}` : '') + (footer ? `\n\n${footer}` : ''), checkpoint);
-    const sessionContext = this.sessionContextFor(runId, state, stepId, resumedPrompt);
-    const openingPrompt = sessionContext.prefix + resumedPrompt;
-    const continuationTail = composeSystemPrompt(
-      record?.systemPrompt,
-      delegation?.instructions,
-      this.automationsPart(),
-      webhooksPart,
-      artifactInstructions(continueProfile.env.CEZ_ARTIFACTS_DIR),
-      handoffInstructions({ tools: !!ciTools, handoffInjected: sessionContext.handoffInjected }),
-    );
-    session = startManagedSession(runner,
-      {
-        // Skill body (when resent), then the run's extra system prompt, then
-        // the handoff contract — the same order as the opening session (#790).
-        // In-thread resume omits the skill from systemPrompt; OpenCode's 404
-        // fallback uses resumeFallbackSystemPrompt so the fresh session still
-        // gets the playbook.
-        systemPrompt: composeSystemPrompt(continuationSkillPrompt, continuationTail),
-        ...(skipSkillOnResume ? {
-          resumeFallbackSystemPrompt: composeSystemPrompt(fallbackSkillPrompt, continuationTail),
-        } : {}),
-        userPrompt: attachments.length
-          ? `${openingPrompt}\n\n${pastedAttachmentsText(attachments)}`
-          : openingPrompt,
-        ...(openingImages.length ? { images: openingImages } : {}),
-        cwd: state.cwd,
-        allowedTools: grants.allowedTools,
-        bashAllowlist: grants.bashAllowlist,
-        additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), continueProfile.env),
-        env: { ...continueProfile.env, ...delegation?.env, ...ciTools?.env },
-        ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
-        ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
-        model: continueModel,
-        effort: continueEffort,
-        sessionId,
-        resume: sessionId !== undefined,
-        timeoutMs: 0,
-      },
-      onEvent,
-      {
-        onUiEvent: (event) => {
-          completedAssistantText = appendCompletedAssistantText(completedAssistantText, event);
-          turnTail = trackTurnTail(turnTail, event);
-          if (event.type === 'turn.started') this.recordOpeningAccepted(runId, state);
-          this.handleRunnerUiEvent(runId, state, sink, event);
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(resolve, 1_500);
+        timeout.unref?.();
+        const settle = () => { clearTimeout(timeout); resolve(); };
+        waitForTeamSkills(this.repoRoot).then(settle, settle);
+        waitForCachedTeamSkills(this.repoRoot).then((cached) => {
+          if (cached.some((candidate) => candidate.name === continuedSkillName)) settle();
+        }, () => undefined);
+      });
+      state.skills = await this.discoverSkills().catch(() => state.skills ?? []);
+      return this.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
+    } catch {
+      // Best-effort — a slow or failing team-skills load must not fail Continue.
+      return undefined;
+    }
+  }
+
+  /** A Stop before the Continue's session spawned: cancel the step and the run. */
+  private settleContinuationPrelaunchCancel(runId: string, stepId: string, state: ActiveRun): void {
+    this.store.updateStep(runId, stepId, { status: 'cancelled' });
+    this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentStepId: undefined });
+    this.clearAutosaveTimer(state); this.dropActive(runId);
+  }
+
+  /** A Continue's launch went stale while it provisioned (`launchStale`). A replaced active run
+   *  needs nothing more; a Stop cancels the run; a root Finish holds the Continue in the queue. */
+  private settleStaleContinuationLaunch(
+    runId: string,
+    stepId: string,
+    state: ActiveRun,
+    held: Omit<PendingContinuation, 'lineJoinedAt'>,
+  ): void {
+    if (this.active.get(runId) !== state) return;
+    if (state.cancelled || this.workerExecutionStopped(runId)) {
+      state.cancelled = true;
+      this.settleContinuationPrelaunchCancel(runId, stepId, state);
+    } else {
+      this.holdContinuationForRootFinish(runId, { ...held, lineJoinedAt: Date.now() }, state);
+    }
+  }
+
+  /** Start a Continue's session, resuming its own session when it has one. A throw revokes the
+   *  tools this launch was given and propagates to `continueRun`. */
+  private startContinuationSession(
+    runId: string,
+    state: ActiveRun,
+    runner: ReturnType<typeof createRunner>,
+    launch: ContinuationSessionLaunch,
+    onEvent: (event: AgentEvent) => void,
+    turn: SessionTurn,
+    sink: UiEventSink,
+  ): AgentSession {
+    const { delegation, ciTools, opening, skills, settings } = launch;
+    let session: AgentSession | undefined;
+    try {
+      // Provisioning determines the actual capability, including a fresh session after recovery.
+      const resumed = this.launchOpening(runId, state, launch.stepId, {
+        body: expandRegistrySlashSkillText(launch.prompt, this.enabledSkills(state), skills.files) +
+          (launch.setupNote ? `\n\n${launch.setupNote}` : ''),
+        ciTools,
+        checkpoint: opening.checkpoint,
+      });
+      const continuationTail = this.launchSystemTail({
+        extraSystemPrompt: settings.extraSystemPrompt, delegation, webhooksPart: launch.webhooksPart,
+        env: settings.profile.env, ciTools, handoffInjected: resumed.handoffInjected,
+      });
+      session = startManagedSession(runner,
+        {
+          // Skill body (when resent), then the run's extra system prompt, then
+          // the handoff contract — the same order as the opening session (#790).
+          // In-thread resume omits the skill from systemPrompt; OpenCode's 404
+          // fallback uses resumeFallbackSystemPrompt so the fresh session still
+          // gets the playbook.
+          systemPrompt: composeSystemPrompt(skills.skillPrompt, continuationTail),
+          ...(launch.skipSkillOnResume ? {
+            resumeFallbackSystemPrompt: composeSystemPrompt(skills.fallbackSkillPrompt, continuationTail),
+          } : {}),
+          userPrompt: opening.attachments.length
+            ? `${resumed.userPrompt}\n\n${pastedAttachmentsText(opening.attachments)}`
+            : resumed.userPrompt,
+          ...(opening.openingImages.length ? { images: opening.openingImages } : {}),
+          cwd: state.cwd,
+          allowedTools: settings.grants.allowedTools,
+          bashAllowlist: settings.grants.bashAllowlist,
+          additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), settings.profile.env),
+          env: { ...settings.profile.env, ...delegation?.env, ...ciTools?.env },
+          ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
+          ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
+          model: settings.backendModel,
+          effort: settings.effort,
+          sessionId: launch.sessionId,
+          resume: launch.sessionId !== undefined,
+          timeoutMs: 0,
         },
-        onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
-        onAgentInputConsumed: (ids) => this.handleAgentInputConsumed(runId, state, session, ids),
-        onPidChange: (pid) => { replaceRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
-      },
-    );
+        onEvent,
+        {
+          onUiEvent: (event) => {
+            turn.completedText = appendCompletedAssistantText(turn.completedText, event);
+            turn.tail = trackTurnTail(turn.tail, event);
+            if (event.type === 'turn.started') this.recordOpeningAccepted(runId, state);
+            this.handleRunnerUiEvent(runId, state, sink, event);
+          },
+          onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
+          onAgentInputConsumed: (ids) => this.handleAgentInputConsumed(runId, state, session, ids),
+          onPidChange: (pid) => { replaceRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
+        },
+      );
     } catch (error) { ciTools?.revoke(); state.revokeCiTools = undefined; delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
+    return session;
+  }
+
+  /** Wait for a Continue's session to close, then settle the run by how it closed. Teardown always
+   *  revokes the launch's tools, saves the worktree and leaves the active set
+   *  (`releaseContinuationSession`). */
+  private async awaitContinuationSession(runId: string, state: ActiveRun, session: AgentSession, launch: {
+    stepId: string;
+    sink: UiEventSink;
+    turn: SessionTurn;
+    delegation: LaunchDelegation;
+    ciTools: LaunchCiTools;
+  }): Promise<void> {
+    const { stepId, sink, turn } = launch;
     const sessionClosed = this.trackWorkerSessionResult(runId, session);
     state.session = session;
     const resumedNext = this.continuationNextStep(runId);
     state.nextStep = stepScope(session, resumedNext);
     state.sessionEverOpened = true;
-    state.interrupt = () => session?.interrupt();
+    state.interrupt = () => session.interrupt();
     let setupComplete = false;
-    const finishedAt = () => new Date().toISOString();
+    const close: ContinuationClose = {};
     try {
       this.flushDeferred(runId);
       this.flushAgentInputs(runId);
@@ -7685,139 +7944,211 @@ export class RunManager {
       this.withdrawCezarHumanWaits(runId);
       this.persistWorkerAssistantResult(runId, stepId, result.text);
       // A durable CI wait keeps recovery live, not this failed attempt successful.
-      if (sessionError || state.agentInputError) throw new Error(sessionError ?? state.agentInputError);
-      if (this.holdsClosingWakes(runId) && !state.cancelled) {
-        sink.sessionEnded('end_turn');
-        // A clean close that leaves results undelivered is a failed delivery too.
-        const delivery = this.owesDelivery(runId) ? this.failedWakeDelivery(runId, WAKE_SESSION_CLOSED_ERROR) : 'park';
-        if (delivery === 'park') {
-          // No turn end will show a human wait this session registered (hearsay-tools/cezarion#1234).
-          this.surfaceHumanWait(runId, state);
-          this.store.updateRun(runId, { status: 'waiting' });
-          return;
-        }
-        this.store.updateStep(runId, stepId, { status: 'failed', error: WAKE_SESSION_CLOSED_ERROR, finishedAt: finishedAt() });
-        this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
-        appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
-        this.store.updateRun(runId, { status: 'failed', error: `continue failed: ${WAKE_SESSION_CLOSED_ERROR}`, finishedAt: finishedAt(), currentStepId: undefined });
-        this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${WAKE_SESSION_CLOSED_ERROR}` });
-        this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
-        return;
-      }
-      if (!state.cancelled) {
-        this.store.updateRun(runId, { continuationMessage: undefined });
-        this.store.flush();
-      }
-      sink.sessionEnded(state.cancelled ? 'cancelled' : 'end_turn');
-      if (state.cancelled) {
-        this.store.updateStep(runId, stepId, { status: 'cancelled', finishedAt: finishedAt() });
-        this.store.updateRun(runId, { status: 'cancelled', finishedAt: finishedAt(), currentStepId: undefined });
-        this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
-        appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=cancelled`);
-      } else if (this.stepLeftOpen(state, stepId, resumedNext)) {
-        await this.settleIncompleteContinuation(runId, stepId);
-      } else if (!state.idleClosed && !this.unansweredWorkflowAsk(runId, state)) {
-        this.store.updateStep(runId, stepId, { status: 'done', finishedAt: finishedAt() });
-        this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'done' });
-        const completed = this.store.getRun(runId);
-        const waitingIndex = completed ? this.waitingWorkflowStepIndex(completed) : -1;
-        if (completed?.workflowDef && waitingIndex >= 0) {
-          const waitingStep = completed.workflowDef.steps[waitingIndex]!;
-          // The continuation succeeded, not the failed attempt it recovered.
-          if (waitingStep.id !== completed.workflowResumeStepId) {
-            this.store.updateStep(runId, waitingStep.id, { status: 'done', finishedAt: finishedAt() });
-            this.store.appendEvent(runId, { type: 'step-end', stepId: waitingStep.id, status: 'done' });
-          }
-          // Finish accepts this resumed step before the async settlement gate,
-          // but must not launch the remaining workflow. A later cancellation
-          // may cancel still-live steps, never this completed one (R30).
-          if (!state.finishRequested && waitingIndex < completed.workflowDef.steps.length - 1) {
-            resumeWorkflow = {
-              workflow: completed.workflowDef,
-              startAt: waitingIndex + 1,
-              input: {
-                task: completed.task,
-                runner: completed.runner,
-                model: completed.model,
-                effort: completed.effort,
-                agentProfile: completed.agentProfile,
-                systemPrompt: completed.systemPrompt,
-                autonomous: completed.autonomous,
-                worktree: completed.worktree,
-              },
-            };
-            this.store.updateRun(runId, { status: 'queued', currentStepId: undefined, workflowResumeStepId: undefined });
-            // The workflow remainder is a crash boundary. Persist it before the
-            // finally block awaits worktree autosave and installs its in-memory job.
-            this.store.flush();
-            appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — remaining workflow queued`);
-          } else {
-            this.store.updateRun(runId, { workflowResumeStepId: undefined });
-            await this.settleSuccess(runId);
-            appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=done`);
-          }
-        } else {
-          await this.settleSuccess(runId);
-          appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=done`);
-        }
-      } else {
-        await this.settleIdleClosedRun(runId, state);
-      }
+      if (turn.sessionError || state.agentInputError) throw new Error(turn.sessionError ?? state.agentInputError);
+      const settled = this.settleClosedContinuation(runId, state, stepId, sink, resumedNext, close);
+      if (settled) await settled;
     } catch (err) {
       if (!setupComplete) {
         try { session.interrupt(); } catch { /* Still wait for actual termination. */ }
         await sessionClosed;
       }
       if (this.preserveRunAfterDisposal(runId, state)) return;
-      // Keep the provider failure that triggered teardown, even if teardown rejects.
-      const message = sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
-      sink.sessionEnded('error', message);
-      this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: finishedAt() });
-      appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
-      this.withdrawCezarHumanWaits(runId);
-      const delivery = this.holdsClosingWakes(runId) && !state.cancelled ? this.failedWakeDelivery(runId, message) : 'settle';
-      if (delivery === 'park') {
-        // Retain the wait and scheduler wake source while closing this attempt.
-        // settleSuccess only completes running/waiting steps, so its failure is durable.
-        this.surfaceHumanWait(runId, state);
-        this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
-        this.store.updateRun(runId, { status: 'waiting', error: `continue failed: ${message}` });
-        return;
-      }
-      this.store.updateRun(runId, {
-        status: 'failed',
-        error: `continue failed: ${message}`,
-        finishedAt: finishedAt(),
-        currentStepId: undefined,
-      });
-      this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${message}` });
-      if (delivery === 'capped') this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
+      this.settleFailedContinuation(runId, state, stepId, sink, turn, err);
     } finally {
-      ciTools?.revoke(); state.revokeCiTools = undefined;
-      delegation?.revoke(); state.revokeDelegation = undefined;
-      this.recordUsagePeaks(runId);
-      this.clearIdleTimer(state);
-      this.clearAutosaveTimer(state);
-      await this.saveWorktree(runId, state, 'turn end');
-      // Cancellation may be accepted while final autosave is yielding, even
-      // after success was recorded. Retire any durable queue intent before
-      // dropping the active state, otherwise pump can launch the tail with a
-      // fresh `cancelled:false` state.
-      if (state.cancelled) {
-        resumeWorkflow = undefined;
-        if (this.store.getRun(runId)?.status !== 'cancelled') {
-          this.store.updateRun(runId, {
-            status: 'cancelled', finishedAt: finishedAt(), currentStepId: undefined,
-          });
-          this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
-        }
+      await this.releaseContinuationSession(runId, state, launch.delegation, launch.ciTools, close);
+    }
+  }
+
+  /** Settle a Continue whose session closed without a fault: undelivered wakes, a Stop, a step left
+   *  open, a done, or an idle close. Returns the settlement to wait for, or undefined when it
+   *  completed without yielding. */
+  private settleClosedContinuation(
+    runId: string,
+    state: ActiveRun,
+    stepId: string,
+    sink: UiEventSink,
+    resumedNext: WorkflowStepDef | undefined,
+    close: ContinuationClose,
+  ): Promise<void> | undefined {
+    if (this.holdsClosingWakes(runId) && !state.cancelled) {
+      this.settleClosingWakes(runId, state, stepId, sink);
+      return undefined;
+    }
+    if (!state.cancelled) {
+      this.store.updateRun(runId, { continuationMessage: undefined });
+      this.store.flush();
+    }
+    sink.sessionEnded(state.cancelled ? 'cancelled' : 'end_turn');
+    if (state.cancelled) {
+      this.settleCancelledContinuation(runId, stepId);
+      return undefined;
+    }
+    if (this.stepLeftOpen(state, stepId, resumedNext)) return this.settleIncompleteContinuation(runId, stepId);
+    if (!state.idleClosed && !this.unansweredWorkflowAsk(runId, state)) return this.settleDoneContinuation(runId, state, stepId, close);
+    return this.settleIdleClosedRun(runId, state);
+  }
+
+  /** The session closed with wakes it still holds: park the run, or fail it when their delivery
+   *  failed. */
+  private settleClosingWakes(runId: string, state: ActiveRun, stepId: string, sink: UiEventSink): void {
+    sink.sessionEnded('end_turn');
+    // A clean close that leaves results undelivered is a failed delivery too.
+    const delivery = this.owesDelivery(runId) ? this.failedWakeDelivery(runId, WAKE_SESSION_CLOSED_ERROR) : 'park';
+    if (delivery === 'park') {
+      // No turn end will show a human wait this session registered (hearsay-tools/cezarion#1234).
+      this.surfaceHumanWait(runId, state);
+      this.store.updateRun(runId, { status: 'waiting' });
+      return;
+    }
+    this.store.updateStep(runId, stepId, { status: 'failed', error: WAKE_SESSION_CLOSED_ERROR, finishedAt: new Date().toISOString() });
+    this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
+    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
+    this.store.updateRun(runId, { status: 'failed', error: `continue failed: ${WAKE_SESSION_CLOSED_ERROR}`, finishedAt: new Date().toISOString(), currentStepId: undefined });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${WAKE_SESSION_CLOSED_ERROR}` });
+    this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
+  }
+
+  /** A Stop ended the Continue's session: cancel its step and the run. */
+  private settleCancelledContinuation(runId: string, stepId: string): void {
+    this.store.updateStep(runId, stepId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+    this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentStepId: undefined });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=cancelled`);
+  }
+
+  /** The Continue's step is done: settle the run, or the workflow step it resumed. Returns the
+   *  settlement to wait for, or undefined when it queued the workflow remainder. */
+  private settleDoneContinuation(runId: string, state: ActiveRun, stepId: string, close: ContinuationClose): Promise<void> | undefined {
+    this.store.updateStep(runId, stepId, { status: 'done', finishedAt: new Date().toISOString() });
+    this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'done' });
+    const completed = this.store.getRun(runId);
+    const waitingIndex = completed ? this.waitingWorkflowStepIndex(completed) : -1;
+    if (completed?.workflowDef && waitingIndex >= 0) {
+      return this.settleResumedWorkflowStep(runId, state, stepId, completed, completed.workflowDef, waitingIndex, close);
+    }
+    return this.succeedContinuation(runId, stepId);
+  }
+
+  /** The Continue finished the workflow step it resumed: queue the workflow remainder, or settle
+   *  the run when none is left or Finish was requested. */
+  private settleResumedWorkflowStep(
+    runId: string,
+    state: ActiveRun,
+    stepId: string,
+    completed: RunRecord,
+    workflow: WorkflowDef,
+    waitingIndex: number,
+    close: ContinuationClose,
+  ): Promise<void> | undefined {
+    const waitingStep = workflow.steps[waitingIndex]!;
+    // The continuation succeeded, not the failed attempt it recovered.
+    if (waitingStep.id !== completed.workflowResumeStepId) {
+      this.store.updateStep(runId, waitingStep.id, { status: 'done', finishedAt: new Date().toISOString() });
+      this.store.appendEvent(runId, { type: 'step-end', stepId: waitingStep.id, status: 'done' });
+    }
+    // Finish accepts this resumed step before the async settlement gate,
+    // but must not launch the remaining workflow. A later cancellation
+    // may cancel still-live steps, never this completed one (R30).
+    if (!state.finishRequested && waitingIndex < workflow.steps.length - 1) {
+      close.resumeWorkflow = {
+        workflow,
+        startAt: waitingIndex + 1,
+        input: {
+          task: completed.task,
+          runner: completed.runner,
+          model: completed.model,
+          effort: completed.effort,
+          agentProfile: completed.agentProfile,
+          systemPrompt: completed.systemPrompt,
+          autonomous: completed.autonomous,
+          worktree: completed.worktree,
+        },
+      };
+      this.store.updateRun(runId, { status: 'queued', currentStepId: undefined, workflowResumeStepId: undefined });
+      // The workflow remainder is a crash boundary. Persist it before the
+      // finally block awaits worktree autosave and installs its in-memory job.
+      this.store.flush();
+      appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — remaining workflow queued`);
+      return undefined;
+    }
+    this.store.updateRun(runId, { workflowResumeStepId: undefined });
+    return this.succeedContinuation(runId, stepId);
+  }
+
+  /** Settle the run after a successful Continue. */
+  private async succeedContinuation(runId: string, stepId: string): Promise<void> {
+    await this.settleSuccess(runId);
+    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=done`);
+  }
+
+  /** The Continue's session failed, or its settlement threw: fail its step, then park the run
+   *  when it still holds wakes, else fail it. */
+  private settleFailedContinuation(
+    runId: string,
+    state: ActiveRun,
+    stepId: string,
+    sink: UiEventSink,
+    turn: SessionTurn,
+    err: unknown,
+  ): void {
+    // Keep the provider failure that triggered teardown, even if teardown rejects.
+    const message = turn.sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
+    sink.sessionEnded('error', message);
+    this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: new Date().toISOString() });
+    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
+    this.withdrawCezarHumanWaits(runId);
+    const delivery = this.holdsClosingWakes(runId) && !state.cancelled ? this.failedWakeDelivery(runId, message) : 'settle';
+    if (delivery === 'park') {
+      // Retain the wait and scheduler wake source while closing this attempt.
+      // settleSuccess only completes running/waiting steps, so its failure is durable.
+      this.surfaceHumanWait(runId, state);
+      this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
+      this.store.updateRun(runId, { status: 'waiting', error: `continue failed: ${message}` });
+      return;
+    }
+    this.store.updateRun(runId, {
+      status: 'failed',
+      error: `continue failed: ${message}`,
+      finishedAt: new Date().toISOString(),
+      currentStepId: undefined,
+    });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${message}` });
+    if (delivery === 'capped') this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
+  }
+
+  /** A Continue's session teardown: revoke the launch's tools, record the usage peaks, clear the
+   *  timers, save the worktree, leave the active set, then queue the workflow remainder. */
+  private async releaseContinuationSession(
+    runId: string,
+    state: ActiveRun,
+    delegation: LaunchDelegation,
+    ciTools: LaunchCiTools,
+    close: ContinuationClose,
+  ): Promise<void> {
+    ciTools?.revoke(); state.revokeCiTools = undefined;
+    delegation?.revoke(); state.revokeDelegation = undefined;
+    this.recordUsagePeaks(runId);
+    this.clearIdleTimer(state);
+    this.clearAutosaveTimer(state);
+    await this.saveWorktree(runId, state, 'turn end');
+    // Cancellation may be accepted while final autosave is yielding, even
+    // after success was recorded. Retire any durable queue intent before
+    // dropping the active state, otherwise pump can launch the tail with a
+    // fresh `cancelled:false` state.
+    if (state.cancelled) {
+      close.resumeWorkflow = undefined;
+      if (this.store.getRun(runId)?.status !== 'cancelled') {
+        this.store.updateRun(runId, {
+          status: 'cancelled', finishedAt: new Date().toISOString(), currentStepId: undefined,
+        });
+        this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
       }
-      this.dropActive(runId);
-      if (resumeWorkflow) {
-        this.pendingJobs.set(runId, resumeWorkflow);
-        this.queue.push(runId);
-        void this.pump();
-      }
+    }
+    this.dropActive(runId);
+    if (close.resumeWorkflow) {
+      this.pendingJobs.set(runId, close.resumeWorkflow);
+      this.queue.push(runId);
+      void this.pump();
     }
   }
 
@@ -8492,7 +8823,7 @@ export class RunManager {
     // Which agent account this step spawns under, and — recorded on the step before the spawn —
     // which one its session belongs to. `sessionId` and `profileId` are a pair: a resume that
     // reads the wrong account's config dir finds no session and silently starts a fresh one.
-    const stepProfile = await this.stepProfileFor(runId, stepBackend, step.id);
+    const stepProfile = await this.stepProfileFor(runId, stepBackend, { stepId: step.id });
     if (typeof stepProfile === 'string') return stepProfile;
     const beforeSpawn = this.store.getRun(runId);
     if (state.cancelled || (beforeSpawn && this.executionBlockedByRootFinish(beforeSpawn))) return null;
@@ -8681,16 +9012,18 @@ export class RunManager {
   }
 
   /**
-   * The account a fresh step spawns under, resolved together with the temp-directory preflight
+   * The account a step's session spawns under, resolved together with the temp-directory preflight
    * (#785): the step fails with a named, actionable error instead of spawning a backend whose shell
    * would return empty output. An account that would open another folder than its own fails the
    * same way (#1283). Returns the profile, or that error's message.
    */
-  private async stepProfileFor(runId: string, stepBackend: RunnerId, stepId: string): Promise<StepProfile | string> {
+  private async stepProfileFor(
+    runId: string,
+    stepBackend: RunnerId,
+    options: { recordedProfileId?: string; stepId?: string },
+  ): Promise<StepProfile | string> {
     try {
-      return await this.agentEnvForStep(runId, stepBackend, {
-        stepId,
-      });
+      return await this.agentEnvForStep(runId, stepBackend, options);
     } catch (err) {
       if (err instanceof AgentTempDirError || err instanceof AgentAccountUnavailableError) return err.message;
       throw err;
@@ -8714,12 +9047,17 @@ export class RunManager {
     return true;
   }
 
-  /** A launch's opening message (hearsay-tools/cezarion#1632): the body, the open-waits footer, then
-   *  the session-start context in front. */
-  private launchOpening(runId: string, state: ActiveRun, stepId: string, launch: { body: string; ciTools: LaunchCiTools }): LaunchOpening {
+  /** A launch's opening message (hearsay-tools/cezarion#1632): the body, the open-waits footer, the
+   *  resume context of a Continue's checkpoint, then the session-start context in front. */
+  private launchOpening(
+    runId: string,
+    state: ActiveRun,
+    stepId: string,
+    launch: { body: string; ciTools: LaunchCiTools; checkpoint?: RunRecord['continuationMessage'] },
+  ): LaunchOpening {
     // Opening prompts bypass live delivery; do not infer tools before provisioning finishes.
     const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !!launch.ciTools });
-    const prompt = footer ? `${launch.body}\n\n${footer}` : launch.body;
+    const prompt = withResumeContext(footer ? `${launch.body}\n\n${footer}` : launch.body, launch.checkpoint);
     const sessionContext = this.sessionContextFor(runId, state, stepId, prompt);
     return { userPrompt: sessionContext.prefix + prompt, handoffInjected: sessionContext.handoffInjected };
   }
