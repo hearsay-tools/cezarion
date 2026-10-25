@@ -1718,8 +1718,10 @@ function workersCells(runners: RunnerId[]): void {
       const f = await messageWakeWithoutSession();
       const id = await f.progress('Worker progress u14m');
       // Without the bound the attempts never stop: one attempt past it is enough to fail on.
-      await until(() => (store.getRun(f.p.id)?.status === 'failed' && !manager.isActive(f.p.id)) ||
-        prompted(runner, MESSAGE_WAKE_OPENING).length > MAX_WAKE_DELIVERY_ATTEMPTS);
+      await until(() => {
+        return (store.getRun(f.p.id)?.status === 'failed' && !manager.isActive(f.p.id)) ||
+          prompted(runner, MESSAGE_WAKE_OPENING).length > MAX_WAKE_DELIVERY_ATTEMPTS;
+      });
       expect(prompted(runner, MESSAGE_WAKE_OPENING)).toHaveLength(MAX_WAKE_DELIVERY_ATTEMPTS);
       const run = store.getRun(f.p.id)!;
       expect(run.status).toBe('failed');
@@ -2430,7 +2432,9 @@ function workersCells(runners: RunnerId[]): void {
       await until(() => routed() !== undefined && store.getRun(w.id)?.status === 'waiting');
       const askSeq = asks(w.id)[0]!.seq;
       const requestId = String(routed()!.messageId);
-      const unanswered = () => (manager as unknown as { unansweredQuestions(id: string): { workerId: string; messageId: string }[] }).unansweredQuestions(p.id);
+      const unanswered = () => {
+        return (manager as unknown as { unansweredQuestions(id: string): { workerId: string; messageId: string }[] }).unansweredQuestions(p.id);
+      };
       expect(unanswered()).toEqual([expect.objectContaining({ workerId: w.id })]);
       const text = 'automatic steer U25';
       expect((manager as unknown as { deliverMessage(id: string, content: unknown[], userAuthored: boolean): boolean })
