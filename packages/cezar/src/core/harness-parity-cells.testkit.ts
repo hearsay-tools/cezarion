@@ -31,6 +31,7 @@ import { WAIT_CRITERIA } from '../workflows/waits-parity.testkit.ts';
 import { monitoringTimerOf, monitoringWakeOf } from '../workflows/waits.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync, mkdtempSync, mkdirSync, realpathSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
+import { readMockRecords } from '../mock-records.testkit.ts';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { agentInputEventSchema } from '@open-mercato/cezar-contract/events';
@@ -94,6 +95,9 @@ import {
 import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns, seedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
+
+/** One request the OpenCode serve mock recorded in `CEZ_MOCK_ARGS_FILE`. */
+type OpencodeRequestRow = { method?: string; url?: string; body?: { permission?: unknown } };
 
 /** One row of the matrix, named once and applied to every harness. */
 interface SeamCriterion<T = SeamObservation> {
@@ -2215,7 +2219,8 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
               } });
               expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
               expect(obs.v1.at(-1)?.type).toBe('done');
-              launches.push(readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line)));
+              // Argv arrays or JSON-RPC rows, by runner, as JSON.parse returned them before.
+              launches.push(readMockRecords<any>(path));
             }
             const [ordinary, restricted] = launches;
             if (backend === 'claude' || backend === 'pi') {
@@ -2295,7 +2300,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             env: { CEZ_MOCK_ARGS_FILE: path, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
           } });
           expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
-          const rows = readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+          const rows = readMockRecords<OpencodeRequestRow>(path);
           expect(rows.some(row => row.method === 'GET' && row.url === `/session/${PINNED_SESSION_ID}`)).toBe(true);
           expect(rows.filter(row => row.method === 'POST' && row.url === '/session')).toEqual([]);
           expect(rows.filter(row => row.method === 'PATCH')).toEqual([]);
@@ -2311,9 +2316,9 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             env: { CEZ_MOCK_ARGS_FILE: path, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
           } });
           expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
-          const rows = readFileSync(path, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+          const rows = readMockRecords<OpencodeRequestRow>(path);
           expect(rows.some(row => row.method === 'GET' && row.url === `/session/${PINNED_SESSION_ID}`)).toBe(true);
-          expect(rows.find(row => row.method === 'POST' && row.url === '/session')?.body.permission).toEqual(
+          expect(rows.find(row => row.method === 'POST' && row.url === '/session')?.body?.permission).toEqual(
             [{ permission: 'task', pattern: '*', action: 'deny' }],
           );
           expect(rows.filter(row => row.method === 'PATCH')).toEqual([]);
@@ -2792,10 +2797,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
       params?: { input?: { text?: string }[]; prompt?: { text?: string }[] };
       body?: { parts?: { text?: string }[] };
     };
-    // A mock can still be appending the last record. Parse complete lines only;
-    // the next poll will read the trailing fragment once its newline is written.
-    const records = (path: string): (Wire | string[])[] => existsSync(path)
-      ? readFileSync(path, 'utf8').split('\n').slice(0, -1).filter(Boolean).map(line => JSON.parse(line)) : [];
+    const records = (path: string) => readMockRecords<Wire | string[]>(path);
     // Print carries its combined prompt on stdin; Claude/Pi/OMP keep the system prompt in argv.
     const stdinWire = (backend: RunnerId) => backend === 'claude' || backend === 'pi' || backend === 'omp';
     const messages = (backend: RunnerId, dir: string): string[] => {
@@ -3143,7 +3145,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             },
           });
           expect(observation.failure).toBeUndefined();
-          const urls = readFileSync(argsFile, 'utf8').split('\n').filter(Boolean).map(line => (JSON.parse(line) as { url?: string }).url);
+          const urls = readMockRecords<{ url?: string }>(argsFile).map(row => row.url);
           expect(urls).not.toContain('/permission/per_mock_classify/reply');
           expect(urls).toContain('/permission/per_mock_marker/reply');
         });

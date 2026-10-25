@@ -70,7 +70,7 @@ in the same PR and verifies the combined changes. It does not open a sibling PR
 or wait for one to merge. The PR links the summary and all member reports, with
 closing references only for defects actually fixed. An unresolved member does not
 close merely because another member passed. When no defects remain, the task
-records fixing evidence for every member instead of opening an empty PR.
+records fixing evidence and closes resolved reports instead of opening an empty PR.
 
 An active repair from an earlier attempt, a legacy task or an existing member PR
 is competing work. Stop and ask the human in the same task. Do not take over,
@@ -83,6 +83,36 @@ Unclear evidence, design conflicts or policy changes require a human decision in
 the same task. Tasks never merge, weaken checks, quarantine tests, enable
 automations or repeatedly rerun CI to obtain green. The summary groups evidence;
 it does not approve every possible remedy. Human review still controls merging.
+
+## Close resolved reports
+
+The repair owns report cleanup as well as code changes. A summary closing does
+not establish that its members are resolved. Read every report's saved occurrences
+and later recurrences, then record a resolution table for the subject and every
+member: issue, remaining cause, fixing evidence, and closure or open action owner.
+
+| Case | Required action |
+| --- | --- |
+| Already fixed on current main | Comment with the fixing commit or merged PR and relevant passing verification, then close the report now. No new PR is needed. |
+| Fixed by the new repair PR | Give every fully resolved report a repository-qualified closing reference in the PR body. Keep it open until merge. A plain link or `Refs` does not close it. |
+| Aggregate report | Close or give it a closing reference only when every cause it reflects is resolved or covered by that PR. |
+| Retired scenario or false report | Explain why no required work remains and close as not planned. Do not claim an unproven root cause was fixed. |
+| Duplicate of an unresolved cause | Link its occurrence evidence from the canonical open issue first, verify that issue is open, then close only the duplicate as not planned. The defect remains unresolved. |
+| Unresolved cause, missing evidence, protected issue or competing claim | Keep it open with an explicit action owner or blocker. Respect `do-not-close` and the existing competing-work decision. |
+
+Reconcile the summary after every cause is resolved, covered by the new PR, or
+explicitly transferred with its evidence to a canonical open issue. Never close
+members solely because the summary closed or a retry passed. Before finishing,
+re-fetch issue states and the PR's closing references. Each report must be closed
+with evidence, covered by the repair PR's closing references, or open with an
+explicit action owner or blocker. Record that final table in the handoff. Failed
+or protected writes remain visible blockers, not successful cleanup. Apply the
+same rules to a legacy individual report without closing unrelated reports.
+
+These instructions live in the automation's task prompt. Changing the checked-in
+helper does not update a running cockpit's saved prompt. Apply and verify the
+prompt-only migration below for future tasks. Tasks already launched retain their
+original prompt and need an explicit continuation instruction for this cleanup.
 
 GitHub issues retain the diagnostic evidence and summary. Cezar retains matching
 receipts and the task handoff. Each reported main CI attempt adds one summary

@@ -17,13 +17,15 @@ describe('RunManager pins every executing run through one helper', () => {
     expect(activate.slice(0, activate.indexOf('\n  }\n'))).toMatch(/this\.active\.set\(runId, state\);\s+this\.store\.pin\(runId, 'active'\);/);
   });
 
-  it('builds an ActiveRun in execute and in runContinuation, and both go through activate', () => {
-    const constructions = [...source.matchAll(/const state: ActiveRun = \{/g)].map((match) => match.index!);
-    expect(constructions).toHaveLength(2);
+  it('builds an ActiveRun with createActiveRun in execute and in runContinuation, and both go through activate', () => {
+    // The factory's own literal is the only one (the `active-run-literal` ast-grep rule refuses a
+    // second), so a construction site is a call to it.
+    const calls = [...source.matchAll(/= createActiveRun\(/g)].map((match) => match.index!);
+    expect(calls).toHaveLength(2);
     for (const [name, start] of [['runContinuation', source.indexOf('  private async runContinuation(')], ['execute', source.indexOf('  private async execute(')]] as const) {
       expect(start, name).toBeGreaterThan(0);
       const body = source.slice(start, source.indexOf('\n  }\n', start));
-      expect(body, name).toContain('const state: ActiveRun = {');
+      expect(body, name).toMatch(/const state = createActiveRun\(\{[^}]*\}\);/);
       expect(body, name).toContain('this.activate(runId, state);');
     }
   });

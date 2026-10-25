@@ -9,7 +9,7 @@ import { z } from 'zod';
 /**
  * Helpers for `ast-grep-rules.test.ts`: the ast-grep rules that pin construction sites and
  * readers (hearsay-tools/cezarion#1802). A rule is a syntax-tree match, so it finds what a regex
- * over `blank()` cannot, such as both `ActiveRun` literals whatever order their fields take. The
+ * over `blank()` cannot, such as an `ActiveRun` literal whatever order its fields take. The
  * rules and their baselines live in `.ai/ast-grep/rules`, one `<id>.yml` and one
  * `<id>.baseline.json` per rule, and `.ai/ast-grep/README.md` says how to add one.
  *
