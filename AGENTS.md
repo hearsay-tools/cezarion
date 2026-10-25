@@ -932,6 +932,20 @@ how to read a bundle, and the single-test reproduction with an env-gated server 
 
 `CEZ_DRY_RUN=1 npm run dev` still exercises the whole cockpit offline for manual verification.
 
+To check a UI change by hand in a real browser, run `node .ai/scripts/qa-fixture.mjs up`
+(hearsay-tools/cezarion#1406). It builds the `VITE_CEZ_E2E=1` cockpit into a temporary root
+and serves it under `CEZ_DRY_RUN=1` on a new Git repository with its own `CEZ_HOME`. That
+repository is a registered project, so project settings and project routes work from a task
+worktree too; the clone the shared test env serves is not registered there. It prints
+`QA_FIXTURE_BASE_URL`, `QA_FIXTURE_PROJECT_ID` and `QA_FIXTURE_PROJECT_URL`; drive that URL
+with the agent-browser operations in `.ai/browsers/agent-browser.md`. Opt-ins use
+`--server-env=CEZ_NAME=value`, as for `test-env-up.sh`. It takes no test-env lease, so a
+Squeal browser run does not block it. One fixture runs per worktree, and `up` replaces it.
+`node .ai/scripts/qa-fixture.mjs down` stops the server's process group and removes the
+temporary root. A forgotten fixture stops on its own when its worktree, its `.ai/qa` or its
+temporary root is deleted, and so does a server whose `up` was interrupted during boot.
+Linux and macOS only.
+
 ## Related documents
 
 - `AGENT_PROTOCOL.md` — the agent protocol: the runner seam, the v1 `AgentEvent` + v2 `UiEvent` streams, per-backend mapping, the two parity matrices (§6 mapper capabilities, §7 session and lifecycle), the golden-fixture testing contract, and the checklist for adding a new runner.

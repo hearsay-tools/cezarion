@@ -25,7 +25,8 @@ function windowsCommand(args) {
 }
 const windowsPayload = value => Buffer.from(JSON.stringify(value)).toString('base64');
 
-function identity(pid, timeout = 15_000) {
+// A process's start identity. qa-fixture.mjs uses it too, so it never signals a reused pid.
+export function identity(pid, timeout = 15_000) {
   try { process.kill(pid, 0); }
   catch (error) { return error.code === 'ESRCH' ? { dead: true } : {}; }
   if (process.platform === 'win32') {
