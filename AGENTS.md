@@ -21,6 +21,16 @@ YAML and regenerate `LEDGER.md`. Preserve example protocol markers, test filters
 UI sample numbers, spec numbers, colors and shell syntax. These are not citations.
 New prose in an archive must still qualify its references individually.
 
+A bare `#N` next to new code is legacy and is not a style to copy. CI's
+`Check issue citations` step fails a change that adds one in a comment, a test
+title or Markdown prose: run `node .github/scripts/check-citations.cjs` before a
+PR. It compares `HEAD` with its merge-base against `origin/main` (`--base <ref>`
+for another), and names each file, line and qualified form. A bare `#N` it
+already finds in the changed files before the change passes, so rewording or
+moving a legacy citation passes. It never reads string literals, code, JSX text,
+backtick spans, a `#` joined to a word or path, generated upstream scan files,
+test-data directories, or an archive in the change that adds its source note.
+
 ## Zero config
 
 cezar ships no config file the user must create and no setting they must set before it works. Every capability is discovered from what is already there — the repo, the environment, `gh`, the running processes — or it degrades quietly to a smaller cezar. `.ai/cezar/config.json` is optional and every key has a working default; `.env` is never auto-loaded.
@@ -802,6 +812,7 @@ npm run test:unit   # node:test — fast core-module coverage (packages/cezar/te
 npm run build       # tsc → dist/, vite → packages/cezar/web/dist/, then the check:pack tarball gate
 npm run test:package # pack/install the release tarball and exercise the built CLI (packages/cezar/test/e2e/)
 npm run test:e2e     # cockpit browser E2E in CI shards; skipped is not a pass
+node .github/scripts/check-citations.cjs  # no added bare #N citation (§ Issue and PR citations)
 ```
 
 For web-only verification, use `npm run typecheck:web` or
@@ -941,7 +952,7 @@ row's value when the thing it names changes, rather than its label.
 | CI provider | GitHub Actions |
 | Issue tracker | GitHub Issues |
 | Stack | TypeScript (Node ≥24.21.0), pnpm workspaces (npm script metadata retained); Hono + Zod server; React 19 + Vite + Tailwind v4 cockpit |
-| Verification | Local: Squeal when installed and validating, otherwise focused npm checks. Full gate in CI: `npm run typecheck`, `npm test -- --shard=N/3 --maxWorkers=4` (N=1..3), `npm run test:unit`, `npm run build`, `npm run test:package`, `npm run test:e2e` |
+| Verification | Local: Squeal when installed and validating, otherwise focused npm checks. Full gate in CI: `npm run typecheck`, `npm test -- --shard=N/3 --maxWorkers=4` (N=1..3), `npm run test:unit`, `npm run build`, `npm run test:package`, `npm run test:e2e`, `node .github/scripts/check-citations.cjs` |
 | Automated reviewer | `AUTOMATED_REVIEWER=codex`. A pushback-only round needs a manual dispatch of `automated-code-review.yml` with `pr_number`, then a re-run of **Review / review-round** in the CI run. Re-running the CI run's failed jobs alone does not re-judge. |
 | Automated review rounds | The `AUTOMATED_REVIEW_ROUNDS` repository variable, read with `gh variable get AUTOMATED_REVIEW_ROUNDS`; the review workflow falls back to 3 only when the variable is unset or empty |
 | Commit convention | Conventional Commits |
