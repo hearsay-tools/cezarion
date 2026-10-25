@@ -1,0 +1,282 @@
+// A registered throwaway project for a manual UI check (hearsay-tools/cezarion#1406).
+//
+//   node .ai/scripts/qa-fixture.mjs up [--server-env=CEZ_NAME=value]...
+//   node .ai/scripts/qa-fixture.mjs down
+//
+// `up` builds the VITE_CEZ_E2E=1 cockpit into a temporary root and serves it under
+// CEZ_DRY_RUN=1 on a new Git repository with its own CEZ_HOME. The repository is a registered
+// project, so every project setting is reachable. The shared test env cannot do this from a
+// task worktree: the clone it serves sits under `.ai/cezar/worktrees/`, where
+// `shouldRegisterProject` suppresses registration. This script does not go through
+// test-env-up.sh either. That script holds the test-env lease, which Squeal's browser tier
+// keeps while its specs run, and every rebuild replaces its build directory.
+//
+// `down` stops the server's process group and removes the temporary root. A watcher stops the
+// fixture when nobody runs `down`: when the descriptor goes (the worktree or its `.ai/qa` was
+// deleted) or the temporary root goes. It cleans up after a server that exits on its own.
+// POSIX only: the stop signals a process group.
+import { spawn, spawnSync } from 'node:child_process';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { basename, dirname, join, resolve } from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
+import { pathToFileURL } from 'node:url';
+
+import { identity } from './test-env-lease.mjs';
+
+const DESCRIPTOR = '.ai/qa/qa-fixture.json';
+const ROOT_PREFIX = 'cez-qa-fixture-';
+// test-env-up.sh's default health budget: a boot on a loaded host is CPU-bound.
+const BOOT_TIMEOUT_MS = 180_000;
+const STOP_GRACE_MS = 10_000;
+const WATCH_INTERVAL_MS = 30_000;
+const BANNER = /^\s*cockpit → (http:\/\/127\.0\.0\.1:\d+)\s*$/m;
+
+const log = (stderr, message) => stderr.write(`[qa-fixture] ${message}\n`);
+
+/** The `--server-env` opt-ins, by test-env-up.sh's rule: CEZ_NAME=value, no whitespace, one
+ *  per name, and never the two variables this script pins. */
+export function parseUpArgs(args) {
+  const optIns = {};
+  for (const arg of args) {
+    if (!arg.startsWith('--server-env=')) throw new Error(`unknown flag: ${arg}`);
+    const assignment = arg.slice('--server-env='.length);
+    const name = assignment.split('=', 1)[0];
+    if (!/^CEZ_[A-Z0-9_]+=\S*$/.test(assignment) || name === 'CEZ_DRY_RUN' || name === 'CEZ_HOME') {
+      throw new Error(`invalid --server-env: ${assignment} (want CEZ_NAME=value, no whitespace; CEZ_DRY_RUN and CEZ_HOME are pinned)`);
+    }
+    if (name in optIns) throw new Error(`invalid --server-env: ${name} is given twice`);
+    optIns[name] = assignment.slice(name.length + 1);
+  }
+  return optIns;
+}
+
+/** No ambient CEZ_* or GIT_* reaches the server (hearsay-tools/cezarion#1045): an agent's shell
+ *  carries the live cockpit's opt-ins and its per-task plumbing. */
+function serverEnv(ambient, root, optIns) {
+  const env = Object.fromEntries(Object.entries(ambient).filter(([key]) => !/^(CEZ|GIT)_/i.test(key)));
+  return {
+    ...env,
+    GIT_CONFIG_GLOBAL: join(root, 'gitconfig'),
+    GIT_CONFIG_NOSYSTEM: '1',
+    GIT_CEILING_DIRECTORIES: root,
+    GIT_AUTHOR_NAME: 'Cezar Tests',
+    GIT_AUTHOR_EMAIL: 'tests@cezar.invalid',
+    GIT_COMMITTER_NAME: 'Cezar Tests',
+    GIT_COMMITTER_EMAIL: 'tests@cezar.invalid',
+    ...optIns,
+    CEZ_DRY_RUN: '1', CEZ_HOME: join(root, 'home'),
+  };
+}
+
+/** One commit, so a dry-run task can branch and the repo view has a history. */
+function createRepo(repo, env) {
+  mkdirSync(repo);
+  writeFileSync(join(repo, 'README.md'), '# QA fixture\n\nA throwaway project served by .ai/scripts/qa-fixture.mjs.\n');
+  for (const args of [['init', '-q', '-b', 'main'], ['add', '.'], ['commit', '-qm', 'QA fixture']]) {
+    const result = spawnSync('git', args, { cwd: repo, env, encoding: 'utf8' });
+    if (result.status !== 0) throw new Error(`git ${args[0]} failed: ${result.stderr || result.error?.message}`);
+  }
+}
+
+/** The cockpit e2e build, into `out`. build-e2e.sh needs the workspace's installed dependencies. */
+function buildE2e(repoRoot, out, logPath) {
+  if (!existsSync(join(repoRoot, 'packages/cezar/node_modules/zod/package.json'))) {
+    throw new Error('dependencies are not installed: run pnpm install --frozen-lockfile first');
+  }
+  const fd = openSync(logPath, 'w');
+  try {
+    const result = spawnSync('sh', [join(repoRoot, '.ai/scripts/build-e2e.sh'), out], { cwd: repoRoot, stdio: ['ignore', fd, fd] });
+    if (result.status !== 0) throw new Error(`build failed (${logPath})`);
+  } finally { closeSync(fd); }
+}
+
+/** Starts `cmd` detached, so it leads its own process group, with its output in `logPath`. */
+async function detach(cmd, { cwd, env, logPath }) {
+  const fd = openSync(logPath, 'a');
+  try {
+    const child = spawn(process.execPath, cmd, { cwd, env, detached: true, stdio: ['ignore', fd, fd] });
+    await new Promise((done, fail) => { child.once('spawn', done); child.once('error', fail); });
+    child.unref();
+    const { start } = identity(child.pid);
+    if (!start) throw new Error(`cannot read the start identity of pid ${child.pid}`);
+    return { pid: child.pid, start };
+  } finally { closeSync(fd); }
+}
+
+const isRunning = ({ pid, start }) => {
+  const current = identity(pid);
+  return !current.dead && current.start === start;
+};
+
+/** Stops the process group `leader` leads, while the leader keeps its recorded start identity:
+ *  a reused pid is never signalled. True once the leader is gone. */
+async function stopGroup(leader) {
+  for (const [signal, waitMs] of [['SIGTERM', STOP_GRACE_MS], ['SIGKILL', 1000]]) {
+    if (!isRunning(leader)) return true;
+    try { process.kill(-leader.pid, signal); } catch { /* the group already ended */ }
+    const deadline = performance.now() + waitMs;
+    while (isRunning(leader) && performance.now() < deadline) await delay(100);
+  }
+  return !isRunning(leader);
+}
+
+async function waitForCockpit(server, logPath, timeoutMs) {
+  const deadline = performance.now() + timeoutMs;
+  while (performance.now() < deadline) {
+    const url = BANNER.exec(readFileSync(logPath, 'utf8'))?.[1];
+    if (url) return url;
+    if (!isRunning(server)) throw new Error('the server exited during boot');
+    await delay(200);
+  }
+  throw new Error(`the server did not announce its address within ${timeoutMs / 1000} s`);
+}
+
+async function registeredProject(baseUrl, repo) {
+  const response = await fetch(`${baseUrl}/api/v1/projects`);
+  if (!response.ok) throw new Error(`GET /api/v1/projects answered ${response.status}`);
+  const { projects = [] } = await response.json();
+  const root = realpathSync(repo);
+  const project = projects.find((entry) => entry.root === root);
+  // cezar never registers a folder inside a task worktree, and the root comes from TMPDIR.
+  if (!project) throw new Error(`the served project is not registered: ${root} is inside .ai/cezar/worktrees/. Set TMPDIR outside it, for example TMPDIR=/tmp`);
+  return project.id;
+}
+
+function readDescriptor(repoRoot) {
+  try {
+    return JSON.parse(readFileSync(join(repoRoot, DESCRIPTOR), 'utf8'));
+  } catch {
+    return undefined;
+  }
+}
+
+function writeDescriptor(repoRoot, fixture) {
+  mkdirSync(join(repoRoot, '.ai/qa'), { recursive: true });
+  writeFileSync(join(repoRoot, DESCRIPTOR), JSON.stringify(fixture, null, 2) + '\n');
+}
+
+const sameProcess = (a, b) => a?.pid === b.pid && a?.start === b.start;
+
+/** Only a root this script made: a corrupt descriptor never names a path to delete. */
+function removeRoot(root) {
+  if (typeof root === 'string' && resolve(root) === root && basename(root).startsWith(ROOT_PREFIX)) {
+    rmSync(root, { recursive: true, force: true });
+  }
+}
+
+function printLogTail(stderr, root) {
+  const name = ['server.log', 'build.log'].find((file) => existsSync(join(root, file)));
+  if (!name) return;
+  const tail = readFileSync(join(root, name), 'utf8').trimEnd().split('\n').slice(-20).join('\n');
+  log(stderr, `last lines of ${name}:\n${tail}`);
+}
+
+/** Stops the fixture the descriptor names. The watcher goes first, so it cannot clean up at the
+ *  same time. A server that would not stop keeps its descriptor, so `down` can try again. */
+async function stopFixture(repoRoot, stderr) {
+  const fixture = readDescriptor(repoRoot);
+  if (!fixture) return log(stderr, 'no fixture is running');
+  if (fixture.watcher) await stopGroup(fixture.watcher);
+  if (fixture.server) {
+    log(stderr, `stopping cezar (pid ${fixture.server.pid})`);
+    if (!await stopGroup(fixture.server)) throw new Error(`cezar pid ${fixture.server.pid} did not stop`);
+  }
+  removeRoot(fixture.root);
+  rmSync(join(repoRoot, DESCRIPTOR), { force: true });
+}
+
+export async function down({ repoRoot, stdout = process.stdout, stderr = process.stderr }) {
+  await stopFixture(repoRoot, stderr);
+  stdout.write('QA_FIXTURE_STATUS=stopped\n');
+}
+
+export async function up({
+  repoRoot,
+  args = [],
+  env = process.env,
+  stdout = process.stdout,
+  stderr = process.stderr,
+  build = (out, logPath) => buildE2e(repoRoot, out, logPath),
+  tmp = tmpdir(),
+  bootTimeoutMs = BOOT_TIMEOUT_MS,
+  watchIntervalMs = WATCH_INTERVAL_MS,
+}) {
+  const optIns = parseUpArgs(args);
+  if (process.platform !== 'linux' && process.platform !== 'darwin') {
+    throw new Error('qa-fixture runs on Linux and macOS only: it stops the server by its process group');
+  }
+  await stopFixture(repoRoot, stderr);
+  const root = mkdtempSync(join(realpathSync(tmp), ROOT_PREFIX));
+  const repo = join(root, 'repo');
+  let server;
+  try {
+    const childEnv = serverEnv(env, root, optIns);
+    writeFileSync(join(root, 'gitconfig'), '');
+    createRepo(repo, childEnv);
+    log(stderr, `building the e2e cockpit into ${join(root, 'build/cezar')}`);
+    await build(join(root, 'build/cezar'), join(root, 'build.log'));
+    server = await detach([join(root, 'build/cezar/dist/index.js'), 'serve', '--repo', repo, '--port', '0', '--no-open'],
+      { cwd: repo, env: childEnv, logPath: join(root, 'server.log') });
+    const baseUrl = await waitForCockpit(server, join(root, 'server.log'), bootTimeoutMs);
+    const projectId = await registeredProject(baseUrl, repo);
+    const fixture = { root, baseUrl, projectId, server, startedAt: new Date().toISOString() };
+    // Written before the watcher starts: a watcher that finds no descriptor stops the server.
+    writeDescriptor(repoRoot, fixture);
+    fixture.watcher = await detach([import.meta.filename, 'watch', repoRoot, root, String(server.pid), server.start, String(watchIntervalMs)],
+      { cwd: dirname(root), env, logPath: join(root, 'watch.log') });
+    writeDescriptor(repoRoot, fixture);
+    stdout.write([
+      'QA_FIXTURE_STATUS=running',
+      `QA_FIXTURE_BASE_URL=${baseUrl}`,
+      `QA_FIXTURE_PROJECT_ID=${projectId}`,
+      `QA_FIXTURE_PROJECT_URL=${baseUrl}/p/${projectId}`,
+      `QA_FIXTURE_REPO=${repo}`,
+      `QA_FIXTURE_LOG=${join(root, 'server.log')}`,
+      'QA_FIXTURE_STOP=node .ai/scripts/qa-fixture.mjs down',
+    ].join('\n') + '\n');
+  } catch (error) {
+    if (server) await stopGroup(server);
+    printLogTail(stderr, root);
+    removeRoot(root);
+    rmSync(join(repoRoot, DESCRIPTOR), { force: true });
+    throw error;
+  }
+}
+
+/** The fixture's end when nobody runs `down`. The descriptor is the only handle `down` has, so
+ *  the server stops once the descriptor no longer names it, or its temporary root is gone. A
+ *  server that exits on its own leaves nothing behind. */
+export async function watch({ repoRoot, root, server, intervalMs = WATCH_INTERVAL_MS }) {
+  while (true) {
+    await delay(intervalMs);
+    const current = identity(server.pid);
+    const exited = current.dead || (current.start !== undefined && current.start !== server.start);
+    if (!exited) {
+      if (sameProcess(readDescriptor(repoRoot)?.server, server) && existsSync(root)) continue;
+      // Retried at the next poll when the server would not stop.
+      if (!await stopGroup(server)) continue;
+    }
+    removeRoot(root);
+    if (sameProcess(readDescriptor(repoRoot)?.server, server)) rmSync(join(repoRoot, DESCRIPTOR), { force: true });
+    return;
+  }
+}
+
+async function main([command, ...args]) {
+  const repoRoot = resolve(import.meta.dirname, '../..');
+  if (command === 'up') return up({ repoRoot, args });
+  if (command === 'down' && args.length === 0) return down({ repoRoot });
+  if (command === 'watch' && args.length === 5) {
+    const [worktree, root, pid, start, intervalMs] = args;
+    return watch({ repoRoot: worktree, root, server: { pid: Number(pid), start }, intervalMs: Number(intervalMs) });
+  }
+  throw new Error('usage: node .ai/scripts/qa-fixture.mjs up [--server-env=CEZ_NAME=value]... | down');
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+  main(process.argv.slice(2)).catch((error) => {
+    console.error(`[qa-fixture] ${error.message}`);
+    process.exitCode = 1;
+  });
+}
