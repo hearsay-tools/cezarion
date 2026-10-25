@@ -5,9 +5,9 @@
  *
  *  - The PICKER PICK (workflow + skills) is a "way of working, not a property of one item"
  *    (see `HandToAgent`'s doc block) — it already survives switching between GitHub items
- *    within a session via route state (`github.tsx`). This adds survival across a full page
- *    reload, and — read on FIRST mount — doubles as the "remembered last selection" (#408 item
- *    3) that pre-fills a hand-off you have never touched yet.
+ *    within a session via session state (`use-hand-to-agent-state.ts`). This adds survival
+ *    across a full page reload, and — read on FIRST mount — doubles as the "remembered last
+ *    selection" (#408 item 3) that pre-fills a hand-off you have never touched yet.
  *  - The PROMPT is per hand-off TARGET — an issue/PR's instructions are its own, not shared —
  *    keyed by the item's URL so switching between issues never leaks one item's in-progress
  *    text into another's textarea (#408 item 4).
