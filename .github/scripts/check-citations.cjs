@@ -173,6 +173,9 @@ function fenceOf(text) {
 const closesFence = (fence, { width, text }) =>
   width - fence.base <= 3 && Boolean(FENCE_CLOSE.exec(text)?.[1].startsWith(fence.marker));
 
+/** The list items still open at `line`: a change of block-quote depth closes them all, a shallower line the deeper ones. */
+const openItems = (items, depth, line) => (line.depth === depth ? items.filter((column) => column <= line.width) : []);
+
 /**
  * Tells, line by line, whether a Markdown line is code: in a fenced code block, or in an
  * indented one. Indentation counts from the content column of the list item that holds the
@@ -199,9 +202,8 @@ function markdownCodeReader() {
     indented = null;
     const marker = HEADING_OR_BREAK.test(line.text) ? undefined : LIST_MARKER.exec(line.text)?.[0];
     if (!paragraph || marker) {
-      if (line.depth !== depth) items = [];
+      items = openItems(items, depth, line);
       depth = line.depth;
-      items = items.filter((column) => column <= line.width);
     }
     const base = items.at(-1) ?? 0;
     if (line.width - base >= 4) {
