@@ -162,3 +162,13 @@ test('auto-merge rejects numeric growth and allows a shrinking baseline', (t) =>
   r.write('.github/scripts/baseline-growth.cjs', '// guard changes need owner review');
   assert.match(autoMerge(r, r.commit()).stdout, /gate or test harness/);
 });
+
+test('CI permits a new ratchet, while auto-merge requires owner review of its starting debt', (t) => {
+  const r = repository(t);
+  r.write('new.baseline.json', '{"max":100}');
+  const head = r.commit();
+  assert.deepEqual(checkBaselineGrowth({ cwd: r.cwd, base: r.base, head }), []);
+  const result = autoMerge(r, head);
+  assert.equal(result.status, 1, result.stdout + result.stderr);
+  assert.match(result.stdout, /new ratchet baseline: new.baseline.json/);
+});

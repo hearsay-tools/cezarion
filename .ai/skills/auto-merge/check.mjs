@@ -164,6 +164,7 @@ function parseDiff(base, head) {
 function pathReasons(diff) {
   const reasons = []
   for (const f of diff.files) {
+    if (f.status === 'A' && f.path.endsWith('.baseline.json')) reasons.push(`new ratchet baseline: ${f.path}`)
     if ([f.oldMode, f.newMode].some((m) => m === '120000' || m === '160000')) reasons.push(`symlink or submodule: ${f.path}`)
     else if (f.status === 'M' && f.oldMode !== f.newMode) reasons.push(`changes the file mode: ${f.path}`)
     for (const rule of NEVER) {
