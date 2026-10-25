@@ -1,3 +1,4 @@
+import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import type { ReactNode } from 'react'
 
 import { Link } from '@/lib/project-router'
@@ -32,7 +33,7 @@ export function TabLink({
   return (
     <Link
       to={to}
-      {...(replace === undefined ? {} : { replace })}
+      {...defined({ replace })}
       aria-current={active ? 'page' : undefined}
       onClick={onClick}
       className={cn(

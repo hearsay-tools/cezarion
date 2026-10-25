@@ -1,3 +1,4 @@
+import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import { useMutation } from '@tanstack/react-query'
 import { CheckCheckIcon, CopyIcon, EllipsisIcon, ExternalLinkIcon, SettingsIcon } from 'lucide-react'
 import { useRef, useState } from 'react'
@@ -140,13 +141,13 @@ export function ProjectMenu({ projectId, onNavigate, triggerRef, triggerClassNam
   }
 
   return (
-    <DropdownMenu {...(onOpenChange === undefined ? {} : { onOpenChange })}>
+    <DropdownMenu {...defined({ onOpenChange })}>
       <DropdownMenuTrigger asChild>
         <button data-slot="project-menu-trigger" ref={triggerRef} type="button" aria-label="Project menu" className={cn('flex shrink-0 items-center justify-center rounded-[6px] text-soft-foreground hover:bg-sidebar-row-hover hover:text-foreground focus-visible:outline-2 focus-visible:outline-ring data-[state=open]:bg-sidebar-row-selected data-[state=open]:text-foreground', triggerClassName)}>
           <EllipsisIcon aria-hidden="true" className="size-[15px]" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align={align} {...(alignOffset === undefined ? {} : { alignOffset })} {...(side === undefined ? {} : { side })} sideOffset={4} className={menuClass}>
+      <DropdownMenuContent align={align} {...defined({ alignOffset, side })} sideOffset={4} className={menuClass}>
         <DropdownMenuItem className={itemClass} disabled={marking || runs.isError || runs.data === undefined || unread.length === 0 || projectId === null} onSelect={() => { void markAllRead() }}>
           <CheckCheckIcon aria-hidden="true" /> Mark all read
           <span className="ml-auto text-[11.5px] text-soft-foreground">{marking ? 'Marking…' : count}</span>

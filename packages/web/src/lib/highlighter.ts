@@ -1,3 +1,4 @@
+import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import type { HighlighterCore } from 'shiki/core'
 
 /**
@@ -222,10 +223,10 @@ export function highlightSync(code: string, lang: string, options: HighlightOpti
     const result = core.codeToTokens(code, {
       lang: canonical as never,
       theme: SYN_THEME.name,
-      ...(options.tokenizeTimeLimit === undefined ? {} : { tokenizeTimeLimit: options.tokenizeTimeLimit }),
+      ...defined({ tokenizeTimeLimit: options.tokenizeTimeLimit }),
     })
     return {
-      tokens: result.tokens.map((line) => line.map(({ content, color }) => ({ content, ...(color === undefined ? {} : { color }) }))),
+      tokens: result.tokens.map((line) => line.map(({ content, color }) => ({ content, ...defined({ color }) }))),
       fg: result.fg ?? 'var(--syn-var)',
       bg: 'transparent',
     }

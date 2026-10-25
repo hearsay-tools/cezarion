@@ -1,3 +1,4 @@
+import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import { invalidateLiveReads } from './live-coordinator'
 import type {
   FileLinkResult,
@@ -328,7 +329,7 @@ function unscoped(url: string): string {
  * value — whose type the caller gets from the route, not from a hand-written declaration.
  */
 /** The per-request options `hc` takes, from this module's `ReadOptions`. */
-const init = (opts?: ReadOptions) => ({ init: { ...(opts?.signal === undefined ? {} : { signal: opts.signal }) } })
+const init = (opts?: ReadOptions) => ({ init: { ...defined({ signal: opts?.signal }) } })
 
 /**
  * Accepts a route that answers more than one FORMAT — `/repo/commit/:sha` serves a structured
@@ -1118,13 +1119,13 @@ export async function getGithubPrChanges(
 /** The run's worktree diff against its base, as unified-diff text. Also the plain-text
  *  "(no worktree — …)" sentence for runs that executed in the repo working tree. */
 export function getRunDiff(id: string, opts?: ReadOptions): Promise<string> {
-  return requestText(runPath(id, '/diff'), { method: 'GET', ...(opts?.signal === undefined ? {} : { signal: opts.signal }) })
+  return requestText(runPath(id, '/diff'), { method: 'GET', ...defined({ signal: opts?.signal }) })
 }
 
 /** The run's handoff journal (spec 007) as markdown text. `''` until the file is seeded —
  *  the server only 404s for an unknown run, never for a missing file. */
 export function getRunHandoff(id: string, opts?: ReadOptions): Promise<string> {
-  return requestText(runPath(id, '/handoff'), { method: 'GET', ...(opts?.signal === undefined ? {} : { signal: opts.signal }) })
+  return requestText(runPath(id, '/handoff'), { method: 'GET', ...defined({ signal: opts?.signal }) })
 }
 
 /** Another project's handoff journal, for a row of All tasks (hearsay-tools/cezarion#1616): the
@@ -1132,7 +1133,7 @@ export function getRunHandoff(id: string, opts?: ReadOptions): Promise<string> {
 export async function getProjectRunHandoff(projectId: string, id: string, opts?: ReadOptions): Promise<string> {
   const res = await cez.api.v1.p[':projectId'].runs[':id'].handoff.$get(
     { param: { projectId, id: encodeURIComponent(id) } },
-    { init: { ...(opts?.signal === undefined ? {} : { signal: opts.signal }) }, headers: { accept: 'text/plain' } },
+    { init: { ...defined({ signal: opts?.signal }) }, headers: { accept: 'text/plain' } },
   )
   const body = await res.text()
   if (!res.ok) throw errorFor(res.status, res.statusText, body)
@@ -2107,7 +2108,7 @@ export async function putWorkspaceUiState(
   return unwrap(
     await cez.api.v1.workspace['ui-state'].$put(
       { json: patch },
-      { init: { ...(opts.keepalive === undefined ? {} : { keepalive: opts.keepalive }) } },
+      { init: { ...defined({ keepalive: opts.keepalive }) } },
     ),
     '/workspace/ui-state',
   )

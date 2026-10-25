@@ -1,3 +1,4 @@
+import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import { spawn, spawnSync, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { setTimeout as delay } from 'node:timers/promises'
@@ -143,7 +144,7 @@ export function captureFixtureServer(child: ChildProcess, outputLimit = 16_384) 
   const startedAt = Date.now()
   const lifecycle: Array<{ kind: string; elapsedMs: number; detail?: string }> = []
   const event = (kind: string, detail?: string) => {
-    lifecycle.push({ kind, elapsedMs: Date.now() - startedAt, ...(detail === undefined ? {} : { detail }) })
+    lifecycle.push({ kind, elapsedMs: Date.now() - startedAt, ...defined({ detail }) })
     if (lifecycle.length > 16) lifecycle.shift()
   }
   let stdout = '', stderr = '', stdoutDropped = 0, stderrDropped = 0
@@ -254,7 +255,7 @@ export async function waitForFixtureServer(
           return { failure: new Error(`Fixture restart listener changed: expected ${expectedOrigin}, announced ${origin}`) }
         }
         phase = 'awaiting owned listener health'
-        const response = await fetch(`${origin}/api/v1/health`, { signal, ...(healthHeaders === undefined ? {} : { headers: healthHeaders }) })
+        const response = await fetch(`${origin}/api/v1/health`, { signal, ...defined({ headers: healthHeaders }) })
         // Keep received headers even if cancellation or a later probe times out.
         lastHealthResponse = `GET ${origin}/api/v1/health answered ${response.status}`
         await response.body?.cancel()

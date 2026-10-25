@@ -1,3 +1,4 @@
+import { defined } from '@open-mercato/cezar-api-client/contract/defined'
 import { memo, useContext, useMemo } from 'react'
 import {
   Streamdown,
@@ -199,10 +200,12 @@ export const Markdown = memo(function Markdown({
       className={inline ? 'thread-markdown thread-markdown-inline' : 'thread-markdown'}
       plugins={{ code: shikiPlugin }}
       shikiTheme={[SYN_THEME, SYN_THEME]}
-      {...(fileContext || (document && imageSrc) ? { remarkPlugins: contextual.remark } : breaks ? { remarkPlugins: HARD_BREAKS } : {})}
-      {...(inline ? { allowedElements: INLINE_ELEMENTS } : {})}
-      {...(inline ? { unwrapDisallowed: true } : {})}
-      {...(inline ? { components: INLINE_COMPONENTS } : fileContext || document ? { components: contextual.components } : {})}
+      {...defined({
+        remarkPlugins: fileContext || (document && imageSrc) ? contextual.remark : breaks ? HARD_BREAKS : undefined,
+        allowedElements: inline ? INLINE_ELEMENTS : undefined,
+        unwrapDisallowed: inline || undefined,
+        components: inline ? INLINE_COMPONENTS : fileContext || document ? contextual.components : undefined,
+      })}
       linkSafety={LINK_SAFETY}
       // Copy + language chip on every fence (the deliverable); download is file-manager noise
       // in a chat, and table export dropdowns are R5-territory chrome.
