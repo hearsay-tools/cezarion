@@ -201,7 +201,10 @@ describe('provisionSkills', { timeout: 30_000 }, () => {
     rmSync(home, { recursive: true, force: true });
   });
 
-  const gitDir = async () => (await git(worktree, 'rev-parse', '--absolute-git-dir')).trim();
+  const gitDir = async () => {
+    const dir = await git(worktree, 'rev-parse', '--absolute-git-dir');
+    return dir.trim();
+  };
   const manifestPath = async () => join(await gitDir(), 'cezar-manifest.json');
   const status = (cwd: string) => git(cwd, 'status', '--porcelain', '--untracked-files=all');
 

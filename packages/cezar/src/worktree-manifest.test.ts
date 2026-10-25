@@ -25,7 +25,10 @@ describe('worktree manifest', { timeout: 30_000 }, () => {
   let worktree: string;
   let gitDir: string;
 
-  const git = async (cwd: string, ...args: string[]) => (await execFileAsync('git', args, { cwd })).stdout;
+  const git = async (cwd: string, ...args: string[]) => {
+    const { stdout } = await execFileAsync('git', args, { cwd });
+    return stdout;
+  };
   const manifestFile = () => join(gitDir, MANIFEST_FILE);
   const writeManifest = (doc: unknown) => writeFileSync(manifestFile(), typeof doc === 'string' ? doc : JSON.stringify(doc));
   const pass = <T>(writer: 'skills' | 'seed', run: (files: WorktreeFiles) => Promise<T>, options: WorktreeFilesOptions = {}) =>

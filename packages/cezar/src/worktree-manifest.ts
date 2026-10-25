@@ -84,8 +84,9 @@ async function readJson(file: string): Promise<{ found: false } | { found: true;
   }
 }
 
-const strings = (values: readonly unknown[] | undefined): string[] =>
-  (values ?? []).filter((value): value is string => typeof value === 'string');
+function strings(values: readonly unknown[] | undefined): string[] {
+  return (values ?? []).filter((value): value is string => typeof value === 'string');
+}
 
 /** The manifest, or `newer` when a later cezar wrote a version this one cannot read. */
 async function loadManifest(gitDir: string): Promise<Loaded | 'newer'> {
@@ -165,7 +166,10 @@ async function removePath(path: string): Promise<void> {
   else await unlink(path);
 }
 
-const isFile = async (path: string) => (await lstat(path).catch(() => null))?.isFile() === true;
+async function isFile(path: string): Promise<boolean> {
+  const stat = await lstat(path).catch(() => null);
+  return stat?.isFile() === true;
+}
 
 /** Rename into place; across filesystems (`EXDEV`), copy instead, which a crash can leave partial. */
 async function moveInto(from: string, to: string): Promise<void> {

@@ -31,7 +31,10 @@ const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 describe('provisionSkills after an interrupted write', { timeout: 30_000 }, () => {
   let main: string;
   let worktree: string;
-  const git = async (cwd: string, ...args: string[]) => (await execFileAsync('git', args, { cwd })).stdout;
+  const git = async (cwd: string, ...args: string[]) => {
+    const { stdout } = await execFileAsync('git', args, { cwd });
+    return stdout;
+  };
 
   beforeEach(async () => {
     main = realpathSync(mkdtempSync(join(tmpdir(), 'cez-provision-interrupted-')));
