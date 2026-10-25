@@ -522,7 +522,24 @@ test('no workflow declares both pull_request and pull_request_target', () => {
   }
 });
 
-test('baseline growth is required through trusted classify-pr with default PR event types', () => {
+// Runs the Reject baseline growth script with stubbed modules. Returns each `git show` object it
+// read, and fails unless it then calls the gate it loaded.
+async function baselineGateSources(script, eventName) {
+  const shown = [];
+  let checked = false;
+  const modules = {
+    'node:fs': { writeFileSync: () => {} },
+    'node:path': path,
+    'node:child_process': { execFileSync: (command, args) => { shown.push(args.at(-1)); return ''; } },
+  };
+  const load = name => modules[name] ?? { checkPullRequest: async () => { checked = true; } };
+  const run = new (async () => {}).constructor('require', 'context', 'github', 'core', 'process', script);
+  await run(load, { eventName, sha: 'workflow-sha' }, {}, {}, { env: { RUNNER_TEMP: os.tmpdir() } });
+  assert.ok(checked, `${eventName} must call the gate it loaded`);
+  return shown;
+}
+
+test('baseline growth is required through trusted classify-pr with default PR event types', async () => {
   const ci = workflow();
   const job = ci.jobs['classify-pr'];
   const checkIndex = job.steps.findIndex(step => step.name === 'Reject baseline growth');
@@ -538,10 +555,9 @@ test('baseline growth is required through trusted classify-pr with default PR ev
   const check = job.steps[checkIndex];
   assert.equal(check.if, "github.event_name == 'pull_request_target' || steps['resolve-dispatch'].outputs.valid == 'true'");
   // The checkout is the event's base.sha, which can predate the gate; the workflow's own commit cannot.
-  assert.match(check.with.script, /'show', `\$\{context\.sha\}:\.github\/scripts\/baseline-growth\.cjs`/);
-  assert.match(check.with.script, /require\(gate\)/);
-  assert.doesNotMatch(check.with.script, /require\('\.\/.github\/scripts\/baseline-growth.cjs'\)/);
-  assert.match(check.with.script, /await checkPullRequest\(\{ github, context, core \}\)/);
+  // A dispatch runs at the dispatched PR head, so only the checked-out trusted base may supply its gate.
+  assert.deepEqual(await baselineGateSources(check.with.script, 'pull_request_target'), ['workflow-sha:.github/scripts/baseline-growth.cjs']);
+  assert.deepEqual(await baselineGateSources(check.with.script, 'workflow_dispatch'), ['HEAD:.github/scripts/baseline-growth.cjs']);
   assert.ok(ci.jobs.verify.needs.includes('classify-pr'));
   assert.match(ci.jobs.verify.steps[0].run, /test "\$CLASSIFY_RESULT" = success/);
   assert.equal(ci.on.pull_request_target.types, undefined, 'label changes must not cancel and restart CI');
