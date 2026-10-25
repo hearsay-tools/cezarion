@@ -7,7 +7,6 @@ import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest'
 
 import { settleVisual, waitForSettledSample } from './visual-ready'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
-import { expectGroupRowHeightMatchesTaskRow } from './row-height'
 import { AgentBrowser, HOVER_POINTER_ARGS, bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import {
   applyContrastQaVariant,
@@ -18,7 +17,7 @@ import {
   restoreContrastQaDefaults,
   type ContrastSample,
 } from './contrast'
-// fixture-server starts: 7
+// fixture-server starts: 6
 
 /**
  * The task quick-list, in a real browser, against a real cezar serving real runs.
@@ -154,7 +153,6 @@ let baseUrl: string
 let bootProject: string
 
 const ROW = '[data-slot="task-row"]'
-const TILE = '[data-slot="group-tile"]'
 
 /** A flat route target under this server's own project prefix (multi-project spec, step 3.2).
  *  Every in-app link the cockpit renders is scoped, so every href assertion below is too. */
@@ -165,12 +163,12 @@ const scoped = (path: string) => `/p/${bootProject}${path}`
 const textOf = (selector: string) =>
   browser.evaluate(`document.querySelector(${JSON.stringify(selector)}).textContent`) as string
 
-/** The rendered rows/tiles under one bucket header, in DOM order. */
+/** The rendered rows under one bucket header, in DOM order. */
 const rowsIn = (label: string) =>
   browser.evaluate(`(() => {
     const bucket = document.querySelector('[data-bucket=${JSON.stringify(label)}]')
     if (!bucket) return null
-    return [...bucket.querySelectorAll('${ROW}, ${TILE}')].map((el) => el.textContent.trim())
+    return [...bucket.querySelectorAll('${ROW}')].map((el) => el.textContent.trim())
   })()`) as string[] | null
 
 beforeAll(async () => {
@@ -223,22 +221,22 @@ describe('task quick-list', () => {
     // .ai/qa/1509-proof/vitest.config.ts -t 'groups attention before finished outcomes'`:
     // 1 of 1 failed before; 1 of 1 passed after, with the same detach/restore and no burners.
     const expectedBuckets = ['Needs you', 'Finished']
-    const expectedRows = ['fix-review-pr', 'fix-done', 'fix-failed']
+    // Historical variant runs are ordinary rows since the compare page was retired
+    // (hearsay-tools/cezarion#1760).
+    const expectedRows = ['fix-var-a', 'fix-var-b', 'fix-review-pr', 'fix-done', 'fix-failed']
     const title = 'Structured changes endpoint for the git view'
-    const sample = browser.waitForValue<{ buckets: string[]; rows: string[]; groups: number; text: string }>(`(() => {
+    const sample = browser.waitForValue<{ buckets: string[]; rows: string[]; text: string }>(`(() => {
       const buckets = [...document.querySelectorAll('[data-slot="quick-list-bucket"]')]
       return {
         buckets: buckets.map(bucket => bucket.dataset.bucket),
         rows: buckets.flatMap(bucket => [...bucket.querySelectorAll('${ROW}')].map(row => row.dataset.runId)),
-        groups: buckets.reduce((count, bucket) => count + bucket.querySelectorAll('${TILE}').length, 0),
         text: buckets[0]?.textContent ?? '',
       }
     })()`, value => JSON.stringify(value.buckets) === JSON.stringify(expectedBuckets)
       && JSON.stringify(value.rows) === JSON.stringify(expectedRows)
-      && value.groups === 1 && value.text.includes(title))
+      && value.text.includes(title))
     expect(sample.buckets).toEqual(expectedBuckets)
     expect(sample.rows).toEqual(expectedRows)
-    expect(sample.groups).toBe(1)
     expect(sample.text).toContain(title)
   })
 
@@ -335,105 +333,6 @@ describe('task quick-list', () => {
 
     // Only the run that has one.
     expect(browser.count('[data-run-id="fix-done"] [data-slot="pr-chip"]')).toBe(0)
-  })
-
-  it('expands the variant group into per-variant rows, and collapses it again', () => {
-    // Scoped to the quick-list's rows: the Tasks table (Step 3.4) legitimately lists each
-    // variant as its own row, so a bare data-run-id would match the table too.
-    expect(browser.count(`${ROW}[data-run-id="fix-var-a"]`)).toBe(0)
-
-    browser.click(TILE)
-    browser.waitForFunction(`document.querySelector('${ROW}[data-run-id="fix-var-a"]') !== null`)
-    // Historical fixtures have no directional counters: show each backend, never invent usage.
-    // Line two is the meta line — the state word, no age (#617).
-    expect(textOf(`${ROW}[data-run-id="fix-var-a"]`)).toBe('Aclaudeneeds review')
-    expect(textOf(`${ROW}[data-run-id="fix-var-b"]`)).toBe('Bcodexneeds review')
-    // Each variant is still its own deep link.
-    expect(
-      browser.evaluate(`document.querySelector('${ROW}[data-run-id="fix-var-b"] a').getAttribute('href')`)
-    ).toBe(scoped('/tasks/fix-var-b'))
-
-    browser.screenshot(`${artifactsDir}/quick-list-expanded.png`)
-
-    browser.click(TILE)
-    browser.waitForFunction(`document.querySelector('${ROW}[data-run-id="fix-var-a"]') === null`)
-  })
-
-  it('keeps the group row two fixed lines through expand and collapse, each member dot under its title (#617)', () => {
-    const group = '[data-slot="group-row"][data-group-id="fix-group-1"]'
-    type Geometry = { expanded: string | null; height: number; titleLeft: number; meta: string }
-    const geometry = `(() => {
-      const row = document.querySelector('${group}')
-      if (!row) return null
-      return { expanded: row.querySelector('${TILE}').getAttribute('aria-expanded'),
-        height: Math.round(row.getBoundingClientRect().height),
-        titleLeft: row.querySelector('[data-slot="group-title"]').getBoundingClientRect().left,
-        meta: row.querySelector('[data-slot="group-meta"]').textContent }
-    })()`
-    const collapsed = waitForSettledSample(browser, geometry, (g: Geometry | null) => g?.expanded === 'false') as Geometry
-    // Two review members, no shared reference: the aggregate in words, then the latest age.
-    expect(collapsed.meta).toBe('2 needs review · 11m')
-    browser.click(TILE)
-    const open = waitForSettledSample(browser, geometry, (g: Geometry | null) => g?.expanded === 'true') as Geometry
-    expect(open.height).toBe(collapsed.height)
-    const dots = waitForSettledSample(browser, `(() => {
-      const slots = ['fix-var-a', 'fix-var-b'].map((id) => document.querySelector('${ROW}[data-run-id="' + id + '"] [data-slot="task-row-dot"]'))
-      return slots.every(Boolean) ? slots.map((slot) => slot.getBoundingClientRect().left) : null
-    })()`) as number[]
-    for (const left of dots) expect(Math.abs(left - collapsed.titleLeft), `dot at ${left}, title at ${collapsed.titleLeft}`).toBeLessThanOrEqual(1)
-    browser.click(TILE)
-    const closed = waitForSettledSample(browser, geometry, (g: Geometry | null) => g?.expanded === 'false') as Geometry
-    expect(closed.height).toBe(collapsed.height)
-  })
-
-  // This spec's headless browser reports `hover: none`: the touch structure (one toggle over
-  // both lines) must hold the task row's height at desktop and phone widths alike.
-  it("keeps the group row a task row's height at 1440 and 768px on hover:none (#617)", () => {
-    // 520 and 390 are gone: the phone drawer no longer holds the quick list (#621), so the group
-    // row has no surface below md. 768 is the narrowest width that still renders the sidebar.
-    expectGroupRowHeightMatchesTaskRow(browser, { url: `${baseUrl}${scoped('/')}`, groupId: 'fix-group-1', widths: [1440, 768] })
-  })
-
-  it('keeps the group and member rows readable, at rest and selected, in both themes (#617)', () => {
-    const group = '[data-slot="group-row"][data-group-id="fix-group-1"]'
-    const member = `${ROW}[data-run-id="fix-var-a"]`
-    const read = (selector: string, state: string) => {
-      const sample = browser.evaluate(contrastSampleExpression(selector)) as ContrastSample
-      expect(sample.ratio, `${state} ${selector}: ${sample.foreground} on ${sample.background}`).toBeGreaterThanOrEqual(4.5)
-    }
-    const mark = (selector: string, state: string) => {
-      const sample = browser.evaluate(contrastSampleExpression(selector, 'background-color', 'parent')) as ContrastSample
-      expect(sample.ratio, `${state} ${selector}: ${sample.foreground} on ${sample.background}`).toBeGreaterThanOrEqual(3)
-    }
-    try {
-      for (const variant of contrastQaVariants.filter(({ viewport }) => viewport.width === 1440)) {
-        // The compare page selects the group; a member's thread (expanded) selects the member.
-        for (const [path, groupSelected] of [[scoped('/compare/fix-group-1'), true], [scoped('/tasks/fix-var-a'), false]] as const) {
-          browser.goto(`${baseUrl}${path}`)
-          browser.waitForFunction(`document.querySelector('${group} ${TILE}')?.getAttribute('aria-expanded') === 'false'`)
-          applyContrastQaVariant(browser, variant)
-          browser.click(TILE)
-          browser.waitForFunction(`document.querySelector('${member}') !== null && (document.querySelector('${group}').dataset.active === 'true') === ${groupSelected} && (document.querySelector('${member}').dataset.active === 'true') === ${!groupSelected}`)
-          const state = `${variant.id} ${groupSelected ? 'group selected' : 'member selected'}`
-          for (const part of ['group-title', 'group-meta', 'group-count']) read(`${group} [data-slot="${part}"]`, state)
-          for (const part of ['task-row-title', 'task-row-meta', 'task-row-variant-letter']) read(`${member} [data-slot="${part}"]`, state)
-          // The letter chip as resolved: a 16px circle saying `A`. The compare view's sheet
-          // styles its own `variant-letter` slot globally (`Variant ` prefix, 18px), which is
-          // why this one has a slot of its own.
-          expect(browser.evaluate(`(() => {
-            const chip = document.querySelector('${member} [data-slot="task-row-variant-letter"]'), s = getComputedStyle(chip)
-            return { size: s.width + ' ' + s.height, before: getComputedStyle(chip, '::before').content, text: chip.textContent }
-          })()`), state).toEqual({ size: '16px 16px', before: 'none', text: 'A' })
-          mark(`${group} [data-slot="status-dot"]`, state)
-          mark(`${member} [data-slot="status-dot"]`, state)
-          browser.screenshot(`${artifactsDir}/quick-list-group-${variant.id}-${groupSelected ? 'group' : 'member'}.png`, { viewport: true })
-        }
-      }
-    } finally {
-      restoreContrastQaDefaults(browser)
-      browser.goto(`${baseUrl}${scoped('/')}`)
-      browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
-    }
   })
 
   it('lights the row for the task the route has open', () => {
@@ -599,10 +498,6 @@ describe('tasks table overview', () => {
       'fix-done': '+9 −2',
       'fix-failed': '—',
     })
-  })
-
-  it('does not promote retired variant comparisons', () => {
-    expect(browser.count('[data-slot="compare-strip"]')).toBe(0)
   })
 
   it('keeps the table archive filter and the sidebar tabs independent', () => {
@@ -1473,154 +1368,6 @@ describe('a row under width contention, in a column the user can widen', () => {
 })
 
 /** The other half of the truth: with no runs, the sidebar says so rather than inventing any. */
-/**
- * Variant rows and the group row at the default 264px column (#617 fix round). Its own fixture:
- * a short-token opencode variant is the case where line 1 (`opencode · $0.40`) runs out of room
- * while line 2's tokens would still fit, and only a real layout can say which gives way.
- */
-describe('variant rows and the group row under width pressure', () => {
-  let varServer: ChildProcess
-  let varRoot: string
-  let varUrl: string
-  let varProject: string
-  const GROUP = '[data-slot="group-row"][data-group-id="g-wide"]'
-  const member = (id: string) => `[data-slot="task-row"][data-run-id="${id}"]`
-  const VARIANTS = ['wa', 'wb'].map((id, index) => ({
-    id, title: `Ledger scan (${index ? 'B' : 'A'})`, workflow: 'default', task: 'scan the ledger', status: 'review',
-    createdAt: ago((20 - index) * 60_000), finishedAt: ago((10 - index) * 60_000), tokensUsed: 2,
-    runner: 'opencode', costUsd: 0.4, inputTokens: 1, outputTokens: 1,
-    // Shared by both, so it belongs to the group row's line 2 (#617 01a).
-    referencedIssueUrl: 'https://github.com/open-mercato/cezar/issues/425',
-    groupId: 'g-wide', variant: index ? 'B' : 'A', archived: false, steps: [],
-  }))
-
-  beforeAll(async () => {
-    varRoot = mkdtempSync(join(tmpdir(), 'cezar-e2e-variants-'))
-    mkdirSync(join(varRoot, '.ai/cezar'), { recursive: true })
-    writeFileSync(join(varRoot, '.ai/cezar/runs.json'), JSON.stringify(VARIANTS, null, 2), 'utf8')
-
-    varServer = spawnFixtureServer([cezarCli, 'serve', '--repo', varRoot, '--port', '0', '--no-open'], {
-      env: fixtureServeEnv(varRoot), stdio: 'ignore',
-    })
-    varUrl = await waitForFixtureServer(varServer)
-    varProject = await bootProjectId(varUrl)
-  }, 90_000)
-
-  afterAll(async () => {
-    browser.evaluate(`localStorage.removeItem('cez-sidebar-width')`)
-    await stopFixtureServer(varServer)
-    if (varRoot) rmSync(varRoot, { recursive: true, force: true })
-    browser.setViewport(1440, 900)
-    browser.goto(`${baseUrl}${scoped('/')}`)
-    browser.waitForFunction(`document.querySelector('[data-slot="quick-list-bucket"]') !== null`)
-  })
-
-  const open = (width: number) => {
-    browser.setViewport(1440, 900)
-    browser.goto(`${varUrl}/p/${varProject}/`)
-    browser.evaluate(`localStorage.setItem('cez-sidebar-width', '${width}')`)
-    browser.goto(`${varUrl}/p/${varProject}/`)
-    browser.waitForFunction(`document.querySelector('${GROUP} [data-slot="group-tile"]')?.getAttribute('aria-expanded') === 'false'`)
-    browser.click(`${GROUP} [data-slot="group-tile"]`)
-  }
-
-  type Line = { text: string; rendered: string; overflows: boolean; tokens: boolean; costShown: boolean }
-  const lineOf = (id: string) => `(() => {
-    const row = document.querySelector(${JSON.stringify(member(id))})
-    const title = row?.querySelector('[data-slot="task-row-title"]')
-    if (!title) return null
-    const cost = title.querySelector('[data-slot="variant-cost"]')
-    return { text: title.textContent, rendered: title.innerText, overflows: title.scrollWidth > title.clientWidth,
-      tokens: row.querySelector('[data-slot="task-row-tokens"]') !== null,
-      costShown: cost !== null && cost.getBoundingClientRect().right <= title.getBoundingClientRect().right + 0.5 }
-  })()`
-
-  it('at 264px, never shows the tokens while the cost is cut, and reads "opencode · $0.40"', () => {
-    open(264)
-    for (const id of ['wa', 'wb']) {
-      // The layout settles after the ResizeObserver's first pass: wait for a stable answer.
-      const line = browser.waitForStable(lineOf(id), { holdMs: 300, matcher: (l: Line | null) => l !== null }) as Line
-      expect(!(line.overflows && line.tokens), JSON.stringify(line)).toBe(true)
-      expect(line.text, id).toBe('opencode · $0.40')
-      // Rendered text keeps the separator's spaces (a flex item dropped the leading one).
-      expect(line.rendered, id).toBe('opencode · $0.40')
-      // Tokens drop first: either the whole cost is visible, or the tokens are gone.
-      expect(line.costShown || !line.tokens, JSON.stringify(line)).toBe(true)
-    }
-    browser.screenshot(`${artifactsDir}/quick-list-variants-264.png`, { viewport: true })
-  })
-
-  it('at 420px, has room for both: the full cost and the tokens', () => {
-    open(420)
-    for (const id of ['wa', 'wb']) {
-      const line = browser.waitForStable(lineOf(id), { holdMs: 300, matcher: (l: Line | null) => l !== null }) as Line
-      expect(line.tokens, JSON.stringify(line)).toBe(true)
-      expect(line.overflows, JSON.stringify(line)).toBe(false)
-      expect(line.costShown, JSON.stringify(line)).toBe(true)
-    }
-  })
-
-  it("puts the shared reference on the group row's line 2, and keeps the row's height through expand", () => {
-    browser.setViewport(1440, 900)
-    browser.goto(`${varUrl}/p/${varProject}/`)
-    type Group = { expanded: string | null; height: number; meta: string; inert: string | null; links: number; inToggle: boolean }
-    const group = `(() => {
-      const row = document.querySelector('${GROUP}')
-      const meta = row?.querySelector('[data-slot="group-meta"]')
-      if (!meta) return null
-      const chip = meta.querySelector('[data-slot="issue-chip"]')
-      return { expanded: row.querySelector('[data-slot="group-tile"]').getAttribute('aria-expanded'),
-        height: Math.round(row.getBoundingClientRect().height), meta: meta.textContent,
-        inert: chip?.dataset.inert ?? null, links: meta.querySelectorAll('a').length, inToggle: chip?.closest('button') != null }
-    })()`
-    const collapsed = waitForSettledSample(browser, group, (g: Group | null) => g?.expanded === 'false') as Group
-    // The fixture's newest member finished 9m before `now`, a module-load constant, while the row
-    // ages against the live clock: a slow shard start legitimately shows 10m, 11m... So pin the
-    // age to 9m plus the minutes elapsed since the fixture was built (one minute of rounding slack)
-    // instead of the bare 9m, which was wall-clock dependent, or any digits, which would pass a wrong age.
-    // Reproduction (red with the bare 9m, green with this bound): quick-list-age-reproduction.md.
-    const shown = /^2 needs review · #425 · (\d+)m$/.exec(collapsed.meta)
-    const elapsedMin = Math.floor((Date.now() - now) / 60_000)
-    expect(shown, collapsed.meta).not.toBeNull()
-    expect(Number(shown?.[1]), collapsed.meta).toBeGreaterThanOrEqual(9 + elapsedMin - 1)
-    expect(Number(shown?.[1]), collapsed.meta).toBeLessThanOrEqual(9 + elapsedMin + 1)
-    // This spec's browser reports `hover: none`, so the reference is inert text here; the
-    // pointer path (a link with the status panel) is pinned in selection-states.
-    // …and inside the one toggle that spans both lines (#617 mobile regression): inert text is
-    // not interactive, so nothing is nested in the button.
-    expect(collapsed).toMatchObject({ inert: 'true', links: 0, inToggle: true })
-    browser.click(`${GROUP} [data-slot="group-tile"]`)
-    const expanded = waitForSettledSample(browser, group, (g: Group | null) => g?.expanded === 'true') as Group
-    expect(expanded.height).toBe(collapsed.height)
-    // The members no longer repeat the reference their group row carries.
-    const memberMeta = browser.waitForValue(`document.querySelector('${member('wa')} [data-slot="task-row-meta"]')?.textContent ?? null`) as string
-    expect(memberMeta).toMatch(/^needs review/)
-    expect(memberMeta).not.toContain('#425')
-  })
-
-  it('gives the compare link a real 44px touch target beside the disclosure, and a tap opens compare', () => {
-    open(264)
-    type Target = { noHover: boolean; w: number; h: number; clearOfDisclosure: boolean; hits: boolean[]; x: number; y: number }
-    const target = waitForSettledSample(browser, `(() => {
-      const link = document.querySelector('${GROUP} [data-slot="group-compare"]')
-      const chevron = document.querySelector('${GROUP} [data-slot="group-disclosure"]')
-      if (!link || !chevron) return null
-      const r = link.getBoundingClientRect(), c = chevron.getBoundingClientRect()
-      const cx = r.left + r.width / 2, cy = r.top + r.height / 2
-      const points = [[r.left + 1, cy], [r.right - 1, cy], [cx, r.top + 1], [cx, r.bottom - 1], [cx, cy]]
-      return { noHover: matchMedia('(hover: none)').matches, w: r.width, h: r.height, clearOfDisclosure: r.right <= c.left + 0.5,
-        hits: points.map(([x, y]) => link.contains(document.elementFromPoint(x, y))), x: Math.round(cx), y: Math.round(cy) }
-    })()`) as Target
-    // This spec's browser reports `hover: none` — the touch path this target exists for.
-    expect(target.noHover).toBe(true)
-    expect([target.w, target.h]).toEqual([44, 44])
-    expect(target.clearOfDisclosure).toBe(true)
-    expect(target.hits).toEqual([true, true, true, true, true])
-    browser.tapAt(target.x, target.y)
-    browser.waitForFunction(`location.pathname.endsWith('/compare/g-wide')`)
-  })
-})
-
 describe('empty quick-list', () => {
   let emptyServer: ChildProcess
   let emptyRoot: string
@@ -1654,9 +1401,8 @@ describe('empty quick-list', () => {
   })
 })
 
-
 describe('persistent task pins (#93)', () => {
-  it('pins a needs-you variant from a 44px phone control without moving it out of attention on reload', async () => {
+  it('pins a needs-you task from a 44px phone control without moving it out of attention on reload', async () => {
     browser.setViewport(360, 640)
     browser.goto(`${baseUrl}${scoped('/')}`)
     browser.waitForFunction(`document.querySelector('[data-slot="task-card"][data-run-id="fix-var-b"]') !== null`)
@@ -1670,11 +1416,9 @@ describe('persistent task pins (#93)', () => {
     expect(browser.url()).toContain(scoped('/'))
     browser.setViewport(1280, 800)
     browser.goto(`${baseUrl}${scoped('/')}`)
-    browser.waitForFunction(`document.querySelector('[data-bucket="Needs you"] [data-slot="group-tile"]') !== null`)
-    expect(browser.count('[data-slot="group-tile"][data-group-id="fix-group-1"]')).toBe(1)
-    browser.click('[data-bucket="Needs you"] [data-slot="group-tile"]')
-    browser.waitForFunction(`document.querySelector('[data-bucket="Needs you"] [data-run-id="fix-var-a"]') !== null`)
-    expect(browser.evaluate(`[...document.querySelectorAll('[data-bucket="Needs you"] [data-slot="task-row"]')].map(x => x.dataset.runId)`)).toEqual(['fix-var-a', 'fix-var-b', 'fix-review-pr'])
+    // The pin lifts the run to the top of its status section (#935).
+    expect(browser.waitForValue(`[...document.querySelectorAll('[data-bucket="Needs you"] [data-slot="task-row"]')].map(x => x.dataset.runId)`,
+      (ids: string[]) => ids.length === 3)).toEqual(['fix-var-b', 'fix-var-a', 'fix-review-pr'])
     const runs = await (await fetch(`${baseUrl}/api/v1/runs`)).json() as Array<{ id: string; pinned?: boolean; pinnedAt?: string }>
     expect(runs.find(r => r.id === 'fix-var-a')).not.toHaveProperty('pinned')
     expect(runs.find(r => r.id === 'fix-var-b')).toMatchObject({ pinned: true, pinnedAt: expect.any(String) })

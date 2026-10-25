@@ -2,7 +2,7 @@
 
 import { describe, expect, it } from 'vitest'
 
-import { compactTokens, shortAge } from '@/lib/format'
+import { compactTokens, resumeLabel, shortAge } from '@/lib/format'
 
 describe('shortAge', () => {
   const now = Date.parse('2026-07-14T12:00:00.000Z')
@@ -53,5 +53,24 @@ describe('compactTokens', () => {
 
   it.each([-5, Number.NaN, Number.POSITIVE_INFINITY])('renders %s as 0', (tokens) => {
     expect(compactTokens(tokens)).toBe('0')
+  })
+})
+
+describe('resumeLabel (a scheduled run\'s meta word)', () => {
+  const NOW = Date.parse('2026-07-14T12:00:00.000Z')
+  const ago = (ms: number) => new Date(NOW - ms).toISOString()
+  it('says how long, under an hour', () => {
+    expect(resumeLabel(new Date(NOW + 12 * 60_000 + 5_000).toISOString(), NOW)).toBe('resumes in 12m')
+    expect(resumeLabel(new Date(NOW + 20_000).toISOString(), NOW)).toBe('resumes in 1m')
+  })
+  it('says when, from an hour out', () => {
+    const at = new Date(NOW + 2 * 3_600_000)
+    const clock = new Intl.DateTimeFormat(undefined, { hour: '2-digit', minute: '2-digit' }).format(at)
+    expect(resumeLabel(at.toISOString(), NOW)).toBe(`resumes ${clock}`)
+  })
+  it('falls back to scheduled when the time is missing, invalid or already past', () => {
+    expect(resumeLabel(undefined, NOW)).toBe('scheduled')
+    expect(resumeLabel('not a date', NOW)).toBe('scheduled')
+    expect(resumeLabel(ago(60_000), NOW)).toBe('scheduled')
   })
 })

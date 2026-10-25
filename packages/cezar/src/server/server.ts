@@ -31,7 +31,7 @@ import { workerCapacity } from '../delegation/capacity.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
 import { githubItemParamsSchema } from '@open-mercato/cezar-contract/github';
-import { PARALLEL_VARIANTS_REMOVED, singleRunVariantsSchema, toRunSummary } from '@open-mercato/cezar-contract/runs';
+import { singleRunVariantsSchema, toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { workerEmptyRequestSchema, runRelationshipsSchema } from '@open-mercato/cezar-contract/delegation';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -83,8 +83,6 @@ import {
   archiveFinishedRequestSchema,
   markAllReadRequestSchema,
   notifyRunInputSchema,
-  type GroupResponse,
-  type GroupVariant,
   type RunIndexEntry,
   type RunsIndexResponse,
 } from '@open-mercato/cezar-contract/runs';
@@ -101,7 +99,6 @@ import {
   MODEL_DISCOVERY_RUNNERS,
   modelDiscoveryRunnerSchema,
   openProjectInSchema,
-  runnerDiscoversModels,
 } from '@open-mercato/cezar-contract/workspace';
 import {
   attachmentInputSchema,
@@ -132,13 +129,10 @@ import { detectEnvironment } from '../core/backend-detect.ts';
 import { RUNNER_IDS } from '../core/agent-runner.ts';
 import type { ContentBlock } from '../core/agent-runner.ts';
 import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
-import { hostModelCatalogAdapters } from '../core/host-model-catalog.ts';
 import {
   PROVIDER_IDS,
   ProviderAuthService,
-  providerAuthChecksDisabled,
   type ProviderId,
-  type ProviderStatusResponse,
 } from '../core/provider-auth.ts';
 import { applyProviderEnablement } from '../core/provider-availability.ts';
 import { RunnerModelCatalog } from '../core/runner-model-catalog.ts';
@@ -147,18 +141,16 @@ import { WORKFLOWS_DIR, loadWorkflows } from '../workflows/load.ts';
 import {
   QUICK_TASK_WORKFLOW,
   normalizeWorkflowDoc,
-  plannedWorkflow,
   skillStackOf,
   skillsToSteps,
   stepsIssue,
   workflowFileSchema,
   workflowStepSchema,
-  type WorkflowDef,
 } from '../workflows/types.ts';
 import { planChain, slugify } from '../planner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
 import { getTeamSkillsCached, refreshTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
-import { appendHandoffHeartbeat, handoffProgressExcerpt, readHandoff } from '../handoff.ts';
+import { appendHandoffHeartbeat, readHandoff } from '../handoff.ts';
 import { ARCHIVED_WINDOW, type RepoHandle, type RunEvent, type RunRecord, type RunStatus, type RunStore } from '../runs/store.ts';
 import {
   HistoryCursorError,
@@ -169,7 +161,6 @@ import {
 import { readRunIndexFromDisk, searchRunIndexFromDisk } from '../runs/run-index.ts';
 import { workerDestroyView } from '../runs/delegation-state.ts';
 import { searchTokens } from '../runs/run-search.ts';
-import { clientRequestHash } from '../runs/client-request.ts';
 import { ownPullRequestNumbers } from '../runs/pull-requests.ts';
 import { ColdRepoHandles } from './cold-repo-handles.ts';
 import { isV2WireEventType } from '../runs/ui-event-sink.ts';
@@ -183,7 +174,7 @@ import { artifactParamsSchema, fileLinkQuerySchema } from '@open-mercato/cezar-c
 import { artifactDirectory, listArtifacts, readArtifact } from '../artifacts/store.ts';
 import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
 import { isUntouchedCancelledRun, toPastedContent, type PastedContent, type RunManager } from '../workflows/run.ts';
-import { worktreeDiff, worktreeDiffStat, worktreeSizeBytes } from '../git-worktree.ts';
+import { worktreeDiff, worktreeSizeBytes } from '../git-worktree.ts';
 import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
 import { isReclaimable, reclaimWorktree, reclaimWorktrees, rematerializeReclaimedWorktree, selectReclaimableWorktrees } from '../runs/retention.ts';
 import { getBranches, getCommit, getDiff, getLogWithParents, getBranchHead, getRepoInfo, getStatus, getTracking } from './git.ts';
@@ -273,7 +264,6 @@ import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
 import { parseRemote, resolveForge, forgeWebRoot, type ForgeAvailability } from './forge/index.ts';
 import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubCommentCounts, fetchGithubComments, fetchGithubItem, forgetGithubItem, fetchGithubPrDiff, fetchGithubRefStatus, forgetRefStatus, readCachedRefStatuses, refNumberFromUrl, searchGithubItems, GithubPrNotFoundError, GH_CHECKS_MAX, GH_REF_STATUS_MAX } from './github.ts';
-import { ensureLaunchKey } from './launch-key.ts';
 import { CockpitAlreadyRunningError, type CockpitOwnership } from './cockpit-ownership.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
@@ -284,8 +274,26 @@ import {
   providerForActiveRun,
   providerForExistingRun,
   providersRequiredByWorkflow,
-  unavailableProviderMessage,
 } from './provider-action-gate.ts';
+import {
+  attachProjectWebhooks,
+  createBootContext,
+  createProviderStatus,
+  resolveServerDeps,
+  watchProviderRuntimeAuth,
+} from './server-deps.ts';
+import {
+  NO_WEBHOOK_ERROR,
+  agentProfileRefusal,
+  clientRequestOf,
+  launchRun,
+  modelLockRefusal,
+  notifyRefusal,
+  providerGateRefusal,
+  replayedRun,
+  resolveStartWorkflow,
+  startRunInput,
+} from './start-run-options.ts';
 import {
   ASSET_CACHE_CONTROL,
   BUILD_HINT_HTML,
@@ -542,12 +550,6 @@ const AUTOMATIONS_OFF = 'Automations are disabled — set CEZ_AUTOMATIONS=1 to e
 /** 404 body for a run whose row is in runs.db but whose record this cezar cannot decode (#779). */
 const UNREADABLE_RUN_ERROR = 'this run could not be read by this cezar: its record in runs.db does not fit this version (a newer cezar may have written it). It is left in the database untouched.';
 
-// ---- variant-compare response shapes (spec 010) ----------------------------
-// Named and exported so `api-types.test.ts` can drift-guard the cockpit's
-// hand-mirrored copies (`web/app/src/api/types.ts`) against the real thing.
-
-/** One column of `GET /api/groups/:groupId`. NOTE: `diffStat` here is the raw
- *  `git diff --stat` text (worktreeDiffStat), NOT the numeric `RunRecord.diffStat`. */
 /** `GET /api/projects` (multi-project spec) — the workspace registry with
  *  per-root status probes. Absolute `root`s belong HERE (same-origin, behind
  *  the cockpit) and are deliberately never mirrored into the CORS-open
@@ -1086,51 +1088,11 @@ export function createApp(deps: ServerDeps) {
   // turns into a compile error instead.
   const bootRoot = deps.repoRoot;
   const bootDataDir = join(bootRoot, '.ai/cezar');
-  // One adapter per contract-advertised runner; the map is typed over `modelDiscoveryRunnerSchema`
-  // so a runner added to the contract without an adapter fails typecheck (AGENT_PROTOCOL.md §10).
-  const modelCatalog = deps.modelCatalog ?? new RunnerModelCatalog({ adapters: hostModelCatalogAdapters(bootRoot) });
-  const invalidateHostModels = (provider: ProviderId): void => {
-    if (runnerDiscoversModels(provider)) modelCatalog.invalidate(provider);
-  };
-  const providerAuth = deps.providerAuth ?? new ProviderAuthService();
-  const workspaceConfig = deps.workspaceConfig ?? {
-    load: loadWorkspaceConfig,
-    mergeWrite: mergeWriteWorkspaceConfig,
-  };
-  const providerStatus = async (options?: { refresh?: boolean }): Promise<ProviderStatusResponse> => {
-    if (providerAuthChecksDisabled()) {
-      return applyProviderEnablement(
-        await providerAuth.status(options?.refresh ? { refresh: true } : undefined),
-        [],
-      );
-    }
-    const [discovered, workspace] = await Promise.all([
-      providerAuth.status(options?.refresh ? { refresh: true } : undefined),
-      workspaceConfig.load(),
-    ]);
-    return applyProviderEnablement(discovered, workspace.disabledProviders);
-  };
-  /**
-   * Verify cached provider unavailability before refusing a start. Settings-disabled providers
-   * need no probe. Runtime incidents remain authoritative until an explicit retry or matching
-   * native verification clears them.
-   */
-  const providerActionError = async (
-    required: readonly ProviderId[],
-  ): Promise<string | null> => {
-    const known = await providerStatus();
-    const message = unavailableProviderMessage(required, known);
-    if (message === null) return null;
-    // A DISABLED provider is a settings fact, not a probe result — re-probing it learns nothing and
-    // would spawn a CLI to re-read something the user typed.
-    const disabled = required.some((provider) =>
-      known.providers.find((row) => row.provider === provider)?.enabled === false);
-    if (disabled) return message;
-    return unavailableProviderMessage(required, await providerStatus({ refresh: true }));
-  };
-  const openTerminal = deps.openTerminal ?? openInTerminal;
-  const openFile = deps.openFile ?? openFileInDefaultApp;
-  const openApp = deps.openApp ?? openInApp;
+  // The host-wide services and the provider closures built on them live in `./server-deps.ts`.
+  const { modelCatalog, providerAuth, workspaceConfig, openTerminal, openFile, openApp } =
+    resolveServerDeps(deps, bootRoot);
+  const { providerStatus, providerActionError, invalidateHostModels } =
+    createProviderStatus({ modelCatalog, providerAuth, workspaceConfig });
 
   // ---- workspace boot-project identity (multi-project spec) ----------------
   // The boot flow (`initWorkspace` in src/index.ts) registers the boot repo
@@ -1192,21 +1154,8 @@ export function createApp(deps: ServerDeps) {
   // SSE subscription (and torn down with the last), nothing to start here.
 
   // ---- project contexts (multi-project spec, step 2.2) ---------------------
-  // The boot project's context is SEEDED from the deps the caller already
-  // built (src/index.ts `serveCommand` did the recover/prune/launch-key work
-  // at startup — observable boot behavior unchanged); it never enters the
-  // lazy map, so its `.ai/cezar` state is never double-opened. `id` starts as
-  // the reserved alias when registration was suppressed — handlers never read
-  // it; API payloads name the boot project via `resolveBootProject` instead.
-  const bootContext: ProjectContext = {
-    id: bootProjectId ?? 'default',
-    root: bootRoot,
-    dataDir: bootDataDir,
-    store: deps.store,
-    manager: deps.manager,
-    automationStore: deps.automationStore ?? AutomationStore.open(bootDataDir),
-    launchKey: ensureLaunchKey(bootDataDir), // bookmarklet auto-start secret (spec 011)
-  };
+  // The boot project's context is SEEDED from the deps the caller already built (`createBootContext`).
+  const bootContext: ProjectContext = createBootContext(deps, bootRoot, bootDataDir);
   // The task webhook (#589): attached before any recovery — the boot store by `index.ts`, lazy
   // projects through `prepareManager` below. Attaching is idempotent, so the calls here only
   // cover an app built without boot's wiring (tests, embedded servers).
@@ -1253,20 +1202,9 @@ export function createApp(deps: ServerDeps) {
       workspaceEvents.emit('provider-status', status);
     });
 
-  providerRuntimeAuth.watch(bootContext.store);
-  for (const id of contexts.ids()) {
-    const ctx = contexts.peek(id);
-    if (ctx) providerRuntimeAuth.watch(ctx.store);
-  }
-  contexts.onStoreCreated((store) => providerRuntimeAuth.watch(store));
-  contexts.onContextBuilt((ctx) => providerRuntimeAuth.watch(ctx.store));
+  watchProviderRuntimeAuth(providerRuntimeAuth, bootContext, contexts);
 
-  // Injected contexts (tests) skip `prepareManager`; attach those when they are built.
-  for (const id of contexts.ids()) {
-    const ctx = contexts.peek(id);
-    if (ctx) taskWebhooks.attach(ctx);
-  }
-  contexts.onContextBuilt((ctx) => taskWebhooks.attach(ctx));
+  attachProjectWebhooks(taskWebhooks, contexts);
   // #667: recovery ran inside the build, before any workspace stream attached to this project's
   // store, so the runs it resumed sent no `run` event. Until a cockpit refetches, its cross-project
   // index keeps the cold read's answer: every run the restart interrupted, shown as failed.
@@ -3958,78 +3896,29 @@ export function createApp(deps: ServerDeps) {
     })
 
     .post('/runs', jsonZodValidator(startRunSchema), async (c) => {
-      const { root: repoRoot, dataDir, manager, store } = c.get('project');
-      const parsed = { data: c.req.valid('json') };
-      const clientRequest = parsed.data.clientRequestId
-        ? { id: parsed.data.clientRequestId, hash: clientRequestHash(parsed.data) }
-        : undefined;
-      // A retry only retrieves a persisted result: mutable start prerequisites (workflow,
-      // provider, account and model policy) must not invalidate an already accepted request.
+      const { id: projectId, root: repoRoot, manager, store } = c.get('project');
+      const body = c.req.valid('json');
+      const clientRequest = clientRequestOf(body);
       if (clientRequest) {
-        const existing = store.findRunByClientRequestId(clientRequest.id);
-        if (existing) {
-          if (existing.clientRequestHash !== clientRequest.hash) return c.json({ error: 'request id payload conflict' }, 409);
-          return c.json(existing, 200 as const);
-        }
+        const replay = replayedRun(store, clientRequest);
+        if (replay && 'error' in replay) return c.json({ error: replay.error }, replay.status);
+        if (replay) return c.json(replay.run, 200 as const);
       }
-      if (
-        agentModelsLocked(repoRoot) &&
-        (parsed.data.model?.trim() || parsed.data.effort?.trim())
-      ) {
-        return c.json({ error: AGENT_MODELS_LOCKED_ERROR }, 409);
-      }
-      let workflow: WorkflowDef | undefined;
-      if (parsed.data.steps) {
-        // Inline chain (spec 008): an approved plan runs as an ad-hoc workflow.
-        const issue = stepsIssue(parsed.data.steps);
-        if (issue) return c.json({ error: issue }, 400);
-        workflow = plannedWorkflow(parsed.data.steps);
-      } else {
-        const { workflows } = await loadWorkflows(repoRoot);
-        workflow = workflows.find((w) => w.name === parsed.data.workflow);
-        if (!workflow) return c.json({ error: `unknown workflow: ${parsed.data.workflow}` }, 404);
-      }
-      const fallback = parsed.data.runner ?? (await loadConfig(repoRoot)).defaultRunner;
-      const blocked = await providerActionError(providersRequiredByWorkflow(workflow, fallback));
-      if (blocked) return c.json({ error: blocked }, 409);
-      // A composer override names an account the user just picked, so a stale id (deleted since
-      // the page loaded) is answered honestly instead of quietly running on the default — the
-      // opposite of how RESOLUTION treats a dangling reference, and deliberately so: a run
-      // replaying a stored id has no better answer than the default, a user does.
-      if (parsed.data.agentProfile !== undefined) {
-        const account = await resolveWorkspaceProfile(fallback, parsed.data.agentProfile);
-        if ('error' in account) return c.json({ error: account.error }, 400);
-      }
-      // Task webhook (#589): an explicit `true` on a project with no webhook is refused, so a
-      // bot learns in one round trip. `cez task start`'s implicit default never sends it there.
-      if (parsed.data.notify === true && taskWebhookList(await projectRegistryEntry(c.get('project').id).catch(() => undefined)).length === 0) {
-        return c.json({ error: NO_WEBHOOK_ERROR }, 400);
-      }
-      const images = parsed.data.images?.map(toPastedContent);
-      const input = {
-        task: parsed.data.task,
-        notify: parsed.data.notify,
-        model: parsed.data.model,
-        effort: parsed.data.effort,
-        runner: parsed.data.runner,
-        agentProfile: parsed.data.agentProfile,
-        images,
-        systemPrompt: parsed.data.systemPrompt,
-        worktree: parsed.data.worktree,
-        autonomous: parsed.data.autonomous,
-        archiveWhenDone: parsed.data.archiveWhenDone,
-        autoMergePr: parsed.data.autoMergePr,
-      };
-      if (clientRequest) {
-        // Recheck after every await: concurrent first requests may both miss the early lookup.
-        // The manager's lookup and create are synchronous, so exactly one can create (#504).
-        const result = manager.startRunIdempotent(workflow, input, clientRequest);
-        if ('conflict' in result) return c.json({ error: 'request id payload conflict' }, 409);
-        if (!result.created) return c.json(result.run, 200 as const);
-        return c.json(result.run, 201 as const);
-      }
-      const run = manager.startRun(workflow, input);
-      return c.json(run, 201);
+      const locked = modelLockRefusal(repoRoot, body);
+      if (locked) return c.json({ error: locked.error }, locked.status);
+      const resolved = await resolveStartWorkflow(repoRoot, body);
+      if ('error' in resolved) return c.json({ error: resolved.error }, resolved.status);
+      const { workflow } = resolved;
+      const runner = body.runner ?? (await loadConfig(repoRoot)).defaultRunner;
+      const blocked = await providerGateRefusal(providerActionError, workflow, runner);
+      if (blocked) return c.json({ error: blocked.error }, blocked.status);
+      const badProfile = await agentProfileRefusal(resolveWorkspaceProfile, runner, body.agentProfile);
+      if (badProfile) return c.json({ error: badProfile.error }, badProfile.status);
+      const noWebhook = await notifyRefusal(body.notify, projectId, projectRegistryEntry);
+      if (noWebhook) return c.json({ error: noWebhook.error }, noWebhook.status);
+      const started = launchRun(manager, workflow, startRunInput(body), clientRequest);
+      if ('error' in started) return c.json({ error: started.error }, started.status);
+      return c.json(started.run, started.status);
     })
 
     .get('/runs/:id', (c) => {
@@ -4827,46 +4716,6 @@ export function createApp(deps: ServerDeps) {
         return store.deleteRun(id) ? c.json({ deleted: true }) : c.json({ error: 'history cleanup incomplete — retry deletion' }, 409);
       } finally { release(); }
     });
-
-  // ---- retained variant groups (spec 010) -----------------------------------------
-
-  const groupRuns = (store: RunStore, groupId: string): RunRecord[] =>
-    store
-      .listGroupRuns(groupId)
-      .sort((a, b) => (a.variant ?? '').localeCompare(b.variant ?? ''));
-
-  // ---- chained family: variant groups (project-scoped) ----
-  const groupsRoutes = new Hono<ProjectApiEnv>()
-    .get('/groups/:groupId', async (c) => {
-      const { dataDir, store } = c.get('project');
-      const runs = groupRuns(store, c.req.param('groupId'));
-      if (runs.length === 0) return c.json({ error: 'not found' }, 404);
-      const detailed = await Promise.all(
-        runs.map(async (r): Promise<GroupVariant> => ({
-          id: r.id,
-          variant: r.variant ?? '?',
-          title: r.title,
-          status: r.status,
-          archived: r.archived,
-          tokensUsed: r.tokensUsed,
-          ...(r.inputTokens !== undefined ? { inputTokens: r.inputTokens } : {}),
-          ...(r.outputTokens !== undefined ? { outputTokens: r.outputTokens } : {}),
-          ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}),
-          diffStat:
-            r.worktreePath && existsSync(r.worktreePath) && !autosaveCleanupBlocker(dataDir, r.id)
-              ? await worktreeDiffStat(r.worktreePath, r.baseBranch ?? 'HEAD')
-              : '',
-          handoffExcerpt: handoffProgressExcerpt(readHandoff(dataDir, r.id)),
-        })),
-      );
-      return c.json({
-        groupId: c.req.param('groupId'),
-        runs: detailed,
-      } satisfies GroupResponse);
-    })
-
-    // Old clients receive an explicit refusal. This route never mutates retained results.
-    .post('/groups/:groupId/pick', (c) => c.json({ error: PARALLEL_VARIANTS_REMOVED }, 410));
 
   // ---- chained family: open-targets (project-scoped) ----
   const openTargetsRoutes = new Hono<ProjectApiEnv>()
@@ -5902,7 +5751,6 @@ export function createApp(deps: ServerDeps) {
     .route('/', automationsRoutes)
     .route('/', agentWebhooksRoutes)
     .route('/', runsRoutes)
-    .route('/', groupsRoutes)
     .route('/', openTargetsRoutes)
     .route('/', worktreesRoutes)
     .route('/', sseRoutes)
@@ -6151,9 +5999,6 @@ export function cockpitOriginFor(bindHost: string | undefined, port: number): st
 }
 
 const webhookNameTakenError = (name: string) => `this project already has a webhook named "${name.trim()}" — pick another name`;
-
-const NO_WEBHOOK_ERROR =
-  'this project has no task webhook — add a webhook with Task notifications on in Settings → General → Webhooks, or start without notify';
 
 export function startServer(deps: ServerDeps, port: number, listener?: Server): ServerType & { shutdownForRestart: () => Promise<void> } {
   const workspaceEvents = deps.workspaceEvents ?? new WorkspaceEventBus();

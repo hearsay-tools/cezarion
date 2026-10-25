@@ -308,7 +308,7 @@ export function AppShell({
         }} />
 
         <div className="grid min-w-0 flex-1 grid-rows-[auto_auto_1fr_auto] overflow-hidden">
-          <MobileTopBar title={current?.label ?? 'cezar'} pushed={pushed ? { compare: areaPathname.startsWith('/compare/'), onSlot: setRunBarSlot } : null} repo={repo} elsewhere={elsewhereSignal(mobileProjects, currentProjectId)} onTrigger={(button) => { mobileNavTrigger.current = button }} />
+          <MobileTopBar title={current?.label ?? 'cezar'} pushed={pushed ? { onSlot: setRunBarSlot } : null} repo={repo} elsewhere={elsewhereSignal(mobileProjects, currentProjectId)} onTrigger={(button) => { mobileNavTrigger.current = button }} />
           <header data-slot="desktop-breadcrumb" className={cn("row-start-1 hidden min-w-0 items-center gap-3 border-b border-border text-[13px] text-muted-foreground md:flex", areaPathname === '/new' ? 'h-[72px] px-11' : 'h-16 px-9')}>
             <FolderIcon aria-hidden="true" className="size-4 shrink-0" />
             {(breadcrumb?.project ?? repo?.name) ? <><span className="truncate font-medium text-foreground">{breadcrumb?.project ?? repo?.name}</span><span aria-hidden="true">/</span></> : null}
@@ -751,15 +751,15 @@ function VersionChip({ version, latestVersion }: { version: string; latestVersio
 /** Mobile chrome (<md): the sidebar's replacement. Its menu button and project button open `MobileNavDrawer`. */
 function MobileTopBar({ title, pushed, repo, elsewhere, onTrigger }: {
   title: string
-  /** Non-null on a pushed screen (a task or a variant compare): the bar swaps its project chrome for
-   *  back / title / actions. `onSlot` receives the element the routed view portals its content into. */
-  pushed: { compare: boolean; onSlot: (slot: HTMLElement | null) => void } | null
+  /** Non-null on a pushed screen (a task): the bar swaps its project chrome for back / title /
+   *  actions. `onSlot` receives the element the routed view portals its content into. */
+  pushed: { onSlot: (slot: HTMLElement | null) => void } | null
   repo: RepoChip | null
   /** The other projects' four counts summed; null while activity is unknown. */
   elsewhere: ProjectSignal | null
   onTrigger: (button: HTMLButtonElement) => void
 }) {
-  if (pushed) return <PushedTopBar compare={pushed.compare} onSlot={pushed.onSlot} />
+  if (pushed) return <PushedTopBar onSlot={pushed.onSlot} />
   return (
     <header
       data-slot="mobile-top-bar"
@@ -825,14 +825,13 @@ function MobileTopBar({ title, pushed, repo, elsewhere, onTrigger }: {
 
 /**
  * The pushed screen's bar: back, then whatever the routed view publishes into the slot (a task's
- * title, state line and run actions — see `mobile-run-bar.tsx`). A compare route publishes
- * nothing, so it titles itself.
+ * title, state line and run actions — see `mobile-run-bar.tsx`).
  *
  * Back returns to where the user came from when the app has in-app history (react-router's
  * `history.state.idx` counts entries pushed by this session), and falls to the Tasks list when the
  * screen was opened cold — a deep link or a reload — where `navigate(-1)` would leave the app.
  */
-function PushedTopBar({ compare, onSlot }: { compare: boolean; onSlot: (slot: HTMLElement | null) => void }) {
+function PushedTopBar({ onSlot }: { onSlot: (slot: HTMLElement | null) => void }) {
   const navigate = useNavigate()
   const goBack = () => {
     const idx = (window.history.state as { idx?: unknown } | null)?.idx
@@ -855,9 +854,8 @@ function PushedTopBar({ compare, onSlot }: { compare: boolean; onSlot: (slot: HT
         >
           <ChevronLeftIcon className="size-[22px]" aria-hidden="true" />
         </Button>
-        {compare ? <span className="min-w-0 flex-1 truncate text-[15px] font-semibold text-foreground">Retained results</span> : null}
         {/* The routed view's portal target; empty while the run loads. */}
-        <div data-slot="mobile-run-bar" ref={onSlot} className={cn('flex min-w-0 items-center gap-[4px]', compare ? 'shrink-0' : 'flex-1')} />
+        <div data-slot="mobile-run-bar" ref={onSlot} className="flex min-w-0 flex-1 items-center gap-[4px]" />
       </div>
     </header>
   )

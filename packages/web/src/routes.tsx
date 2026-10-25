@@ -17,7 +17,6 @@ import { useHealth, useProjects, useRunsIndex, useRunsSearch } from './api/queri
 import { ProjectScopeProvider } from './api/project-scope-context'
 import { locationToRestore, readStoredLastLocation } from './lib/last-location'
 import { Navigate as ScopedNavigate, stripProjectPrefix } from './lib/project-router'
-import { CompareLoading } from './routes/compare-loading'
 import { GithubLoading } from './routes/github/github-loading'
 import { InboxRoute } from './routes/inbox'
 import { NewTaskRoute } from './routes/new-task'
@@ -50,11 +49,6 @@ import { WorkspaceToolsRoute } from './routes/workspace-tools'
  *  shows while fetching, so the split is invisible to the user. */
 const TaskThreadRoute = lazy(() =>
   import('./routes/task-thread/task-thread').then((m) => ({ default: m.TaskThreadRoute })),
-)
-
-/** Old comparison URLs load a small read-only view of retained task history. */
-const RetainedVariantsRoute = lazy(() =>
-  import('./routes/compare-variants').then((m) => ({ default: m.RetainedVariantsRoute })),
 )
 
 /** Lazy because both tabs render the shared run header, which lives in the thread chunk
@@ -321,7 +315,6 @@ const PAGE_TITLE_ROUTES = [
   { pattern: '/tasks', pageLabel: 'All tasks' },
   { pattern: '/tools', pageLabel: 'Workspace tools' },
   { pattern: '/new', pageLabel: 'New task' },
-  { pattern: '/compare/:groupId', pageLabel: 'Retained results' },
   { pattern: '/git/*', pageLabel: 'Git' },
   { pattern: '/github/*', pageLabel: 'GitHub' },
   { pattern: '/automations/*', pageLabel: 'Automations' },
@@ -410,14 +403,9 @@ function projectScopeRoute(capabilities: HealthResponse['capabilities'] | undefi
           }
         />
       </Route>
-      <Route
-        path="compare/:groupId"
-        element={
-          <Suspense fallback={<CompareLoading />}>
-            <RetainedVariantsRoute />
-          </Suspense>
-        }
-      />
+      {/* The parallel-variant compare page is retired (hearsay-tools/cezarion#1760): old
+          bookmarks land on the task list. */}
+      <Route path="compare/:groupId" element={<ScopedNavigate to="/" replace />} />
       {/* The Git view (issue 06 §3): each section is a URL — /git (Recently on main; a phone's
           Git screen unless ?view=repo), /git/commits (+ /:sha, one commit inside Recently on
           main), /git/not-landed (issue 08), /git/cleanup, /git/branches, and /git/changes (the main tree's uncommitted

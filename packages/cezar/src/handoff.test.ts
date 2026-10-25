@@ -9,15 +9,25 @@ import {
   appendHandoffHeartbeat,
   handoffInstructions,
   handoffPath,
-  handoffProgressExcerpt,
   recordHandoffPeriodicAutosave,
   seedHandoffFile,
 } from './handoff.ts';
 
+/** The top line of "## Progress log" ('' when it has none): the agent's summary line. */
+function progressTop(text: string): string {
+  const idx = text.indexOf('## Progress log');
+  if (idx < 0) return '';
+  for (const line of text.slice(idx + '## Progress log'.length).split('\n')) {
+    if (line.startsWith('## ')) break;
+    if (line.trim()) return line.trim();
+  }
+  return '';
+}
+
 /**
  * hearsay-tools/cezarion#1004: the autosave report lives in its own section, so
- * the top of the Progress log stays the agent's own summary — the variant
- * compare column (`handoffProgressExcerpt`) and the draft-PR body read it.
+ * the top of the Progress log stays the agent's own summary — the draft-PR
+ * body (`buildPrBody`) reads it.
  */
 describe('appendHandoffAutosaveReport', () => {
   const RUN = 'run-1';
@@ -63,7 +73,7 @@ describe('appendHandoffAutosaveReport', () => {
     expect(section('## Autosave (cezar)')).toMatch(new RegExp(`^\\n- \\d{4}-\\d\\d-\\d\\dT[\\d:.]+Z — ${REPORT}\\n$`));
     expect(section('## Goal')).not.toContain(REPORT);
     expect(section('## Progress log')).not.toContain(REPORT);
-    expect(handoffProgressExcerpt(text)).toMatch(/^- \S+ — implemented the change$/);
+    expect(progressTop(text)).toMatch(/^- \S+ — implemented the change$/);
     expect(text.endsWith('## Resume notes\n')).toBe(true);
   });
 
@@ -86,7 +96,7 @@ describe('appendHandoffAutosaveReport', () => {
     appendHandoffAutosaveReport(dataDir, RUN, 'new report');
 
     expect(read()).toMatch(/## Autosave \(cezar\)\n\n- \S+ — new report\n- old report\n$/);
-    expect(handoffProgressExcerpt(read())).toBe('- agent line');
+    expect(progressTop(read())).toBe('- agent line');
   });
 
   it('appends the section at the end of a file without a Progress log', () => {
@@ -109,30 +119,6 @@ describe('appendHandoffAutosaveReport', () => {
 
     expect(HANDOFF_ONLY_INSTRUCTIONS).toContain(`"${header}"`);
     expect(HANDOFF_ONLY_INSTRUCTIONS).toMatch(/"## Autosave \(cezar\)" section[^\n]*leave it in place/);
-  });
-});
-
-describe('handoffProgressExcerpt', () => {
-  const log = (...lines: string[]) => `# Handoff\n\n## Progress log\n\n${lines.join('\n')}\n\n## Resume notes\n`;
-  const agentLine = '- 2026-10-19T00:00:00.000Z — mock: implemented the change (dry run)';
-
-  // The no-wait nudge adds a turn, and every turn end writes a lifecycle line at the top
-  // (hearsay-tools/cezarion#1234): they must not push the agent's own summary out.
-  it("shows the agent's own lines ahead of Cezar's lifecycle heartbeats", () => {
-    const text = log(
-      '- 2026-10-19T00:00:04.000Z — step "task" complete — status=done',
-      '- 2026-10-19T00:00:03.000Z — turn complete — status=waiting',
-      '- 2026-10-19T00:00:02.000Z — turn complete — status=running (no-wait nudge)',
-      '- 2026-10-19T00:00:01.000Z — session idle-closed — status=waiting; Continue to resume',
-      agentLine,
-      '- 2026-10-18T23:59:00.000Z — picked from 2 variants',
-    );
-    expect(handoffProgressExcerpt(text)).toBe(`${agentLine}\n- 2026-10-18T23:59:00.000Z — picked from 2 variants`);
-  });
-
-  it('falls back to the heartbeats when the agent wrote nothing', () => {
-    const lines = ['- 2026-10-19T00:00:02.000Z — turn complete — status=waiting', '- 2026-10-19T00:00:01.000Z — turn complete — status=running (no-wait nudge)'];
-    expect(handoffProgressExcerpt(log(...lines))).toBe(lines.join('\n'));
   });
 });
 
@@ -184,7 +170,7 @@ describe('recordHandoffPeriodicAutosave', () => {
     expect(text.indexOf('## Progress log\n')).toBeGreaterThan(text.indexOf('## Autosave (cezar)\n'));
     expect(section('## Autosave (cezar)')).toBe(`\n- 2026-10-16T10:00:00.000Z — ${periodic(1, 'abc1234', 'abc1234')}\n`);
     expect(section('## Progress log')).not.toContain('periodic');
-    expect(handoffProgressExcerpt(text)).toMatch(/^- \S+ — implemented the change$/);
+    expect(progressTop(text)).toMatch(/^- \S+ — implemented the change$/);
     expect(text.endsWith('## Resume notes\n')).toBe(true);
   });
 
@@ -198,7 +184,7 @@ describe('recordHandoffPeriodicAutosave', () => {
 
     expect(lines()).toEqual([`- 2026-10-16T10:03:00.000Z — ${periodic(3, 'aaa1111', 'ccc3333')}`]);
     expect(read().match(/^## Autosave \(cezar\)$/gm)).toHaveLength(1);
-    expect(handoffProgressExcerpt(read())).toBe('');
+    expect(progressTop(read())).toBe('');
   });
 
   it('starts a new line on a different branch', () => {

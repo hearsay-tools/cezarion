@@ -1475,6 +1475,10 @@ interface ListOrder {
   seq: number;
 }
 
+/** An archived root's place in the archived list, with its summary once it is known: a held run's,
+ *  or a searched row's. A row ranked by key alone has none, and its page reads it. */
+type ArchivedKey = ListOrder & { summary?: RunSummary };
+
 /** Newest first, runs created in the same millisecond in insertion order: the order `runs.db`
  *  lists in, and the order every list had while it was a stable sort of the in-memory map. */
 /** Why a `run` event fired, when a delegation checkpoint caused it or nothing durable changed
@@ -2199,7 +2203,7 @@ export class RunStore extends EventEmitter {
   /**
    * The live set, newest first: runs whose record is live (`isLiveRecord`) or that a RunManager
    * pins. Finished runs are not here — read one by id (`getRun`), by an indexed query
-   * (`listWorkersOf`, `findRunByClientRequestId`, `listGroupRuns`, `listRunsWithWorktree`,
+   * (`listWorkersOf`, `findRunByClientRequestId`, `listRunsWithWorktree`,
    * `listBranchOwners`), or as list rows (`listRunSummaries`).
    */
   listRuns(): RunRecord[] {
@@ -2286,37 +2290,65 @@ export class RunStore extends EventEmitter {
       if (!after) return { error: 'before is not a cursor this server wrote' };
     }
     const q = options.q?.trim() ?? '';
+    const ranked = this.rankArchivedRows(q, options.automationNames);
+    this.overlayHeldArchived(ranked, q, options.automationNames);
+    const ordered = [...ranked.entries()].sort(([, a], [, b]) => newestFirst(a, b));
+    return this.archivedPage(ordered, after, options.limit);
+  }
+
+  /** The archived roots in `runs.db`, each by its key: every one without `q` (no record, no
+   *  summary read), and with `q` the searched rows `matchesRunQuery` keeps, which carry the summary
+   *  the search read. A deleted, held or unreadable run's row is left out; a held run joins in
+   *  `overlayHeldArchived`. */
+  private rankArchivedRows(q: string, automationNames: AutomationNames | undefined): Map<string, ArchivedKey> {
     const skipped = (id: string) => this.deleted.has(id) || this.held.has(id) || this.unreadable.has(id);
-    const ranked = new Map<string, ListOrder & { summary?: RunSummary }>();
+    const ranked = new Map<string, ArchivedKey>();
     if (q === '') {
       for (const key of this.db?.listKeysWhere(ARCHIVED_ROOT) ?? []) if (!skipped(key.id)) ranked.set(key.id, key);
     } else {
-      for (const row of this.db?.searchRootSummaries(sqlPrefilterTokens(q, options.automationNames)) ?? []) {
+      for (const row of this.db?.searchRootSummaries(sqlPrefilterTokens(q, automationNames)) ?? []) {
         if (skipped(row.id)) continue;
         const summary = parseStoredSummary(row.summary) ?? this.coldSummary(row.id);
-        if (summary?.archived && matchesRunQuery(summary, q, options.automationNames)) ranked.set(row.id, { ...row, summary });
+        if (summary?.archived && matchesRunQuery(summary, q, automationNames)) ranked.set(row.id, { ...row, summary });
       }
     }
+    return ranked;
+  }
+
+  /** Lay the held archived roots over `ranked`, each by its record: it replaces its stored row
+   *  (already left out of `ranked`), and with `q` it must match. A held worker never lists. */
+  private overlayHeldArchived(ranked: Map<string, ArchivedKey>, q: string, automationNames: AutomationNames | undefined): void {
     for (const [id, run] of this.held) {
       if (!run.archived || run.delegation?.role === 'worker') continue;
       const summary = toRunSummary(run);
-      if (q === '' || matchesRunQuery(summary, q, options.automationNames)) ranked.set(id, { ...this.listOrder(run), summary });
+      if (q === '' || matchesRunQuery(summary, q, automationNames)) ranked.set(id, { ...this.listOrder(run), summary });
     }
-    const ordered = [...ranked.entries()].sort(([, a], [, b]) => newestFirst(a, b));
+  }
+
+  /** The page of `ordered` after the cursor `after`: its summaries, the cursor of the next page,
+   *  and `total`, the count of all of `ordered`. */
+  private archivedPage(ordered: Array<[string, ArchivedKey]>, after: ListOrder | undefined, limit: number): ArchivedRunsResponse {
     const rest = after ? ordered.filter(([, key]) => newestFirst(key, after) > 0) : ordered;
-    const page = rest.slice(0, options.limit);
-    const cold = new Map((this.db?.getSummaries(page.filter(([, key]) => !key.summary).map(([id]) => id)) ?? [])
-      .map((row) => [row.id, parseStoredSummary(row.summary) ?? this.coldSummary(row.id)]));
-    const runs = page.flatMap(([id, key]) => {
-      const summary = key.summary ?? cold.get(id);
-      return summary ? [summary] : [];
-    });
+    const page = rest.slice(0, limit);
+    const runs = this.hydrateArchivedPage(page);
     const last = page.at(-1)?.[1];
     return {
       runs,
       nextCursor: last && rest.length > page.length ? encodeArchivedCursor(last) : null,
       total: ordered.length,
     };
+  }
+
+  /** The page's summaries: a ranked key's own, else its stored one, read for the rows that have
+   *  none in a single query. A row whose stored summary does not fit the contract is projected from
+   *  its record; a row that cannot be read at all is left out. */
+  private hydrateArchivedPage(page: Array<[string, ArchivedKey]>): RunSummary[] {
+    const cold = new Map((this.db?.getSummaries(page.filter(([, key]) => !key.summary).map(([id]) => id)) ?? [])
+      .map((row) => [row.id, parseStoredSummary(row.summary) ?? this.coldSummary(row.id)]));
+    return page.flatMap(([id, key]) => {
+      const summary = key.summary ?? cold.get(id);
+      return summary ? [summary] : [];
+    });
   }
 
   /**
@@ -2524,11 +2556,6 @@ export class RunStore extends EventEmitter {
     for (const id of this.deleted) ids.delete(id);
     for (const id of this.held.keys()) ids.add(id);
     return [...ids];
-  }
-
-  /** The members of one parallel-variant group (spec 010), in no particular order. */
-  listGroupRuns(groupId: string): RunRecord[] {
-    return this.queryRuns(this.db?.listByGroup(groupId) ?? [], (run) => run.groupId === groupId).map(([run]) => run);
   }
 
   /** Runs with a materialized worktree directory (`worktreePath`, not reclaimed), most recently

@@ -1,8 +1,11 @@
 const assert = require('node:assert/strict');
-const { spawnSync } = require('node:child_process');
+const { spawn, spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
 const test = require('node:test');
 
-const { classifyJsonLines, classifyPaths, isDocsPath, testReadDocuments } = require('./change-surface.cjs');
+const { classifyJsonLines, classifyPaths, isDocsPath, testReadDocuments, usage } = require('./change-surface.cjs');
 const docsPathCases = require('./fixtures/docs-path-cases.cjs');
 
 const rootProcessDocuments = [
@@ -230,8 +233,10 @@ test('CLI emits exactly one supported classification line', () => {
   assert.equal(result.stderr, '');
 });
 
-test('CLI fails closed and exits cleanly for malformed or blank stdin', () => {
-  for (const input of ['not json\n', '']) {
+// Empty input still means no paths. Malformed input now explains the input
+// contract on stderr, while retaining the fail-closed stdout and exit status.
+test('CLI fails closed and stays silent when stdin has no paths', () => {
+  for (const input of ['', '\n']) {
     const result = spawnSync(process.execPath, ['./change-surface.cjs'], {
       cwd: __dirname,
       input,
@@ -240,5 +245,78 @@ test('CLI fails closed and exits cleanly for malformed or blank stdin', () => {
     assert.equal(result.status, 0, JSON.stringify(input));
     assert.equal(result.stdout, 'full-matrix\n', JSON.stringify(input));
     assert.equal(result.stderr, '', JSON.stringify(input));
+  }
+});
+
+test('CLI prints usage once for malformed or non-string JSON lines', () => {
+  for (const input of [
+    'AGENTS.md\n', 'not json\n', '{\n', 'null\n', '42\n',
+    '{}\n', '["README.md"]\n', '"README.md"\nnot json\n',
+    'not json\nnot json\n', '\n\n', '"README.md"\n\n', '   \n',
+  ]) {
+    const result = spawnSync(process.execPath, ['./change-surface.cjs'], {
+      cwd: __dirname, input, encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, JSON.stringify(input));
+    assert.equal(result.stdout, 'full-matrix\n', JSON.stringify(input));
+    assert.equal(result.stderr, usage, JSON.stringify(input));
+  }
+});
+
+test('CLI keeps valid JSON string classifications silent', () => {
+  for (const [input, surface] of [
+    ['"AGENTS.md"\n', 'docs-only'],
+    ['".github/workflows/sweep-ci-failures.yml"\n', 'infra-only'],
+    ['"package.json"\n', 'full-matrix'],
+    ['"docs/../README.md"\n', 'full-matrix'],
+    ['""\n', 'full-matrix'],
+  ]) {
+    const result = spawnSync(process.execPath, ['./change-surface.cjs'], {
+      cwd: __dirname, input, encoding: 'utf8',
+    });
+    assert.equal(result.status, 0, JSON.stringify(input));
+    assert.equal(result.stdout, `${surface}\n`, JSON.stringify(input));
+    assert.equal(result.stderr, '', JSON.stringify(input));
+  }
+});
+
+const shellQuote = (value) => `'${value.replaceAll("'", `'\\''`)}'`;
+
+// Run by hand with no pipe, the CLI would wait for terminal input that never
+// comes (hearsay-tools/cezarion#1640). util-linux script(1) gives the child a
+// pseudo-terminal on stdin; other platforms ship a script(1) with other flags.
+test('CLI prints usage and exits 2 when stdin is a terminal', {
+  skip: process.platform !== 'linux' && 'needs util-linux script(1)',
+}, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'change-surface-tty-'));
+  try {
+    const stderrFile = path.join(dir, 'stderr');
+    const command = `${shellQuote(process.execPath)} ./change-surface.cjs 2>${shellQuote(stderrFile)}`;
+    // script(1) sends EOF to the terminal when its own stdin ends, so stdin
+    // stays an open pipe: a CLI that reads the terminal hangs instead.
+    const child = spawn('script', ['-qec', command, '/dev/null'], {
+      cwd: __dirname,
+      stdio: ['pipe', 'pipe', 'inherit'],
+    });
+    let stdout = '';
+    child.stdout.setEncoding('utf8').on('data', (chunk) => { stdout += chunk; });
+    let timedOut = false;
+    // bound: hang guard only; the CLI exits before it reads stdin.
+    const guard = setTimeout(() => {
+      timedOut = true;
+      child.kill('SIGKILL');
+    }, 30_000);
+    const status = await new Promise((resolve, reject) => {
+      child.on('error', reject);
+      child.on('close', resolve);
+    }).finally(() => clearTimeout(guard));
+
+    assert.equal(timedOut, false, 'the CLI waited for input on the terminal');
+    assert.equal(status, 2);
+    assert.equal(stdout, '');
+    assert.equal(fs.readFileSync(stderrFile, 'utf8'), usage);
+    assert.match(usage, /one JSON string per line/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
   }
 });

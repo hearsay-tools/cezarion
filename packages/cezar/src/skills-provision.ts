@@ -9,11 +9,13 @@ import { excludeFromGit, landsInside, materializeSkillDir, TEAM_SKILL_AGENT_DIRS
 const execFileAsync = promisify(execFile);
 
 /**
- * Provision selected skills and heuristically discovered catalog companions in the run’s own
- * worktree. This is not a promise that every enabled skill is installed.
+ * Provision selected skills, the skills a step's prompt names as `/name`, and heuristically
+ * discovered catalog companions in the run’s own worktree. This is not a promise that every
+ * enabled skill is installed.
  */
 
-/** Bound on one closure: a skill that names the whole catalog must not install all of it. */
+/** Bound on one closure's companions: a skill that names the whole catalog must not install all
+ *  of it. Roots are never capped: each one is a skill a human selected or named. */
 export const MAX_SKILL_CLOSURE = 24;
 
 /** A skill name that is safe as one directory name (no separators, never `.`/`..`). */
@@ -33,9 +35,21 @@ export function mentionsSkill(body: string, name: string): boolean {
 }
 
 /**
- * The roots plus every catalog skill their bodies name, transitively: roots first, at most
- * `MAX_SKILL_CLOSURE`. The first catalog entry for a name wins, so a catalog in precedence order
- * (`discoverSkills`, local first) keeps that order. `truncated` names the first skill the cap left out.
+ * True when a human's `text` names `name` as a typed `/name`, at the start of a word and never
+ * as a path segment (`a/name`, `~/name`, `C:/name`, `/name/a`, `/name.ext`, a URL). Stricter than
+ * `mentionsSkill`: a prompt is prose and paths, where a bare hyphenated word is not a request to
+ * run a skill (hearsay-tools/cezarion#1672).
+ */
+export function namesSkillCommand(text: string, name: string): boolean {
+  const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![A-Za-z0-9_.~:/-])/${escaped}(?![A-Za-z0-9_/-]|\\.[A-Za-z0-9_])`).test(text);
+}
+
+/**
+ * Every root, then the catalog skills their bodies name, transitively, while the closure holds
+ * fewer than `MAX_SKILL_CLOSURE`. The first catalog entry for a name wins, so a catalog in
+ * precedence order (`discoverSkills`, local first) keeps that order. `truncated` names the first
+ * companion the cap left out; the cap never leaves out a root (hearsay-tools/cezarion#1672).
  */
 export function skillClosure(
   roots: readonly Skill[],
@@ -47,10 +61,12 @@ export function skillClosure(
   const skills: Skill[] = [];
   const seen = new Set<string>();
   const queue = [...roots];
+  const rootNames = new Set(roots.map((root) => root.name));
   while (queue.length) {
     const skill = queue.shift()!;
     if (seen.has(skill.name)) continue;
-    if (skills.length >= MAX_SKILL_CLOSURE) return { skills, truncated: skill.name };
+    // Roots lead the queue, so every root is in before the first companion meets the cap.
+    if (skills.length >= MAX_SKILL_CLOSURE && !rootNames.has(skill.name)) return { skills, truncated: skill.name };
     seen.add(skill.name);
     skills.push(skill);
     for (const candidate of candidates) {

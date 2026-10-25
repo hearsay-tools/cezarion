@@ -1,5 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react'
 
+import type { useGithubPages } from '@/api/queries'
+import type { GithubData } from '@open-mercato/cezar-api-client'
+
+import type { GithubView } from './github'
+
 /**
  * Scroll-driven paging for the GitHub list (hearsay-tools/cezarion#1183, port of
  * open-mercato/cezar#1374).
@@ -96,4 +101,48 @@ export function useLoadMoreSentinel(enabled: boolean, root: HTMLElement | null, 
     return () => observer.disconnect()
   }, [enabled, sentinel, root])
   return setSentinel
+}
+
+/** The GitHub tab's infinite list query (`useGithubPages(...).pages`). */
+export type GithubPagesQuery = ReturnType<typeof useGithubPages>['pages']
+
+export type GithubListPaging = ReturnType<typeof useGithubListPaging>
+
+/**
+ * Scroll-driven paging for the route (#1183, port of open-mercato/cezar#1374). The rows virtualize
+ * against the element that really scrolls them (the list pane from `md` up, the shell's `main`
+ * below it), and the next page loads when the sentinel nears that element's bottom. No automatic
+ * paging under a text, label, assignee or board narrow: a narrowed list would keep the sentinel
+ * in view and crawl every page, so the next page waits for the user's Load more. The
+ * list-backed presets keep paging, so their counts read `N+` until a side is done; the
+ * search-backed ones never page. A failed page stops the observer too, or the still-visible
+ * sentinel would retry it in a tight loop.
+ */
+export function useGithubListPaging(
+  view: GithubView,
+  list: GithubPagesQuery,
+  gh: GithubData | undefined,
+  backedQuery: string | null,
+  narrowing: boolean,
+) {
+  const [listEl, setListEl] = useState<HTMLElement | null>(null)
+  const [rowsEl, setRowsEl] = useState<HTMLDivElement | null>(null)
+  const scrollOwner = useListScrollOwner(listEl)
+  const scrollOwnerRef = useRef<HTMLElement | null>(null)
+  scrollOwnerRef.current = scrollOwner
+  const startMargin = useStartMargin(rowsEl, scrollOwner)
+  // Gated on the loaded SIDE, not on the preset's matches: a preset with nothing on the loaded
+  // pages must still page on to the match a later page holds.
+  const loadedSide = view === 'issues' ? gh?.issues.length ?? 0 : gh?.prs.length ?? 0
+  const pagingAvailable = list.hasNextPage && backedQuery === null && loadedSide > 0
+  const pagingShown = pagingAvailable && !narrowing
+  // Under a narrow the next page waits for the user's Load more: the filter only sees loaded
+  // rows, and a match on a later page must stay reachable without crawling every page.
+  const manualPaging = pagingAvailable && narrowing
+  const loadMoreRef = useLoadMoreSentinel(
+    pagingShown && !list.isFetchingNextPage && !list.isFetchNextPageError,
+    scrollOwner,
+    () => void list.fetchNextPage(),
+  )
+  return { listEl, setListEl, setRowsEl, scrollOwner, scrollOwnerRef, startMargin, pagingAvailable, manualPaging, loadMoreRef }
 }

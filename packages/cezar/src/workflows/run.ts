@@ -68,7 +68,7 @@ import {
   workerWaitRequestSchema,
   delegationStateSchema,
 } from '@open-mercato/cezar-contract/delegation';
-import type { RunEvent } from '@open-mercato/cezar-contract';
+import type { ConversationState, RunEvent } from '@open-mercato/cezar-contract';
 import {
   type ConversationMessage,
   type RequestWaitRequest,
@@ -91,7 +91,7 @@ import { agentWebhooksPrompt, webhookCliCommand } from '../webhooks/prompt.ts';
 import { agentWebhooks } from '../workspace/webhooks.ts';
 import { createAutomationSkill } from '../automations/builtin-skill.ts';
 import { getTeamSkillsCached, materializeSkillToCache, TEAM_SKILL_AGENT_DIRS, waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
-import { MAX_SKILL_CLOSURE, provisionSkills } from '../skills-provision.ts';
+import { MAX_SKILL_CLOSURE, namesSkillCommand, provisionSkills } from '../skills-provision.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
 import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
@@ -117,6 +117,7 @@ import { reconcileWorkerEntry } from '../delegation/wait.ts';
 import { reconcileConversationState, projectConversationEvents } from '../delegation/conversations.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
 import { answersQuestion, openQuestions, questionMessage } from '../delegation/questions.ts';
+import { messagedParentSince, parkNoticeMessage, parkNoticeWait, parkingTurn } from '../delegation/park-notice.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState, type WakeCounters } from '../runs/store.ts';
@@ -357,6 +358,33 @@ function orderedTurnText(v1: string, v2: string): string | undefined {
   if (contains(v1, v2)) return v1;
   return undefined;
 }
+/** A turn's markers, as `classifyTurnEnd` reads them: each channel's ask line, and its done and
+ *  monitoring lines. */
+type TurnMarkers = { v1Ask: AskMarkerParseResult; v2Ask: AskMarkerParseResult; doneLine: boolean; monitoringLine: boolean };
+/** How a turn end reads its turn (`classifyTurnEnd`). */
+type TurnEndRead = AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean; waitCard: boolean };
+/** Read the turn's markers once from the channel that holds the whole turn, or from each channel
+ *  when neither holds the other (`orderedTurnText`). A done line counts only when no channel
+ *  carries an ask line. */
+function readTurnMarkers(turnText: string, completedAssistantText: string): TurnMarkers {
+  const complete = orderedTurnText(turnText, completedAssistantText);
+  const v1 = turnParkSignals(complete ?? turnText);
+  const v2 = complete === undefined ? turnParkSignals(completedAssistantText) : v1;
+  return {
+    v1Ask: v1.askResult, v2Ask: v2.askResult,
+    doneLine: (v1.done || v2.done) && v1.askResult.kind === 'none' && v2.askResult.kind === 'none',
+    monitoringLine: v1.monitoring || v2.monitoring,
+  };
+}
+/** Read the turn's ask: its ask line, else the card of the human wait it registered, else the
+ *  human gate when that wait has no card. A done reads no ask. */
+function readTurnAsk(markers: TurnMarkers, options: { sessionOpen: boolean; humanWait?: Pick<HumanWaitEntry, 'questions' | 'context'> },
+  done: boolean): AskTurnOutcome & { humanGate: boolean; waitCard: boolean } {
+  const askTurn = resolveAskTurn(markers.v1Ask, markers.v2Ask, options.sessionOpen && !done);
+  const surfaced = options.humanWait && options.sessionOpen && !done && !askTurn.ask ? options.humanWait : undefined;
+  const waitCard = !!surfaced?.questions;
+  return { ...askTurn, ask: askTurn.ask ?? humanWaitCard(surfaced) ?? null, humanGate: !!surfaced && !waitCard, waitCard };
+}
 /** One turn-end decision for fresh and Continue, also retained until an input
  * ACK settles. DONE and human gates take precedence over a quiet
  * declaration or live workers; a false pending-ASK flag alone proves nothing.
@@ -369,21 +397,14 @@ export function classifyTurnEnd(turnText: string, completedAssistantText: string
   sessionOpen: boolean; pendingHumanAsk: boolean;
   scheduledWake: boolean; liveWorkers: boolean;
   humanWait?: Pick<HumanWaitEntry, 'questions' | 'context'>; doneRequested?: boolean;
-}): AskTurnOutcome & { done: boolean; monitoring: boolean; humanGate: boolean; waitCard: boolean } {
-  const complete = orderedTurnText(turnText, completedAssistantText);
-  const v1 = turnParkSignals(complete ?? turnText);
-  const v2 = complete === undefined ? turnParkSignals(completedAssistantText) : v1;
-  const doneLine = (v1.done || v2.done) && v1.askResult.kind === 'none' && v2.askResult.kind === 'none';
-  const done = options.sessionOpen && (!!options.doneRequested || doneLine);
-  const askTurn = resolveAskTurn(v1.askResult, v2.askResult, options.sessionOpen && !done);
-  const surfaced = options.humanWait && options.sessionOpen && !done && !askTurn.ask ? options.humanWait : undefined;
-  const waitCard = !!surfaced?.questions;
-  const ask = askTurn.ask ?? humanWaitCard(surfaced) ?? null;
-  const humanGate = !!surfaced && !waitCard;
-  const monitoring = options.sessionOpen && !done && !ask &&
+}): TurnEndRead {
+  const markers = readTurnMarkers(turnText, completedAssistantText);
+  const done = options.sessionOpen && (!!options.doneRequested || markers.doneLine);
+  const { humanGate, waitCard, ...askTurn } = readTurnAsk(markers, options, done);
+  const monitoring = options.sessionOpen && !done && !askTurn.ask &&
     !options.pendingHumanAsk && !humanGate &&
-    (v1.monitoring || v2.monitoring || options.scheduledWake || options.liveWorkers);
-  return { ...askTurn, ask, done, monitoring, humanGate, waitCard };
+    (markers.monitoringLine || options.scheduledWake || options.liveWorkers);
+  return { ...askTurn, done, monitoring, humanGate, waitCard };
 }
 /** An active ASK marker — valid card or rejected payload — means the user
  *  must answer. Drop follow-ups queued mid-turn so they cannot start a new
@@ -481,6 +502,16 @@ type SettledTurn = {
   scheduleWakeup?: number | null;
 };
 type CompletionRefusal = NonNullable<ReturnType<RunManager['completionRefusal']>>;
+/** What `carryOutTurnEnd` hands the method for a decision kind. `session` is the session as the
+ *  decision found it. */
+type TurnEndCarry = {
+  runId: string; state: ActiveRun; session: AgentSession | undefined; stepId: string | undefined;
+  refused: CompletionRefusal | undefined; noteRefusal: () => void;
+  /** The refusal settles this turn end, so Cezar's own human waits are already withdrawn. */
+  settlesRefusal: boolean;
+};
+/** One method per decision kind of `decideTurnEnd` (`RunManager.turnEndCarriers`). */
+type TurnEndCarriers = { [K in TurnEndDecision['kind']]: (carry: TurnEndCarry, decision: Extract<TurnEndDecision, { kind: K }>) => TurnEndOutcome };
 
 interface ActiveRun {
   /** Last cumulative Claude report per provider session during this process. */
@@ -983,6 +1014,110 @@ interface PersistedAttachments {
   blocks: ContentBlock[];
   attachments: PersistedAttachment[];
 }
+
+/** What `execute` writes to its run's event stream. */
+type ExecutionEmit = (event: { type: string; stepId?: string; [k: string]: unknown }) => void;
+/** One `execute` call: what its phases share. */
+type Execution = { runId: string; workflow: WorkflowDef; input: StartRunInput; startAt: number; state: ActiveRun; emit: ExecutionEmit };
+/** What `startExecution` resolved before the first step. */
+type ExecutionLaunch = {
+  config: Awaited<ReturnType<typeof loadConfig>>;
+  taskBackend: RunnerId;
+  extraSystemPrompt: string | undefined;
+  /** The run record as it was before `startExecution` recorded the start. */
+  ownedRun: RunRecord | undefined;
+  /** An owned worker's workspace. */
+  owned: Extract<NonNullable<RunRecord['delegation']>, { role: 'worker' }>['workspace'] | undefined;
+};
+/** The state of `execute`'s step loop, which `settleExecution` reads once the loop ended. */
+type StepLoop = {
+  /** A failed check's output, handed to the agent step its retry loops back to. */
+  checkFailure: string | null;
+  runError: string | null;
+  deliveryCapped: boolean;
+  /** An earlier step whose session closed without a done (hearsay-tools/cezarion#1620). */
+  incompleteStepId?: string;
+};
+/** What a launched session's callbacks share (hearsay-tools/cezarion#1632): the turn in progress
+ *  and the session's first fault. */
+type SessionTurn = {
+  text: string;
+  completedText: string;
+  tail: TurnTail;
+  /** The delay a Claude ScheduleWakeup call asked for in this turn. */
+  scheduleWakeup: number | null | undefined;
+  /** The fault that ended the session; an agent input error recorded before it wins. */
+  sessionError: string | undefined;
+};
+/** The delegation capability and the CI tools one launch provisioned. */
+type LaunchDelegation = ReturnType<RunManager['provisionSession']>;
+type LaunchCiTools = Awaited<ReturnType<RunManager['provisionCiSession']>>;
+/** A launch's opening message, and whether its session-start context carries the handoff. */
+type LaunchOpening = { userPrompt: string; handoffInjected: boolean };
+/** The account a step's session runs under: its profile, environment and account binding. */
+type StepProfile = Awaited<ReturnType<RunManager['agentEnvForStep']>>;
+/** The model and effort a fresh step's session runs with. */
+type StepModel = { backendModel: string | undefined; effectiveEffort: string | undefined };
+/** What `runAgentStep` resolved before it starts the step's session. */
+type StepSessionLaunch = {
+  step: WorkflowStepDef;
+  sessionId: string;
+  images: ContentBlock[] | undefined;
+  opening: LaunchOpening;
+  skillPrompt: string | undefined;
+  extraSystemPrompt: string | undefined;
+  grants: WorkerStepIdentity['grants'];
+  profile: StepProfile;
+  model: StepModel;
+  delegation: LaunchDelegation;
+  webhooksPart: string | undefined;
+  ciTools: LaunchCiTools;
+};
+/** An owned worker's delegation record. */
+type WorkerDelegationRecord = Extract<NonNullable<RunRecord['delegation']>, { role: 'worker' }>;
+/** A Continue's opening message and what it carries: the checkpoint it replays, whether it is a
+ *  parent's answer to a routed question (#505), and the images and attachments it hands over. */
+type ContinuationOpening = {
+  prompt: string;
+  checkpoint: RunRecord['continuationMessage'];
+  parentAnswer: boolean;
+  openingImages: ContentBlock[];
+  attachments: PersistedAttachment[];
+};
+/** The human ask a Continue's opening message answers, and the human waits that answer settles
+ *  when the opening turn ends. The turn end clears `askSeq`. */
+type OpeningAnswer = { askSeq: number | undefined; waits: string[]; parentAnswer: boolean };
+/** What a Continue resolved before its pre-spawn checks: the step that owns its session, the
+ *  workflow step it extends, and its grants, model, effort and account. */
+type ContinuationSettings = {
+  owningStep: RunRecord['steps'][number] | undefined;
+  toolsStep: WorkflowStepDef | undefined;
+  grants: WorkerStepIdentity['grants'];
+  backendModel: string | undefined;
+  effort: string | undefined;
+  profile: StepProfile;
+  /** The run's extra system prompt, which workers inherit. */
+  extraSystemPrompt: string | undefined;
+};
+/** The continued step's skill playbook, for the system prompt or for the fallback system prompt of
+ *  an in-thread resume, and the skill files the opening message names. */
+type ContinuationSkills = { skillPrompt: string | undefined; fallbackSkillPrompt: string | undefined; files: Map<string, string> };
+/** What `runContinuation` resolved before it starts the Continue's session. */
+type ContinuationSessionLaunch = {
+  stepId: string;
+  sessionId: string | undefined;
+  prompt: string;
+  setupNote: string | undefined;
+  opening: ContinuationOpening;
+  skills: ContinuationSkills;
+  skipSkillOnResume: boolean;
+  settings: ContinuationSettings;
+  delegation: LaunchDelegation;
+  webhooksPart: string | undefined;
+  ciTools: LaunchCiTools;
+};
+/** The workflow remainder a successful Continue queues once its session is released. */
+type ContinuationClose = { resumeWorkflow?: { workflow: WorkflowDef; input: StartRunInput; startAt: number } };
 
 /** Only an original workflow that has never executed may return to its queue. */
 export function isUntouchedCancelledRun(run: RunRecord): boolean {
@@ -1953,7 +2088,8 @@ export class RunManager {
 
   /**
    * Provision the step skill and leading registry slash skill for start, Continue, recovery and
-   * live input. Native slashes that are not registry skills install nothing.
+   * live input, and at a step's start every registry skill its prompt names as a typed `/name`
+   * (#1672). Native slashes that are not registry skills install nothing.
    *
    * The run's OWN task worktree gets every root and the companions their bodies name
    * (`provisionSkills`): links to local and global skills, generated `SKILL.md` files, and marked
@@ -1967,8 +2103,9 @@ export class RunManager {
    *
    * Any other cwd — worktree off, a non-git project, a Continue whose worktree is gone — is the
    * main checkout or unknown, where those directories are LOCAL skills to `discoverSkills` that
-   * would shadow the team source for every later run. A directory team root gets a per-commit
-   * cache copy there instead, and nothing else is installed. So does a worktree where no copy of
+   * would shadow the team source for every later run. A selected or leading-slash directory team
+   * root gets a per-commit cache copy there instead, and nothing else is installed: a skill only
+   * the prompt names gets nothing there, like a companion. So does a worktree where no copy of
    * it landed, such as one whose three agent dirs all link out of it; one that took only some
    * copies names the first that landed, since the runner's own dir may be the one skipped.
    * Returns the step-start notes and, per team root, the directory its prompt must name.
@@ -1976,7 +2113,7 @@ export class RunManager {
   private async provisionRunSkills(
     runId: string,
     state: ActiveRun,
-    wanted: { stepSkill?: string; slash?: string },
+    wanted: { stepSkill?: string; slash?: string; prompt?: string },
   ): Promise<{ notes: string[]; filesDir: Map<string, string>; installed: string[] }> {
     const notes: string[] = [];
     const filesDir = new Map<string, string>();
@@ -1984,14 +2121,17 @@ export class RunManager {
     // Stop can land during an earlier await (Continue's team-cache wait): a stopped run writes
     // nothing, here or between the pass's own steps.
     const stopped = () => Boolean(state.cancelled) || this.workerExecutionStopped(runId);
-    if (wantedNames.length === 0 || stopped()) return { notes, filesDir, installed: [] };
     // The off-list as it is now, applied to every input: the saved registry predates a switch
     // made during the run, so it is filtered as well as the fresh team list.
     const disabled = readDisabledTeamSkills(await readProjectUiState(this.repoRoot));
     const registry = filterDisabledTeamSkills(state.skills ?? [], disabled);
-    const roots = wantedNames.flatMap((name) => registry.filter((skill) => skill.name === name).slice(0, 1));
+    // A skill the prompt names as `/name` is a root after the selected ones, so a capped closure
+    // never leaves it out (#1672). It installs only in the task worktree, like a companion.
+    const named = registry.filter((skill) => namesSkillCommand(wanted.prompt ?? '', skill.name)).map((skill) => skill.name);
+    const roots = [...new Set([...wantedNames, ...named])]
+      .flatMap((name) => registry.filter((skill) => skill.name === name).slice(0, 1));
     if (roots.length === 0 || stopped()) return { notes, filesDir, installed: [] };
-    const teamRoots = roots.filter((skill) => skill.source === 'team' && skill.team?.dir);
+    const teamRoots = roots.filter((skill) => wantedNames.includes(skill.name) && skill.source === 'team' && skill.team?.dir);
     const cacheCopy = async (skill: Skill): Promise<void> => {
       const dir = await materializeSkillToCache(skill).catch(() => null);
       if (!dir) return;
@@ -3626,6 +3766,66 @@ export class RunManager {
     // has no live/deferred anchor, but orphan settlement still appends its lifecycle event.
     // Prepare only eligible starting generations' families before any repair mutation;
     // retain IDs, never an ownership or execution snapshot, across readiness.
+    const { orphanWorkerIds, orphanFactIds } = this.collectOrphanWorkerGenerations(familyRootId, inScope);
+    await this.store.prepareTranscriptFacts(orphanFactIds);
+    if (this.disposed) return;
+    this.recoveryFactsPending = false;
+    // Recovery reads the live set (#779): `listRuns()` is the runs `open` loaded by the `live`
+    // column, and finished runs have nothing to recover. The worker passes below go through
+    // indexed queries instead.
+    this.recoverUnreadInputs(inScope);
+    // #469: a generation whose processes died with the old controller is finalized first, so it
+    // re-launches through the ordinary Continue path; live task scratch is retained.
+    // Any worker, finished or not, may hold a generation a dead controller left `starting`. Its
+    // private proof is read first, so only those workers' records are decoded: settling and
+    // re-probing are no-ops for every other proof phase.
+    // Another process's workers are its own to settle.
+    this.settleOrphanWorkerGenerations(orphanWorkerIds, inScope);
+    this.reconcileWorkerWaits(familyRootId);
+    const live = this.store
+      .listRuns()
+      .filter((r) => inScope(r) && ['queued', 'waiting', 'running'].includes(r.status))
+      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+    // Scratch cleanup discovers private evidence independently of the salvageable run index.
+    // Terminal worker cleanup/retries and the generic orphan sweep share this boundary. An
+    // adopted family only schedules its own members: the sweep belongs to restart.
+    this.recoverWorkerScratch(familyRootId);
+    for (const run of live) {
+      // Await only what the run hands back, so a run that settles nothing recovers without
+      // yielding to the work an earlier run started.
+      const settling = this.recoverLiveRun(run);
+      if (settling) await settling;
+    }
+    if (familyRootId === undefined) await this.reconcileRecoveryWorkerFamilies();
+    if (this.disposed) return;
+    } finally {
+      this.recoveryFactsPending = false;
+      this.recoveryScope = undefined;
+      this.recoveryInFlight = undefined;
+      settled();
+    }
+    // Only a family with a live member has anyone left to route to or fall back from.
+    this.recoverWorkerMessages(familyRootId === undefined ? this.liveFamilyMembers() : this.familyMembers(familyRootId), familyRootId);
+    // A parent reply accepted just before the crash still answers its worker (#505), and only a
+    // live worker takes one.
+    this.answerRecoveredRoutedQuestions(inScope);
+    // The rest re-arms wakes from durable state and is idempotent, so it runs for every live run
+    // even after one adopted family: anything the recovery window held back goes out now.
+    this.rearmRecoveredWakes();
+    // Re-arm usage-limit resumes (spec 2026-08-03-auto-resume-after-usage-limit): the wait is
+    // routinely longer than a cezar session, so the deadline is durable and the timer is rebuilt
+    // from it. `pump()` reconciles again on every sweep, so this is the fast path, not the only
+    // one — see `reconcileAutoResumes`.
+    this.reconcileAutoResumes();
+    void this.pump();
+  }
+
+  /** The workers in scope whose generation a dead controller left `starting`, and the members of
+   *  their families, whose transcript facts recovery prepares before it settles them. */
+  private collectOrphanWorkerGenerations(
+    familyRootId: string | undefined,
+    inScope: (run: RunRecord) => boolean,
+  ): { orphanWorkerIds: string[]; orphanFactIds: Set<string> } {
     const workerIds = familyRootId === undefined ? this.store.listWorkerIds() : this.store.listWorkersOf(familyRootId).map((run) => run.id);
     const orphanWorkerIds: string[] = [];
     const orphanFactIds = new Set<string>();
@@ -3636,12 +3836,11 @@ export class RunManager {
       orphanWorkerIds.push(id);
       for (const member of this.store.listFamilyRunIds(run.delegation.parentRunId)) orphanFactIds.add(member);
     }
-    await this.store.prepareTranscriptFacts(orphanFactIds);
-    if (this.disposed) return;
-    this.recoveryFactsPending = false;
-    // Recovery reads the live set (#779): `listRuns()` is the runs `open` loaded by the `live`
-    // column, and finished runs have nothing to recover. The worker passes below go through
-    // indexed queries instead.
+    return { orphanWorkerIds, orphanFactIds };
+  }
+
+  /** Recovery's first pass over the live set: the input state a dead controller left behind. */
+  private recoverUnreadInputs(inScope: (run: RunRecord) => boolean): void {
     for (const run of this.store.listRuns().filter(inScope)) {
       // A restarted controller cannot answer an old transport's permission RPC.
       if (!this.isActive(run.id) && run.hasPendingPermission) {
@@ -3659,214 +3858,238 @@ export class RunManager {
         if (replayed.length) this.store.appendEvent(run.id, { type: 'note', message: `replaying ${replayed.length} message${replayed.length === 1 ? '' : 's'} accepted before the restart but not read` });
       }
     }
-    // #469: a generation whose processes died with the old controller is finalized first, so it
-    // re-launches through the ordinary Continue path; live task scratch is retained.
-    // Any worker, finished or not, may hold a generation a dead controller left `starting`. Its
-    // private proof is read first, so only those workers' records are decoded: settling and
-    // re-probing are no-ops for every other proof phase.
-    // Another process's workers are its own to settle.
+  }
+
+  /** Settles each orphaned `starting` generation, or re-probes it when its proof does not settle. */
+  private settleOrphanWorkerGenerations(orphanWorkerIds: string[], inScope: (run: RunRecord) => boolean): void {
     for (const id of orphanWorkerIds) {
       const run = this.store.getRun(id);
       if (!run || !inScope(run)) continue;
       if (this.store.readWorkerExecution(id)?.phase === 'starting' && !this.store.writeRefusal(id) &&
         !this.settleOrphanedWorkerExecution(id)) this.armOrphanReprobe(id);
     }
-    this.reconcileWorkerWaits(familyRootId);
-    const live = this.store
-      .listRuns()
-      .filter((r) => inScope(r) && ['queued', 'waiting', 'running'].includes(r.status))
-      .sort((a, b) => a.createdAt.localeCompare(b.createdAt));
-    // Scratch cleanup discovers private evidence independently of the salvageable run index.
-    // Terminal worker cleanup/retries and the generic orphan sweep share this boundary. An
-    // adopted family only schedules its own members: the sweep belongs to restart.
+  }
+
+  /** Restart sweeps every worker's scratch; an adopted family schedules only its own members. */
+  private recoverWorkerScratch(familyRootId: string | undefined): void {
     if (familyRootId === undefined) this.workerScratchCleanup.recover();
     else for (const run of this.familyMembers(familyRootId)) this.workerScratchCleanup.schedule(run.id);
-    for (let run of live) {
-      if (this.isActive(run.id)) continue;
-      if (this.workerExecutionStopped(run.id)) continue;
-      if (run.delegation?.role === 'worker') {
-        const parent = this.store.getRun(run.delegation.parentRunId);
-        if (parent?.delegation?.role === 'root') {
-          if (['done', 'failed', 'cancelled'].includes(parent.status)) { this.cancel(run.id); continue; }
-          if (parent.status === 'review') continue;
-          if (parent.delegation.finishRequestedAt) continue;
-        }
-      }
-      if (this.rootFinishRequested(run.id)) {
-        await this.settleRequestedRootFinish(run.id);
-        continue;
-      }
-      // A usage-limit hold ran no process, so nothing was interrupted: its waits re-arm and resolve,
-      // and `reconcileAutoResumes` re-arms the resume that delivers them (hearsay-tools/cezarion#1236).
-      if (onUsageLimitHold(run)) {
-        for (const wait of openWaits(run)) this.armWait(run.id, wait);
-        continue;
-      }
-      // A worker no process survived for is a closed session: Cezar's fallback question goes as at an
-      // idle close, and the worker recovers as its plain park did (hearsay-tools/cezarion#1301).
-      if (run.delegation?.role === 'worker' && run.status === 'waiting' && this.supersedeWorkerFallback(run.id)) run = this.store.getRun(run.id)!;
-      // Phase 4b (hearsay-tools/cezarion#1236): attention reads the human wait, so an unanswered ask
-      // an older cezar left without one gets one now, attached to that ask.
-      if (this.adoptTranscriptAsk(run.id)) run = this.store.getRun(run.id)!;
-      // A stored pending-question flag can be stale: the answer's receipt reached the transcript and
-      // the row's save did not. The wait read from it is answered (review of #1437).
-      if (this.settleAnsweredLegacyAsk(run.id)) run = this.store.getRun(run.id)!;
-      // hearsay-tools/cezarion#1234: a crash after a human wait's registration and before its turn
-      // end shows the question now. The run waits on the user, its other waits re-armed.
-      if (this.unsurfacedHumanWait(run.id)) {
-        this.surfaceHumanWait(run.id, undefined);
-        this.store.updateRun(run.id, { status: 'waiting' });
-        for (const wait of openWaits(run)) this.armWait(run.id, wait);
-        continue;
-      }
-      if (run.delegation && run.delegation.role !== 'invalid' && this.hasPendingHumanAsk(run.id)) {
-        this.store.updateRun(run.id, { status: 'waiting' });
-        // A pending question leaves its waits open: they re-arm, and a result still wakes the run.
-        for (const wait of openWaits(run)) this.armWait(run.id, wait);
-        // Only the durable, explicitly human payload may resume an unanswered
-        // question. A refused recovery leaves attention, not terminal failure.
-        if (run.continuationMessage?.origin === 'human') {
-          run = this.checkpointRestartContext(run);
-          this.continueRun(run.id, {}, true);
-        }
-        continue;
-      }
-      // No process survived. Open waits re-arm from their stored deadlines (an overdue timer
-      // resolves now); resolved ones wake through a scheduler-owned continuation after recovery.
-      // A human message no longer withdraws a wait, so an interrupted or queued run with queued
-      // messages still owes their delivery: it recovers as below, with its waits armed
-      // (hearsay-tools/cezarion#1233). A parked one stays parked; its wake folds them in.
-      if (run.waits?.length && !this.hasPendingHumanAsk(run.id) && (run.status === 'waiting' || !run.queuedMessages?.length)) {
-        this.store.updateRun(run.id, { status: 'waiting' });
-        for (const wait of openWaits(run)) this.armWait(run.id, wait);
-        continue;
-      }
-      // A pending question or a queued message leaves the waits open: they re-arm, and a result
-      // still wakes the run.
-      for (const wait of openWaits(run)) this.armWait(run.id, wait);
-      if (run.status === 'queued') {
-        await this.reviveQueuedRun(run, 'cezar restarted');
-        continue;
-      }
-      this.deliverConversationInput(run.id);
-      // Waiting is durable human attention for roots and ordinary top-level
-      // runs. A worker reaches here only when it has neither a recoverable ask
-      // nor a worker wait; preserving that record would strand both it and its
-      // parent because workers cannot accept an ordinary inactive Continue.
-      if (run.status === 'waiting' && (run.delegation?.role !== 'worker' ||
-        run.agentInputs?.some(input => !input.deliveredAt && hasLiveInboxClaim(input)))) continue;
-      if (run.status === 'waiting') {
-        const finishedAt = new Date().toISOString();
-        if (run.invalidAsk) {
-          for (const step of run.steps) if (step.status === 'waiting' || step.status === 'running') {
-            this.store.updateStep(run.id, step.id, { status: 'failed', error: 'invalid structured question', finishedAt });
-          }
-          this.store.updateRun(run.id, { status: 'failed', error: 'invalid structured question', finishedAt, currentStepId: undefined });
-          continue;
-        }
-        if (this.ciWorkflowResumeStepIndex(run) >= 0) {
-          // CI ACK retires the wait, but not the failed workflow source. A closed
-          // worker at this boundary must resume before its remaining checks run.
-          const resumed = this.continueRun(run.id, { text: RESTART_CONTINUATION_PROMPT }, true);
-          this.store.appendEvent(run.id, { type: 'lifecycle', message: resumed.ok
-            ? 'cezar restarted — resuming the worker CI recovery from its last session'
-            : `cezar restarted — could not resume worker CI recovery (${resumed.error ?? 'unknown'})` });
-          continue;
-        }
-        for (const step of run.steps) {
-          if (step.status === 'waiting' || step.status === 'running') {
-            this.store.updateStep(run.id, step.id, { status: 'done', finishedAt });
-          }
-        }
-        this.store.appendEvent(run.id, {
-          type: 'lifecycle',
-          message: 'cezar restarted — the open worker session was settled',
-        });
-        await this.settleSuccess(run.id);
-        continue;
-      }
-      // `running`: the process died mid-turn. Mark it interrupted (the state
-      // continueRun expects), then pick the work back up from the last session.
-      run = this.checkpointRestartContext(run);
-      const interruptedStepId = run.currentStepId;
-      const finishedAt = new Date().toISOString();
-      for (const step of run.steps) {
-        if (step.status === 'running' || step.status === 'waiting') {
-          this.store.updateStep(run.id, step.id, {
-            status: 'failed',
-            error: 'interrupted — cezar process exited during the run',
-            finishedAt,
-          });
-        }
-      }
-      this.store.updateRun(run.id, {
-        status: 'failed',
-        error: 'interrupted — cezar process exited during the run',
-        finishedAt,
-        currentStepId: undefined,
-      });
-      const interruptedIndex = run.workflowDef?.steps.findIndex(step => step.id === interruptedStepId) ?? -1;
-      const interruptedDef = interruptedIndex >= 0 ? run.workflowDef?.steps[interruptedIndex] : undefined;
-      const requeueInput = () => ({ task: run.task, runner: run.runner, model: run.model, effort: run.effort,
-        agentProfile: run.agentProfile, systemPrompt: run.systemPrompt, autonomous: run.autonomous,
-        worktree: run.worktree });
-      // Worktree setup (#917) interrupted before any agent session: there is no session to
-      // continue, so start the workflow over. `execute` sees setup still `running` and reruns it.
-      if (run.workflowDef && run.worktreeSetup?.status === 'running' && !run.steps.some(step => step.sessionId)) {
-        this.store.updateRun(run.id, { status: 'queued', error: undefined, finishedAt: undefined, currentStepId: undefined });
-        this.store.flush();
-        this.pendingJobs.set(run.id, { workflow: run.workflowDef, startAt: 0, input: requeueInput() });
-        this.queue.push(run.id);
-        continue;
-      }
-      if (run.workflowDef && interruptedDef && stepKind(interruptedDef) === 'check') {
-        this.store.updateStep(run.id, interruptedDef.id, { status: 'pending', error: undefined, finishedAt: undefined });
-        this.store.updateRun(run.id, { status: 'queued', error: undefined, finishedAt: undefined, currentStepId: undefined });
-        this.store.flush();
-        this.pendingJobs.set(run.id, {
-          workflow: run.workflowDef,
-          startAt: interruptedIndex,
-          input: requeueInput(),
-        });
-        this.queue.push(run.id);
-        continue;
-      }
-      const resumed = this.continueRun(
-        run.id,
-        {
-          text: run.continuationMessage?.text ?? RESTART_CONTINUATION_PROMPT,
-        },
-        true,
-      );
-      this.store.appendEvent(run.id, {
-        type: 'lifecycle',
-        message: resumed.ok
-          ? 'cezar restarted — resuming the interrupted task from its last session'
-          : `cezar restarted — could not resume the interrupted task (${resumed.error ?? 'unknown'})`,
-      });
+  }
+
+  /**
+   * One live run of the restart loop. Returns the promise the loop must await (a root finish, a
+   * re-queue or a settlement), else `undefined`.
+   */
+  private recoverLiveRun(found: RunRecord): Promise<void> | undefined {
+    if (this.isActive(found.id)) return undefined;
+    if (this.workerExecutionStopped(found.id)) return undefined;
+    if (this.recoveryLeavesWorkerToRoot(found)) return undefined;
+    if (this.rootFinishRequested(found.id)) return this.settleRequestedRootFinish(found.id);
+    // A usage-limit hold ran no process, so nothing was interrupted: its waits re-arm and resolve,
+    // and `reconcileAutoResumes` re-arms the resume that delivers them (hearsay-tools/cezarion#1236).
+    if (onUsageLimitHold(found)) {
+      for (const wait of openWaits(found)) this.armWait(found.id, wait);
+      return undefined;
     }
-    // Re-arm usage-limit resumes (spec 2026-08-03-auto-resume-after-usage-limit): the wait is
-    // routinely longer than a cezar session, so the deadline is durable and the timer is rebuilt
-    // from it. `pump()` reconciles again on every sweep, so this is the fast path, not the only
-    // one — see `reconcileAutoResumes`.
-    if (familyRootId === undefined) await this.reconcileRecoveryWorkerFamilies();
-    if (this.disposed) return;
-    } finally {
-      this.recoveryFactsPending = false;
-      this.recoveryScope = undefined;
-      this.recoveryInFlight = undefined;
-      settled();
+    const run = this.reconcileRecoveredAsk(found);
+    if (this.parkRecoveredRun(run)) return undefined;
+    // A pending question or a queued message leaves the waits open: they re-arm, and a result
+    // still wakes the run.
+    for (const wait of openWaits(run)) this.armWait(run.id, wait);
+    if (run.status === 'queued') return this.reviveQueuedRun(run, 'cezar restarted');
+    this.deliverConversationInput(run.id);
+    if (run.status === 'waiting') return this.recoverClosedWaitingRun(run);
+    this.recoverInterruptedRun(run);
+    return undefined;
+  }
+
+  /** True when a worker's root takes no more work from it: a closed root cancels the worker, and a
+   *  root in review or finishing leaves it as it is. */
+  private recoveryLeavesWorkerToRoot(run: RunRecord): boolean {
+    if (run.delegation?.role !== 'worker') return false;
+    const parent = this.store.getRun(run.delegation.parentRunId);
+    if (parent?.delegation?.role !== 'root') return false;
+    if (['done', 'failed', 'cancelled'].includes(parent.status)) {
+      this.cancel(run.id);
+      return true;
     }
-    // A question a crash caught before or after its commit to the parent still gets routed (#505).
-    // Only a family with a live member has anyone left to route to or fall back from.
-    const families = familyRootId === undefined ? this.liveFamilyMembers() : this.familyMembers(familyRootId);
-    for (const run of families) if (run.delegation?.role === 'worker') this.routeWorkerQuestion(run.id);
-    this.reconcileWorkerWaits(familyRootId);
-    // A parent reply accepted just before the crash still answers its worker (#505), and only a
-    // live worker takes one.
+    return parent.status === 'review' || Boolean(parent.delegation.finishRequestedAt);
+  }
+
+  /** The run as recovery reads it after it reconciles the run's question state. */
+  private reconcileRecoveredAsk(found: RunRecord): RunRecord {
+    let run = found;
+    // A worker no process survived for is a closed session: Cezar's fallback question goes as at an
+    // idle close, and the worker recovers as its plain park did (hearsay-tools/cezarion#1301).
+    if (run.delegation?.role === 'worker' && run.status === 'waiting' && this.supersedeWorkerFallback(run.id)) run = this.store.getRun(run.id)!;
+    // Phase 4b (hearsay-tools/cezarion#1236): attention reads the human wait, so an unanswered ask
+    // an older cezar left without one gets one now, attached to that ask.
+    if (this.adoptTranscriptAsk(run.id)) run = this.store.getRun(run.id)!;
+    // A stored pending-question flag can be stale: the answer's receipt reached the transcript and
+    // the row's save did not. The wait read from it is answered (review of #1437).
+    if (this.settleAnsweredLegacyAsk(run.id)) run = this.store.getRun(run.id)!;
+    return run;
+  }
+
+  /** True when the recovered run stays parked: on a human wait, a pending question or its waits. */
+  private parkRecoveredRun(run: RunRecord): boolean {
+    // hearsay-tools/cezarion#1234: a crash after a human wait's registration and before its turn
+    // end shows the question now. The run waits on the user, its other waits re-armed.
+    if (this.unsurfacedHumanWait(run.id)) {
+      this.surfaceHumanWait(run.id, undefined);
+      this.parkOnOpenWaits(run);
+      return true;
+    }
+    if (run.delegation && run.delegation.role !== 'invalid' && this.hasPendingHumanAsk(run.id)) {
+      // A pending question leaves its waits open: they re-arm, and a result still wakes the run.
+      this.parkOnOpenWaits(run);
+      // Only the durable, explicitly human payload may resume an unanswered
+      // question. A refused recovery leaves attention, not terminal failure.
+      if (run.continuationMessage?.origin === 'human') {
+        const restarted = this.checkpointRestartContext(run);
+        this.continueRun(restarted.id, {}, true);
+      }
+      return true;
+    }
+    // No process survived. Open waits re-arm from their stored deadlines (an overdue timer
+    // resolves now); resolved ones wake through a scheduler-owned continuation after recovery.
+    // A human message no longer withdraws a wait, so an interrupted or queued run with queued
+    // messages still owes their delivery: it recovers as below, with its waits armed
+    // (hearsay-tools/cezarion#1233). A parked one stays parked; its wake folds them in.
+    if (run.waits?.length && !this.hasPendingHumanAsk(run.id) && (run.status === 'waiting' || !run.queuedMessages?.length)) {
+      this.parkOnOpenWaits(run);
+      return true;
+    }
+    return false;
+  }
+
+  /** Parks a recovered run: `waiting`, with each of its open waits re-armed. */
+  private parkOnOpenWaits(run: RunRecord): void {
+    this.store.updateRun(run.id, { status: 'waiting' });
+    for (const wait of openWaits(run)) this.armWait(run.id, wait);
+  }
+
+  /**
+   * A `waiting` run that did not park. Returns the settlement the loop must await, else
+   * `undefined`.
+   */
+  private recoverClosedWaitingRun(run: RunRecord): Promise<void> | undefined {
+    // Waiting is durable human attention for roots and ordinary top-level
+    // runs. A worker reaches here only when it has neither a recoverable ask
+    // nor a worker wait; preserving that record would strand both it and its
+    // parent because workers cannot accept an ordinary inactive Continue.
+    if (run.delegation?.role !== 'worker' ||
+      run.agentInputs?.some(input => !input.deliveredAt && hasLiveInboxClaim(input))) return undefined;
+    const finishedAt = new Date().toISOString();
+    if (run.invalidAsk) {
+      this.failRecoveredInvalidAsk(run, finishedAt);
+      return undefined;
+    }
+    if (this.ciWorkflowResumeStepIndex(run) >= 0) {
+      // CI ACK retires the wait, but not the failed workflow source. A closed
+      // worker at this boundary must resume before its remaining checks run.
+      const resumed = this.continueRun(run.id, { text: RESTART_CONTINUATION_PROMPT }, true);
+      this.store.appendEvent(run.id, { type: 'lifecycle', message: resumed.ok
+        ? 'cezar restarted — resuming the worker CI recovery from its last session'
+        : `cezar restarted — could not resume worker CI recovery (${resumed.error ?? 'unknown'})` });
+      return undefined;
+    }
+    for (const step of run.steps) {
+      if (step.status === 'waiting' || step.status === 'running') {
+        this.store.updateStep(run.id, step.id, { status: 'done', finishedAt });
+      }
+    }
+    this.store.appendEvent(run.id, {
+      type: 'lifecycle',
+      message: 'cezar restarted — the open worker session was settled',
+    });
+    return this.settleSuccess(run.id);
+  }
+
+  /** A recovered run whose structured question cannot be answered fails with its open steps. */
+  private failRecoveredInvalidAsk(run: RunRecord, finishedAt: string): void {
+    for (const step of run.steps) if (step.status === 'waiting' || step.status === 'running') {
+      this.store.updateStep(run.id, step.id, { status: 'failed', error: 'invalid structured question', finishedAt });
+    }
+    this.store.updateRun(run.id, { status: 'failed', error: 'invalid structured question', finishedAt, currentStepId: undefined });
+  }
+
+  /** A `running` run whose process died mid-turn. */
+  private recoverInterruptedRun(found: RunRecord): void {
+    // `running`: the process died mid-turn. Mark it interrupted (the state
+    // continueRun expects), then pick the work back up from the last session.
+    const run = this.checkpointRestartContext(found);
+    const interruptedStepId = run.currentStepId;
+    const finishedAt = new Date().toISOString();
+    for (const step of run.steps) {
+      if (step.status === 'running' || step.status === 'waiting') {
+        this.store.updateStep(run.id, step.id, {
+          status: 'failed',
+          error: 'interrupted — cezar process exited during the run',
+          finishedAt,
+        });
+      }
+    }
+    this.store.updateRun(run.id, {
+      status: 'failed',
+      error: 'interrupted — cezar process exited during the run',
+      finishedAt,
+      currentStepId: undefined,
+    });
+    if (this.requeueInterruptedRun(run, interruptedStepId)) return;
+    const resumed = this.continueRun(
+      run.id,
+      {
+        text: run.continuationMessage?.text ?? RESTART_CONTINUATION_PROMPT,
+      },
+      true,
+    );
+    this.store.appendEvent(run.id, {
+      type: 'lifecycle',
+      message: resumed.ok
+        ? 'cezar restarted — resuming the interrupted task from its last session'
+        : `cezar restarted — could not resume the interrupted task (${resumed.error ?? 'unknown'})`,
+    });
+  }
+
+  /** True when the interrupted run has no session to continue and goes back to the queue. */
+  private requeueInterruptedRun(run: RunRecord, interruptedStepId: RunRecord['currentStepId']): boolean {
+    const interruptedIndex = run.workflowDef?.steps.findIndex(step => step.id === interruptedStepId) ?? -1;
+    const interruptedDef = interruptedIndex >= 0 ? run.workflowDef?.steps[interruptedIndex] : undefined;
+    const requeueInput = () => ({ task: run.task, runner: run.runner, model: run.model, effort: run.effort,
+      agentProfile: run.agentProfile, systemPrompt: run.systemPrompt, autonomous: run.autonomous,
+      worktree: run.worktree });
+    // Worktree setup (#917) interrupted before any agent session: there is no session to
+    // continue, so start the workflow over. `execute` sees setup still `running` and reruns it.
+    if (run.workflowDef && run.worktreeSetup?.status === 'running' && !run.steps.some(step => step.sessionId)) {
+      this.store.updateRun(run.id, { status: 'queued', error: undefined, finishedAt: undefined, currentStepId: undefined });
+      this.store.flush();
+      this.pendingJobs.set(run.id, { workflow: run.workflowDef, startAt: 0, input: requeueInput() });
+      this.queue.push(run.id);
+      return true;
+    }
+    if (run.workflowDef && interruptedDef && stepKind(interruptedDef) === 'check') {
+      this.store.updateStep(run.id, interruptedDef.id, { status: 'pending', error: undefined, finishedAt: undefined });
+      this.store.updateRun(run.id, { status: 'queued', error: undefined, finishedAt: undefined, currentStepId: undefined });
+      this.store.flush();
+      this.pendingJobs.set(run.id, {
+        workflow: run.workflowDef,
+        startAt: interruptedIndex,
+        input: requeueInput(),
+      });
+      this.queue.push(run.id);
+      return true;
+    }
+    return false;
+  }
+
+  /** Delivers the parent replies routed to each worker in scope. */
+  private answerRecoveredRoutedQuestions(inScope: (run: RunRecord) => boolean): void {
     for (const run of this.store.listRuns().filter(inScope)) if (run.delegation?.role === 'worker') this.answerRoutedQuestion(run.id);
-    // The rest re-arms wakes from durable state and is idempotent, so it runs for every live run
-    // even after one adopted family: anything the recovery window held back goes out now.
+  }
+
+  /** Re-arms each live run's waits, or queues the wake it owes. */
+  private rearmRecoveredWakes(): void {
     for (const run of this.store.listRuns()) {
       // A terminal row keeps its waits (and stays live) until something cancels them. A failed run
       // that owes results keeps them for a human, and its open waits still resolve without a wake.
@@ -3876,8 +4099,6 @@ export class RunManager {
       // A message the recovery window held back is a wake of its own (hearsay-tools/cezarion#1235).
       else if (['running', 'waiting', 'queued'].includes(run.status) && this.owesWake(run)) this.queueWaitWake(run.id);
     }
-    this.reconcileAutoResumes();
-    void this.pump();
   }
 
   /**
@@ -5016,33 +5237,13 @@ export class RunManager {
     const run = this.store.getRun(runId)!;
     const state = this.active.get(runId)!;
     if (!run.delegation || run.delegation.role === 'invalid') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-    if (request.workerIds) {
-      if (run.delegation.role !== 'root' || !run.delegation.permissions.includes('wait')) throw new DelegationPolicyError('denied_scope', 'Only a parent may wait for owned workers');
-      for (const id of request.workerIds) {
-        const worker = this.store.getRun(id);
-        if (worker?.delegation?.role !== 'worker' || worker.delegation.parentRunId !== runId ||
-          worker.delegation.workspace.ownerRunId !== id) throw new DelegationPolicyError('denied_scope', 'not an owned worker');
-      }
-    } else {
-      const root = run.delegation.role === 'root' ? run : this.store.getRun(run.delegation.parentRunId);
-      if (root?.delegation?.role !== 'root' || (run.delegation.role === 'root' && !run.delegation.permissions.includes('wait'))) {
-        throw new DelegationPolicyError('denied_scope', 'Request wait scope denied');
-      }
-      for (const id of request.requestIds ?? []) {
-        if (!root.delegation.conversation?.messages.some(message => message.id === id && message.kind === 'request' &&
-          message.state === 'accepted' && message.senderRunId === runId)) throw new DelegationPolicyError('denied_scope', 'Request wait scope denied');
-      }
-    }
+    if (request.workerIds) this.assertOwnedWorkerWaitScope(runId, run.delegation, request.workerIds);
+    else this.assertRequestWaitScope(runId, run, run.delegation, request.requestIds ?? []);
     const repeated = identicalWorkerWait(run.waits ?? [], request);
     if (repeated && hasWorkerDeadline(repeated)) return repeated;
     if (openWaits(run).length >= WAIT_LIMIT) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
     const now = Date.now();
-    const target = request.workerIds
-      ? { workerIds: request.workerIds, outcomes: [], revisions: request.workerIds.map(workerId => {
-        const metadata = this.store.getRun(workerId)!.delegation;
-        return { workerId, revision: metadata?.role === 'worker' ? metadata.executionRevision ?? 0 : 0 };
-      }) }
-      : { requestIds: request.requestIds!, requestOutcomes: [] };
+    const target = this.workerWaitTarget(request);
     const entry: DeadlinedWorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'agent', via, registeredAt: new Date(now).toISOString(),
       deadline: new Date(now + request.timeoutSeconds * 1000).toISOString(), timeoutSeconds: request.timeoutSeconds,
       turnId: state.ciTurnId ??= randomUUID(), phase: 'open', ...(request.mode === undefined ? {} : { mode: request.mode }), ...target };
@@ -5050,11 +5251,48 @@ export class RunManager {
     this.store.commitWait(runId, entry);
     // Outcomes already in resolve it now (or, with every worker destroyed, cancel it); the rest arm it.
     this.reconcileWorkerWaits(familyOf(run));
+    // A worker that parked before this wait opened tells the parent now (hearsay-tools/cezarion#1327).
+    this.noticeParkedWorkers(familyOf(run));
     const current = this.store.getRun(runId);
     if (current?.waits?.some(wait => wait.id === entry.id) && (state.atTurnBoundary === state.session || this.waiting.has(runId))) this.parkOnWaits(runId, state);
+    return this.recordedWorkerWait(runId, entry.id) ?? entry;
+  }
+
+  /** Scope of a wait on workers: only a parent holding `wait` may select, and only workers it owns. */
+  private assertOwnedWorkerWaitScope(runId: string, delegation: Exclude<NonNullable<RunRecord['delegation']>, { role: 'invalid' }>, workerIds: string[]): void {
+    if (delegation.role !== 'root' || !delegation.permissions.includes('wait')) throw new DelegationPolicyError('denied_scope', 'Only a parent may wait for owned workers');
+    for (const id of workerIds) {
+      const worker = this.store.getRun(id);
+      if (worker?.delegation?.role !== 'worker' || worker.delegation.parentRunId !== runId ||
+        worker.delegation.workspace.ownerRunId !== id) throw new DelegationPolicyError('denied_scope', 'not an owned worker');
+    }
+  }
+
+  /** Scope of a wait on replies: the caller's own accepted requests, read from its family root's conversation. */
+  private assertRequestWaitScope(runId: string, run: RunRecord, delegation: Exclude<NonNullable<RunRecord['delegation']>, { role: 'invalid' }>, requestIds: string[]): void {
+    const root = delegation.role === 'root' ? run : this.store.getRun(delegation.parentRunId);
+    if (root?.delegation?.role !== 'root' || (delegation.role === 'root' && !delegation.permissions.includes('wait'))) {
+      throw new DelegationPolicyError('denied_scope', 'Request wait scope denied');
+    }
+    for (const id of requestIds) {
+      if (!root.delegation.conversation?.messages.some(message => message.id === id && message.kind === 'request' &&
+        message.state === 'accepted' && message.senderRunId === runId)) throw new DelegationPolicyError('denied_scope', 'Request wait scope denied');
+    }
+  }
+
+  /** The entry's target fields: each worker's revision at registration, or the requests with no outcome yet. */
+  private workerWaitTarget(request: { workerIds?: string[]; requestIds?: string[] }) {
+    if (!request.workerIds) return { requestIds: request.requestIds!, requestOutcomes: [] };
+    return { workerIds: request.workerIds, outcomes: [], revisions: request.workerIds.map(workerId => {
+      const metadata = this.store.getRun(workerId)!.delegation;
+      return { workerId, revision: metadata?.role === 'worker' ? metadata.executionRevision ?? 0 : 0 };
+    }) };
+  }
+
+  /** The wait as the store now holds it, open or already delivered, with its deadline. */
+  private recordedWorkerWait(runId: string, id: string): DeadlinedWorkerWaitEntry | undefined {
     const latest = this.store.getRun(runId);
-    const recorded = [...latest?.waits ?? [], ...latest?.lastWaits ?? []].find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === entry.id && wait.kind === 'worker' && hasWorkerDeadline(wait));
-    return recorded ?? entry;
+    return [...latest?.waits ?? [], ...latest?.lastWaits ?? []].find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === id && wait.kind === 'worker' && hasWorkerDeadline(wait));
   }
 
   /**
@@ -5071,6 +5309,7 @@ export class RunManager {
       revisions: ids.map(workerId => { const worker = this.store.getRun(workerId)!.delegation; return { workerId, revision: worker?.role === 'worker' ? worker.executionRevision ?? 0 : 0 }; }) };
     this.store.commitWait(runId, entry);
     this.reconcileWorkerWaits(familyOf(this.store.getRun(runId)!));
+    this.noticeParkedWorkers(runId);
     return entry;
   }
 
@@ -5248,6 +5487,72 @@ export class RunManager {
     this.deliverConversationInput(parentId);
   }
 
+  /**
+   * A worker parked before finishing while its parent waits on it tells the parent why
+   * (hearsay-tools/cezarion#1327): Cezar posts a progress message from the worker, which wakes the
+   * parent and closes no wait. A parked question needs none, since the question itself goes to the
+   * parent. At most one notice per parent wait (`parkNoticeId`), and none when the turn that
+   * parked already messaged the parent, Cezar's own notice included. The message and the parent's
+   * input commit together; a crash before that commit leaves the recovery sweep to post it.
+   */
+  private noticeParkedWorker(workerId: string): void {
+    const worker = this.store.getRun(workerId);
+    if (worker?.delegation?.role !== 'worker' || worker.delegation.destroy || !this.parkedBeforeFinishing(worker)) return;
+    const parentId = worker.delegation.parentRunId;
+    const root = this.store.getRun(parentId);
+    if (root?.delegation?.role !== 'root' || !this.parentTakesMessages(root) ||
+      !root.delegation.receipts.some(receipt => receipt.workerId === workerId && !receipt.deletion)) return;
+    const state = root.delegation.conversation ?? { messages: [], outcomes: [] };
+    const wait = parkNoticeWait(workerId, root.waits ?? [], state.messages);
+    if (!wait) return;
+    const turn = parkingTurn(this.store.readEvents(workerId));
+    if (messagedParentSince(state.messages, workerId, parentId, turn.startedAt) || this.parkNoticeAtCapacity(workerId, wait.id, root, state)) return;
+    const now = new Date().toISOString();
+    const message = parkNoticeMessage({ workerRunId: workerId, parentRunId: parentId, waitId: wait.id, waits: worker.waits ?? [],
+      ...(turn.text === undefined ? {} : { lastText: turn.text }), now, redact: text => this.store.redactText(text) });
+    const input = { id: message.id, source: 'agent' as const, parentRunId: parentId, text: message.text, createdAt: now,
+      conversation: { senderRunId: workerId, recipientRunId: parentId, kind: 'progress' as const } };
+    this.store.commitConversation(parentId, { ...state, messages: [...state.messages, message] }, { recipientRunId: parentId, input });
+    projectConversationEvents(this.store, this.store.getRun(parentId)!);
+    this.deliverConversationInput(parentId);
+  }
+
+  /** A worker parked before finishing: waiting, not stopping or complete, with no pending question
+   *  and no queued input. */
+  private parkedBeforeFinishing(worker: RunRecord): boolean {
+    // A question goes to the parent through `routeWorkerQuestion`; a prose gate does not, so it gets a notice.
+    // Queued input wakes the worker, so the turn that takes it decides at its own park.
+    return worker.status === 'waiting' && !worker.stopping && !this.store.transcriptFacts(worker.id).pendingAsk &&
+      !this.active.get(worker.id)?.pendingHumanAsk && this.store.readWorkerExecution(worker.id)?.phase !== 'complete' &&
+      !this.hasQueuedAgentInputs(worker.id);
+  }
+
+  /** The ledger and the parent's inbox keep room as `service.send` counts it, beside open
+   *  questions' replies. When either is full, the worker's log says so once per wait. */
+  private parkNoticeAtCapacity(workerId: string, waitId: string, root: RunRecord, state: ConversationState): boolean {
+    if (state.messages.length + openQuestions(state).length < 1024 && (root.agentInputs ?? []).filter(input => !input.deliveredAt).length < 32) return false;
+    const projectionId = `park-notice-skipped:${waitId}`;
+    if (!this.store.hasProjection(workerId, projectionId)) {
+      this.store.appendEvent(workerId, { type: 'note', tone: 'warning', projectionId, message: 'Parked, but the parent conversation is at capacity: no park notice was sent.' });
+    }
+    return true;
+  }
+
+  /** Recovery's pass over family members: a question (#505) or a park notice
+   *  (hearsay-tools/cezarion#1327) that a crash caught before or after its commit to the parent
+   *  still reaches it. The worker waits settle between the two, so a notice selects only a wait
+   *  that is still open. */
+  private recoverWorkerMessages(families: readonly RunRecord[], familyRootId: string | undefined): void {
+    for (const run of families) if (run.delegation?.role === 'worker') this.routeWorkerQuestion(run.id);
+    this.reconcileWorkerWaits(familyRootId);
+    for (const run of families) this.noticeParkedWorker(run.id);
+  }
+
+  /** `noticeParkedWorker` for every worker a family's root owns. */
+  private noticeParkedWorkers(rootId: string): void {
+    for (const child of this.store.listWorkersOf(rootId)) this.noticeParkedWorker(child.id);
+  }
+
   /** A human answering a worker question its parent handed back (#505): the reviewing parent
    * can no longer answer it, so it must not also block the human. */
   private answersFallenBackAsk(runId: string, opts: { text?: string; images?: PastedContent[] }, deferred: boolean): boolean {
@@ -5368,8 +5673,12 @@ export class RunManager {
 
   /** The parent can still read and answer a routed question; answering needs its steer grant. */
   private parentCanReceive(parent: RunRecord): boolean {
-    return parent.delegation?.role === 'root' && parent.delegation.permissions.includes('steer') &&
-      ['queued', 'running', 'waiting'].includes(parent.status) && !parent.stopping &&
+    return parent.delegation?.role === 'root' && parent.delegation.permissions.includes('steer') && this.parentTakesMessages(parent);
+  }
+
+  /** The parent can still read a message from its worker. */
+  private parentTakesMessages(parent: RunRecord): boolean {
+    return parent.delegation?.role === 'root' && ['queued', 'running', 'waiting'].includes(parent.status) && !parent.stopping &&
       !this.rootFinishRequested(parent.id) && !this.historyDeletionPending(parent.id);
   }
 
@@ -6902,78 +7211,22 @@ export class RunManager {
     if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() })) return;
     this.workerIdentity(runId);
     const record = this.store.getRun(runId);
-    let cwd: string;
-    // Retention (#483) rebuilt a reclaimed directory: a bare checkout that needs setup again (#917).
-    let rematerialized = false;
-    if (record?.delegation?.role === 'worker') {
-      try {
-        if (record.delegation.destroy) throw new Error('Worker destruction has begun');
-        cwd = (await verifyOwnedWorkspace(this.repoRoot, record)).path;
-        await verifyWorkerContext({ dataDir: this.dataDir, parentId: record.delegation.parentRunId, workspace: record.delegation.workspace, context: record.delegation.context,
-          parentCwd: this.store.getRun(record.delegation.parentRunId)?.worktreePath ?? this.repoRoot });
-      } catch (error) {
-        const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
-        const finishedAt = new Date().toISOString();
-        this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt });
-        this.store.updateRun(runId, { status: 'failed', error: message, finishedAt, currentStepId: undefined });
-        this.store.appendEvent(runId, { type: 'lifecycle', message });
-        this.starting.delete(runId);
-        this.dropActive(runId);
-        return;
-      }
-    } else {
-      rematerialized = await rematerializeReclaimedWorktree(this.repoRoot, this.store, runId);
-      cwd = record?.worktreePath && existsSync(record.worktreePath) ? record.worktreePath : this.repoRoot;
-    }
-    if (this.store.getRun(runId)?.stopping) {
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
-      this.starting.delete(runId);
-      this.dropActive(runId);
-      return;
-    }
+    const workspace = await this.continuationWorkspace(runId, stepId, record);
+    if (!workspace) return;
+    if (this.settleStoppedContinuation(runId)) return;
     // Continue/recovery constructs a second ActiveRun: hydrate the durable mode here too.
     const state: ActiveRun = {
       delegationSettings: undefined, revokeDelegation: undefined,
-      cancelled: false, interrupt: () => undefined, cwd,
+      cancelled: false, interrupt: () => undefined, cwd: workspace.cwd,
       pendingHumanAsk: this.hasPendingHumanAsk(runId),
       pendingPermissions: new Set(),
       autonomous: record?.autonomous === true,
     };
     this.activate(runId, state);
     this.starting.delete(runId);
-    if (state.cwd === this.repoRoot) {
-      if (repositoryRootLockDisabled()) {
-        this.store.appendEvent(runId, {
-          type: 'note',
-          message: REPOSITORY_ROOT_LOCK_DISABLED_NOTE,
-        });
-      } else {
-        this.store.appendEvent(runId, {
-          type: 'note',
-          message: 'waiting for exclusive access to the repository working tree',
-        });
-        if (!(await this.acquireRepoRoot(runId, state))) {
-          this.store.updateRun(runId, {
-            status: 'cancelled',
-            finishedAt: new Date().toISOString(),
-            currentStepId: undefined,
-          });
-          this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
-          this.dropActive(runId);
-          return;
-        }
-      }
-    }
-    this.armAutosave(runId, state);
-    if (record) seedHandoffFile(this.dataDir, record); // idempotent — normally already there
-    // Worktree setup (#917) for a directory retention rebuilt, or one a restart interrupted.
-    const setupNote = await this.prepareWorktree(
-      runId,
-      state,
-      (await loadConfig(this.repoRoot)).worktreeSetup,
-      (event) => this.store.appendEvent(runId, event),
-      rematerialized ? 'rematerialized' : 'resume',
-    );
+    const lease = this.continuationRepoRootLease(runId, state);
+    if (lease && !(await lease)) return;
+    const setupNote = await this.prepareContinuationWorktree(runId, state, record, workspace.rematerialized);
     // A Stop during setup settles below, at the prelaunch cancellation check before any spawn.
     // Registry snapshot for `/skill` expansion. `execute` loads this for the workflow's own
     // sessions; a continuation builds its OWN ActiveRun, and without this the resumed session
@@ -6981,6 +7234,225 @@ export class RunManager {
     // answered "Unknown skill" (#811). Best-effort — discovery must never break Continue.
     state.skills = await this.discoverSkills().catch(() => [] as Skill[]);
 
+    this.startContinuationStep(runId, stepId, record, sessionId, backend);
+    const opening = this.continuationOpening(runId, stepId, state, record, { prompt, images, persistedImages, persistedAttachments });
+    prompt = opening.prompt;
+    const answer = this.openingAnswer(runId, state, opening);
+    state.pendingHumanAsk = answer.askSeq === undefined && this.hasPendingHumanAsk(runId);
+
+    const turn: SessionTurn = { text: '', completedText: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
+    const sink = this.makeUiSink(runId, stepId);
+    const onEvent = (event: AgentEvent) => {
+      if (this.disposedSessionEvent(runId, state, event)) return;
+      if (event.type === 'image') {
+        const saved = this.persistAttachment(runId, event.mediaType, event.data);
+        if (saved) this.store.appendEvent(runId, { type: 'image', stepId, ...saved });
+        return;
+      }
+      if (event.type === 'text') {
+        this.clearUnreadInputTimer(state); // real content: the harness is working
+        this.clearHeldHumanInputTimer(state);
+        this.noteNoWaitNudgeContent(runId, state, event);
+        turn.text = appendTurnText(turn.text, event.text);
+        const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
+        if (text) this.store.appendEvent(runId, { type: 'text', text, stepId });
+        return;
+      }
+      if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
+      if (event.type === 'tool-call' || event.type === 'tool-result') {
+        this.clearUnreadInputTimer(state);
+        this.clearHeldHumanInputTimer(state);
+        this.noteNoWaitNudgeContent(runId, state, event);
+      }
+      this.store.appendEvent(runId, { ...event, stepId });
+      if (event.type === 'cost') this.recordReportedCost(runId, stepId, state, backend, event.usd);
+      if (event.type === 'error') { this.recordSessionFault(state, turn, event.message); return; }
+      if (turn.sessionError || state.agentInputError) return;
+      if (event.type === 'session') {
+        this.store.updateStep(runId, stepId, { sessionId: event.sessionId, backend,
+          ...(event.sessionTransport ? { sessionTransport: event.sessionTransport } : {}) });
+      }
+      if (event.type === 'token-usage') {
+        this.store.updateStep(runId, stepId, { tokensUsed: event.tokensUsed });
+      }
+      const wakeDelay = claudeScheduleWakeupDelay(event, backend);
+      if (wakeDelay !== undefined) turn.scheduleWakeup = wakeDelay;
+      if (event.type === 'turn-end') {
+        this.markTurnBoundary(runId, state, event);
+        if (!this.acknowledgeOpeningTurn(runId, state, answer)) return;
+        // Belt-and-braces: v2 `turn.completed` already flushed the delta
+        // coalescers; the v1 turn boundary flushes again (idempotent) so no
+        // buffered delta can outlive its turn.
+        sink.flushAll();
+        this.trackTurnEnd(runId, turn.text); // titleSummary + diffStat (#389)
+        const text = turn.text;
+        const completedText = turn.completedText;
+        turn.text = '';
+        turn.completedText = '';
+        turn.tail = 'none';
+        const turnWakeDelay = turn.scheduleWakeup;
+        turn.scheduleWakeup = undefined;
+        this.endTurn(runId, state, sink, { stepId, text, completedText, scheduleWakeup: turnWakeDelay });
+      }
+    };
+
+    const settings = await this.continuationLaunchSettings(runId, stepId, state, record, sessionId, backend, sink);
+    if (!settings) return;
+    if (state.cancelled) { this.settleContinuationPrelaunchCancel(runId, stepId, state); return; }
+    if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() }, state)) return;
+    this.applyContinuationSettings(runId, stepId, state, backend, settings);
+    const { runner, skipSkillOnResume } = this.continuationRunner(backend, sessionId, settings.owningStep);
+    // Re-expand the continued step's skill from the current registry (#790) BEFORE
+    // provisionSession. Materializing the skill used to sit after the pre-launch
+    // revalidation, so Stop during that await still launched with revoked tools.
+    // `record.systemPrompt` is only the extra prompt; the opening session put
+    // `skillSystemPrompt(skill)` in front. Skip that prefix only when this
+    // session resumes into its own thread on an in-thread runner — those
+    // already carry the playbook in history. A missing skill degrades to
+    // today's extra-only prompt with one lifecycle warning; in-thread skips
+    // do not warn. Workers still inherit only the extra prompt (#778).
+    const pendingSkills = this.continuationSkills(runId, state, prompt, settings.toolsStep, skipSkillOnResume);
+    const skills = pendingSkills
+      ? await pendingSkills
+      : { skillPrompt: undefined, fallbackSkillPrompt: undefined, files: new Map<string, string>() };
+    state.currentStepId = stepId;
+    this.beginUsageInvocation(runId, state, stepId);
+    // A continuation's opening message becomes the session's `userPrompt` and never passes
+    // through `deliverMessage`, so it needs the SAME delivery-only `/skill` rewrite the
+    // live path applies (#811). Delivery-only: the `user-message` event above already
+    // persisted the user's original text, and the transcript must keep showing that.
+    state.agentSessionError = undefined;
+    if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
+    const delegation = this.provisionSession(runId, state);
+    // Read before the cancellation checks below, which also cover this await (#1576).
+    const webhooksPart = await this.agentWebhooksPart();
+    const ciTools = await this.provisionCiSession(runId, state);
+    // Stop/Finish can arrive while the local tool controller is starting.
+    if (this.launchStale(runId, state, delegation, ciTools)) {
+      this.settleStaleContinuationLaunch(runId, stepId, state, { stepId, sessionId, backend, prompt, images });
+      return;
+    }
+    state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
+    const session = this.startContinuationSession(runId, state, runner, {
+      stepId, sessionId, prompt, setupNote, opening, skills, skipSkillOnResume, settings, delegation, webhooksPart, ciTools,
+    }, onEvent, turn, sink);
+    return this.awaitContinuationSession(runId, state, session, { stepId, sink, turn, delegation, ciTools });
+  }
+
+  /** Where a Continue runs: an owned worker's verified workspace, or the task's worktree, which
+   *  retention may have reclaimed (#483), else the repository root. Returns undefined after an
+   *  unavailable owned workspace failed the run. */
+  private async continuationWorkspace(
+    runId: string,
+    stepId: string,
+    record: RunRecord | undefined,
+  ): Promise<{ cwd: string; rematerialized: boolean } | undefined> {
+    if (record?.delegation?.role === 'worker') {
+      const cwd = await this.ownedContinuationWorkspace(runId, stepId, record, record.delegation);
+      return cwd === undefined ? undefined : { cwd, rematerialized: false };
+    }
+    // Retention (#483) rebuilt a reclaimed directory: a bare checkout that needs setup again (#917).
+    const rematerialized = await rematerializeReclaimedWorktree(this.repoRoot, this.store, runId);
+    const cwd = record?.worktreePath && existsSync(record.worktreePath) ? record.worktreePath : this.repoRoot;
+    return { cwd, rematerialized };
+  }
+
+  /** An owned worker's workspace for a Continue, verified with its parent's context. Returns
+   *  undefined after it failed the run: owned workers never adopt or recreate an unverified resource. */
+  private async ownedContinuationWorkspace(
+    runId: string,
+    stepId: string,
+    record: RunRecord,
+    delegation: WorkerDelegationRecord,
+  ): Promise<string | undefined> {
+    try {
+      if (delegation.destroy) throw new Error('Worker destruction has begun');
+      const cwd = (await verifyOwnedWorkspace(this.repoRoot, record)).path;
+      await verifyWorkerContext({ dataDir: this.dataDir, parentId: delegation.parentRunId, workspace: delegation.workspace, context: delegation.context,
+        parentCwd: this.store.getRun(delegation.parentRunId)?.worktreePath ?? this.repoRoot });
+      return cwd;
+    } catch (error) {
+      const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
+      const finishedAt = new Date().toISOString();
+      this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt });
+      this.store.updateRun(runId, { status: 'failed', error: message, finishedAt, currentStepId: undefined });
+      this.store.appendEvent(runId, { type: 'lifecycle', message });
+      this.starting.delete(runId);
+      this.dropActive(runId);
+      return undefined;
+    }
+  }
+
+  /** A Stop that arrived while the Continue resolved its workspace cancels the run before it
+   *  becomes active. */
+  private settleStoppedContinuation(runId: string): boolean {
+    if (!this.store.getRun(runId)?.stopping) return false;
+    this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+    this.starting.delete(runId);
+    this.dropActive(runId);
+    return true;
+  }
+
+  /** The repository-root lease of a Continue that runs in the repository root. Returns undefined
+   *  when no lease is needed, so that path does not yield, else whether the lease was granted. */
+  private continuationRepoRootLease(runId: string, state: ActiveRun): Promise<boolean> | undefined {
+    if (state.cwd !== this.repoRoot) return undefined;
+    if (repositoryRootLockDisabled()) {
+      this.store.appendEvent(runId, {
+        type: 'note',
+        message: REPOSITORY_ROOT_LOCK_DISABLED_NOTE,
+      });
+      return undefined;
+    }
+    this.store.appendEvent(runId, {
+      type: 'note',
+      message: 'waiting for exclusive access to the repository working tree',
+    });
+    return this.acquireContinuationRepoRoot(runId, state);
+  }
+
+  /** Wait for the repository-root lease; a Stop during the wait cancels the run. */
+  private async acquireContinuationRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
+    if (await this.acquireRepoRoot(runId, state)) return true;
+    this.store.updateRun(runId, {
+      status: 'cancelled',
+      finishedAt: new Date().toISOString(),
+      currentStepId: undefined,
+    });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+    this.dropActive(runId);
+    return false;
+  }
+
+  /** Arm autosave, seed the handoff file, and run worktree setup. Returns setup's note for the
+   *  opening message. */
+  private async prepareContinuationWorktree(
+    runId: string,
+    state: ActiveRun,
+    record: RunRecord | undefined,
+    rematerialized: boolean,
+  ): Promise<string | undefined> {
+    this.armAutosave(runId, state);
+    if (record) seedHandoffFile(this.dataDir, record); // idempotent — normally already there
+    // Worktree setup (#917) for a directory retention rebuilt, or one a restart interrupted.
+    return this.prepareWorktree(
+      runId,
+      state,
+      (await loadConfig(this.repoRoot)).worktreeSetup,
+      (event) => this.store.appendEvent(runId, event),
+      rematerialized ? 'rematerialized' : 'resume',
+    );
+  }
+
+  /** Mark the run and the Continue's step as running, then open the step. A Cursor session resumes
+   *  on the transport it was opened with. */
+  private startContinuationStep(
+    runId: string,
+    stepId: string,
+    record: RunRecord | undefined,
+    sessionId: string | undefined,
+    backend: RunnerId,
+  ): void {
     this.store.updateRun(runId, {
       status: 'running',
       error: undefined,
@@ -6998,12 +7470,17 @@ export class RunManager {
       } : {}),
     });
     this.store.appendEvent(runId, { type: 'step-start', stepId, name: 'Continue', kind: 'agent', iteration: 1 });
-    // Attachments pasted into the follow-up composer, on the same terms as a live-session
-    // message (#357): persisted to the run's own attachment store so the thread renders the
-    // bubble's images rather than a bare count, and handed to the agent as absolute paths
-    // appended to the prompt (so it can operate on them — and because codex/opencode drop image
-    // blocks before they reach the model). An image ALSO rides along as a base64 block so the
-    // model can view it; a file (#950) has nothing to view and travels as its path alone.
+  }
+
+  /** A Continue's opening message: the checkpoint's agent input with its outcome, its images and
+   *  attachments, and the `user-message` event that shows it. */
+  private continuationOpening(
+    runId: string,
+    stepId: string,
+    state: ActiveRun,
+    record: RunRecord | undefined,
+    input: { prompt: string; images: PastedContent[]; persistedImages: ContentBlock[]; persistedAttachments: PersistedAttachment[] },
+  ): ContinuationOpening {
     const checkpoint = record?.continuationMessage;
     state.openingAgentInputId = checkpoint?.agentInputId;
     const openingInput = record?.agentInputs?.find(input => input.id === checkpoint?.agentInputId);
@@ -7012,12 +7489,9 @@ export class RunManager {
     // A parent's answer to a routed question (#505) is shown as its conversation reply, not
     // as a human message, and its own reply outcome is not news to the worker.
     const parentAnswer = openingInput?.conversation?.kind === 'reply' && this.routedAsk(runId) !== undefined;
+    let prompt = input.prompt;
     if (openingInput && !parentAnswer) prompt += this.agentInputOutcomeText(openingInput);
-    const saved = this.readPersistedAttachments(
-      runId, checkpoint?.id === stepId ? checkpoint.images ?? [] : [], 'continuation',
-    );
-    const openingImages = [...(images.length ? contentBlocksOf(images) : saved.blocks), ...persistedImages];
-    const attachments = [...saved.attachments, ...persistedAttachments];
+    const { openingImages, attachments } = this.continuationImages(runId, stepId, checkpoint, input);
     if (checkpoint?.origin !== 'lifecycle' && !parentAnswer) this.store.appendEvent(runId, {
       type: 'user-message',
       stepId,
@@ -7025,158 +7499,105 @@ export class RunManager {
       imageCount: openingImages.filter((b) => b.type === 'image').length,
       ...(attachments.length ? { images: attachments.map((saved) => saved.url) } : {}),
     });
-    let openingAnswerAskSeq = checkpoint?.origin === 'human' ? this.pendingHumanAskSeq(runId) : undefined;
-    state.openingAnswerAskSeq = openingAnswerAskSeq;
+    return { prompt, checkpoint, parentAnswer, openingImages, attachments };
+  }
+
+  /** A Continue's opening images and attachments. */
+  private continuationImages(
+    runId: string,
+    stepId: string,
+    checkpoint: RunRecord['continuationMessage'],
+    input: { images: PastedContent[]; persistedImages: ContentBlock[]; persistedAttachments: PersistedAttachment[] },
+  ): { openingImages: ContentBlock[]; attachments: PersistedAttachment[] } {
+    // Attachments pasted into the follow-up composer, on the same terms as a live-session
+    // message (#357): persisted to the run's own attachment store so the thread renders the
+    // bubble's images rather than a bare count, and handed to the agent as absolute paths
+    // appended to the prompt (so it can operate on them — and because codex/opencode drop image
+    // blocks before they reach the model). An image ALSO rides along as a base64 block so the
+    // model can view it; a file (#950) has nothing to view and travels as its path alone.
+    const saved = this.readPersistedAttachments(
+      runId, checkpoint?.id === stepId ? checkpoint.images ?? [] : [], 'continuation',
+    );
+    const openingImages = [...(input.images.length ? contentBlocksOf(input.images) : saved.blocks), ...input.persistedImages];
+    const attachments = [...saved.attachments, ...input.persistedAttachments];
+    return { openingImages, attachments };
+  }
+
+  /** The human ask a human Continue answers, and the human waits that answer settles. */
+  private openingAnswer(runId: string, state: ActiveRun, opening: ContinuationOpening): OpeningAnswer {
+    const askSeq = opening.checkpoint?.origin === 'human' ? this.pendingHumanAskSeq(runId) : undefined;
+    state.openingAnswerAskSeq = askSeq;
     // The human waits this answer answers; one the opening turn opens is its next question.
-    const openingAnswerWaits = openingAnswerAskSeq === undefined ? []
+    const waits = askSeq === undefined ? []
       : openWaits(this.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
-    state.pendingHumanAsk = openingAnswerAskSeq === undefined && this.hasPendingHumanAsk(runId);
+    return { askSeq, waits, parentAnswer: opening.parentAnswer };
+  }
 
-    let turnText = '';
-    let completedAssistantText = '';
-    let turnTail: TurnTail = 'none';
-    let scheduleWakeup: number | null | undefined;
-    let sessionError: string | undefined;
-    const sink = this.makeUiSink(runId, stepId);
-    const onEvent = (event: AgentEvent) => {
-      if (this.isDisposedDelegatedRun(runId)) {
-        if (event.type === 'error') state.session?.interrupt();
-        return;
-      }
-      if (event.type === 'image') {
-        const saved = this.persistAttachment(runId, event.mediaType, event.data);
-        if (saved) this.store.appendEvent(runId, { type: 'image', stepId, ...saved });
-        return;
-      }
-      if (event.type === 'text') {
-        this.clearUnreadInputTimer(state); // real content: the harness is working
-        this.clearHeldHumanInputTimer(state);
-        this.noteNoWaitNudgeContent(runId, state, event);
-        turnText = appendTurnText(turnText, event.text);
-        const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
-        if (text) this.store.appendEvent(runId, { type: 'text', text, stepId });
-        return;
-      }
-      if (event.type === 'input-unconsumed') { this.retireUnreadInputs(runId, state, event.inputIds, true); return; }
-      if (event.type === 'tool-call' || event.type === 'tool-result') {
-        this.clearUnreadInputTimer(state);
-        this.clearHeldHumanInputTimer(state);
-        this.noteNoWaitNudgeContent(runId, state, event);
-      }
-      this.store.appendEvent(runId, { ...event, stepId });
-      if (event.type === 'cost') this.recordReportedCost(runId, stepId, state, backend, event.usd);
-      if (event.type === 'error') {
-        // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
-        sessionError ??= state.agentInputError ?? event.message;
-        state.agentSessionError = sessionError;
-        state.session?.interrupt();
-        return;
-      }
-      if (sessionError || state.agentInputError) return;
-      if (event.type === 'session') {
-        this.store.updateStep(runId, stepId, { sessionId: event.sessionId, backend,
-          ...(event.sessionTransport ? { sessionTransport: event.sessionTransport } : {}) });
-      }
-      if (event.type === 'token-usage') {
-        this.store.updateStep(runId, stepId, { tokensUsed: event.tokensUsed });
-      }
-      const wakeDelay = claudeScheduleWakeupDelay(event, backend);
-      if (wakeDelay !== undefined) scheduleWakeup = wakeDelay;
-      if (event.type === 'turn-end') {
-        this.retireUnreadInputs(runId, state, event.unconsumedInputIds ?? [], false);
-        this.readBundledInputs(runId, state);
-        state.waitWakeTurn = undefined;
-        state.atTurnBoundary = state.session;
-        state.ciTurnId = randomUUID();
-        // A completed turn acknowledges the opening payload. Until then a restart
-        // must replay it, including a crash after startSession but before delivery.
-        if (!state.cancelled) {
-          if (state.openingAgentInputId && state.session?.open) {
-            const id = state.openingAgentInputId;
-            const deliveredAt = new Date().toISOString();
-            try {
-              // The successful opening turn handled its instruction: delivered and read (#505).
-              this.store.commitAgentInputs(runId, (this.store.getRun(runId)?.agentInputs ?? []).map(input => {
-                if (input.id !== id) return input;
-                const { awaitingRead: _awaiting, ...handled } = input;
-                return { ...handled, deliveredAt: input.deliveredAt ?? deliveredAt, consumedAt: input.consumedAt ?? deliveredAt };
-              }), id);
-            } catch (error) {
-              state.agentInputError = `agent input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
-              try { state.session.interrupt(); } finally {
-                try { this.store.appendEvent(runId, { type: 'error', message: state.agentInputError }); }
-                catch { console.error(`[cez] ${state.agentInputError}`); }
-              }
-              return;
-            }
-            state.openingAgentInputId = undefined;
-            this.reconcileWorkerWaits();
-          }
-          if (openingAnswerAskSeq !== undefined && state.session?.open) {
-            this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: openingAnswerAskSeq, ...(parentAnswer ? { source: 'parent' } : {}) });
-            this.settleHumanWaits(runId, openingAnswerWaits);
-            openingAnswerAskSeq = undefined;
-            state.openingAnswerAskSeq = undefined;
-          }
-          this.store.updateRun(runId, { continuationMessage: undefined });
-          this.store.flush();
-        }
-        // Belt-and-braces: v2 `turn.completed` already flushed the delta
-        // coalescers; the v1 turn boundary flushes again (idempotent) so no
-        // buffered delta can outlive its turn.
-        sink.flushAll();
-        this.trackTurnEnd(runId, turnText); // titleSummary + diffStat (#389)
-        const text = turnText;
-        const completedText = completedAssistantText;
-        turnText = '';
-        completedAssistantText = '';
-        turnTail = 'none';
-        const turnWakeDelay = scheduleWakeup;
-        scheduleWakeup = undefined;
-        this.endTurn(runId, state, sink, { stepId, text, completedText, scheduleWakeup: turnWakeDelay });
-      }
-    };
+  /**
+   * A completed turn acknowledges the opening payload. Until then a restart
+   * must replay it, including a crash after startSession but before delivery.
+   * Returns false when the opening input's checkpoint failed, and the turn end stops there.
+   */
+  private acknowledgeOpeningTurn(runId: string, state: ActiveRun, answer: OpeningAnswer): boolean {
+    if (state.cancelled) return true;
+    if (state.openingAgentInputId && state.session?.open) {
+      if (!this.acknowledgeOpeningInput(runId, state, state.session, state.openingAgentInputId)) return false;
+    }
+    if (answer.askSeq !== undefined && state.session?.open) {
+      this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: answer.askSeq, ...(answer.parentAnswer ? { source: 'parent' } : {}) });
+      this.settleHumanWaits(runId, answer.waits);
+      answer.askSeq = undefined;
+      state.openingAnswerAskSeq = undefined;
+    }
+    this.store.updateRun(runId, { continuationMessage: undefined });
+    this.store.flush();
+    return true;
+  }
 
-    // Backend + model come off the record: the run's current backend by default, or the
-    // follow-up override that `continueRun` persisted before scheduling (#401).
-    const continueBackend = backend;
-    /** Settle this turn as a failure before anything is spawned — the shape both
-     *  pre-spawn gates below need (model identity, #405; temp directory, #785). */
-    const failBeforeSpawn = (message: string): void => {
-      const failedAt = new Date().toISOString();
-      sink.sessionEnded('error', message);
-      this.store.updateStep(runId, stepId, {
-        status: 'failed',
-        error: message,
-        finishedAt: failedAt,
-      });
-      this.store.updateRun(runId, {
-        status: 'failed',
-        error: `continue failed: ${message}`,
-        finishedAt: failedAt,
-        currentStepId: undefined,
-      });
-      this.store.appendEvent(runId, {
-        type: 'lifecycle',
-        message: `continue failed — ${message}`,
-      });
-      this.dropActive(runId);
-    };
-    // Apply the SAME canonical-identity gate the first spawn applies (#405, review M1).
-    // A follow-up may switch both runner and model (#401), so without this the record keeps
-    // asserting the identity the run STARTED with while a different model serves the turn —
-    // the exact defect that PR existed to remove — and the raw record string reaches the CLI
-    // in the un-normalised wire form the first step already converted away (`anthropic/opus`
-    // instead of `opus`). Fail loud here too rather than let the backend pick a default.
-    let continueModel: string | undefined;
-    let resumeWorkflow: { workflow: WorkflowDef; input: StartRunInput; startAt: number } | undefined;
+  /** Record the opening agent input as delivered and read. A failed checkpoint records an agent
+   *  input error, interrupts the session and returns false. */
+  private acknowledgeOpeningInput(runId: string, state: ActiveRun, session: AgentSession, id: string): boolean {
+    const deliveredAt = new Date().toISOString();
+    try {
+      // The successful opening turn handled its instruction: delivered and read (#505).
+      this.store.commitAgentInputs(runId, (this.store.getRun(runId)?.agentInputs ?? []).map(input => {
+        if (input.id !== id) return input;
+        const { awaitingRead: _awaiting, ...handled } = input;
+        return { ...handled, deliveredAt: input.deliveredAt ?? deliveredAt, consumedAt: input.consumedAt ?? deliveredAt };
+      }), id);
+    } catch (error) {
+      state.agentInputError = `agent input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
+      try { session.interrupt(); } finally {
+        try { this.store.appendEvent(runId, { type: 'error', message: state.agentInputError }); }
+        catch { console.error(`[cez] ${state.agentInputError}`); }
+      }
+      return false;
+    }
+    state.openingAgentInputId = undefined;
+    this.reconcileWorkerWaits();
+    return true;
+  }
+
+  /**
+   * What a Continue runs with. Backend + model come off the record: the run's current backend by
+   * default, or the follow-up override that `continueRun` persisted before scheduling (#401).
+   * Returns undefined after a pre-spawn gate failed the turn.
+   */
+  private async continuationLaunchSettings(
+    runId: string,
+    stepId: string,
+    state: ActiveRun,
+    record: RunRecord | undefined,
+    sessionId: string | undefined,
+    backend: RunnerId,
+    sink: UiEventSink,
+  ): Promise<ContinuationSettings | undefined> {
     // Resuming reattaches to a session that lives inside ONE account's config dir, so the
     // continuation must run under the account that created it — not whatever the project has
     // been switched to since. The owning step is the one carrying this session id.
     const owningStep = sessionId === undefined
       ? undefined
       : record?.steps.find((s) => s.sessionId === sessionId);
-    const resumedProfileId = owningStep?.profileId;
     // An owned worker's turn runs under the identity pinned for the step it extends (#452).
     const toolsStep = this.continuationDefStep(record, sessionId);
     const stepIdentity = this.workerStep(runId, toolsStep?.id);
@@ -7191,120 +7612,177 @@ export class RunManager {
     // agent step. A legacy record without `workflowDef` (#367), or a session no step owns,
     // keeps today's defaults.
     const grants = stepIdentity?.grants ?? {
-      allowedTools: allowedToolsForStep(toolsStep, continueBackend), bashAllowlist: toolsStep?.bashAllowlist,
+      allowedTools: allowedToolsForStep(toolsStep, backend), bashAllowlist: toolsStep?.bashAllowlist,
     };
+    const model = await this.continuationModel(runId, state, record, toolsStep, stepIdentity, backend);
+    if (typeof model === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, model); return undefined; }
+    const effort = this.continuationEffort(record, toolsStep, stepIdentity);
+    if (typeof effort === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, effort); return undefined; }
+    // The temp-directory preflight (#785) rides along with the account resolution: a resumed
+    // turn hits the same broken `/tmp` a fresh one would, and an agent whose shell silently
+    // returns nothing is worse than a turn that refuses to start and says why. So does an account
+    // that would open another folder than the one its session lives in (#1283).
+    const profile = await this.stepProfileFor(runId, backend, {
+      recordedProfileId: owningStep?.profileId,
+      stepId: toolsStep?.id,
+    });
+    if (typeof profile === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, profile); return undefined; }
+    return {
+      owningStep, toolsStep, grants, backendModel: model.backendModel, effort: effort.effort, profile,
+      extraSystemPrompt: record?.systemPrompt,
+    };
+  }
+
+  /** Settle this turn as a failure before anything is spawned — the shape every
+   *  pre-spawn gate needs (model identity, #405; temp directory, #785). */
+  private failContinuationBeforeSpawn(runId: string, stepId: string, sink: UiEventSink, message: string): void {
+    const failedAt = new Date().toISOString();
+    sink.sessionEnded('error', message);
+    this.store.updateStep(runId, stepId, {
+      status: 'failed',
+      error: message,
+      finishedAt: failedAt,
+    });
+    this.store.updateRun(runId, {
+      status: 'failed',
+      error: `continue failed: ${message}`,
+      finishedAt: failedAt,
+      currentStepId: undefined,
+    });
+    this.store.appendEvent(runId, {
+      type: 'lifecycle',
+      message: `continue failed — ${message}`,
+    });
+    this.dropActive(runId);
+  }
+
+  /**
+   * The model a Continue runs with, or the model identity error's message.
+   * Apply the SAME canonical-identity gate the first spawn applies (#405, review M1).
+   * A follow-up may switch both runner and model (#401), so without this the record keeps
+   * asserting the identity the run STARTED with while a different model serves the turn —
+   * the exact defect that PR existed to remove — and the raw record string reaches the CLI
+   * in the un-normalised wire form the first step already converted away (`anthropic/opus`
+   * instead of `opus`). Fail loud here too rather than let the backend pick a default.
+   */
+  private async continuationModel(
+    runId: string,
+    state: ActiveRun,
+    record: RunRecord | undefined,
+    toolsStep: WorkflowStepDef | undefined,
+    stepIdentity: WorkerStepIdentity | undefined,
+    backend: RunnerId,
+  ): Promise<{ backendModel: string | undefined } | string> {
     // The owning step's authored `model` wins over the run-level pin, exactly as the first
     // spawn resolved `step.model ?? input.model` (#464 review): a catalog worker keeps the
     // parent's inherited model at run level, so reading only the record silently switched a
     // step authored for another model on Continue.
     try {
       const normalized = normalizeModelForBackend(
-        continueBackend,
+        backend,
         agentModelsLocked(this.repoRoot) ? undefined : stepIdentity ? stepIdentity.model : toolsStep?.model ?? record?.model,
-        { configuredProvider: await configuredModelProvider(continueBackend, state.cwd) },
+        { configuredProvider: await configuredModelProvider(backend, state.cwd) },
       );
-      continueModel = normalized?.backendModel;
       this.store.updateRun(runId, {
         modelIdentity: normalized ? formatModelIdentity(normalized.identity) : undefined,
       });
+      return { backendModel: normalized?.backendModel };
     } catch (err) {
       if (!(err instanceof ModelIdentityError)) throw err;
-      failBeforeSpawn(err.message);
-      return;
+      return err.message;
     }
-    let continueEffort: string | undefined;
+  }
+
+  /** The effort a Continue runs at, or the message of the error that refuses it: an owned worker's
+   *  pinned effort, else the continued step's authored one, else the run's; unset when the project
+   *  locks agent models. */
+  private continuationEffort(
+    record: RunRecord | undefined,
+    toolsStep: WorkflowStepDef | undefined,
+    stepIdentity: WorkerStepIdentity | undefined,
+  ): { effort: string | undefined } | string {
     try {
       const modelsLocked = agentModelsLocked(this.repoRoot);
       const authoredStepEffort = toolsStep?.effort !== undefined;
       if (modelsLocked && toolsStep?.effort?.trim()) throw new Error(AGENT_MODELS_LOCKED_ERROR);
       const stepEffort = parseDelegationEffort(toolsStep?.effort);
-      continueEffort = modelsLocked
-        ? undefined
-        : stepIdentity ? stepIdentity.effort : authoredStepEffort ? stepEffort : record?.effort;
+      return {
+        effort: modelsLocked
+          ? undefined
+          : stepIdentity ? stepIdentity.effort : authoredStepEffort ? stepEffort : record?.effort,
+      };
     } catch (err) {
-      failBeforeSpawn(err instanceof Error ? err.message : String(err));
-      return;
+      return err instanceof Error ? err.message : String(err);
     }
-    // The temp-directory preflight (#785) rides along with the account resolution: a resumed
-    // turn hits the same broken `/tmp` a fresh one would, and an agent whose shell silently
-    // returns nothing is worse than a turn that refuses to start and says why. So does an account
-    // that would open another folder than the one its session lives in (#1283).
-    let continueProfile: Awaited<ReturnType<RunManager['agentEnvForStep']>>;
-    try {
-      continueProfile = await this.agentEnvForStep(runId, continueBackend, {
-        recordedProfileId: resumedProfileId,
-        stepId: toolsStep?.id,
-      });
-    } catch (err) {
-      if (!(err instanceof AgentTempDirError || err instanceof AgentAccountUnavailableError)) throw err;
-      failBeforeSpawn(err.message);
-      return;
-    }
-    const settlePrelaunchCancellation = () => {
-      this.store.updateStep(runId, stepId, { status: 'cancelled' });
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentStepId: undefined });
-      this.clearAutosaveTimer(state); this.dropActive(runId);
-    };
-    if (state.cancelled) { settlePrelaunchCancellation(); return; }
-    if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() }, state)) return;
-    this.store.updateStep(runId, stepId, { profileId: continueProfile.profileId });
+  }
 
-    state.delegationSettings = { cwd: state.cwd, runner: continueBackend, model: continueModel,
-      effort: continueEffort, agentProfile: continueProfile.profileId, accountBinding: continueProfile.accountBinding,
-      systemPrompt: record?.systemPrompt, allowedTools: grants.allowedTools, bashAllowlist: grants.bashAllowlist };
-    const sessionTransport = sessionId !== undefined && continueBackend === 'cursor'
+  /** Record the Continue's account on its step and the settings its workers inherit. */
+  private applyContinuationSettings(
+    runId: string,
+    stepId: string,
+    state: ActiveRun,
+    backend: RunnerId,
+    settings: ContinuationSettings,
+  ): void {
+    this.store.updateStep(runId, stepId, { profileId: settings.profile.profileId });
+    state.delegationSettings = { cwd: state.cwd, runner: backend, model: settings.backendModel,
+      effort: settings.effort, agentProfile: settings.profile.profileId, accountBinding: settings.profile.accountBinding,
+      systemPrompt: settings.extraSystemPrompt, allowedTools: settings.grants.allowedTools, bashAllowlist: settings.grants.bashAllowlist };
+  }
+
+  /** The Continue's runner, and whether it resumes into a thread that already holds the skill
+   *  playbook. A resumed Cursor session keeps the transport it was opened with. */
+  private continuationRunner(
+    backend: RunnerId,
+    sessionId: string | undefined,
+    owningStep: RunRecord['steps'][number] | undefined,
+  ): { runner: ReturnType<typeof createRunner>; skipSkillOnResume: boolean } {
+    const sessionTransport = sessionId !== undefined && backend === 'cursor'
       ? owningStep?.sessionTransport ?? 'cursor-acp'
       : undefined;
-    const runner = createRunner(continueBackend, sessionTransport ? { sessionTransport } : {});
-    // Re-expand the continued step's skill from the current registry (#790) BEFORE
-    // provisionSession. Materializing the skill used to sit after the pre-launch
-    // revalidation, so Stop during that await still launched with revoked tools.
-    // `record.systemPrompt` is only the extra prompt; the opening session put
-    // `skillSystemPrompt(skill)` in front. Skip that prefix only when this
-    // session resumes into its own thread on an in-thread runner — those
-    // already carry the playbook in history. A missing skill degrades to
-    // today's extra-only prompt with one lifecycle warning; in-thread skips
-    // do not warn. Workers still inherit only the extra prompt (#778).
-    const skipSkillOnResume = sessionId !== undefined && runner.systemPromptOnResume === 'in-thread';
-    let continuationSkillPrompt: string | undefined;
-    let fallbackSkillPrompt: string | undefined;
+    const runner = createRunner(backend, sessionTransport ? { sessionTransport } : {});
+    return { runner, skipSkillOnResume: sessionId !== undefined && runner.systemPromptOnResume === 'in-thread' };
+  }
+
+  /** The continued step's skill files and playbook, when the step names a skill or the prompt
+   *  starts with a `/name`. Returns undefined otherwise, so that path does not yield. */
+  private continuationSkills(
+    runId: string,
+    state: ActiveRun,
+    prompt: string,
+    toolsStep: WorkflowStepDef | undefined,
+    skipSkillOnResume: boolean,
+  ): Promise<ContinuationSkills> | undefined {
     const continuedSkillName = toolsStep?.skill;
     // The continued step's skill and a leading `/name` in this prompt both get their companions;
     // upstream rebuilt only the slash name, so an ordinary Continue lost the step skill's (#1408).
     const continuationSlash = leadingSlashSkillName(prompt);
-    let continuationFiles = new Map<string, string>();
+    if (!continuedSkillName && !continuationSlash) return undefined;
+    return this.provisionContinuationSkills(runId, state, continuedSkillName, continuationSlash, skipSkillOnResume);
+  }
+
+  /** Reinstall the continued step's skill and a leading `/name`'s, and build the playbook. */
+  private async provisionContinuationSkills(
+    runId: string,
+    state: ActiveRun,
+    continuedSkillName: string | undefined,
+    continuationSlash: string | undefined,
+    skipSkillOnResume: boolean,
+  ): Promise<ContinuationSkills> {
+    let skillPrompt: string | undefined;
+    let fallbackSkillPrompt: string | undefined;
+    let files = new Map<string, string>();
     if (continuedSkillName) {
       let skill = this.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
-      if (!skill) {
-        // Boot recovery can outrun the async team-skills cache (`getTeamSkillsCached`
-        // returns [] until `initialTeamSkillsLoad` resolves). Wait briefly, then
-        // re-discover; never hang Continue on the network. The on-disk clone's
-        // list arrives before the passive fetch (#859), so stop as soon as it
-        // names this skill instead of waiting out a slow first fetch of the day.
-        try {
-          await new Promise<void>((resolve) => {
-            const timeout = setTimeout(resolve, 1_500);
-            timeout.unref?.();
-            const settle = () => { clearTimeout(timeout); resolve(); };
-            waitForTeamSkills(this.repoRoot).then(settle, settle);
-            waitForCachedTeamSkills(this.repoRoot).then((cached) => {
-              if (cached.some((candidate) => candidate.name === continuedSkillName)) settle();
-            }, () => undefined);
-          });
-          state.skills = await this.discoverSkills().catch(() => state.skills ?? []);
-          skill = this.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
-        } catch {
-          // Best-effort — a slow or failing team-skills load must not fail Continue.
-        }
-      }
+      if (!skill) skill = await this.awaitContinuedSkill(state, continuedSkillName);
       if (skill) {
         // Reinstall the skill and its companions — into a #483 rematerialized
         // worktree, or a team skill's cache copy when the worktree is gone — before
         // the playbook, which names a cache copy's directory (#1024, #1408). No note on Continue.
-        continuationFiles = (await this.provisionRunSkills(runId, state, { stepSkill: skill.name, slash: continuationSlash })).filesDir;
-        const playbook = skillSystemPrompt(skill, continuationFiles.get(skill.name));
+        files = (await this.provisionRunSkills(runId, state, { stepSkill: skill.name, slash: continuationSlash })).filesDir;
+        const playbook = skillSystemPrompt(skill, files.get(skill.name));
         if (skipSkillOnResume) fallbackSkillPrompt = playbook;
-        else continuationSkillPrompt = playbook;
+        else skillPrompt = playbook;
       } else if (!skipSkillOnResume) {
         this.store.appendEvent(runId, {
           type: 'lifecycle',
@@ -7313,104 +7791,149 @@ export class RunManager {
       }
     }
     if (!continuedSkillName || !this.enabledSkills(state).some((candidate) => candidate.name === continuedSkillName)) {
-      if (continuationSlash) continuationFiles = (await this.provisionRunSkills(runId, state, { slash: continuationSlash })).filesDir;
+      if (continuationSlash) files = (await this.provisionRunSkills(runId, state, { slash: continuationSlash })).filesDir;
     }
-    state.currentStepId = stepId;
-    this.beginUsageInvocation(runId, state, stepId);
-    // A continuation's opening message becomes the session's `userPrompt` and never passes
-    // through `deliverMessage`, so it needs the SAME delivery-only `/skill` rewrite the
-    // live path applies (#811). Delivery-only: the `user-message` event above already
-    // persisted the user's original text, and the transcript must keep showing that.
-    state.agentSessionError = undefined;
-    let session: AgentSession | undefined;
-    if (this.workerExecutionStopped(runId)) { state.cancelled = true; throw new Error('Worker stopped before launch'); }
-    const delegation = this.provisionSession(runId, state);
-    // Read before the cancellation checks below, which also cover this await (#1576).
-    const webhooksPart = await this.agentWebhooksPart();
-    const ciTools = await this.provisionCiSession(runId, state);
-    // Stop/Finish can arrive while the local tool controller is starting.
-    const launchRun = this.store.getRun(runId);
-    if (state.cancelled || this.workerExecutionStopped(runId) || this.active.get(runId) !== state ||
-      (launchRun && this.executionBlockedByRootFinish(launchRun))) {
-      ciTools?.revoke();
-      if (state.revokeCiTools === ciTools?.revoke) state.revokeCiTools = undefined;
-      delegation?.revoke();
-      if (state.revokeDelegation === delegation?.revoke) state.revokeDelegation = undefined;
-      if (this.active.get(runId) !== state) return;
-      if (state.cancelled || this.workerExecutionStopped(runId)) {
-        state.cancelled = true;
-        settlePrelaunchCancellation();
-      } else {
-        this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() }, state);
-      }
-      return;
-    }
-    state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
+    return { skillPrompt, fallbackSkillPrompt, files };
+  }
+
+  /** The continued step's skill when the registry did not list it yet. */
+  private async awaitContinuedSkill(state: ActiveRun, continuedSkillName: string): Promise<Skill | undefined> {
+    // Boot recovery can outrun the async team-skills cache (`getTeamSkillsCached`
+    // returns [] until `initialTeamSkillsLoad` resolves). Wait briefly, then
+    // re-discover; never hang Continue on the network. The on-disk clone's
+    // list arrives before the passive fetch (#859), so stop as soon as it
+    // names this skill instead of waiting out a slow first fetch of the day.
     try {
-    // Provisioning determines the actual capability, including a fresh session after recovery.
-    const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !!ciTools });
-    const resumedPrompt = withResumeContext(expandRegistrySlashSkillText(prompt, this.enabledSkills(state), continuationFiles) +
-      (setupNote ? `\n\n${setupNote}` : '') + (footer ? `\n\n${footer}` : ''), checkpoint);
-    const sessionContext = this.sessionContextFor(runId, state, stepId, resumedPrompt);
-    const openingPrompt = sessionContext.prefix + resumedPrompt;
-    const continuationTail = composeSystemPrompt(
-      record?.systemPrompt,
-      delegation?.instructions,
-      this.automationsPart(),
-      webhooksPart,
-      artifactInstructions(continueProfile.env.CEZ_ARTIFACTS_DIR),
-      handoffInstructions({ tools: !!ciTools, handoffInjected: sessionContext.handoffInjected }),
-    );
-    session = startManagedSession(runner,
-      {
-        // Skill body (when resent), then the run's extra system prompt, then
-        // the handoff contract — the same order as the opening session (#790).
-        // In-thread resume omits the skill from systemPrompt; OpenCode's 404
-        // fallback uses resumeFallbackSystemPrompt so the fresh session still
-        // gets the playbook.
-        systemPrompt: composeSystemPrompt(continuationSkillPrompt, continuationTail),
-        ...(skipSkillOnResume ? {
-          resumeFallbackSystemPrompt: composeSystemPrompt(fallbackSkillPrompt, continuationTail),
-        } : {}),
-        userPrompt: attachments.length
-          ? `${openingPrompt}\n\n${pastedAttachmentsText(attachments)}`
-          : openingPrompt,
-        ...(openingImages.length ? { images: openingImages } : {}),
-        cwd: state.cwd,
-        allowedTools: grants.allowedTools,
-        bashAllowlist: grants.bashAllowlist,
-        additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), continueProfile.env),
-        env: { ...continueProfile.env, ...delegation?.env, ...ciTools?.env },
-        ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
-        ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
-        model: continueModel,
-        effort: continueEffort,
-        sessionId,
-        resume: sessionId !== undefined,
-        timeoutMs: 0,
-      },
-      onEvent,
-      {
-        onUiEvent: (event) => {
-          completedAssistantText = appendCompletedAssistantText(completedAssistantText, event);
-          turnTail = trackTurnTail(turnTail, event);
-          if (event.type === 'turn.started') this.recordOpeningAccepted(runId, state);
-          this.handleRunnerUiEvent(runId, state, sink, event);
+      await new Promise<void>((resolve) => {
+        const timeout = setTimeout(resolve, 1_500);
+        timeout.unref?.();
+        const settle = () => { clearTimeout(timeout); resolve(); };
+        waitForTeamSkills(this.repoRoot).then(settle, settle);
+        waitForCachedTeamSkills(this.repoRoot).then((cached) => {
+          if (cached.some((candidate) => candidate.name === continuedSkillName)) settle();
+        }, () => undefined);
+      });
+      state.skills = await this.discoverSkills().catch(() => state.skills ?? []);
+      return this.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
+    } catch {
+      // Best-effort — a slow or failing team-skills load must not fail Continue.
+      return undefined;
+    }
+  }
+
+  /** A Stop before the Continue's session spawned: cancel the step and the run. */
+  private settleContinuationPrelaunchCancel(runId: string, stepId: string, state: ActiveRun): void {
+    this.store.updateStep(runId, stepId, { status: 'cancelled' });
+    this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentStepId: undefined });
+    this.clearAutosaveTimer(state); this.dropActive(runId);
+  }
+
+  /** A Continue's launch went stale while it provisioned (`launchStale`). A replaced active run
+   *  needs nothing more; a Stop cancels the run; a root Finish holds the Continue in the queue. */
+  private settleStaleContinuationLaunch(
+    runId: string,
+    stepId: string,
+    state: ActiveRun,
+    held: Omit<PendingContinuation, 'lineJoinedAt'>,
+  ): void {
+    if (this.active.get(runId) !== state) return;
+    if (state.cancelled || this.workerExecutionStopped(runId)) {
+      state.cancelled = true;
+      this.settleContinuationPrelaunchCancel(runId, stepId, state);
+    } else {
+      this.holdContinuationForRootFinish(runId, { ...held, lineJoinedAt: Date.now() }, state);
+    }
+  }
+
+  /** Start a Continue's session, resuming its own session when it has one. A throw revokes the
+   *  tools this launch was given and propagates to `continueRun`. */
+  private startContinuationSession(
+    runId: string,
+    state: ActiveRun,
+    runner: ReturnType<typeof createRunner>,
+    launch: ContinuationSessionLaunch,
+    onEvent: (event: AgentEvent) => void,
+    turn: SessionTurn,
+    sink: UiEventSink,
+  ): AgentSession {
+    const { delegation, ciTools, opening, skills, settings } = launch;
+    let session: AgentSession | undefined;
+    try {
+      // Provisioning determines the actual capability, including a fresh session after recovery.
+      const resumed = this.launchOpening(runId, state, launch.stepId, {
+        body: expandRegistrySlashSkillText(launch.prompt, this.enabledSkills(state), skills.files) +
+          (launch.setupNote ? `\n\n${launch.setupNote}` : ''),
+        ciTools,
+        checkpoint: opening.checkpoint,
+      });
+      const continuationTail = this.launchSystemTail({
+        extraSystemPrompt: settings.extraSystemPrompt, delegation, webhooksPart: launch.webhooksPart,
+        env: settings.profile.env, ciTools, handoffInjected: resumed.handoffInjected,
+      });
+      session = startManagedSession(runner,
+        {
+          // Skill body (when resent), then the run's extra system prompt, then
+          // the handoff contract — the same order as the opening session (#790).
+          // In-thread resume omits the skill from systemPrompt; OpenCode's 404
+          // fallback uses resumeFallbackSystemPrompt so the fresh session still
+          // gets the playbook.
+          systemPrompt: composeSystemPrompt(skills.skillPrompt, continuationTail),
+          ...(launch.skipSkillOnResume ? {
+            resumeFallbackSystemPrompt: composeSystemPrompt(skills.fallbackSkillPrompt, continuationTail),
+          } : {}),
+          userPrompt: opening.attachments.length
+            ? `${resumed.userPrompt}\n\n${pastedAttachmentsText(opening.attachments)}`
+            : resumed.userPrompt,
+          ...(opening.openingImages.length ? { images: opening.openingImages } : {}),
+          cwd: state.cwd,
+          allowedTools: settings.grants.allowedTools,
+          bashAllowlist: settings.grants.bashAllowlist,
+          additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), settings.profile.env),
+          env: { ...settings.profile.env, ...delegation?.env, ...ciTools?.env },
+          ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
+          ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
+          model: settings.backendModel,
+          effort: settings.effort,
+          sessionId: launch.sessionId,
+          resume: launch.sessionId !== undefined,
+          timeoutMs: 0,
         },
-        onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
-        onAgentInputConsumed: (ids) => this.handleAgentInputConsumed(runId, state, session, ids),
-        onPidChange: (pid) => { replaceRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
-      },
-    );
+        onEvent,
+        {
+          onUiEvent: (event) => {
+            turn.completedText = appendCompletedAssistantText(turn.completedText, event);
+            turn.tail = trackTurnTail(turn.tail, event);
+            if (event.type === 'turn.started') this.recordOpeningAccepted(runId, state);
+            this.handleRunnerUiEvent(runId, state, sink, event);
+          },
+          onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
+          onAgentInputConsumed: (ids) => this.handleAgentInputConsumed(runId, state, session, ids),
+          onPidChange: (pid) => { replaceRunProcess(runId, pid); this.recordWorkerProcess(runId, pid); },
+        },
+      );
     } catch (error) { ciTools?.revoke(); state.revokeCiTools = undefined; delegation?.revoke(); state.revokeDelegation = undefined; throw error; }
+    return session;
+  }
+
+  /** Wait for a Continue's session to close, then settle the run by how it closed. Teardown always
+   *  revokes the launch's tools, saves the worktree and leaves the active set
+   *  (`releaseContinuationSession`). */
+  private async awaitContinuationSession(runId: string, state: ActiveRun, session: AgentSession, launch: {
+    stepId: string;
+    sink: UiEventSink;
+    turn: SessionTurn;
+    delegation: LaunchDelegation;
+    ciTools: LaunchCiTools;
+  }): Promise<void> {
+    const { stepId, sink, turn } = launch;
     const sessionClosed = this.trackWorkerSessionResult(runId, session);
     state.session = session;
     const resumedNext = this.continuationNextStep(runId);
     state.nextStep = stepScope(session, resumedNext);
     state.sessionEverOpened = true;
-    state.interrupt = () => session?.interrupt();
+    state.interrupt = () => session.interrupt();
     let setupComplete = false;
-    const finishedAt = () => new Date().toISOString();
+    const close: ContinuationClose = {};
     try {
       this.flushDeferred(runId);
       this.flushAgentInputs(runId);
@@ -7421,139 +7944,211 @@ export class RunManager {
       this.withdrawCezarHumanWaits(runId);
       this.persistWorkerAssistantResult(runId, stepId, result.text);
       // A durable CI wait keeps recovery live, not this failed attempt successful.
-      if (sessionError || state.agentInputError) throw new Error(sessionError ?? state.agentInputError);
-      if (this.holdsClosingWakes(runId) && !state.cancelled) {
-        sink.sessionEnded('end_turn');
-        // A clean close that leaves results undelivered is a failed delivery too.
-        const delivery = this.owesDelivery(runId) ? this.failedWakeDelivery(runId, WAKE_SESSION_CLOSED_ERROR) : 'park';
-        if (delivery === 'park') {
-          // No turn end will show a human wait this session registered (hearsay-tools/cezarion#1234).
-          this.surfaceHumanWait(runId, state);
-          this.store.updateRun(runId, { status: 'waiting' });
-          return;
-        }
-        this.store.updateStep(runId, stepId, { status: 'failed', error: WAKE_SESSION_CLOSED_ERROR, finishedAt: finishedAt() });
-        this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
-        appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
-        this.store.updateRun(runId, { status: 'failed', error: `continue failed: ${WAKE_SESSION_CLOSED_ERROR}`, finishedAt: finishedAt(), currentStepId: undefined });
-        this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${WAKE_SESSION_CLOSED_ERROR}` });
-        this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
-        return;
-      }
-      if (!state.cancelled) {
-        this.store.updateRun(runId, { continuationMessage: undefined });
-        this.store.flush();
-      }
-      sink.sessionEnded(state.cancelled ? 'cancelled' : 'end_turn');
-      if (state.cancelled) {
-        this.store.updateStep(runId, stepId, { status: 'cancelled', finishedAt: finishedAt() });
-        this.store.updateRun(runId, { status: 'cancelled', finishedAt: finishedAt(), currentStepId: undefined });
-        this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
-        appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=cancelled`);
-      } else if (this.stepLeftOpen(state, stepId, resumedNext)) {
-        await this.settleIncompleteContinuation(runId, stepId);
-      } else if (!state.idleClosed && !this.unansweredWorkflowAsk(runId, state)) {
-        this.store.updateStep(runId, stepId, { status: 'done', finishedAt: finishedAt() });
-        this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'done' });
-        const completed = this.store.getRun(runId);
-        const waitingIndex = completed ? this.waitingWorkflowStepIndex(completed) : -1;
-        if (completed?.workflowDef && waitingIndex >= 0) {
-          const waitingStep = completed.workflowDef.steps[waitingIndex]!;
-          // The continuation succeeded, not the failed attempt it recovered.
-          if (waitingStep.id !== completed.workflowResumeStepId) {
-            this.store.updateStep(runId, waitingStep.id, { status: 'done', finishedAt: finishedAt() });
-            this.store.appendEvent(runId, { type: 'step-end', stepId: waitingStep.id, status: 'done' });
-          }
-          // Finish accepts this resumed step before the async settlement gate,
-          // but must not launch the remaining workflow. A later cancellation
-          // may cancel still-live steps, never this completed one (R30).
-          if (!state.finishRequested && waitingIndex < completed.workflowDef.steps.length - 1) {
-            resumeWorkflow = {
-              workflow: completed.workflowDef,
-              startAt: waitingIndex + 1,
-              input: {
-                task: completed.task,
-                runner: completed.runner,
-                model: completed.model,
-                effort: completed.effort,
-                agentProfile: completed.agentProfile,
-                systemPrompt: completed.systemPrompt,
-                autonomous: completed.autonomous,
-                worktree: completed.worktree,
-              },
-            };
-            this.store.updateRun(runId, { status: 'queued', currentStepId: undefined, workflowResumeStepId: undefined });
-            // The workflow remainder is a crash boundary. Persist it before the
-            // finally block awaits worktree autosave and installs its in-memory job.
-            this.store.flush();
-            appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — remaining workflow queued`);
-          } else {
-            this.store.updateRun(runId, { workflowResumeStepId: undefined });
-            await this.settleSuccess(runId);
-            appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=done`);
-          }
-        } else {
-          await this.settleSuccess(runId);
-          appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=done`);
-        }
-      } else {
-        await this.settleIdleClosedRun(runId, state);
-      }
+      if (turn.sessionError || state.agentInputError) throw new Error(turn.sessionError ?? state.agentInputError);
+      const settled = this.settleClosedContinuation(runId, state, stepId, sink, resumedNext, close);
+      if (settled) await settled;
     } catch (err) {
       if (!setupComplete) {
         try { session.interrupt(); } catch { /* Still wait for actual termination. */ }
         await sessionClosed;
       }
       if (this.preserveRunAfterDisposal(runId, state)) return;
-      // Keep the provider failure that triggered teardown, even if teardown rejects.
-      const message = sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
-      sink.sessionEnded('error', message);
-      this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: finishedAt() });
-      appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
-      this.withdrawCezarHumanWaits(runId);
-      const delivery = this.holdsClosingWakes(runId) && !state.cancelled ? this.failedWakeDelivery(runId, message) : 'settle';
-      if (delivery === 'park') {
-        // Retain the wait and scheduler wake source while closing this attempt.
-        // settleSuccess only completes running/waiting steps, so its failure is durable.
-        this.surfaceHumanWait(runId, state);
-        this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
-        this.store.updateRun(runId, { status: 'waiting', error: `continue failed: ${message}` });
-        return;
-      }
-      this.store.updateRun(runId, {
-        status: 'failed',
-        error: `continue failed: ${message}`,
-        finishedAt: finishedAt(),
-        currentStepId: undefined,
-      });
-      this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${message}` });
-      if (delivery === 'capped') this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
+      this.settleFailedContinuation(runId, state, stepId, sink, turn, err);
     } finally {
-      ciTools?.revoke(); state.revokeCiTools = undefined;
-      delegation?.revoke(); state.revokeDelegation = undefined;
-      this.recordUsagePeaks(runId);
-      this.clearIdleTimer(state);
-      this.clearAutosaveTimer(state);
-      await this.saveWorktree(runId, state, 'turn end');
-      // Cancellation may be accepted while final autosave is yielding, even
-      // after success was recorded. Retire any durable queue intent before
-      // dropping the active state, otherwise pump can launch the tail with a
-      // fresh `cancelled:false` state.
-      if (state.cancelled) {
-        resumeWorkflow = undefined;
-        if (this.store.getRun(runId)?.status !== 'cancelled') {
-          this.store.updateRun(runId, {
-            status: 'cancelled', finishedAt: finishedAt(), currentStepId: undefined,
-          });
-          this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
-        }
+      await this.releaseContinuationSession(runId, state, launch.delegation, launch.ciTools, close);
+    }
+  }
+
+  /** Settle a Continue whose session closed without a fault: undelivered wakes, a Stop, a step left
+   *  open, a done, or an idle close. Returns the settlement to wait for, or undefined when it
+   *  completed without yielding. */
+  private settleClosedContinuation(
+    runId: string,
+    state: ActiveRun,
+    stepId: string,
+    sink: UiEventSink,
+    resumedNext: WorkflowStepDef | undefined,
+    close: ContinuationClose,
+  ): Promise<void> | undefined {
+    if (this.holdsClosingWakes(runId) && !state.cancelled) {
+      this.settleClosingWakes(runId, state, stepId, sink);
+      return undefined;
+    }
+    if (!state.cancelled) {
+      this.store.updateRun(runId, { continuationMessage: undefined });
+      this.store.flush();
+    }
+    sink.sessionEnded(state.cancelled ? 'cancelled' : 'end_turn');
+    if (state.cancelled) {
+      this.settleCancelledContinuation(runId, stepId);
+      return undefined;
+    }
+    if (this.stepLeftOpen(state, stepId, resumedNext)) return this.settleIncompleteContinuation(runId, stepId);
+    if (!state.idleClosed && !this.unansweredWorkflowAsk(runId, state)) return this.settleDoneContinuation(runId, state, stepId, close);
+    return this.settleIdleClosedRun(runId, state);
+  }
+
+  /** The session closed with wakes it still holds: park the run, or fail it when their delivery
+   *  failed. */
+  private settleClosingWakes(runId: string, state: ActiveRun, stepId: string, sink: UiEventSink): void {
+    sink.sessionEnded('end_turn');
+    // A clean close that leaves results undelivered is a failed delivery too.
+    const delivery = this.owesDelivery(runId) ? this.failedWakeDelivery(runId, WAKE_SESSION_CLOSED_ERROR) : 'park';
+    if (delivery === 'park') {
+      // No turn end will show a human wait this session registered (hearsay-tools/cezarion#1234).
+      this.surfaceHumanWait(runId, state);
+      this.store.updateRun(runId, { status: 'waiting' });
+      return;
+    }
+    this.store.updateStep(runId, stepId, { status: 'failed', error: WAKE_SESSION_CLOSED_ERROR, finishedAt: new Date().toISOString() });
+    this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
+    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
+    this.store.updateRun(runId, { status: 'failed', error: `continue failed: ${WAKE_SESSION_CLOSED_ERROR}`, finishedAt: new Date().toISOString(), currentStepId: undefined });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${WAKE_SESSION_CLOSED_ERROR}` });
+    this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
+  }
+
+  /** A Stop ended the Continue's session: cancel its step and the run. */
+  private settleCancelledContinuation(runId: string, stepId: string): void {
+    this.store.updateStep(runId, stepId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+    this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentStepId: undefined });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=cancelled`);
+  }
+
+  /** The Continue's step is done: settle the run, or the workflow step it resumed. Returns the
+   *  settlement to wait for, or undefined when it queued the workflow remainder. */
+  private settleDoneContinuation(runId: string, state: ActiveRun, stepId: string, close: ContinuationClose): Promise<void> | undefined {
+    this.store.updateStep(runId, stepId, { status: 'done', finishedAt: new Date().toISOString() });
+    this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'done' });
+    const completed = this.store.getRun(runId);
+    const waitingIndex = completed ? this.waitingWorkflowStepIndex(completed) : -1;
+    if (completed?.workflowDef && waitingIndex >= 0) {
+      return this.settleResumedWorkflowStep(runId, state, stepId, completed, completed.workflowDef, waitingIndex, close);
+    }
+    return this.succeedContinuation(runId, stepId);
+  }
+
+  /** The Continue finished the workflow step it resumed: queue the workflow remainder, or settle
+   *  the run when none is left or Finish was requested. */
+  private settleResumedWorkflowStep(
+    runId: string,
+    state: ActiveRun,
+    stepId: string,
+    completed: RunRecord,
+    workflow: WorkflowDef,
+    waitingIndex: number,
+    close: ContinuationClose,
+  ): Promise<void> | undefined {
+    const waitingStep = workflow.steps[waitingIndex]!;
+    // The continuation succeeded, not the failed attempt it recovered.
+    if (waitingStep.id !== completed.workflowResumeStepId) {
+      this.store.updateStep(runId, waitingStep.id, { status: 'done', finishedAt: new Date().toISOString() });
+      this.store.appendEvent(runId, { type: 'step-end', stepId: waitingStep.id, status: 'done' });
+    }
+    // Finish accepts this resumed step before the async settlement gate,
+    // but must not launch the remaining workflow. A later cancellation
+    // may cancel still-live steps, never this completed one (R30).
+    if (!state.finishRequested && waitingIndex < workflow.steps.length - 1) {
+      close.resumeWorkflow = {
+        workflow,
+        startAt: waitingIndex + 1,
+        input: {
+          task: completed.task,
+          runner: completed.runner,
+          model: completed.model,
+          effort: completed.effort,
+          agentProfile: completed.agentProfile,
+          systemPrompt: completed.systemPrompt,
+          autonomous: completed.autonomous,
+          worktree: completed.worktree,
+        },
+      };
+      this.store.updateRun(runId, { status: 'queued', currentStepId: undefined, workflowResumeStepId: undefined });
+      // The workflow remainder is a crash boundary. Persist it before the
+      // finally block awaits worktree autosave and installs its in-memory job.
+      this.store.flush();
+      appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — remaining workflow queued`);
+      return undefined;
+    }
+    this.store.updateRun(runId, { workflowResumeStepId: undefined });
+    return this.succeedContinuation(runId, stepId);
+  }
+
+  /** Settle the run after a successful Continue. */
+  private async succeedContinuation(runId: string, stepId: string): Promise<void> {
+    await this.settleSuccess(runId);
+    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=done`);
+  }
+
+  /** The Continue's session failed, or its settlement threw: fail its step, then park the run
+   *  when it still holds wakes, else fail it. */
+  private settleFailedContinuation(
+    runId: string,
+    state: ActiveRun,
+    stepId: string,
+    sink: UiEventSink,
+    turn: SessionTurn,
+    err: unknown,
+  ): void {
+    // Keep the provider failure that triggered teardown, even if teardown rejects.
+    const message = turn.sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
+    sink.sessionEnded('error', message);
+    this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: new Date().toISOString() });
+    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
+    this.withdrawCezarHumanWaits(runId);
+    const delivery = this.holdsClosingWakes(runId) && !state.cancelled ? this.failedWakeDelivery(runId, message) : 'settle';
+    if (delivery === 'park') {
+      // Retain the wait and scheduler wake source while closing this attempt.
+      // settleSuccess only completes running/waiting steps, so its failure is durable.
+      this.surfaceHumanWait(runId, state);
+      this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
+      this.store.updateRun(runId, { status: 'waiting', error: `continue failed: ${message}` });
+      return;
+    }
+    this.store.updateRun(runId, {
+      status: 'failed',
+      error: `continue failed: ${message}`,
+      finishedAt: new Date().toISOString(),
+      currentStepId: undefined,
+    });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${message}` });
+    if (delivery === 'capped') this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
+  }
+
+  /** A Continue's session teardown: revoke the launch's tools, record the usage peaks, clear the
+   *  timers, save the worktree, leave the active set, then queue the workflow remainder. */
+  private async releaseContinuationSession(
+    runId: string,
+    state: ActiveRun,
+    delegation: LaunchDelegation,
+    ciTools: LaunchCiTools,
+    close: ContinuationClose,
+  ): Promise<void> {
+    ciTools?.revoke(); state.revokeCiTools = undefined;
+    delegation?.revoke(); state.revokeDelegation = undefined;
+    this.recordUsagePeaks(runId);
+    this.clearIdleTimer(state);
+    this.clearAutosaveTimer(state);
+    await this.saveWorktree(runId, state, 'turn end');
+    // Cancellation may be accepted while final autosave is yielding, even
+    // after success was recorded. Retire any durable queue intent before
+    // dropping the active state, otherwise pump can launch the tail with a
+    // fresh `cancelled:false` state.
+    if (state.cancelled) {
+      close.resumeWorkflow = undefined;
+      if (this.store.getRun(runId)?.status !== 'cancelled') {
+        this.store.updateRun(runId, {
+          status: 'cancelled', finishedAt: new Date().toISOString(), currentStepId: undefined,
+        });
+        this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
       }
-      this.dropActive(runId);
-      if (resumeWorkflow) {
-        this.pendingJobs.set(runId, resumeWorkflow);
-        this.queue.push(runId);
-        void this.pump();
-      }
+    }
+    this.dropActive(runId);
+    if (close.resumeWorkflow) {
+      this.pendingJobs.set(runId, close.resumeWorkflow);
+      this.queue.push(runId);
+      void this.pump();
     }
   }
 
@@ -7575,150 +8170,11 @@ export class RunManager {
     this.starting.delete(runId);
     const emit = (event: { type: string; stepId?: string; [k: string]: unknown }) =>
       this.store.appendEvent(runId, event);
+    const execution: Execution = { runId, workflow, input, startAt, state, emit };
 
-    // Resolve the agent backend for this run: the task choice (GUI) wins over
-    // the config default. Per-step `runner` can still override it below.
-    const config = await loadConfig(this.repoRoot);
-    if (state.cancelled || this.store.getRun(runId)?.stopping) {
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
-      this.dropActive(runId);
-      return;
-    }
-    const taskBackend: RunnerId = input.runner ?? config.defaultRunner;
-    // The account may have gone into a usage-limit hold since this run was dequeued — the queue
-    // gate cannot be the only one, because dequeue is not the moment of no return. Nothing has
-    // happened yet here, so the run goes back to the queue untouched (spec
-    // 2026-08-03-auto-resume-after-usage-limit).
-    if (this.requeueWhileHeld(runId, workflow, input, taskBackend, undefined, startAt)) return;
-    // Extra system prompt (R2 2.3): POST override > config default; echoed on
-    // the record so the UI/API can show what the run actually used.
-    const extraSystemPrompt = this.store.getRun(runId)?.delegation?.role === 'worker'
-      ? input.systemPrompt
-      : resolveExtraSystemPrompt(input.systemPrompt, config.systemPrompt);
-    // Canonical provider/model identity (#405) — the normalised `provider/model`
-    // the task ran with, persisted for cost attribution / reproducible replay
-    // beside the free-text `model`. Best-effort here (a per-step `runner`/`model`
-    // can still override below); the authoritative fail-loud gate is at spawn.
-    let modelIdentity: string | undefined;
-    try {
-      const normalized = normalizeModelForBackend(
-        taskBackend,
-        agentModelsLocked(this.repoRoot) ? undefined : input.model,
-        { configuredProvider: await configuredModelProvider(taskBackend, this.repoRoot) },
-      );
-      modelIdentity = normalized ? formatModelIdentity(normalized.identity) : undefined;
-    } catch {
-      // An unresolvable task-level model surfaces loudly at the step below; the
-      // metadata echo stays absent rather than guessing.
-    }
-    if (state.cancelled) {
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
-      this.dropActive(runId);
-      return;
-    }
-    const ownedRun = this.store.getRun(runId);
-    const owned = ownedRun?.delegation?.role === 'worker' ? ownedRun.delegation.workspace : undefined;
-    this.store.updateRun(runId, {
-      // A resumed workflow stays durably queued until its next step is actually
-      // entered. If setup crashes, recovery can replay from `startAt` instead
-      // of treating the previous continuation as the interrupted step.
-      status: startAt > 0 ? 'queued' : 'running',
-      invalidAsk: undefined,
-      startedAt: ownedRun?.startedAt ?? new Date().toISOString(),
-      runner: taskBackend,
-      systemPrompt: extraSystemPrompt,
-      modelIdentity,
-    });
-    emit({ type: 'lifecycle', message: `run started — workflow "${workflow.name}" (runner: ${taskBackend})` });
-
-    // Worktree per task (spec 006): the agent works on its own branch in
-    // `.ai/cezar/worktrees/<id>`, never in the user's working tree. A Git task
-    // that requests isolation fails closed if the worktree cannot be
-    // established; only explicit opt-out and non-Git modes run in place.
-    const repo = await getRepoInfo(this.repoRoot);
-    if (repo && input.worktree === false && !owned) {
-      // Composer opt-out: run in the repo working tree, no branch/worktree. The
-      // repository-root lease serializes these runs by default; the explicit
-      // CEZ_DISABLE_REPO_LOCK=1 escape hatch allows unsafe overlap.
-      // Pin the starting commit: the session's Changes and Commits views use it
-      // as their stable lower bound while reading the current working copy.
-      const startingCommit = await getHeadCommit(repo.root);
-      if (startingCommit && !ownedRun?.baseBranch) this.store.updateRun(runId, { baseBranch: startingCommit });
-      emit({ type: 'note', message: 'worktree off — running in the repo working tree' });
-    } else if (repo || owned) {
-      emit({
-        type: 'note',
-        message: `worktree on — using an isolated task worktree (${input.worktree === true ? 'explicit request' : 'default'})`,
-      });
-      // Fork from the configured base branch (config.json `baseBranch`, e.g.
-      // `develop`) — also the target of the eventual draft PR. Unresolvable
-      // (typo, not fetched) → note + the currently checked-out branch.
-      //
-      // A task that already recorded a fork point keeps it: its worktree is
-      // reused as-is, and re-resolving against a since-changed config would
-      // silently re-anchor the `merge-base` every diff/shortstat is measured
-      // from, shifting "what did this task change" under an existing task.
-      const recorded = owned?.baselineSha ?? this.store.getRun(runId)?.baseBranch;
-      let base = recorded ?? repo?.branch ?? 'HEAD';
-      const configured = recorded ? undefined : config.baseBranch;
-      if (configured) {
-        const resolved = await resolveBaseRef(this.repoRoot, configured);
-        if (resolved) {
-          base = resolved;
-        } else {
-          emit({
-            type: 'note',
-            message: `configured base branch "${configured}" not found (locally or on origin) — using "${base}"`,
-          });
-        }
-      }
-      try {
-        if (this.workerExecutionStopped(runId)) { this.dropActive(runId); return; }
-        const ownedWorkspace = owned && ownedRun ? await ensureOwnedWorkspace(this.repoRoot, ownedRun) : undefined;
-        if (ownedRun?.delegation?.role === 'worker') await verifyWorkerContext({ dataDir: this.dataDir, parentId: ownedRun.delegation.parentRunId, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context,
-          parentCwd: this.store.getRun(ownedRun.delegation.parentRunId)?.worktreePath ?? this.repoRoot });
-        // First launch only (hearsay-tools/cezarion#1149): a worker re-queued past its first step and
-        // runContinuation never re-place attachments the worker may have edited or deleted.
-        if (ownedRun?.delegation?.role === 'worker' && startAt === 0) await placeWorkerAttachments({ dataDir: this.dataDir, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context });
-        const wt = ownedWorkspace
-          ? { path: ownedWorkspace.path, branch: ownedWorkspace.branch, baseBranch: ownedWorkspace.baselineSha }
-          : await createWorktree(this.repoRoot, runId, base);
-        state.cwd = wt.path;
-        this.store.updateRun(runId, {
-          worktreePath: wt.path,
-          branch: wt.branch,
-          baseBranch: wt.baseBranch,
-          ...(owned ? { worktree: undefined } : {}),
-        });
-        emit({ type: 'note', message: `worktree ready — branch ${wt.branch} (base ${wt.baseBranch})` });
-        // Seed from this manager's project root: each multi-project context has
-        // its own manager/repoRoot and must never copy another project's layer.
-        // A worker's explicit `--attach` files win over the main checkout's copy (hearsay-tools/cezarion#1149).
-        const attached = new Set(ownedRun?.delegation?.role === 'worker'
-          ? (ownedRun.delegation.context?.inputs ?? []).flatMap(input => input.source.kind === 'parent-file' ? [input.source.path] : [])
-          : []);
-        const seededConfig = await seedAgentConfigLocalLayer(this.repoRoot, state.cwd, process.env, attached).catch(() => []);
-        if (seededConfig.length > 0) {
-          emit({ type: 'note', message: `seeded personal agent config: ${seededConfig.join(', ')}` });
-        }
-        this.armAutosave(runId, state);
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        const error = `worktree creation failed: ${message}`;
-        emit({ type: 'note', message: `${error} — task stopped before workflow execution` });
-        this.store.updateRun(runId, {
-          status: 'failed',
-          error,
-          finishedAt: new Date().toISOString(),
-          currentStepId: undefined,
-        });
-        emit({ type: 'lifecycle', message: `run failed — ${error}` });
-        this.dropActive(runId);
-        return;
-      }
-    } else {
-      emit({ type: 'note', message: 'not a git repository — running in place, one task at a time' });
-    }
+    const launch = await this.startExecution(execution);
+    if (!launch) return;
+    if (!(await this.prepareExecutionWorktree(execution, launch))) return;
 
     if (state.cwd === this.repoRoot) {
       if (repositoryRootLockDisabled()) {
@@ -7743,7 +8199,7 @@ export class RunManager {
       // is a spawn, and hand the run back to the queue if the account closed meanwhile. This
       // check also covers the explicit lock-bypass path, where the account may close while the
       // run is preparing its first step.
-      if (this.requeueWhileHeld(runId, workflow, input, taskBackend, state, startAt)) return;
+      if (this.requeueWhileHeld(runId, workflow, input, launch.taskBackend, state, startAt)) return;
     }
 
     // Handoff journal (spec 007) — seeded after the worktree exists so the
@@ -7752,17 +8208,220 @@ export class RunManager {
     if (seeded) seedHandoffFile(this.dataDir, seeded);
     // Worktree setup (#917): before the first step, so the agent starts in a prepared tree. Its
     // note rides the first agent step's opening message only, like the task's attachments.
-    let startSetupNote = await this.prepareWorktree(runId, state, config.worktreeSetup, emit, 'start');
+    const setupNote = await this.prepareWorktree(runId, state, launch.config.worktreeSetup, emit, 'start');
 
     const skills = await this.discoverSkills();
     // Every ActiveRun construction site must carry the registry — `runContinuation` builds
     // its own, and the one that skipped this leaked raw `/skill` text to the backend (#811).
     state.skills = skills;
-    let checkFailure: string | null = null;
-    let runError: string | null = null;
-    let deliveryCapped = false;
-    /** An earlier step whose session closed without a done (hearsay-tools/cezarion#1620). */
-    let incompleteStepId: string | undefined;
+    const loop = await this.runWorkflowSteps(execution, launch, { ...this.openingInputs(execution), setupNote });
+    if (loop) await this.settleExecution(runId, state, loop);
+  }
+
+  /**
+   * The launch half of `execute`: the backend, extra system prompt and model identity the run
+   * starts with, recorded on the run as it starts. Undefined when the run was cancelled or went
+   * back to the queue first.
+   */
+  private async startExecution(execution: Execution): Promise<ExecutionLaunch | undefined> {
+    const { runId, workflow, input, startAt, state, emit } = execution;
+    // Resolve the agent backend for this run: the task choice (GUI) wins over
+    // the config default. Per-step `runner` can still override it at the step.
+    const config = await loadConfig(this.repoRoot);
+    if (state.cancelled || this.store.getRun(runId)?.stopping) {
+      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+      this.dropActive(runId);
+      return undefined;
+    }
+    const taskBackend: RunnerId = input.runner ?? config.defaultRunner;
+    // The account may have gone into a usage-limit hold since this run was dequeued — the queue
+    // gate cannot be the only one, because dequeue is not the moment of no return. Nothing has
+    // happened yet here, so the run goes back to the queue untouched (spec
+    // 2026-08-03-auto-resume-after-usage-limit).
+    if (this.requeueWhileHeld(runId, workflow, input, taskBackend, undefined, startAt)) return undefined;
+    // Extra system prompt (R2 2.3): POST override > config default; echoed on
+    // the record so the UI/API can show what the run actually used.
+    const extraSystemPrompt = this.store.getRun(runId)?.delegation?.role === 'worker'
+      ? input.systemPrompt
+      : resolveExtraSystemPrompt(input.systemPrompt, config.systemPrompt);
+    const modelIdentity = await this.taskModelIdentity(taskBackend, input);
+    if (state.cancelled) {
+      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+      this.dropActive(runId);
+      return undefined;
+    }
+    const ownedRun = this.store.getRun(runId);
+    const owned = ownedRun?.delegation?.role === 'worker' ? ownedRun.delegation.workspace : undefined;
+    this.store.updateRun(runId, {
+      // A resumed workflow stays durably queued until its next step is actually
+      // entered. If setup crashes, recovery can replay from `startAt` instead
+      // of treating the previous continuation as the interrupted step.
+      status: startAt > 0 ? 'queued' : 'running',
+      invalidAsk: undefined,
+      startedAt: ownedRun?.startedAt ?? new Date().toISOString(),
+      runner: taskBackend,
+      systemPrompt: extraSystemPrompt,
+      modelIdentity,
+    });
+    emit({ type: 'lifecycle', message: `run started — workflow "${workflow.name}" (runner: ${taskBackend})` });
+    return { config, taskBackend, extraSystemPrompt, ownedRun, owned };
+  }
+
+  /**
+   * Canonical provider/model identity (#405) — the normalised `provider/model`
+   * the task ran with, persisted for cost attribution / reproducible replay
+   * beside the free-text `model`. Best-effort here (a per-step `runner`/`model`
+   * can still override it); the authoritative fail-loud gate is at spawn.
+   */
+  private async taskModelIdentity(taskBackend: RunnerId, input: StartRunInput): Promise<string | undefined> {
+    try {
+      const normalized = normalizeModelForBackend(
+        taskBackend,
+        agentModelsLocked(this.repoRoot) ? undefined : input.model,
+        { configuredProvider: await configuredModelProvider(taskBackend, this.repoRoot) },
+      );
+      return normalized ? formatModelIdentity(normalized.identity) : undefined;
+    } catch {
+      // An unresolvable task-level model surfaces loudly at the step; the
+      // metadata echo stays absent rather than guessing.
+      return undefined;
+    }
+  }
+
+  /**
+   * Worktree per task (spec 006): the agent works on its own branch in
+   * `.ai/cezar/worktrees/<id>`, never in the user's working tree. A Git task
+   * that requests isolation fails closed if the worktree cannot be
+   * established; only explicit opt-out and non-Git modes run in place.
+   * False when the run stopped here.
+   */
+  private async prepareExecutionWorktree(execution: Execution, launch: ExecutionLaunch): Promise<boolean> {
+    const { runId, input, emit } = execution;
+    const repo = await getRepoInfo(this.repoRoot);
+    if (repo && input.worktree === false && !launch.owned) {
+      // Composer opt-out: run in the repo working tree, no branch/worktree. The
+      // repository-root lease serializes these runs by default; the explicit
+      // CEZ_DISABLE_REPO_LOCK=1 escape hatch allows unsafe overlap.
+      // Pin the starting commit: the session's Changes and Commits views use it
+      // as their stable lower bound while reading the current working copy.
+      const startingCommit = await getHeadCommit(repo.root);
+      if (startingCommit && !launch.ownedRun?.baseBranch) this.store.updateRun(runId, { baseBranch: startingCommit });
+      emit({ type: 'note', message: 'worktree off — running in the repo working tree' });
+    } else if (repo || launch.owned) {
+      emit({
+        type: 'note',
+        message: `worktree on — using an isolated task worktree (${input.worktree === true ? 'explicit request' : 'default'})`,
+      });
+      const base = await this.executionBaseRef(execution, repo, launch);
+      return this.createExecutionWorktree(execution, launch, base);
+    } else {
+      emit({ type: 'note', message: 'not a git repository — running in place, one task at a time' });
+    }
+    return true;
+  }
+
+  /**
+   * Fork from the configured base branch (config.json `baseBranch`, e.g.
+   * `develop`) — also the target of the eventual draft PR. Unresolvable
+   * (typo, not fetched) → note + the currently checked-out branch.
+   *
+   * A task that already recorded a fork point keeps it: its worktree is
+   * reused as-is, and re-resolving against a since-changed config would
+   * silently re-anchor the `merge-base` every diff/shortstat is measured
+   * from, shifting "what did this task change" under an existing task.
+   */
+  private async executionBaseRef(
+    execution: Execution,
+    repo: Awaited<ReturnType<typeof getRepoInfo>>,
+    launch: ExecutionLaunch,
+  ): Promise<string> {
+    const { runId, emit } = execution;
+    const recorded = launch.owned?.baselineSha ?? this.store.getRun(runId)?.baseBranch;
+    let base = recorded ?? repo?.branch ?? 'HEAD';
+    const configured = recorded ? undefined : launch.config.baseBranch;
+    if (configured) {
+      const resolved = await resolveBaseRef(this.repoRoot, configured);
+      if (resolved) {
+        base = resolved;
+      } else {
+        emit({
+          type: 'note',
+          message: `configured base branch "${configured}" not found (locally or on origin) — using "${base}"`,
+        });
+      }
+    }
+    return base;
+  }
+
+  /** Opens the task's worktree and prepares it for the first step. False when the worker stopped
+   *  first, or when the worktree could not be established, which fails the run. */
+  private async createExecutionWorktree(execution: Execution, launch: ExecutionLaunch, base: string): Promise<boolean> {
+    const { runId, state, emit } = execution;
+    const { owned, ownedRun } = launch;
+    try {
+      if (this.workerExecutionStopped(runId)) { this.dropActive(runId); return false; }
+      const wt = await this.openExecutionWorktree(execution, launch, base);
+      state.cwd = wt.path;
+      this.store.updateRun(runId, {
+        worktreePath: wt.path,
+        branch: wt.branch,
+        baseBranch: wt.baseBranch,
+        ...(owned ? { worktree: undefined } : {}),
+      });
+      emit({ type: 'note', message: `worktree ready — branch ${wt.branch} (base ${wt.baseBranch})` });
+      // Seed from this manager's project root: each multi-project context has
+      // its own manager/repoRoot and must never copy another project's layer.
+      // A worker's explicit `--attach` files win over the main checkout's copy (hearsay-tools/cezarion#1149).
+      const attached = new Set(ownedRun?.delegation?.role === 'worker'
+        ? (ownedRun.delegation.context?.inputs ?? []).flatMap(input => input.source.kind === 'parent-file' ? [input.source.path] : [])
+        : []);
+      const seededConfig = await seedAgentConfigLocalLayer(this.repoRoot, state.cwd, process.env, attached).catch(() => []);
+      if (seededConfig.length > 0) {
+        emit({ type: 'note', message: `seeded personal agent config: ${seededConfig.join(', ')}` });
+      }
+      this.armAutosave(runId, state);
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      const error = `worktree creation failed: ${message}`;
+      emit({ type: 'note', message: `${error} — task stopped before workflow execution` });
+      this.store.updateRun(runId, {
+        status: 'failed',
+        error,
+        finishedAt: new Date().toISOString(),
+        currentStepId: undefined,
+      });
+      emit({ type: 'lifecycle', message: `run failed — ${error}` });
+      this.dropActive(runId);
+      return false;
+    }
+  }
+
+  /** The task's worktree: an owned worker's verified workspace, or a new worktree forked from `base`. */
+  private async openExecutionWorktree(
+    execution: Execution,
+    launch: ExecutionLaunch,
+    base: string,
+  ): Promise<{ path: string; branch: string; baseBranch: string }> {
+    const { runId, startAt } = execution;
+    const { owned, ownedRun } = launch;
+    const ownedWorkspace = owned && ownedRun ? await ensureOwnedWorkspace(this.repoRoot, ownedRun) : undefined;
+    if (ownedRun?.delegation?.role === 'worker') await verifyWorkerContext({ dataDir: this.dataDir, parentId: ownedRun.delegation.parentRunId, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context,
+      parentCwd: this.store.getRun(ownedRun.delegation.parentRunId)?.worktreePath ?? this.repoRoot });
+    // First launch only (hearsay-tools/cezarion#1149): a worker re-queued past its first step and
+    // runContinuation never re-place attachments the worker may have edited or deleted.
+    if (ownedRun?.delegation?.role === 'worker' && startAt === 0) await placeWorkerAttachments({ dataDir: this.dataDir, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context });
+    return ownedWorkspace
+      ? { path: ownedWorkspace.path, branch: ownedWorkspace.branch, baseBranch: ownedWorkspace.baselineSha }
+      : await createWorktree(this.repoRoot, runId, base);
+  }
+
+  /**
+   * The task's attachments for the first agent step's opening message, and its image blocks.
+   * Both are empty once an agent step of this workflow has run.
+   */
+  private openingInputs(execution: Execution): { attachments: PersistedAttachment[]; images: ContentBlock[] | undefined } {
+    const { runId, workflow, input } = execution;
     // `startRun` already persisted the task's attachments so a queued bubble can render them
     // (#612). Reuse those files for the agent-facing path note instead of minting
     // duplicate pasted files when execution finally begins.
@@ -7776,7 +8435,7 @@ export class RunManager {
       stepKind(definition) === 'agent' &&
       (startRecord?.steps.find(step => step.id === definition.id)?.iterations ?? 0) > 0,
     );
-    let startAttachments: PersistedAttachment[] = openingAlreadyDelivered ? [] : [
+    const attachments: PersistedAttachment[] = openingAlreadyDelivered ? [] : [
       ...(startRecord?.taskImages ?? []),
       ...(startRecord?.queuedMessages ?? []).flatMap((m) => m.images ?? []),
     ]
@@ -7802,10 +8461,27 @@ export class RunManager {
     // File blocks are dropped here — a session only ever sees viewable blocks (#950). An empty
     // result stays `undefined` rather than `[]`, so a task carrying only files hands the runner
     // seam exactly the shape a task carrying nothing always did.
-    const startBlocks = openingAlreadyDelivered
+    const blocks = openingAlreadyDelivered
       ? []
       : contentBlocksOf([...(input.images ?? []), ...(input.stackedImages ?? [])]);
-    let startImages: ContentBlock[] | undefined = startBlocks.length ? startBlocks : undefined;
+    return { attachments, images: blocks.length ? blocks : undefined };
+  }
+
+  /**
+   * The step loop of `execute`, from `startAt`. Returns its outcome for `settleExecution`, or
+   * undefined when the run left this execution: parked, back in the queue, or held by another
+   * owner.
+   */
+  private async runWorkflowSteps(
+    execution: Execution,
+    launch: ExecutionLaunch,
+    opening: { attachments: PersistedAttachment[]; images: ContentBlock[] | undefined; setupNote: string | undefined },
+  ): Promise<StepLoop | undefined> {
+    const { runId, workflow, input, startAt, state, emit } = execution;
+    const loop: StepLoop = { checkFailure: null, runError: null, deliveryCapped: false };
+    let startImages = opening.images;
+    let startAttachments = opening.attachments;
+    let startSetupNote = opening.setupNote;
 
     let i = startAt;
     while (i < workflow.steps.length) {
@@ -7834,12 +8510,12 @@ export class RunManager {
           state,
           step,
           input,
-          checkFailure,
+          loop.checkFailure,
           nextStep,
           emit,
           startImages,
-          taskBackend,
-          extraSystemPrompt,
+          launch.taskBackend,
+          launch.extraSystemPrompt,
           chainStepNote(workflow.steps, i),
           startAttachments,
           startSetupNote,
@@ -7847,104 +8523,161 @@ export class RunManager {
         startImages = undefined;
         startAttachments = [];
         startSetupNote = undefined;
-        checkFailure = null;
-        // Stale setup cannot finalize a replacement owner. Disposal also clears
-        // active, but must still honor a previously accepted Stop/Finish intent.
-        if (this.active.get(runId) !== state &&
-          !(this.disposed && (state.cancelled || state.finishRequested))) return;
-        if (state.cancelled || this.preserveRunAfterDisposal(runId, state)) break;
-        this.withdrawCezarHumanWaits(runId);
-        // An authored step deadline bounds the whole step, its question included (#427 Q8, #470 T3):
-        // once it has passed, the step's human waits expire with it and the failure settles as it
-        // did before questions were waits. CI and timer waits still park the failure below. The
-        // clock starts before session setup, so a failure that close to the deadline counts as it.
-        if (failure && step.timeoutMs && Date.now() - attemptStartedAt >= step.timeoutMs) {
-          const human = openWaits(this.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
-          if (human.length) this.store.commitWaitCancellation(runId, human);
-        }
-        const current = this.store.getRun(runId);
-        if (current && this.executionBlockedByRootFinish(current) && !state.sessionEverOpened) {
-          this.store.updateStep(runId, step.id, { status: 'pending' });
-          this.requeueWhileHeld(runId, workflow, input, taskBackend, state, i);
-          return;
-        }
-        // runAgentStep already emitted session.ended(error). Record the failed
-        // attempt before parking so later successful CI recovery cannot erase it.
-        if (failure) {
-          if (this.holdsClosingWakes(runId)) this.store.updateRun(runId, { workflowResumeStepId: step.id });
-          this.finishStep(runId, step.id, 'failed', failure, emit);
-          runError = `step "${step.id}" failed: ${failure}`;
-        }
-        // A clean close that leaves results undelivered is a failed delivery too.
-        const undelivered = failure ?? (this.owesDelivery(runId) ? WAKE_SESSION_CLOSED_ERROR : undefined);
-        const delivery = this.holdsClosingWakes(runId) && !state.cancelled
-          ? undelivered ? this.failedWakeDelivery(runId, undelivered) : 'park' : 'settle';
-        if (delivery === 'capped') {
-          deliveryCapped = true;
-          if (!failure) {
-            this.finishStep(runId, step.id, 'failed', WAKE_SESSION_CLOSED_ERROR, emit);
-            runError = `step "${step.id}" failed: ${WAKE_SESSION_CLOSED_ERROR}`;
-          }
-        }
-        if (delivery === 'park') {
-          this.surfaceHumanWait(runId, state);
-          this.store.updateRun(runId, { status: 'waiting',
-            ...(failure ? { error: runError! } : {}) });
-          this.store.flush(); // checkpoint the failed attempt and its recoverable workflow cursor before parking
-          this.dropActive(runId);
-          return;
-        }
-        if (failure || deliveryCapped) break;
-        // A session that closed without a done leaves its step resumable; the tail never starts.
-        if (this.stepLeftOpen(state, step.id, nextStep)) { incompleteStepId = step.id; break; }
-        if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) break;
-        this.finishStep(runId, step.id, 'done', undefined, emit);
-        // Finish is an explicit stop, not an answer or permission to run checks.
-        if (state.finishRequested) break;
+        loop.checkFailure = null;
+        const after = this.nextAfterAgentStep(execution, launch, loop, { index: i, step, nextStep, failure, startedAt: attemptStartedAt });
+        if (after === 'handed-off') return undefined;
+        if (after === 'settle') break;
         i++;
         continue;
       }
 
       const { ok, output } = await this.runCheckStep(state, step, emit);
       if (state.cancelled || this.preserveRunAfterDisposal(runId, state)) break;
-      if (ok) {
-        this.finishStep(runId, step.id, 'done', undefined, emit);
-        i++;
-        continue;
-      }
+      const nextIndex = this.settleCheckStep(execution, i, record, { ok, output }, loop);
+      if (nextIndex === undefined) break;
+      i = nextIndex;
+    }
+    return loop;
+  }
 
-      // Retry consumption is distinct from executions: another check may loop
-      // back through this step after it already passed. Persist only the times
-      // this check itself invoked onFail so max remains bounded across restarts.
-      const used = record?.retriesUsed ?? 0;
-      if (step.onFail && used < step.onFail.max) {
-        checkFailure = output;
-        this.finishStep(runId, step.id, 'failed', 'check failed — looping back', emit);
-        const retryIdx = workflow.steps.findIndex((s) => s.id === step.onFail?.retry);
-        emit({
-          type: 'note',
-          stepId: step.id,
-          message: `check failed — retrying from "${step.onFail.retry}" (attempt ${used + 1}/${step.onFail.max})`,
-        });
-        // Steps we're about to re-run go back to pending so the GUI rail
-        // reads top-to-bottom truthfully.
-        for (const s of workflow.steps.slice(retryIdx, i + 1)) {
-          this.store.updateStep(runId, s.id, { status: 'pending' });
-        }
-        this.store.updateStep(runId, step.id, { retriesUsed: used + 1 });
-        this.store.updateRun(runId, { status: 'queued', currentStepId: undefined });
-        // The retry target and its consumed budget form one crash boundary: a
-        // restart must observe the queued target, budget, and cursor together.
-        this.store.flush();
-        i = retryIdx;
-        continue;
-      }
+  /**
+   * What the step loop does once an agent step's session ended: start the next step, settle the
+   * run, or leave the run to what holds it now (another owner, the queue, or a park). Synchronous,
+   * like the loop body it came from, so the loop yields only where it awaits the step itself.
+   */
+  private nextAfterAgentStep(
+    execution: Execution,
+    launch: ExecutionLaunch,
+    loop: StepLoop,
+    attempt: { index: number; step: WorkflowStepDef; nextStep: WorkflowStepDef | undefined; failure: string | null; startedAt: number },
+  ): 'next' | 'settle' | 'handed-off' {
+    const { runId, workflow, input, state, emit } = execution;
+    const { step, failure } = attempt;
+    // Stale setup cannot finalize a replacement owner. Disposal also clears
+    // active, but must still honor a previously accepted Stop/Finish intent.
+    if (this.active.get(runId) !== state &&
+      !(this.disposed && (state.cancelled || state.finishRequested))) return 'handed-off';
+    if (state.cancelled || this.preserveRunAfterDisposal(runId, state)) return 'settle';
+    this.withdrawCezarHumanWaits(runId);
+    this.expireStepDeadlineWaits(runId, step, failure, attempt.startedAt);
+    const current = this.store.getRun(runId);
+    if (current && this.executionBlockedByRootFinish(current) && !state.sessionEverOpened) {
+      this.store.updateStep(runId, step.id, { status: 'pending' });
+      this.requeueWhileHeld(runId, workflow, input, launch.taskBackend, state, attempt.index);
+      return 'handed-off';
+    }
+    if (this.settleAgentStepWakes(execution, step.id, failure, loop)) return 'handed-off';
+    if (failure || loop.deliveryCapped) return 'settle';
+    // A session that closed without a done leaves its step resumable; the tail never starts.
+    if (this.stepLeftOpen(state, step.id, attempt.nextStep)) { loop.incompleteStepId = step.id; return 'settle'; }
+    if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) return 'settle';
+    this.finishStep(runId, step.id, 'done', undefined, emit);
+    // Finish is an explicit stop, not an answer or permission to run checks.
+    return state.finishRequested ? 'settle' : 'next';
+  }
 
-      this.finishStep(runId, step.id, 'failed', `\`${step.command}\` exited non-zero`, emit);
-      runError = `check "${step.id}" failed${step.onFail ? ` after ${used + 1} attempts` : ''}`;
-      break;
+  /**
+   * An authored step deadline bounds the whole step, its question included (#427 Q8, #470 T3):
+   * once it has passed, the step's human waits expire with it and the failure settles as it
+   * did before questions were waits. CI and timer waits still park the failure
+   * (`settleAgentStepWakes`). The clock starts before session setup, so a failure that close to
+   * the deadline counts as it.
+   */
+  private expireStepDeadlineWaits(runId: string, step: WorkflowStepDef, failure: string | null, attemptStartedAt: number): void {
+    if (failure && step.timeoutMs && Date.now() - attemptStartedAt >= step.timeoutMs) {
+      const human = openWaits(this.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
+      if (human.length) this.store.commitWaitCancellation(runId, human);
+    }
+  }
+
+  /**
+   * Records a failed agent step, then settles what the run's closing wakes need. True when the
+   * run parked to deliver them; a capped delivery fails the step and marks the loop capped.
+   */
+  private settleAgentStepWakes(execution: Execution, stepId: string, failure: string | null, loop: StepLoop): boolean {
+    const { runId, state, emit } = execution;
+    // runAgentStep already emitted session.ended(error). Record the failed
+    // attempt before parking so later successful CI recovery cannot erase it.
+    if (failure) {
+      if (this.holdsClosingWakes(runId)) this.store.updateRun(runId, { workflowResumeStepId: stepId });
+      this.finishStep(runId, stepId, 'failed', failure, emit);
+      loop.runError = `step "${stepId}" failed: ${failure}`;
+    }
+    // A clean close that leaves results undelivered is a failed delivery too.
+    const undelivered = failure ?? (this.owesDelivery(runId) ? WAKE_SESSION_CLOSED_ERROR : undefined);
+    const delivery = this.holdsClosingWakes(runId) && !state.cancelled
+      ? undelivered ? this.failedWakeDelivery(runId, undelivered) : 'park' : 'settle';
+    if (delivery === 'capped') {
+      loop.deliveryCapped = true;
+      if (!failure) {
+        this.finishStep(runId, stepId, 'failed', WAKE_SESSION_CLOSED_ERROR, emit);
+        loop.runError = `step "${stepId}" failed: ${WAKE_SESSION_CLOSED_ERROR}`;
+      }
+    }
+    if (delivery !== 'park') return false;
+    this.surfaceHumanWait(runId, state);
+    this.store.updateRun(runId, { status: 'waiting',
+      ...(failure ? { error: loop.runError! } : {}) });
+    this.store.flush(); // checkpoint the failed attempt and its recoverable workflow cursor before parking
+    this.dropActive(runId);
+    return true;
+  }
+
+  /**
+   * A check step's result: a pass goes on to the next step, a failure loops back to its
+   * `onFail.retry` step while retries remain, and otherwise fails the run. Returns the index the
+   * step loop continues from, or undefined when the run fails.
+   */
+  private settleCheckStep(
+    execution: Execution,
+    index: number,
+    record: StepState | undefined,
+    check: { ok: boolean; output: string },
+    loop: StepLoop,
+  ): number | undefined {
+    const { runId, workflow, emit } = execution;
+    const step = workflow.steps[index] as WorkflowStepDef;
+    if (check.ok) {
+      this.finishStep(runId, step.id, 'done', undefined, emit);
+      return index + 1;
     }
 
+    // Retry consumption is distinct from executions: another check may loop
+    // back through this step after it already passed. Persist only the times
+    // this check itself invoked onFail so max remains bounded across restarts.
+    const used = record?.retriesUsed ?? 0;
+    if (step.onFail && used < step.onFail.max) {
+      loop.checkFailure = check.output;
+      this.finishStep(runId, step.id, 'failed', 'check failed — looping back', emit);
+      const retryIdx = workflow.steps.findIndex((s) => s.id === step.onFail?.retry);
+      emit({
+        type: 'note',
+        stepId: step.id,
+        message: `check failed — retrying from "${step.onFail.retry}" (attempt ${used + 1}/${step.onFail.max})`,
+      });
+      // Steps we're about to re-run go back to pending so the GUI rail
+      // reads top-to-bottom truthfully.
+      for (const s of workflow.steps.slice(retryIdx, index + 1)) {
+        this.store.updateStep(runId, s.id, { status: 'pending' });
+      }
+      this.store.updateStep(runId, step.id, { retriesUsed: used + 1 });
+      this.store.updateRun(runId, { status: 'queued', currentStepId: undefined });
+      // The retry target and its consumed budget form one crash boundary: a
+      // restart must observe the queued target, budget, and cursor together.
+      this.store.flush();
+      return retryIdx;
+    }
+
+    this.finishStep(runId, step.id, 'failed', `\`${step.command}\` exited non-zero`, emit);
+    loop.runError = `check "${step.id}" failed${step.onFail ? ` after ${used + 1} attempts` : ''}`;
+    return undefined;
+  }
+
+  /**
+   * Settles the run once the step loop of `execute` ended: the final autosave, then the
+   * cancelled, failed, incomplete-step, idle-closed or success settlement.
+   */
+  private async settleExecution(runId: string, state: ActiveRun, loop: StepLoop): Promise<void> {
     // Final autosave: the task branch ends holding the finished state; on a branch the
     // agent checked out, the work stays uncommitted and the handoff's Autosave section
     // says so (#1004).
@@ -7956,25 +8689,12 @@ export class RunManager {
       this.dropActive(runId);
       return;
     }
-    const finishedAt = new Date().toISOString();
     if (state.cancelled) {
-      const run = this.store.getRun(runId);
-      for (const s of run?.steps ?? []) {
-        if (s.status === 'running' || s.status === 'waiting') {
-          this.store.updateStep(runId, s.id, { status: 'cancelled' });
-        }
-      }
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt, currentStepId: undefined });
-      emit({ type: 'lifecycle', message: 'run cancelled' });
-    } else if (runError) {
-      this.store.updateRun(runId, { status: 'failed', error: runError, finishedAt, currentStepId: undefined });
-      emit({ type: 'lifecycle', message: `run failed — ${runError}` });
-      if (deliveryCapped) emit({ type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
-    } else if (incompleteStepId) {
-      await this.settleIncompleteStep(runId, incompleteStepId);
-      this.clearIdleTimer(state);
-      this.dropActive(runId);
-      return;
+      this.settleCancelledRun(runId);
+    } else if (loop.runError) {
+      this.settleFailedRun(runId, loop.runError, loop.deliveryCapped);
+    } else if (loop.incompleteStepId) {
+      await this.settleIncompleteStep(runId, loop.incompleteStepId);
     } else if (state.idleClosed || this.unansweredWorkflowAsk(runId, state)) {
       await this.settleIdleClosedRun(runId, state);
       this.dropActive(runId);
@@ -7984,6 +8704,27 @@ export class RunManager {
     }
     this.clearIdleTimer(state);
     this.dropActive(runId);
+  }
+
+  /** The cancelled settlement: the run and its running and waiting steps become cancelled. */
+  private settleCancelledRun(runId: string): void {
+    const finishedAt = new Date().toISOString();
+    const run = this.store.getRun(runId);
+    for (const s of run?.steps ?? []) {
+      if (s.status === 'running' || s.status === 'waiting') {
+        this.store.updateStep(runId, s.id, { status: 'cancelled' });
+      }
+    }
+    this.store.updateRun(runId, { status: 'cancelled', finishedAt, currentStepId: undefined });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+  }
+
+  /** The failed settlement. A capped wake delivery adds the cap's note. */
+  private settleFailedRun(runId: string, runError: string, deliveryCapped: boolean): void {
+    const finishedAt = new Date().toISOString();
+    this.store.updateRun(runId, { status: 'failed', error: runError, finishedAt, currentStepId: undefined });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: `run failed — ${runError}` });
+    if (deliveryCapped) this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
   }
 
   /** Returns an error message, or null on success. */
@@ -8009,51 +8750,7 @@ export class RunManager {
     /** Worktree setup's paragraph for the agent (#917) — appended to the opening message. */
     openingNote?: string,
   ): Promise<string | null> {
-    let systemPrompt: string | undefined;
-    const rawPrompt = applyTemplate(step.prompt ?? '{{task}}', input.task);
-    // The selected skill, a leading `/name`, and their companions go where the agent looks (#1408).
-    const provisioned = await this.provisionRunSkills(runId, state, { stepSkill: step.skill, slash: leadingSlashSkillName(rawPrompt) });
-    for (const message of provisioned.notes) emit({ type: 'note', stepId: step.id, message });
-    if (step.skill) {
-      const skill = this.enabledSkills(state).find((s) => s.name === step.skill);
-      if (skill) {
-        // The body alone often does not identify the selected skill. Keep its
-        // name and catalog description in the normalized runner payload so a
-        // numeric task such as "432" still gives the model enough context to
-        // describe the work — and therefore derive a useful title (#432).
-        // A directory team skill outside the worktree names its cache copy (#1024).
-        systemPrompt = skillSystemPrompt(skill, provisioned.filesDir.get(skill.name));
-      } else {
-        emit({
-          type: 'note',
-          stepId: step.id,
-          message: `skill "${step.skill}" not found in .ai/cezar/skills, .ai/skills or the team skills repo — running with the plain prompt`,
-        });
-      }
-    }
-
-    // Opening prompts bypass deliverMessage. Expand before workflow and attachment
-    // context so a leading registry skill matches, without changing the stored task.
-    let userPrompt = expandRegistrySlashSkillText(rawPrompt, this.enabledSkills(state), provisioned.filesDir);
-    if (chainNote) userPrompt = `${chainNote}\n\n---\n\n${userPrompt}`;
-    if (checkFailure) {
-      userPrompt += `\n\nA verification command failed after the previous attempt. Fix the cause. Failing output:\n\n${checkFailure}`;
-    }
-    if (images?.length) {
-      emit({
-        type: 'note',
-        stepId: step.id,
-        message: `${images.length} screenshot${images.length > 1 ? 's' : ''} attached to the task`,
-      });
-    }
-    // Point the agent at the on-disk files (#357) — for an image the base64 block above already
-    // let it *view* the file and this is what lets it *use* it (save, attach to an issue/PR, copy
-    // into the repo); for a non-image attachment (#950) it is the only reference the agent gets
-    // at all. Deliberately NOT nested in the branch above: gating the paths on an image block
-    // existing is what would leave an agent holding a task about a `.pdf` it was never told the
-    // location of.
-    if (attachments.length) userPrompt += `\n\n${pastedAttachmentsText(attachments)}`;
-    if (openingNote) userPrompt += `\n\n${openingNote}`;
+    const opening = await this.stepOpening(runId, state, step, input, emit, { checkFailure, images, chainNote, attachments, openingNote });
 
     const sessionId = randomUUID();
     const backend = step.runner ?? taskBackend;
@@ -8061,17 +8758,10 @@ export class RunManager {
 
     const stepRecord = this.store.getRun(runId)?.steps.find((s) => s.id === step.id);
     const startTokens = stepRecord?.tokensUsed ?? 0;
-    let turnText = '';
-    let completedAssistantText = '';
-    let turnTail: TurnTail = 'none';
-    let scheduleWakeup: number | null | undefined;
-    let sessionError: string | undefined;
+    const turn: SessionTurn = { text: '', completedText: '', tail: 'none', scheduleWakeup: undefined, sessionError: undefined };
     const sink = this.makeUiSink(runId, step.id);
     const onEvent = (event: AgentEvent) => {
-      if (this.isDisposedDelegatedRun(runId)) {
-        if (event.type === 'error') state.session?.interrupt();
-        return;
-      }
+      if (this.disposedSessionEvent(runId, state, event)) return;
       if (event.type === 'image') {
         const saved = this.persistAttachment(runId, event.mediaType, event.data);
         if (saved) emit({ type: 'image', stepId: step.id, ...saved });
@@ -8081,7 +8771,7 @@ export class RunManager {
         this.clearUnreadInputTimer(state); // real content: the harness is working
         this.clearHeldHumanInputTimer(state);
         this.noteNoWaitNudgeContent(runId, state, event);
-        turnText = appendTurnText(turnText, event.text);
+        turn.text = appendTurnText(turn.text, event.text);
         const text = stripAskMarker(stripTaskMarkers(stripMonitoringMarker(stripDoneMarker(event.text))), false);
         if (text) emit({ type: 'text', text, stepId: step.id });
         return;
@@ -8094,14 +8784,8 @@ export class RunManager {
       }
       emit({ ...event, stepId: step.id });
       if (event.type === 'cost') this.recordReportedCost(runId, step.id, state, backend, event.usd);
-      if (event.type === 'error') {
-        // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
-        sessionError ??= state.agentInputError ?? event.message;
-        state.agentSessionError = sessionError;
-        state.session?.interrupt();
-        return;
-      }
-      if (sessionError || state.agentInputError) return;
+      if (event.type === 'error') { this.recordSessionFault(state, turn, event.message); return; }
+      if (turn.sessionError || state.agentInputError) return;
       if (event.type === 'session') {
         // Codex/OpenCode mint their own session id — persist it so resume works.
         this.store.updateStep(runId, step.id, { sessionId: event.sessionId, backend,
@@ -8111,24 +8795,20 @@ export class RunManager {
         this.store.updateStep(runId, step.id, { tokensUsed: startTokens + event.tokensUsed });
       }
       const wakeDelay = claudeScheduleWakeupDelay(event, backend);
-      if (wakeDelay !== undefined) scheduleWakeup = wakeDelay;
+      if (wakeDelay !== undefined) turn.scheduleWakeup = wakeDelay;
       if (event.type === 'turn-end') {
-        this.retireUnreadInputs(runId, state, event.unconsumedInputIds ?? [], false);
-        this.readBundledInputs(runId, state);
-        state.waitWakeTurn = undefined;
-        state.atTurnBoundary = state.session;
-        state.ciTurnId = randomUUID();
+        this.markTurnBoundary(runId, state, event);
         // v2 `turn.completed` already flushed the coalescers; the v1 turn
         // boundary flushes again (idempotent) as a backstop.
         sink.flushAll();
-        this.trackTurnEnd(runId, turnText); // titleSummary + diffStat (#389)
-        const text = turnText;
-        const completedText = completedAssistantText;
-        turnText = '';
-        completedAssistantText = '';
-        turnTail = 'none';
-        const turnWakeDelay = scheduleWakeup;
-        scheduleWakeup = undefined;
+        this.trackTurnEnd(runId, turn.text); // titleSummary + diffStat (#389)
+        const text = turn.text;
+        const completedText = turn.completedText;
+        turn.text = '';
+        turn.completedText = '';
+        turn.tail = 'none';
+        const turnWakeDelay = turn.scheduleWakeup;
+        turn.scheduleWakeup = undefined;
         this.endTurn(runId, state, sink, { stepId: step.id, text, completedText, scheduleWakeup: turnWakeDelay });
       }
     };
@@ -8138,52 +8818,13 @@ export class RunManager {
     // account and grants alike. The bound `workflowDef` carries the same values; the private
     // evidence is the authority.
     const stepIdentity = this.workerStep(runId, step.id);
-    // Normalise the selected model to canonical `provider/model` and back to the
-    // backend's own wire form via the ONE shared mapper (#405). Fail-loud: an
-    // unresolvable model (e.g. a bare id on opencode) returns the step error
-    // instead of letting the backend silently substitute its default.
-    let backendModel: string | undefined;
-    let effectiveEffort: string | undefined;
-    try {
-      const modelsLocked = agentModelsLocked(this.repoRoot);
-      const authoredStepEffort = step.effort !== undefined;
-      if (modelsLocked && step.effort?.trim()) return AGENT_MODELS_LOCKED_ERROR;
-      const stepEffort = parseDelegationEffort(step.effort);
-      effectiveEffort = modelsLocked
-        ? undefined
-        : stepIdentity ? stepIdentity.effort : authoredStepEffort ? stepEffort : this.store.getRun(runId)?.effort ?? input.effort;
-      const normalized = normalizeModelForBackend(
-        stepBackend,
-        modelsLocked ? undefined : stepIdentity ? stepIdentity.model : step.model ?? input.model,
-        { configuredProvider: await configuredModelProvider(stepBackend, state.cwd) },
-      );
-      backendModel = normalized?.backendModel;
-      // Persist the identity of what ACTUALLY runs (#405, review M1). The run-start echo
-      // (line ~993) is best-effort from `taskBackend`/`input.model`; a per-step `runner`/`model`
-      // override makes it assert a model that never ran. Re-write it here, from the resolved
-      // step identity, so the record — the product of this PR — is always one that ran.
-      this.store.updateRun(runId, {
-        modelIdentity: normalized ? formatModelIdentity(normalized.identity) : undefined,
-      });
-    } catch (err) {
-      if (err instanceof ModelIdentityError || err instanceof DelegationPolicyError) return err.message;
-      throw err;
-    }
+    const model = await this.stepModel(runId, state, step, input, stepBackend, stepIdentity);
+    if (typeof model === 'string') return model;
     // Which agent account this step spawns under, and — recorded on the step before the spawn —
     // which one its session belongs to. `sessionId` and `profileId` are a pair: a resume that
     // reads the wrong account's config dir finds no session and silently starts a fresh one.
-    // Resolved together with the temp-directory preflight (#785): the step fails with a named,
-    // actionable error instead of spawning a backend whose shell would return empty output. An
-    // account that would open another folder than its own fails the same way (#1283).
-    let stepProfile: Awaited<ReturnType<RunManager['agentEnvForStep']>>;
-    try {
-      stepProfile = await this.agentEnvForStep(runId, stepBackend, {
-        stepId: step.id,
-      });
-    } catch (err) {
-      if (err instanceof AgentTempDirError || err instanceof AgentAccountUnavailableError) return err.message;
-      throw err;
-    }
+    const stepProfile = await this.stepProfileFor(runId, stepBackend, { stepId: step.id });
+    if (typeof stepProfile === 'string') return stepProfile;
     const beforeSpawn = this.store.getRun(runId);
     if (state.cancelled || (beforeSpawn && this.executionBlockedByRootFinish(beforeSpawn))) return null;
     this.store.updateStep(runId, step.id, { profileId: stepProfile.profileId });
@@ -8192,13 +8833,12 @@ export class RunManager {
       allowedTools: allowedToolsForStep(step, stepBackend), bashAllowlist: step.bashAllowlist,
     };
     // Workers inherit only the extra prompt, never the parent's selected skill (#778).
-    state.delegationSettings = { cwd: state.cwd, runner: stepBackend, model: backendModel,
-      effort: effectiveEffort,
+    state.delegationSettings = { cwd: state.cwd, runner: stepBackend, model: model.backendModel,
+      effort: model.effectiveEffort,
       agentProfile: stepProfile.profileId, accountBinding: stepProfile.accountBinding, systemPrompt: extraSystemPrompt,
       allowedTools: grants.allowedTools, bashAllowlist: grants.bashAllowlist };
     const runner = createRunner(stepBackend);
     state.agentSessionError = undefined;
-    let session: AgentSession | undefined;
     state.currentStepId = step.id;
     state.completedStepId = undefined;
     this.beginUsageInvocation(runId, state, step.id);
@@ -8208,59 +8848,264 @@ export class RunManager {
     const ciTools = await this.provisionCiSession(runId, state);
     // Revalidate after provisioning, then let execute settle cancellation or
     // requeue a Finish-held step through its existing no-session paths.
-    const launchRun = this.store.getRun(runId);
-    if (state.cancelled || this.workerExecutionStopped(runId) || this.active.get(runId) !== state ||
-      (launchRun && this.executionBlockedByRootFinish(launchRun))) {
-      ciTools?.revoke();
-      if (state.revokeCiTools === ciTools?.revoke) state.revokeCiTools = undefined;
-      delegation?.revoke();
-      if (state.revokeDelegation === delegation?.revoke) state.revokeDelegation = undefined;
+    if (this.launchStale(runId, state, delegation, ciTools)) {
       if (this.workerExecutionStopped(runId)) state.cancelled = true;
       state.currentStepId = undefined;
       return null;
     }
     state.inputDelivery = inputDeliveryOf(runner); state.unreadInputIds = new Set(); state.consumedBeforeAck = new Set();
+    const launchOpening = this.launchOpening(runId, state, step.id, { body: opening.userPrompt, ciTools });
+    const session = this.startStepSession(runId, state, runner, {
+      step, sessionId, images, opening: launchOpening, skillPrompt: opening.skillPrompt, extraSystemPrompt,
+      grants, profile: stepProfile, model, delegation, webhooksPart, ciTools,
+    }, onEvent, turn, sink);
+    if (typeof session === 'string') return session;
+    return this.awaitStepSession(runId, state, session, { stepId: step.id, nextStep, sink, turn, startTokens, delegation, ciTools });
+  }
+
+  /** A fresh step's opening message, before the open-waits footer and the session-start context,
+   *  and the selected skill's playbook for its system prompt. */
+  private async stepOpening(
+    runId: string,
+    state: ActiveRun,
+    step: WorkflowStepDef,
+    input: StartRunInput,
+    emit: ExecutionEmit,
+    parts: {
+      checkFailure: string | null;
+      images: ContentBlock[] | undefined;
+      chainNote: string | undefined;
+      attachments: PersistedAttachment[];
+      openingNote: string | undefined;
+    },
+  ): Promise<{ userPrompt: string; skillPrompt: string | undefined }> {
+    let skillPrompt: string | undefined;
+    const rawPrompt = applyTemplate(step.prompt ?? '{{task}}', input.task);
+    // The selected skill, a leading `/name`, every skill the prompt names as `/name`, and their
+    // companions go where the agent looks (#1408, #1672).
+    const provisioned = await this.provisionRunSkills(runId, state, {
+      stepSkill: step.skill, slash: leadingSlashSkillName(rawPrompt), prompt: rawPrompt,
+    });
+    for (const message of provisioned.notes) emit({ type: 'note', stepId: step.id, message });
+    if (step.skill) {
+      const skill = this.enabledSkills(state).find((s) => s.name === step.skill);
+      if (skill) {
+        // The body alone often does not identify the selected skill. Keep its
+        // name and catalog description in the normalized runner payload so a
+        // numeric task such as "432" still gives the model enough context to
+        // describe the work — and therefore derive a useful title (#432).
+        // A directory team skill outside the worktree names its cache copy (#1024).
+        skillPrompt = skillSystemPrompt(skill, provisioned.filesDir.get(skill.name));
+      } else {
+        emit({
+          type: 'note',
+          stepId: step.id,
+          message: `skill "${step.skill}" not found in .ai/cezar/skills, .ai/skills or the team skills repo — running with the plain prompt`,
+        });
+      }
+    }
+
+    // Opening prompts bypass deliverMessage. Expand before workflow and attachment
+    // context so a leading registry skill matches, without changing the stored task.
+    let userPrompt = expandRegistrySlashSkillText(rawPrompt, this.enabledSkills(state), provisioned.filesDir);
+    if (parts.chainNote) userPrompt = `${parts.chainNote}\n\n---\n\n${userPrompt}`;
+    if (parts.checkFailure) {
+      userPrompt += `\n\nA verification command failed after the previous attempt. Fix the cause. Failing output:\n\n${parts.checkFailure}`;
+    }
+    if (parts.images?.length) {
+      emit({
+        type: 'note',
+        stepId: step.id,
+        message: `${parts.images.length} screenshot${parts.images.length > 1 ? 's' : ''} attached to the task`,
+      });
+    }
+    // Point the agent at the on-disk files (#357) — for an image the base64 block above already
+    // let it *view* the file and this is what lets it *use* it (save, attach to an issue/PR, copy
+    // into the repo); for a non-image attachment (#950) it is the only reference the agent gets
+    // at all. Deliberately NOT nested in the branch above: gating the paths on an image block
+    // existing is what would leave an agent holding a task about a `.pdf` it was never told the
+    // location of.
+    if (parts.attachments.length) userPrompt += `\n\n${pastedAttachmentsText(parts.attachments)}`;
+    if (parts.openingNote) userPrompt += `\n\n${parts.openingNote}`;
+    return { userPrompt, skillPrompt };
+  }
+
+  /** Shutdown left this delegated run to restart recovery: its session's events are dropped, and an
+   *  error still interrupts the session. */
+  private disposedSessionEvent(runId: string, state: ActiveRun, event: AgentEvent): boolean {
+    if (!this.isDisposedDelegatedRun(runId)) return false;
+    if (event.type === 'error') state.session?.interrupt();
+    return true;
+  }
+
+  /** A session's fault: the first one stands, an agent input error recorded before it wins, and the
+   *  session is interrupted. */
+  private recordSessionFault(state: ActiveRun, turn: SessionTurn, message: string): void {
+    // Preserve the initiating fault: interrupt may fail an in-flight HTTP request.
+    turn.sessionError ??= state.agentInputError ?? message;
+    state.agentSessionError = turn.sessionError;
+    state.session?.interrupt();
+  }
+
+  /** The session reached a turn end: retire the inputs it left unread, read the bundled inputs, and
+   *  open the turn boundary with a fresh CI turn id. */
+  private markTurnBoundary(runId: string, state: ActiveRun, event: Extract<AgentEvent, { type: 'turn-end' }>): void {
+    this.retireUnreadInputs(runId, state, event.unconsumedInputIds ?? [], false);
+    this.readBundledInputs(runId, state);
+    state.waitWakeTurn = undefined;
+    state.atTurnBoundary = state.session;
+    state.ciTurnId = randomUUID();
+  }
+
+  /**
+   * The model and effort a fresh step runs with. Normalise the selected model to canonical
+   * `provider/model` and back to the backend's own wire form via the ONE shared mapper (#405).
+   * Fail-loud: an unresolvable model (e.g. a bare id on opencode) returns the step error
+   * instead of letting the backend silently substitute its default.
+   */
+  private async stepModel(
+    runId: string,
+    state: ActiveRun,
+    step: WorkflowStepDef,
+    input: StartRunInput,
+    stepBackend: RunnerId,
+    stepIdentity: WorkerStepIdentity | undefined,
+  ): Promise<StepModel | string> {
+    try {
+      const modelsLocked = agentModelsLocked(this.repoRoot);
+      if (modelsLocked && step.effort?.trim()) return AGENT_MODELS_LOCKED_ERROR;
+      const effectiveEffort = this.stepEffort(runId, step, input, stepIdentity, modelsLocked);
+      const normalized = normalizeModelForBackend(
+        stepBackend,
+        modelsLocked ? undefined : stepIdentity ? stepIdentity.model : step.model ?? input.model,
+        { configuredProvider: await configuredModelProvider(stepBackend, state.cwd) },
+      );
+      // Persist the identity of what ACTUALLY runs (#405, review M1). The run-start echo
+      // (line ~993) is best-effort from `taskBackend`/`input.model`; a per-step `runner`/`model`
+      // override makes it assert a model that never ran. Re-write it here, from the resolved
+      // step identity, so the record — the product of this PR — is always one that ran.
+      this.store.updateRun(runId, {
+        modelIdentity: normalized ? formatModelIdentity(normalized.identity) : undefined,
+      });
+      return { backendModel: normalized?.backendModel, effectiveEffort };
+    } catch (err) {
+      if (err instanceof ModelIdentityError || err instanceof DelegationPolicyError) return err.message;
+      throw err;
+    }
+  }
+
+  /** The effort a fresh step runs at: an owned worker's pinned effort, else the step's authored one,
+   *  else the run's; unset when the project locks agent models. An invalid authored effort throws
+   *  `DelegationPolicyError`. */
+  private stepEffort(
+    runId: string,
+    step: WorkflowStepDef,
+    input: StartRunInput,
+    stepIdentity: WorkerStepIdentity | undefined,
+    modelsLocked: boolean,
+  ): string | undefined {
+    const authoredStepEffort = step.effort !== undefined;
+    const stepEffort = parseDelegationEffort(step.effort);
+    return modelsLocked
+      ? undefined
+      : stepIdentity ? stepIdentity.effort : authoredStepEffort ? stepEffort : this.store.getRun(runId)?.effort ?? input.effort;
+  }
+
+  /**
+   * The account a step's session spawns under, resolved together with the temp-directory preflight
+   * (#785): the step fails with a named, actionable error instead of spawning a backend whose shell
+   * would return empty output. An account that would open another folder than its own fails the
+   * same way (#1283). Returns the profile, or that error's message.
+   */
+  private async stepProfileFor(
+    runId: string,
+    stepBackend: RunnerId,
+    options: { recordedProfileId?: string; stepId?: string },
+  ): Promise<StepProfile | string> {
+    try {
+      return await this.agentEnvForStep(runId, stepBackend, options);
+    } catch (err) {
+      if (err instanceof AgentTempDirError || err instanceof AgentAccountUnavailableError) return err.message;
+      throw err;
+    }
+  }
+
+  /**
+   * Pre-launch revalidation (hearsay-tools/cezarion#1632). Stop, a stopped execution, a replaced
+   * active run or a root Finish can arrive while provisioning awaits. Then this launch's CI tools
+   * and delegation are revoked, and the run state forgets each one only while it is still this
+   * launch's. The caller settles the run.
+   */
+  private launchStale(runId: string, state: ActiveRun, delegation: LaunchDelegation, ciTools: LaunchCiTools): boolean {
+    const launchRun = this.store.getRun(runId);
+    if (!(state.cancelled || this.workerExecutionStopped(runId) || this.active.get(runId) !== state ||
+      (launchRun && this.executionBlockedByRootFinish(launchRun)))) return false;
+    ciTools?.revoke();
+    if (state.revokeCiTools === ciTools?.revoke) state.revokeCiTools = undefined;
+    delegation?.revoke();
+    if (state.revokeDelegation === delegation?.revoke) state.revokeDelegation = undefined;
+    return true;
+  }
+
+  /** A launch's opening message (hearsay-tools/cezarion#1632): the body, the open-waits footer, the
+   *  resume context of a Continue's checkpoint, then the session-start context in front. */
+  private launchOpening(
+    runId: string,
+    state: ActiveRun,
+    stepId: string,
+    launch: { body: string; ciTools: LaunchCiTools; checkpoint?: RunRecord['continuationMessage'] },
+  ): LaunchOpening {
     // Opening prompts bypass live delivery; do not infer tools before provisioning finishes.
-    const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !!ciTools });
-    if (footer) userPrompt += `\n\n${footer}`;
-    const sessionContext = this.sessionContextFor(runId, state, step.id, userPrompt);
-    userPrompt = sessionContext.prefix + userPrompt;
+    const footer = openWaitsFooter(this.store.getRun(runId)?.waits ?? [], { tools: !!launch.ciTools });
+    const prompt = withResumeContext(footer ? `${launch.body}\n\n${footer}` : launch.body, launch.checkpoint);
+    const sessionContext = this.sessionContextFor(runId, state, stepId, prompt);
+    return { userPrompt: sessionContext.prefix + prompt, handoffInjected: sessionContext.handoffInjected };
+  }
+
+  /** Start a fresh step's session. A throw revokes the tools this launch was given and returns its
+   *  message as the step's error. */
+  private startStepSession(
+    runId: string,
+    state: ActiveRun,
+    runner: ReturnType<typeof createRunner>,
+    launch: StepSessionLaunch,
+    onEvent: (event: AgentEvent) => void,
+    turn: SessionTurn,
+    sink: UiEventSink,
+  ): AgentSession | string {
+    const { delegation, ciTools, profile } = launch;
+    let session: AgentSession | undefined;
     try {
       session = startManagedSession(runner,
         {
           // Skill body, then the run's extra prompt (POST override or config
           // default), then the handoff contract — every agent step.
-          systemPrompt: composeSystemPrompt(
-            systemPrompt,
-            extraSystemPrompt,
-            delegation?.instructions,
-            this.automationsPart(),
-            webhooksPart,
-            artifactInstructions(stepProfile.env.CEZ_ARTIFACTS_DIR),
-            handoffInstructions({ tools: !!ciTools, handoffInjected: sessionContext.handoffInjected }),
-          ),
-          userPrompt,
-          images,
+          systemPrompt: composeSystemPrompt(launch.skillPrompt, this.launchSystemTail({
+            extraSystemPrompt: launch.extraSystemPrompt, delegation, webhooksPart: launch.webhooksPart,
+            env: profile.env, ciTools, handoffInjected: launch.opening.handoffInjected,
+          })),
+          userPrompt: launch.opening.userPrompt,
+          images: launch.images,
           cwd: state.cwd,
-          allowedTools: grants.allowedTools,
-          bashAllowlist: grants.bashAllowlist,
+          allowedTools: launch.grants.allowedTools,
+          bashAllowlist: launch.grants.bashAllowlist,
           // The handoff file lives outside the worktree — grant access.
-          additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), stepProfile.env),
-          env: { ...stepProfile.env, ...delegation?.env, ...ciTools?.env },
+          additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), profile.env),
+          env: { ...profile.env, ...delegation?.env, ...ciTools?.env },
           ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
           ...(delegation ? { restrictNativeDelegation: delegation.restrictNativeDelegation } : {}),
-          model: backendModel,
-          effort: effectiveEffort,
-          sessionId,
+          model: launch.model.backendModel,
+          effort: launch.model.effectiveEffort,
+          sessionId: launch.sessionId,
           // Managed work has no default wall clock, including non-final steps.
           // Only an authored step opts in; turn completion still advances the chain.
-          timeoutMs: step.timeoutMs ?? 0,
+          timeoutMs: launch.step.timeoutMs ?? 0,
         },
         onEvent,
         {
           onUiEvent: (event) => {
-            completedAssistantText = appendCompletedAssistantText(completedAssistantText, event);
-            turnTail = trackTurnTail(turnTail, event);
+            turn.completedText = appendCompletedAssistantText(turn.completedText, event);
+            turn.tail = trackTurnTail(turn.tail, event);
             this.handleRunnerUiEvent(runId, state, sink, event);
           },
           onAgentInputReady: () => this.handleAgentInputReady(runId, state, session),
@@ -8274,12 +9119,50 @@ export class RunManager {
       state.currentStepId = undefined;
       return err instanceof Error ? err.message : String(err);
     }
+    return session;
+  }
+
+  /**
+   * The system prompt after the skill playbook (hearsay-tools/cezarion#1632): the run's extra
+   * prompt, the delegation instructions, the automations and project webhooks parts, the artifact
+   * contract, then the handoff contract.
+   */
+  private launchSystemTail(launch: {
+    extraSystemPrompt: string | undefined;
+    delegation: LaunchDelegation;
+    webhooksPart: string | undefined;
+    env: StepProfile['env'];
+    ciTools: LaunchCiTools;
+    handoffInjected: boolean;
+  }): string {
+    return composeSystemPrompt(
+      launch.extraSystemPrompt,
+      launch.delegation?.instructions,
+      this.automationsPart(),
+      launch.webhooksPart,
+      artifactInstructions(launch.env.CEZ_ARTIFACTS_DIR),
+      handoffInstructions({ tools: !!launch.ciTools, handoffInjected: launch.handoffInjected }),
+    );
+  }
+
+  /** Wait for a fresh step's session to close. Returns the step's error, or null. Teardown always
+   *  revokes the launch's tools and clears the session's state (`releaseStepSession`). */
+  private async awaitStepSession(runId: string, state: ActiveRun, session: AgentSession, launch: {
+    stepId: string;
+    nextStep: WorkflowStepDef | undefined;
+    sink: UiEventSink;
+    turn: SessionTurn;
+    startTokens: number;
+    delegation: LaunchDelegation;
+    ciTools: LaunchCiTools;
+  }): Promise<string | null> {
+    const { stepId, sink, turn } = launch;
     const sessionClosed = this.trackWorkerSessionResult(runId, session);
     state.session = session;
-    state.nextStep = stepScope(session, nextStep);
+    state.nextStep = stepScope(session, launch.nextStep);
     state.sessionEverOpened = true;
-    state.currentStepId = step.id;
-    state.interrupt = () => session?.interrupt();
+    state.currentStepId = stepId;
+    state.interrupt = () => session.interrupt();
     let setupComplete = false;
     try {
       this.flushDeferred(runId);
@@ -8288,8 +9171,8 @@ export class RunManager {
       setupComplete = true;
       const result = await session.result.finally(() => state.agentInputFlight?.settled).finally(() => this.requeueUnreadAtClose(runId, state, session));
       if (this.isDisposedDelegatedRun(runId)) return null;
-      this.persistWorkerAssistantResult(runId, step.id, result.text);
-      const inputOrSessionError = sessionError ?? state.agentInputError;
+      this.persistWorkerAssistantResult(runId, stepId, result.text);
+      const inputOrSessionError = turn.sessionError ?? state.agentInputError;
       if (inputOrSessionError) {
         sink.sessionEnded('error', inputOrSessionError);
         return inputOrSessionError;
@@ -8297,7 +9180,7 @@ export class RunManager {
       // v2 counterpart of v1's `done` (spec: the mappers leave session-close
       // events to the RunManager — only it knows how the session settled).
       sink.sessionEnded(state.cancelled ? 'cancelled' : 'end_turn');
-      this.store.updateStep(runId, step.id, { tokensUsed: startTokens + result.tokensUsed });
+      this.store.updateStep(runId, stepId, { tokensUsed: launch.startTokens + result.tokensUsed });
       return null;
     } catch (err) {
       if (!setupComplete) {
@@ -8306,25 +9189,32 @@ export class RunManager {
       }
       if (this.isDisposedDelegatedRun(runId)) return null;
       // Keep the provider failure that triggered teardown, even if teardown rejects.
-      const message = sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
+      const message = turn.sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
       sink.sessionEnded('error', message); // alongside v1's fatal `error`
       return message;
     } finally {
-      ciTools?.revoke(); state.revokeCiTools = undefined;
-      delegation?.revoke(); state.revokeDelegation = undefined;
-      this.recordUsagePeaks(runId);
-      this.clearIdleTimer(state);
-      this.monitoring.delete(runId);
-      this.waiting.delete(runId);
-      state.nextStep = undefined;
-      state.waitWakeTurn = undefined;
-      state.atTurnBoundary = undefined;
-      state.doneAtBoundary = undefined;
-      state.parkAfterAck = undefined;
-      state.session = undefined;
-      state.currentStepId = undefined;
-      state.interrupt = () => undefined;
+      this.releaseStepSession(runId, state, launch.delegation, launch.ciTools);
     }
+  }
+
+  /** A fresh step's session teardown: revoke the launch's tools, record the usage peaks, and clear
+   *  what its turns left on the run state: the idle timer, the monitoring and waiting marks, the
+   *  turn boundary, the park intents and the session itself. */
+  private releaseStepSession(runId: string, state: ActiveRun, delegation: LaunchDelegation, ciTools: LaunchCiTools): void {
+    ciTools?.revoke(); state.revokeCiTools = undefined;
+    delegation?.revoke(); state.revokeDelegation = undefined;
+    this.recordUsagePeaks(runId);
+    this.clearIdleTimer(state);
+    this.monitoring.delete(runId);
+    this.waiting.delete(runId);
+    state.nextStep = undefined;
+    state.waitWakeTurn = undefined;
+    state.atTurnBoundary = undefined;
+    state.doneAtBoundary = undefined;
+    state.parkAfterAck = undefined;
+    state.session = undefined;
+    state.currentStepId = undefined;
+    state.interrupt = () => undefined;
   }
 
   /** Some adapters return assistant text only in their final result. Preserve that
@@ -8879,35 +9769,14 @@ export class RunManager {
     const run = this.store.getRun(runId);
     let review = false;
     if (run?.worktreePath && existsSync(run.worktreePath)) {
-      // An unresolved autosave may still own the real index. Conservatively
-      // treat its retained work as reviewable without starting `git add -N`.
-      const diff = this.autosaveCleanupBlocker(runId)
-        ? 'autosave cleanup pending'
-        : await worktreeDiff(run.worktreePath, run.baseBranch ?? 'HEAD');
-      if (durableRootFinish && diff.startsWith('(diff failed')) throw new Error('parent finish diff unavailable');
-      const hasDiff = diff.trim().length > 0 && !diff.startsWith('(diff failed');
-      const config = await loadConfig(this.repoRoot);
-      review = hasDiff && reviewGateEnabled(config) && run.autonomous !== true;
+      review = await this.successNeedsReview(run, run.worktreePath, durableRootFinish);
     }
     // Diff/config I/O can race cancellation or a replacement execution. Re-read
     // the record before touching steps, and never settle another session's work.
     const current = this.store.getRun(runId);
-    const active = this.active.get(runId);
-    // Disposal clears active, but cannot revoke an already accepted Finish/Stop.
-    // A different active state is still a replacement, even after disposal.
-    const disposedWithTerminalIntent = this.disposed && active === undefined && (state?.finishRequested || state?.cancelled);
-    if (!current || !['queued', 'running', 'waiting'].includes(current.status) ||
-      this.continuationGenerations.get(runId) !== continuationGeneration ||
-      (active !== state && !disposedWithTerminalIntent)) return;
+    if (!current || this.successSuperseded(runId, current.status, state, continuationGeneration)) return;
     if (state?.cancelled) {
-      const finishedAt = new Date().toISOString();
-      for (const step of current.steps) {
-        if (step.status === 'running' || step.status === 'waiting') {
-          this.store.updateStep(runId, step.id, { status: 'cancelled', finishedAt: step.finishedAt ?? finishedAt });
-        }
-      }
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt, currentStepId: undefined });
-      this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+      this.settleCancelledSuccess(runId, current);
       return;
     }
     // A worker's accepted continuation or a new child can defer parent completion.
@@ -8917,30 +9786,83 @@ export class RunManager {
       // follows the atomic terminal/step checkpoint, never the other way around.
       if (!this.store.commitRootFinishSuccess(runId, review ? 'review' : 'done')) return;
     } else {
-      const finishedAt = new Date().toISOString();
-      // An idle-closed Continue remains waiting until the whole task succeeds.
-      // Complete those intermediate steps before publishing terminal run status.
-      // A worker's incomplete earlier step stays `waiting`: a parent resume re-enters it (hearsay-tools/cezarion#1620).
-      for (const step of this.store.getRun(runId)?.steps ?? []) {
-        if (settlesAsDone(step, keepStepId)) {
-          this.store.updateStep(runId, step.id, { status: 'done', finishedAt: step.finishedAt ?? finishedAt });
-        }
-      }
-      this.store.updateRun(runId, {
-        status: review ? 'review' : 'done',
-        finishedAt,
-        currentStepId: undefined,
-        // A run that got all the way to a settled turn is not in a limit loop, so the resume
-        // counter starts over — otherwise a task that legitimately met the limit once a week would
-        // creep toward the cap forever and stop resuming for no reason anyone could see.
-        autoResumeAttempts: undefined,
-      });
+      this.commitOrdinarySuccess(runId, review, keepStepId);
     }
     this.store.appendEvent(runId, {
       type: 'lifecycle',
       message: review
         ? 'changes ready for review — send feedback, open a draft PR, or finish'
         : 'run finished',
+    });
+  }
+
+  /**
+   * Whether a successful run rests at `review`: its worktree holds a diff, the review gate is
+   * on, and the run is not autonomous. A root finish cannot settle without a diff, so a failed
+   * diff throws for it.
+   */
+  private async successNeedsReview(run: RunRecord, worktreePath: string, durableRootFinish: boolean): Promise<boolean> {
+    // An unresolved autosave may still own the real index. Conservatively
+    // treat its retained work as reviewable without starting `git add -N`.
+    const diff = this.autosaveCleanupBlocker(run.id)
+      ? 'autosave cleanup pending'
+      : await worktreeDiff(worktreePath, run.baseBranch ?? 'HEAD');
+    if (durableRootFinish && diff.startsWith('(diff failed')) throw new Error('parent finish diff unavailable');
+    const hasDiff = diff.trim().length > 0 && !diff.startsWith('(diff failed');
+    const config = await loadConfig(this.repoRoot);
+    return hasDiff && reviewGateEnabled(config) && run.autonomous !== true;
+  }
+
+  /** True when the success settlement must not write: the run is no longer live, a newer
+   *  continuation started, or another execution replaced the one that began settling. */
+  private successSuperseded(
+    runId: string,
+    status: RunRecord['status'],
+    state: ActiveRun | undefined,
+    continuationGeneration: symbol | undefined,
+  ): boolean {
+    const active = this.active.get(runId);
+    // Disposal clears active, but cannot revoke an already accepted Finish/Stop.
+    // A different active state is still a replacement, even after disposal.
+    const disposedWithTerminalIntent = this.disposed && active === undefined && (state?.finishRequested || state?.cancelled);
+    return !['queued', 'running', 'waiting'].includes(status) ||
+      this.continuationGenerations.get(runId) !== continuationGeneration ||
+      (active !== state && !disposedWithTerminalIntent);
+  }
+
+  /** A Stop accepted while the success settlement read the diff: the run and its running and
+   *  waiting steps become cancelled, and a step keeps a finish time it already has. */
+  private settleCancelledSuccess(runId: string, current: RunRecord): void {
+    const finishedAt = new Date().toISOString();
+    for (const step of current.steps) {
+      if (step.status === 'running' || step.status === 'waiting') {
+        this.store.updateStep(runId, step.id, { status: 'cancelled', finishedAt: step.finishedAt ?? finishedAt });
+      }
+    }
+    this.store.updateRun(runId, { status: 'cancelled', finishedAt, currentStepId: undefined });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+  }
+
+  /** The ordinary success path (not a root finish): the steps that settle as done, then the run
+   *  as `review` or `done`. */
+  private commitOrdinarySuccess(runId: string, review: boolean, keepStepId: string | undefined): void {
+    const finishedAt = new Date().toISOString();
+    // An idle-closed Continue remains waiting until the whole task succeeds.
+    // Complete those intermediate steps before publishing terminal run status.
+    // A worker's incomplete earlier step stays `waiting`: a parent resume re-enters it (hearsay-tools/cezarion#1620).
+    for (const step of this.store.getRun(runId)?.steps ?? []) {
+      if (settlesAsDone(step, keepStepId)) {
+        this.store.updateStep(runId, step.id, { status: 'done', finishedAt: step.finishedAt ?? finishedAt });
+      }
+    }
+    this.store.updateRun(runId, {
+      status: review ? 'review' : 'done',
+      finishedAt,
+      currentStepId: undefined,
+      // A run that got all the way to a settled turn is not in a limit loop, so the resume
+      // counter starts over — otherwise a task that legitimately met the limit once a week would
+      // creep toward the cap forever and stop resuming for no reason anyone could see.
+      autoResumeAttempts: undefined,
     });
   }
 
@@ -9179,7 +10101,7 @@ export class RunManager {
       liveWorkers: this.monitorsLiveWorkers(runId),
       humanWait, doneRequested: !!doneRequest,
     });
-    const { monitoring, humanGate, ask, notes: askNotes, waitCard } = read;
+    const { monitoring, humanGate, ask } = read;
     this.latchAskLineCard(runId, humanWait, read);
     discardQueuedMessagesOnAsk(state.session, read);
     // The turn that just ended answered a nudge: one flag per cause (hearsay-tools/cezarion#1234,
@@ -9188,15 +10110,7 @@ export class RunManager {
     state.noWaitNudged = undefined;
     state.completionNudgeAnswered = state.completionNudged === state.session ? state.session : undefined;
     state.completionNudged = undefined;
-    for (const note of askNotes) this.store.appendEvent(runId, { type: 'note', stepId: turn.stepId, ...note });
-    this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
-    // An autonomous run registers no newly parsed ask line before the budget, as `cezar_ask`
-    // refuses it (hearsay-tools/cezarion#1234): the autonomous nudge goes instead. Do this before
-    // prepareHumanAsk latches it; an existing/native ask or a human wait's card still blocks the helper.
-    const askNudged = !!ask && !waitCard && sessionOpen && this.tryAutonomousNudge(runId, state, turn.stepId, ask);
-    if (ask && !askNudged) this.prepareHumanAsk(state);
-    if (humanGate && !ask && !state.pendingHumanAsk) this.raiseHumanGate(runId, state);
-    if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, humanWait, null);
+    const askNudged = this.prepareTurnAsk(runId, state, { stepId: turn.stepId, sessionOpen, humanWait }, read);
     state.parkAfterAck = sessionOpen && state.session
       ? { session: state.session, monitoring, humanGate, nudgedLastTurn, scheduleWakeup: turn.scheduleWakeup } : undefined;
     const settled = this.settleTurn(runId, state, 'turn-end', {
@@ -9211,6 +10125,24 @@ export class RunManager {
     if (settled && this.store.getRun(runId)?.autoResumeAttempts !== undefined) {
       this.store.updateRun(runId, { autoResumeAttempts: undefined });
     }
+  }
+
+  /** Prepare the turn's ask before the turn end settles (`endTurn`): its notes, the `invalidAsk`
+   *  flag, and the ask or human gate the run parks on. True when the autonomous nudge went instead
+   *  of the ask line. */
+  private prepareTurnAsk(runId: string, state: ActiveRun, turn: { stepId: string; sessionOpen: boolean; humanWait: HumanWaitEntry | undefined },
+    read: TurnEndRead): boolean {
+    const { humanGate, ask, notes: askNotes, waitCard } = read;
+    for (const note of askNotes) this.store.appendEvent(runId, { type: 'note', stepId: turn.stepId, ...note });
+    this.store.updateRun(runId, { invalidAsk: !ask && askNotes.length > 0 ? true : undefined });
+    // An autonomous run registers no newly parsed ask line before the budget, as `cezar_ask`
+    // refuses it (hearsay-tools/cezarion#1234): the autonomous nudge goes instead. Do this before
+    // prepareHumanAsk latches it; an existing/native ask or a human wait's card still blocks the helper.
+    const askNudged = !!ask && !waitCard && turn.sessionOpen && this.tryAutonomousNudge(runId, state, turn.stepId, ask);
+    if (ask && !askNudged) this.prepareHumanAsk(state);
+    if (humanGate && !ask && !state.pendingHumanAsk) this.raiseHumanGate(runId, state);
+    if (humanGate && !ask) this.recordTurnEndQuestion(runId, state, turn.humanWait, null);
+    return askNudged;
   }
 
   /** The turn end an entry settles after it (`settleIdleBoundary`, `handleAgentInputReady`), and
@@ -9240,91 +10172,18 @@ export class RunManager {
     const stepId = turn.stepId;
     // A done goes to the completion gate first (hearsay-tools/cezarion#1301). A refused done is not a done.
     const gate = refusal ?? (turn.done && session?.open ? this.completionGate(runId) : 'accept');
-    if (gate === 'held') {
-      // A stopped root, or a question that parked for the user: the done stays at the boundary.
-      if (entry === 'turn-end') {
-        this.recordDoneAtBoundary(state, true, turn.doneRequest);
-        this.clearHeldHumanInputTimer(state);
-        if (state.agentInputError) return false;
-      }
-      this.writeTurnHeartbeat(runId, entry, { kind: 'park', keepsSlot: this.monitoring.has(runId) });
-      return true;
-    }
+    if (gate === 'held') return this.settleHeldTurn(runId, state, entry, turn);
     const refused = typeof gate === 'object' ? gate : undefined;
     if (entry === 'ready') state.autonomousNudgePending = undefined;
-    const facts = (inputTaken: boolean | undefined): TurnEndFacts => {
-      const run = this.store.getRun(runId);
-      return {
-        sessionOpen: !state.cancelled && !!session?.open,
-        done: turn.done,
-        ...(refused ? { doneRefused: { liveWorkers: refused.liveWorkerIds.length > 0 } } : {}),
-        inputInFlight: !!state.agentInputFlight,
-        inputQueued: this.hasQueuedAgentInputs(runId, state.agentInputFlight?.inputIds),
-        inputTaken,
-        nudgePending: !!session && state.autonomousNudgePending === session,
-        turnAsk: !!turn.ask,
-        nativeAsk: !!state.pendingHumanAsk,
-        question: !!turn.ask || turn.humanGate || !!state.pendingHumanAsk || this.hasPendingHumanAsk(runId),
-        agentWaits: this.holdsAgentWaits(runId),
-        cezarHumanWait: (run?.waits ?? []).some(isCezarHumanWait),
-        stepScope: !!session && state.nextStep?.session === session,
-        noWaitNudgedLastTurn: turn.nudgedLastTurn,
-        completionNudgedLastTurn: !!session && state.completionNudgeAnswered === session,
-        autonomous: !!state.autonomous,
-        budgetSpent: this.automaticWakes(runId) >= MAX_AUTO_CONTINUES,
-        tools: !state.toolless,
-      };
-    };
     let noted = false;
     const noteRefusal = () => {
       if (!refused || noted) return;
       noted = true;
       this.store.appendEvent(runId, { type: 'note', tone: 'warning', ...(stepId ? { stepId } : {}), message: `Completion blocked: ${refused.message}` });
     };
-    // The monitoring line and `ScheduleWakeup` open their timer before the rule reads the waits, as
-    // the `cezar_wait` timer they alias. An autonomous nudge waiting for readiness keeps precedence.
-    const openAlias = () => {
-      if (turn.monitoring && session?.open && state.autonomousNudgePending !== session) this.openTimerAlias(runId, state, turn.scheduleWakeup);
-    };
-    if (turn.askNudged) {
-      // The ask line's autonomous nudge went instead of the question: its turn is the next one.
-      this.recordDoneAtBoundary(state, false, turn.doneRequest);
-      this.clearHeldHumanInputTimer(state);
-      if (state.agentInputError) return false;
-      this.writeTurnHeartbeat(runId, entry, { kind: 'nudge', cause: 'no-wait', autonomous: true });
-      return true;
-    }
-    // A turn end opens it once owed input was tried; this turn's ask keeps that input back, so its
-    // monitoring line opens the timer now. A refused done decides before any alias, as before.
-    if (entry !== 'turn-end' || (turn.ask && !refused)) openAlias();
-    // The turn end and the gate deliver owed input; an acknowledgement or readiness finds it already tried.
-    let decision = decideTurnEnd(facts(entry === 'turn-end' || entry === 'gate' ? undefined : false));
-    const keepDone = turn.done && (!refused || (decision.kind === 'defer' && !!decision.keepDone));
-    if (entry === 'turn-end') this.recordDoneAtBoundary(state, keepDone, turn.doneRequest);
-    else if (entry === 'ack' && turn.done && !keepDone) state.doneAtBoundary = undefined;
-    let tried = false;
-    if (decision.kind === 'take-input') {
-      if (decision.refused) noteRefusal();
-      tried = true;
-      // #505: input the harness accepted but has not read yet runs as its next turn. An in-flight
-      // submission is settled by its acknowledgement (parkAfterAck), not here.
-      const taken = this.flushAgentInputs(runId) || (!turn.humanGate && this.harnessOwesInput(state)) ||
-        !!state.agentInputFlight || this.harnessHoldsHumanInput(state);
-      if (!taken) openAlias();
-      decision = decideTurnEnd(facts(taken));
-    }
-    if (entry === 'turn-end') {
-      if (tried) this.armUnreadInputTimer(runId, state);
-      if (tried && this.harnessHoldsHumanInput(state)) this.armHeldHumanInputTimer(runId, state);
-      else this.clearHeldHumanInputTimer(state);
-      if (state.agentInputError) return false;
-      // `CEZ:ASK` surfaces the structured question as an ask card (#473) before the rule parks on it.
-      if (turn.ask && turn.sink && decision.kind !== 'closed' && decision.kind !== 'input' && !this.humanWaitShown(runId, turn.humanWait)) {
-        emitAskRequested(turn.sink, turn.ask);
-        this.recordTurnEndQuestion(runId, state, turn.humanWait, turn.ask);
-        this.routeWorkerQuestion(runId);
-      }
-    }
+    if (turn.askNudged) return this.settleAskNudgedTurn(runId, state, entry, turn);
+    const { decision, tried } = this.decideSettledTurn(runId, state, session, entry, turn, refused, noteRefusal);
+    if (entry === 'turn-end' && !this.settleTurnEndInput(runId, state, turn, tried, decision)) return false;
     // A run an earlier entry already parked keeps that park: a second one would free its slot twice.
     if (entry !== 'turn-end' && decision.kind === 'park' && this.waiting.has(runId)) return true;
     const outcome = this.carryOutTurnEnd(runId, state, stepId, decision, refused, noteRefusal);
@@ -9333,76 +10192,219 @@ export class RunManager {
     return true;
   }
 
-  /** Carry out what the turn-end rule decided, and report how it left the run. */
+  /** The completion gate held the done (`settleTurn`). A stopped root, or a question that parked
+   *  for the user: the done stays at the boundary. False when the input checkpoint failed. */
+  private settleHeldTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn): boolean {
+    if (entry === 'turn-end') {
+      this.recordDoneAtBoundary(state, true, turn.doneRequest);
+      this.clearHeldHumanInputTimer(state);
+      if (state.agentInputError) return false;
+    }
+    this.writeTurnHeartbeat(runId, entry, { kind: 'park', keepsSlot: this.monitoring.has(runId) });
+    return true;
+  }
+
+  /** The ask line's autonomous nudge went instead of the question (`settleTurn`): its turn is the
+   *  next one. False when the input checkpoint failed. */
+  private settleAskNudgedTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn): boolean {
+    this.recordDoneAtBoundary(state, false, turn.doneRequest);
+    this.clearHeldHumanInputTimer(state);
+    if (state.agentInputError) return false;
+    this.writeTurnHeartbeat(runId, entry, { kind: 'nudge', cause: 'no-wait', autonomous: true });
+    return true;
+  }
+
+  /** What the turn-end rule decides for a settled turn (`settleTurn`): the timer alias the rule
+   *  reads, the first decision and the done it keeps, then the owed input a `take-input` decision
+   *  tries and the decision after it. `tried` is true when that input was tried. */
+  private decideSettledTurn(runId: string, state: ActiveRun, session: AgentSession | undefined, entry: 'turn-end' | 'ack' | 'ready' | 'gate',
+    turn: SettledTurn, refused: CompletionRefusal | undefined, noteRefusal: () => void): { decision: TurnEndDecision; tried: boolean } {
+    // A turn end opens it once owed input was tried; this turn's ask keeps that input back, so its
+    // monitoring line opens the timer now. A refused done decides before any alias, as before.
+    if (entry !== 'turn-end' || (turn.ask && !refused)) this.openTurnTimerAlias(runId, state, session, turn);
+    // The turn end and the gate deliver owed input; an acknowledgement or readiness finds it already tried.
+    const decision = decideTurnEnd(this.turnEndFacts(runId, state, session, turn, refused, entry === 'turn-end' || entry === 'gate' ? undefined : false));
+    this.keepSettledDone(state, entry, turn, refused, decision);
+    if (decision.kind !== 'take-input') return { decision, tried: false };
+    if (decision.refused) noteRefusal();
+    const taken = this.takeOwedInput(runId, state, turn);
+    if (!taken) this.openTurnTimerAlias(runId, state, session, turn);
+    return { decision: decideTurnEnd(this.turnEndFacts(runId, state, session, turn, refused, taken)), tried: true };
+  }
+
+  /** The facts the turn-end rule reads for a settled turn (`decideSettledTurn`). `session` is the
+   *  session `settleTurn` found. */
+  private turnEndFacts(runId: string, state: ActiveRun, session: AgentSession | undefined, turn: SettledTurn,
+    refused: CompletionRefusal | undefined, inputTaken: boolean | undefined): TurnEndFacts {
+    const run = this.store.getRun(runId);
+    return {
+      sessionOpen: !state.cancelled && !!session?.open,
+      done: turn.done,
+      ...(refused ? { doneRefused: { liveWorkers: refused.liveWorkerIds.length > 0 } } : {}),
+      inputInFlight: !!state.agentInputFlight,
+      inputQueued: this.hasQueuedAgentInputs(runId, state.agentInputFlight?.inputIds),
+      inputTaken,
+      nudgePending: !!session && state.autonomousNudgePending === session,
+      turnAsk: !!turn.ask,
+      nativeAsk: !!state.pendingHumanAsk,
+      question: !!turn.ask || turn.humanGate || !!state.pendingHumanAsk || this.hasPendingHumanAsk(runId),
+      agentWaits: this.holdsAgentWaits(runId),
+      cezarHumanWait: (run?.waits ?? []).some(isCezarHumanWait),
+      stepScope: !!session && state.nextStep?.session === session,
+      noWaitNudgedLastTurn: turn.nudgedLastTurn,
+      completionNudgedLastTurn: !!session && state.completionNudgeAnswered === session,
+      autonomous: !!state.autonomous,
+      budgetSpent: this.automaticWakes(runId) >= MAX_AUTO_CONTINUES,
+      tools: !state.toolless,
+    };
+  }
+
+  /** The monitoring line and `ScheduleWakeup` open their timer before the rule reads the waits, as
+   *  the `cezar_wait` timer they alias. An autonomous nudge waiting for readiness keeps precedence. */
+  private openTurnTimerAlias(runId: string, state: ActiveRun, session: AgentSession | undefined, turn: SettledTurn): void {
+    if (turn.monitoring && session?.open && state.autonomousNudgePending !== session) this.openTimerAlias(runId, state, turn.scheduleWakeup);
+  }
+
+  /** The done the first decision keeps at the boundary (`decideSettledTurn`): a turn end records
+   *  it, and an acknowledgement drops a refused done the rule does not keep. */
+  private keepSettledDone(state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn,
+    refused: CompletionRefusal | undefined, decision: TurnEndDecision): void {
+    const keepDone = turn.done && (!refused || (decision.kind === 'defer' && !!decision.keepDone));
+    if (entry === 'turn-end') this.recordDoneAtBoundary(state, keepDone, turn.doneRequest);
+    else if (entry === 'ack' && turn.done && !keepDone) state.doneAtBoundary = undefined;
+  }
+
+  /** The owed input a `take-input` decision tries (`decideSettledTurn`). True when input was taken.
+   *  #505: input the harness accepted but has not read yet runs as its next turn. An in-flight
+   *  submission is settled by its acknowledgement (parkAfterAck), not here. */
+  private takeOwedInput(runId: string, state: ActiveRun, turn: SettledTurn): boolean {
+    return this.flushAgentInputs(runId) || (!turn.humanGate && this.harnessOwesInput(state)) ||
+      !!state.agentInputFlight || this.harnessHoldsHumanInput(state);
+  }
+
+  /** A turn end's own steps after the rule decided (`settleTurn`): the unread and held input timers,
+   *  then the `CEZ:ASK` card. False when the input checkpoint failed. */
+  private settleTurnEndInput(runId: string, state: ActiveRun, turn: SettledTurn, tried: boolean, decision: TurnEndDecision): boolean {
+    if (tried) this.armUnreadInputTimer(runId, state);
+    if (tried && this.harnessHoldsHumanInput(state)) this.armHeldHumanInputTimer(runId, state);
+    else this.clearHeldHumanInputTimer(state);
+    if (state.agentInputError) return false;
+    // `CEZ:ASK` surfaces the structured question as an ask card (#473) before the rule parks on it.
+    if (turn.ask && turn.sink && decision.kind !== 'closed' && decision.kind !== 'input' && !this.humanWaitShown(runId, turn.humanWait)) {
+      emitAskRequested(turn.sink, turn.ask);
+      this.recordTurnEndQuestion(runId, state, turn.humanWait, turn.ask);
+      this.routeWorkerQuestion(runId);
+    }
+    return true;
+  }
+
+  /** Carry out what the turn-end rule decided, and report how it left the run. A refusal the
+   *  decision follows is noted first; then the decision kind's own method runs (`turnEndCarriers`). */
   private carryOutTurnEnd(runId: string, state: ActiveRun, stepId: string | undefined, decision: TurnEndDecision,
     refused: CompletionRefusal | undefined, noteRefusal: () => void): TurnEndOutcome {
     const session = state.session;
-    const parked = (): TurnEndOutcome => ({ kind: 'park', keepsSlot: this.monitoring.has(runId) });
-    if ('refused' in decision && decision.refused) noteRefusal();
+    const decisionRefused = 'refused' in decision && !!decision.refused;
+    if (decisionRefused) noteRefusal();
     // A refusal that settles the turn end replaces Cezar's own human wait, as the agent's own wait would.
-    const settlesRefusal = !!refused && !('refused' in decision && decision.refused) && !(decision.kind === 'defer' && decision.keepDone);
+    const settlesRefusal = !!refused && !decisionRefused && !(decision.kind === 'defer' && decision.keepDone);
     if (settlesRefusal) this.withdrawCezarHumanWaits(runId);
-    switch (decision.kind) {
-      case 'closed': case 'input': case 'take-input':
-        return { kind: 'running' };
-      case 'defer':
-        // A refused autonomous nudge waits for readiness at this boundary, bounded by the idle timer.
-        return !decision.keepDone && session && state.autonomousNudgePending === session ? { kind: 'readiness' } : { kind: 'running' };
-      case 'done':
-        this.closeAsDone(runId, state, session);
-        return { kind: 'done' };
-      case 'park':
-        // A human wait is shown and parks for the user; CI and timer waits keep their slot. A
-        // question with no wait parks for the user, and the freed slot can start a queued run.
-        if (!this.parkOnWaits(runId, state)) this.parkForUser(runId, state, stepId);
-        return parked();
-      case 'completion-wait':
-        // One nudge per cycle: Cezar waits on the live workers for the agent.
-        noteRefusal();
-        this.registerCompletionWait(runId, refused!.liveWorkerIds);
-        if (!this.parkOnWaits(runId, state)) this.parkForUser(runId, state, stepId);
-        return parked();
-      case 'human-wait': {
-        if (decision.via === 'completion') {
-          noteRefusal();
-          const wait = this.openHumanAlias(runId, state, 'completion');
-          if (wait?.source === 'cezar' && wait.askSeq === undefined) this.showCezarHumanWait(runId, state, wait, refused!.message);
-          this.parkForUser(runId, state, stepId);
-          return parked();
-        }
-        const capNote = state.autonomous ? `autonomous — safety cap reached (${MAX_AUTO_CONTINUES}); automatic continuation paused`
-          : `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you`;
-        if (settlesRefusal) {
-          noteRefusal();
-          this.openTurnEndHumanWait(runId, state, stepId, 'budget', capNote);
-          return parked();
-        }
-        // Stopping, finishing, parent completion and owed input keep today's plain park.
-        if (!this.canAutoContinue(runId, state)) this.parkForUser(runId, state, stepId);
-        else this.openTurnEndHumanWait(runId, state, stepId, decision.via, decision.via === 'no-wait' ? NO_WAIT_NOTE : capNote, true);
-        return parked();
-      }
-      case 'nudge': {
-        if (decision.cause === 'completion') {
-          const text = refused!.liveWorkerIds.length ? `${refused!.message} ${COMPLETION_WILL_WAIT}` : refused!.message;
-          state.noWaitNudgeSawContent = false;
-          if (!session || !this.canAutoContinue(runId, state) || !this.submitAgentInput(runId, state, [{ type: 'text', text }])) {
-            noteRefusal();
-            this.parkForUser(runId, state, stepId);
-            return parked();
-          }
-          this.awaitCompletionNudgeReply(runId, state, session);
-          const spent = this.chargeAutomaticWake(runId);
-          this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: `${COMPLETION_NUDGE_NOTE} (${spent}/${MAX_AUTO_CONTINUES}): ${refused!.code}` });
-          return { kind: 'nudge', cause: 'completion', autonomous: !!state.autonomous };
-        }
-        if (this.sendTurnEndNudge(runId, state, stepId, decision.text!)) return { kind: 'nudge', cause: 'no-wait', autonomous: !!state.autonomous };
-        if (session && state.autonomousNudgePending === session) return { kind: 'readiness' };
-        if (!this.canAutoContinue(runId, state)) this.parkForUser(runId, state, stepId);
-        else this.openTurnEndHumanWait(runId, state, stepId, 'no-wait', NO_WAIT_NOTE, true);
-        return parked();
-      }
+    const carryOut = this.turnEndCarriers[decision.kind] as (carry: TurnEndCarry, decision: TurnEndDecision) => TurnEndOutcome;
+    return carryOut({ runId, state, session, stepId, refused, noteRefusal, settlesRefusal }, decision);
+  }
+
+  /** The method for each decision kind (`carryOutTurnEnd`). A closed session settles elsewhere, and
+   *  owed input runs as the session's next turn: the run keeps running. */
+  private readonly turnEndCarriers: TurnEndCarriers = {
+    closed: () => ({ kind: 'running' }),
+    input: () => ({ kind: 'running' }),
+    'take-input': () => ({ kind: 'running' }),
+    defer: (carry, decision) => this.carryOutDefer(carry, decision),
+    done: carry => this.carryOutDone(carry),
+    park: carry => this.carryOutPark(carry),
+    'completion-wait': carry => this.carryOutCompletionWait(carry),
+    'human-wait': (carry, { via }) => via === 'completion' ? this.carryOutCompletionHumanWait(carry) : this.carryOutHumanWait(carry, via),
+    nudge: (carry, decision) => decision.cause === 'completion' ? this.carryOutCompletionNudge(carry) : this.carryOutNoWaitNudge(carry, decision.text!),
+  };
+
+  /** Every park returns this once it is carried out, so a worker's park notice goes here whichever
+   *  decision parked it (hearsay-tools/cezarion#1327). */
+  private parkedOutcome(runId: string): TurnEndOutcome {
+    this.noticeParkedWorker(runId);
+    return { kind: 'park', keepsSlot: this.monitoring.has(runId) };
+  }
+
+  /** A refused autonomous nudge waits for readiness at this boundary, bounded by the idle timer. */
+  private carryOutDefer({ state, session }: TurnEndCarry, decision: Extract<TurnEndDecision, { kind: 'defer' }>): TurnEndOutcome {
+    return !decision.keepDone && session && state.autonomousNudgePending === session ? { kind: 'readiness' } : { kind: 'running' };
+  }
+
+  private carryOutDone({ runId, state, session }: TurnEndCarry): TurnEndOutcome {
+    this.closeAsDone(runId, state, session);
+    return { kind: 'done' };
+  }
+
+  /** A human wait is shown and parks for the user; CI and timer waits keep their slot. A question
+   *  with no wait parks for the user, and the freed slot can start a queued run. */
+  private carryOutPark({ runId, state, stepId }: TurnEndCarry): TurnEndOutcome {
+    if (!this.parkOnWaits(runId, state)) this.parkForUser(runId, state, stepId);
+    return this.parkedOutcome(runId);
+  }
+
+  /** One nudge per cycle: Cezar waits on the live workers for the agent, then parks as `park` does. */
+  private carryOutCompletionWait(carry: TurnEndCarry): TurnEndOutcome {
+    carry.noteRefusal();
+    this.registerCompletionWait(carry.runId, carry.refused!.liveWorkerIds);
+    return this.carryOutPark(carry);
+  }
+
+  /** The completion cause's human wait: the refusal is its note, and Cezar's own wait shows it. */
+  private carryOutCompletionHumanWait({ runId, state, stepId, refused, noteRefusal }: TurnEndCarry): TurnEndOutcome {
+    noteRefusal();
+    const wait = this.openHumanAlias(runId, state, 'completion');
+    if (wait?.source === 'cezar' && wait.askSeq === undefined) this.showCezarHumanWait(runId, state, wait, refused!.message);
+    this.parkForUser(runId, state, stepId);
+    return this.parkedOutcome(runId);
+  }
+
+  /** The no-wait and budget human waits. A refusal that settles the turn end opens the budget wait. */
+  private carryOutHumanWait({ runId, state, stepId, noteRefusal, settlesRefusal }: TurnEndCarry, via: 'no-wait' | 'budget'): TurnEndOutcome {
+    const capNote = state.autonomous ? `autonomous — safety cap reached (${MAX_AUTO_CONTINUES}); automatic continuation paused`
+      : `automatic-wake budget spent (${MAX_AUTO_CONTINUES}); waiting for you`;
+    if (settlesRefusal) {
+      noteRefusal();
+      this.openTurnEndHumanWait(runId, state, stepId, 'budget', capNote);
+      return this.parkedOutcome(runId);
     }
+    // Stopping, finishing, parent completion and owed input keep today's plain park.
+    if (!this.canAutoContinue(runId, state)) this.parkForUser(runId, state, stepId);
+    else this.openTurnEndHumanWait(runId, state, stepId, via, via === 'no-wait' ? NO_WAIT_NOTE : capNote, true);
+    return this.parkedOutcome(runId);
+  }
+
+  /** The completion cause's nudge: the refusal message, which names the worker wait when live
+   *  workers block the done. A nudge that cannot go parks for the user. */
+  private carryOutCompletionNudge({ runId, state, session, stepId, refused, noteRefusal }: TurnEndCarry): TurnEndOutcome {
+    const text = refused!.liveWorkerIds.length ? `${refused!.message} ${COMPLETION_WILL_WAIT}` : refused!.message;
+    state.noWaitNudgeSawContent = false;
+    if (!session || !this.canAutoContinue(runId, state) || !this.submitAgentInput(runId, state, [{ type: 'text', text }])) {
+      noteRefusal();
+      this.parkForUser(runId, state, stepId);
+      return this.parkedOutcome(runId);
+    }
+    this.awaitCompletionNudgeReply(runId, state, session);
+    const spent = this.chargeAutomaticWake(runId);
+    this.store.appendEvent(runId, { type: 'note', ...(stepId ? { stepId } : {}), message: `${COMPLETION_NUDGE_NOTE} (${spent}/${MAX_AUTO_CONTINUES}): ${refused!.code}` });
+    return { kind: 'nudge', cause: 'completion', autonomous: !!state.autonomous };
+  }
+
+  /** The no-wait cause's nudge. One the wire refuses waits for input readiness when it is
+   *  autonomous, else opens Cezar's no-wait human wait. */
+  private carryOutNoWaitNudge({ runId, state, session, stepId }: TurnEndCarry, text: string): TurnEndOutcome {
+    if (this.sendTurnEndNudge(runId, state, stepId, text)) return { kind: 'nudge', cause: 'no-wait', autonomous: !!state.autonomous };
+    if (session && state.autonomousNudgePending === session) return { kind: 'readiness' };
+    if (!this.canAutoContinue(runId, state)) this.parkForUser(runId, state, stepId);
+    else this.openTurnEndHumanWait(runId, state, stepId, 'no-wait', NO_WAIT_NOTE, true);
+    return this.parkedOutcome(runId);
   }
 
   /** `turn complete — status=<word>` (spec 007): the handoff stays current when the agent writes

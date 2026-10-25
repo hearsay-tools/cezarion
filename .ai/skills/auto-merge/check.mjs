@@ -29,7 +29,7 @@ const NEVER = [
     'packages/web/e2e/{agent-browser,failure-setup,environment,fixture-server,held-browser-daemon,poll}.ts',
     'squeal.config.json', 'scripts/{test-changed,test-git-env}.mjs', '.ai/scripts/**', '**/tsconfig*.json',
   ] },
-  { why: 'ratchet baseline growth', unless: 'deletes', globs: ['**/*.baseline.json'] },
+  { why: 'ratchet baseline growth', unless: 'deletes', globs: ['**/*.baseline.json', '.github/*.baseline.json'] },
   { why: 'guard test change', unless: 'adds', globs: [
     'packages/cezar/src/server/{contract-parity*,route-parity,versioned-surface,bc-route-inventory,typed-bodies,api-types,origin-guard,host-guard}.test.ts',
     'packages/cezar/src/{contract-import-boundaries,contract-subpaths,test-wait-discipline,pack-check}.test.ts',

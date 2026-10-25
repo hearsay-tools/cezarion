@@ -8,13 +8,11 @@ import type { AgentSession } from '../core/agent-runner.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { RunStore } from '../runs/store.ts';
 import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
-import { CredentialRegistry } from '../delegation/credentials.ts';
-import { DelegationService } from '../delegation/service.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { COMPLETION_NUDGE_NOTE, IDLE_TIMEOUT_MS } from './run.ts';
 import { gatedProviderFailure } from './waits-parity.testkit.ts';
 import {
-  collect, controlledWire, fixtureUpdateRun, manager, parent, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker,
+  collect, controlledWire, delegatingParent, fixtureUpdateRun, manager, parent, restart, root, semaphore, store, until, useWorkerWaitFixture, waitOf, worker,
 } from './worker-wait.testkit.ts';
 
 /**
@@ -297,28 +295,14 @@ describe('messages wake without being waits', { timeout: 45_000 }, () => {
 
   /** A steering parent and a parked worker, with a service to message between them. */
   async function conversing(parentTask = 'mock:hold', workerTask = 'mock:hold') {
-    process.env.CEZ_DELEGATION = '1';
-    const p = await parent(parentTask);
-    const delegation = store.getRun(p.id)!.delegation!;
-    if (delegation.role !== 'root') throw Error('root fixture');
-    store.commitDelegation([{ id: p.id, delegation: { ...delegation, permissions: [...delegation.permissions, 'steer'] } }]);
+    const { p, service, callerFor } = await delegatingParent({ task: parentTask, permissions: ['spawn', 'wait', 'steer'] });
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id, workerTask);
     manager.enqueueOwnedRun(w.id);
     await until(() => store.getRun(w.id)?.status === 'waiting');
-    return { p, w, ...callers(p.id, w.id) };
+    return { p, w, service, parentCaller: callerFor(p.id), workerCaller: callerFor(w.id) };
   }
-  let credentials: CredentialRegistry | undefined;
-  afterEach(() => { credentials?.close(); credentials = undefined; });
-  function callers(parentId: string, workerId: string) {
-    credentials?.close();
-    credentials = new CredentialRegistry();
-    const [parentCaller, workerCaller] = [parentId, workerId].map(id => credentials!.authenticate(credentials!.issue('project', id, randomUUID()))!);
-    const service = new DelegationService();
-    service.registerProject({ id: 'project', root, store, manager });
-    return { service, parentCaller: parentCaller!, workerCaller: workerCaller! };
-  }
-  const say = (f: ReturnType<typeof callers>, from: 'parent' | 'worker', to: string, kind: 'progress' | 'request', text: string, id = randomUUID()) =>
+  const say = (f: Awaited<ReturnType<typeof conversing>>, from: 'parent' | 'worker', to: string, kind: 'progress' | 'request', text: string, id = randomUUID()) =>
     f.service.send(from === 'parent' ? f.parentCaller : f.workerCaller, { id, recipientRunId: to, kind, text, timeoutSeconds: 600 }).then(() => id);
 
   /** The parent parked on an agent worker wait for `f.w`. */

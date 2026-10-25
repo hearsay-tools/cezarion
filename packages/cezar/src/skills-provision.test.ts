@@ -9,6 +9,7 @@ import {
   MAX_SKILL_CLOSURE,
   PROVISION_IGNORE_MARK,
   mentionsSkill,
+  namesSkillCommand,
   provisionSkills,
   removeProvisionedSkills,
   skillClosure,
@@ -61,6 +62,41 @@ describe('mentionsSkill', () => {
   });
 });
 
+// hearsay-tools/cezarion#1672: a task prompt names a skill only as a typed `/name`.
+describe('namesSkillCommand', () => {
+  it('matches /name at the start of the text and of a word', () => {
+    expect(namesSkillCommand('/check-code-quality first', 'check-code-quality')).toBe(true);
+    expect(namesSkillCommand('When done, run the /check-code-quality skill', 'check-code-quality')).toBe(true);
+    expect(namesSkillCommand('then (/auto-merge)', 'auto-merge')).toBe(true);
+    expect(namesSkillCommand('then `/auto-merge`', 'auto-merge')).toBe(true);
+    expect(namesSkillCommand('line one\n/fix it', 'fix')).toBe(true);
+  });
+
+  it('matches /name before punctuation', () => {
+    expect(namesSkillCommand('run /auto-merge, then stop', 'auto-merge')).toBe(true);
+    expect(namesSkillCommand('then run /auto-merge.', 'auto-merge')).toBe(true);
+    expect(namesSkillCommand('Next: /auto-merge', 'auto-merge')).toBe(true);
+  });
+
+  it('never matches a path segment', () => {
+    expect(namesSkillCommand('read .ai/skills/check-code-quality/SKILL.md', 'check-code-quality')).toBe(false);
+    expect(namesSkillCommand('see src/fix', 'fix')).toBe(false);
+    expect(namesSkillCommand('see https://example.test/fix', 'fix')).toBe(false);
+    expect(namesSkillCommand('see ~/fix', 'fix')).toBe(false);
+    expect(namesSkillCommand('Open C:/repo/src', 'repo')).toBe(false);
+    expect(namesSkillCommand('Open /repo/src', 'repo')).toBe(false);
+    expect(namesSkillCommand('Open /repo.json', 'repo')).toBe(false);
+  });
+
+  it('never matches a bare word, a quoted name, a longer name or another case', () => {
+    expect(namesSkillCommand('fix the auto-merge label', 'auto-merge')).toBe(false);
+    expect(namesSkillCommand('run `fix` or "fix"', 'fix')).toBe(false);
+    expect(namesSkillCommand('run /auto-merger', 'auto-merge')).toBe(false);
+    expect(namesSkillCommand('run /auto-merge-x', 'auto-merge')).toBe(false);
+    expect(namesSkillCommand('run /Auto-Merge', 'auto-merge')).toBe(false);
+  });
+});
+
 describe('skillClosure', () => {
   it('lists the roots first, then every skill they name, transitively', () => {
     const a = skill('lead-a', 'then run helper-b');
@@ -108,6 +144,14 @@ describe('skillClosure', () => {
     const result = skillClosure([chain[0]!], chain);
     expect(result.skills).toHaveLength(MAX_SKILL_CLOSURE);
     expect(result.truncated).toBe(`step${MAX_SKILL_CLOSURE}`);
+  });
+
+  // hearsay-tools/cezarion#1672: the cap bounds companions; a root a human asked for always stays.
+  it('never caps a root, and caps the companions after the roots', () => {
+    const roots = Array.from({ length: 30 }, (_, i) => skill(`root-${i}`, i === 0 ? 'then run helper-x' : ''));
+    const result = skillClosure(roots, [...roots, skill('helper-x')]);
+    expect(result.skills.map((s) => s.name)).toEqual(roots.map((s) => s.name));
+    expect(result.truncated).toBe('helper-x');
   });
 
   it('reports no truncation when the closure fits', () => {

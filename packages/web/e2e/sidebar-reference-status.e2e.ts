@@ -46,12 +46,7 @@ beforeAll(async () => {
     ...(isIssue(status) ? { referencedIssueUrl: `https://github.com/o/r/issues/${600 + index}` } : { pullRequestUrl: `https://github.com/o/r/pull/${600 + index}` }),
     steps: [{ id: 'task', name: 'Task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'reference-fixture' }],
   }))
-  // Shared group issue and per-variant PRs travel through the same plain rendering.
-  const variants = ['A', 'B'].map((variant, index) => ({
-    ...records[0], id: `variant-${variant}`, title: 'Grouped references', groupId: 'references', variant,
-    referencedIssueUrl: 'https://github.com/o/r/issues/609', pullRequestUrl: `https://github.com/o/r/pull/${605 + index}`,
-  }))
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([...records, ...variants]))
+  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify(records))
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
     env: fixtureServeEnv(root), stdio: 'ignore',
   })
@@ -126,19 +121,6 @@ describe('sidebar reference status (#677)', () => {
       browser.screenshot(join(artifacts, `${theme}-selected-conflict.png`), { viewport: true })
     }, 180_000)
   }
-
-  it('paints the shared group reference and each variant reference', () => {
-    browser.goto(`${base}/p/${project}`)
-    const group = '[data-slot="group-row"][data-group-id="references"]'
-    browser.waitForFunction(`document.querySelector('${group} [data-slot="issue-chip"] svg:not([data-slot="reference-kind"])') !== null`)
-    const shared = browser.waitForValue(`document.querySelector('${group} [data-slot="issue-chip"] svg:not([data-slot="reference-kind"])').getAttribute('class')`)
-    expect(shared).toContain('text-merged-text')
-    browser.click(`${group} [data-slot="group-tile"]`)
-    for (const [variant, tone] of [['A', 'text-success'], ['B', 'text-merged-text']]) {
-      const glyph = browser.waitForValue(`document.querySelector('[data-run-id="variant-${variant}"] [data-slot="pr-chip"] svg:not([data-slot="reference-kind"])')?.getAttribute('class')`)
-      expect(glyph).toContain(tone)
-    }
-  })
 
   it('desktop hover keeps Resolve conflicts reachable and delivers the numbered prompt', () => {
     browser.goto(`${base}/p/${project}`)

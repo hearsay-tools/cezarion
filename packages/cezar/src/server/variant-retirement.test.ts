@@ -1,9 +1,9 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { createRunInputSchema, groupResponseSchema } from '@open-mercato/cezar-contract/runs';
+import { createRunInputSchema } from '@open-mercato/cezar-contract/runs';
 import { createAutomationInputSchema, updateAutomationInputSchema } from '@open-mercato/cezar-contract/automations';
 import { AutomationStore } from '../automations/store.ts';
 import { launchAutomationRun, launchScheduledRun } from '../automations/task-template.ts';
@@ -65,34 +65,6 @@ describe('parallel variant retirement', () => {
     expect(response.status).toBe(201);
     expect(await response.json()).toHaveProperty('id');
     expect(startRun).toHaveBeenCalledOnce();
-  });
-
-  it('reads historical groups after reopening and refuses pick without changing any retained data', async () => {
-    const records = ['A', 'B'].map(variant => {
-      const worktreePath = join(root, `retained-${variant}`);
-      mkdirSync(worktreePath);
-      writeFileSync(join(worktreePath, 'diff.txt'), `retained ${variant}`);
-      const record = store.createRun({ title: `Work (${variant})`, task: 'Work', workflow: 'quick-task', steps: [], groupId: 'old-group', variant });
-      store.updateRun(record.id, { status: 'done', archived: variant === 'B', branch: `retained-${variant}`, worktreePath });
-      return store.getRun(record.id)!;
-    });
-    store.close();
-    store = RunStore.open(join(root, '.ai/cezar'));
-    const app = createApp({ repoRoot: root, store, manager, version: 'test', bootProjectId: 'project' });
-    for (const prefix of ['/api/v1', '/api/v1/p/project', '/api/v1/p/default']) {
-      const read = await apiRequest(app, `${prefix}/groups/old-group`);
-      expect(read.status).toBe(200);
-      expect(groupResponseSchema.parse(await read.json()).runs.map(r => r.variant)).toEqual(['A', 'B']);
-      const pick = await apiRequest(app, `${prefix}/groups/old-group/pick`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ runId: records[0]!.id }) });
-      expect(pick.status).toBe(410);
-      expect((await pick.json() as { error: string }).error).toMatch(retired);
-    }
-    for (const record of records) {
-      expect(store.getRun(record.id)).toEqual(record);
-      expect(existsSync(record.worktreePath!)).toBe(true);
-      expect(readFileSync(join(record.worktreePath!, 'diff.txt'), 'utf8')).toBe(`retained ${record.variant}`);
-    }
-    expect(manager.cancel).not.toHaveBeenCalled();
   });
 
   it.each(['github', 'schedule'] as const)('retains a saved %s template but refuses to launch its candidates', async kind => {

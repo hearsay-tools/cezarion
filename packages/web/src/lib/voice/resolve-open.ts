@@ -20,7 +20,6 @@ import { voiceStatusMatches } from './status-map'
 
 export type OpenTarget =
   | { kind: 'run'; runId: string }
-  | { kind: 'group'; groupId: string }
   | { kind: 'empty' }
   | { kind: 'past-end' }
 
@@ -38,14 +37,14 @@ function rowsFor(runs: readonly RunSummary[], sidebarView: SidebarView, status: 
 }
 
 const rowMatches = (row: QuickListRow, status: VoiceStatus): boolean =>
-  row.kind === 'run' ? voiceStatusMatches(status, row.run) : row.members.some((member) => voiceStatusMatches(status, member))
+  voiceStatusMatches(status, row.run)
 
 const rowHolds = (row: QuickListRow, runId: string): boolean =>
-  row.kind === 'run' ? row.run.id === runId : row.members.some((member) => member.id === runId)
+  row.run.id === runId
 
 const targetOf = (row: QuickListRow | undefined): OpenTarget => {
   if (row === undefined) return { kind: 'past-end' }
-  return row.kind === 'run' ? { kind: 'run', runId: row.run.id } : { kind: 'group', groupId: row.groupId }
+  return { kind: 'run', runId: row.run.id }
 }
 
 export function resolveOpenTarget(args: {

@@ -154,7 +154,13 @@ export function describeTestEnvHolders(holders, {
 }
 
 // A shell can die before its build/clone child. Retain its group claim until the
-// last non-zombie member exits. Unknown visibility never authorizes replacement.
+// last non-zombie member exits. Returns true (live), false (dead), or undefined
+// (unknown). On Linux, unrelated process starts/exits can change the two /proc
+// listings, so unknown is common under churn, even for a zombie-only group.
+// Callers must retain ownership and retry on unknown, never treat it as stopped.
+// Sustained churn can prevent reclamation until acquisition times out. One scan
+// seeing only zombies cannot exclude a live member that forked an unseen child
+// and exited during enumeration; a dead leader alone does not remove that race.
 function groupLive(pgid) {
   if (process.platform === 'win32') {
     const live = windowsProbe('live', String(pgid));

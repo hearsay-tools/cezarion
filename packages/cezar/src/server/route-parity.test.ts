@@ -239,7 +239,6 @@ describe('project-route alias parity (unprefixed vs /api/v1/p/<boot> vs /api/v1/
     await expectParity('/workflows/no-such-workflow', () => ({
       method: 'DELETE',
     }));
-    await expectParity('/groups/no-such-group/pick', json('POST', { runId: 'x' }));
     // 409: the follow-up inbox is off (CEZ_FOLLOWUPS unset).
     await expectParity('/todos/t1/start', json('POST', {}));
     // 200 non-GET without observable side effects (no worktrees exist).

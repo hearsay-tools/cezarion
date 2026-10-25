@@ -19,6 +19,7 @@ import type {
   WorkflowsResponse,
 } from '@open-mercato/cezar-api-client'
 import { resetToasts, Toaster } from '@/components/ui/toaster'
+import { answerFixture, answerFromRoutes, jsonResponse, type FetchRoute } from '@/test/fetch-routes'
 
 import { readDraft, resetDraft, writeDraft } from './new-task-draft'
 import { NewTaskRoute } from './new-task'
@@ -277,54 +278,57 @@ function serve(overrides: {
   }
   requests = []
   let saves = 0
-  const json = (payload: unknown, status = 200) =>
-    new Response(JSON.stringify(payload), { status, headers: { 'content-type': 'application/json' } })
-  const answer = (payload: unknown) =>
-    typeof payload === 'function' ? (payload as () => Promise<Response>)() : json(payload)
+  // Tried in order. A route without a method answers every method. `projects` and
+  // `agentProfiles` answer `undefined` until a test sets them, which falls through to the 404.
+  const routes: FetchRoute<Recorded>[] = [
+    { path: '/api/v1/health', respond: () => answerFixture(data.health) },
+    { path: '/api/v1/providers/status', respond: () => answerFixture(data.providerStatus, data.providerStatusStatus) },
+    { path: '/api/v1/models?runner=claude', respond: () => jsonResponse({ runner: 'claude', models: [], source: 'unavailable', stale: false }) },
+    { path: '/api/v1/models?runner=codex', respond: () => jsonResponse(data.models) },
+    { path: '/api/v1/skills', respond: () => jsonResponse(data.skills) },
+    { method: 'GET', path: '/api/v1/workflows', respond: () => jsonResponse(data.workflows) },
+    {
+      method: 'POST',
+      path: '/api/v1/workflows',
+      respond: () => {
+        const answer = data.saveWorkflow[Math.min(saves, data.saveWorkflow.length - 1)]!
+        saves += 1
+        return jsonResponse(answer.body, answer.status)
+      },
+    },
+    { method: 'POST', path: '/api/v1/plan', respond: () => answerFixture(data.plan) },
+    { path: '/api/v1/repo', respond: () => answerFixture(data.repo) },
+    { path: '/api/v1/launch-key', respond: () => jsonResponse({ key: data.launchKey }) },
+    { method: 'GET', path: '/api/v1/ui-state', respond: () => jsonResponse(data.uiState, data.uiStateStatus) },
+    { method: 'PUT', path: '/api/v1/ui-state', respond: ({ body }) => jsonResponse(body ?? {}) },
+    { method: 'POST', path: '/api/v1/runs', respond: () => answerFixture(data.createRun, data.createRunStatus) },
+    {
+      method: 'GET',
+      path: '/api/v1/config',
+      respond: () => (typeof data.config === 'function' ? data.config() : jsonResponse({ ...CONFIG, ...data.config })),
+    },
+    {
+      method: 'PUT',
+      path: '/api/v1/config',
+      respond: ({ body }) => jsonResponse({ baseBranch: (body as { baseBranch: string | null }).baseBranch, defaultRunner: 'claude' }),
+    },
+    { method: 'GET', path: '/api/v1/workspace/config', respond: () => jsonResponse(data.workspaceConfig) },
+    { method: 'GET', path: '/api/v1/projects', respond: () => (data.projects ? jsonResponse(data.projects) : undefined) },
+    {
+      method: 'GET',
+      path: '/api/v1/workspace/agent-profiles',
+      respond: () => (data.agentProfiles ? jsonResponse(data.agentProfiles) : undefined),
+    },
+  ]
   vi.stubGlobal(
     'fetch',
     vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input)
       const method = init?.method ?? 'GET'
       const body = init?.body ? (JSON.parse(String(init.body)) as unknown) : undefined
-      requests.push({ method, url, body })
-      if (url === '/api/v1/health') {
-        return typeof data.health === 'function' ? data.health() : json(data.health)
-      }
-      if (url === '/api/v1/providers/status') {
-        return typeof data.providerStatus === 'function'
-          ? data.providerStatus()
-          : json(data.providerStatus, data.providerStatusStatus)
-      }
-      if (url === '/api/v1/models?runner=claude') return json({ runner: 'claude', models: [], source: 'unavailable', stale: false })
-      if (url === '/api/v1/models?runner=codex') return json(data.models)
-      if (url === '/api/v1/skills') return json(data.skills)
-      if (url === '/api/v1/workflows' && method === 'GET') return json(data.workflows)
-      if (url === '/api/v1/workflows' && method === 'POST') {
-        const answer = data.saveWorkflow[Math.min(saves, data.saveWorkflow.length - 1)]!
-        saves += 1
-        return json(answer.body, answer.status)
-      }
-      if (url === '/api/v1/plan' && method === 'POST') {
-        return typeof data.plan === 'function' ? (data.plan as () => Promise<Response>)() : json(data.plan)
-      }
-      if (url === '/api/v1/repo') return answer(data.repo)
-      if (url === '/api/v1/launch-key') return json({ key: data.launchKey })
-      if (url === '/api/v1/ui-state' && method === 'GET') return json(data.uiState, data.uiStateStatus)
-      if (url === '/api/v1/ui-state' && method === 'PUT') return json(body ?? {})
-      if (url === '/api/v1/runs' && method === 'POST') return typeof data.createRun === 'function' ? data.createRun() : json(data.createRun, data.createRunStatus)
-      if (url === '/api/v1/config' && method === 'GET')
-        return typeof data.config === 'function'
-          ? data.config()
-          : json({ ...CONFIG, ...data.config })
-      if (url === '/api/v1/config' && method === 'PUT')
-        return json({ baseBranch: (body as { baseBranch: string | null }).baseBranch, defaultRunner: 'claude' })
-      if (url === '/api/v1/workspace/config' && method === 'GET') return json(data.workspaceConfig)
-      if (url === '/api/v1/projects' && method === 'GET' && data.projects) return json(data.projects)
-      if (url === '/api/v1/workspace/agent-profiles' && method === 'GET' && data.agentProfiles) {
-        return json(data.agentProfiles)
-      }
-      return json({ error: `unmocked ${method} ${url}` }, 404)
+      const request: Recorded = { method, url, body }
+      requests.push(request)
+      return answerFromRoutes(routes, request, () => jsonResponse({ error: `unmocked ${method} ${url}` }, 404))
     }),
   )
 }
