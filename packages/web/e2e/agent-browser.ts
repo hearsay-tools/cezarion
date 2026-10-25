@@ -464,7 +464,8 @@ export function fixtureServeEnv(
   } else if (discovery.error || discovery.status !== 128 || !notARepository.test(discovery.stderr)) {
     throw new Error(`cezar e2e: cannot verify fixture repository ${fixtureRoot}; refusing server boot`, { cause: discovery.error })
   }
-  // Production skill discovery reads HOME, independently of CEZ_HOME. Reset only
+  // Production skill discovery reads os.homedir() (USERPROFILE on Windows), independently
+  // of CEZ_HOME. Reset only
   // this fixture-owned directory; the caller's tools keep their original HOME.
   const serverHome = resolve(fixtureRoot, '.server-home')
   rmSync(serverHome, { recursive: true, force: true })
@@ -472,6 +473,7 @@ export function fixtureServeEnv(
   return {
     ...env,
     HOME: serverHome,
+    USERPROFILE: serverHome,
     // One line on purpose: the `fixture-serve-must-pin-cez-home` design guardian reads these
     // two together, and a CEZ_DRY_RUN without CEZ_HOME beside it is exactly the mistake it
     // exists to catch.

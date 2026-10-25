@@ -6,6 +6,12 @@ import { expect, it } from 'vitest'
 import { bootProjectId, cezarCli, fixtureServeEnv } from './agent-browser'
 import { spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 // fixture-server starts: 1
+// hearsay-tools/cezarion#1699: completed local reproduction at proof_base
+// 5136044253bd4046f2cdb72a2222a7181b77b248 in a disposable worktree with its own dependencies.
+// Command: pnpm exec vitest run --project e2e packages/web/e2e/fixture-home-isolation.e2e.ts
+// Old helper: 1 failed (host-agents-sentinel reached the catalog); fixed helper: 1 passed
+// (both host sentinels absent, project sentinel retained), with VITEST deleted in both runs.
+// This API-only test attaches no browser, so it produces no browser failure bundle.
 
 it('excludes invoking HOME skills from a real fixture server while keeping project skills', async () => {
   const root = mkdtempSync(join(tmpdir(), 'cez-e2e-home-isolation-'))
@@ -22,7 +28,7 @@ it('excludes invoking HOME skills from a real fixture server while keeping proje
     writeFileSync(join(repo, '.ai/skills/project-sentinel.md'), '# Project skill\nMust remain discoverable.\n')
     // Simulate the invoking account, then restore it before any browser or tool runs.
     process.env.HOME = invokingHome
-    const env = fixtureServeEnv(repo)
+    const env = fixtureServeEnv(repo, { USERPROFILE: invokingHome })
     if (previousHome === undefined) delete process.env.HOME
     else process.env.HOME = previousHome
     delete env.VITEST // Exercise production discovery, including the global directory walk.
