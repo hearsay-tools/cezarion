@@ -2,11 +2,16 @@
  * Bundle private runtime contract code and declarations into the published service dist, then
  * rewrite emitted root and subpath references. Keep source imports unchanged. Remove this step
  * when private runtime resolution is no longer needed.
+ *
+ * Every subpath repoints to one bundle of `packages/contract/src/index.ts`, so it exports only
+ * the names that index re-exports. A module the index reaches through a named re-export (`ask.ts`
+ * names a few of `ask-schema.ts`'s) keeps only those names in the bundle. The build fails when an
+ * emitted import names a contract value the bundle lacks (hearsay-tools/cezarion#1431).
  */
 import { execFileSync } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { build } from 'esbuild';
 
@@ -15,9 +20,9 @@ const dist = process.argv[2] ? resolve(process.argv[2]) : join(here, '..', 'dist
 const contractRoot = join(here, '..', '..', 'contract');
 const entry = join(contractRoot, 'src', 'index.ts');
 const outdir = join(dist, 'contract');
-// The bare name and every module subpath (`@open-mercato/cezar-contract/runs`, hearsay-tools/cezarion#1237):
-// all of them repoint to the one bundle, which exports every module's names.
+// The bare name and every module subpath (`@open-mercato/cezar-contract/runs`, hearsay-tools/cezarion#1237).
 const SPEC = /(['"])@open-mercato\/cezar-contract(?:\/[^'"]*)?\1/g;
+const CONTRACT = /^@open-mercato\/cezar-contract(?:\/[^'"]*)?$/;
 
 /** Emitted files that name the package — the copy happens only if it is really used. */
 const referrers = [];
@@ -51,6 +56,52 @@ await build({
   target: 'es2022',
   external: ['zod'],
 });
+
+// Link every emitted importer against the bundle, as Node does when the CLI starts, before
+// anything is repointed. Each specifier loads as a module of its own that re-exports the bundle,
+// so esbuild's message names the subpath. Every other import stays external: only contract
+// names are checked. `import-is-undefined` covers a namespace member the bundle lacks.
+const bundle = join(outdir, 'index.js');
+const importers = referrers.filter((p) => p.endsWith('.js'));
+const gaps = importers.length === 0 ? [] : await build({
+  entryPoints: importers,
+  absWorkingDir: dist,
+  outdir: join(dist, '.inline-contract-check'),
+  write: false,
+  bundle: true,
+  format: 'esm',
+  platform: 'neutral',
+  logLevel: 'silent',
+  logOverride: { 'import-is-undefined': 'error' },
+  plugins: [{
+    name: 'contract-exports',
+    setup(check) {
+      check.onResolve({ filter: /.*/ }, (args) => {
+        if (args.kind === 'entry-point') return undefined;
+        if (CONTRACT.test(args.path)) return { path: args.path, namespace: 'contract' };
+        if (args.namespace === 'contract') return { path: bundle };
+        return { external: true };
+      });
+      check.onLoad({ filter: /.*/, namespace: 'contract' }, () => ({ contents: `export * from ${JSON.stringify(bundle)};` }));
+    },
+  }],
+}).then(() => [], (error) => {
+  if (!Array.isArray(error?.errors)) throw error;
+  return error.errors;
+});
+if (gaps.length > 0) {
+  for (const { text, location } of gaps) {
+    const where = location ? `${join(basename(dist), location.file)}:${location.line}` : basename(dist);
+    const name = /import "([^"]+)"/i.exec(text)?.[1];
+    const subpath = /"contract:([^"]+)"/.exec(text)?.[1];
+    console.error(name && subpath
+      ? `inline-contract: ${where} imports "${name}" from "${subpath}", which dist/contract/index.js does not export`
+      : `inline-contract: ${where}: ${text}`);
+  }
+  console.error('inline-contract: the bundle holds only the names packages/contract/src/index.ts re-exports. '
+    + 'Re-export each name there: an `export *` of its module, or the named re-export that reaches it.');
+  process.exit(1);
+}
 
 // `tsc` is located through the module graph rather than a guessed `node_modules` path, because
 // `typescript` is a devDependency of THIS package and may sit here or be hoisted to the workspace
