@@ -21,6 +21,7 @@ const COUNTED = /\.(ts|tsx|mjs|cjs)$/;
 const EXCLUDED = /\.(test|testkit|e2e)\.|\/test\/|__fixtures__|\/fixtures\//;
 const isCounted = (path: string): boolean => COUNTED.test(path) && !EXCLUDED.test(path);
 const lineCount = (text: string): number => text.split('\n').length - 1;
+const lengthOf = (lengths: Record<string, number>, path: string): number => lengths[path] ?? 0;
 
 interface Baseline {
   $comment: string;
@@ -51,7 +52,7 @@ function compareLengths(lengths: Record<string, number>, baseline: Baseline) {
     unpinned: over.filter(([path]) => !(path in baseline.files)).map(([path, lines]) => `${path}: ${lines} lines, over the limit of ${baseline.limit}`),
     grown: over.filter(([path, lines]) => lines > (baseline.files[path] ?? Infinity)).map(([path, lines]) => `${path}: ${lines} lines, pinned at ${baseline.files[path]}`),
     stale: Object.entries(baseline.files)
-      .filter(([path, pin]) => (lengths[path] ?? 0) < pin || (lengths[path] ?? 0) <= baseline.limit)
+      .filter(([path, pin]) => lengthOf(lengths, path) < pin || lengthOf(lengths, path) <= baseline.limit)
       .map(([path, pin]) => `${path}: pinned at ${pin}, now ${lengths[path] ?? 'gone'}`),
   };
 }
@@ -59,7 +60,7 @@ function compareLengths(lengths: Record<string, number>, baseline: Baseline) {
 /** Lower every pin to the file's length and drop the pins that no longer apply. Never adds or raises one. */
 function pinnedLengths(lengths: Record<string, number>, baseline: Baseline): Record<string, number> {
   const files = Object.entries(baseline.files)
-    .filter(([path]) => (lengths[path] ?? 0) > baseline.limit)
+    .filter(([path]) => lengthOf(lengths, path) > baseline.limit)
     .map(([path, pin]) => [path, Math.min(pin, lengths[path] ?? pin)] as const);
   return Object.fromEntries(files.sort(([a], [b]) => a.localeCompare(b)));
 }
