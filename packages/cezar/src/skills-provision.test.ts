@@ -144,6 +144,14 @@ describe('skillClosure', () => {
     expect(result.truncated).toBe(`step${MAX_SKILL_CLOSURE}`);
   });
 
+  // hearsay-tools/cezarion#1672: the cap bounds companions; a root a human asked for always stays.
+  it('never caps a root, and caps the companions after the roots', () => {
+    const roots = Array.from({ length: 30 }, (_, i) => skill(`root-${i}`, i === 0 ? 'then run helper-x' : ''));
+    const result = skillClosure(roots, [...roots, skill('helper-x')]);
+    expect(result.skills.map((s) => s.name)).toEqual(roots.map((s) => s.name));
+    expect(result.truncated).toBe('helper-x');
+  });
+
   it('reports no truncation when the closure fits', () => {
     expect(skillClosure([skill('lead-a')], []).truncated).toBeUndefined();
   });

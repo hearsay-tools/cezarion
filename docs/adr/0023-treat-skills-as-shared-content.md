@@ -13,8 +13,8 @@ provisioning pass, and apply it to roots and companions. Skills disabled during 
 installed on later passes; existing copies stay until the task ends.
 
 Provision selected roots, the skills an agent step’s prompt names as a typed `/name`, and the
-catalog skills their bodies name into the run’s own worktree. Prompt-named skills follow the
-selected roots, so the closure cap never leaves them out.
+catalog skills their bodies name into the run’s own worktree. The closure cap bounds those
+companions only: it never leaves out a selected or prompt-named root.
 The companion scan is a bounded heuristic, not a guarantee that every dependency was discovered.
 Runs without an owned worktree retain a cache fallback.
 

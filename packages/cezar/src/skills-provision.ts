@@ -14,7 +14,8 @@ const execFileAsync = promisify(execFile);
  * enabled skill is installed.
  */
 
-/** Bound on one closure: a skill that names the whole catalog must not install all of it. */
+/** Bound on one closure's companions: a skill that names the whole catalog must not install all
+ *  of it. Roots are never capped: each one is a skill a human selected or named. */
 export const MAX_SKILL_CLOSURE = 24;
 
 /** A skill name that is safe as one directory name (no separators, never `.`/`..`). */
@@ -45,9 +46,10 @@ export function namesSkillCommand(text: string, name: string): boolean {
 }
 
 /**
- * The roots plus every catalog skill their bodies name, transitively: roots first, at most
- * `MAX_SKILL_CLOSURE`. The first catalog entry for a name wins, so a catalog in precedence order
- * (`discoverSkills`, local first) keeps that order. `truncated` names the first skill the cap left out.
+ * Every root, then the catalog skills their bodies name, transitively, while the closure holds
+ * fewer than `MAX_SKILL_CLOSURE`. The first catalog entry for a name wins, so a catalog in
+ * precedence order (`discoverSkills`, local first) keeps that order. `truncated` names the first
+ * companion the cap left out; the cap never leaves out a root (hearsay-tools/cezarion#1672).
  */
 export function skillClosure(
   roots: readonly Skill[],
@@ -59,10 +61,12 @@ export function skillClosure(
   const skills: Skill[] = [];
   const seen = new Set<string>();
   const queue = [...roots];
+  const rootNames = new Set(roots.map((root) => root.name));
   while (queue.length) {
     const skill = queue.shift()!;
     if (seen.has(skill.name)) continue;
-    if (skills.length >= MAX_SKILL_CLOSURE) return { skills, truncated: skill.name };
+    // Roots lead the queue, so every root is in before the first companion meets the cap.
+    if (skills.length >= MAX_SKILL_CLOSURE && !rootNames.has(skill.name)) return { skills, truncated: skill.name };
     seen.add(skill.name);
     skills.push(skill);
     for (const candidate of candidates) {
