@@ -410,7 +410,9 @@ export function servedRoot(): string {
  * hide account catalogs under `localHandoff:false` (#358); pass `CEZ_REMOTE: '1'` in `extra`
  * when a fixture intentionally tests hosted security.
  *
- * The shared test env pins the same variable under `.ai/qa/cez-home`
+ * HOME is a fresh `.server-home` inside the fixture, so global skills from the
+ * invoking account never enter the server catalog. Explicit HOME overrides are ignored.
+ * The shared test env pins CEZ_HOME under `.ai/qa/cez-home`
  * (`.ai/scripts/test-env-up.sh`); this is that rule for the specs that boot their own server.
  *
  * No ambient `CEZ_*` variable reaches the fixture (hearsay-tools/cezarion#1045). An agent's shell
@@ -462,8 +464,16 @@ export function fixtureServeEnv(
   } else if (discovery.error || discovery.status !== 128 || !notARepository.test(discovery.stderr)) {
     throw new Error(`cezar e2e: cannot verify fixture repository ${fixtureRoot}; refusing server boot`, { cause: discovery.error })
   }
+  // Production skill discovery reads os.homedir() (USERPROFILE on Windows), independently
+  // of CEZ_HOME. Reset only
+  // this fixture-owned directory; the caller's tools keep their original HOME.
+  const serverHome = resolve(fixtureRoot, '.server-home')
+  rmSync(serverHome, { recursive: true, force: true })
+  mkdirSync(serverHome)
   return {
     ...env,
+    HOME: serverHome,
+    USERPROFILE: serverHome,
     // One line on purpose: the `fixture-serve-must-pin-cez-home` design guardian reads these
     // two together, and a CEZ_DRY_RUN without CEZ_HOME beside it is exactly the mistake it
     // exists to catch.
