@@ -22,7 +22,7 @@ import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
-import { identity } from './test-env-lease.mjs';
+import { groupLive, identity } from './test-env-lease.mjs';
 
 const DESCRIPTOR = '.ai/qa/qa-fixture.json';
 // Inside the temporary root: what `up` started there, which confirms the descriptor.
@@ -31,6 +31,9 @@ const ROOT_PREFIX = 'cez-qa-fixture-';
 // test-env-up.sh's default health budget: a boot on a loaded host is CPU-bound.
 const BOOT_TIMEOUT_MS = 180_000;
 const STOP_GRACE_MS = 10_000;
+// After SIGKILL the group only shrinks, but groupLive answers "unknown" while other processes
+// start and exit during its /proc scan, about half of its answers on a busy host: keep asking.
+const KILL_WAIT_MS = 5_000;
 const WATCH_INTERVAL_MS = 30_000;
 const BANNER = /^\s*cockpit → (http:\/\/127\.0\.0\.1:\d+)\s*$/m;
 
@@ -116,25 +119,22 @@ const isRunning = ({ pid, start }) => {
   return !current.dead && current.start === start;
 };
 
-/** True while the process group `leader` started may still hold its processes. A group outlives
- *  its leader while any member runs, and the kernel never hands out a pid that still names a
- *  group, so `-pid` reaches only this group until its last member exits. A live process with the
- *  leader's pid and another start identity means the group ended and the pid was reused. */
+/** True while the process group `leader` started may still hold a running process. A group
+ *  outlives its leader while any member runs, and the kernel never hands out a pid that still
+ *  names a group, so `-pid` reaches only this group until its last member is reaped. A live
+ *  process with the leader's pid and another start identity means the group ended and the pid
+ *  was reused. Zombies do not count: one whose parent never reaps it, such as a container init
+ *  that does not wait, keeps the group's id forever. An unknown answer counts as running. */
 function groupRunning(leader) {
   const current = identity(leader.pid);
   if (!current.dead && current.start !== leader.start) return false;
-  try {
-    process.kill(-leader.pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
+  return groupLive(leader.pid) !== false;
 }
 
 /** Stops the process group `leader` started: SIGTERM, then SIGKILL for whatever outlives the
  *  grace, the leader or any other member. True once the group is empty. */
 async function stopGroup(leader, graceMs = STOP_GRACE_MS) {
-  for (const [signal, waitMs] of [['SIGTERM', graceMs], ['SIGKILL', 1000]]) {
+  for (const [signal, waitMs] of [['SIGTERM', graceMs], ['SIGKILL', KILL_WAIT_MS]]) {
     if (!groupRunning(leader)) return true;
     try { process.kill(-leader.pid, signal); } catch { /* the group already ended */ }
     const deadline = performance.now() + waitMs;

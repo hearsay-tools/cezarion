@@ -13,7 +13,8 @@ import { identity } from '../.ai/scripts/test-env-lease.mjs';
 // qa-fixture makes. It records its argv and environment, and keeps a child in its own process
 // group, so a test can see what reached the server and that `down` stops the whole group.
 // CEZ_STUB_MODE (passed through --server-env) picks a failure; CEZ_STUB_CHILD=stubborn makes
-// the child ignore SIGTERM.
+// the child ignore SIGTERM, and CEZ_STUB_CHILD=zombie makes it leave the group without reaping
+// the process it forked, which then stays in the group as a zombie.
 const STUB_SERVER = `
 import { spawn } from 'node:child_process';
 import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
@@ -24,7 +25,9 @@ const repo = realpathSync(args[args.indexOf('--repo') + 1]);
 const mode = process.env.CEZ_STUB_MODE ?? 'serve';
 if (mode === 'exit') process.exit(3);
 const childScript = (process.env.CEZ_STUB_CHILD === 'stubborn' ? 'process.on("SIGTERM", () => {}); ' : '') + 'setInterval(() => {}, 1000)';
-const child = spawn(process.execPath, ['-e', childScript], { stdio: 'ignore' });
+const child = process.env.CEZ_STUB_CHILD === 'zombie'
+  ? spawn('sh', ['-c', 'true & exec setsid sleep 1000'], { stdio: 'ignore' })
+  : spawn(process.execPath, ['-e', childScript], { stdio: 'ignore' });
 // cezar creates its home on first write, as here.
 mkdirSync(process.env.CEZ_HOME, { recursive: true });
 writeFileSync(join(process.env.CEZ_HOME, 'stub.json'), JSON.stringify({ args, env: process.env, child: child.pid }));
@@ -255,6 +258,37 @@ test('down kills a group member that outlives the server and ignores SIGTERM', a
   await until(() => !alive(child), 'the stubborn child to exit');
   assert.equal(alive(server.pid), false);
   assert.equal(existsSync(root), false);
+});
+
+/** The state and process group of a process, from /proc (Linux only). */
+function stat(pid) {
+  try {
+    const text = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const fields = text.slice(text.lastIndexOf(')') + 1).trim().split(/\s+/);
+    return { state: fields[0], pgid: Number(fields[2]) };
+  } catch {
+    return undefined;
+  }
+}
+
+const groupStates = (pgid) => readdirSync('/proc').filter((name) => /^\d+$/.test(name))
+  .map(stat).filter((entry) => entry?.pgid === pgid).map((entry) => entry.state);
+
+test('down treats a process group of zombies only as stopped', { skip: process.platform !== 'linux' && 'reads /proc' }, async (t) => {
+  const f = fixture(t);
+  await up(f.options({ args: ['--server-env=CEZ_STUB_CHILD=zombie'] }));
+  const { root, server } = descriptor(f.worktree);
+  const stub = JSON.parse(readFileSync(join(root, 'home/stub.json'), 'utf8'));
+  try {
+    await until(() => stat(stub.child)?.pgid !== server.pid && groupStates(server.pid).includes('Z'), 'a zombie left in the server group');
+    await down(f.options({ stdout: sink(), stopGraceMs: 300 }));
+  } finally {
+    // The sleeper left the group, so nothing else stops it; once it exits, its zombie is reaped.
+    try { process.kill(stub.child, 'SIGKILL'); } catch { /* already gone */ }
+  }
+  assert.deepEqual(groupStates(server.pid).filter((state) => state !== 'Z'), []);
+  assert.equal(existsSync(root), false, 'the temporary root survived down');
+  assert.equal(existsSync(descriptorPath(f.worktree)), false, 'the descriptor survived down');
 });
 
 test('the watcher stops the server once its temporary root is gone', async (t) => {

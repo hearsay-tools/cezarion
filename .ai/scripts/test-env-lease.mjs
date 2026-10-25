@@ -155,7 +155,8 @@ export function describeTestEnvHolders(holders, {
 
 // A shell can die before its build/clone child. Retain its group claim until the
 // last non-zombie member exits. Unknown visibility never authorizes replacement.
-function groupLive(pgid) {
+// qa-fixture.mjs uses it too, so a group of zombies never reads as a running server.
+export function groupLive(pgid) {
   if (process.platform === 'win32') {
     const live = windowsProbe('live', String(pgid));
     return live === 'true' ? true : live === 'false' ? false : undefined;
