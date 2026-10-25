@@ -361,7 +361,7 @@ seeded entries because checkout and built-in entries can still appear alongside 
 
 E2E servers read no host global skills. The shared server pins `HOME` to
 `.ai/qa/server-home`; `fixtureServeEnv` pins it to `.server-home` under the fixture root,
-after caller overrides. The fixture also pins `USERPROFILE` to the same directory for
+after caller overrides. Both launchers also pin `USERPROFILE` to the same directory for
 Windows `os.homedir()` lookups. Each directory starts empty on a cold boot (fixture boot preparation
 for spec-owned servers). Healthy shared-server reuse keeps its current home. Browser setup
 and builds keep the invoking account's `HOME`; `CEZ_HOME` and the Git identity/config pins

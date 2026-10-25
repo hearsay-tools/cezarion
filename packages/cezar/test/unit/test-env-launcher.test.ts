@@ -483,7 +483,7 @@ test('ambient CEZ_* never reaches the shared server; --server-env does and keys 
   boot();
   assert.deepEqual(appEnv(), ['CEZ_DRY_RUN=1']);
   const plain = JSON.parse(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8')) as { environment: unknown };
-  assert.deepEqual(plain.environment, { singleProject: false, serverEnv: 'none', watch: 'idle=30 interval=30', serverHome: '.ai/qa/server-home' });
+  assert.deepEqual(plain.environment, { singleProject: false, serverEnv: 'none', watch: 'idle=30 interval=30', serverHome: '.ai/qa/server-home', serverUserProfile: '.ai/qa/server-home' });
 
   const opted = boot('--server-env=CEZ_FOLLOWUPS=1', '--server-env=CEZ_AUTOMATIONS=1');
   assert.match(opted.stdout, /TEST_ENV_REUSED=0/);
@@ -496,7 +496,7 @@ test('ambient CEZ_* never reaches the shared server; --server-env does and keys 
   const single = boot('--server-env=CEZ_SINGLE_PROJECT=1');
   assert.match(single.stdout, /TEST_ENV_REUSED=0/);
   assert.deepEqual(JSON.parse(readFileSync(join(fixture.root, '.ai/qa/test-env.json'), 'utf8')).environment,
-    { singleProject: true, serverEnv: 'CEZ_SINGLE_PROJECT=1', watch: 'idle=30 interval=30', serverHome: '.ai/qa/server-home' });
+    { singleProject: true, serverEnv: 'CEZ_SINGLE_PROJECT=1', watch: 'idle=30 interval=30', serverHome: '.ai/qa/server-home', serverUserProfile: '.ai/qa/server-home' });
 
   for (const bad of [
     ['--server-env=CEZ_HOME=/elsewhere'], ['--server-env=PATH=/x'], ['--server-env=CEZ_X=a b'],
@@ -1119,12 +1119,13 @@ test('server HOME is fresh on cold boots, preserved on reuse, and separate from 
   const fixture = makeFixture(false);
   const invokingHome = join(fixture.root, 'invoking-home');
   mkdirSync(invokingHome);
-  const env = { ...fixtureEnv, PATH: fixture.path, HOME: invokingHome, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+  const env = { ...fixtureEnv, PATH: fixture.path, HOME: invokingHome, USERPROFILE: invokingHome, TEST_ENV_CACHE_TTL_SECONDS: '600' };
   const npm = join(fixture.root, 'bin/npm');
   writeFileSync(npm, readFileSync(npm, 'utf8')
     .replace('set -eu', `set -eu\nprintf '%s\\n' "$HOME" >> .ai/tool-home`)
     .replace("const http = require('node:http');", `const http = require('node:http');
 require('node:fs').writeFileSync('.ai/app-home', process.env.HOME);
+require('node:fs').writeFileSync('.ai/app-userprofile', process.env.USERPROFILE);
 require('node:fs').writeFileSync('.ai/app-git-ident', require('node:child_process').execFileSync('git', ['var', 'GIT_AUTHOR_IDENT']));`));
   const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
   const home = join(fixture.root, '.ai/qa/server-home');
@@ -1135,6 +1136,7 @@ require('node:fs').writeFileSync('.ai/app-git-ident', require('node:child_proces
   const first = descriptor(fixture.root);
   launchedPids.add(first.app.pid);
   assert.equal(readFileSync(join(fixture.root, '.ai/app-home'), 'utf8'), home);
+  assert.equal(readFileSync(join(fixture.root, '.ai/app-userprofile'), 'utf8'), home);
   assert.equal(existsSync(join(home, 'stale')), false);
   assert.match(first.app.startCommand, /HOME=\.ai\/qa\/server-home /);
   assert.match(readFileSync(join(fixture.root, '.ai/app-git-ident'), 'utf8'), /^Cezar Tests <tests@cezar.invalid> /);
@@ -1147,7 +1149,7 @@ require('node:fs').writeFileSync('.ai/app-git-ident', require('node:child_proces
   // A descriptor from an older launcher cannot certify that the live server has an isolated HOME.
   const descriptorPath = join(fixture.root, '.ai/qa/test-env.json');
   const legacy = JSON.parse(readFileSync(descriptorPath, 'utf8'));
-  delete legacy.environment.serverHome;
+  delete legacy.environment.serverUserProfile;
   writeFileSync(descriptorPath, JSON.stringify(legacy));
   const upgraded = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
   assert.equal(upgraded.status, 0, upgraded.stderr);
