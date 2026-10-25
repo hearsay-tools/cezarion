@@ -71,7 +71,12 @@ describe('session provisioning', () => {
     expect(worker.instructions).toContain('Your questions — cezar_ask, or a native question — go to your parent');
     expect(worker.instructions).not.toContain('only a human can answer');
     expect(worker.instructions).not.toContain('Messages never answer human questions');
+    // hearsay-tools/cezarion#1327: a park notice quotes the worker's last message to its waiting parent.
+    expect(worker.instructions).toContain('Cezar tells your parent what you wait on and quotes your last message');
+    expect(worker.instructions).not.toContain('Cezar sends you a notice');
     const root = provision()!;
+    expect(root.instructions).toContain('Cezar sends you a notice from it naming what it waits on, at most one per wait; like any message it wakes you and closes no wait');
+    expect(root.instructions).not.toContain('Cezar tells your parent');
     expect(root.instructions).toContain('Worker questions arrive as requests carrying a question');
     expect(root.instructions).toContain('--request-id <question-id>');
     // hearsay-tools/cezarion#1234: an open question takes the parent's own words.

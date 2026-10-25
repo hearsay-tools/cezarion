@@ -5,13 +5,14 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
-import type { AgentInput, CiWaitResult, HumanWaitEntry, ProcessWaitResult, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import type { AgentInput, CiWaitResult, ConversationMessage, HumanWaitEntry, ProcessWaitResult, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
 import { exemptionFor, HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { ProcessWaitSupervisor } from '../process-wait/supervisor.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
+import { parkNoticeId } from '../delegation/park-notice.ts';
 import { checkpoint, collect, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
@@ -171,6 +172,20 @@ async function expectHumanWaitAnswered(id: string, via: Wait['via']) {
 const workerWaits = (id: string) => (store.getRun(id)?.waits ?? []).filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker');
 const workerWake = (wait: Wait) => `Worker wait ${wait.id} (terminal outcome)`;
 const delivered = (id: string, inputId: string) => !!store.getRun(id)?.agentInputs?.find(input => input.id === inputId)?.deliveredAt;
+const conversationOf = (id: string): ConversationMessage[] => {
+  const delegation = store.getRun(id)?.delegation;
+  return delegation?.role === 'root' ? delegation.conversation?.messages ?? [] : [];
+};
+/** Cezar's park notices from a worker to its parent (hearsay-tools/cezarion#1327): progress the worker never sent itself. */
+const parkNotices = (parentId: string, workerId: string) => conversationOf(parentId).filter(message =>
+  message.senderRunId === workerId && message.kind === 'progress' && message.text.startsWith('Cezar notice: '));
+/** A root parent on `runner`'s native wire, parked after its opening turn. */
+async function parentOn(runner: RunnerId) {
+  nativeWire(runner);
+  const p = await parent(HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
+  await until(() => store.getRun(p.id)?.status === 'waiting', () => timeline(p.id));
+  return p;
+}
 
 /** A root parent on `runner`'s native wire, parked after its opening turn, and one worker it owns
  *  that never starts: `fixtureUpdateRun` settles it. Workers run on the Claude wire. */
@@ -301,7 +316,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
 
@@ -1547,6 +1562,74 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
         expect(settled(f.p.id, workers.id)).toMatchObject({ result: { reason: 'outcome' } });
         expect(inputsFor(f.p.id, workers.id)).toHaveLength(1);
         await until(() => store.getRun(f.p.id)?.status === 'waiting');
+      });
+
+      // hearsay-tools/cezarion#1327: the worker runs on this runner's wire too, since its turn end parks.
+      it(`${runner} U3n a worker that parks on the monitoring line while its parent waits on it wakes the parent with one notice naming its timer, the wait stays open, a second park sends none, and settlement resolves the wait`, async () => {
+        const p = await parentOn(runner);
+        const w = await worker(p.id, messagesPrompt(runner, ['Squeal is still pending u3n.\nCEZ:MONITORING']), runner);
+        await parentTurn(p.id, toolCall('cezar_wait', { kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }), () => parkedOn(p.id, workerWaits(p.id)[0]));
+        const workers = workerWaits(p.id)[0]!;
+        // A worker that has not parked yet sends nothing when the wait opens.
+        expect(parkNotices(p.id, w.id)).toEqual([]);
+        manager.enqueueOwnedRun(w.id);
+        await until(() => parkedOn(w.id, viaOf(w.id, 'monitoring-line')) && parkNotices(p.id, w.id).length > 0, () => timeline(w.id));
+        const timer = viaOf(w.id, 'monitoring-line')!;
+        const [notice, ...more] = parkNotices(p.id, w.id);
+        expect(more).toEqual([]);
+        expect(notice).toMatchObject({ id: parkNoticeId(w.id, workers.id), kind: 'progress', senderRunId: w.id, recipientRunId: p.id, state: 'accepted' });
+        expect(notice!.text).toContain(`It waits on: timer ${timer.id} at ${timer.deadline}`);
+        expect(notice!.text).toContain('Its last message:\nSqueal is still pending u3n.');
+        // The notice reaches the parent on its own wire, and the parent's wait stays open.
+        await until(() => delivered(p.id, notice!.id) && prompted(runner, `Cezar notice: your worker ${w.id}`).length > 0);
+        expect(prompted(runner, `Cezar notice: your worker ${w.id}`).at(-1)).toContain(`Still open: worker wait ${workers.id} on 1 worker`);
+        await until(() => parkedOn(p.id, workerWaits(p.id)[0]));
+        expect(workerWaits(p.id)).toEqual([expect.objectContaining({ id: workers.id, phase: 'open', deadline: workers.deadline })]);
+        expect(inputsFor(p.id, workers.id)).toEqual([]);
+        // A second park during the same wait sends no second notice.
+        const turns = turnEnds(w.id);
+        expect(manager.sendMessage(w.id, [{ type: 'text', text: messagesPrompt(runner, ['Still pending u3n.\nCEZ:MONITORING']) }])).toBe(true);
+        await until(() => turnEnds(w.id) > turns && parkedOn(w.id, viaOf(w.id, 'monitoring-line')), () => timeline(w.id));
+        expect(parkNotices(p.id, w.id)).toHaveLength(1);
+        // The wait still ends on the worker's outcome, once.
+        expect(manager.finish(w.id)).toBe(true);
+        await until(() => settled(p.id, workers.id)?.phase === 'delivered' && prompted(runner, workerWake(workers)).length > 0);
+        expect(settled(p.id, workers.id)).toMatchObject({ result: { reason: 'outcome' } });
+        expect(parkNotices(p.id, w.id)).toHaveLength(1);
+      });
+
+      it(`${runner} U3r a worker parked before its parent waits on it sends its notice when the wait opens`, async () => {
+        const p = await parentOn(runner);
+        const w = await worker(p.id, messagesPrompt(runner, ['Waiting for input u3r.']), runner);
+        // A spent budget plain-parks the opening turn end instead of asking the parent.
+        spendWorkerBudget(w.id);
+        manager.enqueueOwnedRun(w.id);
+        await until(() => store.getRun(w.id)?.status === 'waiting' && turnEnds(w.id) > 0, () => timeline(w.id));
+        // No wait is open on the worker yet, so its park sends nothing.
+        expect(parkNotices(p.id, w.id)).toEqual([]);
+        await parentTurn(p.id, toolCall('cezar_wait', { kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }), () => workerWaits(p.id)[0]?.phase === 'open');
+        const workers = workerWaits(p.id)[0]!;
+        await until(() => prompted(runner, `Cezar notice: your worker ${w.id}`).length > 0 && parkedOn(p.id, workerWaits(p.id)[0]));
+        const [notice, ...more] = parkNotices(p.id, w.id);
+        expect(more).toEqual([]);
+        expect(notice).toMatchObject({ id: parkNoticeId(w.id, workers.id), senderRunId: w.id, recipientRunId: p.id });
+        expect(notice!.text).toContain('It has no open wait: it waits for a message from you.');
+        expect(notice!.text).toContain('Its last message:\nWaiting for input u3r.');
+        expect(workerWaits(p.id)).toEqual([expect.objectContaining({ id: workers.id, phase: 'open', deadline: workers.deadline })]);
+        expect(inputsFor(p.id, workers.id)).toEqual([]);
+      });
+
+      it(`${runner} U3d a worker that finishes while its parent waits on it sends no notice`, async () => {
+        const p = await parentOn(runner);
+        const w = await worker(p.id, messagesPrompt(runner, ['Finished u3d.\nCEZ:DONE']), runner);
+        await parentTurn(p.id, toolCall('cezar_wait', { kind: 'worker', worker_ids: [w.id], timeout_seconds: 600 }), () => parkedOn(p.id, workerWaits(p.id)[0]));
+        const workers = workerWaits(p.id)[0]!;
+        manager.enqueueOwnedRun(w.id);
+        await until(() => settled(p.id, workers.id)?.phase === 'delivered' && prompted(runner, workerWake(workers)).length > 0, () => timeline(w.id));
+        expect(terminal).toContain(store.getRun(w.id)?.status);
+        expect(store.readEvents(w.id).some(event => event.type === 'turn-end')).toBe(true);
+        expect(conversationOf(p.id).filter(message => message.senderRunId === w.id)).toEqual([]);
+        expect(prompted(runner, 'Cezar notice:')).toEqual([]);
       });
 
       it(`${runner} U7w cez worker wait and cezar_wait kind worker land in the same wait list`, async () => {

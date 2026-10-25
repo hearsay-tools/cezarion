@@ -117,6 +117,7 @@ import { reconcileWorkerEntry } from '../delegation/wait.ts';
 import { reconcileConversationState, projectConversationEvents } from '../delegation/conversations.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
 import { answersQuestion, openQuestions, questionMessage } from '../delegation/questions.ts';
+import { parkNoticeId, parkNoticeMessage, parkingTurn } from '../delegation/park-notice.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState, type WakeCounters } from '../runs/store.ts';
@@ -3862,6 +3863,8 @@ export class RunManager {
     const families = familyRootId === undefined ? this.liveFamilyMembers() : this.familyMembers(familyRootId);
     for (const run of families) if (run.delegation?.role === 'worker') this.routeWorkerQuestion(run.id);
     this.reconcileWorkerWaits(familyRootId);
+    // So does a park notice a crash caught before its commit (hearsay-tools/cezarion#1327).
+    for (const run of families) if (run.delegation?.role === 'worker') this.noticeParkedWorker(run.id);
     // A parent reply accepted just before the crash still answers its worker (#505), and only a
     // live worker takes one.
     for (const run of this.store.listRuns().filter(inScope)) if (run.delegation?.role === 'worker') this.answerRoutedQuestion(run.id);
@@ -5050,6 +5053,8 @@ export class RunManager {
     this.store.commitWait(runId, entry);
     // Outcomes already in resolve it now (or, with every worker destroyed, cancel it); the rest arm it.
     this.reconcileWorkerWaits(familyOf(run));
+    // A worker that parked before this wait opened tells the parent now (hearsay-tools/cezarion#1327).
+    this.noticeParkedWorkers(familyOf(run));
     const current = this.store.getRun(runId);
     if (current?.waits?.some(wait => wait.id === entry.id) && (state.atTurnBoundary === state.session || this.waiting.has(runId))) this.parkOnWaits(runId, state);
     const latest = this.store.getRun(runId);
@@ -5071,6 +5076,7 @@ export class RunManager {
       revisions: ids.map(workerId => { const worker = this.store.getRun(workerId)!.delegation; return { workerId, revision: worker?.role === 'worker' ? worker.executionRevision ?? 0 : 0 }; }) };
     this.store.commitWait(runId, entry);
     this.reconcileWorkerWaits(familyOf(this.store.getRun(runId)!));
+    this.noticeParkedWorkers(runId);
     return entry;
   }
 
@@ -5248,6 +5254,56 @@ export class RunManager {
     this.deliverConversationInput(parentId);
   }
 
+  /**
+   * A worker parked before finishing while its parent waits on it tells the parent why
+   * (hearsay-tools/cezarion#1327): Cezar posts a progress message from the worker, which wakes the
+   * parent and closes no wait. A parked question needs none, since the question itself goes to the
+   * parent. At most one notice per parent wait (`parkNoticeId`), and none when the turn that
+   * parked already messaged the parent, Cezar's own notice included. The message and the parent's
+   * input commit together; a crash before that commit leaves the recovery sweep to post it.
+   */
+  private noticeParkedWorker(workerId: string): void {
+    const worker = this.store.getRun(workerId);
+    // A question goes to the parent through `routeWorkerQuestion`; a prose gate does not, so it gets a notice.
+    if (worker?.delegation?.role !== 'worker' || worker.status !== 'waiting' || worker.stopping || worker.delegation.destroy ||
+      this.store.transcriptFacts(workerId).pendingAsk || this.active.get(workerId)?.pendingHumanAsk ||
+      this.store.readWorkerExecution(workerId)?.phase === 'complete') return;
+    const parentId = worker.delegation.parentRunId;
+    const root = this.store.getRun(parentId);
+    if (root?.delegation?.role !== 'root' || !this.parentTakesMessages(root) ||
+      !root.delegation.receipts.some(receipt => receipt.workerId === workerId && !receipt.deletion)) return;
+    const state = root.delegation.conversation ?? { messages: [], outcomes: [] };
+    const selects = (wait: WorkerWaitEntry) => wait.workerIds ? wait.workerIds.includes(workerId)
+      : (wait.requestIds ?? []).some(id => state.messages.some(message => message.id === id && message.recipientRunId === workerId));
+    const wait = (root.waits ?? []).find((entry): entry is WorkerWaitEntry => entry.kind === 'worker' && entry.phase === 'open' && selects(entry) &&
+      !state.messages.some(message => message.id === parkNoticeId(workerId, entry.id)));
+    if (!wait) return;
+    const turn = parkingTurn(this.store.readEvents(workerId));
+    if (turn.startedAt && state.messages.some(message => message.senderRunId === workerId && message.recipientRunId === parentId &&
+      message.createdAt >= turn.startedAt!)) return;
+    // The ledger and the parent's inbox keep room as `service.send` counts it, beside open questions' replies.
+    if (state.messages.length + openQuestions(state).length >= 1024 || (root.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32) {
+      const projectionId = `park-notice-skipped:${wait.id}`;
+      if (!this.store.hasProjection(workerId, projectionId)) {
+        this.store.appendEvent(workerId, { type: 'note', tone: 'warning', projectionId, message: 'Parked, but the parent conversation is at capacity: no park notice was sent.' });
+      }
+      return;
+    }
+    const now = new Date().toISOString();
+    const message = parkNoticeMessage({ workerRunId: workerId, parentRunId: parentId, waitId: wait.id, waits: worker.waits ?? [],
+      ...(turn.text === undefined ? {} : { lastText: turn.text }), now, redact: text => this.store.redactText(text) });
+    const input = { id: message.id, source: 'agent' as const, parentRunId: parentId, text: message.text, createdAt: now,
+      conversation: { senderRunId: workerId, recipientRunId: parentId, kind: 'progress' as const } };
+    this.store.commitConversation(parentId, { ...state, messages: [...state.messages, message] }, { recipientRunId: parentId, input });
+    projectConversationEvents(this.store, this.store.getRun(parentId)!);
+    this.deliverConversationInput(parentId);
+  }
+
+  /** `noticeParkedWorker` for every worker a family's root owns. */
+  private noticeParkedWorkers(rootId: string): void {
+    for (const child of this.store.listWorkersOf(rootId)) this.noticeParkedWorker(child.id);
+  }
+
   /** A human answering a worker question its parent handed back (#505): the reviewing parent
    * can no longer answer it, so it must not also block the human. */
   private answersFallenBackAsk(runId: string, opts: { text?: string; images?: PastedContent[] }, deferred: boolean): boolean {
@@ -5368,8 +5424,12 @@ export class RunManager {
 
   /** The parent can still read and answer a routed question; answering needs its steer grant. */
   private parentCanReceive(parent: RunRecord): boolean {
-    return parent.delegation?.role === 'root' && parent.delegation.permissions.includes('steer') &&
-      ['queued', 'running', 'waiting'].includes(parent.status) && !parent.stopping &&
+    return parent.delegation?.role === 'root' && parent.delegation.permissions.includes('steer') && this.parentTakesMessages(parent);
+  }
+
+  /** The parent can still read a message from its worker. */
+  private parentTakesMessages(parent: RunRecord): boolean {
+    return parent.delegation?.role === 'root' && ['queued', 'running', 'waiting'].includes(parent.status) && !parent.stopping &&
       !this.rootFinishRequested(parent.id) && !this.historyDeletionPending(parent.id);
   }
 
@@ -9329,6 +9389,8 @@ export class RunManager {
     if (entry !== 'turn-end' && decision.kind === 'park' && this.waiting.has(runId)) return true;
     const outcome = this.carryOutTurnEnd(runId, state, stepId, decision, refused, noteRefusal);
     if (outcome.kind === 'done') return false;
+    // Every park a worker reaches here, whichever branch parked it (hearsay-tools/cezarion#1327).
+    if (outcome.kind === 'park') this.noticeParkedWorker(runId);
     this.writeTurnHeartbeat(runId, entry, outcome);
     return true;
   }
