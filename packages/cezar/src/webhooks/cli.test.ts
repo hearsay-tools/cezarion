@@ -12,7 +12,7 @@ const ENV = { CEZ_COCKPIT_URL: 'http://127.0.0.1:4321', CEZ_PROJECT_ID: 'proj', 
 
 function harness(answer: (path: string, init?: { method?: string; body?: unknown }) => HttpResult) {
   const lines: string[] = [];
-  const requests: Array<{ cockpit: Cockpit; path: string; init?: { method?: string; body?: unknown } }> = [];
+  const requests: Array<{ cockpit: Cockpit; path: string; init?: { method?: string; body?: unknown } | undefined }> = [];
   const io: WebhookIo = {
     stdout: (line) => lines.push(line),
     readFile: async (path) => (path === 'report.md' ? '# Friction\nSqueal skipped an edit.' : Promise.reject(new Error('ENOENT'))),

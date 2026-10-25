@@ -56,7 +56,7 @@ export function ownPullRequestNumbers(
 
 /** Fail closed over the COMPLETE collection, including unresolved or malformed members. */
 export function archivePullRequests(
-  family: readonly { pullRequests?: unknown; pullRequestUrl?: string; referencedPullRequestUrl?: string; prNumber?: number }[],
+  family: readonly { pullRequests?: unknown; pullRequestUrl?: string | undefined; referencedPullRequestUrl?: string | undefined; prNumber?: number | undefined }[],
   repoBase?: string,
 ): ArchivePullRequestIdentity[] | undefined {
   const own = repoBase ? githubIdentity(`${repoBase.replace(/\/$/, '')}/pull/1`) : undefined;

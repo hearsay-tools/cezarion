@@ -485,7 +485,7 @@ export class ScheduleRunner {
    * alone (a rename) left the schedule alone too, so advancing from the captured one is right.
    */
   private advanced(
-    current: { revision?: number; nextRunAt?: string },
+    current: { revision?: number | undefined; nextRunAt?: string | undefined },
     definition: ScheduleAutomationDefinition,
     fromMs: number,
     now: number,

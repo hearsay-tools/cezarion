@@ -742,7 +742,7 @@ export class RunDatabase {
    * `archivedLimit` archived roots. Archived workers are never in it — no list renders them, and
    * counting them is what let them push an older live root out of a newest-N window.
    */
-  listWindowSummaries(archivedLimit: number, options: { roots?: boolean } = {}): RunSummaryRow[] {
+  listWindowSummaries(archivedLimit: number, options: { roots?: boolean | undefined } = {}): RunSummaryRow[] {
     const statement = options.roots ? this.statements.listRootWindowSummaries : this.statements.listWindowSummaries;
     return this.run(() => statement.all(archivedLimit)).map(toSummaryRow);
   }

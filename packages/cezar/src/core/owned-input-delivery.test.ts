@@ -6,7 +6,7 @@ import { withHeldAck, withHeldResponse, withRejectedInput } from './owned-input-
 import { HARNESS_ADAPTERS } from './harness-parity.testkit.ts';
 
 /** A delivered receipt; an observable harness may also have reported reading it (#505). */
-const delivered = (input: object, stored: { consumedAt?: string; awaitingRead?: true } | undefined) =>
+const delivered = (input: object, stored: { consumedAt?: string | undefined; awaitingRead?: true | undefined } | undefined) =>
   ({ ...input, deliveredAt: expect.any(String), ...(stored?.consumedAt ? { consumedAt: expect.any(String) } : {}),
     ...(stored?.awaitingRead ? { awaitingRead: true } : {}) });
 import { driveSeam, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';

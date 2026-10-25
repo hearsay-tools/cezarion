@@ -5,7 +5,7 @@ import type { RunStore } from '../runs/store.ts';
 import { sharedCwdScan, type CwdSource } from './process-liveness.ts';
 import { noJitter, retryDelayMs, SCRATCH_BACKOFF, type Backoff } from './retry-backoff.ts';
 
-type Pending = { at: number; attempts: number; generation?: string; resourceId?: string };
+type Pending = { at: number; attempts: number; generation?: string | undefined; resourceId?: string | undefined };
 
 /**
  * Keep terminal cleanup intent in the generation checkpoint as well as the index. Retain and
@@ -13,11 +13,11 @@ type Pending = { at: number; attempts: number; generation?: string; resourceId?:
  */
 export class WorkerScratchCleanup {
   private due = new Map<string, Pending>();
-  private timer?: NodeJS.Timeout;
+  private timer?: NodeJS.Timeout | undefined;
   /** The `at` the timer was armed for; with the clock, it decides what a tick takes. */
   private armedFor = 0;
   private ticking = false;
-  private recoveryTimer?: NodeJS.Timeout;
+  private recoveryTimer?: NodeJS.Timeout | undefined;
   private enabled = true;
   // Private and overridable so tests need not wait out production cadence.
   private backoff: Backoff = SCRATCH_BACKOFF;

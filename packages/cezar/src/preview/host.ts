@@ -65,24 +65,24 @@ type RunEntry = {
   servers: Map<number, ServerEntry>;
   startedAt: Map<number, string>;
   approvals: Map<number, PreviewServer>;
-  session?: PreviewSession;
-  browser?: BrowserHandle;
-  launching?: Promise<PreviewSession | undefined>;
+  session?: PreviewSession | undefined;
+  browser?: BrowserHandle | undefined;
+  launching?: Promise<PreviewSession | undefined> | undefined;
   /** Bumped whenever the browser is closed on purpose, so a launch in flight knows it lost. */
   browserGen: number;
   /** Bumped by every open and every show: a show still waiting for Chromium navigates only if
    *  nothing newer asked for the pane since. */
   targetGen: number;
   /** Chromium died or would not start: shown until `retryBrowser`, never relaunched on its own. */
-  browserFailure?: PreviewStateMessage;
-  viewer?: Viewer;
+  browserFailure?: PreviewStateMessage | undefined;
+  viewer?: Viewer | undefined;
   /** Retained across detach so a background tab cannot steal a newer viewer on resume. */
-  viewerId?: string;
+  viewerId?: string | undefined;
   /** The registered port the viewer is looking at; undefined for a typed URL. */
-  port?: number;
-  lastUrl?: string;
+  port?: number | undefined;
+  lastUrl?: string | undefined;
   adopted: boolean;
-  idleTimers: { server?: NodeJS.Timeout; browser?: NodeJS.Timeout };
+  idleTimers: { server?: NodeJS.Timeout | undefined; browser?: NodeJS.Timeout | undefined };
   released: boolean;
 };
 
@@ -145,7 +145,7 @@ export class PreviewHost implements PreviewHostLike {
   private readonly entries = new Map<string, RunEntry>();
   private readonly deps: Required<Omit<PreviewHostDeps, 'env' | 'platform' | 'arch'>> & { env: NodeJS.ProcessEnv; platform: string; arch: string };
   /** Chromium lands in one shared cache, so there is one download for the whole host. */
-  private download?: { controller: AbortController; promise: Promise<string>; watchers: Set<RunEntry> };
+  private download?: { controller: AbortController; promise: Promise<string>; watchers: Set<RunEntry> } | undefined;
 
   constructor(deps: PreviewHostDeps = {}) {
     const env = deps.env ?? process.env;
@@ -165,7 +165,7 @@ export class PreviewHost implements PreviewHostLike {
    * A pane asks for a server or a URL. A registered port is probed again now: answering is
    * adopted and streamed, silent asks for approval. Nothing here spawns a command.
    */
-  async open(ctx: RunContext, viewer: Viewer, target: PreviewTarget, options: { viewerId?: string; resume?: boolean } = {}): Promise<void> {
+  async open(ctx: RunContext, viewer: Viewer, target: PreviewTarget, options: { viewerId?: string | undefined; resume?: boolean | undefined } = {}): Promise<void> {
     const entry = this.entryFor(ctx);
     if (entry.released) return;
     if (options.resume && ((entry.viewerId !== undefined && entry.viewerId !== options.viewerId) || (entry.viewer && entry.viewer !== viewer && (!options.viewerId || entry.viewerId !== options.viewerId)))) {

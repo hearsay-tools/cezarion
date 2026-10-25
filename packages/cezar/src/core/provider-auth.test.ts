@@ -106,7 +106,7 @@ function runner(
 
 function statuses(
   service: ProviderAuthService,
-): Promise<Record<string, { status: string; hint?: string }>> {
+): Promise<Record<string, { status: string; hint?: string | undefined }>> {
   return service.status().then(({ providers }) => Object.fromEntries(
     providers.map(({ provider, status, hint }) => [provider, { status, hint }]),
   ));

@@ -338,10 +338,8 @@ when it lands — open-mercato/cezar#694 arrived with eleven unreachable routes 
 
 The contract must describe EXACTLY what the route sends — no wider, no narrower. When a schema and
 its route disagree, fix the SOURCE, never widen the schema; `contract-parity*.test.ts` asserts both
-directions and a one-way check passes on real drift. Two mismatches recur often enough to name:
-writing `key: maybeUndefined` types a key as always-present that `JSON.stringify` drops from the
-wire (spread it conditionally), and an object-literal `type: 'x'` widens to `string` during hono's
-inference, erasing a discriminant consumers narrow on (`as const`).
+directions and a one-way check passes on real drift. An object-literal `type: 'x'` can widen to
+`string` during hono's inference, erasing a discriminant consumers narrow on (`as const`).
 
 When a new variant lacks a field the other variants require, give it its own arm in
 `z.discriminatedUnion` on the existing discriminant; never make the shared field optional

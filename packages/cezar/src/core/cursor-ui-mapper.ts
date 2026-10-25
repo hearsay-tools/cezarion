@@ -1,3 +1,4 @@
+import { defined } from './defined.ts';
 /** Pure ACP notification mapper. Transport and asks belong to the runner; session attribution stays here.
  * Wire sources and vendor limitations: __fixtures__/cursor/README.md.
  */
@@ -211,7 +212,10 @@ function tool(value: Record<string, unknown>, state: CursorUiState, metadata = f
   const item: UiToolItem = { ...(prior ?? { kind: 'tool', id }), name: metadata ? 'task' : prior?.name ?? kind,
     toolKind: kind, title: str(value.title) ?? prior?.title ?? 'Tool', status };
   if (value.rawInput !== undefined && value.rawInput !== null) item.input = value.rawInput;
-  if (value.rawOutput !== undefined && value.rawOutput !== null) item.output = serialize(value.rawOutput);
+  if (value.rawOutput !== undefined && value.rawOutput !== null) {
+    delete item.output;
+    Object.assign(item, defined({ output: serialize(value.rawOutput) }));
+  }
   if (Array.isArray(value.content)) {
     const output: string[] = [];
     const diffs: FileDiff[] = [];
@@ -243,7 +247,7 @@ function tool(value: Record<string, unknown>, state: CursorUiState, metadata = f
 function planEntry(value: unknown): PlanEntry | undefined {
   if (!record(value) || typeof value.content !== 'string' || typeof value.status !== 'string' || !['pending', 'in_progress', 'completed', 'cancelled'].includes(value.status)) return undefined;
   return { content: value.content, status: value.status as PlanEntry['status'],
-    ...(typeof value.priority === 'string' && ['high', 'medium', 'low'].includes(value.priority) ? { priority: value.priority as PlanEntry['priority'] } : {}) };
+    ...(typeof value.priority === 'string' && ['high', 'medium', 'low'].includes(value.priority) ? { priority: value.priority as NonNullable<PlanEntry['priority']> } : {}) };
 }
 function toolKind(value: unknown): ToolKind | undefined {
   return typeof value === 'string' && ['read', 'edit', 'delete', 'move', 'search', 'execute', 'think', 'fetch', 'task', 'plan', 'other'].includes(value) ? value as ToolKind : undefined;

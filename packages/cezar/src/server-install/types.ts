@@ -151,7 +151,7 @@ export interface Ui {
   error(message: string): void;
   select<T>(opts: {
     message: string;
-    options: Array<{ value: T; label: string; hint?: string }>;
+    options: Array<{ value: T; label: string; hint?: string | undefined }>;
     initialValue?: T;
   }): Promise<Cancellable<T>>;
   multiselect<T>(opts: {

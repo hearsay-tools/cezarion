@@ -4,6 +4,7 @@
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,
+    "exactOptionalPropertyTypes": true,
     "rootDir": ".",
     "types": ["node"],
     // The api-client drift guards (api-types.test.ts, tool-display-mirror.test.ts) read that

@@ -8,7 +8,7 @@ type Snapshot = Map<number, string | undefined> | 'unknown';
 
 /** Darwin probes must not block the event loop (and other runs' kill timers). */
 function inspect(command: string, args: string[], timeout: number) {
-  return new Promise<{ ok: boolean; stdout: string; pid?: number }>(done => {
+  return new Promise<{ ok: boolean; stdout: string; pid?: number | undefined }>(done => {
     const child = execFile(command, args, {
       encoding: 'utf8', timeout, killSignal: 'SIGKILL', maxBuffer: 16 * 1024 * 1024,
       env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' },
@@ -83,7 +83,7 @@ async function live(entry: RecordedProcess): Promise<boolean> {
 export const AUTOSAVE_OWNER_ENV = 'CEZ_AUTOSAVE_OWNER';
 
 /** `marked` is absent when the environment cannot be read; `gone` means the process exited. */
-export type OwnerProbe = (pid: number, marker: string) => Promise<{ marked?: boolean; parent?: number } | 'gone'>;
+export type OwnerProbe = (pid: number, marker: string) => Promise<{ marked?: boolean | undefined; parent?: number } | 'gone'>;
 
 const linuxOwnerProbe: OwnerProbe = async (pid, marker) => {
   let stat: string;
@@ -139,7 +139,7 @@ export async function watchAutosaveHolders(cwd: string, owner: AutosaveOwner,
   const alive = async () => {
     const current = await snapshot(cwd);
     if (current === 'unknown') { diagnostics = { ...diagnostics, inspectionFailed: true }; return true; }
-    const pending = new Map<number, { startToken?: string; parent?: number }>();
+    const pending = new Map<number, { startToken?: string | undefined; parent?: number | undefined }>();
     for (const [pid, startToken] of current) {
       if (startToken !== undefined && baseline.get(pid) === startToken) continue;
       const previous = observed.get(pid);

@@ -1,3 +1,4 @@
+import { uiAskQuestions } from './ask.ts';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { parseCursorConfigOptions, cursorEffortSelection, type CursorConfigOption } from './cursor-config-options.ts';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -70,7 +71,7 @@ export class CursorAcpRunner implements AgentRunner {
    * 2026.09.18), so agent input waits for the turn boundary; routine messages never cancel tools (#505). */
   readonly inputDelivery: InputDelivery = { mode: 'boundary', consumption: 'unobservable', via: 'next session/prompt after end_turn' };
   private lastSession?: AgentSession;
-  constructor(private readonly options: { bin?: string; timeoutMs?: number; providerRetry?: CursorProviderRetryOptions } = {}) {}
+  constructor(private readonly options: { bin?: string | undefined; timeoutMs?: number; providerRetry?: CursorProviderRetryOptions } = {}) {}
   startSession(spec: AgentRunSpec, onEvent?: (event: AgentEvent) => void, opts: SessionOptions = {}): AgentSession {
     const bin = this.options.bin ?? process.env.CEZ_CURSOR_BIN ?? (process.env.CEZ_DRY_RUN === '1'
       ? fileURLToPath(new URL('../../scripts/mock-cursor-acp.mjs', import.meta.url)) : 'agent');
@@ -108,13 +109,13 @@ class CursorSession implements AgentSession {
   private busy = true;
   private ready = false;
   private markerAsk = false;
-  private sessionId?: string;
+  private sessionId?: string | undefined;
   private configOptions: CursorConfigOption[] = [];
-  private pendingAsk?: PendingAsk;
+  private pendingAsk?: PendingAsk | undefined;
   private answeredNativeAsk = false;
   private queued: ContentBlock[][] = [];
   private requestId = 0;
-  private readonly pending = new Map<RpcId, { resolve: (value: Obj) => void; reject: (error: Error) => void; timer?: NodeJS.Timeout }>();
+  private readonly pending = new Map<RpcId, { resolve: (value: Obj) => void; reject: (error: Error) => void; timer?: NodeJS.Timeout | undefined }>();
   private state = createCursorUiState();
   private readonly texts: string[] = [];
   private readonly toolCalls: AgentToolCallRecord[] = [];
@@ -122,15 +123,15 @@ class CursorSession implements AgentSession {
   private tokensUsed = 0;
   private failure?: string;
   private lastPrompt?: ContentBlock[];
-  private pendingProviderRetry?: PendingProviderRetry;
-  private providerRetryTimer?: NodeJS.Timeout;
+  private pendingProviderRetry?: PendingProviderRetry | undefined;
+  private providerRetryTimer?: NodeJS.Timeout | undefined;
   private providerRetryAttempts = 0;
-  private autoEnd?: NodeJS.Timeout;
+  private autoEnd?: NodeJS.Timeout | undefined;
   private deadline?: NodeJS.Timeout;
   private termTimer?: NodeJS.Timeout;
   private killTimer?: NodeJS.Timeout;
-  private hungKillTimer?: NodeJS.Timeout;
-  private stdinProbe?: NodeJS.Timeout;
+  private hungKillTimer?: NodeJS.Timeout | undefined;
+  private stdinProbe?: NodeJS.Timeout | undefined;
   private resolveResult!: (value: AgentRunResult) => void;
   private settled = false;
 
@@ -619,7 +620,7 @@ class CursorSession implements AgentSession {
         this.ui({ type: 'item.completed', item: { kind: 'message', id: `cursor-plan-${id}`, role: 'assistant', text: params.plan } });
         const questions: AskQuestion[] = [{ header: 'Plan', question: String(params.overview ?? params.name ?? 'Approve this plan?').slice(0, 400), options: [{ label: 'Approve' }, { label: 'Reject' }], multiSelect: false }];
         this.pendingAsk = { id, questions, wire: [], kind: 'plan' };
-        this.ui({ type: 'ask.requested', requestId: String(id), questions }); continue;
+        this.ui({ type: 'ask.requested', requestId: String(id), questions: uiAskQuestions(questions) }); continue;
       }
       if (msg.method === 'session/request_permission' && id !== undefined) {
         const options = Array.isArray(params.options) ? params.options.map(object) : [];
@@ -643,7 +644,7 @@ class CursorSession implements AgentSession {
       this.write({ id, result: { outcome: { outcome: 'skipped', reason: 'Question cannot be represented in the cockpit' } } }); return;
     }
     this.discardQueuedMessages();
-    this.pendingAsk = { id, questions: parsed.questions, wire, kind: 'question' };
-    this.ui({ type: 'ask.requested', requestId: String(id), questions: parsed.questions });
+    this.pendingAsk = { id, questions: uiAskQuestions(parsed.questions), wire, kind: 'question' };
+    this.ui({ type: 'ask.requested', requestId: String(id), questions: uiAskQuestions(parsed.questions) });
   }
 }
