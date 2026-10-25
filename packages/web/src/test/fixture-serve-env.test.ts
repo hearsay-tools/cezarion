@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { execFileSync, spawnSync } from 'node:child_process'
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, realpathSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, realpathSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
@@ -129,4 +129,18 @@ it('keeps the CEZ_* flags a spec passes explicitly', () => {
   expect(env.CEZ_AUTOMATIONS).toBe('1')
   expect(env.CEZ_FOLLOWUPS).toBe('1')
   expect(env.CEZ_PREVIEW).toBeUndefined()
+})
+
+it('pins a fresh server HOME after caller overrides without changing the invoking HOME', () => {
+  const invokingHome = root(), path = gitRoot()
+  vi.stubEnv('HOME', invokingHome)
+  const home = join(realpathSync(path), '.server-home')
+  mkdirSync(home)
+  writeFileSync(join(home, 'stale-skill'), 'from an earlier boot')
+  const env = fixtureServeEnv(path, { HOME: invokingHome })
+  expect(env.HOME).toBe(home)
+  expect(readdirSync(home)).toEqual([])
+  expect(process.env.HOME).toBe(invokingHome)
+  expect(execFileSync('git', ['-C', path, 'var', 'GIT_AUTHOR_IDENT'], { env, encoding: 'utf8' }))
+    .toMatch(/^Cezar Tests <tests@cezar.invalid> /)
 })

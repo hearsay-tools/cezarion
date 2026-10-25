@@ -356,8 +356,23 @@ installed on the host, a default that cezar ships, or the skills this checkout k
 `.ai/skills`. Those catalogs differ between a developer machine and CI's runner, and a change can
 remove a default without touching a spec. On the shared server, write the entries under
 `servedRoot()`, and registered projects through `workspace-registry.ts`. A spec that boots its own
-server writes them into its fixture repository. Remove them in `afterAll`. Host entries can still
-show up next to the seeded ones, so scope each assertion to the seeded entries.
+server writes them into its fixture repository. Remove them in `afterAll`. Scope assertions to
+seeded entries because checkout and built-in entries can still appear alongside them.
+
+E2E servers read no host global skills. The shared server pins `HOME` to
+`.ai/qa/server-home`; `fixtureServeEnv` pins it to `.server-home` under the fixture root,
+after caller overrides. Each directory starts empty on a cold boot (fixture boot preparation
+for spec-owned servers). Healthy shared-server reuse keeps its current home. Browser setup
+and builds keep the invoking account's `HOME`; `CEZ_HOME` and the Git identity/config pins
+keep their existing roles. The shared descriptor records the server's `HOME` in its start
+command. Descriptors from before this pin trigger a cold boot.
+
+To reproduce a missing skill catalog, remove the checkout's skill catalog files from a
+disposable checkout (including `.ai/skills`, `.ai/cezar/skills` and project runner skill
+directories when present). No launcher edit or host-home change is needed. A built-in skill
+or an explicitly configured team source is separate; account for those if the reproduction
+requires a completely empty catalog. Tests of global discovery must plant their own skills
+inside the fixture server's sandbox after preparing its environment.
 
 `settings-skills.e2e.ts` shows the failure (hearsay-tools/cezarion#1572). Its scroll case needs a
 skills list long enough to overflow. On CI's runner, only the default team catalog made the list
@@ -365,7 +380,7 @@ that long, and the spec's comment gave "the host's real global catalog" as the r
 hearsay-tools/cezarion#1541 removed that catalog, and the case failed only in CI (run
 39983148239 attempt 1, job 120515509286). The spec now seeds 40 filler skills.
 `skill-search-ranking.e2e.ts` shows the pattern: it seeds its 24 browse rows, and it checks
-membership against its own fixture skills only, because global skills can match the same query.
+membership against its own fixture skills only, so unrelated catalog entries cannot affect it.
 
 A built-in that a spec tests as product behavior, such as the `quick-task` workflow a new task
 runs, is not a catalog entry in this sense. A change that removes one still searches the specs

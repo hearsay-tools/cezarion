@@ -1113,3 +1113,46 @@ for (const [name, value, rule] of [
     assert.equal(existsSync(join(fixture.root, '.ai/qa/test-env.json')), false);
   });
 }
+
+// hearsay-tools/cezarion#1699: isolate only the server, preserving tool caches and Git pins.
+test('server HOME is fresh on cold boots, preserved on reuse, and separate from tool HOME', () => {
+  const fixture = makeFixture(false);
+  const invokingHome = join(fixture.root, 'invoking-home');
+  mkdirSync(invokingHome);
+  const env = { ...fixtureEnv, PATH: fixture.path, HOME: invokingHome, TEST_ENV_CACHE_TTL_SECONDS: '600' };
+  const npm = join(fixture.root, 'bin/npm');
+  writeFileSync(npm, readFileSync(npm, 'utf8')
+    .replace('set -eu', `set -eu\nprintf '%s\\n' "$HOME" >> .ai/tool-home`)
+    .replace("const http = require('node:http');", `const http = require('node:http');
+require('node:fs').writeFileSync('.ai/app-home', process.env.HOME);
+require('node:fs').writeFileSync('.ai/app-git-ident', require('node:child_process').execFileSync('git', ['var', 'GIT_AUTHOR_IDENT']));`));
+  const up = join(fixture.root, '.ai/scripts/test-env-up.sh');
+  const home = join(fixture.root, '.ai/qa/server-home');
+  mkdirSync(home, { recursive: true });
+  writeFileSync(join(home, 'stale'), 'old boot');
+  const cold = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(cold.status, 0, cold.stderr);
+  const first = descriptor(fixture.root);
+  launchedPids.add(first.app.pid);
+  assert.equal(readFileSync(join(fixture.root, '.ai/app-home'), 'utf8'), home);
+  assert.equal(existsSync(join(home, 'stale')), false);
+  assert.match(first.app.startCommand, /HOME=\.ai\/qa\/server-home /);
+  assert.match(readFileSync(join(fixture.root, '.ai/app-git-ident'), 'utf8'), /^Cezar Tests <tests@cezar.invalid> /);
+  assert.deepEqual([...new Set(readFileSync(join(fixture.root, '.ai/tool-home'), 'utf8').trim().split('\n'))], [invokingHome]);
+  writeFileSync(join(home, 'live'), 'keep during reuse');
+  const warm = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(warm.status, 0, warm.stderr);
+  assert.match(warm.stdout, /TEST_ENV_REUSED=1/);
+  assert.equal(existsSync(join(home, 'live')), true);
+  // A descriptor from an older launcher cannot certify that the live server has an isolated HOME.
+  const descriptorPath = join(fixture.root, '.ai/qa/test-env.json');
+  const legacy = JSON.parse(readFileSync(descriptorPath, 'utf8'));
+  delete legacy.environment.serverHome;
+  writeFileSync(descriptorPath, JSON.stringify(legacy));
+  const upgraded = spawnSync('/bin/sh', [up], { encoding: 'utf8', env, timeout: 20_000 });
+  assert.equal(upgraded.status, 0, upgraded.stderr);
+  const next = descriptor(fixture.root);
+  launchedPids.add(next.app.pid);
+  assert.notEqual(next.app.pid, first.app.pid);
+  assert.equal(existsSync(join(home, 'live')), false);
+});
