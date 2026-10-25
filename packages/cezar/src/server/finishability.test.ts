@@ -7,7 +7,8 @@ import { collect, manager, parent, root, store, until, useWorkerWaitFixture, wor
 import { hasPendingAsk } from '../runs/run-store.testkit.ts';
 
 describe('authoritative finishability (#449)', () => {
-  useWorkerWaitFixture();
+  // The race below includes the final autosave, so its worktree keeps the mock's notes.md change.
+  useWorkerWaitFixture({ mockNotes: true });
   const app = () => createApp({ repoRoot: root, store, manager, version: 'test' });
   const detail = async (id: string) => {
     const response = await apiRequest(app(), `/api/v1/runs/${id}`);

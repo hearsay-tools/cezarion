@@ -2136,6 +2136,12 @@ pin the same through delayed ACK admission with live workers; M28 preserves ordi
 rejected-ASK autonomous nudging. Active ASK lines use the existing payload parser
 unchanged.
 
+Each text-form row keeps one or two representative forms on every native wire, on
+fresh and Continue sessions (M2, M3, M6, M18, M20, and M30's earlier gate). The other
+quoted, fenced, indented, example and Markdown forms are read by the shared turn-end
+rule directly in `workflows/turn-end-text.test.ts`, with identical channels and the
+`missing` and `refresh` channel shapes (hearsay-tools/cezarion#1665).
+
 M9, M10, M15, M16 and M25 are retired (hearsay-tools/cezarion#1234). They pinned
 the prose gate and the rejected-ASK fallback gate, which raised Needs you beside a
 monitoring line, live workers or a dependency wait and held later worker input until
@@ -2149,7 +2155,8 @@ partial channels on fresh/Continue. Native Codex completion refreshes and
 Codex/OpenCode omitted completion text exercise actual channel divergence;
 the native observer pins each capability. Claude/Pi/OMP/Cursor carry coupled
 completion text; OpenCode also deduplicates refreshed completed parts. Those
-named executable wire controls assert equality rather than inject divergence.
+named executable wire controls assert equality rather than inject divergence; a
+runner runs one coupled control, not one per direction it lacks.
 When one channel is an ordered expansion of the other, classify its raw text
 once; neither channel always wins. Incomparable transcripts retain the existing
 conservative gate policy. This partial/replayed-frame coverage differs from
@@ -2749,6 +2756,17 @@ offered for cezar's per-run server. Codex reads `cancel` as the same skipped cal
 as `decline`, so it is not offered. If Codex still asks before a cezar tool (an
 older Codex that ignores the key, say), the request reaches Needs you like any
 other; it is never answered silently. Elicitations carry no item ID.
+
+`.ai/scripts/probe-approvals.ts` checks this routing against the installed Codex
+in one paid turn (hearsay-tools/cezarion#1343). It builds a scratch `CODEX_HOME`
+from the user's provider settings only, with no `approval_policy`, and runs
+cezar's own runner and tool socket beside a second, marker MCP server. The model
+calls the marker tool and then `cezar_wait`. The probe prints the thread's
+`approvalPolicy`, every server request with cezar's reply, and each
+`mcpToolCall` status. A default run shows the cezar call completed with no
+approval request, and the marker call's `permission.requested` answered with
+"Allow once". With `--answer decline`, the marker call is rejected. CI never
+runs the probe.
 
 Approvals emit the `permission.requested` event with an opaque, fresh
 request ID, item ID when present, a title, full action/scope details and offered

@@ -66,6 +66,23 @@
             "shard": "Vitest shard 3/3"
           }
         ]
+      },
+      {
+        "issue": "hearsay-tools/cezarion#1665",
+        "files": "packages/cezar/src/workflows/monitoring-turn.test.ts and packages/cezar/src/workflows/monitoring-channel-order.test.ts, text forms moved to turn-end-text.test.ts",
+        "aggregation": "One passed run: each file's passed suite-summary duration",
+        "run": 40145794368,
+        "sha": "7b4b42c736b53b3805eb571c14629693f059b428",
+        "jobs": [
+          {
+            "job": 121027057418,
+            "shard": "Vitest shard 1/3"
+          },
+          {
+            "job": 121027057363,
+            "shard": "Vitest shard 3/3"
+          }
+        ]
       }
     ]
   },
@@ -446,8 +463,8 @@
     "packages/cezar/src/workflows/immediate-delivery.test.ts": 29526,
     "packages/cezar/src/workflows/maintenance-claims.test.ts": 294,
     "packages/cezar/src/workflows/model-identity-wiring.test.ts": 30375,
-    "packages/cezar/src/workflows/monitoring-channel-order.test.ts": 196534,
-    "packages/cezar/src/workflows/monitoring-turn.test.ts": 448918,
+    "packages/cezar/src/workflows/monitoring-channel-order.test.ts": 86039,
+    "packages/cezar/src/workflows/monitoring-turn.test.ts": 271407,
     "packages/cezar/src/workflows/pasted-attachments.test.ts": 36067,
     "packages/cezar/src/workflows/pi-teardown.test.ts": 578,
     "packages/cezar/src/workflows/prelaunch-cancel.test.ts": 6016,
