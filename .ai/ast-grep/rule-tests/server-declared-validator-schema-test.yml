@@ -1,0 +1,39 @@
+id: server-declared-validator-schema
+valid:
+  # Imported from the contract.
+  - |
+    import { startRunSchema } from '@open-mercato/cezar-contract/runs'
+    app.post('/runs', jsonZodValidator(startRunSchema), handler)
+  # Derived from an import: this file declares no `idSchema`.
+  - |
+    import { idSchema } from './ids.ts'
+    app.get('/x', paramZodValidator(idSchema.pick({ id: true })), handler)
+  # A local zod schema that no validator takes.
+  - |
+    const parseOutput = z.object({ ok: z.boolean() })
+    parseOutput.parse(value)
+  - |
+    const unusedSchema = z.object({ a: z.string() })
+    app.get('/x', handler)
+  # A second argument is an option, not the schema.
+  - |
+    app.get('/x', paramZodValidator(contractSchema, z.object({ message: 'x' })), handler)
+invalid:
+  - |
+    const planSchema = z.object({ a: z.string() })
+    app.post('/plan', jsonZodValidator(planSchema), handler)
+  - |
+    const planSchema = z.object({ a: z.string() })
+    app.post('/plan', jsonZodValidator(planSchema, { message: 'bad' }), handler)
+  - |
+    const waitQuery = z.object({ wait: z.string() })
+    app.get('/wait', queryZodValidator(waitQuery), handler)
+  - |
+    function build() {
+      app.post('/p', jsonZodValidator(() => registerSchema, { message: 'bad' }), handler)
+      const registerSchema = z.object({ root: z.string() })
+    }
+  - |
+    app.get('/x', paramZodValidator(z.object({ id: z.string() })), handler)
+  - |
+    app.post('/x', jsonZodValidator(z.object({ id: z.string() }).strict(), { message: 'bad' }), handler)

@@ -42,6 +42,7 @@
     "typecheck:contract": "npm run typecheck -w @open-mercato/cezar-contract"
   },
   "devDependencies": {
+    "@ast-grep/cli": "0.51.0",
     "@babel/parser": "^8.0.7",
     "@bcoe/v8-coverage": "1.0.2",
     "@vitest/coverage-v8": "4.1.10",

@@ -1,0 +1,14 @@
+id: active-run-literal
+valid:
+  - 'const state = this.makeActiveRun()'
+  - 'const other: Other = { a: 1 }'
+  - 'const run = state as ActiveRun'
+  - 'const run = { a: 1 } as Other'
+  - 'const state: ActiveRun = this.build()'
+invalid:
+  - 'const state: ActiveRun = { a: 1 }'
+  - 'let state: ActiveRun = { a: 1 }'
+  - 'const state = { a: 1 } as ActiveRun'
+  - 'const state = { a: 1 } as unknown as ActiveRun'
+  - 'const state = { a: 1 } satisfies ActiveRun'
+  - 'const state = { ...base, a: 1 } as ActiveRun'
