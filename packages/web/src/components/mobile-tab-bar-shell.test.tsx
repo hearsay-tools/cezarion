@@ -70,7 +70,7 @@ describe('AppShell mobile tab bar (#621)', () => {
     expect(tabBar()!.querySelectorAll('[data-tab]')).toHaveLength(3)
   })
 
-  it.each(['/p/cezarion/tasks/abc', '/p/cezarion/tasks/abc/changes', '/tasks/abc/files', '/p/cezarion/compare/g1', '/compare/g1'])(
+  it.each(['/p/cezarion/tasks/abc', '/p/cezarion/tasks/abc/changes', '/tasks/abc/files'])(
     'hides the tab bar and New task button on pushed route %s',
     (entry) => {
       renderShell(entry)

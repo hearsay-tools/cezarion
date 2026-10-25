@@ -701,13 +701,12 @@ function SummaryTasksTable({ rows, onRename, onTogglePin, now, showTokens, showC
   </div>
 }
 
-/** One row of a status group's tables: a run, or one member of a variant group in order. */
+/** One row of a status group's tables. */
 type GroupedTask = { run: RunSummary; queuePosition: number | null }
 
 /**
  * One status group's tasks in every presentation the page has: the summary table, the detailed
- * table with the saved column choices, and the phone cards. Variant groups keep their place and
- * list their members in variant order.
+ * table with the saved column choices, and the phone cards.
  */
 function GroupedTasks({
   group,
@@ -737,7 +736,7 @@ function GroupedTasks({
   automationName: (automationId: string) => string | undefined
 }) {
   const rows: GroupedTask[] = group.rows.flatMap((row) =>
-    rowTasks(row).map((run) => ({ run, queuePosition: row.kind === 'run' && run.status === 'queued' ? row.queuePosition : null })),
+    rowTasks(row).map((run) => ({ run, queuePosition: run.status === 'queued' ? row.queuePosition : null })),
   )
   return (
     <>

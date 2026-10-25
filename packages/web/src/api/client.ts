@@ -70,7 +70,6 @@ import type {
   GithubMergeResponse,
   GithubPrMergeStateResponse,
   GithubPrChangesData,
-  GroupResponse,
   HealthResponse,
   ApplicationUpdateResponse,
   AttachmentInput,
@@ -1188,18 +1187,6 @@ export function fileLinkImageUrl(id: string, path: string): string {
  *  Scoped here rather than in send() — this URL is handed to an `<img>`, never fetched. */
 export function runFileRawUrl(id: string, path: string): string {
   return apiPath(runPath(id, `/files?path=${encodeURIComponent(path)}&raw=1`))
-}
-
-/** The variant-compare data (spec 010): one entry per variant of the group, with the legacy
- *  `git diff --stat` text and the handoff Progress excerpt. 404 for an unknown group. */
-export async function getGroup(groupId: string, opts?: ReadOptions): Promise<GroupResponse> {
-  return unwrap(
-    await cez.api.v1.p[':projectId'].groups[':groupId'].$get(
-      { param: { projectId: opts?.projectId ?? queryScope(), groupId: encodeURIComponent(groupId) } },
-      init(opts),
-    ),
-    `/groups/${encodeURIComponent(groupId)}`,
-  )
 }
 
 // ---- workspace mutations ------------------------------------------------------------------

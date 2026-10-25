@@ -11,8 +11,7 @@ import type { RunSummary } from '@open-mercato/cezar-api-client'
  * nothing here touches React, the router or the clock. The component below it only paints.
  *
  * Behavior is ported from the legacy list (`web/app.js` → `sortedRuns` / `bucketOf` /
- * `renderRunList`), which is the parity bar for R1: same buckets, same order, same variant
- * collapsing, same queue numbers.
+ * `renderRunList`), which was the parity bar for R1: same buckets, same order, same queue numbers.
  */
 
 /** The Tasks table's Active/Archived. The sidebar asks a different question: `SidebarView`. */
@@ -26,10 +25,6 @@ export type BucketLabel = 'Needs you' | 'Working' | 'Finished' | 'Archived'
 
 /** Rendering order. Also the exhaustive set — `groupRuns` emits a subset of these, in this order. */
 export const BUCKET_ORDER: readonly BucketLabel[] = ['Needs you', 'Finished', 'Working', 'Archived']
-
-/** A variant tile remains in flight until all siblings finish. Its status priority is not the
- * presentation/budget order: putting Finished second must not file a live sibling as history. */
-const GROUP_STATUS_ORDER: readonly BucketLabel[] = ['Needs you', 'Working', 'Finished', 'Archived']
 
 /**
  * Sort weight per status: needs-you first, then the pipeline in the order it will actually
@@ -62,38 +57,26 @@ const statusWeight = (run: RunSummary): number =>
     : STATUS_ORDER[run.status] ?? 9
 
 /**
- * The member a variant group's row shows the dot of (#617 01a): the loudest by attention —
- * `ATTENTION_RANK[deriveAttention(member).bucket]`, so a failed or needs-you member is never
- * hidden behind a done one. Deliberately NOT the group's list position: `sortRuns` puts pins
- * first and ranks done ahead of failed, which is right for placement and wrong for the dot.
- * Ties break on status weight (queued before done inside the quiet rung), then variant letter.
+ * The run a set of runs shows the dot of (#617 01a), such as a sidebar section header: the loudest
+ * by attention — `ATTENTION_RANK[deriveAttention(run).bucket]`, so a failed or needs-you run is
+ * never hidden behind a done one. Ties break on status weight (queued before done inside the quiet
+ * rung), then list order.
  */
 export function loudestMember(members: readonly RunSummary[]): RunSummary {
   const rank = (run: RunSummary) => ATTENTION_RANK[deriveAttention(run).bucket]
   return [...members].sort(
-    (a, b) => rank(a) - rank(b) || statusWeight(a) - statusWeight(b) || (a.variant ?? '').localeCompare(b.variant ?? ''),
+    (a, b) => rank(a) - rank(b) || statusWeight(a) - statusWeight(b),
   )[0]!
 }
 
-/** One row of the quick-list: either a single run, or a collapsed variant group (spec 010). */
-export type QuickListRow =
-  | {
-      kind: 'run'
-      run: RunSummary
-      /** 1-based position among queued runs, `null` unless the run is queued. */
-      queuePosition: number | null
-    }
-  | {
-      kind: 'group'
-      groupId: string
-      /** The shared task title, without the per-variant suffix. */
-      title: string
-      /** Every member, ordered by variant letter (A, B, C). Always ≥ 2 — see `groupRuns`. */
-      members: RunSummary[]
-      /** The member whose dot the group row shows — the loudest by attention (`loudestMember`),
-       *  which is not necessarily the one that picked the bucket (#617 01a). */
-      lead: RunSummary
-    }
+/** One row of the quick-list: a single run. Historical variant runs are ordinary rows since the
+ *  compare page was retired (hearsay-tools/cezarion#1760). */
+export type QuickListRow = {
+  kind: 'run'
+  run: RunSummary
+  /** 1-based position among queued runs, `null` unless the run is queued. */
+  queuePosition: number | null
+}
 
 export interface QuickListBucket {
   label: BucketLabel
@@ -183,16 +166,6 @@ export function refPrefixMatches(title: string, reference: number | undefined): 
 }
 
 /**
- * A variant's shared title: `"Add autocomplete (A)"` → `"Add autocomplete"`.
- *
- * The suffix is the server's own convention (the retired launch engine appended ` (A)`…` (C)`), so this
- * strips exactly that shape — a title that merely ends in "(D)" or "(draft)" is left alone.
- */
-export function groupTitle(run: Pick<RunSummary, 'title'>): string {
-  return run.title.replace(/ \([A-C]\)$/, '')
-}
-
-/**
  * Queue positions: the `#2` a queued row shows instead of an age.
  *
  * Computed over the *active* queued runs by creation order, which is the order the engine will
@@ -227,9 +200,8 @@ export function sortRuns(runs: readonly RunSummary[], view: ListView): RunSummar
     .filter((run) => (view === 'archived' ? run.archived : !run.archived))
     .sort((a, b) => {
       // Pinned first (#935), ahead of every status weight — that IS what a pin asks for, and it
-      // orders the flat Tasks table and rows within each bucket. Variant placement
-      // separately follows bucket priority so attention beats the pin.
-       // Within each pin partition the ordinary rules below apply unchanged.
+      // orders the flat Tasks table and rows within each bucket. Within each pin partition the
+      // ordinary rules below apply unchanged.
       //
       // Ignored in the archived view, where `bucketOf` collapses everything into one bucket:
       // archiving unpins, so a pin there is a hand-edit, and history has no "what happens next".
@@ -274,13 +246,7 @@ export function sidebarActiveRunId(
 }
 
 /**
- * The whole list, ready to render: filtered to the view, sorted, variant-collapsed and bucketed.
- *
- * Variant collapsing (spec 010): runs sharing a `groupId` render as one tile, placed where the
- * group's best-ranked member would have sat — so a group with one variant waiting on you rises to
- * "Needs you" as a unit, rather than tearing in half across two buckets. A `groupId` with only one
- * member left in view (the picked winner, or the only one not archived) is not a group at all and
- * renders as a plain row.
+ * The whole list, ready to render: filtered to the view, sorted and bucketed.
  *
  * Empty buckets are omitted rather than rendered headerless-and-empty; a fully empty result is the
  * component's cue for the empty state.
@@ -301,24 +267,7 @@ export function groupRuns(
     else byBucket.set(label, [row])
   }
 
-  const seenGroups = new Set<string>()
   for (const run of sorted) {
-    if (run.groupId) {
-      if (seenGroups.has(run.groupId)) continue
-      seenGroups.add(run.groupId)
-      // From `sorted`, not from `runs`: a group's members must obey the same view filter as
-      // everything else, or an archived variant would reappear inside an active group's tile.
-      const members = sorted
-        .filter((member) => member.groupId === run.groupId)
-        .sort((a, b) => (a.variant ?? '').localeCompare(b.variant ?? ''))
-      if (members.length > 1) {
-        // Bucket priority is independent of sortRuns' flat-table pin ordering: any
-        // attentive member lifts the whole group above even a pinned quiet sibling.
-        const label = GROUP_STATUS_ORDER.find((label) => members.some((member) => bucketOf(member, view) === label))!
-        push(label, { kind: 'group', groupId: run.groupId, title: groupTitle(run), members, lead: loudestMember(members) })
-        continue
-      }
-    }
     push(bucketOf(run, view), { kind: 'run', run, queuePosition: positions.get(run.id) ?? null })
   }
 
@@ -331,10 +280,9 @@ export function groupRuns(
 /**
  * Apply the overall and per-section row budgets in bucket order. Missing preferences keep
  * ten rows overall with unlimited sections; null disables only its corresponding constraint.
- * A collapsed variant-group tile counts as one row — it occupies one row of sidebar. Buckets
- * emptied by the cap are dropped, like `groupRuns` drops empty ones.
+ * Buckets emptied by the cap are dropped, like `groupRuns` drops empty ones.
  *
- * Pinned rows are EXEMPT, including attentive pins and groups containing a pin in Needs you.
+ * Pinned rows are EXEMPT, including attentive pins in Needs you.
  * They spend none of the budget the other rows share (#935). A pin is an
  * explicit request for that row to be on screen, so trimming one is the one thing this cap must
  * not do — and the alternative, letting pins eat the ten rows, would let three pins hide every
@@ -349,7 +297,7 @@ export function capBuckets(buckets: readonly QuickListBucket[], limits: SidebarL
   for (const bucket of buckets) {
     let sectionRemaining = bucket.label === 'Archived' ? Infinity : preferences[sectionKeys[bucket.label]] ?? Infinity
     const rows = bucket.rows.filter((row) => {
-      const pinned = row.kind === 'run' ? row.run.pinned : row.members.some((member) => member.pinned)
+      const pinned = row.run.pinned
       // Archived records cannot use stale pin flags to escape the history cap.
       if (bucket.label !== 'Archived' && pinned) return true
       if (remaining <= 0 || sectionRemaining <= 0) return false

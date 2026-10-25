@@ -4,7 +4,7 @@ import { reportVoiceOutcome, voiceDecide } from '@/api/client'
 import { useRuns } from '@/api/queries'
 import { useListView } from '@/components/list-view'
 import { useActiveProjectId, useNavigate, useProjectMatch, useProjectPathname } from '@/lib/project-router'
-import { groupTitle, runTitle, type SidebarView } from '@/lib/task-groups'
+import { runTitle, type SidebarView } from '@/lib/task-groups'
 import { parseNumberedPick } from '@/lib/voice/numbered-pick'
 import { usePendingAsk, useVoiceProposal, voiceStore, type VoiceProposal } from '@/lib/voice/proposal-store'
 import { resolveOpenTarget, type OpenTarget } from '@/lib/voice/resolve-open'
@@ -110,7 +110,7 @@ interface DecisionRequest {
   failed: boolean
 }
 
-type Openable = Extract<OpenTarget, { kind: 'run' | 'group' }>
+type Openable = Extract<OpenTarget, { kind: 'run' }>
 interface Choice {
   target: Openable
   text: string
@@ -133,12 +133,8 @@ function planOpen(
   context: { runs: readonly RunSummary[]; sidebarView: SidebarView; openRunId: string | null },
 ): { primary: OpenTarget; choices: Choice[] } {
   const titleOf = (target: Openable): string => {
-    if (target.kind === 'run') {
-      const run = context.runs.find((candidate) => candidate.id === target.runId)
-      return run ? runTitle(run) : target.runId
-    }
-    const member = context.runs.find((candidate) => candidate.groupId === target.groupId)
-    return member ? groupTitle(member) : target.groupId
+    const run = context.runs.find((candidate) => candidate.id === target.runId)
+    return run ? runTitle(run) : target.runId
   }
   const resolve = (status: OpenDecision['status'], position: OpenDecision['position']) =>
     resolveOpenTarget({ ...context, status, position })
@@ -147,8 +143,8 @@ function planOpen(
   const seen = new Set<string>()
   for (const candidate of [{ status: decision.status, position: decision.position }, ...(decision.alternatives ?? [])]) {
     const target = resolve(candidate.status, candidate.position)
-    if (target.kind !== 'run' && target.kind !== 'group') continue
-    const id = target.kind === 'run' ? `run:${target.runId}` : `group:${target.groupId}`
+    if (target.kind !== 'run') continue
+    const id = `run:${target.runId}`
     if (seen.has(id)) continue
     seen.add(id)
     choices.push({ target, text: openRowText(titleOf(target), candidate.status, candidate.position) })
@@ -306,7 +302,7 @@ export function useVoiceCommand(args: {
       }
       setChoosing(undefined)
       latest.current.close()
-      latest.current.navigate(target.kind === 'run' ? `/tasks/${target.runId}` : `/compare/${target.groupId}`)
+      latest.current.navigate(`/tasks/${target.runId}`)
     },
     [report],
   )

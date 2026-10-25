@@ -294,12 +294,15 @@ describe('useVoiceCommand', () => {
     expect(mocks.navigate).toHaveBeenCalledWith('/tasks/a')
   })
 
-  it('opens a variant group at its compare page', async () => {
-    mocks.runs = [failed({ id: 'g1', groupId: 'grp', title: 'Shared · A' }), failed({ id: 'g2', groupId: 'grp', title: 'Shared · B' })]
+  it('opens a historical variant run at its own task page (hearsay-tools/cezarion#1760)', async () => {
+    mocks.runs = [
+      failed({ id: 'g1', groupId: 'grp', variant: 'A', title: 'Shared · A', createdAt: '2026-07-14T12:00:00.000Z' }),
+      failed({ id: 'g2', groupId: 'grp', variant: 'B', title: 'Shared · B', createdAt: '2026-07-14T11:00:00.000Z' }),
+    ]
     const harness = setup({ text: 'open the first failed task' })
     enter(harness)
     await answer(calls[0], { action: 'open', decisionId: DECISION_ID(1), status: 'failed', position: 1, confidence: 0.9 })
-    expect(mocks.navigate).toHaveBeenCalledWith('/compare/grp')
+    expect(mocks.navigate).toHaveBeenCalledWith('/tasks/g1')
   })
 
   it('says why nothing opens: an empty list, a position past its end', async () => {

@@ -14,7 +14,6 @@ describe('activeNavPath', () => {
     ['/tasks/abc123', '/'],
     ['/tasks/abc123/changes', '/'],
     ['/tasks/abc123/files', '/'],
-    ['/compare/grp-1', '/'],
 
     ['/inbox', null],
     ['/git', '/git'],
@@ -169,10 +168,8 @@ describe('isPushedRoute', () => {
     ['/tasks/abc123/commits', true],
     ['/tasks/abc123/commits/deadbeef', true],
     ['/tasks/abc123/files', true],
-    ['/compare/grp-1', true],
     ['/p/cezar/tasks/abc123', true],
     ['/p/cezar/tasks/abc123/files', true],
-    ['/p/cezar/compare/grp-1', true],
     // The all-projects overview is a list, not a pushed screen.
     ['/tasks', false],
     ['/tasks/', false],

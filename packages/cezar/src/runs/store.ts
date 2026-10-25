@@ -2199,7 +2199,7 @@ export class RunStore extends EventEmitter {
   /**
    * The live set, newest first: runs whose record is live (`isLiveRecord`) or that a RunManager
    * pins. Finished runs are not here — read one by id (`getRun`), by an indexed query
-   * (`listWorkersOf`, `findRunByClientRequestId`, `listGroupRuns`, `listRunsWithWorktree`,
+   * (`listWorkersOf`, `findRunByClientRequestId`, `listRunsWithWorktree`,
    * `listBranchOwners`), or as list rows (`listRunSummaries`).
    */
   listRuns(): RunRecord[] {
@@ -2524,11 +2524,6 @@ export class RunStore extends EventEmitter {
     for (const id of this.deleted) ids.delete(id);
     for (const id of this.held.keys()) ids.add(id);
     return [...ids];
-  }
-
-  /** The members of one parallel-variant group (spec 010), in no particular order. */
-  listGroupRuns(groupId: string): RunRecord[] {
-    return this.queryRuns(this.db?.listByGroup(groupId) ?? [], (run) => run.groupId === groupId).map(([run]) => run);
   }
 
   /** Runs with a materialized worktree directory (`worktreePath`, not reclaimed), most recently

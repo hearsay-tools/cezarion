@@ -178,12 +178,6 @@ describe('pushed task screen top bar', () => {
     expect(screen.getByTestId('location').textContent).toBe('/')
   })
 
-  it('titles a compare route itself', () => {
-    renderScreen('/compare/grp-1')
-    expect(within(topBar()).getByText('Retained results')).toBeTruthy()
-    expect(within(topBar()).getByRole('button', { name: 'Back' })).toBeTruthy()
-  })
-
   it('keeps the list route on the project top bar', () => {
     renderScreen('/')
     expect(topBar().getAttribute('data-mode')).toBeNull()

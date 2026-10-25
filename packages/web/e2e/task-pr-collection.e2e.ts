@@ -38,12 +38,11 @@ beforeAll(async () => {
     archived: false, pinned: true, createdAt: new Date().toISOString(), tokensUsed: 0, steps: [],
     pullRequests: numbers.map(number => ({ number, url: `https://github.com/mock/repo/pull/${number}`, source: 'created' })),
     issueNumber: 142 }
-  const group = ['A', 'B'].map((variant, index) => ({ ...record, id: `group-${variant}`, title: 'Grouped work', groupId: 'collection-group', variant,
-    runner: 'claude', inputTokens: 100000, outputTokens: 200000,
-    pullRequests: [...record.pullRequests, ...Array.from({ length: 10 }, (_, n) => ({ number: 200 + index * 20 + n, url: `https://github.com/mock/repo/pull/${200 + index * 20 + n}`, source: 'created' }))] }))
+  const wide = { ...record, id: 'wide', title: 'Wide collection', runner: 'claude', inputTokens: 100000, outputTokens: 200000,
+    pullRequests: [...record.pullRequests, ...Array.from({ length: 10 }, (_, n) => ({ number: 200 + n, url: `https://github.com/mock/repo/pull/${200 + n}`, source: 'created' }))] }
   mkdirSync(join(root, '.ai/cezar'), { recursive: true })
   mkdirSync(artifacts, { recursive: true })
-  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([record, ...group,
+  writeFileSync(join(root, '.ai/cezar/runs.json'), JSON.stringify([record, wide,
     { ...record, id: 'long', title: 'Long collection', issueNumber: undefined, pullRequests: Array.from({ length: 25 }, (_, n) => ({ number: 300 + n, url: `https://github.com/mock/repo/pull/${300 + n}`, source: 'created' })) },
     { ...record, id: 'legacy', title: 'Legacy task', pullRequests: undefined, prNumber: 128, issueNumber: undefined }]))
   server = spawnFixtureServer([cezarCli, 'serve', '--repo', root, '--port', '0', '--no-open'], {
@@ -149,30 +148,18 @@ describe('complete task PR collection', () => {
     expect(legacy).toBe('#128')
   })
 
-  it('keeps group and variant overflow operable at narrow pointer widths', () => {
+  it('keeps row overflow operable at narrow pointer widths', () => {
     browser.setViewport(1280, 900)
     browser.goto(`${base}/p/${project}`)
     browser.evaluate(`localStorage.setItem('cez-sidebar-width', '264')`)
     browser.goto(`${base}/p/${project}`)
-    const group = '[data-slot="group-row"][data-group-id="collection-group"]'
-    const trigger = `${group} [data-slot="reference-overflow"]`
-    const available = waitForSettledSample<boolean>(browser, `(() => {
+    const trigger = '[data-slot="task-row"][data-run-id="wide"] [data-slot="reference-overflow"]'
+    const usable = waitForSettledSample<boolean>(browser, `(() => {
       const el = document.querySelector('${trigger}'); if (!el) return null
       return !el.closest('[data-ellipsis-hidden]') && getComputedStyle(el).pointerEvents !== 'none'
     })()`)
-    expect(available).toBe(true)
-    hoverVisiblePoint(browser, trigger)
-    browser.waitForValue(`!!document.querySelector('${panel}')`)
-    browser.moveTo(0, 0)
-    browser.waitForValue(`document.querySelector('${panel}') === null`)
-    browser.click(`${group} [data-slot="group-tile"]`)
-    const variant = '[data-run-id="group-A"] [data-slot="reference-overflow"]'
-    const usable = waitForSettledSample<boolean>(browser, `(() => {
-      const el = document.querySelector('${variant}'); if (!el) return null
-      return !el.closest('[data-ellipsis-hidden]') && getComputedStyle(el).pointerEvents !== 'none'
-    })()`)
     expect(usable).toBe(true)
-    hoverVisiblePoint(browser, variant)
+    hoverVisiblePoint(browser, trigger)
     expect(browser.waitForValue(`document.querySelector('${panel}')?.textContent`)).toContain('#209')
     browser.moveTo(0, 0)
     browser.waitForValue(`document.querySelector('${panel}') === null`)
@@ -234,7 +221,7 @@ describe('complete task PR collection', () => {
     expect(browser.waitForValue(`location.pathname.endsWith('/tasks/long/pr/324')`)).toBe(true)
   })
 
-  it('touch overflow is outside the group toggle and never toggles or navigates', async () => {
+  it('touch overflow opens without navigating', async () => {
     browser.close()
     browser = AgentBrowser.open(`pr-collection-touch-${process.pid}`)
     browser.setViewport(1280, 900)
@@ -249,20 +236,7 @@ describe('complete task PR collection', () => {
       return bottom - top
     })()`)
     expect(hitArea).toBeGreaterThanOrEqual(44)
-    const group = '[data-slot="group-row"][data-group-id="collection-group"]'
-    const trigger = `${group} [data-slot="reference-overflow"]`
-    const target = browser.waitForValue<{ x: number; y: number; nested: boolean; height: number }>(`(() => {
-      const el = document.querySelector('${trigger}'); if (!el) return null
-      const r = el.getBoundingClientRect(); return { x: r.x+r.width/2, y: r.y+r.height/2,
-        nested: !!el.closest('[data-slot="group-tile"]'), height: r.height }
-    })()`)
-    expect(target.nested).toBe(false)
-    expect(target.height).toBeGreaterThanOrEqual(44)
-    await nativeTap(trigger, `document.querySelector('${panel}') !== null`)
-    const state = browser.waitForValue<{ open: boolean; expanded: string; path: string }>(`(() => {
-      if (!document.querySelector('${panel}')) return null
-      return { open: true, expanded: document.querySelector('${group} [data-slot="group-tile"]').getAttribute('aria-expanded'), path: location.pathname }
-    })()`)
-    expect(state).toEqual({ open: true, expanded: 'false', path: `/p/${project}` })
+    await nativeTap(single, `document.querySelector('${panel}') !== null`)
+    expect(browser.waitForValue(`document.querySelector('${panel}') ? location.pathname : null`)).toBe(`/p/${project}`)
   })
 })

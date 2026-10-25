@@ -173,7 +173,7 @@ and an orchestrator keeps a whole queue of them moving.
   handing their code and keys to a SaaS — the agent runs on your subscription,
   on your machine.
 - **`claude` CLI power users** who love headless runs but want to *see* them,
-  compare a few attempts side by side, and review a diff before it lands.
+  and review a diff before it lands.
 - **Anyone with a backlog** who'd rather queue three tasks into isolated worktrees
   and pick the winners than babysit one terminal.
 - **Teams with shared conventions** who want their playbooks (skills) pulled from
@@ -722,12 +722,12 @@ Parallel variants (×2/×3) are removed in the next breaking minor release (0.17
 The owner chose immediate removal without a deprecation window
 (hearsay-tools/cezarion#1542). The composer starts one task. `POST /api/v1/runs`
 refuses `variants: 2` or `3` with `400`; it never turns them into one candidate.
-The old `variants: 1` spelling still means an ordinary run. Winner selection
-returns `410` and cannot cancel, archive or remove any result.
+The old `variants: 1` spelling still means an ordinary run.
 
-Historical `groupId` and `variant` fields remain readable. Old `/compare/:groupId`
-links, including project-scoped links, open retained results with links to each task's
-transcript, diff and commits. No retirement migration deletes runs, branches or worktrees;
+The compare page and its group routes are retired too (hearsay-tools/cezarion#1760).
+Historical `groupId` and `variant` fields remain stored, and old variant runs list as
+ordinary tasks. Old `/compare/:groupId` links, including project-scoped links, open the
+task list. No retirement migration deletes runs, branches or worktrees;
 normal retention and explicit cleanup still apply. Saved multi-candidate drafts and
 automations offer **Use one task** before saving or launching. A saved automation with
 `task.variants > 1` reports an error on launch; edit it to remove that field or set it to `1`.

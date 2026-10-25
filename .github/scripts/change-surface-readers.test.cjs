@@ -54,7 +54,6 @@ const mentionedOnly = [
   { file: 'packages/web/e2e/task-pr-collection.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
   { file: 'packages/web/e2e/task-views-layout.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
   { file: 'packages/web/e2e/touch-targets.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
-  { file: 'packages/web/e2e/variants-compare.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
   { file: 'packages/web/e2e/worktree-setup.e2e.ts', markdown: 'packages/web/e2e/README.md', reason: FIXTURE_README },
   { file: 'packages/web/src/test/e2e-wait-discipline.baseline.json', markdown: 'packages/web/e2e/README.md', reason: 'names the wait rules in its $comment' },
   { file: 'packages/web/src/test/e2e-wait-discipline.test.ts', markdown: 'packages/web/e2e/README.md', reason: 'names the wait rules in an assertion message' },

@@ -168,7 +168,6 @@ describe('pageTitleContext', () => {
   it.each([
     ['/p/cezar/', 'Tasks'],
     ['/new', 'New task'],
-    ['/p/cezar/compare/group-1', 'Retained results'],
     ['/p/cezar/git', 'Git'],
     ['/p/cezar/git/commits/abc123', 'Git'],
     ['/p/cezar/github/issues/543', 'GitHub'],
@@ -212,8 +211,6 @@ const ROUTE_CASES: Array<[url: string, route: string, title: string]> = [
   // The linked-item tabs (#692): with fetch never answering they are honestly loading.
   ['/tasks/abc123/pr/5', 'task-github-item', 'Loading pull request…'],
   ['/tasks/abc123/issue/7', 'task-github-item', 'Loading issue…'],
-  // The real compare view (Step R3 2.3): with fetch never answering it is honestly loading.
-  ['/compare/grp-1', 'compare', 'Loading retained results…'],
   // The real repo view (R5 Step 1.7): with fetch never answering it is honestly loading —
   // and every segment is its own URL, commit deep links included.
   ['/git', 'repo-git', 'Loading repository…'],
@@ -379,6 +376,12 @@ describe('the global settings area (/settings/global)', () => {
       expect(screen.getByRole('heading', { level: 2, name: title })).toBeTruthy()
     })
   }
+
+  it.each(['/compare/grp-1', `/p/${BOOT}/compare/grp-1`])('%s (retired, hearsay-tools/cezarion#1760) lands on the task list', (url) => {
+    renderAt(url)
+    expect(currentPathname()).toBe(`/p/${BOOT}/`)
+    expect(routeName()).toBe('tasks')
+  })
 
   it('/settings/global/skills (removed, hearsay-tools/cezarion#1494) lands on the Skills page', () => {
     renderAt('/settings/global/skills')

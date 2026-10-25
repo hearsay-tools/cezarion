@@ -1,7 +1,6 @@
 import {
   ApiError,
   getGithubItem,
-  getGroup,
   getAutomations,
   getProjectRun,
   getRunCommit,
@@ -95,8 +94,6 @@ async function entityExists(
         const item = await getGithubItem(pattern.endsWith('/issue/:n') ? 'issue' : 'pr', number, {}, opts)
         return item.available ? item.item !== null : null
       }
-    } else if (pattern === '/compare/:groupId') {
-      await getGroup(params.groupId ?? '', opts)
     } else if (pattern === '/git/commits/:sha') {
       await getRepoCommit(params.sha ?? '', opts)
     } else if (pattern === '/github/issues/:n' || pattern.startsWith('/github/prs/:n')) {

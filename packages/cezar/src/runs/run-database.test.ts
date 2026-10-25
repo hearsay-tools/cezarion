@@ -420,13 +420,6 @@ describe('RunDatabase', () => {
       expect(db.findByClientRequestId('client-2')).toBeUndefined();
     });
 
-    it("lists a variant group's members", () => {
-      const db = openDb();
-      seed(db);
-      expect(db.listByGroup('group-1').map((r) => r.id).sort()).toEqual(['v-a', 'v-b']);
-      expect(db.listByGroup('group-2')).toEqual([]);
-    });
-
     it('lists runs with a materialized worktree, most recently finished first', () => {
       const db = openDb();
       seed(db);

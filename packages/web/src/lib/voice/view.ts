@@ -6,7 +6,6 @@ import type { VoiceView } from '@open-mercato/cezar-api-client/contract/voice'
  */
 const PAGES: [prefix: string, view: VoiceView][] = [
   ['/tasks', 'task'],
-  ['/compare', 'compare'],
   ['/new', 'new-task'],
   ['/github', 'github'],
   ['/git', 'git'],

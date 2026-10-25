@@ -31,7 +31,7 @@ import { workerCapacity } from '../delegation/capacity.ts';
 import type { DelegationController } from '../delegation/provision.ts';
 import { delegationFailure } from '../delegation/routes.ts';
 import { githubItemParamsSchema } from '@open-mercato/cezar-contract/github';
-import { PARALLEL_VARIANTS_REMOVED, singleRunVariantsSchema, toRunSummary } from '@open-mercato/cezar-contract/runs';
+import { singleRunVariantsSchema, toRunSummary } from '@open-mercato/cezar-contract/runs';
 import { workerEmptyRequestSchema, runRelationshipsSchema } from '@open-mercato/cezar-contract/delegation';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
@@ -83,8 +83,6 @@ import {
   archiveFinishedRequestSchema,
   markAllReadRequestSchema,
   notifyRunInputSchema,
-  type GroupResponse,
-  type GroupVariant,
   type RunIndexEntry,
   type RunsIndexResponse,
 } from '@open-mercato/cezar-contract/runs';
@@ -158,7 +156,7 @@ import {
 import { planChain, slugify } from '../planner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
 import { getTeamSkillsCached, refreshTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
-import { appendHandoffHeartbeat, handoffProgressExcerpt, readHandoff } from '../handoff.ts';
+import { appendHandoffHeartbeat, readHandoff } from '../handoff.ts';
 import { ARCHIVED_WINDOW, type RepoHandle, type RunEvent, type RunRecord, type RunStatus, type RunStore } from '../runs/store.ts';
 import {
   HistoryCursorError,
@@ -183,7 +181,7 @@ import { artifactParamsSchema, fileLinkQuerySchema } from '@open-mercato/cezar-c
 import { artifactDirectory, listArtifacts, readArtifact } from '../artifacts/store.ts';
 import { artifactPreview, loadFileLink, rasterMime } from '../artifacts/resolve.ts';
 import { isUntouchedCancelledRun, toPastedContent, type PastedContent, type RunManager } from '../workflows/run.ts';
-import { worktreeDiff, worktreeDiffStat, worktreeSizeBytes } from '../git-worktree.ts';
+import { worktreeDiff, worktreeSizeBytes } from '../git-worktree.ts';
 import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
 import { isReclaimable, reclaimWorktree, reclaimWorktrees, rematerializeReclaimedWorktree, selectReclaimableWorktrees } from '../runs/retention.ts';
 import { getBranches, getCommit, getDiff, getLogWithParents, getBranchHead, getRepoInfo, getStatus, getTracking } from './git.ts';
@@ -542,12 +540,6 @@ const AUTOMATIONS_OFF = 'Automations are disabled — set CEZ_AUTOMATIONS=1 to e
 /** 404 body for a run whose row is in runs.db but whose record this cezar cannot decode (#779). */
 const UNREADABLE_RUN_ERROR = 'this run could not be read by this cezar: its record in runs.db does not fit this version (a newer cezar may have written it). It is left in the database untouched.';
 
-// ---- variant-compare response shapes (spec 010) ----------------------------
-// Named and exported so `api-types.test.ts` can drift-guard the cockpit's
-// hand-mirrored copies (`web/app/src/api/types.ts`) against the real thing.
-
-/** One column of `GET /api/groups/:groupId`. NOTE: `diffStat` here is the raw
- *  `git diff --stat` text (worktreeDiffStat), NOT the numeric `RunRecord.diffStat`. */
 /** `GET /api/projects` (multi-project spec) — the workspace registry with
  *  per-root status probes. Absolute `root`s belong HERE (same-origin, behind
  *  the cockpit) and are deliberately never mirrored into the CORS-open
@@ -4828,46 +4820,6 @@ export function createApp(deps: ServerDeps) {
       } finally { release(); }
     });
 
-  // ---- retained variant groups (spec 010) -----------------------------------------
-
-  const groupRuns = (store: RunStore, groupId: string): RunRecord[] =>
-    store
-      .listGroupRuns(groupId)
-      .sort((a, b) => (a.variant ?? '').localeCompare(b.variant ?? ''));
-
-  // ---- chained family: variant groups (project-scoped) ----
-  const groupsRoutes = new Hono<ProjectApiEnv>()
-    .get('/groups/:groupId', async (c) => {
-      const { dataDir, store } = c.get('project');
-      const runs = groupRuns(store, c.req.param('groupId'));
-      if (runs.length === 0) return c.json({ error: 'not found' }, 404);
-      const detailed = await Promise.all(
-        runs.map(async (r): Promise<GroupVariant> => ({
-          id: r.id,
-          variant: r.variant ?? '?',
-          title: r.title,
-          status: r.status,
-          archived: r.archived,
-          tokensUsed: r.tokensUsed,
-          ...(r.inputTokens !== undefined ? { inputTokens: r.inputTokens } : {}),
-          ...(r.outputTokens !== undefined ? { outputTokens: r.outputTokens } : {}),
-          ...(r.costUsd !== undefined ? { costUsd: r.costUsd } : {}),
-          diffStat:
-            r.worktreePath && existsSync(r.worktreePath) && !autosaveCleanupBlocker(dataDir, r.id)
-              ? await worktreeDiffStat(r.worktreePath, r.baseBranch ?? 'HEAD')
-              : '',
-          handoffExcerpt: handoffProgressExcerpt(readHandoff(dataDir, r.id)),
-        })),
-      );
-      return c.json({
-        groupId: c.req.param('groupId'),
-        runs: detailed,
-      } satisfies GroupResponse);
-    })
-
-    // Old clients receive an explicit refusal. This route never mutates retained results.
-    .post('/groups/:groupId/pick', (c) => c.json({ error: PARALLEL_VARIANTS_REMOVED }, 410));
-
   // ---- chained family: open-targets (project-scoped) ----
   const openTargetsRoutes = new Hono<ProjectApiEnv>()
     .get('/open-targets', (c) => c.json({ targets: capabilities().localHandoff ? detectOpenTargets() : [] }))
@@ -5902,7 +5854,6 @@ export function createApp(deps: ServerDeps) {
     .route('/', automationsRoutes)
     .route('/', agentWebhooksRoutes)
     .route('/', runsRoutes)
-    .route('/', groupsRoutes)
     .route('/', openTargetsRoutes)
     .route('/', worktreesRoutes)
     .route('/', sseRoutes)

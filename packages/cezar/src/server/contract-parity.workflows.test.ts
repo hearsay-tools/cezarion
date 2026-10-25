@@ -12,9 +12,7 @@ import type {
 } from '@open-mercato/cezar-contract';
 import type {
   deleteWorkflowResponseSchema,
-  groupResponseSchema,
   parsedWorkflowSchema,
-  variantRetirementResponseSchema,
   planResponseSchema,
   saveWorkflowResponseSchema,
   workflowsResponseSchema,
@@ -24,7 +22,7 @@ import type { AppType } from './app-type.ts';
 import { workflowStepSchema } from '../workflows/types.ts';
 
 /**
- * Same guard as `contract-parity.test.ts`, for the workflows / groups / skills /
+ * Same guard as `contract-parity.test.ts`, for the workflows / skills /
  * agent-config families. See that file for why every assertion is MUTUAL: one-way
  * assignability passes on genuine drift, in both directions, and did so historically.
  *
@@ -45,10 +43,6 @@ describe('src/contract workflows/skills/agent-config schemas match the routes ex
   type ParseWorkflow200 = InferResponseType<typeof client.api.v1.workflows.parse.$post, 200>;
   type Plan200 = InferResponseType<typeof client.api.v1.plan.$post, 200>;
 
-  // ---- parallel variants -----------------------------------------------------------------
-  type Group200 = InferResponseType<(typeof client.api.v1.groups)[':groupId']['$get'], 200>;
-  type Pick410 = InferResponseType<(typeof client.api.v1.groups)[':groupId']['pick']['$post'], 410>;
-
   // ---- skills / todos --------------------------------------------------------------------
   type Skills200 = InferResponseType<typeof client.api.v1.skills.$get, 200>;
   type SkillsRefresh200 = InferResponseType<typeof client.api.v1.skills.refresh.$post, 200>;
@@ -65,8 +59,6 @@ describe('src/contract workflows/skills/agent-config schemas match the routes ex
     Assert<Exact<z.infer<typeof deleteWorkflowResponseSchema>, DeleteWorkflow200>>,
     Assert<Exact<z.infer<typeof parsedWorkflowSchema>, ParseWorkflow200>>,
     Assert<Exact<z.infer<typeof planResponseSchema>, Plan200>>,
-    Assert<Exact<z.infer<typeof groupResponseSchema>, Group200>>,
-    Assert<Exact<z.infer<typeof variantRetirementResponseSchema>, Pick410>>,
     Assert<Exact<z.infer<typeof skillSchema>[], Skills200>>,
     Assert<Exact<z.infer<typeof skillSchema>[], SkillsRefresh200>>,
     Assert<Exact<z.infer<typeof importableSkillSchema>[], Importable200>>,

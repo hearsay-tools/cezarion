@@ -38,7 +38,7 @@ describe('human owned-worker cleanup', () => {
     const forged = await app.request(`http://127.0.0.1/api/v1/runs/${workerId}/worker-destroy`, { method: 'POST', headers: { host: '127.0.0.1', 'content-type': 'application/json' }, body: '{"parentRunId":"fake"}' }); expect(forged.status).toBe(400);
     const ordinary = await app.request(`http://127.0.0.1/api/v1/runs/${f.parent.id}/worker-destroy`, { method: 'POST', headers: { host: '127.0.0.1' } }); expect(ordinary.status).toBe(403);
   });
-  it.each(['delete', 'remove-worktree', 'variant-pick'] as const)('never lets %s erase a reused worker path or branch', async operation => {
+  it.each(['delete', 'remove-worktree'] as const)('never lets %s erase a reused worker path or branch', async operation => {
     const { workerId } = await f.service.spawn(f.caller, { task: 'child', baseline: 'HEAD', requestId: randomUUID() });
     await f.service.destroy(f.caller, { workerId });
     const worker = f.store.getRun(workerId)!;
@@ -50,18 +50,10 @@ describe('human owned-worker cleanup', () => {
     expect(f.store.canDeleteRun(workerId)).toBe(true);
     const app = createApp({ repoRoot: f.root, store: f.store, manager: f.manager, version: 'test', bootProjectId: 'project' });
     let url = `/runs/${workerId}`;
-    let body: string | undefined;
     if (operation === 'remove-worktree') url += '/remove-worktree';
-    if (operation === 'variant-pick') {
-      const groupId = randomUUID();
-      const winner = f.store.createRun({ task: 'winner', title: 'winner', workflow: 'quick-task', steps: [] });
-      f.store.updateRun(winner.id, { groupId, variant: 'A', status: 'done' });
-      f.store.updateRun(workerId, { groupId, variant: 'B' });
-      url = `/groups/${groupId}/pick`; body = JSON.stringify({ runId: winner.id });
-    }
     const response = await app.request(`http://127.0.0.1/api/v1${url}`, { method: operation === 'delete' ? 'DELETE' : 'POST',
-      headers: { host: '127.0.0.1', 'content-type': 'application/json' }, ...(body ? { body } : {}) });
-    expect(response.status).toBe(operation === 'remove-worktree' ? 409 : operation === 'variant-pick' ? 410 : 200);
+      headers: { host: '127.0.0.1', 'content-type': 'application/json' } });
+    expect(response.status).toBe(operation === 'remove-worktree' ? 409 : 200);
     expect(existsSync(join(path, 'unrelated.txt'))).toBe(true);
     expect(execFileSync('git', ['rev-parse', `refs/heads/${branch}`], { cwd: f.root, encoding: 'utf8' }).trim()).toBe(f.sha);
     expect(f.store.getRun(workerId) === undefined).toBe(operation === 'delete');

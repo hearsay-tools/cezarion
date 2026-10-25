@@ -11,8 +11,8 @@ import {
   bucketOf,
   capBuckets,
   groupRuns,
-  groupTitle,
   listCounts,
+  loudestMember,
   queuePositions,
   refPrefixMatches,
   runTitle,
@@ -48,7 +48,7 @@ function shape(buckets: QuickListBucket[]): string[] {
   return buckets.map(
     (bucket) =>
       `${bucket.label}: ${bucket.rows
-        .map((row) => (row.kind === 'group' ? `[${row.members.map((m) => m.variant).join('')}]` : row.run.id))
+        .map((row) => row.run.id)
         .join(', ')}`
   )
 }
@@ -59,13 +59,6 @@ function rowsOf(buckets: QuickListBucket[], index = 0) {
   const bucket = buckets[index]
   if (!bucket) throw new Error(`no bucket at ${index}`)
   return bucket.rows
-}
-
-/** The one group row a test expects, narrowed. */
-function groupRow(buckets: QuickListBucket[], index = 0) {
-  const row = rowsOf(buckets)[index]
-  if (!row || row.kind !== 'group') throw new Error('expected a group row')
-  return row
 }
 
 describe('bucketOf', () => {
@@ -267,20 +260,6 @@ describe('refPrefixMatches', () => {
   })
 })
 
-describe('groupTitle', () => {
-  it.each([
-    ['Add skills autocomplete (A)', 'Add skills autocomplete'],
-    ['Add skills autocomplete (C)', 'Add skills autocomplete'],
-    ['Add skills autocomplete', 'Add skills autocomplete'],
-    // Only the server's own ` (A)`…` (C)` suffix — a title that happens to end in parentheses
-    // keeps them.
-    ['Bump zod to v4 (draft)', 'Bump zod to v4 (draft)'],
-    ['Rename the (D) flag', 'Rename the (D) flag'],
-  ])('%s → %s', (title, expected) => {
-    expect(groupTitle(run({ title }))).toBe(expected)
-  })
-})
-
 describe('groupRuns', () => {
   it('emits the buckets in the mockup order, and omits empty ones', () => {
     const runs = [
@@ -315,7 +294,7 @@ describe('groupRuns', () => {
     ]
     const rows = rowsOf(groupRuns(runs, 'active'))
     expect(
-      rows.map((row) => (row.kind === 'run' ? [row.run.id, row.queuePosition] : null))
+      rows.map((row) => [row.run.id, row.queuePosition])
     ).toEqual([
       // FIFO now (the sort), so the rows run in the same order as the numbers they carry —
       // the engine's start order, top to bottom.
@@ -325,77 +304,14 @@ describe('groupRuns', () => {
     ])
   })
 
-  describe('variant groups (spec 010)', () => {
-    const group = (over: Partial<RunRecord>[]): RunSummary[] =>
-      over.map((o) => run({ groupId: 'g1', title: 'Add autocomplete (X)', ...o }))
-
-    it('collapses a groupId into one tile, members ordered by letter', () => {
-      const runs = group([
-        { id: 'b', variant: 'B', status: 'running', title: 'Add autocomplete (B)' },
-        { id: 'c', variant: 'C', status: 'running', title: 'Add autocomplete (C)' },
-        { id: 'a', variant: 'A', status: 'running', title: 'Add autocomplete (A)' },
-      ])
-      const buckets = groupRuns(runs, 'active')
-      expect(shape(buckets)).toEqual(['Working: [ABC]'])
-
-      const row = groupRow(buckets)
-      expect(row.groupId).toBe('g1')
-      // The shared title, without any variant's suffix.
-      expect(row.title).toBe('Add autocomplete')
-      expect(row.members).toHaveLength(3)
-    })
-
-    it('places the tile where its best-ranked member would sit — the group moves as a unit', () => {
-      const runs = [
-        ...group([
-          { id: 'a', variant: 'A', status: 'running', title: 'Add autocomplete (A)' },
-          { id: 'b', variant: 'B', status: 'waiting', title: 'Add autocomplete (B)' },
-        ]),
-        run({ id: 'other', status: 'running' }),
-      ]
-      // B is waiting, so the whole tile is under "Needs you" — it does not tear in half with A
-      // left behind under Working.
-      expect(shape(groupRuns(runs, 'active'))).toEqual(['Needs you: [AB]', 'Working: other'])
-    })
-
-    it('renders a lone survivor as a plain row, not a one-member group', () => {
-      // What the "pick a winner" flow leaves behind: the winner keeps its groupId forever.
-      const runs = group([{ id: 'winner', variant: 'A', status: 'done', title: 'Add autocomplete (A)' }])
-      expect(shape(groupRuns(runs, 'active'))).toEqual(['Finished: winner'])
-    })
-
-    it('does not pull members across the view filter', () => {
-      const runs = group([
-        { id: 'a', variant: 'A', status: 'done', title: 'Add autocomplete (A)' },
-        { id: 'b', variant: 'B', status: 'done', title: 'Add autocomplete (B)', archived: true },
-      ])
-      // One active member left → a plain row, and the archived one is not smuggled into its tile.
-      expect(shape(groupRuns(runs, 'active'))).toEqual(['Finished: a'])
-      expect(shape(groupRuns(runs, 'archived'))).toEqual(['Archived: b'])
-    })
-
-    it('emits each group once, however many members it has', () => {
-      const runs = [
-        ...group([
-          { id: 'a', variant: 'A', status: 'done', title: 'Add autocomplete (A)' },
-          { id: 'b', variant: 'B', status: 'done', title: 'Add autocomplete (B)' },
-          { id: 'c', variant: 'C', status: 'done', title: 'Add autocomplete (C)' },
-        ]),
-      ]
-      expect(rowsOf(groupRuns(runs, 'active'))).toHaveLength(1)
-    })
-
-    it('keeps separate groups separate', () => {
-      const runs = [
-        run({ id: 'a1', groupId: 'g1', variant: 'A', status: 'running', title: 'One (A)' }),
-        run({ id: 'a2', groupId: 'g1', variant: 'B', status: 'running', title: 'One (B)' }),
-        run({ id: 'b1', groupId: 'g2', variant: 'A', status: 'running', title: 'Two (A)' }),
-        run({ id: 'b2', groupId: 'g2', variant: 'B', status: 'running', title: 'Two (B)' }),
-      ]
-      const rows = rowsOf(groupRuns(runs, 'active'))
-      expect(rows).toHaveLength(2)
-      expect(rows.map((row) => (row.kind === 'group' ? row.title : row.run.id))).toEqual(['One', 'Two'])
-    })
+  it('lists historical variant runs as ordinary rows (hearsay-tools/cezarion#1760)', () => {
+    const runs = [
+      run({ id: 'a', groupId: 'g1', variant: 'A', status: 'running', title: 'Add autocomplete (A)' }),
+      run({ id: 'b', groupId: 'g1', variant: 'B', status: 'waiting', title: 'Add autocomplete (B)' }),
+      run({ id: 'c', groupId: 'g1', variant: 'C', status: 'running', title: 'Add autocomplete (C)', archived: true }),
+    ]
+    expect(shape(groupRuns(runs, 'active'))).toEqual(['Needs you: b', 'Working: a'])
+    expect(shape(groupRuns(runs, 'archived'))).toEqual(['Archived: c'])
   })
 
   it('handles an empty list', () => {
@@ -477,12 +393,6 @@ describe('listCounts', () => {
 })
 
 describe('status sections (#811)', () => {
-  it('keeps a mixed working/finished variant group in flight even though Finished renders first', () => {
-    const members = [run({ id: 'a', groupId: 'mixed', variant: 'A', status: 'done', pinned: true }), run({ id: 'b', groupId: 'mixed', variant: 'B', status: 'running' })]
-    expect(shape(groupRuns([...members, run({ id: 'done' })], 'active'))).toEqual(['Finished: done', 'Working: [AB]'])
-    expect(shape(capBuckets(groupRuns(members, 'active'), 0))).toEqual(['Working: [AB]'])
-  })
-
   it('keeps pins first inside their status and allocates the shared budget to Finished before Working', () => {
     const runs = [
       run({ id: 'work', status: 'running' }),
@@ -573,15 +483,6 @@ describe('pinned tasks (#935)', () => {
       expect(shape(groupRuns([run({ id: 'done', status: 'done' })], 'active'))).toEqual(['Finished: done'])
     })
 
-    it('lifts a whole variant tile when any member is pinned', () => {
-      // A pinned variant lifts the whole tile within its status section.
-      const runs = [
-        run({ id: 'a', groupId: 'g1', variant: 'A', status: 'done' }),
-        pinned({ id: 'b', groupId: 'g1', variant: 'B', status: 'done' }),
-        run({ id: 'other', status: 'done' }),
-      ]
-      expect(shape(groupRuns(runs, 'active'))).toEqual(['Finished: [AB], other'])
-    })
   })
 
   describe('capBuckets', () => {
@@ -630,37 +531,6 @@ describe('pinned tasks (#935)', () => {
   })
 })
 
-
-describe('pin promotion preserves visible variant membership (#93)', () => {
-  it('promotes once with multiple pins, preserves sibling flags/order, and spends no row budget', () => {
-    const a = run({ id: 'a', groupId: 'g', variant: 'A', status: 'waiting' })
-    const b = run({ id: 'b', groupId: 'g', variant: 'B', status: 'done', pinned: true })
-    const c = run({ id: 'c', groupId: 'g', variant: 'C', status: 'running', pinned: true })
-    const rows = [c, b, a, run({ id: 'single-pin', pinned: true }), ...Array.from({ length: 12 }, (_, i) => run({ id: `recent-${i}` }))]
-    const before = structuredClone(rows)
-    expect(shape(capBuckets(groupRuns(rows, 'active'), 0))).toEqual(['Needs you: [ABC]', 'Finished: single-pin'])
-    const buckets = capBuckets(groupRuns(rows, 'active'), 10)
-    expect(buckets.map(({ label, rows }) => [label, rows.length])).toEqual([['Needs you', 1], ['Finished', 11]])
-    const group = buckets[0]?.rows.find((row) => row.kind === 'group')
-    expect(group?.kind).toBe('group')
-    if (group?.kind !== 'group') throw new Error('missing group')
-    expect(group.members.map(({ id }) => id)).toEqual(['a', 'b', 'c'])
-    expect(group.members.map(({ pinned }) => pinned)).toEqual([undefined, true, true])
-    expect(rows).toEqual(before)
-    expect(listCounts(rows)).toEqual({ active: 16, archived: 0, waiting: 1 })
-  })
-
-  it('never promotes active siblings because of an archived pin, and keeps the lone visible survivor', () => {
-    const a = run({ id: 'a', groupId: 'g', variant: 'A', status: 'done' })
-    const b = run({ id: 'b', groupId: 'g', variant: 'B', status: 'done', pinned: true, archived: true })
-    const c = run({ id: 'c', groupId: 'g', variant: 'C', status: 'done' })
-    expect(shape(groupRuns([b, c, a], 'active'))).toEqual(['Finished: [AC]'])
-    expect(shape(groupRuns([b, c, a], 'archived'))).toEqual(['Archived: b'])
-    expect(shape(groupRuns([b, { ...a, pinned: true }], 'active'))).toEqual(['Finished: a'])
-    expect(shape(capBuckets(groupRuns([b, { ...a, pinned: true }], 'active'), 0))).toEqual(['Finished: a'])
-  })
-})
-
 it.each(['open', 'resolved'] as const)('keeps %s worker waits in the appropriate existing group/count', phase => {
   const record = run({ status: 'waiting', delegation: { role: 'root', permissions: [], receipts: [] }, waits: [workerWait({ workerIds: ['worker'], phase })] } as Partial<RunRecord>)
   expect(bucketOf(record, 'active')).toBe('Working')
@@ -692,14 +562,6 @@ describe('owned workers are not list rows (#312)', () => {
     expect(shape(groupRuns([parent, child, other], 'archived'))).toEqual(['Archived: parent'])
   })
 
-  it('does not let an owned worker join a variant group', () => {
-    const runs = [
-      run({ id: 'a', groupId: 'g1', variant: 'A', title: 'Add autocomplete (A)' }),
-      ownedWorker({ id: 'b', groupId: 'g1', variant: 'B', title: 'Add autocomplete (B)' }),
-    ]
-    expect(shape(groupRuns(runs, 'active'))).toEqual(['Finished: a'])
-  })
-
   it('does not count workers in Active, Archived, or waiting', () => {
     const runs = [
       run({ status: 'running' }),
@@ -723,7 +585,7 @@ describe('owned workers are not list rows (#312)', () => {
     )
     const capped = capBuckets(groupRuns([...parents, ...workers], 'active'), 10)
     const ids = capped.flatMap((bucket) =>
-      bucket.rows.map((row) => (row.kind === 'run' ? row.run.id : row.groupId)),
+      bucket.rows.map((row) => row.run.id),
     )
     expect(ids).toHaveLength(10)
     expect(ids).toEqual(parents.map((parent) => parent.id).reverse())
@@ -748,43 +610,22 @@ describe('owned workers are not list rows (#312)', () => {
   })
 })
 
-describe("a variant group's lead dot (#617): the loudest member by attention, not the list's first", () => {
-  const groupOf = (members: RunSummary[]) => {
-    const row = groupRuns(members, 'active').flatMap((bucket) => bucket.rows).find((r) => r.kind === 'group')
-    if (!row || row.kind !== 'group') throw new Error('no group row')
-    return row
-  }
-
-  it('shows a failed member over a done one, though sortRuns ranks done first', () => {
-    const lead = groupOf([
-      run({ id: 'd', groupId: 'g', variant: 'A', status: 'done', finishedAt: '2026-07-14T11:00:00.000Z' }),
-      run({ id: 'f', groupId: 'g', variant: 'B', status: 'failed', finishedAt: '2026-07-14T11:00:00.000Z' }),
-    ]).lead
-    expect(lead.id).toBe('f')
+describe("a section's dot (#617): the loudest run by attention, not the list's first", () => {
+  it('shows a failed run over a done one, though sortRuns ranks done first', () => {
+    expect(loudestMember([
+      run({ id: 'd', status: 'done', finishedAt: '2026-07-14T11:00:00.000Z' }),
+      run({ id: 'f', status: 'failed', finishedAt: '2026-07-14T11:00:00.000Z' }),
+    ]).id).toBe('f')
   })
 
-  it('shows a needs-you member over a pinned done one, and places the group in Needs you', () => {
-    const members = [
-      run({ id: 'pd', groupId: 'g', variant: 'A', status: 'done', pinned: true }),
-      run({ id: 'w', groupId: 'g', variant: 'B', status: 'waiting' }),
-    ]
-    expect(groupOf(members).lead.id).toBe('w')
-    // Attention chooses placement even when a quiet sibling is pinned.
-    expect(groupRuns(members, 'active').map((bucket) => bucket.label)).toEqual(['Needs you'])
+  it('shows a needs-you run over a pinned done one', () => {
+    expect(loudestMember([run({ id: 'pd', status: 'done', pinned: true }), run({ id: 'w', status: 'waiting' })]).id).toBe('w')
   })
 
-  it('breaks a tie on the same attention rung deterministically — status weight, then variant letter', () => {
-    const twoRunning = [
-      run({ id: 'b', groupId: 'g', variant: 'B', status: 'running', createdAt: '2026-07-14T10:05:00.000Z' }),
-      run({ id: 'a', groupId: 'g', variant: 'A', status: 'running' }),
-    ]
-    expect(groupOf(twoRunning).lead.id).toBe('a')
-    expect(groupOf([...twoRunning].reverse()).lead.id).toBe('a')
+  it('breaks a tie on the same attention rung by status weight, then list order', () => {
+    expect(loudestMember([run({ id: 'b', status: 'running' }), run({ id: 'a', status: 'running' })]).id).toBe('b')
     // Same `none` rung: queued (still to happen) outranks done.
-    expect(groupOf([
-      run({ id: 'dd', groupId: 'g', variant: 'A', status: 'done' }),
-      run({ id: 'q', groupId: 'g', variant: 'B', status: 'queued' }),
-    ]).lead.id).toBe('q')
+    expect(loudestMember([run({ id: 'dd', status: 'done' }), run({ id: 'q', status: 'queued' })]).id).toBe('q')
   })
 })
 
@@ -796,12 +637,6 @@ it('keeps attentive pins after the cap is exhausted without spending ordinary ro
   ], 'active')
   expect(shape(capBuckets(buckets, 0))).toEqual(['Needs you: pin-review'])
   expect(shape(capBuckets(buckets, 2))).toEqual(['Needs you: pin-review, plain-wait', 'Working: work'])
-})
-
-it('does not bury an attentive variant behind a non-attentive waiting parent', () => {
-  const parked = run({ id: 'parked', status: 'waiting', groupId: 'g', variant: 'A',
-    delegation: { role: 'root', permissions: [], receipts: [] }, waits: [workerWait({ workerIds: ['worker'] })] } as Partial<RunRecord>)
-  expect(shape(groupRuns([parked, run({ status: 'review', groupId: 'g', variant: 'B' })], 'active'))).toEqual(['Needs you: [AB]'])
 })
 
 it('does not exempt a stale archived pin from the row cap', () => {
@@ -823,16 +658,13 @@ describe('project sidebar combined limits (#810)', () => {
   ])('combines overall and independent section constraints: %j', (limits, expected) => {
     expect(shape(capBuckets(groupRuns(records(), 'active'), limits))).toEqual(expected)
   })
-  it('counts groups as one row and exempts pins from both budgets', () => {
+  it('exempts pins from both budgets', () => {
     const rows = [
-      run({ id: 'a', groupId: 'g', variant: 'A', status: 'waiting' }),
-      run({ id: 'b', groupId: 'g', variant: 'B', status: 'waiting' }),
-      run({ id: 'c', groupId: 'p', variant: 'A', status: 'done', pinned: true }),
-      run({ id: 'd', groupId: 'p', variant: 'B', status: 'done' }),
+      run({ id: 'c', status: 'done', pinned: true }),
       run({ id: 'pin', status: 'running', pinned: true }), ...records(),
     ]
     expect(shape(capBuckets(groupRuns(rows, 'active'), { overall: 1, needsYou: 1, finished: 1, working: 1 })))
-      .toEqual(['Needs you: [AB]', 'Finished: [AB]', 'Working: pin'])
+      .toEqual(['Needs you: 0-0', 'Finished: c', 'Working: pin'])
   })
   it('Archived ignores section caps and denies stale pin exemptions', () => {
     const rows = records().map(row => ({ ...row, archived: true, pinned: true }))
@@ -856,22 +688,19 @@ describe('sidebar Active and Automations (#1332)', () => {
     auto({ id: 'gone', archived: true }),
     run({ id: 'archived', archived: true }),
     { ...ownedWorker({ id: 'worker', status: 'waiting' }), automationId: 'auto-1' },
-    auto({ id: 'va', groupId: 'g1', variant: 'A', title: 'Nightly (A)' }),
-    auto({ id: 'vb', groupId: 'g1', variant: 'B', title: 'Nightly (B)' }),
   ]
 
   it('splits unarchived tasks by recorded origin, never by autonomy', () => {
     expect(sidebarRuns(fixture(), 'active').map((r) => r.id)).toEqual(['manual', 'autonomous'])
-    expect(sidebarRuns(fixture(), 'automations').map((r) => r.id)).toEqual(['scheduled', 'asks', 'worker', 'va', 'vb'])
+    expect(sidebarRuns(fixture(), 'automations').map((r) => r.id)).toEqual(['scheduled', 'asks', 'worker'])
   })
 
-  it('keeps an automation variant group as one tile in its status section', () => {
-    expect(shape(groupRuns(sidebarRuns(fixture(), 'automations'), 'active'))).toEqual(['Needs you: asks', 'Finished: scheduled, [AB]'])
+  it('places automation tasks in their status sections', () => {
+    expect(shape(groupRuns(sidebarRuns(fixture(), 'automations'), 'active'))).toEqual(['Needs you: asks', 'Finished: scheduled'])
   })
 
   it('counts each tab and its own attention, without workers or archived tasks', () => {
-    // Variants count one per run, as the Tasks table counts them.
-    expect(sidebarCounts(fixture())).toEqual({ active: 2, automations: 4, activeWaiting: 0, automationsWaiting: 1 })
+    expect(sidebarCounts(fixture())).toEqual({ active: 2, automations: 2, activeWaiting: 0, automationsWaiting: 1 })
     expect(sidebarCounts([])).toEqual({ active: 0, automations: 0, activeWaiting: 0, automationsWaiting: 0 })
   })
 })

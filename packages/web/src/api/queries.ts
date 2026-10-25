@@ -34,7 +34,6 @@ import {
   getGithubItem,
   getGithubPrChanges,
   getGithubRefStatus,
-  getGroup,
   getHealth,
   getLaunchKey,
   getOpenTargets,
@@ -168,9 +167,6 @@ export const queryKeys = {
     handoff: (id: string) => [queryScope(), 'runs', 'handoff', id] as const,
     commits: (id: string) => [queryScope(), 'runs', 'commits', id] as const,
     commit: (id: string, sha: string) => [queryScope(), 'runs', 'commit', id, sha] as const,
-  },
-  groups: {
-    detail: (groupId: string) => [queryScope(), 'groups', groupId] as const,
   },
   get workflows() {
     return [queryScope(), 'workflows'] as const
@@ -1172,18 +1168,6 @@ export function useArtifact(id: string, artifactId: string | null) {
 }
 export function useArtifacts(id: string) {
   return useQuery({ queryKey: [queryScope(), 'runs', 'artifacts', id], queryFn: ({ signal }) => getArtifacts(id, { signal }), retry: false, staleTime: 0, refetchOnWindowFocus: true })
-}
-
-/** The variant-compare data for `/compare/:groupId` (spec 010). Freshness while variants are
- *  still running is the ROUTE's concern: the group endpoint is not on the SSE stream, so the
- *  compare view invalidates this key when the run list (which IS stream-patched) shows a member
- *  changing state — no polling, per the sync doctrine. */
-export function useGroup(groupId: string | undefined) {
-  return useQuery({
-    queryKey: queryKeys.groups.detail(groupId ?? ''),
-    queryFn: ({ signal }) => getGroup(groupId as string, { signal }),
-    enabled: Boolean(groupId),
-  })
 }
 
 /** A run's commit list (Commits tab). Polls while active so new commits appear as the agent

@@ -530,7 +530,7 @@ export const runSummarySchema = z.object({
    *  step's name when it has one, otherwise `workflow`. Derived here because it is the one thing
    *  a list row ever read off `steps[]`. */
   workflowLabel: z.string(),
-  /** Variant group membership (spec 010): the list collapses a group into one row. */
+  /** Historical variant group membership (spec 010, retired): the list shows each run as its own row. */
   groupId: z.string().optional(),
   variant: z.string().optional(),
   pinned: z.boolean().optional(),
@@ -865,46 +865,6 @@ export type RunCommit = z.infer<typeof runCommitSchema>;
 /** `GET /runs/:id/commits` — `<base>..HEAD` on the worktree branch, newest first. */
 export const runCommitsResponseSchema = z.object({ commits: z.array(runCommitSchema) });
 export type RunCommitsResponse = z.infer<typeof runCommitsResponseSchema>;
-
-// ---- retained variant groups (spec 010) ----------------------------------------------------------
-//
-// `/groups/:groupId/*` is the RUN family seen sideways: a group is the runs sharing a `groupId`,
-// and the pick answers a whole run record. So these live here rather than with the workflows,
-// which keeps `./workflows.ts` free of any edge back into this file (see its header).
-
-/**
- * One variant column of the compare view.
- *
- * CAREFUL: `diffStat` here is the raw `git diff --stat` TEXT the server runs in the variant's
- * worktree — a different thing from the numeric `RunRecord.diffStat`. `''` when the worktree
- * is gone.
- */
-export const groupVariantSchema = z.object({
-  id: z.string(),
-  /** 'A' | 'B' | 'C' in practice; `'?'` for a record that lost its letter. */
-  variant: z.string(),
-  title: z.string(),
-  status: runStatusSchema,
-  archived: z.boolean(),
-  tokensUsed: z.number(),
-  inputTokens: usageCounterSchema.optional(),
-  outputTokens: usageCounterSchema.optional(),
-  costUsd: z.number().optional(),
-  diffStat: z.string(),
-  /** First lines of the handoff journal's "## Progress log" section, as markdown. */
-  handoffExcerpt: z.string(),
-});
-export type GroupVariant = z.infer<typeof groupVariantSchema>;
-
-/** `GET /groups/:groupId` — every run sharing a groupId, side by side. */
-export const groupResponseSchema = z.object({
-  groupId: z.string(),
-  runs: z.array(groupVariantSchema),
-});
-export type GroupResponse = z.infer<typeof groupResponseSchema>;
-
-/** `POST /groups/:groupId/pick` (410) — the retired action changes no history. */
-export const variantRetirementResponseSchema = z.object({ error: z.string() });
 
 // ---- request bodies ----------------------------------------------------------------------
 //
