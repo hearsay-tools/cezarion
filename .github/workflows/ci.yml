@@ -185,8 +185,16 @@ jobs:
         if: github.event_name == 'pull_request_target' || steps['resolve-dispatch'].outputs.valid == 'true'
         uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
         with:
+          # This workflow runs from the base branch tip (context.sha), but the checkout above is the
+          # event's base.sha, which GitHub does not move when the branch advances. Load the gate
+          # from the workflow's own trusted commit, so the step never outruns its script.
           script: |
-            const { checkPullRequest } = require('./.github/scripts/baseline-growth.cjs');
+            const fs = require('node:fs');
+            const path = require('node:path');
+            const { execFileSync } = require('node:child_process');
+            const gate = path.join(process.env.RUNNER_TEMP, 'baseline-growth.cjs');
+            fs.writeFileSync(gate, execFileSync('git', ['show', `${context.sha}:.github/scripts/baseline-growth.cjs`]));
+            const { checkPullRequest } = require(gate);
             await checkPullRequest({ github, context, core });
       - id: classify
         env:

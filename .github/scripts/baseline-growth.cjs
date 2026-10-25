@@ -100,7 +100,9 @@ async function checkPullRequest({ github, context, core, cwd = process.cwd() }) 
   git(cwd, 'fetch', '--no-tags', 'origin', `refs/pull/${number}/head`);
   const fetched = git(cwd, 'rev-parse', 'FETCH_HEAD').trim();
   if (fetched !== expectedHead) throw new Error('PR changed during fetch; rerun CI');
-  const mergeBase = git(cwd, 'merge-base', base, fetched).trim();
+  // GitHub never moves the event's base.sha when the base branch advances. Measure from the
+  // branch tip this workflow runs from, so commits the head took from that branch stay out.
+  const mergeBase = git(cwd, 'merge-base', dispatched ? base : context.sha, fetched).trim();
   const allowGrowth = pr.labels.some(label => label.name === 'baseline-growth');
   const reasons = checkBaselineGrowth({ cwd, base: mergeBase, head: fetched, allowGrowth });
   if (reasons.length) core.setFailed(`${reasons.join('\n')}\nFor an owner-approved increase, add the baseline-growth label, then re-run the failed classify-pr job. Deletion readers and invalid JSON must still be fixed.`);

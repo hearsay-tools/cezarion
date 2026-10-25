@@ -537,7 +537,10 @@ test('baseline growth is required through trusted classify-pr with default PR ev
   assert.equal(job.permissions['pull-requests'], 'read');
   const check = job.steps[checkIndex];
   assert.equal(check.if, "github.event_name == 'pull_request_target' || steps['resolve-dispatch'].outputs.valid == 'true'");
-  assert.match(check.with.script, /require\('\.\/.github\/scripts\/baseline-growth.cjs'\)/);
+  // The checkout is the event's base.sha, which can predate the gate; the workflow's own commit cannot.
+  assert.match(check.with.script, /'show', `\$\{context\.sha\}:\.github\/scripts\/baseline-growth\.cjs`/);
+  assert.match(check.with.script, /require\(gate\)/);
+  assert.doesNotMatch(check.with.script, /require\('\.\/.github\/scripts\/baseline-growth.cjs'\)/);
   assert.match(check.with.script, /await checkPullRequest\(\{ github, context, core \}\)/);
   assert.ok(ci.jobs.verify.needs.includes('classify-pr'));
   assert.match(ci.jobs.verify.steps[0].run, /test "\$CLASSIFY_RESULT" = success/);
