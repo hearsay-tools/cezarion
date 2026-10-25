@@ -138,15 +138,29 @@ export function leaderRunning(leader: GroupLeader, readStart: ReadStart = proces
  *  its leader while any member is unreaped, and the kernel never hands out a pid that still names
  *  a group, so `-pid` reaches only this group until then. A live process with the leader's pid
  *  and another start identity means the group ended and the pid was reused. */
-export function groupExists(leader: GroupLeader, readStart: ReadStart = processStartToken): boolean {
-  // Windows has no process groups: the recorded leader, until it is provably gone, is all there is.
-  if (process.platform === 'win32') return leaderStatus(leader, readStart) !== 'gone';
-  if (leader.start !== undefined) {
-    const current = readStart(leader.pid);
-    if (current !== undefined && current !== leader.start) return false;
+/** Whether the group `leader` started may still have members. `unknown` when its pid names a live
+ *  process the record cannot verify, which may lead another group now. A leader that is gone leaves
+ *  its group's id reserved while any member lives, so a group by that id is still its own. */
+function groupStatus(leader: GroupLeader, readStart: ReadStart): 'exists' | 'gone' | 'unknown' {
+  // Windows has no process groups: the recorded leader is all there is.
+  if (process.platform === 'win32') {
+    const status = leaderStatus(leader, readStart);
+    return status === 'running' ? 'exists' : status;
   }
-  try { process.kill(-leader.pid, 0); return true; }
-  catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+  const answers = () => {
+    try { process.kill(-leader.pid, 0); return true; }
+    catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
+  };
+  if (leader.start === undefined) return answers() ? 'unknown' : 'gone';
+  if (processState(leader.pid) !== 'gone') {
+    const current = readStart(leader.pid);
+    if (current === undefined) return 'unknown';
+    if (current !== leader.start) return 'gone';
+  }
+  return answers() ? 'exists' : 'gone';
+}
+export function groupExists(leader: GroupLeader, readStart: ReadStart = processStartToken): boolean {
+  return groupStatus(leader, readStart) !== 'gone';
 }
 
 /** True when one look at the process table finds a member of group `pgid` that is not a zombie,
@@ -195,8 +209,9 @@ export interface StopOptions {
 /** Stops the process group `leader` started: SIGTERM, then SIGKILL for whatever outlives the
  *  grace, the leader or any other member. True once no member runs. SIGKILL goes to every group
  *  that still exists, zombies only included, so it also reaches a member a scan missed. On
- *  Windows it ends the recorded leader's process tree at once, then waits `killWaitMs`. A leader
- *  with no recorded start is never signalled; the stop reports it stopped only once no member runs. */
+ *  Windows it ends the recorded leader's process tree at once, then waits `killWaitMs`. A live
+ *  leader whose start is not recorded, or cannot be read now, is never signalled; the stop reports
+ *  it stopped only once no member runs. */
 export async function stopGroup(leader: GroupLeader, options: StopOptions = {}): Promise<boolean> {
   const { graceMs = 10_000, killWaitMs = 1_000, readStart = processStartToken } = options;
   if (process.platform === 'win32') {
@@ -208,10 +223,11 @@ export async function stopGroup(leader: GroupLeader, options: StopOptions = {}):
     while (processState(leader.pid) !== 'gone' && performance.now() < deadline) await delay(POLL_MS);
     return processState(leader.pid) === 'gone';
   }
-  // With no recorded identity the pid may now lead another group: report, never signal.
-  if (leader.start === undefined) return !groupRunning(leader, readStart);
   for (const [signal, waitMs] of [['SIGTERM', graceMs], ['SIGKILL', killWaitMs]] as const) {
-    if (!groupExists(leader, readStart)) return true;
+    const status = groupStatus(leader, readStart);
+    if (status === 'gone') return true;
+    // The pid may lead another group now: report, never signal.
+    if (status === 'unknown') return !groupRunning(leader, readStart);
     try { process.kill(-leader.pid, signal); } catch { /* the group already ended */ }
     const deadline = performance.now() + waitMs;
     while (groupRunning(leader, readStart) && performance.now() < deadline) await delay(POLL_MS);

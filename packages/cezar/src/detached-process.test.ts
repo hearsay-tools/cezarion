@@ -174,6 +174,14 @@ require('node:fs').writeFileSync(out('sleeper.pid'), sh.pid + '\\n'); ${IDLE}`);
     expect(alive(other.pid)).toBe(true);
   });
 
+  it('never signals a live leader whose start identity cannot be read now: its pid may lead another group', async () => {
+    const { leader } = await startLeader(IDLE);
+    const unreadable = () => undefined;
+    expect(groupExists(leader, unreadable)).toBe(true);
+    expect(await stopGroup(leader, { graceMs: 200, readStart: unreadable })).toBe(false);
+    expect(alive(leader.pid)).toBe(true);
+  });
+
   it('never signals a leader whose start identity was not recorded: its pid may name another process', async () => {
     const { leader } = await startLeader(IDLE);
     const unrecorded: GroupLeader = { pid: leader.pid };
