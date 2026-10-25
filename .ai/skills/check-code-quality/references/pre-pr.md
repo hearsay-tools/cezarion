@@ -186,6 +186,11 @@ To plan a split along a flagged function's decision points, list them with
 `--line <line>` for a repeated name). Each `line kind` row is one counted
 point, so the rows plus one equal the complexity.
 
+CI runs a looser ratchet on the same functions:
+`node <skill>/scripts/complexity-gate.mjs --base <target-ref> --head HEAD` fails only on a
+function over 20 that is new or more complex than at the merge base. This check still
+flags every changed function above a limit, so passing here implies passing there.
+
 A small change stays within the function or an immediate helper, preserves its
 contract and needs no new architecture. Prefer simpler control flow and useful
 missing tests. Keep decisions visible; moving all of them to a new helper to
