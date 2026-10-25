@@ -777,7 +777,7 @@ function replyWithAsk(turnText, msg) {
 }
 
 function replyWithOrdinaryTurn() {
-emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_m1', text: '' } } });
+  emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_m1', text: '' } } });
   emit({ method: 'item/agentMessage/delta', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', itemId: 'item_m1', delta: 'Checking the working tree.' } });
   emit({ method: 'item/completed', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'agentMessage', id: 'item_m1', text: 'Checking the working tree.' } } });
   emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mock_1', item: { type: 'commandExecution', id: 'item_c1', command: ['bash', '-lc', 'git status --short'], cwd: '/repo', status: 'inProgress' } } });
@@ -791,7 +791,7 @@ emit({ method: 'item/started', params: { threadId: 'th_mock_1', turnId: 'turn_mo
 }
 
 async function handleNativeFailure(turnText, msg) {
-const selectedFailure = failureControl?.failureFor(turnText);
+  const selectedFailure = failureControl?.failureFor(turnText);
   const nativeFailure = selectedFailure instanceof Promise ? await selectedFailure : selectedFailure;
   if (failureControl ? nativeFailure === 'provider' : turnText.includes('mock:provider-error') || turnText.includes('mock:empty-success')) {
     // Derived from the 0.147 rollout and upstream envelope; see the source
