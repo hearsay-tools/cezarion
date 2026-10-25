@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import type { ConversationMessage, Wait } from '@open-mercato/cezar-contract';
+import type { ConversationMessage, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import type { RunEvent } from '../runs/store.ts';
 import { describeWait, isCezarHumanWait } from '../workflows/waits.ts';
 import { uuidFrom } from './questions.ts';
@@ -17,6 +17,21 @@ export const PARK_NOTICE_EXCERPT_MAX = 1000;
  */
 export function parkNoticeId(workerRunId: string, waitId: string): string {
   return uuidFrom(`worker-park:${workerRunId}:${waitId}`);
+}
+
+/** The parent's first open worker wait that selects the worker, by its ID or by a request sent to
+ *  it, and holds no park notice from it yet. */
+export function parkNoticeWait(workerRunId: string, waits: readonly Wait[], messages: readonly ConversationMessage[]): WorkerWaitEntry | undefined {
+  const selects = (wait: WorkerWaitEntry) => wait.workerIds ? wait.workerIds.includes(workerRunId)
+    : (wait.requestIds ?? []).some(id => messages.some(message => message.id === id && message.recipientRunId === workerRunId));
+  const noticed = (wait: WorkerWaitEntry) => { const id = parkNoticeId(workerRunId, wait.id); return messages.some(message => message.id === id); };
+  return waits.find((wait): wait is WorkerWaitEntry => wait.kind === 'worker' && wait.phase === 'open' && selects(wait) && !noticed(wait));
+}
+
+/** Whether the worker sent its parent a message since `since`, the start of its parking turn. A
+ *  turn that already said something needs no notice. */
+export function messagedParentSince(messages: readonly ConversationMessage[], workerRunId: string, parentRunId: string, since: string | undefined): boolean {
+  return since !== undefined && messages.some(message => message.senderRunId === workerRunId && message.recipientRunId === parentRunId && message.createdAt >= since);
 }
 
 /** The turn the worker parked in: when it started, and its last top-level assistant text. An

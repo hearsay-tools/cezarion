@@ -68,7 +68,7 @@ import {
   workerWaitRequestSchema,
   delegationStateSchema,
 } from '@open-mercato/cezar-contract/delegation';
-import type { RunEvent } from '@open-mercato/cezar-contract';
+import type { ConversationState, RunEvent } from '@open-mercato/cezar-contract';
 import {
   type ConversationMessage,
   type RequestWaitRequest,
@@ -117,7 +117,7 @@ import { reconcileWorkerEntry } from '../delegation/wait.ts';
 import { reconcileConversationState, projectConversationEvents } from '../delegation/conversations.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
 import { answersQuestion, openQuestions, questionMessage } from '../delegation/questions.ts';
-import { parkNoticeId, parkNoticeMessage, parkingTurn } from '../delegation/park-notice.ts';
+import { messagedParentSince, parkNoticeMessage, parkNoticeWait, parkingTurn } from '../delegation/park-notice.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState, type WakeCounters } from '../runs/store.ts';
@@ -3858,13 +3858,8 @@ export class RunManager {
       this.recoveryInFlight = undefined;
       settled();
     }
-    // A question a crash caught before or after its commit to the parent still gets routed (#505).
     // Only a family with a live member has anyone left to route to or fall back from.
-    const families = familyRootId === undefined ? this.liveFamilyMembers() : this.familyMembers(familyRootId);
-    for (const run of families) if (run.delegation?.role === 'worker') this.routeWorkerQuestion(run.id);
-    this.reconcileWorkerWaits(familyRootId);
-    // So does a park notice a crash caught before its commit (hearsay-tools/cezarion#1327).
-    for (const run of families) if (run.delegation?.role === 'worker') this.noticeParkedWorker(run.id);
+    this.recoverWorkerMessages(familyRootId === undefined ? this.liveFamilyMembers() : this.familyMembers(familyRootId), familyRootId);
     // A parent reply accepted just before the crash still answers its worker (#505), and only a
     // live worker takes one.
     for (const run of this.store.listRuns().filter(inScope)) if (run.delegation?.role === 'worker') this.answerRoutedQuestion(run.id);
@@ -5264,32 +5259,16 @@ export class RunManager {
    */
   private noticeParkedWorker(workerId: string): void {
     const worker = this.store.getRun(workerId);
-    // A question goes to the parent through `routeWorkerQuestion`; a prose gate does not, so it gets a notice.
-    // Queued input wakes the worker, so the turn that takes it decides at its own park.
-    if (worker?.delegation?.role !== 'worker' || worker.status !== 'waiting' || worker.stopping || worker.delegation.destroy ||
-      this.store.transcriptFacts(workerId).pendingAsk || this.active.get(workerId)?.pendingHumanAsk ||
-      this.store.readWorkerExecution(workerId)?.phase === 'complete' || this.hasQueuedAgentInputs(workerId)) return;
+    if (worker?.delegation?.role !== 'worker' || worker.delegation.destroy || !this.parkedBeforeFinishing(worker)) return;
     const parentId = worker.delegation.parentRunId;
     const root = this.store.getRun(parentId);
     if (root?.delegation?.role !== 'root' || !this.parentTakesMessages(root) ||
       !root.delegation.receipts.some(receipt => receipt.workerId === workerId && !receipt.deletion)) return;
     const state = root.delegation.conversation ?? { messages: [], outcomes: [] };
-    const selects = (wait: WorkerWaitEntry) => wait.workerIds ? wait.workerIds.includes(workerId)
-      : (wait.requestIds ?? []).some(id => state.messages.some(message => message.id === id && message.recipientRunId === workerId));
-    const noticed = (entry: WorkerWaitEntry) => { const id = parkNoticeId(workerId, entry.id); return state.messages.some(message => message.id === id); };
-    const wait = (root.waits ?? []).find((entry): entry is WorkerWaitEntry => entry.kind === 'worker' && entry.phase === 'open' && selects(entry) && !noticed(entry));
+    const wait = parkNoticeWait(workerId, root.waits ?? [], state.messages);
     if (!wait) return;
     const turn = parkingTurn(this.store.readEvents(workerId));
-    if (turn.startedAt && state.messages.some(message => message.senderRunId === workerId && message.recipientRunId === parentId &&
-      message.createdAt >= turn.startedAt!)) return;
-    // The ledger and the parent's inbox keep room as `service.send` counts it, beside open questions' replies.
-    if (state.messages.length + openQuestions(state).length >= 1024 || (root.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32) {
-      const projectionId = `park-notice-skipped:${wait.id}`;
-      if (!this.store.hasProjection(workerId, projectionId)) {
-        this.store.appendEvent(workerId, { type: 'note', tone: 'warning', projectionId, message: 'Parked, but the parent conversation is at capacity: no park notice was sent.' });
-      }
-      return;
-    }
+    if (messagedParentSince(state.messages, workerId, parentId, turn.startedAt) || this.parkNoticeAtCapacity(workerId, wait.id, root, state)) return;
     const now = new Date().toISOString();
     const message = parkNoticeMessage({ workerRunId: workerId, parentRunId: parentId, waitId: wait.id, waits: worker.waits ?? [],
       ...(turn.text === undefined ? {} : { lastText: turn.text }), now, redact: text => this.store.redactText(text) });
@@ -5298,6 +5277,37 @@ export class RunManager {
     this.store.commitConversation(parentId, { ...state, messages: [...state.messages, message] }, { recipientRunId: parentId, input });
     projectConversationEvents(this.store, this.store.getRun(parentId)!);
     this.deliverConversationInput(parentId);
+  }
+
+  /** A worker parked before finishing: waiting, not stopping or complete, with no pending question
+   *  and no queued input. */
+  private parkedBeforeFinishing(worker: RunRecord): boolean {
+    // A question goes to the parent through `routeWorkerQuestion`; a prose gate does not, so it gets a notice.
+    // Queued input wakes the worker, so the turn that takes it decides at its own park.
+    return worker.status === 'waiting' && !worker.stopping && !this.store.transcriptFacts(worker.id).pendingAsk &&
+      !this.active.get(worker.id)?.pendingHumanAsk && this.store.readWorkerExecution(worker.id)?.phase !== 'complete' &&
+      !this.hasQueuedAgentInputs(worker.id);
+  }
+
+  /** The ledger and the parent's inbox keep room as `service.send` counts it, beside open
+   *  questions' replies. When either is full, the worker's log says so once per wait. */
+  private parkNoticeAtCapacity(workerId: string, waitId: string, root: RunRecord, state: ConversationState): boolean {
+    if (state.messages.length + openQuestions(state).length < 1024 && (root.agentInputs ?? []).filter(input => !input.deliveredAt).length < 32) return false;
+    const projectionId = `park-notice-skipped:${waitId}`;
+    if (!this.store.hasProjection(workerId, projectionId)) {
+      this.store.appendEvent(workerId, { type: 'note', tone: 'warning', projectionId, message: 'Parked, but the parent conversation is at capacity: no park notice was sent.' });
+    }
+    return true;
+  }
+
+  /** Recovery's pass over family members: a question (#505) or a park notice
+   *  (hearsay-tools/cezarion#1327) that a crash caught before or after its commit to the parent
+   *  still reaches it. The worker waits settle between the two, so a notice selects only a wait
+   *  that is still open. */
+  private recoverWorkerMessages(families: readonly RunRecord[], familyRootId: string | undefined): void {
+    for (const run of families) if (run.delegation?.role === 'worker') this.routeWorkerQuestion(run.id);
+    this.reconcileWorkerWaits(familyRootId);
+    for (const run of families) this.noticeParkedWorker(run.id);
   }
 
   /** `noticeParkedWorker` for every worker a family's root owns. */
@@ -9390,8 +9400,6 @@ export class RunManager {
     if (entry !== 'turn-end' && decision.kind === 'park' && this.waiting.has(runId)) return true;
     const outcome = this.carryOutTurnEnd(runId, state, stepId, decision, refused, noteRefusal);
     if (outcome.kind === 'done') return false;
-    // Every park a worker reaches here, whichever branch parked it (hearsay-tools/cezarion#1327).
-    if (outcome.kind === 'park') this.noticeParkedWorker(runId);
     this.writeTurnHeartbeat(runId, entry, outcome);
     return true;
   }
@@ -9400,7 +9408,12 @@ export class RunManager {
   private carryOutTurnEnd(runId: string, state: ActiveRun, stepId: string | undefined, decision: TurnEndDecision,
     refused: CompletionRefusal | undefined, noteRefusal: () => void): TurnEndOutcome {
     const session = state.session;
-    const parked = (): TurnEndOutcome => ({ kind: 'park', keepsSlot: this.monitoring.has(runId) });
+    // Every branch returns this once its park is carried out, so a worker's park notice goes here
+    // whichever branch parked it (hearsay-tools/cezarion#1327).
+    const parked = (): TurnEndOutcome => {
+      this.noticeParkedWorker(runId);
+      return { kind: 'park', keepsSlot: this.monitoring.has(runId) };
+    };
     if ('refused' in decision && decision.refused) noteRefusal();
     // A refusal that settles the turn end replaces Cezar's own human wait, as the agent's own wait would.
     const settlesRefusal = !!refused && !('refused' in decision && decision.refused) && !(decision.kind === 'defer' && decision.keepDone);

@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import type { Wait } from '@open-mercato/cezar-contract';
+import type { ConversationMessage, Wait } from '@open-mercato/cezar-contract';
 import { conversationMessageSchema } from '@open-mercato/cezar-contract/conversations';
 import type { RunEvent } from '../runs/store.ts';
-import { PARK_NOTICE_EXCERPT_MAX, formatParkNoticeText, parkNoticeExcerpt, parkNoticeId, parkNoticeMessage, parkingTurn } from './park-notice.ts';
+import { PARK_NOTICE_EXCERPT_MAX, formatParkNoticeText, messagedParentSince, parkNoticeExcerpt, parkNoticeId, parkNoticeMessage, parkNoticeWait, parkingTurn } from './park-notice.ts';
 
 const worker = randomUUID();
 const parent = randomUUID();
@@ -18,6 +18,32 @@ describe('park notices (hearsay-tools/cezarion#1327)', () => {
     expect(parkNoticeId(worker, wait)).toBe(parkNoticeId(worker, wait));
     expect(parkNoticeId(worker, randomUUID())).not.toBe(parkNoticeId(worker, wait));
     expect(parkNoticeId(randomUUID(), wait)).not.toBe(parkNoticeId(worker, wait));
+  });
+
+  const message = (fields: Partial<ConversationMessage>): ConversationMessage => ({ id: randomUUID(), senderRunId: parent, recipientRunId: worker,
+    kind: 'request', text: 'check', createdAt: '2026-10-20T12:13:00.000Z', requestHash: 'hash', state: 'accepted', ...fields } as ConversationMessage);
+  const workerWait = (fields: Record<string, unknown>): Wait => ({ id: randomUUID(), kind: 'worker', source: 'agent', via: 'cezar_wait',
+    registeredAt: '2026-10-20T12:13:00.000Z', deadline: '2026-10-20T12:23:00.000Z', phase: 'open', ...fields } as Wait);
+
+  it('picks the first open wait that selects the worker, by its ID or by a request to it, with no notice from it yet', () => {
+    const request = randomUUID();
+    const byId = workerWait({ workerIds: [worker] });
+    const byRequest = workerWait({ requestIds: [request] });
+    const waits = [timer, workerWait({ workerIds: [worker], phase: 'delivered' }), workerWait({ workerIds: [randomUUID()] }), byId, byRequest];
+    const messages = [message({ id: request })];
+    expect(parkNoticeWait(worker, waits, messages)).toBe(byId);
+    expect(parkNoticeWait(worker, waits, [...messages, message({ id: parkNoticeId(worker, byId.id) })])).toBe(byRequest);
+    // A request to another worker does not select this one.
+    expect(parkNoticeWait(worker, [byRequest], [message({ id: request, recipientRunId: randomUUID() })])).toBeUndefined();
+  });
+
+  it('knows whether the parking turn already messaged the parent', () => {
+    const since = '2026-10-20T12:13:00.000Z';
+    const sent = (createdAt: string, recipientRunId = parent) => [message({ senderRunId: worker, recipientRunId, kind: 'progress', createdAt })];
+    expect(messagedParentSince(sent(since), worker, parent, since)).toBe(true);
+    expect(messagedParentSince(sent('2026-10-20T12:12:59.000Z'), worker, parent, since)).toBe(false);
+    expect(messagedParentSince(sent(since, randomUUID()), worker, parent, since)).toBe(false);
+    expect(messagedParentSince(sent(since), worker, parent, undefined)).toBe(false);
   });
 
   it('reads the parking turn: its start and its last top-level assistant text, not a subagent\'s or an earlier turn\'s', () => {
