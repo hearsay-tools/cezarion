@@ -2,7 +2,7 @@
 
 Rules that pin a construction site or a reader of a shared thing, so a test finds what an agent
 would otherwise have to find by hand (hearsay-tools/cezarion#1802). A rule matches a syntax tree,
-not text: it sees both `ActiveRun` literals whatever order their fields take, which the regex
+not text: it sees an `ActiveRun` literal whatever order its fields take, which the regex
 scans over `blank()` and a clone detector miss. It knows no types and resolves no imports, so it
 matches names (`state`, `active`), and a rule says in a comment what it leaves out.
 

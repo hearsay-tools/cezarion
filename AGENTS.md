@@ -107,11 +107,11 @@ recovery wording that assumed cezar tools, a timer resuming a continuation witho
 tool controller, a budget-cap wake cancelling its timer without opening the budget wait).
 
 **Find every construction site of a shared in-memory object — grep the TYPE, not the
-field.** `ActiveRun` is built in `execute` AND in `runContinuation`;
-open-mercato/cezar#811 populated `state.skills` in the first only, so registry `/skill`
-expansion silently failed on every Continue and every restart recovery. When you add a
-field that a delivery path reads, add it everywhere in the same commit or route both
-sites through one helper.
+field.** Give it one factory: `ActiveRun` is built only by `createActiveRun`, where a new
+required field fails to compile; one that differs by entry path is a required
+`ActiveRunInit` field. `loadRunSkills` alone writes `state.skills` and `enabledSkills`
+alone reads it; ast-grep rules refuse a second literal, write or read
+(open-mercato/cezar#811).
 
 **List each handler's side effects, in order, before you merge handlers into one.** The
 merged method can lose one step of a handler's order while every test stays green. For

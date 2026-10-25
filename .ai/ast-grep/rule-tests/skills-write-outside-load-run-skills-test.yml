@@ -1,0 +1,24 @@
+id: skills-write-outside-load-run-skills
+valid:
+  # The one owner.
+  - 'class A { private async loadRunSkills(state: ActiveRun) { state.skills = await this.discoverSkills() } }'
+  # A read is the other rule's business.
+  - 'const x = state.skills'
+  # Not an ActiveRun: `launch.skills` and a bare local are other objects' fields, and another map's
+  # lookup is not the live map's.
+  - 'launch.skills = []'
+  - 'const skills = await this.discoverSkills()'
+  - 'this.pending.get(runId).skills = skills'
+  - 'state.session = undefined'
+invalid:
+  - 'state.skills = []'
+  - 'state.skills = skills'
+  - 'state.skills ??= []'
+  - 'state.skills += more'
+  - "state['skills'] = []"
+  - 'active.skills = skills'
+  - 'execution.state.skills = skills'
+  - 'this.active.get(runId).skills = skills'
+  - 'this.active.get(runId)!.skills = skills'
+  - 'class A { other(state: ActiveRun) { state.skills = [] } }'
+  - 'class A { async runContinuation(state: ActiveRun) { state.skills = await this.discoverSkills() } }'

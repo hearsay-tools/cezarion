@@ -8,6 +8,7 @@ import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, ceza
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, turnEndHeartbeat, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
+import { createActiveRun, type ActiveRun } from './active-run.ts';
 import { nextLineEntry } from './line-order.ts';
 import { executionAccount } from './execution-account.ts';
 import { chargesBudget, ciWatchRequest, hasPrWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
@@ -82,7 +83,7 @@ import {
   isImageMediaType,
 } from '@open-mercato/cezar-contract/attachments';
 import { askRequestSchema } from '@open-mercato/cezar-contract/ask-schema';
-import type { AgentEvent, ContentBlock, InputDelivery } from '../core/agent-runner.ts';
+import type { AgentEvent, ContentBlock } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
 import { readProjectUiState, readProjectUiStateSync } from '../ui-state.ts';
 import { discoverSkills, filterDisabledTeamSkills, readDisabledTeamSkills, type Skill } from '../skills.ts';
@@ -514,128 +515,6 @@ type TurnEndCarry = {
 };
 /** One method per decision kind of `decideTurnEnd` (`RunManager.turnEndCarriers`). */
 type TurnEndCarriers = { [K in TurnEndDecision['kind']]: (carry: TurnEndCarry, decision: Extract<TurnEndDecision, { kind: K }>) => TurnEndOutcome };
-
-interface ActiveRun {
-  /** Last cumulative Claude report per provider session during this process. */
-  reportedClaudeCost?: Map<string, number>;
-  delegationSettings?: DelegationExecutionSettings | undefined;
-  revokeDelegation?: (() => void) | undefined;
-  revokeCiTools?: (() => void) | undefined;
-  /** hearsay-tools/cezarion#1234: the last session started without cezar tools, so its prompt
-   *  taught the lifecycle markers; kept after the session's tools are revoked. */
-  toolless?: boolean;
-  ciGeneration?: string;
-  ciTurnId?: string;
-  waitWakeTurn?: AgentSession | undefined;
-  cancelled: boolean;
-  /** Explicit human Finish survives disposal; shutdown-only result callbacks do not settle. */
-  finishRequested?: boolean;
-  interrupt: () => void;
-  /** Where this run's steps execute: the task worktree, or the repo root. */
-  cwd: string;
-  /** Live claude session of the currently running agent step, if any. */
-  session?: AgentSession | undefined;
-  pendingHumanAsk: boolean;
-  /** Native grants belong only to this live session generation. */
-  pendingPermissions?: Set<string>;
-  agentInputError?: string;
-  agentInputFlight?: { session: AgentSession; inputIds: readonly string[]; settled?: Promise<void>;
-    /** This batch carries timer results: it holds one unit of the automatic-wake budget, which
-     *  every budget check counts, and charges it to the record on its acknowledgement. */
-    wakeReserved?: boolean;
-    /** This batch is an admitted wake (hearsay-tools/cezarion#1235): its acknowledgement spends
-     *  the admission, a wake of messages alone included. */
-    admittedWake?: boolean } | undefined;
-  /** The current session's declared input delivery (#505). */
-  inputDelivery?: InputDelivery;
-  /** Accepted by this session's harness, not yet reported read (observable backends only).
-   * The harness still owes a turn for them, so they count as pending work (#505). */
-  unreadInputIds?: Set<string>;
-  /** Read before the acceptance checkpoint landed; applied when it does. */
-  consumedBeforeAck?: Set<string>;
-  /** Conversation input carried by a human answer's own write; read at that turn's end. */
-  bundledInputIds?: string[] | undefined;
-  /** Reported unread while their own submission was still unacknowledged. */
-  retiredInFlight?: Set<string>;
-  /** Liveness bound for unread input (#505): timer, and IDs already resubmitted once. */
-  unreadInputTimer?: NodeJS.Timeout | undefined;
-  /** Liveness bound for a no-wait nudge that was acknowledged without a turn (#544,
-   *  hearsay-tools/cezarion#1234). */
-  noWaitNudgeReplyTimer?: NodeJS.Timeout | undefined;
-  /** Parent-level text/item/tool arrived for this nudge, possibly before the timer armed. */
-  noWaitNudgeSawContent?: boolean | undefined;
-  /** The reply bound expired on this session: a late reply from it resumes the run. */
-  noWaitNudgeParked?: AgentSession | undefined;
-  unreadRetried?: Set<string>;
-  /** #486: re-settle a boundary that deferred only because holdsHumanInput() was true. */
-  heldHumanInputTimer?: NodeJS.Timeout | undefined;
-  heldHumanInputSince?: number | undefined;
-  heldHumanInputExpired?: boolean | undefined;
-  /** Only this older ask is being answered by the current continuation's opening turn. */
-  openingAnswerAskSeq?: number | undefined;
-  openingAgentInputId?: string | undefined;
-  agentSessionError?: string | undefined;
-  doneAtBoundary?: AgentSession | undefined;
-  /** `cezar_done` accepted in this session since its last turn end (hearsay-tools/cezarion#1234). */
-  doneRequested?: { session: AgentSession; summary?: string } | undefined;
-  /** The session's done completes a workflow step that is not the last, and this step runs next
-   *  (hearsay-tools/cezarion#1620). Undefined: the done finishes the task. */
-  nextStep?: { session: AgentSession; label: string } | undefined;
-  /** The step an accepted done closed. A workflow step that is not the last advances only on it. */
-  completedStepId?: string | undefined;
-  /** What declared the done `doneAtBoundary` closes on: the closing event names it. */
-  doneClose?: { via: 'cezar_done' | 'done-line'; summary?: string } | undefined;
-  parkAfterAck?: { session: AgentSession; monitoring: boolean; humanGate?: boolean; nudgedLastTurn?: boolean; scheduleWakeup?: number | null | undefined } | undefined;
-  /** Last completed boundary belongs to exactly this still-open session. */
-  atTurnBoundary?: AgentSession | undefined;
-  currentStepId?: string | undefined;
-  idleTimer?: NodeJS.Timeout | undefined;
-  /** The inactivity timer closed the wire; resource teardown must not imply task success. */
-  idleClosed?: boolean;
-  /** The monitoring-timer cap note was written for this session. */
-  monitoringCapNoted?: boolean | undefined;
-  autosaveTimer?: NodeJS.Timeout | undefined;
-  /* The screenshot counter lives on `RunManager.queuedImageSeq` (#472), keyed by
-   * run id — a queued run persists attachments with no `ActiveRun` at all. */
-  /** Has a session EVER opened on this run (#472)? `session` alone cannot answer
-   *  it — teardown sets it back to `undefined`, so a closed session and one that
-   *  never opened look identical. This distinguishes "still starting up, buffer
-   *  the message" from "genuinely closed, 409". */
-  sessionEverOpened?: boolean;
-  /** Autonomous mode (#autonomous): nudge eligible turn ends until done or the cap.
-   *  Pending input, native asks and lifecycle waits retain priority. */
-  autonomous?: boolean;
-  /** An eligible boundary nudge refused until the current transport becomes ready.
-   * Retains its slot, bounded by the existing idle timer; never represents a sent input. */
-  autonomousNudgePending?: AgentSession | undefined;
-  /** Session that received the no-wait nudge (hearsay-tools/cezarion#1234): its next no-wait
-   *  turn end opens a human wait instead of nudging again. */
-  noWaitNudged?: AgentSession | undefined;
-  /** Session that received a refusal nudge for a blocked done (hearsay-tools/cezarion#1301); the
-   *  next turn end on it reads and clears it. */
-  completionNudged?: AgentSession | undefined;
-  /** Session whose turn that just ended answered a refusal nudge (hearsay-tools/cezarion#1301): a
-   *  blocked done at this turn end takes the second step. Every turn end sets or clears it. */
-  completionNudgeAnswered?: AgentSession | undefined;
-  /** Registry snapshot used to expand `/skill` follow-ups before a backend can
-   *  mistake them for its own slash commands (#676). */
-  skills?: Skill[];
-  /** The install a live `/name` started after its message went out (#1408); tests await it. */
-  liveSkillProvisioning?: Promise<void>;
-  /** Release for exclusive execution in the user's repository working tree.
-   *  Worktree-backed runs never need it; root runs ordinarily do unless the
-   *  explicit unsafe bypass is active. */
-  releaseRepoRoot?: (() => void) | undefined;
-  /** Durable directional-usage accounting state for the current runner
-   * invocation. Provider-local turn ids are unique only within this epoch. */
-  usageInvocation?: {
-    stepId: string;
-    epoch: number;
-    observed: boolean;
-    startedTurns: Set<string>;
-    recordedTurns: Set<string>;
-  };
-}
 
 /** #505: a real steer is read at the harness's next model step; a quiet boundary this long
  * with input still unread means the harness will not read it without help. */
@@ -2050,12 +1929,34 @@ export class RunManager {
     return discoverSkills(this.repoRoot, { builtin: this.builtinSkills() });
   }
   /**
-   * The run's skill registry minus the project's off-list as it is now (#1494). The registry is
-   * discovered when the run starts or continues, so a team skill switched off since then is still
-   * in `state.skills`; every prompt a step, a Continue or a live `/name` builds reads this instead.
+   * Load the run's skill registry: the ONLY writer of `state.skills` (hearsay-tools/cezarion#1806).
+   * `execute` and `runContinuation` both call it, once the run is registered and after the awaits
+   * that precede its first prompt. `'throw'` lets a failed discovery fail the run, as a fresh run
+   * always did; `'ignore'` keeps the registry the run already has, or none, because discovery must
+   * never break a Continue (#811). An empty registry expands no `/skill` (it is not an error).
    */
-  private enabledSkills(state: ActiveRun): Skill[] {
-    return filterDisabledTeamSkills(state.skills ?? [], readDisabledTeamSkills(readProjectUiStateSync(this.repoRoot)));
+  private async loadRunSkills(state: ActiveRun, onFailure: 'throw' | 'ignore'): Promise<void> {
+    // Only a rejected discovery is a failure to ignore; a synchronous throw escaped the old
+    // `.catch` too, and still fails the caller.
+    const discovery = this.discoverSkills();
+    try {
+      state.skills = await discovery;
+    } catch (error) {
+      if (onFailure === 'throw') throw error;
+    }
+  }
+  /**
+   * The run's skill registry minus the project's off-list as it is now (#1494): the ONLY reader of
+   * `state.skills`. The registry is discovered when the run starts or continues, so a team skill
+   * switched off since then is still in `state.skills`; every prompt a step, a Continue or a live
+   * `/name` builds reads this instead. A caller that already read the off-list passes it as
+   * `disabled`, so that both see one list.
+   */
+  private enabledSkills(
+    state: ActiveRun,
+    disabled = readDisabledTeamSkills(readProjectUiStateSync(this.repoRoot)),
+  ): Skill[] {
+    return filterDisabledTeamSkills(state.skills ?? [], disabled);
   }
   /**
    * A live `/name` message already carries the skill's body, and `sendMessage` answers
@@ -2126,7 +2027,7 @@ export class RunManager {
     // The off-list as it is now, applied to every input: the saved registry predates a switch
     // made during the run, so it is filtered as well as the fresh team list.
     const disabled = readDisabledTeamSkills(await readProjectUiState(this.repoRoot));
-    const registry = filterDisabledTeamSkills(state.skills ?? [], disabled);
+    const registry = this.enabledSkills(state, disabled);
     // A skill the prompt names as `/name` is a root after the selected ones, so a capped closure
     // never leaves it out (#1672). It installs only in the task worktree, like a companion.
     const named = registry.filter((skill) => namesSkillCommand(wanted.prompt ?? '', skill.name)).map((skill) => skill.name);
@@ -4143,11 +4044,11 @@ export class RunManager {
   }
 
   /**
-   * Register an executing run: the ONE way an `ActiveRun` enters `active`. Both construction
-   * sites (`execute` and `runContinuation`, which serves Continue and restart recovery) call it,
-   * so the store pins every run this manager executes (#779) — its record stays the held object
-   * every turn-end handler reads and writes until `dropActive` lets it go. A second site that set
-   * `active` directly would execute a run the store could evict mid-turn (the #811 shape).
+   * Register an executing run: the ONE way an `ActiveRun` enters `active`. Both callers of
+   * `createActiveRun` (`execute` and `runContinuation`, which serves Continue and restart
+   * recovery) call it, so the store pins every run this manager executes (#779) — its record stays
+   * the held object every turn-end handler reads and writes until `dropActive` lets it go. A site
+   * that set `active` directly would execute a run the store could evict mid-turn (the #811 shape).
    */
   private activate(runId: string, state: ActiveRun): void {
     state.pendingPermissions = new Set();
@@ -7216,25 +7117,23 @@ export class RunManager {
     const workspace = await this.continuationWorkspace(runId, stepId, record);
     if (!workspace) return;
     if (this.settleStoppedContinuation(runId)) return;
-    // Continue/recovery constructs a second ActiveRun: hydrate the durable mode here too.
-    const state: ActiveRun = {
-      delegationSettings: undefined, revokeDelegation: undefined,
-      cancelled: false, interrupt: () => undefined, cwd: workspace.cwd,
+    // Continue and restart recovery build their own ActiveRun: hydrate the durable mode here.
+    const state = createActiveRun({
+      cwd: workspace.cwd,
       pendingHumanAsk: this.hasPendingHumanAsk(runId),
-      pendingPermissions: new Set(),
       autonomous: record?.autonomous === true,
-    };
+    });
     this.activate(runId, state);
     this.starting.delete(runId);
     const lease = this.continuationRepoRootLease(runId, state);
     if (lease && !(await lease)) return;
     const setupNote = await this.prepareContinuationWorktree(runId, state, record, workspace.rematerialized);
     // A Stop during setup settles below, at the prelaunch cancellation check before any spawn.
-    // Registry snapshot for `/skill` expansion. `execute` loads this for the workflow's own
-    // sessions; a continuation builds its OWN ActiveRun, and without this the resumed session
-    // expanded against an empty registry and leaked `/om-...` verbatim to the backend, which
-    // answered "Unknown skill" (#811). Best-effort — discovery must never break Continue.
-    state.skills = await this.discoverSkills().catch(() => [] as Skill[]);
+    // Registry snapshot for `/skill` expansion. A continuation builds its OWN ActiveRun, and without
+    // this the resumed session expanded against an empty registry and leaked `/om-...` verbatim to
+    // the backend, which answered "Unknown skill" (#811). Best-effort — discovery must never
+    // break Continue.
+    await this.loadRunSkills(state, 'ignore');
 
     this.startContinuationStep(runId, stepId, record, sessionId, backend);
     const opening = this.continuationOpening(runId, stepId, state, record, { prompt, images, persistedImages, persistedAttachments });
@@ -7815,7 +7714,7 @@ export class RunManager {
           if (cached.some((candidate) => candidate.name === continuedSkillName)) settle();
         }, () => undefined);
       });
-      state.skills = await this.discoverSkills().catch(() => state.skills ?? []);
+      await this.loadRunSkills(state, 'ignore');
       return this.enabledSkills(state).find((candidate) => candidate.name === continuedSkillName);
     } catch {
       // Best-effort — a slow or failing team-skills load must not fail Continue.
@@ -8159,15 +8058,11 @@ export class RunManager {
   private async execute(runId: string, workflow: WorkflowDef, input: StartRunInput, startAt = 0): Promise<void> {
     if (this.workerExecutionStopped(runId)) { this.starting.delete(runId); return; }
     this.workerIdentity(runId);
-    const state: ActiveRun = {
-      delegationSettings: undefined, revokeDelegation: undefined,
-      pendingHumanAsk: this.hasPendingHumanAsk(runId),
-      pendingPermissions: new Set(),
-      cancelled: false,
-      interrupt: () => undefined,
+    const state = createActiveRun({
       cwd: this.repoRoot,
+      pendingHumanAsk: this.hasPendingHumanAsk(runId),
       autonomous: input.autonomous === true,
-    };
+    });
     this.activate(runId, state);
     this.starting.delete(runId);
     const emit = (event: { type: string; stepId?: string; [k: string]: unknown }) =>
@@ -8212,10 +8107,9 @@ export class RunManager {
     // note rides the first agent step's opening message only, like the task's attachments.
     const setupNote = await this.prepareWorktree(runId, state, launch.config.worktreeSetup, emit, 'start');
 
-    const skills = await this.discoverSkills();
-    // Every ActiveRun construction site must carry the registry — `runContinuation` builds
-    // its own, and the one that skipped this leaked raw `/skill` text to the backend (#811).
-    state.skills = skills;
+    // Every entry path loads the registry — `runContinuation` loads its own, and the one that
+    // skipped this leaked raw `/skill` text to the backend (#811). A failed discovery fails the run.
+    await this.loadRunSkills(state, 'throw');
     const loop = await this.runWorkflowSteps(execution, launch, { ...this.openingInputs(execution), setupNote });
     if (loop) await this.settleExecution(runId, state, loop);
   }

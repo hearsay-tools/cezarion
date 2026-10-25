@@ -3,7 +3,8 @@ language: typescript
 severity: warning
 message: >-
   Read a run's skills through RunManager.enabledSkills(state), which applies the project's
-  off-list (hearsay-tools/cezarion#1494). Writing `state.skills = …` stays where it is.
+  off-list (hearsay-tools/cezarion#1494). Only RunManager.loadRunSkills writes `state.skills`
+  (skills-write-outside-load-run-skills).
 files:
   - packages/cezar/src/workflows/run.ts
 utils:
