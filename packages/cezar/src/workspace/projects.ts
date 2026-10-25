@@ -221,9 +221,9 @@ export function toProjectListEntry(project: WorkspaceProject, probe: RootProbe):
   const { webhook: _legacy, webhooks: _stored, ...rest } = project;
   const webhooks = projectWebhooks(project);
   const task = webhooks.find((entry) => entry.tasks);
-  return {
+  return defined({
     ...rest,
-    ...defined(probe),
+    ...probe,
     ...(task
       ? {
           webhook: {
@@ -234,7 +234,7 @@ export function toProjectListEntry(project: WorkspaceProject, probe: RootProbe):
         }
       : {}),
     ...(webhooks.length > 0 ? { webhooks: webhooks.map(redactWebhook) } : {}),
-  };
+  });
 }
 
 /** Probe TTL — long enough to coalesce a burst of sidebar renders, short
@@ -291,8 +291,8 @@ async function probeRoot(root: string): Promise<RootProbe> {
  */
 export async function probeProjectStatus(
   root: string,
-): Promise<Pick<ProjectListEntry, 'status' | 'branch' | 'forge' | 'repoUrl'>> {
-  return defined(await probeRoot(root));
+): Promise<RootProbe> {
+  return probeRoot(root);
 }
 
 /**

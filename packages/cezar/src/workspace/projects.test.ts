@@ -13,7 +13,22 @@ import {
   registerProject,
   removeProject,
   shouldRegisterProject,
+  toProjectListEntry,
 } from './projects.ts';
+
+it('fresh undefined probe fields clear stale passthrough project metadata on the wire', () => {
+  const project = {
+    id: 'stale', name: 'Stale', root: '/repo', addedAt: '2026-10-25T00:00:00Z',
+    lastOpenedAt: '2026-10-25T00:00:00Z', source: 'local' as const,
+    branch: 'old', forge: 'github', repoUrl: 'https://example.test/old',
+  };
+  const result = toProjectListEntry(project, {
+    status: 'ok', branch: undefined, forge: undefined, repoUrl: undefined,
+  });
+  expect(result.status).toBe('ok');
+  for (const key of ['branch', 'forge', 'repoUrl']) expect(Object.hasOwn(result, key)).toBe(false);
+  expect(project.branch).toBe('old');
+});
 
 /**
  * Project registry ops (spec 2026-07-20-multi-project-workspace, step 1.3):
