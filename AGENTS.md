@@ -30,6 +30,7 @@ already finds in the changed files before the change passes, so rewording or
 moving a legacy citation passes. It never reads string literals, code, JSX text,
 backtick spans, a `#` joined to a word or path, generated upstream scan files,
 test-data directories, or a file the change adds with a historical source note.
+A change that removes an archive's source note fails every bare citation left in it.
 
 ## Zero config
 

@@ -214,6 +214,14 @@ test('checks new prose in an existing file that gains its source note in the sam
   assert.deepEqual(findings(repo, base), ['.ai/specs/kept.md:6:948'], 'the legacy #947 passes, the new #948 fails');
 });
 
+test('reports every bare citation left in an archive whose source note the change removes', (t) => {
+  const repo = fixtureRepo(t);
+  const note = '> Historical source: `open-mercato/cezar` (upstream), preserved at fork point `feb85666`.\n';
+  const base = repo.commit({ '.ai/specs/old.md': `# Old\n\n${note}\nRelates to #947.\n` });
+  repo.commit({ '.ai/specs/old.md': '# Old\n\nRelates to #947.\n' });
+  assert.deepEqual(findings(repo, base), ['.ai/specs/old.md:3:947'], 'the citation lost the note that attributed it');
+});
+
 test('names only resolved SHAs in every git call after resolving the range', (t) => {
   const repo = fixtureRepo(t);
   const base = repo.commit({ 'src/a.ts': 'export const a = 1;\n' });

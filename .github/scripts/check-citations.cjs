@@ -197,15 +197,17 @@ function checkCitations({ cwd, base }) {
     // An archive keeps upstream's bare citations under its source note. A file this change
     // adds with the note is an import: its imported text and any new prose in it are one
     // added file, so it is skipped and a reviewer reads it. An existing file that gains
-    // the note is checked as usual, where the count passes its legacy citations. A deleted
-    // archive's citations are not counted, so moving them into another file fails.
+    // the note is checked as usual, where the count passes its legacy citations. An archive
+    // that loses the note, or is deleted, keeps no baseline: its citations lost their
+    // attribution, so every one left in the file, or moved into another, fails.
     const noteBefore = before !== null && ARCHIVE_NOTE.test(before);
-    if (before !== null && !(noteBefore && after === null)) count(bareCitations(file, before), -1);
+    const noteLost = noteBefore && (after === null || !ARCHIVE_NOTE.test(after));
+    if (before !== null && !noteLost) count(bareCitations(file, before), -1);
     if (after === null || (before === null && ARCHIVE_NOTE.test(after))) continue;
     const citations = bareCitations(file, after);
     count(citations, 1);
     if (citations.length === 0) continue;
-    const added = before === null ? null : addedLines(git, oldSha, newSha);
+    const added = before === null || noteLost ? null : addedLines(git, oldSha, newSha);
     for (const citation of citations) if (!added || added.has(citation.line)) candidates.push({ path: file, ...citation });
   }
   const findings = candidates.filter(({ number }) => counts.get(number) > 0);
