@@ -137,6 +137,26 @@ source, a crash between the removal and the replacement write, and agent edits
 lost to a full re-install. The code was reverted, and hearsay-tools/cezarion#1539
 now holds the five cases.
 
+**Enumerate process exits before starting a background process.** A spec or
+plan that starts a process which outlives the command that started it MUST carry
+a **Process exits** table, reviewed with the spec or plan before implementation
+starts. Detached servers, watchers and daemons are such processes. Use one row
+per case: **Case | What stops it | Behavior at shipped defaults**. State when a
+case cannot happen, and why.
+
+Cover all of these cases: the normal stop; the starting command interrupted by
+SIGINT or SIGKILL in each phase, before and after the process starts; the leader
+exits before its children; a member ignores SIGTERM; members stay zombies because
+their parent never reaps them; the start identity cannot be read; the leader's
+PID is reused; and the handle the stop reads, such as a descriptor or lock file,
+is deleted or forged.
+
+hearsay-tools/cezarion#1406 and PR hearsay-tools/cezarion#1708 are the worked
+example. The plan named only the normal stop. Five review rounds then found
+children outliving the leader, an unconfirmed descriptor, an unreadable start
+identity, a zombie-only group and an interrupted boot. The table makes those
+cases explicit before implementation starts.
+
 **Commit an outcome with what it depends on, or after it.** A write that records
 an outcome (`delivered`, `charged`, `settled`, `answered`) must commit atomically
 with the write holding what that outcome needs, or after that write commits.
