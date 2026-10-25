@@ -6,7 +6,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
-  groupExists, groupRunning, leaderRunning, processStartToken, startOwnedGroup, stopGroup, watchGroup,
+  groupExists, groupRunning, leaderRunning, processStartToken, startAndForget, startOwnedGroup, stopGroup, watchGroup,
   type GroupLeader,
 } from './detached-process.ts';
 
@@ -191,6 +191,64 @@ require('node:fs').writeFileSync(out('sleeper.pid'), sh.pid + '\\n'); ${IDLE}`);
   });
 });
 
+describe.runIf(posix)('stopGroup with the leader\'s handle', () => {
+  const unreadable = () => undefined;
+
+  it('stops a leader this process holds, though its start identity cannot be read', async () => {
+    const { child, leader } = await startLeader(IDLE);
+    const held: GroupLeader = { pid: leader.pid, child };
+    expect(groupExists(held, unreadable)).toBe(true);
+    expect(await stopGroup(held, { graceMs: 20_000, readStart: unreadable })).toBe(true);
+    expect(alive(leader.pid)).toBe(false);
+  });
+
+  it('stops what is left of the group once Node reaped its leader, a member that ignores SIGTERM included', async () => {
+    const { child, leader } = await startLeader(STUBBORN_MEMBER + EXIT_WHEN_MEMBER_READY);
+    const member = await pidFrom('member.pid');
+    strays.push(member);
+    await until(() => child.exitCode !== null, 'Node to reap the leader');
+    const reaped: GroupLeader = { pid: leader.pid, child };
+    expect(groupRunning(reaped, unreadable)).toBe(true);
+    expect(await stopGroup(reaped, { graceMs: 200, readStart: unreadable })).toBe(true);
+    await until(() => !alive(member), 'the stubborn member to exit');
+  });
+
+  it('never signals a live process at the pid of a reaped leader: the pid names another process now', async () => {
+    const { leader: other } = await startLeader(IDLE);
+    const reaped = { pid: other.pid, child: { exitCode: 0, signalCode: null } as ChildProcess };
+    expect(groupExists(reaped, unreadable)).toBe(false);
+    expect(await stopGroup(reaped, { graceMs: 200, readStart: unreadable })).toBe(true);
+    expect(alive(other.pid)).toBe(true);
+  });
+});
+
+describe.runIf(posix)('startAndForget', () => {
+  it('starts the leader of its own process group and reports it started', async () => {
+    expect(await startAndForget(process.execPath, script(`require('node:fs').writeFileSync(out('forgotten.pid'), process.pid + '\\n'); ${IDLE}`))).toBe(true);
+    const pid = await pidFrom('forgotten.pid');
+    strays.push(pid);
+    // Its own group: signal 0 to the group its pid names reaches it.
+    expect(() => process.kill(-pid, 0)).not.toThrow();
+  });
+
+  it('reports a command that cannot start', async () => {
+    expect(await startAndForget(join(dir, 'no-such-binary'), [])).toBe(false);
+  });
+
+  it('keeps nothing alive: its caller exits while the process runs and before the settle window ends', async () => {
+    const helper = new URL('./detached-process.ts', import.meta.url).href;
+    const child = `require('node:fs').writeFileSync(${JSON.stringify(join(dir, 'forgotten.pid'))}, process.pid + '\\n'); ${IDLE}`;
+    const caller = `const { startAndForget } = await import(${JSON.stringify(helper)});
+startAndForget(process.execPath, ['-e', ${JSON.stringify(child)}], { settleMs: 600_000 });`;
+    // bound: hang guard only; a caller that waited for the 600 s window or the child would hit it.
+    const run = spawnSync(process.execPath, ['--input-type=module', '-e', caller], { encoding: 'utf8', timeout: 60_000 });
+    expect(run.status, run.stderr).toBe(0);
+    const pid = await pidFrom('forgotten.pid');
+    strays.push(pid);
+    expect(alive(pid)).toBe(true);
+  });
+});
+
 describe.runIf(posix)('watchGroup', () => {
   it('leaves the group to its starter, then stops it once the starter dies during boot', async () => {
     const starter = spawn(process.execPath, ['-e', IDLE], { stdio: 'ignore' });
@@ -295,5 +353,20 @@ describe.runIf(posix)('on Windows', () => {
     expect(await asWindows(() => stopGroup(leader, { readStart: unreadable }))).toBe(false);
     expect(taskkills).toEqual([]);
     expect(alive(leader.pid)).toBe(true);
+  });
+
+  it('ends the tree of a leader this process holds, with no start identity', async () => {
+    const { child, leader } = await startLeader(IDLE);
+    expect(await asWindows(() => stopGroup({ pid: leader.pid, child }, { readStart: () => undefined }))).toBe(true);
+    expect(taskkills).toEqual([leader.pid]);
+    expect(alive(leader.pid)).toBe(false);
+  });
+
+  it('never ends the tree of a live process at the pid of a reaped leader', async () => {
+    const { leader: other } = await startLeader(IDLE);
+    const reaped = { pid: other.pid, child: { exitCode: 0, signalCode: null } as ChildProcess };
+    expect(await asWindows(() => stopGroup(reaped, { readStart }))).toBe(true);
+    expect(taskkills).toEqual([]);
+    expect(alive(other.pid)).toBe(true);
   });
 });
