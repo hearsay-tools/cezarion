@@ -67,6 +67,18 @@ describe('answerFromRoutes', () => {
     expect((await answerFromRoutes(routes, { method: 'POST', url: '/api/v1/p/web/runs/r1/archive/extra' }, notFound)).status).toBe(404)
   })
 
+  it.each(['g', 'y'])('matches a RegExp with the %s flag from the start of every request', async (flags) => {
+    const routes: FetchRoute[] = [
+      { path: new RegExp('^/api/v1/p/([^/]+)/runs$', flags), respond: (_request, match) => jsonResponse(match?.[1]) },
+    ]
+    for (const projectId of ['web', 'web', 'api']) {
+      expect(await read(answerFromRoutes(routes, { method: 'GET', url: `/api/v1/p/${projectId}/runs` }, notFound))).toEqual({
+        status: 200,
+        body: projectId,
+      })
+    }
+  })
+
   it('passes the request on when a route answers undefined, down to the unmatched answer', async () => {
     let projects: unknown
     const routes: FetchRoute[] = [

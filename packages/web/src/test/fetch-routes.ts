@@ -32,6 +32,12 @@ export function answerFixture<T>(fixture: JsonFixture<T>, status = 200): Respons
   return typeof fixture === 'function' ? (fixture as () => Promise<Response>)() : jsonResponse(fixture, status)
 }
 
+/** Execute `path` from the start of `url`: a global or sticky RegExp would resume at its `lastIndex`. */
+function execFromStart(path: RegExp, url: string): RegExpExecArray | null {
+  path.lastIndex = 0
+  return path.exec(url)
+}
+
 /** Answer `request` from the first matching route that answers, or from `unmatched`. */
 export function answerFromRoutes<Request extends RoutedRequest>(
   routes: readonly FetchRoute<Request>[],
@@ -40,7 +46,7 @@ export function answerFromRoutes<Request extends RoutedRequest>(
 ): Response | Promise<Response> {
   for (const route of routes) {
     if (route.method !== undefined && route.method !== request.method) continue
-    const match = typeof route.path === 'string' ? null : route.path.exec(request.url)
+    const match = typeof route.path === 'string' ? null : execFromStart(route.path, request.url)
     if (typeof route.path === 'string' ? route.path !== request.url : match === null) continue
     const answer = route.respond(request, match)
     if (answer !== undefined) return answer
