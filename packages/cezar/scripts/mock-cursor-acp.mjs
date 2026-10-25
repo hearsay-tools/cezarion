@@ -87,138 +87,299 @@ const update = (value, id = sessionId) => emit({ method: 'session/update', param
 const text = value => update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: value } });
 const complete = id => reply(id, { stopReason: 'end_turn' });
 const question = { id: 'tests', prompt: 'Which test runner?', options: [{ id: 'vitest', label: 'Vitest' }, { id: 'jest', label: 'Jest' }], allowMultiple: false };
-async function prompt(id, content) {
-  const input = answerNudge(content.filter(b => b.type === 'text').map(b => b.text).join('\n'));
-  prompts += 1;
-  if (input.includes('mock:autonomous') || input.startsWith('Continue working autonomously until the task is fully complete.')) {
-    const { autonomousReply } = await import('./mock-autonomous.mjs');
-    text(autonomousReply(input)); complete(id); return;
+async function respondAutonomous(id, input) {
+  const { autonomousReply } = await import('./mock-autonomous.mjs');
+  text(autonomousReply(input)); complete(id); return;
+}
+
+async function respondSilentTail(id, input) {
+  const silent = await import('./mock-silent-tail.mjs');
+  silent.noteSilentTailPrompt(input);
+  if (silent.isFinalMessageNudge(input)) {
+    await respondFinalMessageNudge(id, silent);
+    return true;
   }
-  if (input.includes('mock:silent-tail') || input.includes('mock:tool-tail') || silentNudge(input)) {
-    const silent = await import('./mock-silent-tail.mjs');
-    silent.noteSilentTailPrompt(input);
-    if (silent.isFinalMessageNudge(input)) {
-      const kind = silent.finalMessageNudgeKind();
-      if (kind === 'ack-only') return;
-      if (kind === 'late') await silent.sleep(silent.LATE_REPLY_MS);
-      if (kind === 'silent') update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: silent.SILENT_TAIL_REASONING } });
-      else {
-        if (kind === 'slow-done') {
-          text(silent.SLOW_DONE_PREFIX);
-          await silent.sleep(silent.SLOW_DONE_TAIL_MS);
-        }
-        text(kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE);
-      }
-      complete(id); return;
-    }
-    if (silent.isSilentTailScenario(input)) {
-      text(silent.SILENT_TAIL_OPENING);
-      update({ sessionUpdate: 'tool_call', toolCallId: 'silent-gh', title: 'Create issue', kind: 'execute', status: 'in_progress', rawInput: { command: 'gh issue create' } });
-      update({ sessionUpdate: 'tool_call_update', toolCallId: 'silent-gh', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'created' } }] });
-      update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: silent.SILENT_TAIL_REASONING } });
-      complete(id); return;
-    }
-    if (silent.isToolTailScenario(input)) {
-      text(silent.TOOL_TAIL_OPENING);
-      update({ sessionUpdate: 'tool_call', toolCallId: 'tool-tail-git', title: 'git status', kind: 'execute', status: 'in_progress', rawInput: { command: 'git status --short' } });
-      update({ sessionUpdate: 'tool_call_update', toolCallId: 'tool-tail-git', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: ' M src/example.ts' } }] });
-      complete(id); return;
-    }
+  if (silent.isSilentTailScenario(input)) {
+    respondSilentTailOpening(id, silent);
+    return true;
   }
-  if (input.includes('mock:crash-stderr')) {
-    const { crashWithStderr } = await import('./mock-runner-crash.mjs');
-    if (crashWithStderr(input, '{"method":"session/update","params":')) return;
+  if (silent.isToolTailScenario(input)) {
+    respondToolTailOpening(id, silent);
+    return true;
   }
-  if (input.includes('mock:cezar-tool')) { const { toolPrompt } = await import('./mock-ci-tool.mjs'); text(await toolPrompt('cursor', ciWire, input)); complete(id); return; }
-  if (input.includes('mock:ci-wait')) { const { ciPrompt } = await import('./mock-ci-tool.mjs'); text(await ciPrompt('cursor', ciWire, input)); complete(id); return; }
-  if (resumeDone) { resumeDone = false; text('Resumed work finished.\nCEZ:DONE'); complete(id); return; }
-  if (watchdogStall(input)) return;
-  if (input.includes('mock:busy-progress')) {
-    for (let i = 0; i < 24; i++) { text('working\n'); await new Promise(r => setTimeout(r, 100)); }
-    text('busy complete\n\nCEZ:DONE'); complete(id); return;
+  return false;
+}
+
+async function respondFinalMessageNudge(id, silent) {
+  const kind = silent.finalMessageNudgeKind();
+  if (kind === 'ack-only') return;
+  if (kind === 'late') await silent.sleep(silent.LATE_REPLY_MS);
+  if (kind === 'slow-done') {
+    text(silent.SLOW_DONE_PREFIX);
+    await silent.sleep(silent.SLOW_DONE_TAIL_MS);
   }
-  if (input.includes('mock:hold-done')) {
-    await waitForMockRelease(400);
-    text('parity hold-done: content after the pause\nCEZ:DONE'); complete(id); return;
-  }
-  if (input.includes('mock:hold-ask')) {
-    await waitForMockRelease(400);
-    text('Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}');
-    complete(id); return;
-  }
-  if (input.includes('mock:hold-gated')) {
-    await waitForMockRelease(500);
-    text('parity hold-gated: content after the pause');
-    complete(id); return;
-  }
-  if (input.includes('mock:hold')) await new Promise(r => setTimeout(r, 500));
-  if (input.includes('mock:rpc-error')) { emit({ id, error: { code: -32603, message: 'Provider rejected request' } }); return; }
-  // #443 provider-error envelopes: the specific scenarios must be matched BEFORE the
-  // bare 'mock:provider-error' prefix, which every one of them contains.
-  // #508: observed Cursor 2026.09.18-9a7762b error envelope, followed by end_turn.
-  if (input.includes('mock:provider-error-protocol') && (input.includes('-exhaust') || prompts === 1)) { text('\n\nError: RetriableError: [invalid_argument] protocol error: missing EndStreamResponse'); complete(id); return; }
-  // #528: observed Cursor SSL record-layer envelope (run 4bcd5420 seq 2667). Matched
-  // before the bare mock:provider-error prefix, same pattern as protocol.
-  if (input.includes('mock:provider-error-ssl') && (input.includes('-exhaust') || prompts === 1)) { text('\n\nError: RetriableError: [internal] C0AC9346CC7B0000:error:0A000119:SSL routines:tls_get_more_records:decryption failed or bad record mac:../deps/openssl/openssl/ssl/record/methods/tls_common.c:869:'); complete(id); return; }
-  // #531: observed run 2f891027 seq 2005 capacity envelope. Match before the bare prefix.
-  // Do not reuse the protocol mock's `includes('-exhaust')` check: that token is a
-  // substring of `resource-exhausted` and would never recover.
-  if (input.includes('mock:provider-error-resource-exhausted-exhaust')) { text('\n\nError: RetriableError: [resource_exhausted] Error'); complete(id); return; }
-  if (input.includes('mock:provider-error-resource-exhausted') && prompts === 1) { text('\n\nError: RetriableError: [resource_exhausted] Error'); complete(id); return; }
-  if (input.includes('mock:provider-error-unknown-protocol')) { text('\n\nError: [invalid_argument] protocol error: unknown frame'); complete(id); return; }
-  if (input.includes('mock:provider-error-transient') && prompts === 1) { text('\n\nError: 502 bad gateway.'); complete(id); return; }
-  if (input.includes('mock:provider-error-bare')) { text('\n\nError: 502 bad gateway.'); complete(id); return; }
-  if (input.includes('mock:provider-error-instant-near') && prompts === 1) { text(`\n\nError: 429 rate limited, try again at ${new Date(Date.now() + 300).toISOString()}.`); complete(id); return; }
-  if (input.includes('mock:provider-error-instant-far')) { text(`\n\nError: usage limit reached, try again at ${new Date(Date.now() + 6 * 3600000).toISOString()}.`); complete(id); return; }
-  if (input.includes('mock:provider-error-verbose')) { text(`\n\nError: usage limit reached. The request ${'x'.repeat(600)} could not be completed, try again at ${new Date(Date.now() + 6 * 3600000).toISOString()}.`); complete(id); return; }
-  if (input.includes('mock:provider-error') && !input.includes('mock:provider-error-')) { text('\n\nError: [unauthenticated] Backend rejected authentication.'); complete(id); return; }
-  // #401: ACP has chunks only, so completion must flush the same text to v1/v2.
-  if (input.includes('mock:turn-messages:')) {
-    const { turnMessages } = await import('./mock-turn-messages.mjs');
-    for (const message of turnMessages(input)) text(message + '\n');
-    complete(id); return;
-  }
-  if (input.includes('mock:ask-snapshot')) {
-    text(input.includes('mock:ask-snapshot-bad') ? 'CEZ:ASK {not valid json' : 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}'); complete(id); return;
-  }
-  if (input.includes('mock:ask-prose')) { text('Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json'); complete(id); return; }
-  if (input.includes('mock:ask-bad')) { pendingAsk = { id }; emit({ id: 'bad-question', method: 'cursor/ask_question', params: { questions: [] } }); return; }
-  if (input.includes('mock:plan')) { pendingAsk = { id, input }; emit({ id: 'plan-1', method: 'cursor/create_plan', params: { name: 'Test plan', overview: 'Approve the changes?', plan: 'Implement the change and run tests.' } }); return; }
-  if (input.includes('mock:multi-ask')) { pendingAsk = { id }; emit({ id: 'multi-question', method: 'cursor/ask_question', params: { title: 'Choices', questions: [question, { ...question, id: 'build', prompt: 'Which build tool?', options: [{ id: 'vite', label: 'Vite' }, { id: 'webpack', label: 'Webpack' }] }] } }); return; }
-  if (input.includes('mock:ask')) { pendingAsk = { id, input }; emit({ id: 'question-1', method: 'cursor/ask_question', params: { toolCallId: 'ask-tool', title: 'Tests', questions: [question] } }); return; }
-  if (input.includes('mock:permission')) { pendingAsk = { id }; emit({ id: 'permission-1', method: 'session/request_permission', params: { sessionId, toolCall: { toolCallId: 'shell-1', title: 'echo hello', kind: 'execute' }, options: [{ optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' }, { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' }] } }); return; }
-  // ACP subagent attribution from __fixtures__/cursor/acp-subagents.ndjson.
-  if (input.includes('mock:subagent-after-park')) {
-    update({ sessionUpdate: 'subagent_spawned', subagentSessionId: 'park-child', name: 'Reviewer', task: 'Review', capabilities: {}, _meta: { cursor: { toolCallId: 'park-task', agentId: 'park-agent' } } });
-    update({ sessionUpdate: 'tool_call', toolCallId: 'late-read', kind: 'other', title: 'Inspect README', status: 'in_progress' }, 'park-child');
-    update({ sessionUpdate: 'tool_call_update', toolCallId: 'late-read', status: 'completed' }, 'park-child');
-    text('Watching the child.\nCEZ:MONITORING');
-    complete(id);
-    await afterParityPark(input);
-    update({ sessionUpdate: 'tool_call_update', toolCallId: 'late-read', status: 'completed', rawOutput: 'Read the file.' }, 'park-child');
-    update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Late child text.' } }, 'park-child');
-    // Cursor task metadata can follow the regular completion (acp-subagents.ndjson).
-    // Sessionless extensions are attributed by their known child toolCallId even
-    // after prompt completion; this is the ordered barrier and a nested item update.
-    emit({ method: 'cursor/task', params: { toolCallId: 'late-read', description: 'Post-park child update processed.' } });
-    return;
-  }
-  if (input.includes('mock:subagent')) {
-    update({ sessionUpdate: 'tool_call', toolCallId: 'task-1', title: 'Review', kind: 'other', rawInput: { description: 'Review' }, status: 'in_progress' });
-    update({ sessionUpdate: 'subagent_spawned', subagentSessionId: 'child', name: 'Reviewer', task: 'Review', capabilities: {}, _meta: { cursor: { toolCallId: 'task-1', agentId: 'child-agent' } } });
-    text('Parent monitoring.\nCEZ:MONITORING');
-    update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Child review finished.' } }, 'child');
-    update({ sessionUpdate: 'subagent_state_update', subagentSessionId: 'child', state: 'completed', _meta: { cursor: { toolCallId: 'task-1', agentId: 'child-agent' } } });
-    complete(id); return;
-  }
-  if (input.includes('mock:split-text')) { text('parity split text\nCEZ:'); text('MONITORING'); complete(id); return; }
-  if (input.includes('mock:done')) { text('Done.\nCEZ:DONE'); complete(id); return; }
-  if (input.includes('mock:agent-echo')) { text(input); complete(id); return; }
+  finishFinalMessageNudge(id, silent, kind);
+}
+
+function finishFinalMessageNudge(id, silent, kind) {
+  if (kind === 'silent') update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: silent.SILENT_TAIL_REASONING } });
+  else text(kind === 'standing' ? silent.FINAL_MESSAGE_STANDING : silent.SILENT_TAIL_DONE);
+  complete(id);
+}
+
+function respondSilentTailOpening(id, silent) {
+  text(silent.SILENT_TAIL_OPENING);
+  update({ sessionUpdate: 'tool_call', toolCallId: 'silent-gh', title: 'Create issue', kind: 'execute', status: 'in_progress', rawInput: { command: 'gh issue create' } });
+  update({ sessionUpdate: 'tool_call_update', toolCallId: 'silent-gh', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'created' } }] });
+  update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: silent.SILENT_TAIL_REASONING } });
+  complete(id);
+}
+
+function respondToolTailOpening(id, silent) {
+  text(silent.TOOL_TAIL_OPENING);
+  update({ sessionUpdate: 'tool_call', toolCallId: 'tool-tail-git', title: 'git status', kind: 'execute', status: 'in_progress', rawInput: { command: 'git status --short' } });
+  update({ sessionUpdate: 'tool_call_update', toolCallId: 'tool-tail-git', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: ' M src/example.ts' } }] });
+  complete(id);
+}
+
+async function respondCrash(id, input) {
+  const { crashWithStderr } = await import('./mock-runner-crash.mjs');
+  if (crashWithStderr(input, '{"method":"session/update","params":')) return;
+  return false;
+}
+
+async function respondCezarTool(id, input) {
+  const { toolPrompt } = await import('./mock-ci-tool.mjs'); text(await toolPrompt('cursor', ciWire, input)); complete(id); return;
+}
+
+async function respondCiWait(id, input) {
+  const { ciPrompt } = await import('./mock-ci-tool.mjs'); text(await ciPrompt('cursor', ciWire, input)); complete(id); return;
+}
+
+function respondResumeDone(id, input) {
+  resumeDone = false; text('Resumed work finished.\nCEZ:DONE'); complete(id); return;
+}
+
+function respondWatchdog(id, input) {
+  return watchdogStall(input);
+}
+
+async function respondBusyProgress(id, input) {
+  for (let i = 0; i < 24; i++) { text('working\n'); await new Promise(r => setTimeout(r, 100)); }
+  text('busy complete\n\nCEZ:DONE'); complete(id); return;
+}
+
+async function respondHoldDone(id, input) {
+  await waitForMockRelease(400);
+  text('parity hold-done: content after the pause\nCEZ:DONE'); complete(id); return;
+}
+
+async function respondHoldAsk(id, input) {
+  await waitForMockRelease(400);
+  text('Pick one.\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}');
+  complete(id); return;
+}
+
+async function respondHoldGated(id, input) {
+  await waitForMockRelease(500);
+  text('parity hold-gated: content after the pause');
+  complete(id); return;
+}
+
+async function respondHold(id, input) {
+  await new Promise(r => setTimeout(r, 500));
+  return false;
+}
+
+function respondRpcError(id, input) {
+  emit({ id, error: { code: -32603, message: 'Provider rejected request' } }); return;
+}
+
+// #443 provider-error envelopes: the specific scenarios must be matched BEFORE the
+// bare 'mock:provider-error' prefix, which every one of them contains.
+// #508: observed Cursor 2026.09.18-9a7762b error envelope, followed by end_turn.
+function respondProtocolError(id, input) {
+  text('\n\nError: RetriableError: [invalid_argument] protocol error: missing EndStreamResponse'); complete(id); return;
+}
+
+// #528: observed Cursor SSL record-layer envelope (run 4bcd5420 seq 2667). Matched
+// before the bare mock:provider-error prefix, same pattern as protocol.
+function respondSslError(id, input) {
+  text('\n\nError: RetriableError: [internal] C0AC9346CC7B0000:error:0A000119:SSL routines:tls_get_more_records:decryption failed or bad record mac:../deps/openssl/openssl/ssl/record/methods/tls_common.c:869:'); complete(id); return;
+}
+
+// #531: observed run 2f891027 seq 2005 capacity envelope. Match before the bare prefix.
+// Do not reuse the protocol mock's `includes('-exhaust')` check: that token is a
+// substring of `resource-exhausted` and would never recover.
+function respondResourceExhausted(id, input) {
+  text('\n\nError: RetriableError: [resource_exhausted] Error'); complete(id); return;
+}
+
+function respondResourceRecovery(id, input) {
+  text('\n\nError: RetriableError: [resource_exhausted] Error'); complete(id); return;
+}
+
+function respondUnknownProtocolError(id, input) {
+  text('\n\nError: [invalid_argument] protocol error: unknown frame'); complete(id); return;
+}
+
+function respondTransientError(id, input) {
+  text('\n\nError: 502 bad gateway.'); complete(id); return;
+}
+
+function respondBareError(id, input) {
+  text('\n\nError: 502 bad gateway.'); complete(id); return;
+}
+
+function respondNearLimit(id, input) {
+  text(`\n\nError: 429 rate limited, try again at ${new Date(Date.now() + 300).toISOString()}.`); complete(id); return;
+}
+
+function respondFarLimit(id, input) {
+  text(`\n\nError: usage limit reached, try again at ${new Date(Date.now() + 6 * 3600000).toISOString()}.`); complete(id); return;
+}
+
+function respondVerboseLimit(id, input) {
+  text(`\n\nError: usage limit reached. The request ${'x'.repeat(600)} could not be completed, try again at ${new Date(Date.now() + 6 * 3600000).toISOString()}.`); complete(id); return;
+}
+
+function respondProviderError(id, input) {
+  text('\n\nError: [unauthenticated] Backend rejected authentication.'); complete(id); return;
+}
+
+// #401: ACP has chunks only, so completion must flush the same text to v1/v2.
+async function respondTurnMessages(id, input) {
+  const { turnMessages } = await import('./mock-turn-messages.mjs');
+  for (const message of turnMessages(input)) text(message + '\n');
+  complete(id); return;
+}
+
+function respondAskSnapshot(id, input) {
+  text(input.includes('mock:ask-snapshot-bad') ? 'CEZ:ASK {not valid json' : 'Using the CEZ:ASK structured question format instead:\n\nCEZ:ASK {"questions":[{"header":"Library","question":"Which test library?","options":[{"label":"Vitest"},{"label":"Node test"}]}]}'); complete(id); return;
+}
+
+function respondAskProse(id, input) {
+  text('Use `CEZ:ASK {"questions":[]}` in your reply.\n> CEZ:ASK {not valid json'); complete(id); return;
+}
+
+function respondBadAsk(id, input) {
+  pendingAsk = { id }; emit({ id: 'bad-question', method: 'cursor/ask_question', params: { questions: [] } }); return;
+}
+
+function respondPlan(id, input) {
+  pendingAsk = { id, input }; emit({ id: 'plan-1', method: 'cursor/create_plan', params: { name: 'Test plan', overview: 'Approve the changes?', plan: 'Implement the change and run tests.' } }); return;
+}
+
+function respondMultiAsk(id, input) {
+  pendingAsk = { id }; emit({ id: 'multi-question', method: 'cursor/ask_question', params: { title: 'Choices', questions: [question, { ...question, id: 'build', prompt: 'Which build tool?', options: [{ id: 'vite', label: 'Vite' }, { id: 'webpack', label: 'Webpack' }] }] } }); return;
+}
+
+function respondAsk(id, input) {
+  pendingAsk = { id, input }; emit({ id: 'question-1', method: 'cursor/ask_question', params: { toolCallId: 'ask-tool', title: 'Tests', questions: [question] } }); return;
+}
+
+function respondPermission(id, input) {
+  pendingAsk = { id }; emit({ id: 'permission-1', method: 'session/request_permission', params: { sessionId, toolCall: { toolCallId: 'shell-1', title: 'echo hello', kind: 'execute' }, options: [{ optionId: 'allow-once', name: 'Allow once', kind: 'allow_once' }, { optionId: 'reject-once', name: 'Reject', kind: 'reject_once' }] } }); return;
+}
+
+// ACP subagent attribution from __fixtures__/cursor/acp-subagents.ndjson.
+async function respondSubagentAfterPark(id, input) {
+  update({ sessionUpdate: 'subagent_spawned', subagentSessionId: 'park-child', name: 'Reviewer', task: 'Review', capabilities: {}, _meta: { cursor: { toolCallId: 'park-task', agentId: 'park-agent' } } });
+  update({ sessionUpdate: 'tool_call', toolCallId: 'late-read', kind: 'other', title: 'Inspect README', status: 'in_progress' }, 'park-child');
+  update({ sessionUpdate: 'tool_call_update', toolCallId: 'late-read', status: 'completed' }, 'park-child');
+  text('Watching the child.\nCEZ:MONITORING');
+  complete(id);
+  await afterParityPark(input);
+  update({ sessionUpdate: 'tool_call_update', toolCallId: 'late-read', status: 'completed', rawOutput: 'Read the file.' }, 'park-child');
+  update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Late child text.' } }, 'park-child');
+  // Cursor task metadata can follow the regular completion (acp-subagents.ndjson).
+  // Sessionless extensions are attributed by their known child toolCallId even
+  // after prompt completion; this is the ordered barrier and a nested item update.
+  emit({ method: 'cursor/task', params: { toolCallId: 'late-read', description: 'Post-park child update processed.' } });
+  return;
+}
+
+function respondSubagent(id, input) {
+  update({ sessionUpdate: 'tool_call', toolCallId: 'task-1', title: 'Review', kind: 'other', rawInput: { description: 'Review' }, status: 'in_progress' });
+  update({ sessionUpdate: 'subagent_spawned', subagentSessionId: 'child', name: 'Reviewer', task: 'Review', capabilities: {}, _meta: { cursor: { toolCallId: 'task-1', agentId: 'child-agent' } } });
+  text('Parent monitoring.\nCEZ:MONITORING');
+  update({ sessionUpdate: 'agent_message_chunk', content: { type: 'text', text: 'Child review finished.' } }, 'child');
+  update({ sessionUpdate: 'subagent_state_update', subagentSessionId: 'child', state: 'completed', _meta: { cursor: { toolCallId: 'task-1', agentId: 'child-agent' } } });
+  complete(id); return;
+}
+
+function respondSplitText(id, input) {
+  text('parity split text\nCEZ:'); text('MONITORING'); complete(id); return;
+}
+
+function respondDone(id, input) {
+  text('Done.\nCEZ:DONE'); complete(id); return;
+}
+
+function respondAgentEcho(id, input) {
+  text(input); complete(id); return;
+}
+
+function respondDefault(id) {
   update({ sessionUpdate: 'agent_thought_chunk', content: { type: 'text', text: 'Inspecting the workspace.' } });
   update({ sessionUpdate: 'tool_call', toolCallId: 'read-1', title: 'Read README', kind: 'read', status: 'in_progress', rawInput: { path: 'README.md' } });
   update({ sessionUpdate: 'tool_call_update', toolCallId: 'read-1', status: 'completed', content: [{ type: 'content', content: { type: 'text', text: 'A project' } }] });
   text('Cursor inspected the workspace.');
   complete(id);
+}
+
+// The first handled scenario wins. Silent-tail, clean crashes, watchdog probes
+// and the generic hold can fall through to the following entry. Keep this order.
+const promptScenarios = [
+  { matches: input => input.includes('mock:autonomous') || input.startsWith('Continue working autonomously until the task is fully complete.'), respond: respondAutonomous },
+  { matches: input => input.includes('mock:silent-tail') || input.includes('mock:tool-tail') || silentNudge(input), respond: respondSilentTail },
+  { matches: input => input.includes('mock:crash-stderr'), respond: respondCrash },
+  { matches: input => input.includes('mock:cezar-tool'), respond: respondCezarTool },
+  { matches: input => input.includes('mock:ci-wait'), respond: respondCiWait },
+  { matches: input => resumeDone, respond: respondResumeDone },
+  { matches: input => true, respond: respondWatchdog },
+  { matches: input => input.includes('mock:busy-progress'), respond: respondBusyProgress },
+  { matches: input => input.includes('mock:hold-done'), respond: respondHoldDone },
+  { matches: input => input.includes('mock:hold-ask'), respond: respondHoldAsk },
+  { matches: input => input.includes('mock:hold-gated'), respond: respondHoldGated },
+  { matches: input => input.includes('mock:hold'), respond: respondHold },
+  { matches: input => input.includes('mock:rpc-error'), respond: respondRpcError },
+  { matches: input => input.includes('mock:provider-error-protocol') && (input.includes('-exhaust') || prompts === 1), respond: respondProtocolError },
+  { matches: input => input.includes('mock:provider-error-ssl') && (input.includes('-exhaust') || prompts === 1), respond: respondSslError },
+  { matches: input => input.includes('mock:provider-error-resource-exhausted-exhaust'), respond: respondResourceExhausted },
+  { matches: input => input.includes('mock:provider-error-resource-exhausted') && prompts === 1, respond: respondResourceRecovery },
+  { matches: input => input.includes('mock:provider-error-unknown-protocol'), respond: respondUnknownProtocolError },
+  { matches: input => input.includes('mock:provider-error-transient') && prompts === 1, respond: respondTransientError },
+  { matches: input => input.includes('mock:provider-error-bare'), respond: respondBareError },
+  { matches: input => input.includes('mock:provider-error-instant-near') && prompts === 1, respond: respondNearLimit },
+  { matches: input => input.includes('mock:provider-error-instant-far'), respond: respondFarLimit },
+  { matches: input => input.includes('mock:provider-error-verbose'), respond: respondVerboseLimit },
+  { matches: input => input.includes('mock:provider-error') && !input.includes('mock:provider-error-'), respond: respondProviderError },
+  { matches: input => input.includes('mock:turn-messages:'), respond: respondTurnMessages },
+  { matches: input => input.includes('mock:ask-snapshot'), respond: respondAskSnapshot },
+  { matches: input => input.includes('mock:ask-prose'), respond: respondAskProse },
+  { matches: input => input.includes('mock:ask-bad'), respond: respondBadAsk },
+  { matches: input => input.includes('mock:plan'), respond: respondPlan },
+  { matches: input => input.includes('mock:multi-ask'), respond: respondMultiAsk },
+  { matches: input => input.includes('mock:ask'), respond: respondAsk },
+  { matches: input => input.includes('mock:permission'), respond: respondPermission },
+  { matches: input => input.includes('mock:subagent-after-park'), respond: respondSubagentAfterPark },
+  { matches: input => input.includes('mock:subagent'), respond: respondSubagent },
+  { matches: input => input.includes('mock:split-text'), respond: respondSplitText },
+  { matches: input => input.includes('mock:done'), respond: respondDone },
+  { matches: input => input.includes('mock:agent-echo'), respond: respondAgentEcho },
+];
+
+async function prompt(id, content) {
+  const input = answerNudge(content.filter(b => b.type === 'text').map(b => b.text).join('\n'));
+  prompts += 1;
+  for (const scenario of promptScenarios) {
+    if (!scenario.matches(input)) continue;
+    const result = scenario.respond(id, input);
+    const handled = result instanceof Promise ? await result : result;
+    if (handled !== false) return;
+  }
+  respondDefault(id);
 }
 createInterface({ input: process.stdin }).on('line', async line => {
   let msg; try { msg = JSON.parse(line); } catch { return; }
