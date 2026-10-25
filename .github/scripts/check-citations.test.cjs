@@ -200,6 +200,14 @@ test('skips generated files, test data and an archive import, and checks a later
   assert.deepEqual(findings(repo, imported), ['.ai/specs/old.md:6:948']);
 });
 
+test('checks new prose in an existing file that gains its source note in the same change', (t) => {
+  const repo = fixtureRepo(t);
+  const note = '> Historical source: `open-mercato/cezar` (upstream), preserved at fork point `feb85666`.\n';
+  const base = repo.commit({ '.ai/specs/kept.md': '# Kept\n\nRelates to #947.\n' });
+  repo.commit({ '.ai/specs/kept.md': `# Kept\n\n${note}\nRelates to #947.\nNew prose cites #948.\n` });
+  assert.deepEqual(findings(repo, base), ['.ai/specs/kept.md:6:948'], 'the legacy #947 passes, the new #948 fails');
+});
+
 test('names only resolved SHAs in every git call after resolving the range', (t) => {
   const repo = fixtureRepo(t);
   const base = repo.commit({ 'src/a.ts': 'export const a = 1;\n' });

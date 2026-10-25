@@ -189,12 +189,14 @@ function checkCitations({ cwd, base }) {
     const read = (mode, sha) => (/^100/.test(mode) && !ZERO_SHA.test(sha) ? git(['cat-file', 'blob', sha]) : null);
     const before = read(oldMode, oldSha);
     const after = read(newMode, newSha);
-    // An archive keeps upstream's bare citations under its source note: skip the side that
-    // gains or loses the note, so an import passes and a later edit is checked as usual.
+    // An archive keeps upstream's bare citations under its source note. A file this change
+    // adds with the note is an import: its imported text and any new prose in it are one
+    // added file, so it is skipped and a reviewer reads it. An existing file that gains
+    // the note is checked as usual, where the count passes its legacy citations. A deleted
+    // archive's citations are not counted, so moving them into another file fails.
     const noteBefore = before !== null && ARCHIVE_NOTE.test(before);
-    const noteAfter = after !== null && ARCHIVE_NOTE.test(after);
-    if (before !== null && (!noteBefore || noteAfter)) count(bareCitations(file, before), -1);
-    if (after === null || (noteAfter && !noteBefore)) continue;
+    if (before !== null && !(noteBefore && after === null)) count(bareCitations(file, before), -1);
+    if (after === null || (before === null && ARCHIVE_NOTE.test(after))) continue;
     const citations = bareCitations(file, after);
     count(citations, 1);
     if (citations.length === 0) continue;
