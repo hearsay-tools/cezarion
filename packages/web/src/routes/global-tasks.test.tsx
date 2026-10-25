@@ -8,6 +8,7 @@ import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-cl
 import { ListViewProvider, useListView } from '@/components/list-view'
 import { __clearRememberedStatusesForTests, workspaceQueryKeys } from '@/api/queries'
 import { Toaster, resetToasts } from '@/components/ui/toaster'
+import { answerFromRoutes, jsonResponse, type FetchRoute } from '@/test/fetch-routes'
 
 import { GlobalTasksRoute } from './global-tasks'
 import { resolveConflictsPrompt } from './task-thread/run-actions'
@@ -108,10 +109,13 @@ const RUNS: RunIndexEntry[] = [
   },
 ]
 
-const jsonResponse = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
-
 let sent: { method: string; path: string; body?: unknown }[] = []
+
+/** What a route sees of one request: the logged `path` is its `url`. */
+type MockRequest = { method: string; url: string; body?: unknown }
+
+/** The mock's index: what the next runs-index read answers. A read receipt or an archive replaces `rows`. */
+type MockIndex = { rows: RunIndexEntry[] }
 
 function stubFetch({
   runs = RUNS,
@@ -148,46 +152,54 @@ function stubFetch({
   seenAt = undefined
   // Stateful, like the real server: an archive really flips the flag, so the invalidation
   // refetch answers with the moved row rather than putting the old one back.
-  let index = runs.map((run) => ({ ...run }))
-  vi.stubGlobal(
-    'fetch',
-    vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
-      const path = String(input)
-      const method = init.method ?? 'GET'
-      sent.push({
-        method,
-        path,
-        body: init.body === undefined ? undefined : JSON.parse(String(init.body)),
-      })
-      // The FULL record, which this page's index row deliberately is not: the conflict panel's
-      // action fetches it (per project, on open) to learn whether the task can be spoken to.
-      const detail = /^\/api\/v1\/p\/([^/]+)\/runs\/([^/]+)$/.exec(path)
-      if (detail && method === 'GET') {
-        const [, projectId, id] = detail
-        const found = index.find((run) => run.projectId === projectId && run.id === id)
-        if (!found) return jsonResponse({ error: 'not found' }, 404)
-        return jsonResponse({ ...found, task: found.title, tokensUsed: 0, steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'sess-1' }] })
-      }
-      const fixed = originFixture(method, path, automations, handoff) ?? hostFixture(path, costMetrics, automations !== undefined)
-      if (fixed) return fixed
-      const message = /^\/api\/v1\/p\/([^/]+)\/runs\/([^/]+)\/(messages|continue)$/.exec(path)
-      if (message && method === 'POST') return jsonResponse({ ok: true })
-      if (path === '/api/v1/projects') {
-        return jsonResponse({ projects, bootProject: 'api', projectsDir: '/repos' })
-      }
-      if (path === '/api/v1/workspace/runs-index') {
+  const index: MockIndex = { rows: runs.map((run) => ({ ...run })) }
+  // Tried in order; a route without a method answers every method.
+  const routes: FetchRoute<MockRequest>[] = [
+    // The FULL record, which this page's index row deliberately is not: the conflict panel's
+    // action fetches it (per project, on open) to learn whether the task can be spoken to.
+    { method: 'GET', path: /^\/api\/v1\/p\/([^/]+)\/runs\/([^/]+)$/, respond: (_request, match) => runDetail(index, match!) },
+    // The two reads the origin line and the preview add (#1616): the handoff journal and the
+    // automation definitions per project (409 while a project has none, as with automations off).
+    {
+      method: 'GET',
+      path: /^\/api\/v1\/p\/[^/]+\/runs\/[^/]+\/handoff$/,
+      respond: () => new Response(handoff, { status: 200, headers: { 'content-type': 'text/plain' } }),
+    },
+    {
+      method: 'GET',
+      path: /^\/api\/v1\/p\/([^/]+)\/automations(?:\?|$)/,
+      respond: (_request, match) => automationDefinitions(automations?.[match![1]!]),
+    },
+    // The host's own answers: its connected provider, and the capability slice this page reads.
+    {
+      path: '/api/v1/providers/status',
+      respond: () => jsonResponse({ providers: [{ provider: 'claude', status: 'connected', enabled: true }] }),
+    },
+    // Only the slices `usageMetricVisibility` and the automation-name lookup read.
+    {
+      path: '/api/v1/health',
+      respond: () =>
+        jsonResponse({ capabilities: { costMetrics, tokenUsageMetrics: true, automations: automations !== undefined } }),
+    },
+    { method: 'POST', path: /^\/api\/v1\/p\/([^/]+)\/runs\/([^/]+)\/(messages|continue)$/, respond: () => jsonResponse({ ok: true }) },
+    { path: '/api/v1/projects', respond: () => jsonResponse({ projects, bootProject: 'api', projectsDir: '/repos' }) },
+    {
+      path: '/api/v1/workspace/runs-index',
+      respond: () => {
         if (indexStatus !== 200) return jsonResponse({ error: 'workspace unreadable' }, indexStatus)
         return jsonResponse({
-          runs: index.map((run) => (seenAt === undefined ? run : { ...run, seenAt })),
+          runs: index.rows.map((run) => (seenAt === undefined ? run : { ...run, seenAt })),
           perProjectLimit: 200,
           truncated,
           // Statuses the server already had, riding along with the rows — see `indexedStatuses`.
           referenceStatuses: indexStatuses ?? {},
         })
-      }
-      const status = /^\/api\/v1\/p\/([^/]+)\/github\/ref-status/.exec(path)
-      if (status) {
-        const answer = refStatus?.[status[1]!]
+      },
+    },
+    {
+      path: /^\/api\/v1\/p\/([^/]+)\/github\/ref-status/,
+      respond: (_request, match) => {
+        const answer = refStatus?.[match![1]!]
         // `recheckAfterMs` is the server's call on when to ask again — part of the shape, so the
         // fixture carries it.
         if (!answer) return jsonResponse({ available: false, reason: 'gh CLI not found', recheckAfterMs: 300_000 })
@@ -198,55 +210,70 @@ function stubFetch({
           ...(answer.conflicts ? { conflicts: answer.conflicts } : {}),
           recheckAfterMs: null,
         })
-      }
-      const receipt = /^\/api\/v1\/p\/([^/]+)\/runs\/([^/]+)\/(read|unread)$/.exec(path)
-      if (receipt && method === 'POST') {
-        const [, projectId, id, route] = receipt
-        index = index.map((run) => {
-          if (run.projectId !== projectId || run.id !== id) return run
-          if (route === 'unread') {
-            const { seenAt: _dropped, ...rest } = run
-            return rest
-          }
-          return { ...run, seenAt: '2026-07-14T12:00:00Z' }
-        })
-        return jsonResponse(index.find((run) => run.id === id))
-      }
-      const archive = /^\/api\/v1\/p\/([^/]+)\/runs\/([^/]+)\/archive$/.exec(path)
-      if (archive && method === 'POST') {
-        if (archiveStatus !== 200) return jsonResponse({ error: 'still running' }, archiveStatus)
-        const [, projectId, id] = archive
-        const archived = (JSON.parse(String(init.body)) as { archived: boolean }).archived
-        index = index.map((run) =>
-          run.projectId === projectId && run.id === id ? { ...run, archived } : run,
-        )
-        return jsonResponse(index.find((run) => run.id === id))
-      }
-      return jsonResponse({ error: `unexpected ${path}` }, 404)
+      },
+    },
+    {
+      method: 'POST',
+      path: /^\/api\/v1\/p\/([^/]+)\/runs\/([^/]+)\/(read|unread)$/,
+      respond: (_request, match) => markReceipt(index, match!),
+    },
+    {
+      method: 'POST',
+      path: /^\/api\/v1\/p\/([^/]+)\/runs\/([^/]+)\/archive$/,
+      respond: ({ body }, match) => setArchived(index, archiveStatus, match!, body),
+    },
+  ]
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(async (input: RequestInfo | URL, init: RequestInit = {}) => {
+      const path = String(input)
+      const method = init.method ?? 'GET'
+      const body = init.body === undefined ? undefined : JSON.parse(String(init.body))
+      sent.push({ method, path, body })
+      return answerFromRoutes(routes, { method, url: path, body }, (request) =>
+        jsonResponse({ error: `unexpected ${request.url}` }, 404),
+      )
     }),
   )
 }
 
-/** The two reads the origin line and the preview add (#1616): automation definitions per
- *  project (409 while a project has none, as with automations off) and the handoff journal. */
-/** The host's own answers: its connected provider, and the capability slice this page reads. */
-function hostFixture(path: string, costMetrics: boolean, automations: boolean): Response | undefined {
-  if (path === '/api/v1/providers/status') {
-    return jsonResponse({ providers: [{ provider: 'claude', status: 'connected', enabled: true }] })
-  }
-  // Only the slices `usageMetricVisibility` and the automation-name lookup read.
-  if (path === '/api/v1/health') return jsonResponse({ capabilities: { costMetrics, tokenUsageMetrics: true, automations } })
-  return undefined
+/** The FULL record of one run, or 404 when the index has no such row. */
+function runDetail(index: MockIndex, detail: RegExpExecArray): Response {
+  const [, projectId, id] = detail
+  const found = index.rows.find((run) => run.projectId === projectId && run.id === id)
+  if (!found) return jsonResponse({ error: 'not found' }, 404)
+  return jsonResponse({ ...found, task: found.title, tokensUsed: 0, steps: [{ id: 'task', name: 'Do the task', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0, sessionId: 'sess-1' }] })
 }
 
-function originFixture(method: string, path: string, automations: Record<string, { id: string; name: string }[]> | undefined, handoff: string): Response | undefined {
-  if (method !== 'GET') return undefined
-  if (/^\/api\/v1\/p\/[^/]+\/runs\/[^/]+\/handoff$/.test(path)) return new Response(handoff, { status: 200, headers: { 'content-type': 'text/plain' } })
-  const definitions = /^\/api\/v1\/p\/([^/]+)\/automations(?:\?|$)/.exec(path)
-  if (!definitions) return undefined
-  const list = automations?.[definitions[1]!]
+/** A project's automation definitions; 409 while it has none, as with automations off. */
+function automationDefinitions(list: { id: string; name: string }[] | undefined): Response {
   if (!list) return jsonResponse({ error: 'automations are off' }, 409)
   return jsonResponse({ available: true, timeZone: 'UTC', scheduler: { state: 'idle' }, automations: list.map((entry) => ({ ...entry, counts: {} })) })
+}
+
+/** A read receipt: `read` stamps `seenAt`, `unread` drops it. It answers with the row, by id. */
+function markReceipt(index: MockIndex, receipt: RegExpExecArray): Response {
+  const [, projectId, id, route] = receipt
+  index.rows = index.rows.map((run) => {
+    if (run.projectId !== projectId || run.id !== id) return run
+    if (route === 'unread') {
+      const { seenAt: _dropped, ...rest } = run
+      return rest
+    }
+    return { ...run, seenAt: '2026-07-14T12:00:00Z' }
+  })
+  return jsonResponse(index.rows.find((run) => run.id === id))
+}
+
+/** An archive request: refused with `archiveStatus` unless 200, else it sets the run's flag. */
+function setArchived(index: MockIndex, archiveStatus: number, archive: RegExpExecArray, body: unknown): Response {
+  if (archiveStatus !== 200) return jsonResponse({ error: 'still running' }, archiveStatus)
+  const [, projectId, id] = archive
+  const archived = (body as { archived: boolean }).archived
+  index.rows = index.rows.map((run) =>
+    run.projectId === projectId && run.id === id ? { ...run, archived } : run,
+  )
+  return jsonResponse(index.rows.find((run) => run.id === id))
 }
 
 function renderPage(client = createQueryClient(), entry = '/tasks') {
