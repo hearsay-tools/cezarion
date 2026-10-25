@@ -197,6 +197,8 @@ a backend's own slash commands must survive. Against an empty registry that same
 turns "cezar never loaded the list" into a confident user-facing "Unknown skill". Pair
 every silent pass-through with a test that pins the *empty/absent input* case.
 
+<a id="regression-proof"></a>
+
 **Prove the regression test fails without the fix.** Pin the pre-fix commit as
 `proof_base` and record the command, expected failure and fixed pass. A test written
 after the diagnosis can pass against the bug; a green-either-way test does not prove
@@ -236,6 +238,17 @@ setup and environment; a scratch worktree needs its own dependency installation,
 not a symlink to another checkout's workspace packages. Do not start Squeal in
 this disposable tree. Run the fixed test in the task worktree too (through Squeal
 when it is validating) so the proof does not replace normal verification.
+
+A **test-only change that removes a hidden dependency** needs this proof even
+when no failure has been observed. This includes dependence on a catalog, a host
+setting or a default the test did not write. Run the old test with that dependency
+absent and confirm it fails for that reason, then run the fixed test under the
+same conditions and confirm it passes. Cite the evidence in a comment at the
+changed test site, using the [E2E provenance form](packages/web/e2e/README.md#the-rules-the-ratchet-enforces):
+the reproduction command and conditions, and both before/after counts with their
+totals. For browser failures, include the full failure-bundle leaf path and a
+durable citation as that form requires; for non-browser tests, cite the captured
+runner output instead.
 
 For a **test-only fix**, reproduce the old test's defect under the same conditions
 as the fixed test. There is no source fix to remove. Keep both versions out of the
