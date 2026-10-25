@@ -107,7 +107,7 @@ test('trusted PR gate uses live labels and head blobs, and refuses changed metad
   const head = r.commit();
   r.git('remote', 'add', 'origin', r.cwd);
   r.git('update-ref', 'refs/pull/42/head', head);
-  const context = { eventName: 'pull_request_target', repo: { owner: 'owner', repo: 'repo' },
+  const context = { eventName: 'pull_request_target', sha: r.base, repo: { owner: 'owner', repo: 'repo' },
     payload: { pull_request: { number: 42, head: { sha: head }, base: { sha: r.base } } } };
   let pr = { head: { sha: head }, base: { sha: r.base }, labels: [] };
   const github = { rest: { pulls: { get: async () => ({ data: pr }) } } };
@@ -138,6 +138,27 @@ test('trusted PR gate uses live labels and head blobs, and refuses changed metad
   r.git('update-ref', 'refs/pull/42/head', r.base);
   await assert.rejects(checkPullRequest(input), /changed during fetch/);
   await checkPullRequest({ ...input, context: { eventName: 'push' } });
+});
+
+test('trusted PR gate measures from the branch tip it runs from, not the stale event base.sha', async (t) => {
+  // GitHub keeps base.sha at the PR's opening commit. The base branch then raises a ratchet
+  // (owner-approved, with the label), and the PR rebases onto it without touching the baseline.
+  const { checkPullRequest } = require('./baseline-growth.cjs');
+  const r = repository(t);
+  r.write('deep/space name.baseline.json', '{"max":3}');
+  const tip = r.commit();
+  r.write('feature.txt', 'the PR change');
+  const head = r.commit();
+  r.git('remote', 'add', 'origin', r.cwd);
+  r.git('update-ref', 'refs/pull/42/head', head);
+  const stale = { sha: r.base };
+  const context = { eventName: 'pull_request_target', sha: tip, repo: { owner: 'owner', repo: 'repo' },
+    payload: { pull_request: { number: 42, head: { sha: head }, base: stale } } };
+  const pr = { head: { sha: head }, base: stale, labels: [] };
+  const failures = [];
+  const core = { setFailed: message => failures.push(message), info: () => {} };
+  await checkPullRequest({ github: { rest: { pulls: { get: async () => ({ data: pr }) } } }, context, core, cwd: r.cwd });
+  assert.deepEqual(failures, []);
 });
 
 test('duplicate site counts can reorder without consuming the wrong allowance', () => {
