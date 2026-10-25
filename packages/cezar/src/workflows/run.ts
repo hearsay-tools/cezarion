@@ -9242,35 +9242,14 @@ export class RunManager {
     const run = this.store.getRun(runId);
     let review = false;
     if (run?.worktreePath && existsSync(run.worktreePath)) {
-      // An unresolved autosave may still own the real index. Conservatively
-      // treat its retained work as reviewable without starting `git add -N`.
-      const diff = this.autosaveCleanupBlocker(runId)
-        ? 'autosave cleanup pending'
-        : await worktreeDiff(run.worktreePath, run.baseBranch ?? 'HEAD');
-      if (durableRootFinish && diff.startsWith('(diff failed')) throw new Error('parent finish diff unavailable');
-      const hasDiff = diff.trim().length > 0 && !diff.startsWith('(diff failed');
-      const config = await loadConfig(this.repoRoot);
-      review = hasDiff && reviewGateEnabled(config) && run.autonomous !== true;
+      review = await this.successNeedsReview(run, run.worktreePath, durableRootFinish);
     }
     // Diff/config I/O can race cancellation or a replacement execution. Re-read
     // the record before touching steps, and never settle another session's work.
     const current = this.store.getRun(runId);
-    const active = this.active.get(runId);
-    // Disposal clears active, but cannot revoke an already accepted Finish/Stop.
-    // A different active state is still a replacement, even after disposal.
-    const disposedWithTerminalIntent = this.disposed && active === undefined && (state?.finishRequested || state?.cancelled);
-    if (!current || !['queued', 'running', 'waiting'].includes(current.status) ||
-      this.continuationGenerations.get(runId) !== continuationGeneration ||
-      (active !== state && !disposedWithTerminalIntent)) return;
+    if (!current || this.successSuperseded(runId, current.status, state, continuationGeneration)) return;
     if (state?.cancelled) {
-      const finishedAt = new Date().toISOString();
-      for (const step of current.steps) {
-        if (step.status === 'running' || step.status === 'waiting') {
-          this.store.updateStep(runId, step.id, { status: 'cancelled', finishedAt: step.finishedAt ?? finishedAt });
-        }
-      }
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt, currentStepId: undefined });
-      this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+      this.settleCancelledSuccess(runId, current);
       return;
     }
     // A worker's accepted continuation or a new child can defer parent completion.
@@ -9280,30 +9259,83 @@ export class RunManager {
       // follows the atomic terminal/step checkpoint, never the other way around.
       if (!this.store.commitRootFinishSuccess(runId, review ? 'review' : 'done')) return;
     } else {
-      const finishedAt = new Date().toISOString();
-      // An idle-closed Continue remains waiting until the whole task succeeds.
-      // Complete those intermediate steps before publishing terminal run status.
-      // A worker's incomplete earlier step stays `waiting`: a parent resume re-enters it (hearsay-tools/cezarion#1620).
-      for (const step of this.store.getRun(runId)?.steps ?? []) {
-        if (settlesAsDone(step, keepStepId)) {
-          this.store.updateStep(runId, step.id, { status: 'done', finishedAt: step.finishedAt ?? finishedAt });
-        }
-      }
-      this.store.updateRun(runId, {
-        status: review ? 'review' : 'done',
-        finishedAt,
-        currentStepId: undefined,
-        // A run that got all the way to a settled turn is not in a limit loop, so the resume
-        // counter starts over — otherwise a task that legitimately met the limit once a week would
-        // creep toward the cap forever and stop resuming for no reason anyone could see.
-        autoResumeAttempts: undefined,
-      });
+      this.commitOrdinarySuccess(runId, review, keepStepId);
     }
     this.store.appendEvent(runId, {
       type: 'lifecycle',
       message: review
         ? 'changes ready for review — send feedback, open a draft PR, or finish'
         : 'run finished',
+    });
+  }
+
+  /**
+   * Whether a successful run rests at `review`: its worktree holds a diff, the review gate is
+   * on, and the run is not autonomous. A root finish cannot settle without a diff, so a failed
+   * diff throws for it.
+   */
+  private async successNeedsReview(run: RunRecord, worktreePath: string, durableRootFinish: boolean): Promise<boolean> {
+    // An unresolved autosave may still own the real index. Conservatively
+    // treat its retained work as reviewable without starting `git add -N`.
+    const diff = this.autosaveCleanupBlocker(run.id)
+      ? 'autosave cleanup pending'
+      : await worktreeDiff(worktreePath, run.baseBranch ?? 'HEAD');
+    if (durableRootFinish && diff.startsWith('(diff failed')) throw new Error('parent finish diff unavailable');
+    const hasDiff = diff.trim().length > 0 && !diff.startsWith('(diff failed');
+    const config = await loadConfig(this.repoRoot);
+    return hasDiff && reviewGateEnabled(config) && run.autonomous !== true;
+  }
+
+  /** True when the success settlement must not write: the run is no longer live, a newer
+   *  continuation started, or another execution replaced the one that began settling. */
+  private successSuperseded(
+    runId: string,
+    status: RunRecord['status'],
+    state: ActiveRun | undefined,
+    continuationGeneration: symbol | undefined,
+  ): boolean {
+    const active = this.active.get(runId);
+    // Disposal clears active, but cannot revoke an already accepted Finish/Stop.
+    // A different active state is still a replacement, even after disposal.
+    const disposedWithTerminalIntent = this.disposed && active === undefined && (state?.finishRequested || state?.cancelled);
+    return !['queued', 'running', 'waiting'].includes(status) ||
+      this.continuationGenerations.get(runId) !== continuationGeneration ||
+      (active !== state && !disposedWithTerminalIntent);
+  }
+
+  /** A Stop accepted while the success settlement read the diff: the run and its running and
+   *  waiting steps become cancelled, and a step keeps a finish time it already has. */
+  private settleCancelledSuccess(runId: string, current: RunRecord): void {
+    const finishedAt = new Date().toISOString();
+    for (const step of current.steps) {
+      if (step.status === 'running' || step.status === 'waiting') {
+        this.store.updateStep(runId, step.id, { status: 'cancelled', finishedAt: step.finishedAt ?? finishedAt });
+      }
+    }
+    this.store.updateRun(runId, { status: 'cancelled', finishedAt, currentStepId: undefined });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
+  }
+
+  /** The ordinary success path (not a root finish): the steps that settle as done, then the run
+   *  as `review` or `done`. */
+  private commitOrdinarySuccess(runId: string, review: boolean, keepStepId: string | undefined): void {
+    const finishedAt = new Date().toISOString();
+    // An idle-closed Continue remains waiting until the whole task succeeds.
+    // Complete those intermediate steps before publishing terminal run status.
+    // A worker's incomplete earlier step stays `waiting`: a parent resume re-enters it (hearsay-tools/cezarion#1620).
+    for (const step of this.store.getRun(runId)?.steps ?? []) {
+      if (settlesAsDone(step, keepStepId)) {
+        this.store.updateStep(runId, step.id, { status: 'done', finishedAt: step.finishedAt ?? finishedAt });
+      }
+    }
+    this.store.updateRun(runId, {
+      status: review ? 'review' : 'done',
+      finishedAt,
+      currentStepId: undefined,
+      // A run that got all the way to a settled turn is not in a limit loop, so the resume
+      // counter starts over — otherwise a task that legitimately met the limit once a week would
+      // creep toward the cap forever and stop resuming for no reason anyone could see.
+      autoResumeAttempts: undefined,
     });
   }
 
