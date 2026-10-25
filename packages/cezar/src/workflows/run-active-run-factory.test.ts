@@ -22,10 +22,10 @@ const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
  * recovery. These cases pin what each entry path gets, with no live session to lean on.
  *
  * Which existing tests cover which path:
- * - `execute`: `run.test.ts` "registry /skill expansion on a fresh run's opening prompt (#87)", and
+ * - `execute`: `run.test.ts` "registry /skill expansion on a fresh run's opening prompt", and
  *   harness parity R48, which drives both construction sites on every runner.
- * - Continue: `run.test.ts` "registry /skill expansion survives a continuation (#811)", on a
- *   finished run that has no live session.
+ * - Continue: `run.test.ts` "registry /skill expansion survives a continuation", on a finished run that
+ *   has no live session.
  * - Restart recovery: the case below; no earlier test reached the skill registry after `recover()`.
  */
 describe('createActiveRun', () => {
@@ -110,7 +110,7 @@ describe('loading a run\'s skill registry', () => {
   });
 });
 
-describe('every entry path loads the registry, with no live session before it (#811)', () => {
+describe('every entry path loads the registry, with no live session before it (open-mercato/cezar#811)', () => {
   let repoRoot: string;
   let store: RunStore;
   let manager: RunManager;

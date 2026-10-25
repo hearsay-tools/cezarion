@@ -1933,7 +1933,7 @@ export class RunManager {
    * `execute` and `runContinuation` both call it, once the run is registered and after the awaits
    * that precede its first prompt. `'throw'` lets a failed discovery fail the run, as a fresh run
    * always did; `'ignore'` keeps the registry the run already has, or none, because discovery must
-   * never break a Continue (#811). An empty registry expands no `/skill` (it is not an error).
+   * never break a Continue (open-mercato/cezar#811). An empty registry expands no `/skill` (it is not an error).
    */
   private async loadRunSkills(state: ActiveRun, onFailure: 'throw' | 'ignore'): Promise<void> {
     // Only a rejected discovery is a failure to ignore; a synchronous throw escaped the old
@@ -4048,7 +4048,7 @@ export class RunManager {
    * `createActiveRun` (`execute` and `runContinuation`, which serves Continue and restart
    * recovery) call it, so the store pins every run this manager executes (#779) — its record stays
    * the held object every turn-end handler reads and writes until `dropActive` lets it go. A site
-   * that set `active` directly would execute a run the store could evict mid-turn (the #811 shape).
+   * that set `active` directly would execute a run the store could evict mid-turn (the open-mercato/cezar#811 shape).
    */
   private activate(runId: string, state: ActiveRun): void {
     state.pendingPermissions = new Set();
@@ -7131,7 +7131,7 @@ export class RunManager {
     // A Stop during setup settles below, at the prelaunch cancellation check before any spawn.
     // Registry snapshot for `/skill` expansion. A continuation builds its OWN ActiveRun, and without
     // this the resumed session expanded against an empty registry and leaked `/om-...` verbatim to
-    // the backend, which answered "Unknown skill" (#811). Best-effort — discovery must never
+    // the backend, which answered "Unknown skill" (open-mercato/cezar#811). Best-effort — discovery must never
     // break Continue.
     await this.loadRunSkills(state, 'ignore');
 
@@ -8108,7 +8108,7 @@ export class RunManager {
     const setupNote = await this.prepareWorktree(runId, state, launch.config.worktreeSetup, emit, 'start');
 
     // Every entry path loads the registry — `runContinuation` loads its own, and the one that
-    // skipped this leaked raw `/skill` text to the backend (#811). A failed discovery fails the run.
+    // skipped this leaked raw `/skill` text to the backend (open-mercato/cezar#811). A failed discovery fails the run.
     await this.loadRunSkills(state, 'throw');
     const loop = await this.runWorkflowSteps(execution, launch, { ...this.openingInputs(execution), setupNote });
     if (loop) await this.settleExecution(runId, state, loop);
