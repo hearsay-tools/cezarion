@@ -22,6 +22,16 @@ pass repository setup modules through repeatable `--node-import`. For an existin
 current Istanbul report, replace runner and test options with
 `--coverage <coverage-final.json>`.
 
+A change with no changed JS or TS file (`.js`, `.jsx`, `.ts`, `.tsx`, or their
+`.cjs`, `.mjs`, `.cts` and `.mts` forms) measures nothing, so it needs no
+`--runner` or `--test`:
+
+```sh
+node <skill>/scripts/check.mjs --base <target-ref> --output <report.md>
+```
+
+It reports `Checked 0/0 changed functions` and exits 0.
+
 In this repository, a change with cockpit source, unit tests and browser specs
 takes one command. The `e2e` project's own global setup boots the test
 environment:
