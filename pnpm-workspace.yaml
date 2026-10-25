@@ -9,3 +9,9 @@ linkWorkspacePackages: true
 enablePrePostScripts: true
 allowBuilds:
   esbuild: true
+  # pnpm 12 fails the install (ERR_PNPM_IGNORED_BUILDS) for a dependency whose build script the
+  # workspace has not decided on. `false` decides: its postinstall only hard-links the native binary
+  # over a JS shim, and exits 1 on a host with no platform package (musl), which would break
+  # `pnpm install` there. The shim still runs, and ast-grep-rules.testkit.ts resolves the platform
+  # binary itself and fails with that package's name when the host has none.
+  '@ast-grep/cli': false

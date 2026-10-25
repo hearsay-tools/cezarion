@@ -1,0 +1,43 @@
+id: skills-read-outside-enabled-skills
+language: typescript
+severity: warning
+message: >-
+  Read a run's skills through RunManager.enabledSkills(state), which applies the project's
+  off-list (hearsay-tools/cezarion#1494). Writing `state.skills = …` stays where it is.
+files:
+  - packages/cezar/src/workflows/run.ts
+utils:
+  # The ways run.ts reaches an ActiveRun: the `state` and `active` parameters, `execution.state`, and
+  # a direct lookup in the live map, `this.active.get(runId)`, bare or with a `!`. Not every
+  # `.skills`: `launch.skills` is another object's field. A lookup through a cast or a differently
+  # named local is not matched: the rule sees names, not types.
+  active-run:
+    any:
+      - { kind: identifier, regex: '^(state|active)$' }
+      - { kind: member_expression, has: { field: property, regex: '^state$' } }
+      - pattern: this.active.get($$$)
+      - { kind: non_null_expression, has: { pattern: this.active.get($$$) } }
+rule:
+  all:
+    - any:
+        # `state.skills`, `state?.skills`. The target of a plain `=` is a write, not a read.
+        - all:
+            - kind: member_expression
+            - has: { field: object, matches: active-run }
+            - has: { field: property, regex: '^skills$' }
+            - not: { inside: { kind: assignment_expression, field: left } }
+        - all:
+            - kind: subscript_expression
+            - has: { field: object, matches: active-run }
+            - has: { field: index, regex: '^.skills.$' }
+            - not: { inside: { kind: assignment_expression, field: left } }
+        # `const { skills } = state`
+        - all:
+            - kind: variable_declarator
+            - has: { field: name, has: { regex: '^skills$' } }
+            - has: { field: value, matches: active-run }
+    - not:
+        inside:
+          kind: method_definition
+          stopBy: end
+          has: { field: name, regex: '^enabledSkills$' }

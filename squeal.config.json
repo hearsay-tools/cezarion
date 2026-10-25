@@ -18,6 +18,13 @@
     ".ai/skills/check-code-quality/scripts/restart-wrapper.test.mjs": [
       ".ai/skills/check-code-quality/references/pre-pr.md"
     ],
+    "packages/cezar/src/ast-grep-rules.test.ts": [
+      "sgconfig.yml",
+      ".ai/ast-grep/**",
+      "packages/*/src/**/*.{ts,tsx}",
+      "packages/*/test/**/*.ts",
+      "packages/web/e2e/**/*.ts"
+    ],
     "packages/cezar/src/contract-import-boundaries.test.ts": [
       "packages/cezar/src/**/*.ts",
       "packages/cezar/test/**/*.ts",
