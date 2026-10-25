@@ -277,7 +277,8 @@ function finish(why: string): void {
   console.log(first ? systemPromptOf(first.body) : '');
   console.log('--- end system prompt ---');
   const exit = () => process.exit(why === 'settled' ? 0 : 1);
-  if (child.exitCode !== null || child.signalCode !== null) return exit();
+  // A spawn that failed has no process to wait for: it emits 'error' and 'close', never 'exit'.
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return exit();
   child.once('exit', exit);
   child.stdin.end();
   child.kill('SIGTERM');
@@ -301,7 +302,10 @@ createInterface({ input: child.stdout }).on('line', (line) => {
   try { frame = JSON.parse(line) as Frame; } catch { return; } // a non-JSON line is pi or omp logging
   onFrame(frame);
 });
+// A runner that exits at once fails the probe's stdin writes with EPIPE; 'close' reports that exit
+// once stderr is fully read.
+child.stdin.on('error', () => {});
 child.on('error', (error) => { stderr += String(error); finish('spawn failed'); });
-child.on('exit', (code, signal) => finish(`exited early (${code ?? signal})`));
+child.on('close', (code, signal) => finish(`exited early (${code ?? signal})`));
 write({ id: 'probe-prompt', type: 'prompt', message: USER_PROMPT });
 setTimeout(() => finish('hang guard'), HANG_GUARD_MS).unref();
