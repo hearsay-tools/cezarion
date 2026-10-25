@@ -15,6 +15,9 @@
     "enabled": true
   },
   "inputs": {
+    ".ai/skills/check-code-quality/scripts/restart-wrapper.test.mjs": [
+      ".ai/skills/check-code-quality/references/pre-pr.md"
+    ],
     "packages/cezar/src/contract-import-boundaries.test.ts": [
       "packages/cezar/src/**/*.ts",
       "packages/cezar/test/**/*.ts",

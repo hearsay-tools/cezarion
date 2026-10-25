@@ -47,15 +47,51 @@ when the check fails. From the repository root, wrap the command above as follow
   set -e
   test -d "$PWD"
   squeal stop "$PWD"
-  trap '
+  restore_validation() {
     measurement_status=$?
     trap - EXIT
     if ! squeal start "$PWD"; then
-      echo "Squeal restart failed; restore validation with squeal start in this worktree" >&2
-      if [ "$measurement_status" -eq 0 ]; then measurement_status=1; fi
+      if ! node --input-type=module - "$PWD" "$(command -v squeal)" <<'NODE'
+import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import { setTimeout } from 'node:timers/promises';
+
+const root = realpathSync(process.argv[2]);
+const launcher = process.argv[3];
+// bound: allow 30 extra seconds for the seconds-late startup observed under
+// host load in hearsay-tools/squeal#94; this is not a startup-time guarantee.
+const deadline = performance.now() + 30000;
+process.exitCode = 1;
+while (performance.now() < deadline) {
+  const probe = spawnSync(launcher, ['status', '--json'], {
+    cwd: root,
+    encoding: 'utf8',
+    timeout: Math.max(1, Math.min(5000, Math.ceil(deadline - performance.now()))),
+    killSignal: 'SIGKILL',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  try {
+    // Test failures can make status nonzero; only daemon liveness matters here.
+    const status = JSON.parse(probe.stdout);
+    if (!probe.error && performance.now() < deadline && status.available === true &&
+        status.worktreeRoot === root && status.daemon?.state === 'alive') {
+      process.exitCode = 0;
+      break;
+    }
+  } catch {
+    // Missing or malformed status does not confirm that validation is restored.
+  }
+  await setTimeout(Math.max(0, Math.min(1000, deadline - performance.now())));
+}
+NODE
+      then
+        echo "Squeal restart failed after the status wait; restore validation with squeal start in this worktree" >&2
+        if [ "$measurement_status" -eq 0 ]; then measurement_status=1; fi
+      fi
     fi
     exit "$measurement_status"
-  ' EXIT
+  }
+  trap restore_validation EXIT
   trap 'exit 130' INT
   trap 'exit 143' TERM
   node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
@@ -67,7 +103,18 @@ when the check fails. From the repository root, wrap the command above as follow
 ```
 
 Under Codex, replace each `squeal` command with the absolute launcher from its
-SQUEAL message when it is not on PATH. If no daemon is validating this worktree,
+SQUEAL message when it is not on PATH, including the argument to `command -v`.
+After a failed start, the wrapper checks status about once per second for at most
+30 additional seconds; each probe gets at most five seconds or the remaining
+time. It accepts only an available status for this worktree with a live daemon,
+independently of test verdicts. A successful start adds no wait. A failed
+measurement keeps its exit code, including 130 for INT and 143 for TERM, even
+when restoration also fails. The wait observes the daemon already started;
+it does not start another daemon or run tests. Remove the extra status wait when
+[hearsay-tools/squeal#94](https://github.com/hearsay-tools/squeal/issues/94)
+lands and the installed Squeal version includes the startup fix.
+
+If no daemon is validating this worktree,
 use the original command without the wrapper. Do not remove the lease lock or
 start a duplicate ordinary test run. Remove this workaround when
 [hearsay-tools/squeal#78](https://github.com/hearsay-tools/squeal/issues/78)
