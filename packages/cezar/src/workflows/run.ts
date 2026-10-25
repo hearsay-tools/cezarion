@@ -5133,33 +5133,13 @@ export class RunManager {
     const run = this.store.getRun(runId)!;
     const state = this.active.get(runId)!;
     if (!run.delegation || run.delegation.role === 'invalid') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-    if (request.workerIds) {
-      if (run.delegation.role !== 'root' || !run.delegation.permissions.includes('wait')) throw new DelegationPolicyError('denied_scope', 'Only a parent may wait for owned workers');
-      for (const id of request.workerIds) {
-        const worker = this.store.getRun(id);
-        if (worker?.delegation?.role !== 'worker' || worker.delegation.parentRunId !== runId ||
-          worker.delegation.workspace.ownerRunId !== id) throw new DelegationPolicyError('denied_scope', 'not an owned worker');
-      }
-    } else {
-      const root = run.delegation.role === 'root' ? run : this.store.getRun(run.delegation.parentRunId);
-      if (root?.delegation?.role !== 'root' || (run.delegation.role === 'root' && !run.delegation.permissions.includes('wait'))) {
-        throw new DelegationPolicyError('denied_scope', 'Request wait scope denied');
-      }
-      for (const id of request.requestIds ?? []) {
-        if (!root.delegation.conversation?.messages.some(message => message.id === id && message.kind === 'request' &&
-          message.state === 'accepted' && message.senderRunId === runId)) throw new DelegationPolicyError('denied_scope', 'Request wait scope denied');
-      }
-    }
+    if (request.workerIds) this.assertOwnedWorkerWaitScope(runId, run.delegation, request.workerIds);
+    else this.assertRequestWaitScope(runId, run, run.delegation, request.requestIds ?? []);
     const repeated = identicalWorkerWait(run.waits ?? [], request);
     if (repeated && hasWorkerDeadline(repeated)) return repeated;
     if (openWaits(run).length >= WAIT_LIMIT) throw new DelegationPolicyError('capacity_limit', `This run already has ${WAIT_LIMIT} open waits; cancel one first`);
     const now = Date.now();
-    const target = request.workerIds
-      ? { workerIds: request.workerIds, outcomes: [], revisions: request.workerIds.map(workerId => {
-        const metadata = this.store.getRun(workerId)!.delegation;
-        return { workerId, revision: metadata?.role === 'worker' ? metadata.executionRevision ?? 0 : 0 };
-      }) }
-      : { requestIds: request.requestIds!, requestOutcomes: [] };
+    const target = this.workerWaitTarget(request);
     const entry: DeadlinedWorkerWaitEntry = { id: randomUUID(), kind: 'worker', source: 'agent', via, registeredAt: new Date(now).toISOString(),
       deadline: new Date(now + request.timeoutSeconds * 1000).toISOString(), timeoutSeconds: request.timeoutSeconds,
       turnId: state.ciTurnId ??= randomUUID(), phase: 'open', ...(request.mode === undefined ? {} : { mode: request.mode }), ...target };
@@ -5171,9 +5151,44 @@ export class RunManager {
     this.noticeParkedWorkers(familyOf(run));
     const current = this.store.getRun(runId);
     if (current?.waits?.some(wait => wait.id === entry.id) && (state.atTurnBoundary === state.session || this.waiting.has(runId))) this.parkOnWaits(runId, state);
+    return this.recordedWorkerWait(runId, entry.id) ?? entry;
+  }
+
+  /** Scope of a wait on workers: only a parent holding `wait` may select, and only workers it owns. */
+  private assertOwnedWorkerWaitScope(runId: string, delegation: Exclude<NonNullable<RunRecord['delegation']>, { role: 'invalid' }>, workerIds: string[]): void {
+    if (delegation.role !== 'root' || !delegation.permissions.includes('wait')) throw new DelegationPolicyError('denied_scope', 'Only a parent may wait for owned workers');
+    for (const id of workerIds) {
+      const worker = this.store.getRun(id);
+      if (worker?.delegation?.role !== 'worker' || worker.delegation.parentRunId !== runId ||
+        worker.delegation.workspace.ownerRunId !== id) throw new DelegationPolicyError('denied_scope', 'not an owned worker');
+    }
+  }
+
+  /** Scope of a wait on replies: the caller's own accepted requests, read from its family root's conversation. */
+  private assertRequestWaitScope(runId: string, run: RunRecord, delegation: Exclude<NonNullable<RunRecord['delegation']>, { role: 'invalid' }>, requestIds: string[]): void {
+    const root = delegation.role === 'root' ? run : this.store.getRun(delegation.parentRunId);
+    if (root?.delegation?.role !== 'root' || (delegation.role === 'root' && !delegation.permissions.includes('wait'))) {
+      throw new DelegationPolicyError('denied_scope', 'Request wait scope denied');
+    }
+    for (const id of requestIds) {
+      if (!root.delegation.conversation?.messages.some(message => message.id === id && message.kind === 'request' &&
+        message.state === 'accepted' && message.senderRunId === runId)) throw new DelegationPolicyError('denied_scope', 'Request wait scope denied');
+    }
+  }
+
+  /** The entry's target fields: each worker's revision at registration, or the requests with no outcome yet. */
+  private workerWaitTarget(request: { workerIds?: string[]; requestIds?: string[] }) {
+    if (!request.workerIds) return { requestIds: request.requestIds!, requestOutcomes: [] };
+    return { workerIds: request.workerIds, outcomes: [], revisions: request.workerIds.map(workerId => {
+      const metadata = this.store.getRun(workerId)!.delegation;
+      return { workerId, revision: metadata?.role === 'worker' ? metadata.executionRevision ?? 0 : 0 };
+    }) };
+  }
+
+  /** The wait as the store now holds it, open or already delivered, with its deadline. */
+  private recordedWorkerWait(runId: string, id: string): DeadlinedWorkerWaitEntry | undefined {
     const latest = this.store.getRun(runId);
-    const recorded = [...latest?.waits ?? [], ...latest?.lastWaits ?? []].find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === entry.id && wait.kind === 'worker' && hasWorkerDeadline(wait));
-    return recorded ?? entry;
+    return [...latest?.waits ?? [], ...latest?.lastWaits ?? []].find((wait): wait is DeadlinedWorkerWaitEntry => wait.id === id && wait.kind === 'worker' && hasWorkerDeadline(wait));
   }
 
   /**
