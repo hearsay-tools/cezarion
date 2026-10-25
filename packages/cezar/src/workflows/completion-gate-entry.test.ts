@@ -1,9 +1,10 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentSession } from '../core/agent-runner.ts';
+import { handoffPath, seedHandoffFile } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
 
@@ -82,5 +83,54 @@ describe('the completion gate outside a turn end', () => {
       askNudged: false, done: false, nudgedLastTurn: false });
     expect(store.getRun(id)?.waits?.some(wait => wait.kind === 'timer')).toBe(true);
     expect(store.getRun(id)?.status).toBe('waiting');
+  });
+
+  // A run an earlier entry already parked keeps that park: a second one would free its slot twice.
+  it('at the boundary, a second refusal keeps the park the first one made and frees no second slot', () => {
+    state.atTurnBoundary = session;
+    openWorkerWait();
+    const release = vi.spyOn(manager as unknown as { releaseSlot: () => void }, 'releaseSlot');
+    expect(manager['deferParentCompletion'](id)).toBe(true);
+    expect(manager['deferParentCompletion'](id)).toBe(true);
+    expect(release).toHaveBeenCalledOnce();
+    expect(store.getRun(id)?.status).toBe('waiting');
+  });
+
+  // The gate held the done itself (a stopped root, or a question that parked for the user): a turn
+  // end keeps the done at the boundary and writes the park line; an acknowledgement writes the line
+  // only.
+  describe('a done the gate holds', () => {
+    const lines = () => readFileSync(handoffPath(join(root, '.ai/cezar'), id), 'utf8').match(/status=\S+/g) ?? [];
+    const turnEnd = () => manager['settleTurn'](id, state, 'turn-end', { stepId: 'task', monitoring: false, humanGate: false,
+      ask: null, askNudged: false, done: true, nudgedLastTurn: false });
+    beforeEach(() => {
+      vi.mocked(manager['completionGate']).mockReturnValue('held');
+      seedHandoffFile(join(root, '.ai/cezar'), store.getRun(id)!);
+      state.atTurnBoundary = session;
+      state.heldHumanInputSince = Date.now();
+    });
+
+    it('a turn end keeps the done at the boundary, resets the held-input clock and writes the park line', () => {
+      expect(turnEnd()).toBe(true);
+      expect(state.doneAtBoundary).toBe(session);
+      expect(state.doneClose).toEqual({ via: 'done-line' });
+      expect(state.heldHumanInputSince).toBeUndefined();
+      expect(lines()).toEqual(['status=waiting']);
+    });
+
+    it('a turn end whose input checkpoint failed settles nothing and writes no line', () => {
+      state.agentInputError = 'agent input delivery checkpoint failed';
+      expect(turnEnd()).toBe(false);
+      expect(state.doneAtBoundary).toBe(session);
+      expect(lines()).toEqual([]);
+    });
+
+    it('an acknowledgement writes the park line and leaves the boundary and the held-input clock as they were', () => {
+      state.doneAtBoundary = session;
+      expect(manager['settleTurn'](id, state, 'ack', manager['boundaryTurn'](id, state, session, true))).toBe(true);
+      expect(state.doneAtBoundary).toBe(session);
+      expect(state.heldHumanInputSince).toBeDefined();
+      expect(lines()).toEqual(['status=waiting']);
+    });
   });
 });
