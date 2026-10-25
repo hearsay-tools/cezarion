@@ -3,7 +3,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { execFile as execFileCallback, spawn } from 'node:child_process';
 import { Agent, createServer, get } from 'node:http';
 import { cp, mkdtemp, mkdir, readFile, readdir, readlink, rm, symlink, writeFile } from 'node:fs/promises';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -595,6 +595,14 @@ for (const ephemeral of [false, true]) test(`built production CLI acknowledges i
   }
 });
 
+/** True while `pid` runs. A zombie has stopped: its parent, here a reaper that may never wait, holds it. */
+function running(pid: number): boolean {
+  try { process.kill(pid, 0); } catch { return false; }
+  if (process.platform !== 'linux') return true;
+  try { return !/^[ZX]$/.test(readFileSync(`/proc/${pid}/stat`, 'utf8').split(')').at(-1)!.trim().split(/\s+/)[0]!); }
+  catch { return false; }
+}
+
 test('copied detached helper acknowledges, then promotes and boots its owned child', { timeout: 30_000 }, async () => {
   const fixture = await simpleHelperFixture();
   let replacementPid: number | undefined;
@@ -661,6 +669,46 @@ catch { writeFileSync(${JSON.stringify(join(fixture.root, 'ack-failed'))}, 'yes'
     assert.equal(await readFile(join(fixture.root, 'ack-failed'), 'utf8'), 'yes');
     assert.equal((await readJson(fixture.recordPath)).state.status, 'restarting');
   } finally { await rm(fixture.root, { recursive: true, force: true }); }
+});
+
+test('detached launcher stops what a helper forked before it exited without acknowledgement', { skip: process.platform === 'win32', timeout: 30_000 }, async () => {
+  const fixture = await simpleHelperFixture();
+  const memberPid = join(fixture.root, 'member.pid');
+  let member: number | undefined;
+  try {
+    const planPath = join(fixture.root, 'plan.json');
+    await writeFile(planPath, JSON.stringify(fixture.plan));
+    // Loaded before the helper's own code: fork a member that ignores SIGTERM, wait until it is
+    // ready, and exit, so the helper never acknowledges and its member outlives it. The member
+    // gets no NODE_OPTIONS, or it would load this file too and fork without end.
+    const preload = join(fixture.root, 'fork-and-exit.cjs');
+    await writeFile(preload, `const fs = require('node:fs');
+const env = { ...process.env }; delete env.NODE_OPTIONS;
+require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(`process.on('SIGTERM', () => {}); require('node:fs').writeFileSync(${JSON.stringify(memberPid)}, process.pid + '\\n'); setInterval(() => {}, 1000);`)}], { stdio: 'ignore', env });
+const pause = new Int32Array(new SharedArrayBuffer(4));
+const until = Date.now() + 10000; // bound: hang guard; the member starts in well under a second.
+while (!fs.existsSync(${JSON.stringify(memberPid)}) && Date.now() < until) Atomics.wait(pause, 0, 0, 20);
+process.exit(1);`);
+    const launcherPath = new URL('../../dist/application-update/launcher.js', import.meta.url).pathname;
+    const script = join(fixture.root, 'forked-ack.mjs');
+    await writeFile(script, `import { readFileSync, writeFileSync } from 'node:fs';
+import { armRestartHelper } from ${JSON.stringify(new URL('file://' + launcherPath).href)};
+const plan=JSON.parse(readFileSync(${JSON.stringify(planPath)}));
+process.env.NODE_OPTIONS=${JSON.stringify(`--require ${preload}`)};
+try { await armRestartHelper(plan,{repoRoot:plan.repoRoot,host:plan.host,port:plan.port,npmBin:plan.npmBin}); }
+catch { writeFileSync(${JSON.stringify(join(fixture.root, 'ack-failed'))}, 'yes'); }`);
+    const child = spawn(process.execPath, [script, 'serve'], { cwd: fixture.root,
+      env: { ...process.env, CEZ_HOME: join(fixture.root, 'home') }, stdio: 'ignore' });
+    const code = await new Promise<number | null>((resolve) => child.once('exit', resolve));
+    member = requirePid(memberPid);
+    assert.equal(code, 0);
+    assert.equal(await readFile(join(fixture.root, 'ack-failed'), 'utf8'), 'yes');
+    // The launcher rejects only after the helper's group is stopped: no member runs now.
+    assert.equal(running(member), false, `the member the helper forked (pid ${member}) still runs`);
+  } finally {
+    if (member) { try { process.kill(member, 'SIGKILL'); } catch { /* already stopped */ } }
+    await rm(fixture.root, { recursive: true, force: true });
+  }
 });
 
 test('detached helper does not acknowledge a stale durable claim', { timeout: 10_000 }, async () => {

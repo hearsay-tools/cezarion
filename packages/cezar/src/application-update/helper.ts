@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import type { spawn } from 'node:child_process';
 import { cp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -7,6 +7,7 @@ import { Agent, get } from 'node:http';
 import { withDirectoryLock } from './lock.js';
 import { runOwnedNpm } from './npm-process.js';
 import { restoreGlobalBins, windowsGlobalLayout } from './bin-recovery.js';
+import { spawnDetached, stopGroup } from '../detached-process.js';
 
 const delay = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
@@ -195,8 +196,8 @@ export async function promoteOriginal(plan: HelperPlan, npxLockAlreadyHeld = fal
 function launch(plan: HelperPlan): ReturnType<typeof spawn> {
   const args = [...plan.nodeArgs, plan.installation.launchEntry, ...plan.cliArgs,
     '--bind-host', plan.host, '--port', String(plan.port), '--repo', plan.repoRoot, '--no-open', '--restart-exact'];
-  return spawn(plan.nodeExecutable, args, { cwd: plan.cwd, env: process.env,
-    stdio: ['ignore', 'ignore', 'ignore', 'ipc'], detached: true });
+  return spawnDetached(plan.nodeExecutable, args, { cwd: plan.cwd, env: process.env,
+    stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
 }
 
 async function verifyHealth(plan: HelperPlan, expectedVersion: string, child: ReturnType<typeof spawn>, signal?: AbortSignal): Promise<void> {
@@ -249,11 +250,10 @@ async function verifyHealth(plan: HelperPlan, expectedVersion: string, child: Re
   throw new Error('replacement health timed out');
 }
 
+/** Stops the replacement's whole group, and what is left of it after the replacement exited. */
 async function reap(child: ReturnType<typeof spawn> | undefined): Promise<void> {
-  if (!child?.pid || child.exitCode !== null) return;
-  process.kill(child.pid, 'SIGTERM');
-  try { await waitExit(child.pid, 3000); }
-  catch { process.kill(child.pid, 'SIGKILL'); await waitExit(child.pid, 3000); }
+  if (!child?.pid) return;
+  if (!await stopGroup({ pid: child.pid, child }, { graceMs: 3000, killWaitMs: 3000 })) throw new Error('old server did not exit');
 }
 
 export async function restoreOriginal(plan: HelperPlan, assertOwned: () => Promise<void> = async () => {}): Promise<void> {
