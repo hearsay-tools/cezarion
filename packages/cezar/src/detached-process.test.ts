@@ -1,9 +1,9 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import {
   groupExists, groupRunning, leaderRunning, processStartToken, startOwnedGroup, stopGroup, watchGroup,
@@ -16,8 +16,15 @@ import {
  * process groups: a leader started through the helper, and the members it forks.
  */
 
-const posix = process.platform !== 'win32';
-const linux = process.platform === 'linux';
+// The Windows cases stand in for `taskkill`; every other spawnSync runs as it is.
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return { ...actual, spawnSync: vi.fn(actual.spawnSync) };
+});
+
+const hostPlatform = process.platform;
+const posix = hostPlatform !== 'win32';
+const linux = hostPlatform === 'linux';
 
 let dir: string;
 let strays: number[];
@@ -208,5 +215,62 @@ describe.runIf(posix)('watchGroup', () => {
     const watching = watchGroup({ leader, intervalMs: 50, stop: { graceMs: 200 }, decide: () => undefined });
     expect(await watching).toBe('exited');
     await until(() => !alive(member), 'the member the leader left behind to exit');
+  });
+});
+
+describe.runIf(posix)('on Windows', () => {
+  // The host's own identity reader: the cases test the helper's Windows branches, not the reader.
+  const readStart = (pid: number) => processStartToken(pid, hostPlatform);
+  let taskkills: number[];
+
+  beforeEach(async () => {
+    taskkills = [];
+    const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+    // `taskkill /pid N /t /f` ends a process tree; a SIGKILL of the group is its stand-in here.
+    vi.mocked(spawnSync).mockImplementation(((file: string, args: readonly string[], options: object) => {
+      if (file !== 'taskkill') return actual.spawnSync(file, args, options);
+      const pid = Number(args[1]);
+      taskkills.push(pid);
+      try { process.kill(-pid, 'SIGKILL'); } catch { /* gone */ }
+      return { pid: 0, output: [], stdout: '', stderr: '', status: 0, signal: null };
+    }) as typeof spawnSync);
+  });
+
+  afterEach(async () => {
+    const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+    vi.mocked(spawnSync).mockImplementation(actual.spawnSync);
+  });
+
+  /** Runs `body` as the helper sees a Windows host. The leaders start before it, on the host. */
+  async function asWindows<T>(body: () => Promise<T> | T): Promise<T> {
+    Object.defineProperty(process, 'platform', { value: 'win32', configurable: true });
+    try { return await body(); }
+    finally { Object.defineProperty(process, 'platform', { value: hostPlatform, configurable: true }); }
+  }
+
+  it('ends the recorded leader\'s process tree', async () => {
+    const { leader } = await startLeader(IDLE);
+    expect(await asWindows(() => groupExists(leader, readStart))).toBe(true);
+    expect(await asWindows(() => stopGroup(leader, { readStart }))).toBe(true);
+    expect(taskkills).toEqual([leader.pid]);
+    expect(alive(leader.pid)).toBe(false);
+  });
+
+  it('never ends the tree of a pid whose start identity differs from the record: a reused or forged pid', async () => {
+    const { leader: other } = await startLeader(IDLE);
+    const forged: GroupLeader = { pid: other.pid, start: `${other.start}-forged` };
+    expect(await asWindows(() => groupExists(forged, readStart))).toBe(false);
+    expect(await asWindows(() => stopGroup(forged, { readStart }))).toBe(true);
+    expect(taskkills).toEqual([]);
+    expect(alive(other.pid)).toBe(true);
+  });
+
+  it('leaves a process whose start identity cannot be read, and does not report it stopped', async () => {
+    const { leader } = await startLeader(IDLE);
+    const unreadable = () => undefined;
+    expect(await asWindows(() => groupExists(leader, unreadable))).toBe(true);
+    expect(await asWindows(() => stopGroup(leader, { readStart: unreadable }))).toBe(false);
+    expect(taskkills).toEqual([]);
+    expect(alive(leader.pid)).toBe(true);
   });
 });

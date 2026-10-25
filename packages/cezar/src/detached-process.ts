@@ -139,8 +139,8 @@ export function leaderRunning(leader: GroupLeader, readStart: ReadStart = proces
  *  a group, so `-pid` reaches only this group until then. A live process with the leader's pid
  *  and another start identity means the group ended and the pid was reused. */
 export function groupExists(leader: GroupLeader, readStart: ReadStart = processStartToken): boolean {
-  // Windows has no process groups: the stop's tree kill is all there is.
-  if (process.platform === 'win32') return false;
+  // Windows has no process groups: the recorded leader, until it is provably gone, is all there is.
+  if (process.platform === 'win32') return leaderStatus(leader, readStart) !== 'gone';
   if (leader.start !== undefined) {
     const current = readStart(leader.pid);
     if (current !== undefined && current !== leader.start) return false;
@@ -195,11 +195,16 @@ export interface StopOptions {
 /** Stops the process group `leader` started: SIGTERM, then SIGKILL for whatever outlives the
  *  grace, the leader or any other member. True once no member runs. SIGKILL goes to every group
  *  that still exists, zombies only included, so it also reaches a member a scan missed. On
- *  Windows it ends the leader's process tree at once. */
+ *  Windows it ends the recorded leader's process tree at once, then waits `killWaitMs`. */
 export async function stopGroup(leader: GroupLeader, options: StopOptions = {}): Promise<boolean> {
   const { graceMs = 10_000, killWaitMs = 1_000, readStart = processStartToken } = options;
   if (process.platform === 'win32') {
+    // Only the recorded incarnation's tree: an unreadable identity could be a reused pid.
+    const status = leaderStatus(leader, readStart);
+    if (status !== 'running') return status === 'gone';
     killTree(leader.pid);
+    const deadline = performance.now() + killWaitMs;
+    while (processState(leader.pid) !== 'gone' && performance.now() < deadline) await delay(POLL_MS);
     return processState(leader.pid) === 'gone';
   }
   for (const [signal, waitMs] of [['SIGTERM', graceMs], ['SIGKILL', killWaitMs]] as const) {
