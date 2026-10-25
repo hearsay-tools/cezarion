@@ -29,7 +29,7 @@ export type PreviewSocketProject = { store: RunContext['store']; dataDir: string
 
 export interface PreviewSocketDeps {
   /** Absent when `CEZ_PREVIEW` was off at boot: the path answers 404. */
-  host?: PreviewSocketHost;
+  host?: PreviewSocketHost | undefined;
   verify: (req: IncomingMessage) => WsUpgradeVerdict;
   /** `undefined` is the boot project. An unknown or unusable project resolves to undefined. */
   resolveProject: (projectId: string | undefined) => Promise<PreviewSocketProject | undefined>;

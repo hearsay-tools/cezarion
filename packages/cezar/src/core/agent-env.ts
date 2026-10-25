@@ -292,7 +292,7 @@ function isTruthy(value: string | undefined): boolean {
 export interface BuildChildEnvOptions {
   backend: AgentBackend;
   /** Per-run env (CEZ_HANDOFF_FILE etc.) — always applied, wins over host. */
-  extraEnv?: Record<string, string>;
+  extraEnv?: Record<string, string> | undefined;
   /** Source env; defaults to `process.env`. */
   source?: NodeJS.ProcessEnv;
 }

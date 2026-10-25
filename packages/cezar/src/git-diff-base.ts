@@ -109,7 +109,7 @@ async function changedLines(runGit: GitRunner, ref: string): Promise<number | nu
 export async function resolveTaskDiffBase(
   runGit: GitRunner,
   baseBranch: string,
-  opts: { taskBranch?: string; runStartedAt?: string } = {},
+  opts: { taskBranch?: string | undefined; runStartedAt?: string | undefined } = {},
 ): Promise<TaskDiffBase> {
   const base = await freshestBaseRef(runGit, baseBranch);
   const mergeBase = async (): Promise<string> => {

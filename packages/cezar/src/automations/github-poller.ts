@@ -49,14 +49,14 @@ export interface GithubCandidate {
   author: string;
   assignees: string[];
   labels: string[];
-  changedLabel?: string;
+  changedLabel?: string | undefined;
 }
 
 export interface GithubPollResult {
   candidates: GithubCandidate[];
   truncated: boolean;
   pages: number;
-  cursor?: { timestamp: string; tieBreaker: string };
+  cursor?: { timestamp: string; tieBreaker: string } | undefined;
   historyScan?: AutomationRuntimeState['historyScan'];
 }
 
@@ -65,7 +65,7 @@ export interface GithubPollerOptions {
 }
 
 export interface GithubPollOptions {
-  since?: string;
+  since?: string | undefined;
   historyScan?: AutomationRuntimeState['historyScan'];
 }
 
@@ -131,7 +131,7 @@ export class GithubPoller {
     const observations: Array<{
       timestamp: string;
       tieBreaker: string;
-      candidate?: GithubCandidate;
+      candidate?: GithubCandidate | undefined;
     }> = [];
     let truncated = false;
     for (const source of sources) {

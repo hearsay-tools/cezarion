@@ -662,12 +662,12 @@ async function serverCommand(
   platform: string | undefined,
   flags: {
     yes: boolean;
-    reconfigure?: string;
+    reconfigure?: string | undefined;
     reinstall?: boolean;
-    domain?: string;
-    port?: number;
+    domain?: string | undefined;
+    port?: number | undefined;
     externalProxy?: boolean;
-    bindHost?: string;
+    bindHost?: string | undefined;
   },
 ): Promise<void> {
   // Detection (claude/gh/codex) and tool installs resolve executables off the

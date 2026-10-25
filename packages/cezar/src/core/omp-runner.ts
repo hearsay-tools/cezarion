@@ -120,13 +120,13 @@ export interface OmpToolSelection {
 export function ompTools(
   allowedTools: string[] | undefined,
   opts: {
-    bashAllowlist?: string[];
-    restrictNativeDelegation?: boolean;
+    bashAllowlist?: string[] | undefined;
+    restrictNativeDelegation?: boolean | undefined;
     cezarTools?: boolean;
     /** Env the extension will read: `CEZ_PREVIEW=1` there decides which cezar tools it registers. */
-    env?: NodeJS.ProcessEnv;
+    env?: NodeJS.ProcessEnv | undefined;
     /** OMP names the user's settings disabled (Ruling 13), removed from the list; never added to it. */
-    exclude?: readonly string[];
+    exclude?: readonly string[] | undefined;
   },
 ): OmpToolSelection {
   // OMP's default set includes task, wait, eval and unrestricted bash: D1 and a bash allowlist
@@ -415,7 +415,7 @@ export class OmpRunner implements AgentRunner {
     // session_settled), a rejected or local (`agentInvoked: false`) ack, or
     // discardQueuedMessages. A raw agent_start is not an exit: OMP's mapper reports nothing
     // for it (same rule as pi-runner.ts).
-    const humanHeld = new Map<string, { text: string; acked: boolean; turnId?: string }>();
+    const humanHeld = new Map<string, { text: string; acked: boolean; turnId?: string | undefined }>();
     /** A turn.started was just emitted: it reads every human prompt OMP acknowledged before it. */
     function releaseHeldIntoTurn(): void {
       for (const [id, held] of humanHeld) if (held.acked) humanHeld.delete(id);

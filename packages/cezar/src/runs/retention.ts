@@ -76,7 +76,7 @@ export interface RetentionStore {
 /** The slice of the store the re-materializer needs. */
 export interface RematerializeStore {
   getRun(id: string): RunRecord | undefined;
-  updateRun(id: string, patch: { worktreeReclaimedAt?: string }): unknown;
+  updateRun(id: string, patch: { worktreeReclaimedAt?: string | undefined }): unknown;
 }
 
 /**
@@ -137,7 +137,7 @@ export interface ReclaimOptions {
    *  that a diff snapshot drops binary content and caps its size, so that path asks for clean. */
   requireClean?: boolean;
   /** The workspace preview host (#781): the default reclaimer releases the run's preview first. */
-  previewHost?: Pick<PreviewHostLike, 'release'>;
+  previewHost?: Pick<PreviewHostLike, 'release'> | undefined;
 }
 
 /** Snapshot parent-owned worker evidence before the checkout goes.

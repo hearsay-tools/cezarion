@@ -528,7 +528,7 @@ interface ContextItem {
   turn: number;
   first: RunHistoryEvent;
   latest: RunHistoryEvent;
-  status?: string;
+  status?: string | undefined;
 }
 
 const isSettledContextStatus = (status: string | undefined) =>

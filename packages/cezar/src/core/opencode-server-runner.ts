@@ -1,3 +1,4 @@
+import { uiAskQuestions } from './ask.ts';
 import { opencodeSkillWarning } from './opencode-session-error.ts';
 import { summarizeRunnerStderr } from './runner-stderr.ts';
 import { finished } from 'node:stream/promises';
@@ -57,7 +58,7 @@ export interface OpencodeRunnerOptions {
 }
 
 interface PendingOpencodeQuestion {
-  requestId?: string;
+  requestId?: string | undefined;
   askRequestId: string;
   questions: AskQuestion[];
 }
@@ -70,8 +71,8 @@ interface PendingOpencodePermission {
   /** Absent for a malformed ask, which is only ever rejected. */
   ask?: OpencodePermissionAsk;
   phase: 'classifying' | 'auto-replying' | 'card' | 'answering' | 'rejecting';
-  bridge?: OpencodePermissionBridge;
-  answer?: { optionId: string; reply: OpencodeReply };
+  bridge?: OpencodePermissionBridge | undefined;
+  answer?: { optionId: string; reply: OpencodeReply } | undefined;
 }
 
 const SERVER_START_TIMEOUT_MS = 30_000;
@@ -260,7 +261,7 @@ class OpencodeSession implements AgentSession {
   private pendingPromptRequests = 0;
   /** A provider error must not abort its own independently arriving receipt. */
   private agentAcknowledgement?: Promise<void>;
-  private providerErrorPending?: { message: string; reported: boolean };
+  private providerErrorPending?: { message: string; reported: boolean } | undefined;
   /** `finishTurn` ran for the current turn — repeats and stray idles no-op. */
   private turnEnded = false;
   /** Monotonic identity used to reject async work completed by an older turn. */
@@ -1310,7 +1311,7 @@ class OpencodeSession implements AgentSession {
         {
           type: 'ask.requested',
           requestId: pending.askRequestId,
-          questions: pending.questions,
+          questions: uiAskQuestions(pending.questions),
         },
       ],
     }));
@@ -1538,9 +1539,9 @@ class OpencodeSession implements AgentSession {
     // prompts go through `prompt_async` — nothing long-polls anymore.
     const res = await fetch(`${this.baseUrl}${path}`, {
       method,
-      signal,
+      ...(signal !== undefined ? { signal } : {}),
       headers: body !== undefined ? { 'content-type': 'application/json' } : {},
-      body: body !== undefined ? JSON.stringify(body) : undefined,
+      ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
     });
     if (!res.ok) {
       const detail = await res.text().catch(() => '');

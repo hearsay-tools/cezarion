@@ -76,7 +76,7 @@ export function createClackUi(backend: PromptBackend = realBackend): Ui {
       const res = await backend.select<T>({
         message: opts.message,
         options: opts.options as never,
-        initialValue: opts.initialValue,
+        ...(opts.initialValue !== undefined ? { initialValue: opts.initialValue } : {}),
       });
       return unwrap(res, backend.isCancel);
     },
@@ -96,10 +96,10 @@ export function createClackUi(backend: PromptBackend = realBackend): Ui {
       return unwrap(await backend.confirm(opts), backend.isCancel);
     },
     async text(opts) {
-      return unwrap(await backend.text({ ...opts, validate: wrapValidate(opts.validate) }), backend.isCancel);
+      return unwrap(await backend.text({ ...opts, ...(opts.validate !== undefined ? { validate: wrapValidate(opts.validate)! } : {}) }), backend.isCancel);
     },
     async password(opts) {
-      return unwrap(await backend.password({ ...opts, validate: wrapValidate(opts.validate) }), backend.isCancel);
+      return unwrap(await backend.password({ ...opts, ...(opts.validate !== undefined ? { validate: wrapValidate(opts.validate)! } : {}) }), backend.isCancel);
     },
     spinner(): SpinnerHandle {
       const s = backend.spinner();

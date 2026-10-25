@@ -18,8 +18,8 @@ export interface HelperPlan {
   targetVersion: string;
   oldVersion: string;
   recovery: string;
-  recoveryPackage?: string;
-  binLinks?: string;
+  recoveryPackage?: string | undefined;
+  binLinks?: string | undefined;
   recordPath: string;
   oldPid: number;
   nodeExecutable: string;

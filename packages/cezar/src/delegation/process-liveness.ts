@@ -7,7 +7,7 @@ import { resolve, sep } from 'node:path';
  * evidence; other uncertainty stays alive or unknown, never proven gone.
  */
 /** `pgid`: the session leader leads its own process group (hearsay-tools/cezarion#890). */
-export type RecordedProcess = { pid: number; startToken?: string; pgid?: number };
+export type RecordedProcess = { pid: number; startToken?: string | undefined; pgid?: number | undefined };
 export type WorkerProcessRecord = { generation: string; controller: RecordedProcess; processes: RecordedProcess[] };
 export type GenerationLiveness = 'gone' | 'alive' | 'unknown';
 
@@ -194,7 +194,7 @@ export type GenerationProbe = { liveness: GenerationLiveness; controller?: numbe
  * the worktree and every scratch location; a missing record (legacy) relies on the scan alone.
  * A live foreign controller short-circuits the scan; otherwise `pids` names every holder.
  * `cwds` is a reprobe tick's shared snapshot (hearsay-tools/cezarion#879); without it, it scans. */
-export function inspectGeneration({ record, paths, cwds }: { record?: WorkerProcessRecord; paths: readonly string[]; cwds?: CwdSource }): GenerationProbe {
+export function inspectGeneration({ record, paths, cwds }: { record?: WorkerProcessRecord; paths: readonly string[]; cwds?: CwdSource | undefined }): GenerationProbe {
   if (record && !isCurrentProcess(record.controller) && recordedProcessLive(record.controller)) return { liveness: 'alive', controller: record.controller.pid, pids: [] };
   const recorded = record?.processes.filter(recordedProcessLive).map(entry => entry.pid) ?? [];
   const scan = processesWithCwdUnder(paths, undefined, undefined, undefined, cwds?.());
@@ -209,7 +209,7 @@ export function probeGeneration(input: { record?: WorkerProcessRecord; paths: re
 /** Execution-only proof: a known reboot ended all old descendants, provided neither the
  * controller nor any recorded process is still live. Never use this to authorize reuse/deletion;
  * execution settlement itself deletes nothing. Legacy or unknown boot evidence keeps the descendant scan. */
-export function inspectExecutionGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[]; pathsComplete?: boolean; cwds?: CwdSource }): GenerationProbe {
+export function inspectExecutionGeneration(input: { record?: WorkerProcessRecord; paths: readonly string[]; pathsComplete?: boolean; cwds?: CwdSource | undefined }): GenerationProbe {
   const record = input.record;
   if (record && recordedProcessLive(record.controller)) return { liveness: 'alive', controller: record.controller.pid, pids: [] };
   const pids = record?.processes.filter(recordedProcessLive).map(entry => entry.pid) ?? [];

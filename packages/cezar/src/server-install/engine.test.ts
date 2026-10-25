@@ -37,7 +37,7 @@ function fakeStep(id: string, over: Partial<InstallStep> = {}): InstallStep {
 }
 
 function strategyOf(steps: InstallStep[], redeploy?: PlatformStrategy['redeploy']): PlatformStrategy {
-  return { id: 'ubuntu-vps', label: 'Ubuntu VPS', preflight: async () => {}, steps: () => steps, redeploy };
+  return { id: 'ubuntu-vps', label: 'Ubuntu VPS', preflight: async () => {}, steps: () => steps, ...(redeploy !== undefined ? { redeploy } : {}) };
 }
 
 describe('engine', () => {

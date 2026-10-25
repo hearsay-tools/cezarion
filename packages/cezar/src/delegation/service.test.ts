@@ -699,7 +699,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     cadence();
     const { workerId } = await settled();
     // When each retry state was written: the wait is measured from there, not from whenever a poll notices it.
-    const written: Array<{ at: number; attempts: number; nextAt: string; needsAttention?: true }> = [];
+    const written: Array<{ at: number; attempts: number; nextAt: string; needsAttention?: true | undefined }> = [];
     const commit = f.store.commitDestroyRetry.bind(f.store);
     vi.spyOn(f.store, 'commitDestroyRetry').mockImplementation((id, retry) => {
       if (retry) written.push({ at: Date.now(), ...retry });

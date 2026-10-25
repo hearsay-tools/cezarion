@@ -120,7 +120,7 @@ function parseArgs(argv: string[]): { runner: RunnerName; fixture?: string; extr
     console.error('usage: probe-startup.ts <pi|omp> [fixture-dir] [-- extra runner args]');
     process.exit(2);
   }
-  return { runner, fixture: fixture && resolve(fixture), extra: split < 0 ? [] : argv.slice(split + 1) };
+  return { runner, ...(fixture !== undefined ? { fixture: fixture && resolve(fixture) } : {}), extra: split < 0 ? [] : argv.slice(split + 1) };
 }
 
 function prepareProject(project: string, fixture: string | undefined): void {

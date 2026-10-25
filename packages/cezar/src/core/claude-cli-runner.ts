@@ -849,7 +849,7 @@ function handleClaudeMessage(
   ctx: {
     toolCalls: AgentToolCallRecord[];
     textChunks: string[];
-    onEvent?: (e: AgentEvent) => void;
+    onEvent?: ((e: AgentEvent) => void) | undefined;
   },
 ): number {
   if (msg.type === 'assistant' && msg.message?.content) {

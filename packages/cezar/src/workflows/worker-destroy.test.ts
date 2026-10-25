@@ -682,7 +682,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
       const other = new RunManager(reopened, root);
       const service = new DelegationService(); service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
-      type ScanRead = { cwd?: string; readlinkError?: string };
+      type ScanRead = { cwd?: string | undefined; readlinkError?: string | undefined };
       const scanReads = new Map<number, ScanRead>();
       const observed = (pid: number) => {
         let entry = scanReads.get(pid);

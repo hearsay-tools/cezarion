@@ -52,7 +52,7 @@ else:
         time.sleep(0.01)
 `], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
     const exited = once(launcher, 'exit');
-    let holder: { pid: number; startToken?: string } | undefined;
+    let holder: { pid: number; startToken?: string | undefined } | undefined;
     try {
       const [data] = await once(launcher.stdout, 'data');
       const pid = requirePidText(String(data), 'launcher stdout');
@@ -225,7 +225,7 @@ describe.runIf(process.platform === 'darwin')('macOS fixture process enumeration
       child.unref(); console.log(child.pid); process.stdin.resume();
     `], { cwd: root, stdio: ['pipe', 'pipe', 'pipe'] });
     const exited = once(launcher, 'exit');
-    let holder: { pid: number; startToken?: string } | undefined;
+    let holder: { pid: number; startToken?: string | undefined } | undefined;
     try {
       const [data] = await once(launcher.stdout, 'data');
       const pid = requirePidText(String(data), 'launcher stdout');

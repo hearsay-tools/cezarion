@@ -94,7 +94,7 @@ export function listAgentProfiles(
  */
 export function selectProfile(
   store: AgentAccountStore,
-  options: { provider: ProviderId; repoRoot?: string; profileId?: string; env?: NodeJS.ProcessEnv },
+  options: { provider: ProviderId; repoRoot?: string | undefined; profileId?: string | undefined; env?: NodeJS.ProcessEnv },
 ): ResolvedAgentProfile {
   const { provider, repoRoot, profileId } = options;
   const env = options.env ?? process.env;

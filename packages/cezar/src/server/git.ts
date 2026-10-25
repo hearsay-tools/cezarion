@@ -9,7 +9,7 @@ const exec = promisify(execFile);
 export interface RepoInfo {
   root: string;
   branch: string;
-  remote?: string;
+  remote?: string | undefined;
 }
 
 export interface StatusEntry {

@@ -199,7 +199,7 @@ export class PiRunner implements AgentRunner {
     // before the turn that reads the prompt is reported. A steer acked after the turn's last
     // model call is read as pi's next prompt, after agent_settled, so the ack alone never
     // releases it.
-    const humanHeld: Array<{ text: string; acked: boolean; turnId?: string }> = [];
+    const humanHeld: Array<{ text: string; acked: boolean; turnId?: string | undefined }> = [];
     /** A turn.started was just emitted: it reads every human prompt pi acknowledged before it. */
     function releaseHeldIntoTurn(): void {
       for (let at = humanHeld.length - 1; at >= 0; at--) if (humanHeld[at]!.acked) humanHeld.splice(at, 1);

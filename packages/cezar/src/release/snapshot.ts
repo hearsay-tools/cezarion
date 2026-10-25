@@ -28,22 +28,22 @@ export interface SnapshotContext {
    *  other caller leaves it empty and gets the event-derived channel. Opt-in by
    *  name is what keeps a `workflow_dispatch` of ci.yml from cutting a nightly by
    *  accident — the event alone is not enough. */
-  requestedChannel?: string;
+  requestedChannel?: string | undefined;
   /** `YYYYMMDD` (UTC) of the day a nightly is cut — the nightly version is named
    *  after its date. Required for the nightly channel, ignored by every other. */
-  nightlyDate?: string;
+  nightlyDate?: string | undefined;
   /** PR number for pull request events; absent/invalid → no publish. */
-  prNumber?: number;
+  prNumber?: number | undefined;
   /** `owner/name` of the PR head repo — fork PRs (≠ `repo`) never publish. */
-  headRepo?: string;
+  headRepo?: string | undefined;
   /** `GITHUB_REPOSITORY` — this repo's `owner/name`. */
-  repo?: string;
+  repo?: string | undefined;
   /** The base version from the root `package.json` (e.g. `0.1.5`). */
   baseVersion: string;
   /** `GITHUB_RUN_NUMBER` — monotonic per workflow; makes versions unique. */
   runNumber: number;
   /** `GITHUB_RUN_ATTEMPT` — appended only when > 1 so re-runs never collide. */
-  runAttempt?: number;
+  runAttempt?: number | undefined;
 }
 
 /** A publishable snapshot: prerelease version + the explicit dist-tag.

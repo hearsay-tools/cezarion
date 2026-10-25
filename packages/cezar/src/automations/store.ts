@@ -72,7 +72,7 @@ export type AutomationArm = (
 ) => Partial<AutomationRuntimeState> | undefined;
 
 export interface AutomationStoreOptions {
-  warn?: (message: string) => void;
+  warn?: ((message: string) => void) | undefined;
   now?: () => Date;
   processAlive?: (pid: number) => boolean;
   /** How long a definitions/state write waits for the other process's write lock. Tests only. */
@@ -409,7 +409,7 @@ export class AutomationStore {
     });
   }
 
-  logs(options: { automationId?: string; result?: AutomationLogRecord['result']; event?: AutomationLogRecord['event']; since?: string; cursor?: number; limit?: number } = {}): AutomationLogRecord[] {
+  logs(options: { automationId?: string | undefined; result?: AutomationLogRecord['result'] | undefined; event?: AutomationLogRecord['event']; since?: string | undefined; cursor?: number | undefined; limit?: number | undefined } = {}): AutomationLogRecord[] {
     const limit = Math.min(Math.max(options.limit ?? 100, 1), 100);
     return this.readNdjson(LOG, automationLogRecordSchema)
       .filter((row) => !options.automationId || row.automationId === options.automationId)

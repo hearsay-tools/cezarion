@@ -1,3 +1,4 @@
+import { defined } from '../core/defined.ts';
 import { realpath, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, join, resolve, sep } from 'node:path';
@@ -206,9 +207,9 @@ export interface ProjectListEntry extends WorkspaceProjectWithoutWebhook {
 
 export interface RootProbe {
   status: ProjectStatus;
-  branch?: string;
-  forge?: ForgeKind;
-  repoUrl?: string;
+  branch?: string | undefined;
+  forge?: ForgeKind | undefined;
+  repoUrl?: string | undefined;
 }
 
 /**
@@ -222,7 +223,7 @@ export function toProjectListEntry(project: WorkspaceProject, probe: RootProbe):
   const task = webhooks.find((entry) => entry.tasks);
   return {
     ...rest,
-    ...probe,
+    ...defined(probe),
     ...(task
       ? {
           webhook: {
@@ -291,7 +292,7 @@ async function probeRoot(root: string): Promise<RootProbe> {
 export async function probeProjectStatus(
   root: string,
 ): Promise<Pick<ProjectListEntry, 'status' | 'branch' | 'forge' | 'repoUrl'>> {
-  return probeRoot(root);
+  return defined(await probeRoot(root));
 }
 
 /**

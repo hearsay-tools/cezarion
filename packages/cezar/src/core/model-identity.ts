@@ -128,7 +128,7 @@ export function parseModelIdentity(raw: string | undefined | null): ModelIdentit
 export function resolveModelIdentity(
   backend: AgentBackend,
   raw: string | undefined,
-  options: { configuredProvider?: string } = {},
+  options: { configuredProvider?: string | undefined } = {},
 ): ModelIdentity | undefined {
   if (!raw || !raw.trim()) return undefined;
   const map = BACKEND_MODEL_MAP[backend] ?? {};
@@ -191,7 +191,7 @@ export function toBackendModel(backend: AgentBackend, id: ModelIdentity): string
 export function normalizeModelForBackend(
   backend: AgentBackend,
   raw: string | undefined,
-  options: { configuredProvider?: string } = {},
+  options: { configuredProvider?: string | undefined } = {},
 ): { backendModel: string; identity: ModelIdentity } | undefined {
   const identity = resolveModelIdentity(backend, raw, options);
   if (!identity) return undefined;
