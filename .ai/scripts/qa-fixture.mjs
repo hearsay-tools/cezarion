@@ -16,13 +16,13 @@
 // deleted) or the temporary root goes. It cleans up after a server that exits on its own.
 // POSIX only: the stop signals a process group.
 import { spawn, spawnSync } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
-import { groupLive, identity } from './test-env-lease.mjs';
+import { identity } from './test-env-lease.mjs';
 
 const DESCRIPTOR = '.ai/qa/qa-fixture.json';
 // Inside the temporary root: what `up` started there, which confirms the descriptor.
@@ -31,9 +31,6 @@ const ROOT_PREFIX = 'cez-qa-fixture-';
 // test-env-up.sh's default health budget: a boot on a loaded host is CPU-bound.
 const BOOT_TIMEOUT_MS = 180_000;
 const STOP_GRACE_MS = 10_000;
-// After SIGKILL the group only shrinks, but groupLive answers "unknown" while other processes
-// start and exit during its /proc scan, about half of its answers on a busy host: keep asking.
-const KILL_WAIT_MS = 5_000;
 const WATCH_INTERVAL_MS = 30_000;
 const BANNER = /^\s*cockpit → (http:\/\/127\.0\.0\.1:\d+)\s*$/m;
 
@@ -119,23 +116,61 @@ const isRunning = ({ pid, start }) => {
   return !current.dead && current.start === start;
 };
 
-/** True while the process group `leader` started may still hold a running process. A group
- *  outlives its leader while any member runs, and the kernel never hands out a pid that still
- *  names a group, so `-pid` reaches only this group until its last member is reaped. A live
- *  process with the leader's pid and another start identity means the group ended and the pid
- *  was reused. Zombies do not count: one whose parent never reaps it, such as a container init
- *  that does not wait, keeps the group's id forever. An unknown answer counts as running. */
-function groupRunning(leader) {
+/** True while the process group `leader` started still has a member, zombies included. A group
+ *  outlives its leader while any member is unreaped, and the kernel never hands out a pid that
+ *  still names a group, so `-pid` reaches only this group until then. A live process with the
+ *  leader's pid and another start identity means the group ended and the pid was reused. */
+function groupExists(leader) {
   const current = identity(leader.pid);
-  if (!current.dead && current.start !== leader.start) return false;
-  return groupLive(leader.pid) !== false;
+  if (current.start !== undefined && current.start !== leader.start) return false;
+  try {
+    process.kill(-leader.pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** True when one look at the process table finds a member of group `pgid` that is not a zombie,
+ *  or cannot read the table. Linux reads /proc, macOS asks ps. */
+function liveMember(pgid) {
+  if (process.platform === 'darwin') {
+    const ps = spawnSync('ps', ['-axo', 'pgid=,stat='], { encoding: 'utf8', timeout: 2000 });
+    if (ps.status !== 0) return true;
+    return ps.stdout.split('\n').some((line) => {
+      const [group, state] = line.trim().split(/\s+/);
+      return Number(group) === pgid && !state?.startsWith('Z');
+    });
+  }
+  for (const name of readdirSync('/proc')) {
+    if (!/^\d+$/.test(name)) continue;
+    try {
+      const stat = readFileSync(`/proc/${name}/stat`, 'utf8');
+      const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
+      if (Number(fields[2]) === pgid && fields[0] !== 'Z' && fields[0] !== 'X') return true;
+    } catch (error) {
+      // A process that exited after the listing is no member; one it cannot read may be.
+      if (error.code !== 'ENOENT' && error.code !== 'ESRCH') return true;
+    }
+  }
+  return false;
+}
+
+/** True while the group `leader` started may still hold a running process. Zombies do not count:
+ *  one whose parent never reaps it, such as a container init that does not wait, keeps the group
+ *  forever. Before SIGKILL a scan can miss a member forked while it ran, by a member that exited
+ *  before the scan reached it. After SIGKILL no member can fork, so a scan that finds none is
+ *  final, and the answer only goes from true to false. */
+function groupRunning(leader) {
+  return groupExists(leader) && liveMember(leader.pid);
 }
 
 /** Stops the process group `leader` started: SIGTERM, then SIGKILL for whatever outlives the
- *  grace, the leader or any other member. True once the group is empty. */
+ *  grace, the leader or any other member. True once no member runs. SIGKILL goes to every group
+ *  that still exists, zombies only included, so it also reaches a member a scan missed. */
 async function stopGroup(leader, graceMs = STOP_GRACE_MS) {
-  for (const [signal, waitMs] of [['SIGTERM', graceMs], ['SIGKILL', KILL_WAIT_MS]]) {
-    if (!groupRunning(leader)) return true;
+  for (const [signal, waitMs] of [['SIGTERM', graceMs], ['SIGKILL', 1000]]) {
+    if (!groupExists(leader)) return true;
     try { process.kill(-leader.pid, signal); } catch { /* the group already ended */ }
     const deadline = performance.now() + waitMs;
     while (groupRunning(leader) && performance.now() < deadline) await delay(100);

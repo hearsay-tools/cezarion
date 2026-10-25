@@ -274,15 +274,19 @@ function stat(pid) {
 const groupStates = (pgid) => readdirSync('/proc').filter((name) => /^\d+$/.test(name))
   .map(stat).filter((entry) => entry?.pgid === pgid).map((entry) => entry.state);
 
-test('down treats a process group of zombies only as stopped', { skip: process.platform !== 'linux' && 'reads /proc' }, async (t) => {
+test('down treats a process group of zombies only as stopped, while other processes start and exit', { skip: process.platform !== 'linux' && 'reads /proc' }, async (t) => {
   const f = fixture(t);
   await up(f.options({ args: ['--server-env=CEZ_STUB_CHILD=zombie'] }));
   const { root, server } = descriptor(f.worktree);
   const stub = JSON.parse(readFileSync(join(root, 'home/stub.json'), 'utf8'));
+  // A busy host: the process list changes while down scans it (CI run 40158867000 attempt 1,
+  // job 121065993069). Without this churn the scans of a quiet host hide the race.
+  const churn = spawn('sh', ['-c', 'while :; do /bin/true; done'], { stdio: 'ignore' });
   try {
     await until(() => stat(stub.child)?.pgid !== server.pid && groupStates(server.pid).includes('Z'), 'a zombie left in the server group');
     await down(f.options({ stdout: sink(), stopGraceMs: 300 }));
   } finally {
+    churn.kill('SIGKILL');
     // The sleeper left the group, so nothing else stops it; once it exits, its zombie is reaped.
     try { process.kill(stub.child, 'SIGKILL'); } catch { /* already gone */ }
   }
