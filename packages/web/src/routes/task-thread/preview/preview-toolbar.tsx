@@ -169,10 +169,10 @@ function SwitcherButton({ current, agentShown, ...rest }: { current: PreviewServ
 }
 
 /** The switcher's entry for the page an agent drives (hearsay-tools/cezarion#784). */
-function AgentPageItem({ shown, onSelect }: { shown: boolean; onSelect: () => void }) {
+function AgentPageItem({ shown, live, onSelect }: { shown: boolean; live: boolean; onSelect: () => void }) {
   return (
     <DropdownMenuItem className="min-h-11 gap-2.5 md:min-h-0" onSelect={onSelect}>
-      <StatusDot tone="success" aria-hidden="true" />
+      <StatusDot tone={live ? 'success' : 'neutral'} aria-hidden="true" />
       <span className="font-semibold">Agent's page</span>
       <span className="ml-auto text-xs text-muted-foreground">agent-browser</span>
       {shown ? <CheckIcon className="size-4" aria-hidden="true" /> : null}
@@ -186,11 +186,21 @@ function shownTitle(current: PreviewServer | undefined, agentShown: boolean): st
   return agentShown ? "Agent's page" : 'Preview'
 }
 
+/**
+ * The switcher's "Agent's page" entry. An agent that left keeps it while the pane still shows its
+ * page, so the servers stay one pick away.
+ */
+function agentEntry(props: PreviewToolbarProps): { agentLive: boolean; agentShown: boolean; agentListed: boolean } {
+  const pickable = props.onPickAgent !== undefined
+  const agentLive = props.agentLive === true && pickable
+  const agentShown = props.agentShown === true
+  return { agentLive, agentShown, agentListed: agentLive || (agentShown && pickable) }
+}
+
 export function PreviewToolbar(props: PreviewToolbarProps) {
   const { url, servers, current, adopted, viewport, compact = false, navEnabled, loading = false, stats, status, badge = true } = props
-  const agentLive = props.agentLive === true && props.onPickAgent !== undefined
-  const agentShown = props.agentShown === true
-  const switcher = servers.length + (agentLive ? 1 : 0) >= 2
+  const { agentLive, agentShown, agentListed } = agentEntry(props)
+  const switcher = servers.length + (agentListed ? 1 : 0) >= 2
   const crowded = switcher || adopted
   const ownInput = useRef<HTMLInputElement | null>(null)
   const input = props.urlInputRef ?? ownInput
@@ -231,7 +241,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
           input.current?.focus()
         }}
       >
-        {agentLive ? <AgentPageItem shown={agentShown} onSelect={() => props.onPickAgent?.()} /> : null}
+        {agentListed ? <AgentPageItem shown={agentShown} live={agentLive} onSelect={() => props.onPickAgent?.()} /> : null}
         {servers.map(server => {
           const look = serverStatus(entryFor(server, props.serverStates))
           return (
