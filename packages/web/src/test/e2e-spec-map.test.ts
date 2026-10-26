@@ -130,9 +130,23 @@ describe('module facts', () => {
   })
 
   it('marks a module with a top-level statement that runs when its chunk loads', () => {
-    expect(facts("import x from './x'\nconst a = x()\nfunction f() {}").topLevelEffect).toBe(false)
+    const deferred = "import x from './x'\nconst a = 1, b = () => x()\nfunction f() { x() }\nclass C { field = x(); method() { x() } }"
+    expect(facts(deferred).topLevelEffect).toBe(false)
     expect(facts("window.addEventListener('focus', () => {})").topLevelEffect).toBe(true)
     expect(facts('if (import.meta.env.DEV) console.log(1)').topLevelEffect).toBe(true)
+  })
+
+  it('marks a declaration that calls something at load, because the call can change state or throw for every loader', () => {
+    for (const source of [
+      "import x from './x'\nconst a = x()",
+      "export const variants = cva('base')",
+      'const seen = new Set()',
+      'const html = String.raw`a`',
+      'const table = { rows: [load()] }',
+      'export default memo(View)',
+      'export class Store { static instance = create() }',
+      'class Store { static { init() } }',
+    ]) expect(facts(source).topLevelEffect, source).toBe(true)
   })
 
   it('resolves the alias, relative paths and index files to repository paths, and skips packages and types', () => {
