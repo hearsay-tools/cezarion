@@ -1,0 +1,134 @@
+{
+ "schemaVersion": "1.0",
+ "thresholds": {
+  "high": 80,
+  "low": 60,
+  "break": null
+ },
+ "files": {
+  "packages/contract/src/attention.ts": {
+   "language": "typescript",
+   "mutants": [
+    {
+     "id": "7",
+     "mutatorName": "ConditionalExpression",
+     "replacement": "true",
+     "status": "Survived",
+     "location": {
+      "end": {
+       "column": 100,
+       "line": 85
+      },
+      "start": {
+       "column": 48,
+       "line": 85
+      }
+     }
+    },
+    {
+     "id": "15",
+     "mutatorName": "BlockStatement",
+     "replacement": "{}",
+     "status": "Survived",
+     "location": {
+      "end": {
+       "column": 2,
+       "line": 94
+      },
+      "start": {
+       "column": 50,
+       "line": 92
+      }
+     }
+    },
+    {
+     "id": "0",
+     "mutatorName": "BlockStatement",
+     "replacement": "{}",
+     "status": "Killed",
+     "location": {
+      "end": {
+       "column": 2,
+       "line": 86
+      },
+      "start": {
+       "column": 61,
+       "line": 84
+      }
+     }
+    },
+    {
+     "id": "1",
+     "mutatorName": "ConditionalExpression",
+     "replacement": "true",
+     "status": "Killed",
+     "location": {
+      "end": {
+       "column": 101,
+       "line": 85
+      },
+      "start": {
+       "column": 10,
+       "line": 85
+      }
+     }
+    },
+    {
+     "id": "2",
+     "mutatorName": "ConditionalExpression",
+     "replacement": "false",
+     "status": "Killed",
+     "location": {
+      "end": {
+       "column": 101,
+       "line": 85
+      },
+      "start": {
+       "column": 10,
+       "line": 85
+      }
+     }
+    },
+    {
+     "id": "3",
+     "mutatorName": "LogicalOperator",
+     "replacement": "run.hasPendingPermission === true || run.status === 'waiting' || run.status === 'running'",
+     "status": "Timeout",
+     "location": {
+      "end": {
+       "column": 101,
+       "line": 85
+      },
+      "start": {
+       "column": 10,
+       "line": 85
+      }
+     }
+    },
+    {
+     "id": "4",
+     "mutatorName": "ConditionalExpression",
+     "replacement": "true",
+     "status": "NoCoverage",
+     "location": {
+      "end": {
+       "column": 43,
+       "line": 85
+      },
+      "start": {
+       "column": 10,
+       "line": 85
+      }
+     }
+    }
+   ],
+   "source": "import type { WorkerWait } from './delegation.ts';\nimport type { RunIndexEntry, RunRecord, RunSummary } from './runs.ts';\nimport { hasResolvedWait, resolveWaitingOn } from './waits.ts';\n\n/**\n * Canonical Node-free attention classification for browser and CLI. Map run facts to bucket,\n * tone and pulse without UI state or backend-specific inference.\n */\n\n/**\n * The attention priority ladder, highest first (spec: permission > error > waiting/review >\n * running > unseen). `rank` is exported because it *is* the contract \u2014 a table test asserts the\n * order rather than trusting the if-chain below to be read correctly.\n */\nexport const ATTENTION_RANK = {\n  permission: 0,\n  error: 1,\n  waiting: 2,\n  running: 3,\n  unseen: 4,\n  none: 5,\n} as const;\n\nexport type AttentionBucket = keyof typeof ATTENTION_RANK;\n\n/** The dot tones the cockpit's design system defines (`--success`/`--pending`/`--danger`/\n *  `--accent-strong`/`--info`/`--status-running`, plus the neutral `--soft-foreground`). Named\n *  here rather than imported from the cockpit's `StatusDot` to keep this module UI-free; the\n *  cockpit's `attention.test.ts` asserts the two sets stay identical. `accent` stays in the\n *  vocabulary for non-status dots (a reference's \"closed as completed\"); no status rung uses it\n *  since #617, because brand teal read as \"done\". */\nexport type AttentionTone = 'success' | 'pending' | 'danger' | 'accent' | 'info' | 'running' | 'neutral';\n\n/**\n * The status key's second channel (#617): hue says the family, SHAPE says whether it is waiting.\n *  - `filled` \u2014 it is moving, or it has ended.\n *  - `ring` \u2014 it is waiting on something outside it (a monitored command, a free slot, a clock).\n *  - `workers` \u2014 it is waiting on its own workers (the robot glyph).\n * Shape is what separates rungs that share a hue: running vs monitoring, queued vs cancelled.\n */\nexport type AttentionShape = 'filled' | 'ring' | 'workers';\n\n/**\n * One id per rung of the ladder (spec 2026-10-17-unified-waits, \"Status and display\"), in its\n * order (hearsay-tools/cezarion#1496). A rung's label is copy and can carry a count; a reader that\n * decides something reads the id. Rung 8 has an id per PR target (merge since\n * hearsay-tools/cezarion#1425) and the process rung sits between CI and timer\n * (hearsay-tools/cezarion#1446). `unseen` is reserved: `isUnseen` never matches.\n */\nexport const ATTENTION_RUNGS = [\n  'needs-permission',\n  'failed',\n  'needs-you',\n  'needs-review',\n  'running',\n  'usage-limit',\n  'waiting-on-workers',\n  'waiting-for-ci',\n  'waiting-for-merge',\n  'waiting-for-command',\n  'monitoring',\n  'waiting-for-capacity',\n  'queued',\n  'done',\n  'cancelled',\n  'unseen',\n] as const;\n\nexport type AttentionRung = (typeof ATTENTION_RUNGS)[number];\n\nexport interface Attention {\n  /** Which rung the run is on: what a reader compares, never `label`. */\n  rung: AttentionRung;\n  bucket: AttentionBucket;\n  tone: AttentionTone;\n  shape: AttentionShape;\n  /** True while the run is *transitioning* \u2014 the spec's \"pulsing while transitioning\" rule. */\n  pulse: boolean;\n  /** Lower-case human phrase for the dot's tooltip / accessible name, and the CLI's `attentionLabel`. */\n  label: string;\n}\n\n/** Permission attention comes only from a live native request, never from waiting alone. */\nfunction hasPendingPermission(run: AttentionInput): boolean {\n  return run.hasPendingPermission === true && (run.status === 'waiting' || run.status === 'running');\n}\n\n/**\n * Reserved unseen attention bucket remains unused. Finished-item read receipts use a separate\n * channel; do not recolor status from unread state.\n */\nfunction isUnseen(_run: AttentionInput): boolean {\n  return false;\n}\n\n/** What attention derivation actually reads. `Pick`ed rather than the full `RunRecord` so\n *  surfaces that only have a status can use\n *  the same canonical function instead of inventing a second status-to-tone mapping. Delegation\n *  uses the slim contract projection: full run records, `ApiRun`s and workspace index rows all\n *  carry it. A summary carries `waitingOn`; a full or stream-patched record carries `waits` and no\n *  `waitingOn`, and `resolveWaitingOn` computes it from them (spec 2026-10-17-unified-waits). */\n"
+  }
+ },
+ "testFiles": {},
+ "projectRoot": "/repo",
+ "framework": {
+  "name": "StrykerJS",
+  "version": "10.1.1"
+ }
+}
