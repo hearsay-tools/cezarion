@@ -8,6 +8,7 @@ import type { DevServerState, DevServerStopReason } from './dev-server.ts';
 import { ChromiumError, installCommand } from './chromium.ts';
 import { ChromiumMissingError, PREVIEW_BROWSER_IDLE_MS, PREVIEW_SERVER_IDLE_MS, PreviewHost, type BrowserExit, type BrowserHandle, type RunContext } from './host.ts';
 import { fakeAgentClient, fakeCdp, fakeConnection, fakeViewer } from './preview.testkit.ts';
+import type { CdpConnection } from './cdp.ts';
 
 class FakeDevServer extends EventEmitter {
   state: DevServerState = 'starting';
@@ -878,6 +879,54 @@ describe('PreviewHost', () => {
       expect(client.closed).toEqual([{ code: 1011, reason: 'The preview browser exited' }]);
       expect(await host.connectAgent(grant.token, fakeAgentClient())).toEqual({ refused: expect.stringContaining('owner can retry') });
       expect(browsers).toHaveLength(1);
+    });
+
+    /** Holds the browser's answer to the next agent handshake until `release` runs. */
+    const holdHandshake = (connection: CdpConnection) => {
+      const call = connection.call;
+      let release!: () => void;
+      const held = new Promise<void>(resolve => (release = resolve));
+      connection.call = async (method, params, sessionId) => {
+        if (method === 'Target.attachToBrowserTarget') {
+          connection.call = call;
+          await held;
+        }
+        return call(method, params, sessionId);
+      };
+      return () => release();
+    };
+
+    it('a session revoked during the handshake leaves the idle timer armed, so the browser closes', async () => {
+      const { host, ctx, store, browsers } = make();
+      const viewer = fakeViewer();
+      await host.handle(ctx, viewer, { t: 'open', target: { url: 'http://localhost:5173/' } });
+      await flush();
+      host.detach(ctx.runId, viewer);
+      const release = holdHandshake(browsers[0]!.connection);
+      const grant = host.grantAgent(ctx.runId, () => ctx);
+      const client = fakeAgentClient();
+      const pending = host.connectAgent(grant.token, client);
+      await flush();
+      grant.revoke();
+      release();
+      expect(await pending).toEqual({ refused: expect.any(String) });
+      expect(agentEvents(store)).toEqual([]);
+      await vi.advanceTimersByTimeAsync(PREVIEW_BROWSER_IDLE_MS);
+      expect(browsers[0]!.close).toHaveBeenCalled();
+    });
+
+    it('an agent whose handshake outlives the last agent leaving keeps the browser', async () => {
+      const { host, ctx, browsers } = make();
+      const grant = host.grantAgent(ctx.runId, () => ctx);
+      const first = await connect(host, grant.token);
+      const release = holdHandshake(browsers[0]!.connection);
+      const pending = host.connectAgent(grant.token, fakeAgentClient());
+      await flush();
+      (first.link as { close(): void }).close();
+      release();
+      expect(await pending).not.toHaveProperty('refused');
+      await vi.advanceTimersByTimeAsync(PREVIEW_BROWSER_IDLE_MS * 2);
+      expect(browsers[0]!.close).not.toHaveBeenCalled();
     });
 
     it('protects the page the pane streams from the agent', async () => {

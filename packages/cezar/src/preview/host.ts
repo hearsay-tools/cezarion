@@ -442,11 +442,15 @@ export class PreviewHost implements PreviewHostLike {
       return { refused: error instanceof Error ? error.message : String(error) };
     }
     if (!stillValid()) {
+      // Never registered, so its close found no agent to remove: the idle timers start here.
       link.close(1001, 'The preview browser closed');
+      this.armIdleWithoutDemand(entry);
       return { refused: 'The preview browser is not available' };
     }
     grant.links.add(link);
     entry.agents.add(link);
+    // The last agent may have left during this handshake and started the idle timers.
+    this.clearIdle(entry);
     if (entry.agents.size === 1) this.recordAgent(entry, 'connected');
     return link;
   }
