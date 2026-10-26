@@ -1,0 +1,13 @@
+id: detached-spawn-outside-helper
+valid:
+  # Not detached, another key, or no object literal.
+  - "spawn('git', ['status'], { stdio: 'ignore' })"
+  - "spawn('git', ['status'], { detached: false })"
+  - 'const options = { detachedAt: true }'
+  - 'const detached = true'
+  - 'child.detached === true'
+invalid:
+  - "spawn('xdg-open', [url], { stdio: 'ignore', detached: true })"
+  - "spawn('/bin/sh', ['-c', command], { cwd, env, detached: true, stdio: ['ignore', fd, fd] })"
+  - "const options = { 'detached': true }"
+  - 'const options: SpawnOptions = { detached: true }'
