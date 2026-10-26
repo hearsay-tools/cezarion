@@ -595,13 +595,12 @@ per-turn budget, or a window that restarts on each sign of progress
 timeout or an autosave budget, applies only to the step it exercises and never
 races its own fixture's startup (hearsay-tools/cezarion#1144,
 hearsay-tools/cezarion#1146). Any bound that remains states its reason at the
-call site, as a `// bound: <reason>` comment. In the server unit tests,
-`packages/cezar/src/test-wait-discipline.test.ts` flags bare sleeps and wait
-bounds under 10 s against a baseline that only shrinks; Vitest's 1 s default
-for `vi.waitFor` and `expect.poll` counts as one. A new site gets the product's
-signal or a `// bound:` reason, never a baseline entry. After fixing a site,
-shrink the baseline with
-`TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts`.
+call site, as a `// bound: <reason>` comment. Baselines that only shrink hold
+the rest: bare sleeps, waits under the floor (Vitest's 1 s default counts) and
+poll loops with no deadline, in `packages/cezar/src/test-wait-discipline.test.ts`
+(server, 10 s) and `packages/web/src/test/unit-wait-discipline.test.ts` (cockpit,
+3 s). A new site gets the product's signal or a `// bound:` reason, never a
+baseline entry; a failing scan names the command that shrinks its baseline.
 The scan cannot see a shrunk product budget, so review checks that one.
 
 ### Before opening a PR
