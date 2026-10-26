@@ -2,6 +2,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach } from 'vitest'
+import { strictRunExits, throwRunExitViolations } from './src/workflows/run-states.ts'
 
 // Test files start from shipped defaults, not the parent cockpit's flags or
 // task context (hearsay-tools/cezarion#1517). Scrub once before sandbox pins:
@@ -173,3 +174,7 @@ afterAll(() => {
   rmSync(sandboxUserHome, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
   rmSync(sandboxTemp, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
 })
+// A run status write the run state table does not declare throws, and fails the test it happens
+// in even when run.ts caught the throw (hearsay-tools/cezarion#1804). Production never checks.
+strictRunExits()
+afterEach(throwRunExitViolations)

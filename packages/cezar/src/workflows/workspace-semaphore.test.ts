@@ -341,6 +341,8 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
   it('applies the owning project cap when the manager runs from a cezar task worktree', async () => {
     const ownerRoot = fixtureRepo('cez-wsem-owner-cap-', roots);
     const taskRoot = join(ownerRoot, '.ai/cezar/worktrees/task-run');
+    // The manager runs from taskRoot: teardown drains it there before it removes ownerRoot (hearsay-tools/cezarion#1804).
+    roots.push(taskRoot);
     mkdirSync(taskRoot, { recursive: true });
     execFileSync('git', ['init', '-q', '-b', 'main'], { cwd: taskRoot });
     execFileSync('git', ['config', 'gc.auto', '0'], { cwd: taskRoot });
