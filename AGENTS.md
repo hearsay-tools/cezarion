@@ -195,11 +195,11 @@ Where readers hide, searched from the repo root (replace the example values):
 - **An enum or discriminant value renamed** (a wait kind, outcome, status or attention
   label): the quoted old value in tests, searched before each push that renames one; the
   `test-enum-literal` baseline lists tests still on literals. A rejection test that
-  passes only because the old value is now unknown must test its intended constraint
+  passes only because the old value is now unknown must test its constraint
   (hearsay-tools/cezarion#1504).
 
   ```bash
-  rg -n -F -e "'ci'" -e '"ci"' packages --glob '*.test.*' --glob '*.e2e.ts'
+  rg -n -F -e 'delegation.wait' -e "'ci'" packages --glob '*.test.*' --glob '*.e2e.ts'
   ```
 
 - **A default removed** (a catalog, a source or a seeded entry): browser specs, by its
