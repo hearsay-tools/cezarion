@@ -15,8 +15,10 @@ import type { ThreadPreviewServer } from '../thread-state'
  * never does, because it is not an approval of anything.
  */
 export interface PreviewOpenRequest {
-  /** The registered server to show. Absent opens the pane on its empty state to pick one. */
+  /** The registered server to show. Absent (with no `agent`) opens the pane on its empty state to pick one. */
   port?: number | undefined
+  /** Show the page the agent drives, as it is, with no navigation (hearsay-tools/cezarion#784). */
+  agent?: true | undefined
   /** The owner pressed Run and open or Start again: the pane may send `run` for `port`. */
   run?: boolean
 }
@@ -30,6 +32,8 @@ export interface PreviewPane {
   port?: number | undefined
   /** The task's worktree is gone: every card reads 5.15 "worktree removed" and offers nothing. */
   worktreeRemoved?: boolean
+  /** An agent drives the task's browser now: the agent's page is one more entry to pick. */
+  agentLive?: boolean
   openPane(request: PreviewOpenRequest): void
 }
 
@@ -138,6 +142,7 @@ export function usePreviewPaneState(scope?: string): PreviewPaneState {
   const openPane = useCallback((next: PreviewOpenRequest) => {
     setRequest({ ...next })
     if (next.port !== undefined) setPort(next.port)
+    else if (next.agent) setPort(undefined)
     setSession(false)
     setOpen(true)
   }, [])

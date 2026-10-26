@@ -125,15 +125,27 @@ function ItemTabLabel({ tab }: { tab: TaskItemTab }) {
 }
 
 /**
- * The preview pane's header toggle (#781): `Preview`, `Preview :5173`, `Preview :5173 +1`. It only
- * opens the pane, on the one server's current state or on the empty state when there are none or
+ * The preview pane's header toggle (#781): `Preview`, `Preview :5173`, `Preview :5173 +1`. The
+ * entries are the registered servers and, while an agent drives the task's browser, the agent's
+ * page (hearsay-tools/cezarion#784): alone it reads `Preview · agent`, beside servers it counts in
+ * the `+N`. It only opens the pane, on the one entry or on the empty state when there are none or
  * several to pick from. It never asks to run a command; that approval lives on the card and in
  * the pane. The green dot means frames are flowing, not that a server is registered.
  */
+export function previewToggleLabel(servers: readonly { port: number }[], agentLive: boolean): string {
+  const first = servers[0]
+  const entries = servers.length + (agentLive ? 1 : 0)
+  if (!first) return agentLive ? 'Preview · agent' : 'Preview'
+  return `Preview :${first.port}${entries > 1 ? ` +${entries - 1}` : ''}`
+}
+
 function PreviewToggle({ servers }: { servers: ApiRun['previewServers'] & object }) {
   const pane = usePreviewPane()
   if (pane === null) return null // no pane to open here (the git tabs)
+  const agentLive = pane.agentLive === true
   const first = servers[0]
+  const entries = servers.length + (agentLive ? 1 : 0)
+  const request = entries !== 1 ? {} : first ? { port: first.port } : { agent: true as const }
   return (
     <Button
       variant="outline"
@@ -141,10 +153,10 @@ function PreviewToggle({ servers }: { servers: ApiRun['previewServers'] & object
       data-slot="preview-toggle"
       className="max-md:h-11"
       aria-pressed={pane.open}
-      onClick={() => pane.openPane(servers.length === 1 && first ? { port: first.port } : {})}
+      onClick={() => pane.openPane(request)}
     >
       <AppWindowIcon aria-hidden="true" />
-      Preview{first ? ` :${first.port}` : ''}{servers.length > 1 ? ` +${servers.length - 1}` : ''}
+      {previewToggleLabel(servers, agentLive)}
       {pane.live ? <StatusDot tone="success" aria-label="Preview is live" /> : null}
     </Button>
   )

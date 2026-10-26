@@ -1,10 +1,13 @@
-import { useMemo } from 'react'
+import { useMemo, type ReactNode } from 'react'
 import { Outlet, useParams } from 'react-router'
+
+import type { ApiRun } from '@open-mercato/cezar-api-client'
 
 import { useHealth, useRun } from '@/api/queries'
 
 import { PreviewSplit } from './preview-split'
-import { PreviewPaneContext, usePreviewPaneState, worktreeRemoved } from './preview-state'
+import { PreviewPaneContext, usePreviewPaneState, worktreeRemoved, type PreviewPaneState } from './preview-state'
+import { useAgentPageLive } from './use-agent-page-live'
 
 /**
  * The layout every task tab sits in (#781). It owns the preview pane's state and the split, so
@@ -25,13 +28,23 @@ export function TaskPreviewLayout() {
   // One pane per task: another task starts with it closed. Only the pane state resets, so moving
   // between tasks never remounts the tab (the run header keeps its per-run state across it).
   const pane = usePreviewPaneState(id)
-  const removed = run.data ? worktreeRemoved(run.data) : false
-  const value = useMemo(() => ({ ...pane, worktreeRemoved: removed }), [pane, removed])
   if (!enabled) return <Outlet />
   return (
+    <PreviewProvider id={id} run={run.data} pane={pane}>
+      <Outlet />
+    </PreviewProvider>
+  )
+}
+
+/** Only with the feature on does the task view read its events for the agent's page. */
+function PreviewProvider({ id, run, pane, children }: { id: string | undefined; run: ApiRun | undefined; pane: PreviewPaneState; children: ReactNode }) {
+  const removed = run ? worktreeRemoved(run) : false
+  const agentLive = useAgentPageLive(id)
+  const value = useMemo(() => ({ ...pane, worktreeRemoved: removed, agentLive }), [pane, removed, agentLive])
+  return (
     <PreviewPaneContext.Provider value={value}>
-      <PreviewSplit run={run.data} state={pane}>
-        <Outlet />
+      <PreviewSplit run={run} state={pane}>
+        {children}
       </PreviewSplit>
     </PreviewPaneContext.Provider>
   )

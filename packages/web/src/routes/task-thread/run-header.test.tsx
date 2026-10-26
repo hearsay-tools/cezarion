@@ -1179,6 +1179,29 @@ describe('Preview header toggle (#781)', () => {
     for (const [request] of openPane.mock.calls) expect(request).not.toHaveProperty('run')
   })
 
+  it("counts the agent's page as an entry: Preview · agent alone, +N beside servers (hearsay-tools/cezarion#784)", async () => {
+    stubFetch({ '/api/v1/health': health(true) })
+    renderToggle(withWorktree(), { agentLive: true })
+    expect((await screen.findByRole('button', { name: /^Preview/ })).textContent).toBe('Preview · agent')
+    cleanup()
+    renderToggle(withWorktree([5173]), { agentLive: true })
+    expect((await screen.findByRole('button', { name: /^Preview/ })).textContent).toBe('Preview :5173 +1')
+    cleanup()
+    renderToggle(withWorktree([5173, 3000]), { agentLive: true })
+    expect((await screen.findByRole('button', { name: /^Preview/ })).textContent).toBe('Preview :5173 +2')
+  })
+
+  it("opens the agent's page when it is the only entry, the empty state when it sits beside a server", async () => {
+    stubFetch({ '/api/v1/health': health(true) })
+    let openPane = renderToggle(withWorktree(), { agentLive: true })
+    fireEvent.click(await screen.findByRole('button', { name: /^Preview/ }))
+    expect(openPane).toHaveBeenCalledWith({ agent: true })
+    cleanup()
+    openPane = renderToggle(withWorktree([5173]), { agentLive: true })
+    fireEvent.click(await screen.findByRole('button', { name: /^Preview/ }))
+    expect(openPane).toHaveBeenCalledWith({})
+  })
+
   it('shows the green dot only while the pane is live', async () => {
     stubFetch({ '/api/v1/health': health(true) })
     renderToggle(withWorktree([5173]), { open: true, live: false })

@@ -286,6 +286,35 @@ describe('PreviewEmptyState (design 04)', () => {
     render(<PreviewEmptyState servers={[]} onOpen={() => undefined} />)
     expect(screen.queryByText('Registered in this task')).toBeNull()
   })
+
+  it("lists the agent's page while an agent drives the browser, and Open opens it (hearsay-tools/cezarion#784)", () => {
+    const onOpenAgent = vi.fn()
+    const onOpen = vi.fn()
+    render(<PreviewEmptyState servers={[server]} agentLive onOpenAgent={onOpenAgent} onOpen={onOpen} />)
+    expect(screen.getByText("Agent's page")).toBeTruthy()
+    expect(screen.getByText('The agent drives this page through agent-browser.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: "Open the agent's page" }))
+    expect(onOpenAgent).toHaveBeenCalledTimes(1)
+    expect(onOpen).not.toHaveBeenCalled()
+    const button = screen.getByRole('button', { name: "Open the agent's page" })
+    expect(button.textContent).toBe('Open')
+    expect(button.className).toContain('max-md:h-11')
+  })
+
+  it("lists no agent's page while no agent is connected", () => {
+    render(<PreviewEmptyState servers={[server]} agentLive={false} onOpenAgent={() => undefined} onOpen={() => undefined} />)
+    expect(screen.queryByText("Agent's page")).toBeNull()
+  })
+
+  it('agent-idle: the empty layout with its line above the list, and no new button', () => {
+    render(<PreviewEmptyState servers={[server]} agentIdle onOpenAgent={() => undefined} onOpen={() => undefined} />)
+    const root = document.querySelector('[data-slot="preview-state"]')!
+    expect(root.getAttribute('data-state')).toBe('agent-idle')
+    const line = screen.getByText('The agent is not driving the browser now.')
+    const list = screen.getByText('Registered in this task')
+    expect(line.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getAllByRole('button').map(b => b.textContent)).toEqual(['Review'])
+  })
 })
 
 describe('time-dependent copy', () => {

@@ -41,7 +41,8 @@ import type { ThreadPreviewServer } from '../thread-state'
 
 /**
  * The pane's toolbar (design 04, 4.1 to 4.3 and the mobile frame). Order: Session (only where the
- * pane replaces the transcript), back, forward, reload, server switcher (two or more servers),
+ * pane replaces the transcript), back, forward, reload, server switcher (two or more entries: the
+ * registered servers and, while an agent drives the browser, the agent's page),
  * address, viewport, stats, Experimental badge, More, close.
  *
  * Room rule: the switcher or the adopted label take space from the address, so the stats shrink
@@ -71,8 +72,12 @@ export interface PreviewToolbarProps {
   /** The page's full URL; empty before anything is open. */
   url: string
   servers: readonly PreviewServer[]
-  /** The registered server being shown. Absent for a typed URL. */
+  /** The registered server being shown. Absent for a typed URL and the agent's page. */
   current?: PreviewServer | undefined
+  /** An agent drives the task's browser now: the switcher lists its page (hearsay-tools/cezarion#784). */
+  agentLive?: boolean
+  /** The pane shows the agent's page. */
+  agentShown?: boolean
   /** The page comes from a server cezar did not start (5.18). */
   adopted: boolean
   viewport: PreviewViewport
@@ -98,6 +103,7 @@ export interface PreviewToolbarProps {
   onForward: () => void
   onReload: (ignoreCache: boolean) => void
   onPickServer: (port: number) => void
+  onPickAgent?: (() => void) | undefined
   onViewport: (viewport: PreviewViewport) => void
   onCopyUrl: () => void
   onStop: (port: number) => void
@@ -145,7 +151,9 @@ function Stats({ stats, shrunk }: { stats: PreviewStatsValue; shrunk: boolean })
 
 export function PreviewToolbar(props: PreviewToolbarProps) {
   const { url, servers, current, adopted, viewport, compact = false, navEnabled, loading = false, stats, status, badge = true } = props
-  const switcher = servers.length >= 2
+  const agentLive = props.agentLive === true && props.onPickAgent !== undefined
+  const agentShown = props.agentShown === true
+  const switcher = servers.length + (agentLive ? 1 : 0) >= 2
   const crowded = switcher || adopted
   const ownInput = useRef<HTMLInputElement | null>(null)
   const input = props.urlInputRef ?? ownInput
@@ -178,10 +186,10 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
           variant="outline"
           size="sm"
           className="max-w-[11rem] min-w-0 gap-1.5 max-md:h-11"
-          aria-label={current ? `Server: ${current.label} :${current.port}` : 'Server'}
+          aria-label={current ? `Server: ${current.label} :${current.port}` : agentShown ? "Server: Agent's page" : 'Server'}
         >
-          {current ? <StatusDot tone="neutral" shape="ring" aria-hidden="true" /> : <ServerIcon aria-hidden="true" />}
-          <span className="truncate">{current ? current.label : 'Server'}</span>
+          {current || agentShown ? <StatusDot tone="neutral" shape="ring" aria-hidden="true" /> : <ServerIcon aria-hidden="true" />}
+          <span className="truncate">{current ? current.label : agentShown ? "Agent's page" : 'Server'}</span>
           {current ? <span className="font-mono font-normal text-muted-foreground">:{current.port}</span> : null}
           <ChevronDownIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
         </Button>
@@ -196,6 +204,14 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
           input.current?.focus()
         }}
       >
+        {agentLive ? (
+          <DropdownMenuItem className="min-h-11 gap-2.5 md:min-h-0" onSelect={() => props.onPickAgent?.()}>
+            <StatusDot tone="success" aria-hidden="true" />
+            <span className="font-semibold">Agent's page</span>
+            <span className="ml-auto text-xs text-muted-foreground">agent-browser</span>
+            {agentShown ? <CheckIcon className="size-4" aria-hidden="true" /> : null}
+          </DropdownMenuItem>
+        ) : null}
         {servers.map(server => {
           const look = serverStatus(entryFor(server, props.serverStates))
           return (
@@ -382,7 +398,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
           <div className="flex min-w-0 flex-1 flex-col items-center leading-tight">
             <span className="flex max-w-full items-center gap-1.5 text-sm font-semibold text-foreground">
               {stats ? <StatusDot tone="success" aria-hidden="true" /> : null}
-              <span className="truncate">{current ? `${current.label} :${current.port}` : 'Preview'}</span>
+              <span className="truncate">{current ? `${current.label} :${current.port}` : agentShown ? "Agent's page" : 'Preview'}</span>
             </span>
             {badge ? <span className="text-xs text-muted-foreground">Experimental</span> : null}
           </div>

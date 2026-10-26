@@ -57,7 +57,7 @@ export function PreviewServerCard({
   entry: ThreadPreviewServer
   inPreview: boolean
   /** Absent when the task view hosts no pane: the card then shows no action at all. */
-  onOpen?: ((request: Required<PreviewOpenRequest>) => void) | undefined
+  onOpen?: ((request: Required<Omit<PreviewOpenRequest, 'agent'>>) => void) | undefined
 }) {
   const { server } = entry
   const current = view(entry)

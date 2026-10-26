@@ -323,6 +323,50 @@ describe('PreviewPane', () => {
     expect(screen.getByText('exited · code 1')).toBeTruthy()
   })
 
+  it("opens the agent's page as the third target, and re-sends it after a reconnect (hearsay-tools/cezarion#784)", () => {
+    render(<PreviewPane run={run} servers={[web]} agentLive request={{ agent: true }} onClose={() => undefined} />)
+    transport('open')
+    expect(sent().filter(m => m.t === 'open')).toEqual([expect.objectContaining({ t: 'open', target: { agent: true } })])
+    transport('reconnecting', 1)
+    transport('open')
+    expect(sent().filter(m => m.t === 'open').at(-1)).toEqual(expect.objectContaining({ target: { agent: true }, resume: true }))
+    expect(sent().some(m => m.t === 'nav' || m.t === 'run')).toBe(false)
+  })
+
+  it("lists the agent's page in the empty state while it is live, and Open opens it", () => {
+    const { rerender } = render(<PreviewPane run={run} servers={[web]} onClose={() => undefined} />)
+    transport('open')
+    expect(screen.queryByText("Agent's page")).toBeNull()
+    rerender(<PreviewPane run={run} servers={[web]} agentLive onClose={() => undefined} />)
+    expect(screen.getByText('The agent drives this page through agent-browser.')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: "Open the agent's page" }))
+    expect(sent()).toContainEqual(expect.objectContaining({ t: 'open', target: { agent: true } }))
+  })
+
+  it('agent-idle draws the empty state with its line above the list; picking a server still opens it', () => {
+    render(<PreviewPane run={run} servers={[web]} request={{ agent: true }} onClose={() => undefined} />)
+    transport('open')
+    message({ t: 'state', stage: 'agent-idle' })
+    const state = document.querySelector('[data-slot="preview-state"]')!
+    expect(state.getAttribute('data-state')).toBe('agent-idle')
+    expect(screen.getByText('The agent is not driving the browser now.')).toBeTruthy()
+    expect(screen.getByText('agent idle')).toBeTruthy()
+    expect(screen.queryByText("Agent's page", { selector: 'span.font-semibold' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: 'Review' }))
+    expect(sent().filter(m => m.t === 'open').at(-1)).toEqual(expect.objectContaining({ target: { port: 5173 } }))
+  })
+
+  it("a typed URL on the agent's page opens the pane's own page instead of moving the agent's", () => {
+    render(<PreviewPane run={run} servers={[web]} agentLive request={{ agent: true }} onClose={() => undefined} />)
+    transport('open')
+    message({ t: 'state', stage: 'streaming', adopted: false })
+    const field = screen.getByRole('textbox', { name: 'Page address' })
+    fireEvent.change(field, { target: { value: 'https://example.com' } })
+    fireEvent.keyDown(field, { key: 'Enter' })
+    expect(sent().some(m => m.t === 'nav')).toBe(false)
+    expect(sent().filter(m => m.t === 'open').at(-1)).toEqual(expect.objectContaining({ target: { url: 'https://example.com' } }))
+  })
+
   it('an error inside the pane stays inside the pane', () => {
     const boom = vi.spyOn(console, 'error').mockImplementation(() => undefined)
     const onClose = vi.fn()
@@ -410,6 +454,12 @@ describe('PreviewSplit', () => {
     render(<Harness open port={null} servers={[web, storybook]} />)
     expect(await screen.findByText('exited · code 1')).toBeTruthy()
     expect(screen.getByText('registered · not started')).toBeTruthy()
+  })
+
+  it("feeds the agent's page from the task history to the pane (hearsay-tools/cezarion#784)", async () => {
+    history.events = [{ seq: 1, ts: '2026-10-02T09:00:00.000Z', type: 'preview.agent-browser', state: 'connected' }]
+    render(<Harness open port={null} servers={[]} />)
+    expect(await screen.findByRole('button', { name: "Open the agent's page" })).toBeTruthy()
   })
 
   it('at 1180 px the transcript and the pane share the row', async () => {

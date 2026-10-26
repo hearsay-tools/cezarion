@@ -44,8 +44,9 @@ import { displayUrl } from './preview-url'
 /** Where the sandbox and proxy limits are written down. */
 export const PREVIEW_DOCS_URL = 'https://github.com/hearsay-tools/cezarion#environment-variables'
 
+/** `agent-idle` is drawn by `PreviewEmptyState` (it lists what to pick), never by `PreviewStates`. */
 export type PreviewStageState =
-  | Exclude<PreviewStateMessage, { stage: 'streaming' }>
+  | Exclude<PreviewStateMessage, { stage: 'streaming' | 'agent-idle' }>
   | { stage: 'proxy-blocked' }
   | { stage: 'taken-over'; by: string }
 
@@ -576,16 +577,48 @@ export function PreviewEmptyState({
   servers,
   states,
   onOpen,
+  agentLive = false,
+  agentIdle = false,
+  onOpenAgent,
 }: {
   servers: readonly PreviewServer[]
   /** Where each server stands now; a server missing here reads as just registered. */
   states?: ReadonlyMap<number, ThreadPreviewServer> | undefined
   onOpen: (port: number) => void
+  /** An agent drives the task's browser now: list its page (hearsay-tools/cezarion#784). */
+  agentLive?: boolean
+  /** The pane asked for the agent's page and no agent is connected (`agent-idle`). */
+  agentIdle?: boolean
+  onOpenAgent?: (() => void) | undefined
 }) {
+  const agentEntry = agentLive && onOpenAgent !== undefined
   return (
-    <div data-slot="preview-state" data-state="empty" className="mx-auto flex h-full w-full max-w-[560px] flex-col justify-center gap-4 px-6 py-8">
+    <div data-slot="preview-state" data-state={agentIdle ? 'agent-idle' : 'empty'} className="mx-auto flex h-full w-full max-w-[560px] flex-col justify-center gap-4 px-6 py-8">
       <h2 className="text-xl leading-tight font-semibold text-foreground">Open a page in this task's browser</h2>
       <Body>The browser runs on the host, next to the worktree. Type a URL, a bare port such as 3000, or open a server the agent registered.</Body>
+      {agentIdle ? (
+        <p role="status" className="flex items-start gap-2 text-sm text-foreground">
+          <UnplugIcon className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span>The agent is not driving the browser now.</span>
+        </p>
+      ) : null}
+      {agentEntry ? (
+        <section aria-labelledby="preview-agent" className="overflow-hidden rounded-lg border border-border bg-card">
+          <h3 id="preview-agent" className="border-b border-border px-3.5 py-2.5 text-xs font-semibold tracking-wide text-soft-foreground uppercase">
+            Driven by the agent
+          </h3>
+          <div data-slot="preview-agent-entry" className="flex items-center justify-between gap-3 px-3.5 py-2 text-sm">
+            <span className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-0.5">
+              <StatusDot tone="success" aria-hidden="true" />
+              <span className="font-semibold text-foreground">Agent's page</span>
+              <span className="text-muted-foreground">The agent drives this page through agent-browser.</span>
+            </span>
+            <Button variant="outline" size="sm" className="max-md:h-11" aria-label="Open the agent's page" onClick={onOpenAgent}>
+              Open
+            </Button>
+          </div>
+        </section>
+      ) : null}
       {servers.length > 0 ? (
         <section aria-labelledby="preview-registered" className="overflow-hidden rounded-lg border border-border bg-card">
           <h3 id="preview-registered" className="border-b border-border px-3.5 py-2.5 text-xs font-semibold tracking-wide text-soft-foreground uppercase">
