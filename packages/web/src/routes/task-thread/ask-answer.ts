@@ -8,7 +8,8 @@ import {
   useActiveProviderAvailability,
   useExistingProviderAvailability,
 } from './active-provider'
-import { isRunActive, lastSessionId, runActionFlags } from './run-actions'
+import { engineOwnsRun } from '@open-mercato/cezar-api-client/contract/run-predicates'
+import { lastSessionId, runActionFlags } from './run-actions'
 
 /**
  * Which seam an AskUser answer travels on.
@@ -66,7 +67,7 @@ export async function resumeAfterIdleTeardown<T>(
  * session continues), which is exactly the seam the ask card was missing.
  */
 export function askDeliveryMode(run: RunRecord): AskDeliveryMode {
-  if (isRunActive(run)) return 'live'
+  if (engineOwnsRun(run)) return 'live'
   return runActionFlags(run).continueRun ? 'resume' : 'unavailable'
 }
 

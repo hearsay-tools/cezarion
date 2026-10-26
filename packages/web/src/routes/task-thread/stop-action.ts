@@ -4,13 +4,13 @@ import { useEffect, useState } from 'react'
 import { cancelRun } from '@/api/client'
 import { queryKeys } from '@/api/queries'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
-import { isRunActive } from './run-actions'
+import { engineOwnsRun } from '@open-mercato/cezar-api-client/contract/run-predicates'
 
 /** Stop acceptance is not termination. Hold the composer until the run record confirms it. */
 export function useStopAction(run: ApiRun) {
   const queryClient = useQueryClient()
   const [requestedRun, setRequestedRun] = useState<string>()
-  const active = isRunActive(run)
+  const active = engineOwnsRun(run)
   useEffect(() => {
     if (!active || (requestedRun && requestedRun !== run.id)) setRequestedRun(undefined)
   }, [active, run.id, requestedRun])

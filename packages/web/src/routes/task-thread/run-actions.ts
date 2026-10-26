@@ -1,4 +1,6 @@
 import type { ApiRun, RunRecord, RunStatus, Runner } from '@open-mercato/cezar-api-client'
+import { engineOwnsRun } from '@open-mercato/cezar-api-client/contract/run-predicates'
+import { isUsageLimitHold } from '@open-mercato/cezar-api-client/contract/waits'
 import { cliTargetRunner } from '@/components/open-in-menu'
 import { deriveAttention } from '@/lib/attention'
 import { canBeUnread, isUnread } from '@/lib/read-state'
@@ -13,23 +15,6 @@ export { cliTargetRunner }
  * The header component only maps these booleans to buttons; every rule lives here where a
  * table test can pin it per status.
  */
-
-/** "Active" in the legacy sense: the engine still owns the run (a queued run is parked but
- *  claimed). `review` is deliberately NOT active — a parked review can be continued, archived
- *  or deleted like any finished run. */
-export function isRunActive(run: Pick<RunRecord, 'status' | 'autoResumeAt'>): boolean {
-  // A usage-limit hold is `waiting` with no session (hearsay-tools/cezarion#1236): the engine
-  // has let go of it until its resume, so it keeps a closed run's controls. It takes the record,
-  // never a bare status, so no caller can read a hold as active.
-  if (run.status === 'waiting' && run.autoResumeAt !== undefined) return false
-  return run.status === 'running' || run.status === 'queued' || run.status === 'waiting'
-}
-
-/** A live agent session owns the run: running, or waiting with its session open. A usage-limit
- *  hold is `waiting` with no session (hearsay-tools/cezarion#1236), so it is not open. */
-export function isSessionOpen(run: Pick<RunRecord, 'status' | 'autoResumeAt'>): boolean {
-  return (run.status === 'running' || run.status === 'waiting') && isRunActive(run)
-}
 
 /** The latest agent session across steps — what Continue/Terminal resume. */
 export function lastSessionId(run: RunRecord): string | undefined {
@@ -81,7 +66,7 @@ export function resumeCommand(runner: Runner | undefined, sessionId: string): st
  *  has its own worktree, because the resume only makes sense from in there. Absent for an id
  *  `resumeCommand` refuses (#431), exactly as for a run that never recorded a session. */
 export function resumeHint(run: ApiRun): string | undefined {
-  if (isRunActive(run)) return undefined
+  if (engineOwnsRun(run)) return undefined
   const sessionId = lastSessionId(run)
   if (sessionId === undefined) return undefined
   if (!SAFE_SESSION_ID.test(sessionId)) return undefined
@@ -96,14 +81,14 @@ export function resumeHint(run: ApiRun): string | undefined {
  *  session id means nothing to a different agent, so cross-runner picks always launch clean.
  *  The session step's backend takes precedence over the run default; old records fall back
  *  to the run backend and then Claude.
- *  Active runs never resume, same gate as `resumeHint`/`runActionFlags.terminal`: the engine
+ *  Active runs never resume, same gate as `resumeHint`/`runActionFlags.terminal` (`engineOwnsRun`): the engine
  *  seeds `sessionId` when the step STARTS (workflows/run.ts), so a running run already has one
  *  and would otherwise offer to attach a second CLI to the transcript the engine is driving.
  *  Those picks launch a fresh CLI in the worktree instead — what the server does too. */
 export function cliTargetResumes(run: RunRecord, targetId: string): boolean {
   const runner = cliTargetRunner(targetId)
   if (!runner) return false
-  if (isRunActive(run)) return false
+  if (engineOwnsRun(run)) return false
   return runner === lastSessionBackend(run) && lastSessionId(run) !== undefined
 }
 
@@ -143,7 +128,7 @@ export interface RunActionFlags {
  *  holds waits (hearsay-tools/cezarion#1236): Continue delivers them once, Stop discards them and
  *  leaves it failed. Finish stays off, as on every failed run. */
 export function holdsWaitResults(run: RunRecord): boolean {
-  return (run.status === 'failed' || (run.status === 'waiting' && run.autoResumeAt !== undefined)) && (run.waits?.length ?? 0) > 0
+  return (run.status === 'failed' || isUsageLimitHold(run)) && (run.waits?.length ?? 0) > 0
 }
 
 /** Only a saved original workflow that has never executed may be requeued. */
@@ -154,7 +139,7 @@ export function isStoppedBeforeStarting(run: RunRecord): boolean {
 }
 
 export function runActionFlags(run: RunRecord): RunActionFlags {
-  const active = isRunActive(run)
+  const active = engineOwnsRun(run)
   const hasSession = lastSessionId(run) !== undefined
   return {
     finish: (run.status === 'waiting' && active) || run.status === 'review',

@@ -45,13 +45,13 @@ const ALL_STATUSES: readonly RunStatus[] = [
 
 describe('deriveAttention', () => {
   const cases: ReadonlyArray<[RunStatus, Attention]> = [
-    ['waiting', { bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' }],
-    ['review', { bucket: 'waiting', tone: 'info', shape: 'filled', pulse: true, label: 'needs review' }],
-    ['running', { bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running' }],
-    ['queued', { bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'queued' }],
-    ['done', { bucket: 'none', tone: 'success', shape: 'filled', pulse: false, label: 'done' }],
-    ['failed', { bucket: 'error', tone: 'danger', shape: 'filled', pulse: false, label: 'failed' }],
-    ['cancelled', { bucket: 'none', tone: 'neutral', shape: 'filled', pulse: false, label: 'cancelled' }],
+    ['waiting', { rung: 'needs-you', bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' }],
+    ['review', { rung: 'needs-review', bucket: 'waiting', tone: 'info', shape: 'filled', pulse: true, label: 'needs review' }],
+    ['running', { rung: 'running', bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running' }],
+    ['queued', { rung: 'queued', bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'queued' }],
+    ['done', { rung: 'done', bucket: 'none', tone: 'success', shape: 'filled', pulse: false, label: 'done' }],
+    ['failed', { rung: 'failed', bucket: 'error', tone: 'danger', shape: 'filled', pulse: false, label: 'failed' }],
+    ['cancelled', { rung: 'cancelled', bucket: 'none', tone: 'neutral', shape: 'filled', pulse: false, label: 'cancelled' }],
   ]
 
   it.each(cases)('maps %s', (status, expected) => {
@@ -152,6 +152,7 @@ describe('a run waiting out a usage limit', () => {
     // A waiting run with a resume booked (spec 2026-10-17-unified-waits, hearsay-tools/cezarion#1236):
     // neutral and still, like `queued`.
     expect(deriveAttention(scheduled)).toEqual({
+      rung: 'usage-limit',
       bucket: 'none',
       tone: 'neutral',
       shape: 'ring',
@@ -220,7 +221,7 @@ it.each(['open', 'resolved'] as const)('distinguishes a %s worker wait without m
     expect(deriveAttention(record).pulse).toBe(false)
   } else {
     expect(deriveAttention(record)).toEqual({
-      bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity',
+      rung: 'waiting-for-capacity', bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity',
     })
     expect(wantsAttention(record)).toBe(false)
   }
@@ -228,7 +229,7 @@ it.each(['open', 'resolved'] as const)('distinguishes a %s worker wait without m
 
 it("reads Cezar's completion wait as waiting on its workers", () => {
   expect(deriveAttention(onWaits('waiting', [completionEntry({ workerIds: ['a', 'b'] })]))).toMatchObject({
-    bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 2 workers',
+    rung: 'waiting-on-workers', bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on 2 workers',
   })
 })
 
@@ -239,19 +240,19 @@ it("never reads an old row's delegation.wait", () => {
 
 it('keeps a parked parent with a pending human ask in list attention without transcript context', () => {
   const record = onWaits('waiting', [workerEntry(), openHumanWait()])
-  expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
+  expect(deriveAttention(record)).toEqual({ rung: 'needs-you', bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
   expect(wantsAttention(record)).toBe(true)
 })
 
 it('keeps a resolved worker wait with a pending human ask in list attention', () => {
   const record = onWaits('waiting', [workerEntry({ phase: 'resolved' }), openHumanWait()])
-  expect(deriveAttention(record)).toEqual({ bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
+  expect(deriveAttention(record)).toEqual({ rung: 'needs-you', bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' })
   expect(wantsAttention(record)).toBe(true)
 })
 
 it('keeps a running parent with a resolved worker wait as running', () => {
   expect(deriveAttention(onWaits('running', [workerEntry({ phase: 'resolved' })]))).toEqual({
-    bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running',
+    rung: 'running', bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running',
   })
 })
 
@@ -260,7 +261,7 @@ it('keeps a running parent with a resolved worker wait as running', () => {
 it('reads a queued parent with a resolved worker wait by whether its question is shown', () => {
   const unshown = onWaits('queued', [workerEntry({ phase: 'resolved' }), openHumanWait()])
   expect(deriveAttention(unshown)).toEqual({
-    bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity',
+    rung: 'waiting-for-capacity', bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity',
   })
   expect(wantsAttention(unshown)).toBe(false)
   const shown = onWaits('queued', [workerEntry({ phase: 'resolved' }), openHumanWait(3)])

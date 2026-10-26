@@ -1656,8 +1656,8 @@ export function useMarkRunUnseen() {
       // while the request was in flight, so writing it over the cached record permanently reverts
       // every field the run stream advanced in that window (nothing refetches afterwards). A
       // finished run is quieter than a just-finished one, but it is not silent — the janitor still
-      // discovers PR links, titles still get summarized, and a `failed` run still publishes its
-      // `autoResumeAt`. Clearing the one field this mutation owns cannot lose any of them.
+      // discovers PR links and titles still get summarized. Clearing the one field this mutation
+      // owns cannot lose any of them.
       const clearReceipt = <T extends { id: string; seenAt?: string | undefined }>(run: T): T =>
         run.id === updated.id ? withoutReceipt(run) : run
       queryClient.setQueryData<RunSummary[]>(queryKeys.runs.list(), (list) => list?.map(clearReceipt))

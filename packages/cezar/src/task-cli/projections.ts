@@ -37,7 +37,7 @@ export interface AttentionFields {
  *  the label, and a CLI reader has only the label. */
 export function attentionFields(run: Parameters<typeof deriveAttention>[0]): AttentionFields {
   const attention = deriveAttention(run);
-  const label = attention.label === 'usage limit' && run.autoResumeAt
+  const label = attention.rung === 'usage-limit' && run.autoResumeAt
     ? `usage limit, resumes ${run.autoResumeAt}`
     : attention.label;
   return { attention: attention.bucket, attentionLabel: label };

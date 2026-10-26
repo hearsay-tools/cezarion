@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest'
 
 import { VOICE_STATUS_IDS, type VoiceStatus } from '@open-mercato/cezar-api-client/contract/voice'
 import type { RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
+import { deriveAttention } from '@/lib/attention'
 import { voiceRun } from './fixture.testkit'
 import { voiceStatusMatches } from './status-map'
 
@@ -76,5 +77,43 @@ describe('voiceStatusMatches', () => {
   it('archived runs match archived only by the flag', () => {
     expect(voiceStatusMatches('archived', voiceRun({ archived: false }))).toBe(false)
     expect(voiceStatusMatches('archived', voiceRun({ archived: true }))).toBe(true)
+  })
+})
+
+// hearsay-tools/cezarion#1496: the status ids that read the dot now read its rung id instead of
+// its label. Each row is one label the dot can show and the ids it answered to on `main` at
+// e10fcebb0, so a rung that maps to another id fails here. Merge and command waits answer to none:
+// `waiting-for-ci` matched only the label `waiting for CI`.
+describe('voiceStatusMatches by attention label', () => {
+  const RUNG_IDS: readonly VoiceStatus[] = [
+    'needs-permission', 'failed', 'needs-review', 'running', 'waiting-for-ci', 'monitoring',
+    'waiting-for-capacity', 'queued', 'scheduled', 'waiting-on-workers', 'done', 'cancelled',
+  ]
+  const at = '2026-07-14T12:00:00.000Z'
+  const asWorker = (summary: RunSummary): RunSummary => ({ ...summary, delegation: { role: 'worker', parentRunId: 'parent' } as RunSummary['delegation'] })
+  const rows: ReadonlyArray<[string, RunSummary, readonly VoiceStatus[]]> = [
+    ['needs permission', voiceRun({ status: 'running', hasPendingPermission: true }), ['needs-permission']],
+    ['failed', voiceRun({ status: 'failed' }), ['failed']],
+    ['needs you', voiceRun({ status: 'waiting' }), []],
+    ['needs review', voiceRun({ status: 'review' }), ['needs-review']],
+    ['running', voiceRun({ status: 'running' }), ['running']],
+    ['usage limit', voiceRun({ status: 'waiting', autoResumeAt: at }), ['scheduled']],
+    ['waiting on 2 workers', voiceRun({ status: 'waiting', delegation: root, waits: [workerWait({ workerIds: ['a', 'b'] })] } as Partial<RunRecord>), ['waiting-on-workers']],
+    ['waiting on workers', voiceRun({ status: 'waiting', delegation: root, waits: [workerWait({ workerIds: ['a'], outcomes: [{ workerId: 'a', status: 'done', observedAt: at }] })] } as Partial<RunRecord>), ['waiting-on-workers']],
+    ['waiting on worker replies', voiceRun({ status: 'waiting', delegation: root, waits: [workerWait({ workerIds: [], requestIds: ['r'], requestOutcomes: [] })] } as Partial<RunRecord>), ['waiting-on-workers']],
+    ['waiting on parent reply', asWorker(voiceRun({ status: 'waiting', waits: [workerWait({ workerIds: [], requestIds: ['r'], requestOutcomes: [] })] } as Partial<RunRecord>)), ['waiting-on-workers']],
+    ['waiting for CI', voiceRun({ status: 'waiting', waits: [{ ...timerWait(), kind: 'pr', until: 'checks' }] } as Partial<RunRecord>), ['waiting-for-ci']],
+    ['waiting for merge', voiceRun({ status: 'waiting', waits: [{ ...timerWait(), kind: 'pr', until: 'merge' }] } as Partial<RunRecord>), []],
+    ['waiting for a command', voiceRun({ status: 'waiting', waits: [{ ...timerWait(), kind: 'process', pid: 4242 }] } as Partial<RunRecord>), []],
+    ['monitoring', voiceRun({ status: 'waiting', waits: [timerWait()] } as Partial<RunRecord>), ['monitoring']],
+    ['waiting for capacity', voiceRun({ status: 'waiting', delegation: root, waits: [workerWait({ phase: 'resolved' })] } as Partial<RunRecord>), ['waiting-for-capacity']],
+    ['queued', voiceRun({ status: 'queued' }), ['queued']],
+    ['done', voiceRun({ status: 'done' }), ['done']],
+    ['cancelled', voiceRun({ status: 'cancelled' }), ['cancelled']],
+  ]
+
+  it.each(rows)('a run the dot labels %j answers to the same ids as on main', (label, summary, ids) => {
+    expect(deriveAttention(summary).label).toBe(label)
+    expect(RUNG_IDS.filter((id) => voiceStatusMatches(id, summary))).toEqual(ids)
   })
 })

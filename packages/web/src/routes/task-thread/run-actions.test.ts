@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest'
 import { openHumanWait } from '@/test/run-summary-fixture'
 
 import { runnerSchema, type Runner } from '@open-mercato/cezar-api-client/contract/health'
+import { engineOwnsRun } from '@open-mercato/cezar-api-client/contract/run-predicates'
 import type { ApiRun, RunRecord, RunStatus, StepState } from '@open-mercato/cezar-api-client'
 
 import { isUnread } from '@/lib/read-state'
@@ -15,7 +16,6 @@ import {
   archiveInComposer,
   cliTargetResumes,
   finishTitle,
-  isRunActive,
   lastSessionId,
   offersComposerFinish,
   queuePosition,
@@ -115,8 +115,8 @@ describe('runActionFlags — the visibility matrix, all 7 statuses × archived',
       cancel: false, deleteRun: true, notes: true,
     })
     expect(runActionFlags({ ...held, waits: [heldWait('resolved')] }).cancel).toBe(true)
-    expect(isRunActive(held)).toBe(false)
-    expect(isRunActive(run('waiting'))).toBe(true)
+    expect(engineOwnsRun(held)).toBe(false)
+    expect(engineOwnsRun(run('waiting'))).toBe(true)
   })
 
   it('a failed run with no waits, or only settled ones, offers no Stop', () => {
@@ -201,7 +201,7 @@ describe('runActionFlags.markUnread — the read→unread affordance (#775)', ()
   })
 })
 
-describe('isRunActive', () => {
+describe('engineOwnsRun', () => {
   it.each([
     ['queued', true],
     ['running', true],
@@ -211,7 +211,7 @@ describe('isRunActive', () => {
     ['failed', false],
     ['cancelled', false],
   ] as Array<[RunStatus, boolean]>)('%s → %s', (status, expected) => {
-    expect(isRunActive({ status })).toBe(expected)
+    expect(engineOwnsRun({ status })).toBe(expected)
   })
 })
 

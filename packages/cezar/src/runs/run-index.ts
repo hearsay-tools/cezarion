@@ -162,7 +162,8 @@ function needsRecord(summary: RunSummary, handle?: RepoHandle | null): boolean {
   // A live-looking run reads as interrupted (or cancelled, after an accepted Stop).
   if (summary.status === 'queued' || summary.status === 'running' || summary.status === 'waiting') return true;
   // Monitoring state, and a usage-limit resume on anything but a waiting run, are cleared; an old
-  // failed one is read as waiting (hearsay-tools/cezarion#1236).
+  // failed one is read as waiting (hearsay-tools/cezarion#1236). Any resume time, not
+  // `isUsageLimitHold`: a stale one on a finished summary is what the record must correct.
   if ((summary as { activity?: unknown }).activity !== undefined) return true;
   if (summary.autoResumeAt !== undefined) return true;
   // A referenced PR that an older cezar's created-PR declaration erased is restored.

@@ -57,7 +57,8 @@ export interface GitActionBar {
 }
 
 /** "Active" as the engine means it: the session/queue still owns the run. `review` is parked,
- *  not active — same rule as run-actions.ts `isRunActive`. */
+ *  not active. It reads the status alone, so unlike the contract's `engineOwnsRun` it counts a
+ *  usage-limit hold as active. */
 const isActive = (status: RunStatus): boolean =>
   status === 'running' || status === 'queued' || status === 'waiting'
 

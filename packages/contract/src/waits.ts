@@ -386,9 +386,23 @@ export const waitingOnSchema = z.preprocess(
 export type WaitingOn = z.infer<typeof waitingOnSchema>;
 
 /** Full records carry the full delegation state; summaries and index rows the slim projection. */
-export type WaitingOnInput = Partial<Pick<RunRecord, 'waits' | 'autoResumeAt'>> & {
+export type WaitingOnInput = Partial<Pick<RunRecord, 'status' | 'waits' | 'autoResumeAt'>> & {
   delegation?: DelegationState | RunDelegationSummary | undefined;
 };
+
+/**
+ * A usage-limit hold (hearsay-tools/cezarion#1236): a `waiting` run with a booked resume time. It
+ * holds no slot and no session, so the engine does not own it; its resume or the user's Continue
+ * wakes it. The one definition every reader calls (hearsay-tools/cezarion#1496). It takes the
+ * record, never a bare status, and the store clears the resume time on every write that leaves
+ * `waiting`, so a resume time on any other run is stale and this reads it as no hold. It narrows
+ * the time only, so a caller can still settle the hold to another status.
+ */
+export function isUsageLimitHold<T extends Partial<Pick<RunRecord, 'status' | 'autoResumeAt'>>>(
+  run: T,
+): run is T & { autoResumeAt: string } {
+  return run.status === 'waiting' && run.autoResumeAt !== undefined;
+}
 
 /** Ids a worker entry has not heard about yet, or requests without an outcome. */
 function workerEntryOwed(wait: WorkerWaitEntry): number {
@@ -421,7 +435,7 @@ export function computeWaitingOn(run: WaitingOnInput): WaitingOn | undefined {
   const open = (Array.isArray(run.waits) ? run.waits : []).filter((wait) => wait?.phase === 'open');
   const human = open.filter((wait) => wait.kind === 'human');
   if (human.length) return human.some((wait) => wait.askSeq !== undefined) ? { kind: 'human', shown: true } : { kind: 'human' };
-  if (run.autoResumeAt) return { kind: 'usage-limit', at: run.autoResumeAt };
+  if (isUsageLimitHold(run)) return { kind: 'usage-limit', at: run.autoResumeAt };
   const workers = workersOwed(open);
   if (workers !== undefined) {
     const entries = open.filter((wait): wait is WorkerWaitEntry => wait.kind === 'worker');

@@ -53,3 +53,26 @@ says still follows the input. The mock keeps its native rejection and
 acknowledgement encoding.
 
 _Avoid_: delayed command, patched mock
+
+## Attention rung
+
+One step of the attention ladder: the single answer to "what does this run want
+now", chosen by priority from its status, its waits and a live permission
+prompt. A run is on exactly one rung at a time. A rung has a stable id and a
+label. The label is copy: it can carry a count ("waiting on 2 workers") and can
+be reworded, while the id stays. A surface that decides something about a run
+reads the rung id; a surface that shows the run prints the label.
+
+_Avoid_: attention label (as an identifier), status (a rung is derived, not
+stored)
+
+## Usage-limit hold
+
+A run that a provider usage limit stopped, parked as `waiting` with a booked
+resume time (`autoResumeAt`). It holds no slot and no agent session, so the
+engine does not own it. Its resume or the user's Continue wakes it, and a wait
+that resolves meanwhile is delivered with the resume. A withdrawn resume
+settles the run `failed` with the error it kept. Only a `waiting` run can be on
+a hold: the store clears the resume time on every write that leaves `waiting`.
+
+_Avoid_: scheduled run (the sidebar's word for it), failed with a resume
