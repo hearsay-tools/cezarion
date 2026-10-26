@@ -104,9 +104,9 @@
   /* The project signal as WORDS (#711): the state line under a project's name on the expanded
    * rail and the mobile drawer. 11px text needs 4.5:1 on the default, hover and selected rows
    * alike; `--danger` as text drops to 3.69:1 on the selected row, so red and amber have their
-   * own inks. Amber 11.8 / 9.9 / 8.5:1, red 6.9 / 5.8 / 5.0:1 (default / hover / selected). */
+   * own inks. Red retains at least 4.5:1 on the lifted selected surface. */
   --signal-word-amber: oklch(0.84292398 0.15105370 88.300494);
-  --signal-word-red: oklch(0.71062735 0.16614792 22.216224);
+  --signal-word-red: oklch(0.72 0.16614792 22.216224);
 
   /* H1b: lifted neutral surfaces and softer ink. Elevation comes from surface steps, not shadows. */
   --surface-base: oklch(0.215 0.004 260);
