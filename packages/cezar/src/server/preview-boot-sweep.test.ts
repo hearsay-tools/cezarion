@@ -106,6 +106,17 @@ describe('sweepRegisteredPreviewLeftovers', () => {
 });
 
 describe('armPreview', () => {
+  it("appends the disconnected a crash left out before anything else runs (hearsay-tools/cezarion#784)", () => {
+    const a = project();
+    mkdirSync(join(a.dataDir, 'preview', 'run-crashed'), { recursive: true });
+    writeFileSync(join(a.dataDir, 'preview', 'run-crashed', 'agent-connected'), '');
+    const events: unknown[] = [];
+    const store = Object.assign(new EventEmitter(), { getRun: () => ({ id: 'run-crashed' }), appendEvent: (_runId: string, event: unknown) => events.push(event) });
+    armPreview(store as unknown as RunStore, a.dataDir, noHost);
+    expect(events).toEqual([{ type: 'preview.agent-browser', state: 'disconnected' }]);
+    expect(existsSync(join(a.dataDir, 'preview', 'run-crashed', 'agent-connected'))).toBe(false);
+  });
+
   it("a deleted run's release that fails never becomes an unhandled rejection", async () => {
     const a = project();
     const unhandled: unknown[] = [];

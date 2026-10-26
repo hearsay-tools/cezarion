@@ -817,6 +817,24 @@ describe('PreviewHost', () => {
       expect(second.link).not.toHaveProperty('refused');
     });
 
+    it('keeps a crash marker from just before connected until just after disconnected', async () => {
+      const { host, ctx, store } = make();
+      const marker = join(ctx.dataDir, 'preview', ctx.runId, 'agent-connected');
+      const markedAtEvent: boolean[] = [];
+      const append = store.appendEvent;
+      store.appendEvent = (runId, event) => {
+        if (event.type === 'preview.agent-browser') markedAtEvent.push(existsSync(marker));
+        return append(runId, event);
+      };
+      const grant = host.grantAgent(ctx.runId, () => ctx);
+      const { link } = await connect(host, grant.token);
+      expect(host.hasAgents(ctx.runId)).toBe(true);
+      (link as { close(): void }).close();
+      expect(markedAtEvent).toEqual([true, true]);
+      expect(existsSync(marker)).toBe(false);
+      expect(host.hasAgents(ctx.runId)).toBe(false);
+    });
+
     it('records disconnected when the last agent leaves, then closes the idle browser after the browser idle time', async () => {
       const { host, ctx, store, browsers } = make();
       const grant = host.grantAgent(ctx.runId, () => ctx);

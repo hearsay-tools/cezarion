@@ -5,6 +5,7 @@ import type { PreviewStopRequest, PreviewStopResult, PreviewClientMessage, Previ
 import { z } from 'zod';
 import type { RunStore } from '../runs/store.ts';
 import type { Cdp, CdpConnection } from './cdp.ts';
+import { clearAgentMarker, markAgentConnected } from './agent-marker.ts';
 import { AgentCdpLink, type AgentClient } from './cdp-proxy.ts';
 import { ChromiumError, downloadChromium, downloadTarget, installCommand, launchChromium, resolveChromium } from './chromium.ts';
 import { DevServer, probePort, type DevServerState } from './dev-server.ts';
@@ -486,6 +487,11 @@ export class PreviewHost implements PreviewHostLike {
     return live(this.entries.get(runId)?.servers.get(port));
   }
 
+  /** Whether an agent is connected to the run's browser now: its crash marker is this process's. */
+  hasAgents(runId: string): boolean {
+    return (this.entries.get(runId)?.agents.size ?? 0) > 0;
+  }
+
   /** Whether this host runs the run's Chromium (`<runId>/chromium.pid.json`): the sweep spares it. */
   ownsBrowser(runId: string): boolean {
     const entry = this.entries.get(runId);
@@ -526,9 +532,11 @@ export class PreviewHost implements PreviewHostLike {
 
   /** `preview.agent-browser`, on the first connection and the last close only. */
   private recordAgent(entry: RunEntry, state: 'connected' | 'disconnected'): void {
-    const { runId, store } = entry.ctx;
+    const { runId, store, dataDir } = entry.ctx;
     if (!store.getRun(runId)) return;
+    if (state === 'connected') markAgentConnected(dataDir, runId);
     store.appendEvent(runId, { type: 'preview.agent-browser', state });
+    if (state === 'disconnected') clearAgentMarker(dataDir, runId);
   }
 
   /** The pane asked for the agent's page: shown as it is, never navigated. */

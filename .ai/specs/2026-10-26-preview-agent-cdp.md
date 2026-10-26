@@ -61,6 +61,7 @@ The pane's agent mode and the agent connection state. No run state is added.
 | Agent connected | Chromium exits | The browser process | Sockets close with 1011; the next agent is refused until the owner retries |
 | Agent connected | Preview released | Run deletion, worktree reclaim, cockpit close | Sockets close with 1001; browser closes |
 | Agent connected | Socket stops answering pings | Heartbeat, 30 s | Socket terminated; same as a close |
+| Agent connected | cezar is killed | The next boot's `armPreview` reads the `<dataDir>/preview/<runId>/agent-connected` marker | `disconnected` appended, marker removed, before the CDP route can accept an agent |
 | Pane on agent's page | Owner opens a server or URL | The owner | Pane streams cezar's page; the agent's tab stays |
 | Pane on agent's page | Agent closes the followed tab | The agent | Pane streams cezar's page |
 | Pane on agent's page | Last agent leaves | As above | Pane keeps the last page; reopening shows `agent-idle` |
