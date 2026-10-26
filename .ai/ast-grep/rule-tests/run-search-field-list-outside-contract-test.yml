@@ -1,0 +1,19 @@
+id: run-search-field-list-outside-contract
+valid:
+  # One of the pair alone is not a field list.
+  - 'const key = [run.branch, run.id]'
+  - 'const label = [run.workflow]'
+  # The pair in two lists, or in an object: a key or a label, not a text test.
+  - 'const a = [run.branch]; const b = [run.workflow]'
+  - 'const row = { branch: run.branch, workflow: run.workflow }'
+  # Another object's fields.
+  - 'const x = [pr.title, pr.body]'
+invalid:
+  # The project list's old matcher (tasks-table.ts).
+  - "const fields = [runTitle(run), run.branch ?? '', run.workflow, workflowLabel(run), extraText(run)]"
+  # All tasks' old haystack (global-tasks.ts).
+  - "const parts = [runTitle(task.run), task.projectName, task.run.workflow, task.run.branch ?? '', ...task.tags]"
+  # The server's old matcher (run-search.ts).
+  - 'const prose = [run.title, run.titleSummary, run.branch, run.workflow, run.workflowLabel, origin]'
+  # Optional chaining and a wrapper call do not hide it.
+  - 'const fields = [a?.branch, lower(b.workflow)]'
