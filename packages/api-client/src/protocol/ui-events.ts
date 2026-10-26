@@ -1,3 +1,4 @@
+import type { ToolKind } from '@open-mercato/cezar-contract/tool-display';
 /**
  * Browser-side normalized protocol vocabulary. Keep type exactness with the service through
  * api-types checks; infer shared permission vocabulary from Node-free contract schemas.
@@ -13,18 +14,7 @@ export type UiBackend = 'claude' | 'codex' | 'opencode' | 'pi' | 'cursor' | 'omp
 export type ToolStatus = 'pending' | 'running' | 'completed' | 'failed' | 'declined'
 
 /** Icon/verb hint for a tool item — a superset of ACP's ToolKind. */
-export type ToolKind =
-  | 'read'
-  | 'edit'
-  | 'delete'
-  | 'move'
-  | 'search'
-  | 'execute'
-  | 'think'
-  | 'fetch'
-  | 'task'
-  | 'plan'
-  | 'other'
+export type { ToolKind } from '@open-mercato/cezar-contract/tool-display'
 
 /** Why a turn (or the session) stopped. */
 export type StopReason = 'end_turn' | 'max_tokens' | 'refusal' | 'cancelled' | 'timeout' | 'error'

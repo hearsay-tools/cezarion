@@ -40,3 +40,43 @@ test('existing clones pass; an added clone fails and prints both source location
     assert.equal(scan(base).status, 0);
   } finally { fs.rmSync(repo, { recursive: true, force: true }); }
 });
+
+// hearsay-tools/cezarion#1813: a baseline cannot grandfather a second package's copy.
+test('cross-package clones fail even when already in the baseline', (t) => {
+  const repo = fs.mkdtempSync(path.join(os.tmpdir(), 'cross-package-clone-'));
+  const git = (...args) => execFileSync('git', ['-c', 'core.hooksPath=/dev/null', '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', ...args], { cwd: repo, encoding: 'utf8' }).trim();
+  const write = (name, content) => { fs.mkdirSync(path.dirname(path.join(repo, name)), { recursive: true }); fs.writeFileSync(path.join(repo, name), content); };
+  const scan = (base) => spawnSync(process.execPath, [script, '--base', base], { cwd: repo, encoding: 'utf8' });
+  const code = `export function calculate(values: number[]) {\n let total = 0;\n${Array.from({ length: 12 }, (_, i) => ` total += values[${i}] * ${i + 37};`).join('\n')}\n return total;\n}\n`;
+  try {
+    git('init', '--quiet');
+    write('packages/contract/src/shared.ts', code);
+    // A same-package baseline clone must stay allowed.
+    write('packages/contract/src/other.ts', code);
+    git('add', '.'); git('commit', '-qm', 'same-package baseline');
+    const initial = git('rev-parse', 'HEAD');
+    assert.equal(scan(initial).status, 0);
+    write('packages/web/src/copied.ts', code);
+    git('add', '.'); git('commit', '-qm', 'planted cross-package clone');
+    for (const base of ['HEAD', initial]) {
+      const failure = scan(base);
+      assert.equal(failure.status, 1, `base ${base}: ${failure.stdout}${failure.stderr}`);
+      assert.match(failure.stdout, /Cross-package clone/);
+      assert.match(failure.stdout, /packages\/contract\/src\/(?:shared|other)\.ts:\d+/);
+      assert.match(failure.stdout, /packages\/web\/src\/copied\.ts:\d+/);
+    }
+    t.diagnostic('planted cross-package clone rejected both as new code and as baseline code');
+    fs.unlinkSync(path.join(repo, 'packages/web/src/copied.ts'));
+    for (const name of ['ignored.test.ts', 'ignored.testkit.ts', 'ignored.e2e.ts', 'fixtures/example.ts']) {
+      write(`packages/web/src/${name}`, code);
+    }
+    git('add', '.'); git('commit', '-qm', 'only excluded cross-package copies');
+    assert.equal(scan('HEAD').status, 0);
+    // A candidate cannot weaken the trusted report configuration.
+    write('packages/web/src/copied.ts', code);
+    write('.jscpd.json', '{"minTokens":1000000000}');
+    write('.gitignore', 'packages/\n');
+    git('add', '-f', '.'); git('commit', '-qm', 'candidate attempts to hide copy');
+    assert.equal(scan('HEAD').status, 1);
+  } finally { fs.rmSync(repo, { recursive: true, force: true }); }
+});

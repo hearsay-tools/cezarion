@@ -41,7 +41,7 @@ import type {
   UiToolItem,
 } from './ui-events.ts';
 import { hookEventName, isVisibleHookItem } from './hook-items.ts';
-import { toolDisplay } from './tool-display.ts';
+import { toolDisplay } from '@open-mercato/cezar-contract/tool-display';
 import { codexTurnOutcome } from './codex-turn-outcome.ts';
 
 /** The two reasoning delta channels, accumulated separately — see

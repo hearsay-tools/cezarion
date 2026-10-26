@@ -13,7 +13,7 @@ import type {
   UiReasoningItem,
   UiToolItem,
 } from './ui-events.js';
-import { toolDisplay } from './tool-display.js';
+import { toolDisplay } from '@open-mercato/cezar-contract/tool-display';
 
 export interface PiUiMapperState {
   readonly sessionStarted: boolean;

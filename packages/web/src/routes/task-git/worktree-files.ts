@@ -1,3 +1,4 @@
+import { isImagePath } from '@open-mercato/cezar-api-client/contract/image-path'
 import type { WorktreeEntry } from '@open-mercato/cezar-api-client'
 
 /**
@@ -5,17 +6,6 @@ import type { WorktreeEntry } from '@open-mercato/cezar-api-client'
  * and the small formatting the tree/preview rows share. Kept out of the components so the
  * rules are unit-testable without rendering.
  */
-
-/** Extensions the preview renders as an inline `<img>` — must match the server's raw-serving
- *  allowlist (IMAGE_MIME in src/server/git-changes.ts), or the `<img>` would 409. */
-const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'bmp', 'ico', 'avif'])
-
-export function isImagePath(path: string): boolean {
-  const name = path.slice(path.lastIndexOf('/') + 1)
-  const dot = name.lastIndexOf('.')
-  if (dot <= 0) return false
-  return IMAGE_EXTENSIONS.has(name.slice(dot + 1).toLowerCase())
-}
 
 export type PreviewKind = 'image' | 'too-large' | 'binary' | 'text'
 
