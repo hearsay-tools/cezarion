@@ -36,7 +36,7 @@ function runShell(command, env = {}) {
   return spawnSync('bash', ['-e', '-c', command], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: { ...process.env, CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success', EVENT_NAME: 'pull_request_target', ...env },
+    env: { ...process.env, CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', CLONE_GATE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success', EVENT_NAME: 'pull_request_target', ...env },
   });
 }
 
@@ -742,4 +742,27 @@ test('a bare dispatch gates the dispatched commit against main', (t) => {
   const result = f.run({ EVENT_NAME: 'workflow_dispatch', GITHUB_SHA: f.head, PR_NUMBER: '', EXPECTED_HEAD_SHA: '' });
   assert.equal(result.status, 1, result.stdout + result.stderr);
   assert.match(result.stdout, /over: complexity 21 \(new function; limit 20\)/);
+});
+
+test('clone gate uses trusted tooling and is required for PRs and merge groups', () => {
+  const ci = workflow();
+  const gate = ci.jobs['clone-gate'];
+  const complexity = ci.jobs['complexity-gate'];
+  assert.deepEqual(gate.steps.slice(0, 4), complexity.steps.slice(0, 4));
+  assert.equal(gate.if, complexity.if);
+  assert.deepEqual(gate.permissions, { contents: 'read', 'pull-requests': 'read' });
+  assert.ok(ci.jobs.verify.needs.includes('clone-gate'));
+  const step = gate.steps.at(-1);
+  assert.match(step.run, /git fetch --no-tags origin/);
+  assert.match(step.run, /EXPECTED_HEAD_SHA/);
+  assert.match(step.run, /base="\$GROUP_BASE_SHA"/);
+  assert.match(step.run, /head="\$GROUP_HEAD_SHA"/);
+  assert.match(step.run, /node \.github\/scripts\/check-clones.cjs --base "\$base" --head "\$head"/);
+  const verify = ci.jobs.verify.steps[0];
+  assert.equal(verify.env.CLONE_GATE_RESULT, "${{ needs['clone-gate'].result }}");
+  for (const event of ['pull_request_target', 'merge_group']) {
+    for (const status of ['failure', 'cancelled', 'skipped']) {
+      assert.notEqual(runShell(verify.run, { EVENT_NAME: event, CLONE_GATE_RESULT: status }).status, 0);
+    }
+  }
 });
