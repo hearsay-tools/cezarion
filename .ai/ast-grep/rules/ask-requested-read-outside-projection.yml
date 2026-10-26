@@ -1,0 +1,31 @@
+id: ask-requested-read-outside-projection
+language: typescript
+severity: warning
+message: >-
+  Read an `ask.requested` event through the pending-ask projection, packages/contract/src/pending-ask.ts
+  (hearsay-tools/cezarion#1808): `pendingAskOf(events)` for the ask a run waits on, `askOf(event)` for one
+  stored event, `askPayloadOf(event)` for a live runner event. It reads the payload once, so a field the
+  ask gains reaches the card, the worker request, `cez task status` and the task webhook together.
+files:
+  - packages/*/src/**/*.ts
+  - packages/*/src/**/*.tsx
+ignores:
+  - packages/contract/src/ask.ts
+  - packages/contract/src/pending-ask.ts
+  - packages/**/*.test.ts
+  - packages/**/*.test.tsx
+  - packages/**/*.testkit.ts
+# A comparison against the event type, `event.type === 'ask.requested'`, in either order, and
+# `case 'ask.requested':`. A reader that finds an ask event this way goes on to read its payload.
+# Emitters write an object literal `{ type: 'ask.requested', ... }`, which is a pair and not
+# matched; a dispatch table keyed by the type is not matched either, because its reducer reads the
+# payload through the projection. The rule knows no types, so it cannot see a payload read on an
+# event found some other way; it does not look for one.
+rule:
+  any:
+    - kind: binary_expression
+      all:
+        - has: { field: operator, regex: '^(===|!==|==|!=)$' }
+        - has: { kind: string, regex: '^[''"]ask\.requested[''"]$' }
+    - kind: switch_case
+      has: { field: value, kind: string, regex: '^[''"]ask\.requested[''"]$' }
