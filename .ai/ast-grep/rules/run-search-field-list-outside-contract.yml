@@ -1,0 +1,25 @@
+id: run-search-field-list-outside-contract
+language: typescript
+severity: warning
+message: >-
+  Search runs with matchesRunSearch from packages/contract/src/run-search.ts, and add a searchable
+  field to RUN_SEARCH_FIELDS there (hearsay-tools/cezarion#1807). A list that holds a run's branch
+  and its workflow is a second search matcher: the project list, All tasks, the archived pages, the
+  ⌘K palette and the SQL prefilter each grew their own, and every new field needed a follow-up fix
+  in each (hearsay-tools/cezarion#1637).
+files:
+  - packages/cezar/src/**/*.ts
+  - packages/web/src/**/*.ts
+  - packages/web/src/**/*.tsx
+ignores:
+  - '**/*.test.ts'
+  - '**/*.test.tsx'
+  - '**/*.testkit.ts'
+rule:
+  # An array literal with a `.branch` and a `.workflow` read in it, however deep (`run.branch ?? ''`).
+  # It sees names, not types: any object with both fields counts, and a list that holds the pair for
+  # another reason (a key, a label) belongs in the baseline, not in a second matcher.
+  kind: array
+  all:
+    - has: { stopBy: end, kind: member_expression, has: { field: property, regex: '^branch$' } }
+    - has: { stopBy: end, kind: member_expression, has: { field: property, regex: '^workflow$' } }
