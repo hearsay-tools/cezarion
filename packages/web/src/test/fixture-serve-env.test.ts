@@ -1,8 +1,8 @@
 // @vitest-environment node
 import { execFileSync, spawnSync } from 'node:child_process'
 import { mkdtempSync, mkdirSync, readdirSync, writeFileSync, readFileSync, rmSync, symlinkSync, realpathSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { hostname, tmpdir } from 'node:os'
+import { basename, dirname, join } from 'node:path'
 import { afterEach, expect, it, vi } from 'vitest'
 import { fixtureServeEnv } from '../../e2e/agent-browser'
 
@@ -18,6 +18,12 @@ function gitRoot() {
   execFileSync('git', ['init', '-q', path])
   return path
 }
+
+it('names this worker in its Git sandbox, so the next worker removes it if this one dies (hearsay-tools/cezarion#1395)', () => {
+  const sandbox = dirname(process.env.GIT_CONFIG_GLOBAL!)
+  expect(basename(sandbox)).toMatch(/^cez-web-test-git-/)
+  expect(JSON.parse(readFileSync(join(sandbox, '.cez-test-owner'), 'utf8'))).toEqual({ pid: process.pid, host: hostname() })
+})
 
 it('uses a sandbox Git config with automatic maintenance off and fixed identity in web tests', () => {
   const path = gitRoot()

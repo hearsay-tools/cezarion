@@ -1,8 +1,9 @@
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach } from 'vitest'
 import { strictRunExits, throwRunExitViolations } from './src/workflows/run-states.ts'
+
+import { createTestSandbox, linkSharedOmpNatives, removeTestSandboxes } from '../../scripts/test-sandbox.mjs'
 
 // Test files start from shipped defaults, not the parent cockpit's flags or
 // task context (hearsay-tools/cezarion#1517). Scrub once before sandbox pins:
@@ -17,12 +18,12 @@ for (const key of Object.keys(process.env)) {
 // "non-repo" path still resolve `git rev-parse --show-toplevel` to the host
 // project. Pin temp to a real OS temp sandbox first, before anything else that
 // calls `tmpdir()`.
-// Prefer a fixed OS temp root over the inherited TMPDIR (which may be inside
-// the repo). On Windows fall back through the usual TEMP/TMP spellings.
-const osTempRoot = process.platform === 'win32'
-  ? (process.env.SystemRoot ? join(process.env.SystemRoot, 'Temp') : 'C:\\Temp')
-  : '/tmp'
-const sandboxTemp = mkdtempSync(join(realpathSync(osTempRoot), 'cez-vitest-tmp-'))
+// `createTestSandbox` prefers a fixed OS temp root over the inherited TMPDIR
+// (which may be inside the repo). The sandbox names this worker, so the next
+// worker removes it when this one dies before `afterAll`; a signal removes it
+// before the worker ends (hearsay-tools/cezarion#1395). The name keeps its
+// length: the agent temp fallback under it must fit the unix socket budget.
+const sandboxTemp = createTestSandbox('cez-vitest-tmp-')
 const sandboxGitConfig = join(sandboxTemp, 'gitconfig')
 // No automatic maintenance (hearsay-tools/cezarion#1279): Git 2.54+ repacks in a
 // detached process after a commit or fetch, and that repack deletes loose objects
@@ -44,7 +45,8 @@ process.env.TEMP = sandboxTemp
 // deletes the variable inside its own body (see `src/paths.test.ts`) — that still
 // works, because this hook runs after the test, not during it. The write guard in
 // `assertCezarHomeWriteIsSandboxed` catches whatever still slips through.
-const sandboxHome = mkdtempSync(join(realpathSync(tmpdir()), 'cez-vitest-home-'))
+// Both homes live inside `sandboxTemp`, so its exit, signal and dead-owner cleanup removes them too.
+const sandboxHome = mkdtempSync(join(sandboxTemp, 'cez-vitest-home-'))
 
 const pinSandboxHome = (): void => {
   if (!process.env.CEZ_HOME) process.env.CEZ_HOME = sandboxHome
@@ -57,7 +59,11 @@ const pinSandboxHome = (): void => {
 // variables that move an agent home are cleared, and both are restored around every test.
 // A test that needs a populated home sets its own in its `beforeEach` (see the omp block
 // in `src/server/agent-profiles-api.test.ts`): this hook runs before theirs.
-const sandboxUserHome = mkdtempSync(join(realpathSync(tmpdir()), 'cez-vitest-user-home-'))
+const sandboxUserHome = mkdtempSync(join(sandboxTemp, 'cez-vitest-user-home-'))
+// A test that starts the real omp would unpack its 373 MB native addon into this
+// home. Every sandbox home reads it from one shared cache instead
+// (hearsay-tools/cezarion#1911); without that cache omp unpacks here, as before.
+linkSharedOmpNatives(sandboxUserHome)
 
 const AGENT_HOME_KEYS = [
   'CLAUDE_CONFIG_DIR', // Claude Code's home.
@@ -167,13 +173,9 @@ afterEach(() => {
   pinGitEnvironment()
   clearHostBinAndModeOverrides()
 })
-afterAll(() => {
-  // bound: keep the existing temp cleanup's three retries / 50 ms backoff for
-  // one-shot child-process writes during removal (hearsay-tools/cezarion#1432).
-  rmSync(sandboxHome, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
-  rmSync(sandboxUserHome, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
-  rmSync(sandboxTemp, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
-})
+// One failed removal no longer skips the next one (hearsay-tools/cezarion#1395);
+// the helper keeps the three retries for late child-process writes.
+afterAll(() => removeTestSandboxes([sandboxHome, sandboxUserHome, sandboxTemp]))
 // A run status write the run state table does not declare throws, and fails the test it happens
 // in even when run.ts caught the throw (hearsay-tools/cezarion#1804). Production never checks.
 strictRunExits()

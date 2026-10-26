@@ -786,4 +786,57 @@ describe('socket-safe temp directory length (#387)', () => {
       rmSync(theirsRoot, { recursive: true, force: true });
     }
   });
+
+  // hearsay-tools/cezarion#1911: the marker holds a digest of the dataDir, so once that dataDir
+  // was deleted no sweep could ever match it, and its fallback stayed in the shared root.
+  describe('a fallback whose dataDir is gone (hearsay-tools/cezarion#1911)', () => {
+    const theirsRoot = (): string => join(osRoot(), `cez-deep-${'g'.repeat(80)}`);
+    const theirs = (): string => join(theirsRoot(), 'gone', '.ai', 'cezar');
+    afterEach(() => rmSync(theirsRoot(), { recursive: true, force: true }));
+
+    /** Mint another project's fallback, then delete that project. */
+    const orphan = (): string => {
+      const dir = mint(theirs(), '44444444-5555-4666-8777-888899990000');
+      rmSync(theirsRoot(), { recursive: true, force: true });
+      return dir;
+    };
+
+    it('records its dataDir beside the ownership marker', () => {
+      const dir = mint(theirs(), '44444444-5555-4666-8777-888899990000');
+      expect(readFileSync(join(dir, '.cez-owner-dir'), 'utf8')).toBe(theirs());
+    });
+
+    it('is swept by any other dataDir’s startup sweep', () => {
+      const dir = orphan();
+      expect(sweepAgentTmpDirs(deepDataDir(), [])).toContain(basename(dir));
+      expect(existsSync(dir)).toBe(false);
+    });
+
+    it('stays when its recorded dataDir does not match its ownership marker', () => {
+      const dir = orphan();
+      writeFileSync(join(dir, '.cez-owner-dir'), join(theirsRoot(), 'forged', '.ai', 'cezar'));
+      sweepAgentTmpDirs(deepDataDir(), []);
+      expect(existsSync(dir)).toBe(true);
+    });
+
+    it('stays when it was minted before the dataDir was recorded', () => {
+      const dir = orphan();
+      rmSync(join(dir, '.cez-owner-dir'));
+      sweepAgentTmpDirs(deepDataDir(), []);
+      expect(existsSync(dir)).toBe(true);
+    });
+
+    it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
+      'stays when the sweep cannot tell whether the dataDir exists', () => {
+        const dir = mint(theirs(), '44444444-5555-4666-8777-888899990000');
+        const parent = join(theirsRoot(), 'gone');
+        chmodSync(parent, 0o000);
+        try {
+          sweepAgentTmpDirs(deepDataDir(), []);
+          expect(existsSync(dir)).toBe(true);
+        } finally {
+          chmodSync(parent, 0o700);
+        }
+      });
+  });
 });
