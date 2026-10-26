@@ -1,0 +1,33 @@
+id: run-status-write-outside-transition
+valid:
+  # The table's entry points.
+  - "this.move(runId, 'cancel', { finishedAt })"
+  - "this.store.updateRun(runId, { ...patch, status: transition(exit, () => this.store.getRun(runId)) })"
+  - "this.store.commitOutcome(runId, outcomes, { patch: { status: transition('resume', read) } })"
+  - "transitionVia('park', () => this.store.getRun(runId), () => this.store.commitParked(runId, stepId))"
+  - "const cancelled = transitionVia('cancel', read, () => this.store.commitRootFinishCancellation(id))"
+  # Step writes, and status fields that are not a run's.
+  - "this.store.updateStep(runId, stepId, { status: 'done', finishedAt })"
+  - "const next = { ...step, status: 'cancelled' }"
+  - "step.status = 'failed'"
+  - "this.store.updateRun(runId, { worktreeSetup: { status: 'running', startedAt } })"
+  - "return { status: 'failed', state }"
+  - "this.store.updateRun(runId, { ...patch, worktreeSetup: { status: 'running' } })"
+  - "const outcome = { status: 'done', commands }"
+  # Reads.
+  - "if (run.status === 'waiting') park()"
+  - "const { status } = run"
+  # A store commit's own body.
+  - "class RunStore { commitParked(id) { this.commitIndex(new Map([[id, { ...run, status: 'waiting' }]])); } }"
+invalid:
+  - "this.store.updateRun(runId, { status: 'waiting' })"
+  - "this.store.updateRun(run.id, { status: 'failed', error, finishedAt })"
+  - "this.store.updateRun(runId, { status: review ? 'review' : 'done' })"
+  - "this.store.commitWorkerContinuation(runId, { status: 'queued' as const }, step)"
+  - "this.store.updateRun(run.id, { hasPendingPermission: false, ...(parked ? { status: 'running' as const } : {}) })"
+  - "const acceptedPatch = { text, status: toLine ? 'queued' as const : 'running' as const }"
+  - "this.store.commitOutcome(runId, outcomes, resumes ? { patch: { status: 'running' } } : {})"
+  - "const record = { ...run, status: 'cancelled' as const, finishedAt }"
+  - "run.status = 'cancelled'"
+  - "this.store.commitParked(runId, stepId)"
+  - "if (!this.store.commitRootFinishSuccess(runId, 'done')) return"

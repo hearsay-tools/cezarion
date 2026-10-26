@@ -74,6 +74,12 @@ describe('run states and their exits (hearsay-tools/cezarion#1804)', () => {
     expect(missing).toEqual([]);
   });
 
+  // Each exit is a write `run.ts` makes, through move(), transition() or transitionVia().
+  it('writes every exit in run.ts', () => {
+    const source = readFileSync(resolve(src, 'workflows/run.ts'), 'utf8');
+    expect(Object.keys(RUN_EXITS).filter((exit) => !source.includes(`'${exit}'`))).toEqual([]);
+  });
+
   it('reaches a final or human-only state from every other state through automatic rows', () => {
     const settled = (state: RunState) => RUN_STATES[state].final || RUN_STATES[state].humanOnly !== undefined;
     const stuck = (Object.keys(RUN_STATES) as RunState[]).filter((start) => {
