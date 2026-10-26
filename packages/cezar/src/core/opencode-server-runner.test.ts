@@ -170,6 +170,8 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
      *  a reply delayed on a timer lands mid-assertion on a loaded host (hearsay-tools/cezarion#1314). */
     holdQuestionReplies?: boolean;
     questionGetDelayMs?: number;
+    /** Hold question lookups until the test releases their response. */
+    holdQuestionGets?: boolean;
     /** `GET /config` body; `'fail'` answers 500 (hearsay-tools/cezarion#1266). */
     config?: unknown;
     configDelayMs?: number;
@@ -195,6 +197,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     const permissionReplies: Array<{ path: string; body: unknown }> = [];
     const heldConfig: Array<() => void> = [];
     const heldQuestionReplies: Array<() => void> = [];
+    const heldQuestionGets: Array<() => void> = [];
     const heldPermissionReplies: Array<() => void> = [];
     let permissionReplyStatus = opts.permissionReplyStatus ?? 200;
     let questionReplyStatus = opts.questionReplyStatus ?? 200;
@@ -220,8 +223,10 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       if (req.method === 'GET' && url === '/question') {
         questionGets.push(Date.now());
         res.writeHead(200, { 'content-type': 'application/json' });
-        if (opts.questionGetDelayMs) setTimeout(() => res.end(JSON.stringify(pendingQuestions)), opts.questionGetDelayMs);
-        else res.end(JSON.stringify(pendingQuestions));
+        const answer = () => res.end(JSON.stringify(pendingQuestions));
+        if (opts.holdQuestionGets) heldQuestionGets.push(answer);
+        else if (opts.questionGetDelayMs) setTimeout(answer, opts.questionGetDelayMs);
+        else answer();
         return;
       }
       if (req.method === 'GET' && url === '/config') {
@@ -300,6 +305,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       configGets,
       permissionReplies,
       releaseConfig: () => heldConfig.splice(0).forEach(answer => answer()),
+      releaseQuestionGets: () => heldQuestionGets.splice(0).forEach(answer => answer()),
       releaseQuestionReplies: () => heldQuestionReplies.splice(0).forEach(reply => reply()),
       releasePermissionReplies: () => heldPermissionReplies.splice(0).forEach(answer => answer()),
       setPermissionReplyStatus(status: number): void {
@@ -426,28 +432,32 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
      *  runner acts on the answer in the microtasks that follow the read, so a `waitFor` poll that
      *  sees the count also sees that action. */
     questionReplyReads: () => number;
+    questionGetReads: () => number;
   }
 
-  /** Counts the question reply answers the runner reads through `fetch`. */
-  function countQuestionReplyReads(): { reads: () => number; restore: () => void } {
+  /** Counts completed question lookup and reply body reads through `fetch`. */
+  function countQuestionResponseReads(): { reads: () => number; getReads: () => number; restore: () => void } {
     const realFetch = globalThis.fetch;
     let reads = 0;
+    let getReads = 0;
     const spy = vi.spyOn(globalThis, 'fetch').mockImplementation(async (input, init) => {
       const res = await realFetch(input, init);
-      if (!/\/question\/[^/]+\/reply$/.test(String(input))) return res;
+      const isGet = String(input).endsWith('/question');
+      if (!isGet && !/\/question\/[^/]+\/reply$/.test(String(input))) return res;
       const text = res.text.bind(res);
       Object.defineProperty(res, 'text', {
         value: async () => {
           try {
             return await text();
           } finally {
-            reads += 1;
+            if (isGet) getReads += 1;
+            else reads += 1;
           }
         },
       });
       return res;
     });
-    return { reads: () => reads, restore: () => spy.mockRestore() };
+    return { reads: () => reads, getReads: () => getReads, restore: () => spy.mockRestore() };
   }
 
   async function withSession(
@@ -467,7 +477,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     spawnHook.override = () => child;
     const events: AgentEvent[] = [];
     const uiEvents: UiEvent[] = [];
-    const replyReads = countQuestionReplyReads();
+    const replyReads = countQuestionResponseReads();
     const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs: 30_000 }).startSession(
       { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'go', cwd: process.cwd(), effort: opts.effort, model: opts.model },
       (e) => events.push(e),
@@ -483,7 +493,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       },
     );
     try {
-      await run({ child, events, uiEvents, mock, session, questionReplyReads: replyReads.reads });
+      await run({ child, events, uiEvents, mock, session, questionReplyReads: replyReads.reads, questionGetReads: replyReads.getReads });
     } finally {
       vi.useRealTimers();
       spawnHook.override = null;
@@ -1720,7 +1730,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   });
 
   it('discards a question capture that completes after its turn ended', async () => {
-    await withSession({}, async ({ events, uiEvents, mock, session }) => {
+    await withSession({ holdQuestionGets: true }, async ({ events, uiEvents, mock, session, questionGetReads }) => {
       await waitFor(() => mock.promptPosts.length === 1);
       sendQuestion(mock, {
         questions: [
@@ -1736,10 +1746,9 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       await waitFor(() => count(events, 'turn-end') === 1);
       mock.pendingQuestions.push({ id: 'q_too_late', sessionID: 'ses_test' });
-      await flushFrames(mock, events);
-      vi.useFakeTimers();
-      await vi.advanceTimersByTimeAsync(250);
-      vi.useRealTimers();
+      mock.releaseQuestionGets();
+      // The lookup must complete after idle before absence of a late ask is meaningful.
+      await waitFor(() => questionGetReads() === 1);
       expect(uiEvents.filter((event) => event.type === 'ask.requested')).toEqual([]);
 
       session.sendMessage([{ type: 'text', text: 'a later prompt' }]);
