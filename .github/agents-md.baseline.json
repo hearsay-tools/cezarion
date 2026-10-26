@@ -1,4 +1,4 @@
 {
   "$comment": "Byte limit for AGENTS.md (CLAUDE.md links to it), checked by .github/scripts/agents-md-budget.test.cjs. Lower it when AGENTS.md shrinks; raise it only with the owner's approval. See docs/sdlc/friction.md, Where a new agent rule goes.",
-  "maxBytes": 72865
+  "maxBytes": 71692
 }
