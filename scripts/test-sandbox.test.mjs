@@ -2,12 +2,12 @@ import assert from 'node:assert/strict'
 import { spawn, spawnSync } from 'node:child_process'
 import { once } from 'node:events'
 import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs'
-import { hostname, tmpdir } from 'node:os'
+import { hostname, tmpdir, userInfo } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { fileURLToPath } from 'node:url'
 
-import { OWNER_FILE, createTestSandbox, linkSharedOmpNatives, reapTestSandboxes, removeTestSandboxes } from './test-sandbox.mjs'
+import { OWNER_FILE, createTestSandbox, linkSharedOmpNatives, reapTestSandboxes, removeTestSandboxes, sharedOmpNativesCache } from './test-sandbox.mjs'
 
 const preload = fileURLToPath(new URL('./test-git-env.mjs', import.meta.url))
 const helper = new URL('./test-sandbox.mjs', import.meta.url).href
@@ -155,6 +155,15 @@ process.stdout.write(String(linkSharedOmpNatives(process.argv[1], process.argv[2
   // Removing a sandbox home removes the link, never the shared cache.
   rmSync(homes[0], { recursive: true, force: true })
   assert.ok(existsSync(cache))
+})
+
+test('the shared omp natives cache lives in the account home, or under an absolute XDG_CACHE_HOME', () => {
+  const accountCache = join(userInfo().homedir, '.cache', 'cez', 'test-omp-natives')
+  assert.equal(sharedOmpNativesCache({}), accountCache)
+  // A sandbox HOME never moves it: the setup has replaced HOME by the time it links.
+  assert.equal(sharedOmpNativesCache({ HOME: '/tmp/cez-vitest-tmp-x/home' }), accountCache)
+  assert.equal(sharedOmpNativesCache({ XDG_CACHE_HOME: '/srv/cache' }), join('/srv/cache', 'cez', 'test-omp-natives'))
+  assert.equal(sharedOmpNativesCache({ XDG_CACHE_HOME: 'relative/cache' }), accountCache)
 })
 
 test('a home keeps no link when the shared cache cannot be created', (t) => {
