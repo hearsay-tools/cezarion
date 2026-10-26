@@ -1362,10 +1362,10 @@ function baseCells(runners: RunnerId[]): void {
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
 
-    // hearsay-tools/cezarion#1805: a message deferred while its session started up (#472) is queued
-    // beside the waits. When it answers the question, the answered wait and the removed queue entry
-    // are one commit: a reopened store never replays an answer it shows delivered, nor shows the
-    // question open after dropping the answer.
+    // hearsay-tools/cezarion#1805: a message deferred while its session started up
+    // (open-mercato/cezar#472) is queued beside the waits. When it answers the question, the answered
+    // wait and the removed queue entry are one commit: a reopened store never replays an answer it
+    // shows delivered, nor shows the question open after dropping the answer.
     it(`${runner} U7q a deferred message that answers the question removes its queue entry in the answer's commit`, async () => {
       nativeWire(runner);
       const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
