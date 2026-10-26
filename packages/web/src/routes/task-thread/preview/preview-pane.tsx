@@ -128,7 +128,12 @@ function stageStatus(stage: PreviewStateMessage): { tone: StatusDotTone; label: 
   }
 }
 
-function PreviewPaneBody({ run, servers, serverStates, agentLive = false, request, onSession, onPort, onLive, onClose }: PreviewPaneProps) {
+/** The owner asked for a server or the agent's page, whose open is on its way. */
+function awaitsTarget(request: PreviewOpenRequest | undefined): boolean {
+  return request?.port !== undefined || request?.agent === true
+}
+
+function PreviewPaneBody({ run, servers, serverStates, agentLive, request, onSession, onPort, onLive, onClose }: PreviewPaneProps) {
   const pageActive = usePageActive()
   const viewerId = useRef(crypto.randomUUID())
   const opened = useRef(false)
@@ -346,7 +351,7 @@ function PreviewPaneBody({ run, servers, serverStates, agentLive = false, reques
   const empty = !hasTarget && !takenOver && transport.state !== 'blocked'
   // The empty state invites typing. A pane opened for a server is not empty, even in the commit
   // before its target lands: focusing then would hide the page URL and pop a phone's keyboard.
-  const awaitingRequest = request?.port !== undefined || request?.agent === true
+  const awaitingRequest = awaitsTarget(request)
   useEffect(() => {
     if (empty && !awaitingRequest) urlInput.current?.focus()
   }, [empty, awaitingRequest])
@@ -396,6 +401,7 @@ function PreviewPaneBody({ run, servers, serverStates, agentLive = false, reques
   const current = servers.find(server => server.port === port)
   const adopted = stage?.stage === 'streaming' && stage.adopted
   const lost = everOpened && (transport.state === 'reconnecting' || transport.state === 'closed')
+  const stageName = stage?.stage
 
   let overlay: ReactNode = null
   let dim = false
@@ -404,18 +410,18 @@ function PreviewPaneBody({ run, servers, serverStates, agentLive = false, reques
   } else if (takenOver !== undefined) {
     dim = true
     overlay = <PreviewStates state={{ stage: 'taken-over', by: takenOver }} actions={actions} />
-  } else if (empty || stage?.stage === 'agent-idle') {
+  } else if (empty || stageName === 'agent-idle') {
     overlay = (
       <PreviewEmptyState
         servers={servers}
         states={serverStates}
         onOpen={serverPort => openServer(serverPort)}
-        agentLive={agentLive}
-        agentIdle={!empty && stage?.stage === 'agent-idle'}
+        agentLive={agentLive === true}
+        agentIdle={!empty && stageName === 'agent-idle'}
         onOpenAgent={openAgent}
       />
     )
-  } else if (stage?.stage === 'streaming' || (stage?.stage === 'loading' && hasFrame)) {
+  } else if (stageName === 'streaming' || (stageName === 'loading' && hasFrame)) {
     overlay = null
   } else if (stage) {
     overlay = <PreviewStates state={stage as PreviewStageState} actions={actions} url={url} worktree={run.worktreePath} />
@@ -426,7 +432,7 @@ function PreviewPaneBody({ run, servers, serverStates, agentLive = false, reques
 
   // The page takes input while it is on screen and live: not behind a state, not while a dialog freezes it.
   const interactive = connected && overlay === null && !dialog
-  const showPage = hasFrame && (stage?.stage === 'streaming' || stage?.stage === 'loading' || dim)
+  const showPage = hasFrame && (stageName === 'streaming' || stageName === 'loading' || dim)
 
   return (
     <section data-slot="preview-pane-body" aria-label="Live preview" className="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -436,7 +442,7 @@ function PreviewPaneBody({ run, servers, serverStates, agentLive = false, reques
         serverStates={serverStates}
         badge={transport.state !== 'blocked'}
         current={current}
-        agentLive={agentLive}
+        agentLive={agentLive === true}
         agentShown={agent}
         adopted={adopted}
         viewport={compact ? 'fit' : viewport}

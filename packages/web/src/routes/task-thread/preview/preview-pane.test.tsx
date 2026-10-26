@@ -257,6 +257,30 @@ describe('PreviewPane', () => {
     expect(screen.getByText('browser exited')).toBeTruthy()
   })
 
+  it('the toolbar status reads each stage of an open pane', () => {
+    render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
+    transport('open')
+    const status = () => document.querySelector('[data-slot="preview-status"]')?.textContent
+    const cases: Array<[PreviewServerMessage, string | undefined]> = [
+      [{ t: 'state', stage: 'downloading', received: 1, total: 2 }, 'downloading'],
+      [{ t: 'state', stage: 'download-failed', error: 'offline', installCommand: 'npx install' }, 'download failed'],
+      [{ t: 'state', stage: 'sandbox-failed', stderrTail: '' }, 'browser failed'],
+      [{ t: 'state', stage: 'needs-approval', server: web, wasRunning: false }, 'not started'],
+      [{ t: 'state', stage: 'port-held', server: web, ownerTitle: 'Other task' }, 'port in use'],
+      [{ t: 'state', stage: 'server-starting', server: web, attempt: 1, startedAt: '2026-10-26T00:00:00.000Z', logTail: [] }, 'waiting for :5173'],
+      [{ t: 'state', stage: 'server-stalled', server: web, logTail: '' }, 'waiting · 2 min'],
+      [{ t: 'state', stage: 'server-exited', server: web, exitCode: 1, logTail: '' }, 'server exited'],
+      [{ t: 'state', stage: 'server-stopped', server: web, reason: 'user', lastUrl: 'http://localhost:5173/' }, 'stopped'],
+      [{ t: 'state', stage: 'agent-idle' }, 'agent idle'],
+      [{ t: 'state', stage: 'loading', step: 'page' }, 'connecting…'],
+      [{ t: 'state', stage: 'worktree-removed' }, undefined],
+    ]
+    for (const [stage, label] of cases) {
+      message(stage)
+      expect(status(), stage.t === 'state' ? stage.stage : '').toBe(label)
+    }
+  })
+
   it('a takeover ends the stream: no live dot, no navigation, status paused', () => {
     const onLive = vi.fn()
     render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onLive={onLive} onClose={() => undefined} />)

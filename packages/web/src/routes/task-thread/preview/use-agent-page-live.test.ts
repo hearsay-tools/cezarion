@@ -4,7 +4,9 @@ import type { RunEvent } from '@open-mercato/cezar-api-client'
 
 import { agentPageLive } from './use-agent-page-live'
 
-const event = (seq: number, fields: Record<string, unknown>): RunEvent => ({ seq, ts: '2026-10-26T10:00:00.000Z', ...fields }) as RunEvent
+function event(seq: number, fields: Record<string, unknown>): RunEvent {
+  return { seq, ts: '2026-10-26T10:00:00.000Z', ...fields } as RunEvent
+}
 
 describe('agentPageLive (hearsay-tools/cezarion#784)', () => {
   it('is false with no preview.agent-browser event', () => {

@@ -19,7 +19,7 @@ import {
   TabletIcon,
   XIcon,
 } from 'lucide-react'
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useRef, useState, type ComponentProps, type RefObject } from 'react'
 
 import type { PreviewServer } from '@open-mercato/cezar-api-client'
 import { StatusDot, type StatusDotTone } from '@/components/status-dot'
@@ -149,6 +149,43 @@ function Stats({ stats, shrunk }: { stats: PreviewStatsValue; shrunk: boolean })
   )
 }
 
+/** The switcher's trigger: the server shown, the agent's page, or neither (a typed URL). */
+function SwitcherButton({ current, agentShown, ...rest }: { current: PreviewServer | undefined; agentShown: boolean } & ComponentProps<typeof Button>) {
+  const name = current ? current.label : agentShown ? "Agent's page" : 'Server'
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="max-w-[11rem] min-w-0 gap-1.5 max-md:h-11"
+      aria-label={current ? `Server: ${current.label} :${current.port}` : agentShown ? `Server: ${name}` : 'Server'}
+      {...rest}
+    >
+      {current || agentShown ? <StatusDot tone="neutral" shape="ring" aria-hidden="true" /> : <ServerIcon aria-hidden="true" />}
+      <span className="truncate">{name}</span>
+      {current ? <span className="font-mono font-normal text-muted-foreground">:{current.port}</span> : null}
+      <ChevronDownIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
+    </Button>
+  )
+}
+
+/** The switcher's entry for the page an agent drives (hearsay-tools/cezarion#784). */
+function AgentPageItem({ shown, onSelect }: { shown: boolean; onSelect: () => void }) {
+  return (
+    <DropdownMenuItem className="min-h-11 gap-2.5 md:min-h-0" onSelect={onSelect}>
+      <StatusDot tone="success" aria-hidden="true" />
+      <span className="font-semibold">Agent's page</span>
+      <span className="ml-auto text-xs text-muted-foreground">agent-browser</span>
+      {shown ? <CheckIcon className="size-4" aria-hidden="true" /> : null}
+    </DropdownMenuItem>
+  )
+}
+
+/** The mobile toolbar's title. */
+function shownTitle(current: PreviewServer | undefined, agentShown: boolean): string {
+  if (current) return `${current.label} :${current.port}`
+  return agentShown ? "Agent's page" : 'Preview'
+}
+
 export function PreviewToolbar(props: PreviewToolbarProps) {
   const { url, servers, current, adopted, viewport, compact = false, navEnabled, loading = false, stats, status, badge = true } = props
   const agentLive = props.agentLive === true && props.onPickAgent !== undefined
@@ -182,17 +219,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
   const switcherMenu = switcher ? (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className="max-w-[11rem] min-w-0 gap-1.5 max-md:h-11"
-          aria-label={current ? `Server: ${current.label} :${current.port}` : agentShown ? "Server: Agent's page" : 'Server'}
-        >
-          {current || agentShown ? <StatusDot tone="neutral" shape="ring" aria-hidden="true" /> : <ServerIcon aria-hidden="true" />}
-          <span className="truncate">{current ? current.label : agentShown ? "Agent's page" : 'Server'}</span>
-          {current ? <span className="font-mono font-normal text-muted-foreground">:{current.port}</span> : null}
-          <ChevronDownIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
-        </Button>
+        <SwitcherButton current={current} agentShown={agentShown} />
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
@@ -204,14 +231,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
           input.current?.focus()
         }}
       >
-        {agentLive ? (
-          <DropdownMenuItem className="min-h-11 gap-2.5 md:min-h-0" onSelect={() => props.onPickAgent?.()}>
-            <StatusDot tone="success" aria-hidden="true" />
-            <span className="font-semibold">Agent's page</span>
-            <span className="ml-auto text-xs text-muted-foreground">agent-browser</span>
-            {agentShown ? <CheckIcon className="size-4" aria-hidden="true" /> : null}
-          </DropdownMenuItem>
-        ) : null}
+        {agentLive ? <AgentPageItem shown={agentShown} onSelect={() => props.onPickAgent?.()} /> : null}
         {servers.map(server => {
           const look = serverStatus(entryFor(server, props.serverStates))
           return (
@@ -398,7 +418,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
           <div className="flex min-w-0 flex-1 flex-col items-center leading-tight">
             <span className="flex max-w-full items-center gap-1.5 text-sm font-semibold text-foreground">
               {stats ? <StatusDot tone="success" aria-hidden="true" /> : null}
-              <span className="truncate">{current ? `${current.label} :${current.port}` : agentShown ? "Agent's page" : 'Preview'}</span>
+              <span className="truncate">{shownTitle(current, agentShown)}</span>
             </span>
             {badge ? <span className="text-xs text-muted-foreground">Experimental</span> : null}
           </div>

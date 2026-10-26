@@ -196,7 +196,7 @@ export class PreviewHost implements PreviewHostLike {
   async open(ctx: RunContext, viewer: Viewer, target: PreviewTarget, options: { viewerId?: string | undefined; resume?: boolean | undefined } = {}): Promise<void> {
     const entry = this.entryFor(ctx);
     if (entry.released) return;
-    if (options.resume && ((entry.viewerId !== undefined && entry.viewerId !== options.viewerId) || (entry.viewer && entry.viewer !== viewer && (!options.viewerId || entry.viewerId !== options.viewerId)))) {
+    if (options.resume && this.heldByAnotherTab(entry, viewer, options.viewerId)) {
       viewer.send({ t: 'replaced', by: entry.viewer?.userAgent ?? 'another tab' });
       viewer.close(4001, 'replaced');
       return;
@@ -633,6 +633,12 @@ export class PreviewHost implements PreviewHostLike {
     if (!viewer) return;
     if (session.url) viewer.send({ t: 'url', url: session.url });
     if (changed) session.attach(viewer);
+  }
+
+  /** A resumed pane whose run another tab took since: that tab keeps it. */
+  private heldByAnotherTab(entry: RunEntry, viewer: Viewer, viewerId: string | undefined): boolean {
+    if (entry.viewerId !== undefined && entry.viewerId !== viewerId) return true;
+    return !!entry.viewer && entry.viewer !== viewer && (!viewerId || entry.viewerId !== viewerId);
   }
 
   private entryFor(ctx: RunContext): RunEntry {
