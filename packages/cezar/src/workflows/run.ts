@@ -7985,7 +7985,7 @@ export class RunManager {
       this.move(runId, 'park', { error: `continue failed: ${message}` });
       return;
     }
-    this.move(runId, 'fail', {
+    this.move(runId, 'fail-continue', {
       error: `continue failed: ${message}`,
       finishedAt: new Date().toISOString(),
       currentStepId: undefined,
