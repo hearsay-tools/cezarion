@@ -12,9 +12,11 @@ on:
 
 permissions: {}
 
-# Serialises the runs of one branch so two of them cannot both create the comment.
+# Serialises the runs of one pull request so two of them cannot both create the comment. The key is
+# the head repository and branch: a branch name alone is shared by unrelated forks, and GitHub keeps
+# only the newest pending run of a group, so a fork's run could replace another pull request's.
 concurrency:
-  group: mutation-report-comment-${{ github.event.workflow_run.head_branch }}
+  group: mutation-report-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
   cancel-in-progress: false
 
 jobs:

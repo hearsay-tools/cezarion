@@ -84,6 +84,17 @@ test('the comment job holds the only write token, runs no pull request code and 
   assert.doesNotMatch(commentCode, /pull_request_target/);
 });
 
+test('comment runs queue per head repository and branch, so a fork that reuses a branch name cannot replace another pull request\'s pending comment', () => {
+  // Two runs of one pull request must queue, or both could find no comment and both create one. A group
+  // that is only the branch name also joins unrelated forks' pull requests, and GitHub replaces the
+  // pending job of a group with the newest, so one of them would lose its report comment.
+  assert.equal(
+    comment.concurrency.group,
+    'mutation-report-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}',
+  );
+  assert.equal(comment.concurrency['cancel-in-progress'], false);
+});
+
 test('the comment job reads the artifact the pull request job uploads, from the run that triggered it', () => {
   const download = step(commentJob, 'Download the mutation evidence');
   assert.equal(download.with.name, step(reportJob, 'Upload the mutation evidence').with.name);
