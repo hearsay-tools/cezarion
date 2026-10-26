@@ -49,10 +49,11 @@ const VITEST_DEFAULT_MS = 1_000
 export const srcDir = resolve(import.meta.dirname, '..')
 export const baselinePath = resolve(import.meta.dirname, 'unit-wait-discipline.baseline.json')
 
-type Visit = (node: Node, ancestors: readonly Node[]) => void
+/** Returns `false` to leave a node's children unvisited. */
+type Visit = (node: Node, ancestors: readonly Node[]) => void | false
 
 function walk(node: Node, ancestors: Node[], visit: Visit): void {
-  visit(node, ancestors)
+  if (visit(node, ancestors) === false) return
   ancestors.push(node)
   for (const value of Object.values(node)) {
     for (const child of Array.isArray(value) ? value : [value]) {
@@ -99,8 +100,8 @@ interface Ctx {
   tlWaits: ReadonlySet<string>
   accepted: (line: number) => boolean
   sites: Site[]
-  /** Each poll loop with the delays of the sleeps inside it, and the function (or program) around it. */
-  loops: Map<Node, { delays: Array<Node | undefined>; scope: Node }>
+  /** Each poll loop with the delays of the sleeps inside it, and where it sits. */
+  loops: Map<Node, { delays: Array<Node | undefined>; where: Where }>
 }
 
 function report(ctx: Ctx, rule: Rule, node: Node): void {
@@ -198,15 +199,27 @@ function awaitedSleep(argument: Node): { delay: Node | undefined } | undefined {
   return param?.type === 'Identifier' ? timerDelay(executor, param.name) : undefined
 }
 
+/** Where a poll loop sits: the nodes above it, and the function (or program) a name in it is looked up in. */
+interface Where {
+  loop: Node
+  scope: Node
+  /** Every node above the loop, outermost first. */
+  above: readonly Node[]
+}
+
 /** The innermost `for`, `while` or `do` loop around a node, within its own function. */
-function loopAround(ancestors: readonly Node[]): { loop: Node; scope: Node } | undefined {
+function loopAround(ancestors: readonly Node[]): Where | undefined {
   let loop: Node | undefined
+  let at = -1
   for (let i = ancestors.length - 1; i >= 0; i -= 1) {
     const ancestor = ancestors[i]!
-    if (isFunction(ancestor)) return loop ? { loop, scope: ancestor } : undefined
-    if (!loop && isPollLoop(ancestor)) loop = ancestor
+    if (isFunction(ancestor)) return loop ? { loop, scope: ancestor, above: ancestors.slice(0, at) } : undefined
+    if (!loop && isPollLoop(ancestor)) {
+      loop = ancestor
+      at = i
+    }
   }
-  return loop ? { loop, scope: ancestors[0]! } : undefined
+  return loop ? { loop, scope: ancestors[0]!, above: ancestors.slice(0, at) } : undefined
 }
 
 function visitAwait(node: AwaitExpression, ancestors: readonly Node[], ctx: Ctx): void {
@@ -219,7 +232,7 @@ function visitAwait(node: AwaitExpression, ancestors: readonly Node[], ctx: Ctx)
   }
   const known = ctx.loops.get(around.loop)
   if (known) known.delays.push(sleep.delay)
-  else ctx.loops.set(around.loop, { delays: [sleep.delay], scope: around.scope })
+  else ctx.loops.set(around.loop, { delays: [sleep.delay], where: around })
 }
 
 const clockCall = (node: Node): boolean => {
@@ -235,35 +248,77 @@ function contains(root: Node, test: (node: Node) => boolean): boolean {
   return found
 }
 
-/** The initializer of a name declared inside a scope (`const deadline = Date.now() + 5_000`), or its parameter default. */
-function definition(scope: Node, name: string): Node | undefined {
-  let found: Node | undefined
-  walk(scope, [], node => {
-    if (found) return
-    if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && node.id.name === name && node.init) found = node.init
-    if (node.type === 'AssignmentPattern' && node.left.type === 'Identifier' && node.left.name === name) found = node.right
+/** A name declared in a function: its initializer (none for a parameter without a default) and where it is in view. */
+interface Declaration {
+  init: Node | undefined
+  /** The block, loop or function the name belongs to. */
+  owner: Node
+  insideLoop: boolean
+  start: number
+}
+
+const blockScopes = new Set(['BlockStatement', 'Program', 'StaticBlock', 'ForStatement', 'ForInStatement', 'ForOfStatement'])
+
+/** What `node` declares under `name` in `scope`: a variable, a parameter or a parameter's default. */
+function declaredAs(node: Node, ancestors: readonly Node[], scope: Node, name: string): Pick<Declaration, 'init' | 'owner'> | undefined {
+  const parent = ancestors.at(-1)
+  if (node.type === 'VariableDeclarator' && node.id.type === 'Identifier' && node.id.name === name && parent?.type === 'VariableDeclaration') {
+    const owner = parent.kind === 'var' ? scope : [...ancestors].reverse().find(ancestor => blockScopes.has(ancestor.type)) ?? scope
+    return { init: node.init ?? undefined, owner }
+  }
+  const param = 'params' in scope && (scope.params as readonly Node[]).includes(node)
+  if (param && node.type === 'Identifier' && node.name === name) return { init: undefined, owner: scope }
+  if (param && node.type === 'AssignmentPattern' && node.left.type === 'Identifier' && node.left.name === name) return { init: node.right, owner: scope }
+  return undefined
+}
+
+/** Every declaration of a name in the loop's function, leaving out the functions nested in it: their names are theirs. */
+function declarationsOf(where: Where, name: string): Declaration[] {
+  const found: Declaration[] = []
+  walk(where.scope, [], (node, ancestors) => {
+    if (node !== where.scope && isFunction(node)) return false
+    const declared = declaredAs(node, ancestors, where.scope, name)
+    if (declared) found.push({ ...declared, insideLoop: ancestors.includes(where.loop), start: node.start ?? 0 })
   })
   return found
 }
 
+/**
+ * What a name means at a poll loop, the way the language scopes it: a declaration inside the loop first, else the
+ * one in the nearest block that holds the loop (the latest there, before the loop). A sibling block that closed
+ * earlier, or a helper function declaring the same name, is not in view. The result has no `init` for a parameter
+ * without a default, which hides a same-file constant of that name.
+ */
+function definition(where: Where, name: string): { init: Node | undefined } | undefined {
+  const inView = declarationsOf(where, name).filter(declaration => declaration.insideLoop || where.above.includes(declaration.owner))
+  const inside = inView.find(declaration => declaration.insideLoop)
+  if (inside) return inside
+  const depth = (declaration: Declaration) => where.above.indexOf(declaration.owner)
+  const before = inView.filter(declaration => declaration.start < (where.loop.start ?? 0))
+  return before.reduce<Declaration | undefined>((nearest, declaration) => (!nearest || depth(declaration) >= depth(nearest) ? declaration : nearest), undefined)
+}
+
 /** Whether a node reads the clock, directly or through a name declared from it (`elapsed = Date.now() - start`). */
-function readsClock(node: Node, scope: Node): boolean {
+function readsClock(node: Node, where: Where): boolean {
   if (contains(node, clockCall)) return true
-  const init = node.type === 'Identifier' ? definition(scope, node.name) : undefined
+  const init = node.type === 'Identifier' ? definition(where, node.name)?.init : undefined
   return init !== undefined && contains(init, clockCall)
 }
 
 /** The literal a clock comparison measures against: `Date.now() - start > N`, `Date.now() < start + N`, `Date.now() < deadline`. */
-function clockBound(comparison: BinaryExpression, scope: Node, consts: ReadonlyMap<string, number | undefined>): number | undefined {
-  const own = (name: string) => numberOf(definition(scope, name), consts) ?? consts.get(name)
+function clockBound(comparison: BinaryExpression, where: Where, consts: ReadonlyMap<string, number | undefined>): number | undefined {
+  const own = (name: string) => {
+    const declared = definition(where, name)
+    return declared ? numberOf(declared.init, consts) : consts.get(name)
+  }
   for (const [measured, limit] of [[comparison.left, comparison.right], [comparison.right, comparison.left]] as const) {
-    if (!readsClock(measured, scope)) continue
+    if (!readsClock(measured, where)) continue
     const value = (node: Node): number | undefined => (node.type === 'Identifier' ? own(node.name) : numberOf(node, consts))
     const direct = value(limit)
     if (direct !== undefined) return direct
     const sum = limit.type === 'BinaryExpression' && limit.operator === '+' ? limit : undefined
     if (sum) return value(sum.left) ?? value(sum.right)
-    const declared = limit.type === 'Identifier' ? definition(scope, limit.name) : undefined
+    const declared = limit.type === 'Identifier' ? definition(where, limit.name)?.init : undefined
     if (declared?.type === 'BinaryExpression' && declared.operator === '+') return value(declared.left) ?? value(declared.right)
   }
   return undefined
@@ -271,12 +326,13 @@ function clockBound(comparison: BinaryExpression, scope: Node, consts: ReadonlyM
 
 const compares = new Set(['<', '<=', '>', '>='])
 
-function clockDeadline(loop: Node, scope: Node, consts: ReadonlyMap<string, number | undefined>): number | 'unreadable' | undefined {
-  if (!contains(loop, node => clockCall(node)) && !contains(loop, node => node.type === 'Identifier' && readsClock(node, scope))) return undefined
+function clockDeadline(where: Where, consts: ReadonlyMap<string, number | undefined>): number | 'unreadable' | undefined {
+  const { loop } = where
+  if (!contains(loop, node => clockCall(node)) && !contains(loop, node => node.type === 'Identifier' && readsClock(node, where))) return undefined
   const bounds: number[] = []
   walk(loop, [], node => {
     if (node.type !== 'BinaryExpression' || !compares.has(node.operator)) return
-    const bound = clockBound(node, scope, consts)
+    const bound = clockBound(node, where, consts)
     if (bound !== undefined) bounds.push(bound)
   })
   return bounds.length ? Math.max(...bounds) : 'unreadable'
@@ -299,10 +355,10 @@ function attemptCount(loop: Node, consts: ReadonlyMap<string, number | undefined
 
 type Deadline = 'none' | 'unreadable' | number
 
-function pollDeadline(loop: Node, delays: ReadonlyArray<Node | undefined>, scope: Node, consts: ReadonlyMap<string, number | undefined>): Deadline {
-  const clock = clockDeadline(loop, scope, consts)
+function pollDeadline(where: Where, delays: ReadonlyArray<Node | undefined>, consts: ReadonlyMap<string, number | undefined>): Deadline {
+  const clock = clockDeadline(where, consts)
   if (typeof clock === 'number') return clock
-  const attempts = attemptCount(loop, consts)
+  const attempts = attemptCount(where.loop, consts)
   if (typeof attempts === 'number') {
     const intervals = delays.map(delay => numberOf(delay, consts))
     return intervals.every(interval => interval !== undefined) ? attempts * intervals.reduce<number>((sum, interval) => sum + interval!, 0) : 'unreadable'
@@ -336,8 +392,8 @@ export function scanSource(file: string, source: string): Site[] {
     sites: [], loops: new Map(),
   }
   walk(ast.program, [], (node, ancestors) => visit(node, ancestors, ctx))
-  for (const [loop, { delays, scope }] of ctx.loops) {
-    const deadline = pollDeadline(loop, delays, scope, ctx.consts)
+  for (const [loop, { delays, where }] of ctx.loops) {
+    const deadline = pollDeadline(where, delays, ctx.consts)
     if (deadline === 'none' || (typeof deadline === 'number' && deadline < FLOOR_MS)) report(ctx, 'poll-deadline', loop)
   }
   return ctx.sites.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule))

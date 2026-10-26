@@ -183,6 +183,20 @@ describe('rule poll-deadline', () => {
     expect(rules('const LIMIT = 800', 'const end = Date.now() + LIMIT', 'while (!ready() && Date.now() < end) await sleep(10)')).toEqual(['poll-deadline'])
   })
 
+  it('reads the declaration nearest the loop, not the first one with that name in the function', () => {
+    const poll = ['  while (!ready() && Date.now() < end) await sleep(10)', '}']
+    // A helper's own `end` is another function's name.
+    expect(rules('async function run() {', '  const helper = () => { const end = Date.now() + 15_000; return end }', '  const end = Date.now() + 1_000', ...poll)).toEqual(['poll-deadline'])
+    // A block that closed before the loop is out of view, whether its bound is long or short.
+    expect(rules('async function run() {', '  { const end = Date.now() + 15_000; use(end) }', '  const end = Date.now() + 1_000', ...poll)).toEqual(['poll-deadline'])
+    expect(rules('async function run() {', '  { const end = Date.now() + 1_000; use(end) }', '  const end = Date.now() + 15_000', ...poll)).toEqual([])
+    // The innermost block that holds the loop wins.
+    expect(rules('async function run() {', '  const end = Date.now() + 15_000', '  {', '    const end = Date.now() + 1_000', '  ' + poll[0], '  }', '}')).toEqual(['poll-deadline'])
+    expect(rules('async function run() {', '  const end = Date.now() + 1_000', '  {', '    const end = Date.now() + 15_000', '  ' + poll[0], '  }', '}')).toEqual([])
+    // A parameter that shadows a bound of the same name hides it.
+    expect(rules('const end = 800', 'async function run(end) {', '  const stop = Date.now() + end', '  while (!ready() && Date.now() < stop) await sleep(10)', '}')).toEqual([])
+  })
+
   it('leaves a bound it cannot read alone', () => {
     expect(rules('async function until(check, ms) {', '  const end = Date.now() + ms', '  while (!check() && Date.now() < end) await sleep(10)', '}')).toEqual([])
     expect(rules('while (!ready() && Date.now() < CEILING) await sleep(10)')).toEqual([])
