@@ -5,11 +5,11 @@ const os = require('node:os');
 const path = require('node:path');
 const { publish } = require('./mutants-comment.cjs');
 const { MARKER } = require('./mutants-report.cjs');
+const { fakeGithub, BOT } = require('./mutants-github.testkit.cjs');
 
 const HEAD_1 = '1'.repeat(40);
 const HEAD_2 = '2'.repeat(40);
 const HEAD_3 = '3'.repeat(40);
-const BOT = 'github-actions[bot]';
 
 const mutant = (over = {}) => ({ file: 'packages/contract/src/attention.ts', line: 85, column: 48, mutator: 'ConditionalExpression', original: 'a', replacement: 'b', status: 'Survived', ...over });
 const pack = (over = {}) => ({
@@ -18,30 +18,6 @@ const pack = (over = {}) => ({
 });
 const artifact = (head, packages) => ({ version: 1, state: 'ran', head, stryker: '10.1.1', packages });
 const noLines = head => ({ version: 1, state: 'no-mutable-lines', head, stryker: '10.1.1', packages: [] });
-
-/** An in-memory Octokit with the five calls the publisher makes. */
-function fakeGithub({ pulls = [], comments = [] } = {}) {
-  const state = { pulls, comments: [...comments], nextId: 100, writes: [], reads: 0 };
-  const rest = {
-    pulls: { get: async ({ pull_number }) => { state.reads += 1; return { data: state.pulls.find(p => p.number === pull_number) }; } },
-    repos: { listPullRequestsAssociatedWithCommit: async ({ commit_sha }) => { state.reads += 1; return { data: state.pulls.filter(p => p.head.sha === commit_sha) }; } },
-    issues: {
-      listComments: async ({ issue_number }) => ({ data: state.comments.filter(c => c.issue_number === issue_number) }),
-      createComment: async ({ issue_number, body }) => {
-        const comment = { id: state.nextId++, issue_number, body, user: { login: BOT } };
-        state.comments.push(comment);
-        state.writes.push('create');
-        return { data: comment };
-      },
-      updateComment: async ({ comment_id, body }) => {
-        state.comments.find(c => c.id === comment_id).body = body;
-        state.writes.push('update');
-        return { data: {} };
-      },
-    },
-  };
-  return { state, rest, paginate: async (method, params) => (await method(params)).data };
-}
 
 const pr = (head, over = {}) => ({ number: 7, state: 'open', head: { sha: head }, base: { ref: 'main' }, ...over });
 const run = (head, over = {}) => ({ event: 'pull_request', conclusion: 'success', head_sha: head, html_url: 'https://github.com/o/r/actions/runs/9', pull_requests: [], ...over });

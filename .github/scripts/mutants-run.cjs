@@ -150,4 +150,4 @@ if (require.main === module) {
   });
 }
 
-module.exports = { main, parseArgs };
+module.exports = { main, parseArgs, EVIDENCE, REPORT };

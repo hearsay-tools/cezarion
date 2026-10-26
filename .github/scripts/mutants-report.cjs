@@ -130,15 +130,17 @@ const code = text => `<code>${esc(text)}</code>`;
 const place = (m, ctx) => ctx.blobBase
   ? `[\`${m.file}:${m.line}\`](${ctx.blobBase}/${m.file}#L${m.line})` : `\`${m.file}:${m.line}\``;
 
-function table(rows, ctx, { result }) {
-  const head = result ? '| Where | Mutator | Original | Mutant | Result |' : '| Where | Mutator | Original | Mutant |';
-  const lines = [head, result ? '|---|---|---|---|---|' : '|---|---|---|---|'];
+const RESULT = { Survived: 'Survived', NoCoverage: 'Not covered', Killed: 'Killed', Timeout: 'Timed out' };
+
+function table(rows, ctx) {
+  const lines = ['| Where | Mutator | Original | Mutant | Result |', '|---|---|---|---|---|'];
   for (const m of rows) {
-    lines.push(`| ${place(m, ctx)} | ${m.mutator} | ${code(m.original)} | ${code(m.replacement)} |${result ? ` ${m.status} |` : ''}`);
+    lines.push(`| ${place(m, ctx)} | ${m.mutator} | ${code(m.original)} | ${code(m.replacement)} | ${RESULT[m.status]} |`);
   }
   return lines.join('\n');
 }
 
+const plural = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 const seconds = ms => (ms >= 60_000 ? `${Math.round(ms / 6000) / 10} min` : `${Math.round(ms / 1000)} s`);
 
 function countsLine(p) {
@@ -149,7 +151,7 @@ function countsLine(p) {
   if (c.timeout) parts.push(`${c.timeout} timed out`);
   if (c.error) parts.push(`${c.error} errors`);
   if (c.ignored) parts.push(`${c.ignored} ignored`);
-  return `${total} mutants in ${p.changedLines} changed lines: ${parts.join(', ')}. ${seconds(p.durationMs)}.`;
+  return `${plural(total, 'mutant')} in ${plural(p.changedLines, 'changed line')}: ${parts.join(', ')}. ${seconds(p.durationMs)}.`;
 }
 
 const NOTICE = { skipped: 'Skipped', 'timed-out': 'Stopped', error: 'Failed' };
@@ -164,10 +166,10 @@ function renderPackage(p, ctx, show) {
   const shownD = detected.slice(0, show.detected);
   const parts = [heading, countsLine(p), `Tests run: the \`${p.name}\` package's own unit tests.`];
   parts.push(p.counts.survived + p.counts.noCoverage === 0 ? 'No mutant survived in the changed lines.'
-    : shownU.length ? table(shownU, ctx, { result: false }) : '');
+    : shownU.length ? table(shownU, ctx) : '');
   if (shownD.length) {
     const count = p.counts.killed + p.counts.timeout;
-    parts.push(`<details><summary>Killed and timed-out mutants (${count})</summary>\n\n${table(shownD, ctx, { result: true })}\n\n</details>`);
+    parts.push(`<details><summary>Killed and timed-out mutants (${count})</summary>\n\n${table(shownD, ctx)}\n\n</details>`);
   }
   return { text: parts.filter(Boolean).join('\n\n'), shown: shownU.length + shownD.length, listed: p.mutants.length + (p.omitted ?? 0) };
 }

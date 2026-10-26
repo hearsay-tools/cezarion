@@ -1,0 +1,70 @@
+name: Mutation report
+
+# Runs StrykerJS on the lines a pull request changes in packages/*/src and uploads what it found.
+# Advisory: it never blocks a merge. No required check, queue entry or failure reporter lists it,
+# a Stryker timeout or error is recorded in its artifact and the job still passes, and a newer push
+# cancels the run before it. mutation-report-comment.yml posts the one pull request comment; this
+# workflow runs the pull request's own code, so it has a read-only token and no secrets.
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mutation-report-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  mutants:
+    name: Surviving mutants in changed lines
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      # The merge revision, so HEAD^1 is the base and HEAD^1..HEAD is exactly the pull request.
+      - name: Check out PR merge revision
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: '12.11.2'
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      # No product line changed: this step writes the artifact that says so and the rest is skipped.
+      - name: Find the changed product lines
+        id: scope
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node .github/scripts/mutants-run.cjs scope
+      - name: Install dependencies
+        if: steps.scope.outputs.has_work == 'true'
+        run: pnpm install --frozen-lockfile
+        timeout-minutes: 5
+      # TypeScript test imports resolve through the server build, as in the Vitest shards.
+      - name: Build server dependencies
+        if: steps.scope.outputs.has_work == 'true'
+        run: npm run build:server
+        timeout-minutes: 5
+      # The script keeps its own 35 minute deadline and records a package it skipped, stopped or could
+      # not run in the artifact. Those outcomes leave this step green.
+      - name: Mutate the changed lines
+        if: steps.scope.outputs.has_work == 'true'
+        env:
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: node .github/scripts/mutants-run.cjs run
+      - name: Upload the mutation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mutation-report
+          path: mutation-evidence/
+          retention-days: 14
+          if-no-files-found: ignore

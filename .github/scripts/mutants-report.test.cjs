@@ -109,9 +109,16 @@ test('renderReport opens with the marker once and reports survivors in a table',
   assert.match(body, /\[job run\]\(https:\/\/github.com\/o\/r\/actions\/runs\/7\)/);
   assert.match(body, /\[`packages\/contract\/src\/attention.ts:85`\]\(https:\/\/github.com\/o\/r\/blob\/abcdef0123456789abcdef0123456789abcdef01\/packages\/contract\/src\/attention.ts#L85\)/);
   assert.match(body, /ConditionalExpression/);
-  assert.match(body, /2 survived/);
+  assert.match(body, /\| Where \| Mutator \| Original \| Mutant \| Result \|/);
+  assert.match(body, /\| Not covered \|/);
+  assert.match(body, /7 mutants in 21 changed lines: 3 killed, 2 survived, 1 not covered, 1 timed out/);
   assert.match(body, /1 not covered/);
   assert.match(body, /<details><summary>Killed and timed-out mutants \(4\)<\/summary>/);
+});
+
+test('renderReport says one mutant in one changed line in the singular', () => {
+  const body = renderReport(wrap(pack({ changedLines: 1, counts: { ...pack().counts, killed: 1, survived: 0 }, mutants: [] })), ctx);
+  assert.match(body, /1 mutant in 1 changed line:/);
 });
 
 test('renderReport says so when nothing survived, and names the tests the job ran', () => {
@@ -125,7 +132,7 @@ test('renderReport escapes every cell so a mutant cannot inject markup, a mentio
   const body = renderReport(wrap(pack({ counts: { ...pack().counts, survived: 1 }, mutants: [hostile] })), ctx);
   assert.doesNotMatch(body, /<img|<script|<\/code><|@octocat|@all/);
   const row = body.split('\n').find(line => line.includes('&lt;img'));
-  assert.equal(row.split(/(?<!\\)\|/).length, 6, 'a row keeps exactly four cells');
+  assert.equal(row.split(/(?<!\\)\|/).length, 7, 'a row keeps exactly five cells');
 });
 
 test('renderReport states why a package was skipped, timed out or failed, with no mutants listed', () => {
