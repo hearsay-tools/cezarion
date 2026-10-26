@@ -181,6 +181,18 @@ read its diff and baseline source, then choose an action:
 | This task introduced or worsened the problem | Fix it in this task. If a larger design decision is needed, report the blocker before opening the PR. |
 | The problem existed before this task, and a fix needs a larger refactor | File or reuse a code quality issue as described below. Keep the PR focused. |
 
+To plan a split along a flagged function's decision points, list them with
+`node <skill>/scripts/metrics.mjs <file> --function <name> --breakdown` (add
+`--line <line>` for a repeated name, and `--column <column>` when another function starts on that line). Each `line kind` row is one counted
+point, so the rows plus one equal the complexity.
+
+CI runs a looser ratchet on the same functions:
+`node <skill>/scripts/complexity-gate.mjs --base <target-ref> --head HEAD` refuses only a
+changed function over 20 that is new or more complex than at the merge base. A change that
+lowers such a function but leaves it above 20 passes CI, and the gate lists it as a notice.
+This check still flags every changed function above a limit, so a clean report here implies
+a pass there. A pass there does not imply a clean report here.
+
 A small change stays within the function or an immediate helper, preserves its
 contract and needs no new architecture. Prefer simpler control flow and useful
 missing tests. Keep decisions visible; moving all of them to a new helper to

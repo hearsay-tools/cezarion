@@ -5,7 +5,7 @@ import { chmodSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, w
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { compareFunctions, exceededMetrics, runChangedFunctions, scanChanges } from './changed-functions.mjs';
+import { compareFunctions, exceededMetrics, matchFunctions, runChangedFunctions, scanChanges } from './changed-functions.mjs';
 
 test('limits flag either score strictly above the threshold and preserve missing CRAP', () => {
   assert.deepEqual(exceededMetrics({ complexity: 20, crap: 30 }), []);
@@ -23,7 +23,7 @@ test('selects edited functions and ignores line shifts and untouched siblings', 
   assert.equal(result[0].name, 'a');
   assert.equal(result[0].line, 2);
   assert.equal(result[0].complexity, 2);
-  assert.deepEqual(result[0].baseline, { name: 'a', line: 1, complexity: 1 });
+  assert.deepEqual(result[0].baseline, { name: 'a', line: 1, column: 1, complexity: 1 });
 });
 
 test('nested body edits belong to the nested function; parent edits stay selected', () => {
@@ -43,6 +43,23 @@ test('tracks additions and duplicate identities conservatively and omits removal
   assert.equal(changed.length, 1);
   assert.equal(changed[0].change, 'unknown');
   assert.equal(changed[0].baseline, null);
+  assert.deepEqual(changed[0].candidates.map(({ name, complexity }) => [name, complexity]), [['f', 1], ['f', 1]]);
+});
+
+test('details expose decision points, body hashes and the functions nothing took over', () => {
+  const before = 'function keep(x) { return x; }\nfunction gone(x) { if (x) return 1; return 2; }';
+  const after = 'function keep(x) { return x; }\nfunction fresh(x) { if (x) return 1; return 2; }';
+  const { changed, unmatched } = matchFunctions(before, after, 'file.ts', { details: true });
+  assert.deepEqual(changed.map(fn => fn.name), ['fresh']);
+  assert.deepEqual(changed[0].points, [{ line: 2, kind: 'IfStatement' }]);
+  assert.deepEqual(unmatched.map(fn => fn.name), ['gone']);
+  assert.equal(unmatched[0].bodyHash, changed[0].bodyHash, 'a rename keeps the body hash');
+  assert.deepEqual(matchFunctions(before, after, 'file.ts').unmatched, []);
+  const twins = 'const a = { f() { return 1; } }; const b = { f() { return 2; } };';
+  const ambiguous = matchFunctions(twins, twins.replace('return 1', 'return 3'), 'file.ts', { details: true });
+  assert.equal(ambiguous.changed[0].change, 'unknown');
+  assert.deepEqual(ambiguous.unmatched, [], 'the candidates of an ambiguous match were not removed');
+  assert.equal('bodyHash' in compareFunctions(before, after, 'file.ts')[0], false, 'plain comparisons keep their shape');
 });
 
 function repo(t) {
@@ -155,4 +172,37 @@ test('every Git call after baseline resolution uses its pinned attribute source'
   assert.ok(reads.some(args => args.includes('show')), 'baseline source was read');
   for (const args of reads) assert.equal(args[0], `--attr-source=${f.base}`, JSON.stringify(args));
   assert.ok(reads.some(args => args.includes('--no-textconv')), 'raw content reads disable text conversion');
+});
+
+test('a head revision is read from Git objects, never from the working tree', t => {
+  const f = repo(t);
+  f.write('file.ts', 'function choose(x) { return x ? 1 : 0; }');
+  symlinkSync('file.ts', join(f.cwd, 'link.ts'));
+  f.git('add', '.');
+  f.git('commit', '-qm', 'head');
+  const head = f.git('rev-parse', 'HEAD');
+  f.write('file.ts', 'function choose(x) { return x && x.a && x.b && x.c ? 1 : 0; }');
+  f.write('untracked.ts', 'function stray() {}');
+  const result = scanChanges(f.base, f.cwd, { head });
+  assert.equal(result.head, head);
+  assert.deepEqual(result.files.map(file => file.file), ['file.ts'], 'the symlink is skipped, the untracked file is not seen');
+  assert.equal(result.files[0].functions[0].complexity, 2);
+  assert.equal('removed' in result, false);
+});
+
+test('details offer the functions of a deleted file as the source of a move', t => {
+  const f = repo(t);
+  const body = '{ if (x) return 1; if (y) return 2; return 3; }';
+  f.write('old.ts', `export function relocated(x, y) ${body}`);
+  f.git('add', '.');
+  f.git('commit', '-qm', 'old home');
+  const base = f.git('rev-parse', 'HEAD');
+  rmSync(join(f.cwd, 'old.ts'));
+  f.write('new.ts', `export function relocated(x, y) ${body}`);
+  f.git('add', '-A');
+  f.git('commit', '-qm', 'move');
+  const result = scanChanges(base, f.cwd, { head: f.git('rev-parse', 'HEAD'), details: true });
+  assert.deepEqual(result.deletedFiles, ['old.ts']);
+  assert.deepEqual(result.removed.map(fn => [fn.file, fn.name, fn.complexity]), [['old.ts', 'relocated', 3]]);
+  assert.equal(result.removed[0].bodyHash, result.files[0].functions[0].bodyHash);
 });

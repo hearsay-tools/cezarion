@@ -18,9 +18,11 @@ CRAP uses per-function body line coverage: C² × (1 − coverage)³ + C.
 Options:
   --function <name>  Select a function or method (Class.method also works)
   --line <number>    Select the innermost function at a source line
+  --column <number>  With --line, select the function that starts at that line and column (1-based)
   --coverage <path> Read an Istanbul coverage-final.json report
   --test <path>     Run a Vitest test file (*.test, *.spec, *.e2e) for fresh coverage; repeatable
   --project <name>  Select a Vitest project for --test; repeatable
+  --breakdown       List each function's decision points as "line kind"; rows plus one is its complexity
   --json            Print a JSON report; test output goes to stderr
   -h, --help        Show this help
 
@@ -70,13 +72,22 @@ function textReport(report) {
   const table = [headers, ...rows].map(row => row.map((value, i) => value.padEnd(widths[i])).join('  ').trimEnd());
   const reasons = [...new Set(report.functions.filter(fn => fn.coverage.status !== 'available').map(fn => fn.coverage.reason))];
   return [report.file, ...table, ...(rows.length ? [] : ['No implemented functions found.']),
+    ...breakdownLines(report.functions),
     '', 'Complexity: classic. Coverage: function body lines.', ...reasons].join('\n') + '\n';
+}
+
+/** One block per function: its decision points as "line kind", so the rows plus one are its complexity. */
+function breakdownLines(functions) {
+  return functions.filter(fn => fn.decisionPoints).flatMap(fn => [
+    '', `${fn.name} (line ${fn.line}): complexity ${fn.complexity} = 1 + ${fn.decisionPoints.length} decision points`,
+    ...fn.decisionPoints.map(point => `  ${point.line} ${point.kind}`),
+  ]);
 }
 
 function parseInput(args, cwd) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
-    function: { type: 'string' }, line: { type: 'string' }, coverage: { type: 'string' },
-    test: { type: 'string', multiple: true }, json: { type: 'boolean' },
+    function: { type: 'string' }, line: { type: 'string' }, column: { type: 'string' }, coverage: { type: 'string' },
+    test: { type: 'string', multiple: true }, json: { type: 'boolean' }, breakdown: { type: 'boolean' },
     project: { type: 'string', multiple: true }, help: { type: 'boolean', short: 'h' },
   } });
   if (values.help) return { values };
@@ -85,11 +96,15 @@ function parseInput(args, cwd) {
   if (values.project && !values.test) throw new Error('--project requires --test.');
   if (values.project?.some(name => !name.trim())) throw new Error('--project must be a nonempty project name.');
   if (values.function !== undefined && !values.function.trim()) throw new Error('--function must be a nonempty name.');
-  const line = values.line === undefined ? undefined : Number(values.line);
-  if (line !== undefined && (!Number.isSafeInteger(line) || line < 1)) throw new Error('--line must be a positive integer.');
+  const [line, column] = [['line', values.line], ['column', values.column]].map(([option, text]) => {
+    const number = text === undefined ? undefined : Number(text);
+    if (number !== undefined && (!Number.isSafeInteger(number) || number < 1)) throw new Error(`--${option} must be a positive integer.`);
+    return number;
+  });
+  if (column !== undefined && line === undefined) throw new Error('--column requires --line.');
   const file = realpathSync(resolve(cwd, positionals[0]));
   if (!/\.[cm]?[jt]sx?$/i.test(file)) throw new Error('Choose a JavaScript or TypeScript source file.');
-  return { values, file, line };
+  return { values, file, line, column };
 }
 
 function testPaths(tests, cwd) {
@@ -123,12 +138,12 @@ export async function runMetrics(args, { cwd = process.cwd(), stdout = process.s
   let temporary;
   let json = args.includes('--json');
   try {
-    const { values, file, line } = parseInput(args, cwd);
+    const { values, file, line, column } = parseInput(args, cwd);
     json = Boolean(values.json);
     if (values.help) { stdout.write(HELP); return 0; }
     const source = readFileSync(file, 'utf8');
     const functions = analyzeSource(source, file);
-    const selected = selectFunctions(functions, { name: values.function, line });
+    const selected = selectFunctions(functions, { name: values.function, line, column });
     let coveragePath;
     if (values.test) {
       const tests = testPaths(values.test, cwd);
@@ -143,7 +158,7 @@ export async function runMetrics(args, { cwd = process.cwd(), stdout = process.s
       schemaVersion: 1, file, sourceHash: hash(source), complexityVariant: 'classic',
       coverageMetric: 'function-body-lines', coverageSource: values.test ? 'test-run' : coveragePath ? 'report' : null,
       coverageReport: values.test ? null : coveragePath ?? null,
-      functions: functionResults(selected, measurements, reason),
+      functions: functionResults(selected, measurements, reason, Boolean(values.breakdown)),
     };
     stdout.write(json ? JSON.stringify(report, null, 2) + '\n' : textReport(report));
     return 0;
