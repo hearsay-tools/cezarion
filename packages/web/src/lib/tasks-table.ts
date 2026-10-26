@@ -1,6 +1,7 @@
 import { runWorkflowLabel } from '@open-mercato/cezar-api-client/contract/run-labels'
 import type { ArchiveFinishedScope, ProcessUsage, RunRecord, RunSummary, RunStatus } from '@open-mercato/cezar-api-client'
 import { isSweepable } from '@open-mercato/cezar-api-client/contract/run-predicates'
+import { matchesRunSearch } from '@open-mercato/cezar-api-client/contract/run-search'
 import { isUsageLimitHold } from '@open-mercato/cezar-api-client/contract/waits'
 import { isOwnedWorker, runTitle, type ListView } from '@/lib/task-groups'
 
@@ -86,7 +87,9 @@ export function workflowLabel(run: Pick<RunSummary, 'workflow'> & { workflowLabe
  * displayed title (`runTitle`: the auto-summary when one exists, per R2 #389), branch and
  * workflow (both the raw name and the label the column prints). Not the task prompt, and not a
  * raw `title` hidden behind a summary: matching on text the table never displays makes rows
- * appear for no visible reason.
+ * appear for no visible reason. `matchesRunSearch` decides, in its `shown` scope; this list reads
+ * the whole query as ONE phrase, which the other lists do not (`mode: 'phrase'`; kept as on `main`,
+ * hearsay-tools/cezarion#1884).
  */
 export function filterRuns(
   runs: readonly RunSummary[],
@@ -95,20 +98,19 @@ export function filterRuns(
   extraText: (run: RunSummary) => string = () => '',
 ): RunSummary[] {
   const listed = runs.filter((run) => !isOwnedWorker(run))
-  const needle = query.trim().toLowerCase()
-  if (!needle) return [...listed]
+  if (!query.trim()) return [...listed]
   return listed.filter((run) =>
-    matchesTaskReferenceNumber(run, needle) ||
-    [runTitle(run), run.branch ?? '', run.workflow, workflowLabel(run), extraText(run)].some((text) =>
-      text.toLowerCase().includes(needle),
-    ),
+    matchesRunSearch(run, query, {
+      scope: 'shown',
+      mode: 'phrase',
+      extras: { displayTitle: runTitle(run), automation: extraText(run), references: () => shownReferenceNumbers(run) },
+    }),
   )
 }
 
-/** References match whole numbers, with an optional #, never a substring of their digits. */
-export function matchesTaskReferenceNumber(run: TaskReferenceInput, token: string): boolean {
-  const match = /^#?(\d+)$/.exec(token)
-  return match !== null && taskReferences(run).some((reference) => reference.number === Number(match[1]))
+/** The reference numbers a row shows, which a search matches whole, never as digits inside text. */
+export function shownReferenceNumbers(run: TaskReferenceInput): number[] {
+  return taskReferences(run).map((reference) => reference.number)
 }
 
 /** How many runs the sweep (`isSweepable`, the server's own predicate) would archive in `scope`.
