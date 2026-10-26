@@ -37,7 +37,7 @@ import { tmpdir } from 'node:os';
 import { agentInputEventSchema } from '@open-mercato/cezar-contract/events';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import type { AgentInput } from '@open-mercato/cezar-contract';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import type { UiEvent } from './ui-events.ts';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
@@ -2518,7 +2518,8 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
   // hearsay-tools/cezarion#784: the agent drives the task's preview browser through
   // `agent-browser --cdp "$CEZ_PREVIEW_CDP_URL"`, so the address must reach each runner's own native
   // process, which the agent's Bash inherits. The session comes from the real tool controller and
-  // `previewCdpSession`, the gate RunManager uses; each mock records its own process env.
+  // `previewCdpSession`, the gate RunManager uses. `mock-env-record.mjs`, preloaded through
+  // NODE_OPTIONS, records each mock's own process env.
   describeRunners('harness parity — preview CDP address in the agent env', () => {
     for (const backend of runners) for (const enabled of [true, false]) {
       it(`${backend} R125 ${enabled ? 'carries' : 'omits'} CEZ_PREVIEW_CDP_URL with CEZ_PREVIEW ${enabled ? 'on' : 'off'}`, async () => {
@@ -2533,7 +2534,9 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           const provisioned = controller.provision({ registerWait: async () => ({ answer: { ok: false, code: 'unavailable', message: 'none' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: [] }) });
           const session = previewCdpSession(provisioned, { host, cockpitOrigin: 'http://127.0.0.1:4321', runId: 'run-r125', worktree: true, context: () => undefined });
           const record = join(dir, 'env.json');
-          const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, env: { ...session.env, CEZ_MOCK_ENV_RECORD: record, CEZ_MOCK_ENV_RECORD_NAMES: 'CEZ_PREVIEW_CDP_URL', CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
+          const recorder = pathToFileURL(fileURLToPath(new URL('../../scripts/mock-env-record.mjs', import.meta.url))).href;
+          const preload = `${process.env.NODE_OPTIONS ?? ''} --import=${recorder}`.trim();
+          const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, env: { ...session.env, NODE_OPTIONS: preload, CEZ_MOCK_ENV_RECORD: record, CEZ_MOCK_ENV_RECORD_NAMES: 'CEZ_PREVIEW_CDP_URL', CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
           expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
           const seen = JSON.parse(readFileSync(record, 'utf8')) as { CEZ_PREVIEW_CDP_URL: string | null };
           if (!enabled) {

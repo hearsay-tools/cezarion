@@ -1,3 +1,4 @@
+import { existsSync } from 'node:fs';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import type { AgentGrant, RunContext } from './host.ts';
 import type { PreviewHostLike } from './registration.ts';
@@ -45,4 +46,11 @@ export function previewCdpSession<S extends { env: Record<string, string>; revok
 ): S {
   if (!previewToolEnabled() || !opts.host?.grantAgent || !opts.cockpitOrigin || !opts.worktree) return session;
   return withPreviewCdp(session, opts.host.grantAgent(opts.runId, opts.context), opts.cockpitOrigin);
+}
+
+/** The preview host's view of a run with a live worktree, read when the agent connects. */
+export function previewRunContext(store: RunContext['store'], dataDir: string, runId: string): RunContext | undefined {
+  const run = store.getRun(runId);
+  if (!run?.worktreePath || !existsSync(run.worktreePath)) return undefined;
+  return { runId, title: run.title, worktreePath: run.worktreePath, dataDir, store };
 }

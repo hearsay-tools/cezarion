@@ -1,6 +1,8 @@
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { PreviewStopRequest, PreviewStopResult, PreviewResultCode, PreviewServeRequest, PreviewServeResult, PreviewServer } from '@open-mercato/cezar-contract';
 import { previewRefusal } from '../ci-wait/errors.ts';
+// RunManager's one import for the preview: the agent's CDP address (hearsay-tools/cezarion#784) too.
+export { previewCdpSession, previewRunContext } from './agent-address.ts';
 
 /**
  * Registration semantics for `cezar_preview_serve` (#781, spec 2026-10-02-live-preview-v1): which
