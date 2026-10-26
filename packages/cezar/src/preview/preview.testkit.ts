@@ -2,7 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { PreviewServerMessage } from '@open-mercato/cezar-contract';
 import { vi } from 'vitest';
-import type { Cdp } from './cdp.ts';
+import type { Cdp, CdpConnection, CdpMessage } from './cdp.ts';
+import type { AgentClient } from './cdp-proxy.ts';
 import type { Viewer } from './session.ts';
 
 /** Fakes shared by the preview session and host tests (#781). */
@@ -29,6 +30,41 @@ export function fakeCdp() {
     for (const fn of listeners.get(event) ?? []) fn(params);
   };
   return { cdp, calls, emit, sent: (method: string) => calls.filter(call => call.method === method) };
+}
+
+/**
+ * A browser connection for the agent's CDP proxy (hearsay-tools/cezarion#784): it grants each
+ * browser session at once and answers every other command with an empty result, recording all.
+ */
+export function fakeConnection() {
+  const requests: Array<{ method: string; params: unknown; sessionId: string | undefined }> = [];
+  let sessions = 0;
+  let markClosed!: () => void;
+  const closed = new Promise<void>(resolve => (markClosed = resolve));
+  const request: CdpConnection['request'] = (method, params, sessionId, onReply) => {
+    requests.push({ method, params, sessionId });
+    onReply(method === 'Target.attachToBrowserTarget' ? { result: { sessionId: `B${++sessions}` } } : { result: {} });
+  };
+  const connection: CdpConnection = {
+    request,
+    call: (method, params, sessionId) => new Promise<CdpMessage>(resolve => request(method, params, sessionId, resolve)),
+    onEvent: () => () => {},
+    session: () => { throw new Error('fakeConnection has no session clients'); },
+    close: () => markClosed(),
+    closed,
+  };
+  return { connection, requests };
+}
+
+/** An agent's proxy socket, as the route hands it to the host. */
+export function fakeAgentClient() {
+  const client = {
+    sent: [] as unknown[],
+    closed: [] as Array<{ code: number; reason: string }>,
+    send(text: string) { client.sent.push(JSON.parse(text)); },
+    close(code: number, reason: string) { client.closed.push({ code, reason }); },
+  };
+  return client satisfies AgentClient;
 }
 
 export function fakeViewer(userAgent = 'Firefox') {

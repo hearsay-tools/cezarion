@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { DevServerState, DevServerStopReason } from './dev-server.ts';
 import { ChromiumError, installCommand } from './chromium.ts';
 import { ChromiumMissingError, PREVIEW_BROWSER_IDLE_MS, PREVIEW_SERVER_IDLE_MS, PreviewHost, type BrowserExit, type BrowserHandle, type RunContext } from './host.ts';
-import { fakeCdp, fakeViewer } from './preview.testkit.ts';
+import { fakeAgentClient, fakeCdp, fakeConnection, fakeViewer } from './preview.testkit.ts';
 
 class FakeDevServer extends EventEmitter {
   state: DevServerState = 'starting';
@@ -50,7 +50,7 @@ function setup(servers: PreviewServer[] = [server(5173)], launchError?: () => Er
   const answering = new Set<number>();
   const devServers: FakeDevServer[] = [];
   const probe = vi.fn(async (port: number) => answering.has(port));
-  const browsers: Array<BrowserHandle & { cdpFake: ReturnType<typeof fakeCdp>; exit(info: BrowserExit): void; profileDir: string }> = [];
+  const browsers: Array<BrowserHandle & { cdpFake: ReturnType<typeof fakeCdp>; connectionFake: ReturnType<typeof fakeConnection>; exit(info: BrowserExit): void; profileDir: string }> = [];
   const host = new PreviewHost({
     probe,
     createServer: opts => {
@@ -65,7 +65,8 @@ function setup(servers: PreviewServer[] = [server(5173)], launchError?: () => Er
       const cdpFake = fakeCdp();
       let exit!: (info: BrowserExit) => void;
       const exited = new Promise<BrowserExit>(resolve => (exit = resolve));
-      const handle = { cdp: cdpFake.cdp, exited, close: vi.fn(), cdpFake, exit, profileDir };
+      const connectionFake = fakeConnection();
+      const handle = { cdp: cdpFake.cdp, connection: connectionFake.connection, pageTargetId: 'PANE', exited, close: vi.fn(), cdpFake, connectionFake, exit, profileDir };
       browsers.push(handle);
       return handle;
     },
@@ -771,6 +772,137 @@ describe('PreviewHost', () => {
       expect(viewer.messages.at(-1)).toMatchObject({ t: 'state', stage: 'needs-approval' });
       await host.handle(other(ctx), viewer, { t: 'run', port: 5173 });
       expect(devServers).toHaveLength(2);
+    });
+  });
+
+  describe('agent CDP connections (hearsay-tools/cezarion#784)', () => {
+    const agentEvents = (store: ReturnType<typeof fakeStore>) =>
+      store.events.filter(entry => entry.event.type === 'preview.agent-browser').map(entry => entry.event.state);
+    const connect = async (host: PreviewHost, token: string) => {
+      const client = fakeAgentClient();
+      const link = await host.connectAgent(token, client);
+      return { client, link };
+    };
+
+    it('refuses a token it never granted, or one revoked', async () => {
+      const { host, ctx, browsers } = make();
+      expect(await host.connectAgent('nope', fakeAgentClient())).toEqual({ refused: expect.stringContaining('no longer valid') });
+      const grant = host.grantAgent(ctx.runId, () => ctx);
+      expect(host.hasAgentGrant(grant.token)).toBe(true);
+      grant.revoke();
+      expect(host.hasAgentGrant(grant.token)).toBe(false);
+      expect(await host.connectAgent(grant.token, fakeAgentClient())).toEqual({ refused: expect.stringContaining('no longer valid') });
+      expect(browsers).toHaveLength(0);
+    });
+
+    it('refuses a run with no worktree, and starts nothing', async () => {
+      const { host, ctx, browsers } = make();
+      const grant = host.grantAgent(ctx.runId, () => undefined);
+      expect(await host.connectAgent(grant.token, fakeAgentClient())).toEqual({ refused: expect.stringContaining('no worktree') });
+      expect(browsers).toHaveLength(0);
+    });
+
+    it('starts Chromium for an agent with no pane open, records connected once, and keeps it while the agent stays', async () => {
+      const { host, ctx, store, browsers } = make();
+      const grant = host.grantAgent(ctx.runId, () => ctx);
+      const first = await connect(host, grant.token);
+      const second = await connect(host, grant.token);
+      expect(browsers).toHaveLength(1);
+      expect(browsers[0]!.connectionFake.requests.filter(r => r.method === 'Target.attachToBrowserTarget')).toHaveLength(2);
+      expect(agentEvents(store)).toEqual(['connected']);
+      await vi.advanceTimersByTimeAsync(PREVIEW_BROWSER_IDLE_MS * 3);
+      expect(browsers[0]!.close).not.toHaveBeenCalled();
+      expect(first.link).not.toHaveProperty('refused');
+      expect(second.link).not.toHaveProperty('refused');
+    });
+
+    it('records disconnected when the last agent leaves, then closes the idle browser after the browser idle time', async () => {
+      const { host, ctx, store, browsers } = make();
+      const grant = host.grantAgent(ctx.runId, () => ctx);
+      const a = await connect(host, grant.token);
+      const b = await connect(host, grant.token);
+      (a.link as { close(): void }).close();
+      expect(agentEvents(store)).toEqual(['connected']);
+      (b.link as { close(): void }).close();
+      expect(agentEvents(store)).toEqual(['connected', 'disconnected']);
+      await vi.advanceTimersByTimeAsync(PREVIEW_BROWSER_IDLE_MS - 1);
+      expect(browsers[0]!.close).not.toHaveBeenCalled();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(browsers[0]!.close).toHaveBeenCalled();
+    });
+
+    it('a viewer leaving while an agent drives starts no idle timer, for the browser or a cezar-run server', async () => {
+      const { host, ctx, browsers, devServers } = make();
+      const viewer = fakeViewer();
+      await host.handle(ctx, viewer, { t: 'open', target: { port: 5173 } });
+      await host.handle(ctx, viewer, { t: 'run', port: 5173 });
+      devServers[0]!.set('up');
+      await flush();
+      const grant = host.grantAgent(ctx.runId, () => ctx);
+      const agent = await connect(host, grant.token);
+      host.detach(ctx.runId, viewer);
+      await vi.advanceTimersByTimeAsync(PREVIEW_SERVER_IDLE_MS + PREVIEW_BROWSER_IDLE_MS);
+      expect(browsers[0]!.close).not.toHaveBeenCalled();
+      expect(devServers[0]!.stop).not.toHaveBeenCalled();
+      (agent.link as { close(): void }).close();
+      await vi.advanceTimersByTimeAsync(PREVIEW_SERVER_IDLE_MS);
+      expect(browsers[0]!.close).toHaveBeenCalled();
+      expect(devServers[0]!.stop).toHaveBeenCalledWith('idle');
+    });
+
+    it("revoking the session's grant closes its sockets with 1008 and records disconnected", async () => {
+      const { host, ctx, store } = make();
+      const grant = host.grantAgent(ctx.runId, () => ctx);
+      const { client } = await connect(host, grant.token);
+      grant.revoke();
+      expect(client.closed).toEqual([{ code: 1008, reason: "The agent's session ended" }]);
+      expect(agentEvents(store)).toEqual(['connected', 'disconnected']);
+    });
+
+    it('release closes the agent sockets and the browser', async () => {
+      const { host, ctx, store, browsers } = make();
+      const grant = host.grantAgent(ctx.runId, () => ctx);
+      const { client } = await connect(host, grant.token);
+      await host.release(ctx.runId);
+      expect(client.closed).toEqual([{ code: 1001, reason: 'The preview browser closed' }]);
+      expect(agentEvents(store)).toEqual(['connected', 'disconnected']);
+      expect(browsers[0]!.close).toHaveBeenCalled();
+    });
+
+    it('a Chromium exit closes the agent sockets with 1011, and a failed browser refuses the next agent without relaunching', async () => {
+      const { host, ctx, browsers } = make();
+      const grant = host.grantAgent(ctx.runId, () => ctx);
+      const { client } = await connect(host, grant.token);
+      browsers[0]!.exit({ signal: 'SIGSEGV', stderrTail: 'Aw, snap' });
+      await flush();
+      expect(client.closed).toEqual([{ code: 1011, reason: 'The preview browser exited' }]);
+      expect(await host.connectAgent(grant.token, fakeAgentClient())).toEqual({ refused: expect.stringContaining('owner can retry') });
+      expect(browsers).toHaveLength(1);
+    });
+
+    it('protects the page the pane streams from the agent', async () => {
+      const { host, ctx } = make();
+      const grant = host.grantAgent(ctx.runId, () => ctx);
+      const { client, link } = await connect(host, grant.token);
+      (link as { fromClient(text: string): void }).fromClient(JSON.stringify({ id: 1, method: 'Target.closeTarget', params: { targetId: 'PANE' } }));
+      expect(client.sent).toEqual([{ id: 1, error: { code: -32000, message: "cezar refuses Target.closeTarget on the page the owner's preview pane shows." } }]);
+    });
+
+    it("opening the agent's page attaches the pane without navigating, and says agent-idle when no agent is connected", async () => {
+      const { host, ctx, browsers } = make();
+      const early = fakeViewer();
+      await host.handle(ctx, early, { t: 'open', target: { agent: true } });
+      expect(stages(early)).toEqual(['agent-idle']);
+      expect(browsers).toHaveLength(0);
+      host.detach(ctx.runId, early);
+      const grant = host.grantAgent(ctx.runId, () => ctx);
+      await connect(host, grant.token);
+      const viewer = fakeViewer();
+      await host.handle(ctx, viewer, { t: 'open', target: { agent: true } });
+      await flush();
+      expect(navigations(browsers[0]!)).toEqual([]);
+      expect(browsers[0]!.cdpFake.sent('Page.startScreencast').length).toBeGreaterThan(0);
+      expect(stages(viewer)).not.toContain('agent-idle');
     });
   });
 });
