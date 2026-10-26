@@ -1,14 +1,19 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
+import { exactLineIndex, HANDOFF_AUTOSAVE_RECORDS_MAX, nextLineIndex, type HandoffAutosaveRecord, type HandoffRecords } from '@open-mercato/cezar-contract/handoff';
+import type { RunStore } from './runs/store.ts';
 
 /**
  * Per-task handoff journal (spec 007): `.ai/cezar/runs/<runId>.handoff.md`,
  * next to the run's NDJSON events and outside the task worktree — it survives
- * worktree removal. Cez seeds the skeleton, appends heartbeats and owns the
- * `## Autosave (cezar)` section (hearsay-tools/cezarion#1004); the agent (told
- * via CEZ_HANDOFF_FILE + the system-prompt fragment below) keeps the
- * "Progress log" and "Resume notes" sections up to date. Everything here is
- * best-effort: the handoff is a journal, never a reason to fail a run.
+ * worktree removal. Cez seeds the skeleton; the agent (told via
+ * CEZ_HANDOFF_FILE + the system-prompt fragment below) keeps the "Progress log"
+ * and "Resume notes" sections up to date. cezar's own records, the autosave
+ * reports, live in the run store (`RunRecord.handoffRecords`) and reach the file
+ * as ONE block that cezar rewrites whole (hearsay-tools/cezarion#1809), so cezar
+ * never edits a line the agent writes. cezar writes no lifecycle line: the run
+ * event log and the run status hold those facts. Everything here is best-effort:
+ * the handoff is a journal, never a reason to fail a run.
  */
 
 export function handoffPath(dataDir: string, runId: string): string {
@@ -47,27 +52,50 @@ export function seedHandoffFile(dataDir: string, run: HandoffSeed): string {
   return file;
 }
 
+const RECORDS_BEGIN = '<!-- cezar:records — cezar rewrites this block whole from its run store; edits here are replaced -->';
+const RECORDS_END = '<!-- /cezar:records -->';
+
+/** The block that shows `records`, or '' when there is nothing to show. */
+function recordsBlock(records: HandoffRecords | undefined): string {
+  const autosave = records?.autosave ?? [];
+  if (autosave.length === 0) return '';
+  const lines = autosave.map((record) => `- ${record.at} — ${record.note}`);
+  return [RECORDS_BEGIN, '## Cezar records', '', '### Autosave', '', ...lines, RECORDS_END, ''].join('\n');
+}
+
 /**
- * Cez's own heartbeat (the janitor pattern): insert `- <ISO ts> — <note>`
- * right under the `## Progress log` header (newest at the top), so the file
- * stays current even when the agent forgets to write. Missing header →
- * append at the end of the file; missing file → no-op.
+ * `text` with its records block replaced by the one for `records` (hearsay-tools/cezarion#1809).
+ * The block runs from the first begin-marker line through the first end-marker line after it; a
+ * begin marker with no end marker is that one line. Without a block, a new one goes right before
+ * the seeded `## Goal` line, or at the start. No other part of `text` is read or changed, and an
+ * empty `text` (no file) stays empty.
  */
-export function appendHandoffHeartbeat(dataDir: string, runId: string, note: string): void {
+export function renderHandoffRecords(text: string, records: HandoffRecords | undefined): string {
+  if (!text) return text;
+  const block = recordsBlock(records);
+  const begin = exactLineIndex(text, RECORDS_BEGIN);
+  if (begin >= 0) {
+    const body = nextLineIndex(text, begin);
+    const end = exactLineIndex(text.slice(body), RECORDS_END);
+    const after = end < 0 ? body : nextLineIndex(text, body + end);
+    return `${text.slice(0, begin)}${block}${text.slice(after)}`;
+  }
+  if (!block) return text;
+  const at = Math.max(exactLineIndex(text, '## Goal'), 0);
+  return `${text.slice(0, at)}${block}\n${text.slice(at)}`;
+}
+
+/** Show `records` in the run's handoff file. Missing file → no-op: seeding is `seedHandoffFile`'s job. */
+function writeHandoffRecords(dataDir: string, runId: string, records: HandoffRecords | undefined): void {
   const file = handoffPath(dataDir, runId);
   let text: string;
   try {
     text = readFileSync(file, 'utf8');
   } catch {
-    return; // not seeded — nothing to heartbeat
+    return;
   }
-  const line = `- ${new Date().toISOString()} — ${note}\n`;
-  const marker = '## Progress log\n';
-  const idx = text.indexOf(marker);
-  const next =
-    idx >= 0
-      ? `${text.slice(0, idx + marker.length)}\n${line}${text.slice(idx + marker.length).replace(/^\n+/, '')}`
-      : `${text}${text.endsWith('\n') || text === '' ? '' : '\n'}${line}`;
+  const next = renderHandoffRecords(text, records);
+  if (next === text) return;
   try {
     writeFileSync(file, next, 'utf8');
   } catch {
@@ -75,115 +103,73 @@ export function appendHandoffHeartbeat(dataDir: string, runId: string, note: str
   }
 }
 
-const AUTOSAVE_HEADER = '## Autosave (cezar)\n';
+type HandoffStore = Pick<RunStore, 'getRun' | 'updateRun'>;
 
-/** Index of `marker` at the start of a line, or -1. */
-function lineStart(text: string, marker: string): number {
-  if (text.startsWith(marker)) return 0;
-  const idx = text.indexOf(`\n${marker}`);
-  return idx < 0 ? -1 : idx + 1;
+/** Show the store's records in the file again. Every session launch does, so its opening message
+ *  carries them after a crash, an agent edit, or a deleted block or file. */
+export function refreshHandoffRecords(store: HandoffStore, dataDir: string, runId: string): void {
+  let records: HandoffRecords | undefined;
+  try {
+    records = store.getRun(runId)?.handoffRecords;
+  } catch {
+    return; // a closed store: the next launch shows them
+  }
+  writeHandoffRecords(dataDir, runId, records);
 }
 
 /**
- * Put `- <ISO ts> — <note>` on top of the `## Autosave (cezar)` section, the one
- * placement every autosave report shares. `entry` sees the newest line under the
- * header (`undefined` when there is none) and names the note, and whether it
- * replaces that line instead of going above it.
+ * Keep `next(current)` as the run's autosave records, newest first. `updateRun` commits a
+ * `handoffRecords` patch at once and throws when the store refuses it; the file shows the records
+ * only after that commit, so it never shows one that a crash would lose.
  */
-function writeAutosaveSection(
-  dataDir: string,
-  runId: string,
-  entry: (newest: string | undefined) => { note: string; replace: boolean },
-): void {
-  const file = handoffPath(dataDir, runId);
-  let text: string;
+function recordAutosave(store: HandoffStore, dataDir: string, runId: string,
+  next: (current: HandoffAutosaveRecord[]) => HandoffAutosaveRecord[]): void {
   try {
-    text = readFileSync(file, 'utf8');
+    const run = store.getRun(runId);
+    if (!run) return;
+    const autosave = next(run.handoffRecords?.autosave ?? []).slice(0, HANDOFF_AUTOSAVE_RECORDS_MAX);
+    writeHandoffRecords(dataDir, runId, store.updateRun(runId, { handoffRecords: { autosave } })?.handoffRecords);
   } catch {
-    return; // not seeded — nothing to report into
-  }
-  const lineFor = (note: string) => `- ${new Date().toISOString()} — ${note}\n`;
-  const header = lineStart(text, AUTOSAVE_HEADER);
-  const progress = lineStart(text, '## Progress log\n');
-  let next: string;
-  if (header >= 0) {
-    const end = header + AUTOSAVE_HEADER.length;
-    const rest = text.slice(end).replace(/^\n+/, '');
-    const eol = rest.indexOf('\n');
-    const first = eol < 0 ? rest : rest.slice(0, eol);
-    const newest = first.startsWith('- ') ? first : undefined;
-    const { note, replace } = entry(newest);
-    const kept = replace && newest !== undefined ? rest.slice(first.length + 1) : rest;
-    next = `${text.slice(0, end)}\n${lineFor(note)}${kept}`;
-  } else {
-    const line = lineFor(entry(undefined).note);
-    next = progress >= 0
-      ? `${text.slice(0, progress)}${AUTOSAVE_HEADER}\n${line}\n${text.slice(progress)}`
-      : `${text === '' ? '' : text.replace(/\n*$/, '\n\n')}${AUTOSAVE_HEADER}\n${line}`;
-  }
-  try {
-    writeFileSync(file, next, 'utf8');
-  } catch {
-    // best effort
+    // The handoff is a journal, never a reason to fail; an uncommitted record stays out of the file.
   }
 }
 
-/**
- * Cez's autosave report (hearsay-tools/cezarion#1004): insert `- <ISO ts> — <note>`
- * right under the `## Autosave (cezar)` header (newest at the top), never in the
- * Progress log, whose top lines are the agent's own summary (variant compare
- * column, draft-PR body). The first report creates the section right before
- * `## Progress log`, so an agent rewriting the end of the file (Resume notes)
- * leaves it alone; no Progress log → end of the file; missing file → no-op.
- */
-export function appendHandoffAutosaveReport(dataDir: string, runId: string, note: string): void {
-  writeAutosaveSection(dataDir, runId, () => ({ note, replace: false }));
+/** Cez's autosave report (hearsay-tools/cezarion#1004): a commit or a skip, newest first. The
+ *  block shows it, never the Progress log, whose lines are the agent's own. */
+export function recordHandoffAutosave(store: HandoffStore, dataDir: string, runId: string, note: string): void {
+  recordAutosave(store, dataDir, runId, (current) => [{ at: new Date().toISOString(), note }, ...current]);
 }
 
 const SHA_UNAVAILABLE = '(sha unavailable)';
-const PERIODIC_SHA = String.raw`[0-9a-f]+|\(sha unavailable\)`;
-/** A whole periodic line as `periodicAutosaveNote` writes it; anything else is not one.
- *  The branch slot takes anything but a line break: Git accepts Unicode whitespace in a ref
- *  name, which `\S` and `.` refuse, and the exact re-render check rejects any line that is
- *  not cezar's own. */
-const PERIODIC_LINE = new RegExp(
-  String.raw`^- \d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z — (periodic: ([1-9]\d*) cezar autosave commit\(s\) on ([^\r\n]+?), ` +
-    String.raw`first (${PERIODIC_SHA}), latest (${PERIODIC_SHA}); .*)$`,
-);
 
-function periodicAutosaveNote(count: number, branch: string, first: string | null, latest: string | null): string {
-  return `periodic: ${count} cezar autosave commit(s) on ${branch}, first ${first ?? SHA_UNAVAILABLE}, latest ${latest ?? SHA_UNAVAILABLE}; ` +
+function periodicAutosaveNote({ count, branch, first, latest }: NonNullable<HandoffAutosaveRecord['periodic']>): string {
+  return `periodic: ${count} cezar autosave commit(s) on ${branch ?? 'detached HEAD'}, first ${first ?? SHA_UNAVAILABLE}, latest ${latest ?? SHA_UNAVAILABLE}; ` +
     `to fold the latest into your own commits while it is HEAD, run \`git reset --soft ${latest ?? 'HEAD'}~1\``;
 }
 
 /**
- * The periodic timer's commit (hearsay-tools/cezarion#1004): a clean closing flush
- * reports nothing, so the timer reports its own commits, as ONE line per run of
- * consecutive periodic commits on one branch — a line every 90 s would bury the
- * section. When the newest line is such a line for `branch`, it is rewritten with
- * the count + 1, its first sha, this `sha` as the latest and a new timestamp. Any
- * other newest line (a turn-end or run-finalize report, another branch, a line
- * someone edited) gets a new line above it, placed as `appendHandoffAutosaveReport`
- * places one. `sha: null` is a commit whose hash could not be read back; `branch:
- * null` is a detached HEAD. Missing file → no-op.
+ * The periodic timer's commit (hearsay-tools/cezarion#1004): a clean closing flush reports
+ * nothing, so the timer reports its own commits, as ONE record per run of consecutive periodic
+ * commits on one branch — a record every 90 s would bury the block. When the newest record is a
+ * periodic one for `commit.branch`, it is replaced with the count + 1, its first sha, this sha as
+ * the latest and a new time; any other newest record gets a new one above it. The merge reads the
+ * record's fields, never the file, so an agent edit cannot restart the count. `sha: null` is a
+ * commit whose hash could not be read back; `branch: null` is a detached HEAD.
  */
 export function recordHandoffPeriodicAutosave(
+  store: HandoffStore,
   dataDir: string,
   runId: string,
   commit: { sha: string | null; branch: string | null },
 ): void {
-  const branch = commit.branch ?? 'detached HEAD';
-  writeAutosaveSection(dataDir, runId, (newest) => {
-    const match = newest === undefined ? null : PERIODIC_LINE.exec(newest);
-    if (match) {
-      const [, note, count, lineBranch, first, latest] = match;
-      const sha = (value: string) => (value === SHA_UNAVAILABLE ? null : value);
-      // Only a line exactly as cezar wrote it is continued: an edit starts a new one.
-      if (lineBranch === branch && note === periodicAutosaveNote(Number(count), branch, sha(first!), sha(latest!))) {
-        return { note: periodicAutosaveNote(Number(count) + 1, branch, sha(first!), commit.sha), replace: true };
-      }
-    }
-    return { note: periodicAutosaveNote(1, branch, commit.sha, commit.sha), replace: false };
+  recordAutosave(store, dataDir, runId, (current) => {
+    const [newest, ...older] = current;
+    const run = newest?.periodic && newest.periodic.branch === commit.branch ? newest.periodic : undefined;
+    const periodic = run
+      ? { ...run, count: run.count + 1, latest: commit.sha }
+      : { branch: commit.branch, count: 1, first: commit.sha, latest: commit.sha };
+    const record = { at: new Date().toISOString(), note: periodicAutosaveNote(periodic), periodic };
+    return run ? [record, ...older] : [record, ...current];
   });
 }
 
@@ -204,7 +190,7 @@ export function deleteHandoff(dataDir: string, runId: string): void {
   }
 }
 
-const HANDOFF_AUTOSAVE_NOTE = `A "## Autosave (cezar)" section, when present, is cezar's record of an autosave commit on your branch (with the command that folds it back) or of work it left uncommitted; leave it in place.`;
+const HANDOFF_AUTOSAVE_NOTE = `The "Cezar records" block near the top, when present, is cezar's record of autosave commits on your branch (with the command that folds one back) or of work it left uncommitted; cezar rewrites the whole block, so never edit it.`;
 const HANDOFF_READ_STEP = `1. At the start of work, read it — "Resume notes" left by a previous session is your starting context. ${HANDOFF_AUTOSAVE_NOTE}`;
 /** Step 1 when the launch's opening message already carries the file (hearsay-tools/cezarion#1584). */
 const HANDOFF_INJECTED_STEP = `1. Its contents as of this launch open your first message for this session, in the cezar context block with id "handoff"; read the file again only when you need a later version. "Resume notes" left by a previous session is your starting context. ${HANDOFF_AUTOSAVE_NOTE}`;

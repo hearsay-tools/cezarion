@@ -1,0 +1,16 @@
+id: handoff-write-outside-writers
+valid:
+  # The three writers.
+  - "export function seedHandoffFile(dataDir: string, run: HandoffSeed) { writeFileSync(file, header, 'utf8') }"
+  - "function writeHandoffRecords(dataDir: string, runId: string) { const write = () => writeFileSync(file, next, 'utf8'); write() }"
+  - 'export function deleteHandoff(dataDir: string, runId: string) { rmSync(handoffPath(dataDir, runId), { force: true }) }'
+  # A read, and a directory for the seed.
+  - "function readHandoff(dataDir: string, runId: string) { return readFileSync(handoffPath(dataDir, runId), 'utf8') }"
+  - 'mkdirSync(dirname(file), { recursive: true })'
+invalid:
+  # The heartbeat writer that hearsay-tools/cezarion#1809 removed, and its autosave section.
+  - "export function appendHandoffHeartbeat(dataDir: string, runId: string, line: string) { appendFileSync(handoffPath(dataDir, runId), line) }"
+  - "function writeAutosaveSection(file: string, text: string) { writeFileSync(file, text, 'utf8') }"
+  - 'const later = async () => fs.promises.writeFile(file, text)'
+  - 'function rotate(file: string) { renameSync(file, `${file}.old`) }'
+  - 'function drop(file: string) { unlinkSync(file) }'

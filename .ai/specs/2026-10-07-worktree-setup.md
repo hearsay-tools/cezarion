@@ -149,7 +149,8 @@ Existing v1 events, no new event type, no step-rail change:
   equivalent, or "worktree setup skipped — worktreeSetup in
   .ai/cezar/config.json is invalid (<reason>)".
 - The same outcome line is appended to the handoff file through
-  `appendHandoffHeartbeat`.
+  `appendHandoffHeartbeat`. (Removed by hearsay-tools/cezarion#1809: cezar writes no lifecycle
+  line into the handoff file; the note is the record.)
 
 ## What the agent is told
 

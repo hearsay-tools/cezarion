@@ -2985,3 +2985,52 @@ describe('RunRecord.worktreeSetup (#917)', () => {
     expect(runRecordSchema.parse(LEGACY_RUN).worktreeSetup).toBeUndefined();
   });
 });
+
+describe('RunRecord.handoffRecords (hearsay-tools/cezarion#1809)', () => {
+  let dataDir: string;
+  beforeEach(() => { dataDir = mkdtempSync(join(tmpdir(), 'cez-store-handoff-')); });
+  afterEach(() => { rmSync(dataDir, { recursive: true, force: true }); });
+
+  const records = { autosave: [
+    { at: '2026-10-25T10:01:00.000Z', note: 'periodic: 2 cezar autosave commit(s) on cez/x', periodic: { branch: 'cez/x', count: 2, first: 'aaa1111', latest: 'bbb2222' } },
+    { at: '2026-10-25T10:00:00.000Z', note: 'turn end: cezar autosave committed 0ld0000 on cez/x' },
+  ] };
+
+  // The handoff file shows a record only after this commit, so a crash never shows one it lost.
+  it('commits in the call, without a flush, and round-trips through a reopen', () => {
+    seedRuns(dataDir, [LEGACY_RUN]);
+    const store = RunStore.open(dataDir, { keepLive: true });
+    expect(store.updateRun('legacy-1', { handoffRecords: records })?.handoffRecords).toEqual(records);
+    expect(readPersistedRuns(dataDir).find((run) => run.id === 'legacy-1').handoffRecords).toEqual(records);
+    store.close();
+    const reopened = RunStore.open(dataDir, { keepLive: true });
+    expect(reopened.getRun('legacy-1')?.handoffRecords).toEqual(records);
+    reopened.close();
+  });
+
+  it('throws when the database refuses the commit, and keeps the records it had', () => {
+    seedRuns(dataDir, [{ ...LEGACY_RUN, handoffRecords: records }]);
+    const store = RunStore.open(dataDir, { keepLive: true });
+    const release = blockRunWrites(dataDir);
+    try {
+      expect(() => store.updateRun('legacy-1', { handoffRecords: { autosave: [] } })).toThrow();
+    } finally { release(); }
+    expect(store.getRun('legacy-1')?.handoffRecords).toEqual(records);
+    expect(readPersistedRuns(dataDir).find((run) => run.id === 'legacy-1').handoffRecords).toEqual(records);
+    store.close();
+  });
+
+  it('loads a record with unreadable records, without the field', () => {
+    seedRuns(dataDir, [{ ...LEGACY_RUN, handoffRecords: { autosave: [{ at: 1 }] } }]);
+    const store = RunStore.open(dataDir, { keepLive: true });
+    expect(store.getRun('legacy-1')).toBeDefined();
+    expect(store.getRun('legacy-1')?.handoffRecords).toBeUndefined();
+    store.close();
+  });
+
+  it('is absent on a record that predates it, and stripped by a schema that predates the key', () => {
+    expect(runRecordSchema.parse(LEGACY_RUN).handoffRecords).toBeUndefined();
+    const previous = contractRunRecordSchema.omit({ handoffRecords: true });
+    expect('handoffRecords' in previous.parse({ ...LEGACY_RUN, handoffRecords: records })).toBe(false);
+  });
+});

@@ -40,7 +40,7 @@ import {
   WAIT_LIMIT,
 } from '@open-mercato/cezar-contract/waits';
 import { engineOwnsRun, isSweepable } from '@open-mercato/cezar-contract/run-predicates';
-import type { ArchiveFinishedScope, ArchivedRunsResponse, CiWait, PrWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry, WorkerWait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
+import type { ArchiveFinishedScope, ArchivedRunsResponse, ArchivePullRequestIdentity, CiWait, PrWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, MergedPullRequest, RunPullRequest, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry, WorkerWait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { matchesRunSearch, sqlPrefilterTokens, type AutomationNames } from '@open-mercato/cezar-contract/run-search';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { HistoryCompressor } from './history-compressor.ts';
@@ -53,13 +53,12 @@ import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartT
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { archivePullRequests, pullRequestKey, mergePullRequests } from './pull-requests.ts';
-import type { ArchivePullRequestIdentity, MergedPullRequest, RunPullRequest } from '@open-mercato/cezar-contract';
 import { extractTaskRefs, MAX_REF } from './task-refs.ts';
 // Type-only module (zod + nothing else), so this cannot cycle back into the store.
 import { workflowDefSchema } from '../workflows/types.ts';
 import { waitInputId } from '../workflows/waits.ts';
 
-import { RUNNER_IDS } from '../core/agent-runner.ts';
+import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import {
   ARCHIVED_ROOT, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunConflictError, RunDatabase, RunDatabaseBusyError,
   type RunConflictEvidence, type RunDatabaseChanges, type RunDatabaseCommit, type RunFenceClaim, type RunRow, type RunRowInput, type RunWriteFence,
@@ -69,8 +68,6 @@ import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.
 import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
 import { RunStoreOpenError, toRunStoreOpenError } from './store-open-error.ts';
 import { claimOwnerLive, closeClaimSession, openClaimSession, type ClaimOwner } from './run-claims.ts';
-
-import type { RunnerId } from '../core/agent-runner.ts';
 
 export type RunStatus = 'queued' | 'running' | 'waiting' | 'review' | 'done' | 'failed' | 'cancelled';
 export type StepStatus =
@@ -141,6 +138,8 @@ export const runRecordSchema = contractRunRecordSchema.extend({
   automationTrigger: contractRunRecordSchema.shape.automationTrigger.unwrap().extend({
     automationRevision: z.number().int().positive(),
   }).optional(),
+  /** The handoff file's autosave records (hearsay-tools/cezarion#1809); unreadable drops the field. */
+  handoffRecords: contractRunRecordSchema.shape.handoffRecords.catch(undefined),
 });
 
 /** The keys an older record used for parks. Schema 4 reads the CI and monitoring ones into
@@ -3128,9 +3127,9 @@ export class RunStore extends EventEmitter {
     }
     // Restore before mutating so a throw leaves status and archived unchanged (#818 S3).
     if (archived === false) restoreHistory(this.dataDir, id);
-    // Only opted-in completion needs this transaction. Default-off Finish must
-    // retain its best-effort write path so a locked database cannot stop cleanup.
-    if ((normalized.status === 'done' && (run.archiveWhenDone || run.autoMergePr)) ||
+    // Opted-in completion and the handoff's records (the file shows only committed ones) take this
+    // transaction. Default-off Finish keeps its best-effort write so a locked database cannot stop cleanup.
+    if ((normalized.status === 'done' && (run.archiveWhenDone || run.autoMergePr)) || normalized.handoffRecords !== undefined ||
       normalized.archiveWhenDone !== undefined || normalized.autoMergePr !== undefined) {
       const next = { ...run, ...this.redactPatch(normalized) };
       if (archived !== undefined) archiveFields(next, archived, new Date().toISOString());

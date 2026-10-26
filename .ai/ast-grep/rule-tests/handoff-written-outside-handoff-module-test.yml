@@ -1,0 +1,14 @@
+id: handoff-written-outside-handoff-module
+valid:
+  # Through handoff.ts, and reads.
+  - 'recordHandoffAutosave(this.store, this.dataDir, runId, message)'
+  - 'const text = readFileSync(handoffPath(dataDir, run.id), "utf8")'
+  # The store removes the file with its run; a removal adds no line.
+  - 'rmSync(this.handoffPath(id), { force: true })'
+  # A write to another file.
+  - 'writeFileSync(join(dataDir, "runs", `${id}.ndjson`), lines)'
+invalid:
+  - "appendFileSync(handoffPath(this.dataDir, runId), `- ${at} — turn complete\\n`)"
+  - 'writeFileSync(handoffFile, text)'
+  - 'await fs.promises.writeFile(process.env.CEZ_HANDOFF_FILE!, text)'
+  - 'renameSync(tmp, this.handoffPath(id))'

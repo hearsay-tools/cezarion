@@ -93,6 +93,11 @@ describe('session-start context through every native wire (hearsay-tools/cezario
       expect(contextLines(run.id)).toEqual([expect.stringMatching(/^session context: handoff applied \(\d+ B, .+\); vision applied \(\d+ B, docs\/vision\.md\); recipient applied \(\d+ B\)$/)]);
 
       writeFileSync(join(root, 'docs/vision.md'), 'VISION-V2\n');
+      // The agent's own line since the first launch; cezar writes none at a turn end (hearsay-tools/cezarion#1809).
+      const handoff = handoffPath(join(root, '.ai/cezar'), run.id);
+      writeFileSync(handoff, readFileSync(handoff, 'utf8').replace('## Progress log\n\n', '## Progress log\n\n- 10:00 — R120 progress\n'));
+      // A record the store committed before a crash, which never reached the file: the launch shows it.
+      store.updateRun(run.id, { handoffRecords: { autosave: [{ at: '2026-10-25T10:00:00.000Z', note: 'turn end: R120 record' }] } });
       const before = messages().length;
       expect(manager.continueRun(run.id, { text: 'Keep working.' })).toEqual({ ok: true });
       await until(() => messages().length > before);
@@ -101,10 +106,10 @@ describe('session-start context through every native wire (hearsay-tools/cezario
       expect(count(second, '<cezar-context id="handoff"')).toBe(1);
       expect(refreshed).toContain('VISION-V2');
       expect(refreshed).not.toContain('VISION-V1');
-      // The whole handoff as it stands at this launch, including what the first launch added.
-      const handoff = readFileSync(handoffPath(join(root, '.ai/cezar'), run.id), 'utf8');
-      expect(handoff).toContain('complete — status=');
-      expect(refreshed).toContain('complete — status=');
+      // The whole handoff as it stands at this launch, including what was written since the first.
+      expect(readFileSync(handoff, 'utf8')).toContain('- 10:00 — R120 progress');
+      expect(refreshed).toContain('- 10:00 — R120 progress');
+      expect(refreshed).toContain('### Autosave\n\n- 2026-10-25T10:00:00.000Z — turn end: R120 record\n');
       expect(second.endsWith('Keep working.')).toBe(true);
       expect(contextLines(run.id)).toHaveLength(2);
     }, 60_000);

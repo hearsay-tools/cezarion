@@ -7,7 +7,7 @@ import type { ScheduleTaskAnswer, ScheduleTaskRequest, ScheduledTasksAnswer, Sch
 import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type CezarWaitRequestInput, type DoneErrorCode, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
-import { AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, turnEndHeartbeat, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
+import { AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 import { nextLineEntry } from './line-order.ts';
 import { executionAccount } from './execution-account.ts';
@@ -50,11 +50,11 @@ import {
   normalizeModelForBackend,
 } from '../core/model-identity.ts';
 import {
-  appendHandoffAutosaveReport,
-  appendHandoffHeartbeat,
   handoffInstructions,
   handoffPath,
+  recordHandoffAutosave,
   recordHandoffPeriodicAutosave,
+  refreshHandoffRecords,
   seedHandoffFile,
 } from '../handoff.ts';
 import { buildSessionContext, formatSessionContextReport, type SessionContext } from '../session-context.ts';
@@ -437,9 +437,8 @@ export function periodicAutosaveEnabled(env: NodeJS.ProcessEnv = process.env): b
   return env.CEZ_AUTOSAVE === '1';
 }
 
-/** The handoff `## Autosave (cezar)` line and cockpit note for a save that committed or
- *  left work behind (hearsay-tools/cezarion#1004): a resumed session reads this, not
- *  `git log`. Never a Progress-log line: the top of that log is the agent's own summary. */
+/** The handoff block's autosave record and cockpit note for a save that committed or left work
+ *  behind (hearsay-tools/cezarion#1004): a resumed session reads this, not `git log`. */
 function autosaveReportLine(reason: AutosaveReason, outcome: AutosaveOutcome, taskBranch: string | undefined): string {
   const where = outcome.branch ?? 'detached HEAD';
   if (outcome.result === 'committed') {
@@ -1892,6 +1891,7 @@ export class RunManager {
     const run = this.store.getRun(runId);
     const role = run?.delegation?.role === 'worker' ? 'worker' : 'parent';
     const handoff = handoffPath(this.dataDir, runId);
+    refreshHandoffRecords(this.store, this.dataDir, runId);
     // A backend's own slash command only works at character zero (#676); a prefix would turn
     // it into plain text, so such a launch gets no context and keeps the read instruction.
     const context: SessionContext = leadingSlashSkillName(openingPrompt)
@@ -2257,7 +2257,6 @@ export class RunManager {
     state.completedStepId = state.currentStepId;
     if (close?.summary) this.store.appendEvent(runId, { type: 'note', message: close.summary });
     this.store.appendEvent(runId, { type: 'lifecycle', message: step ? 'step complete — session closed' : 'goal achieved — session closed', via: close?.via ?? 'done-line' });
-    appendHandoffHeartbeat(this.dataDir, runId, step ? 'turn complete — step done, session closed' : 'turn complete — goal achieved, session closed');
     this.cancelOpenWaits(runId);
     session?.end();
   }
@@ -7893,7 +7892,6 @@ export class RunManager {
     }
     this.store.updateStep(runId, stepId, { status: 'failed', error: WAKE_SESSION_CLOSED_ERROR, finishedAt: new Date().toISOString() });
     this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
-    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
     this.store.updateRun(runId, { status: 'failed', error: `continue failed: ${WAKE_SESSION_CLOSED_ERROR}`, finishedAt: new Date().toISOString(), currentStepId: undefined });
     this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${WAKE_SESSION_CLOSED_ERROR}` });
     this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
@@ -7904,7 +7902,6 @@ export class RunManager {
     this.store.updateStep(runId, stepId, { status: 'cancelled', finishedAt: new Date().toISOString() });
     this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentStepId: undefined });
     this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
-    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=cancelled`);
   }
 
   /** The Continue's step is done: settle the run, or the workflow step it resumed. Returns the
@@ -7959,7 +7956,6 @@ export class RunManager {
       // The workflow remainder is a crash boundary. Persist it before the
       // finally block awaits worktree autosave and installs its in-memory job.
       this.store.flush();
-      appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — remaining workflow queued`);
       return undefined;
     }
     this.store.updateRun(runId, { workflowResumeStepId: undefined });
@@ -7969,7 +7965,6 @@ export class RunManager {
   /** Settle the run after a successful Continue. */
   private async succeedContinuation(runId: string, stepId: string): Promise<void> {
     await this.settleSuccess(runId);
-    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=done`);
   }
 
   /** The Continue's session failed, or its settlement threw: fail its step, then park the run
@@ -7986,7 +7981,6 @@ export class RunManager {
     const message = turn.sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
     sink.sessionEnded('error', message);
     this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: new Date().toISOString() });
-    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
     this.withdrawCezarHumanWaits(runId);
     const delivery = this.holdsClosingWakes(runId) && !state.cancelled ? this.failedWakeDelivery(runId, message) : 'settle';
     if (delivery === 'park') {
@@ -9763,7 +9757,6 @@ export class RunManager {
       if (step.status === 'running') this.store.updateStep(runId, step.id, { status: 'waiting' });
     }
     this.store.updateRun(runId, { status: 'waiting' });
-    appendHandoffHeartbeat(this.dataDir, runId, 'session idle-closed — status=waiting; Continue to resume');
     this.store.flush();
   }
 
@@ -9810,7 +9803,6 @@ export class RunManager {
     this.store.appendEvent(runId, { type: 'lifecycle', stepId, message: `step "${stepId}" ended without done — Continue to resume it` });
     if (run.delegation?.role === 'worker' && await this.settleIdleClosedWorker(runId, stepId)) return;
     this.store.updateRun(runId, { status: 'waiting' });
-    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" ended without done — status=waiting; Continue to resume`);
     this.store.flush();
   }
 
@@ -10045,9 +10037,9 @@ export class RunManager {
    * itself (`turn-end`, a fresh step or a Continue), an acknowledgement that lands after it
    * (`ack`), input readiness for a refused autonomous nudge (`ready`), and the completion gate's
    * refusal of a live session's done outside a turn end (`gate`). It takes a done to the completion
-   * gate, gathers the facts, lets the pure rule (`decideTurnEnd`) decide, carries out the decision
-   * and writes the heartbeat line. False when nothing was settled: the done closed the session, or
-   * the input checkpoint failed.
+   * gate, gathers the facts, lets the pure rule (`decideTurnEnd`) decide and carries out the
+   * decision. False when nothing was settled: the done closed the session, or the input checkpoint
+   * failed.
    */
   private settleTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn,
     refusal?: CompletionRefusal): boolean {
@@ -10071,7 +10063,7 @@ export class RunManager {
     if (entry !== 'turn-end' && decision.kind === 'park' && this.waiting.has(runId)) return true;
     const outcome = this.carryOutTurnEnd(runId, state, stepId, decision, refused, noteRefusal);
     if (outcome.kind === 'done') return false;
-    this.writeTurnHeartbeat(runId, entry, outcome);
+    this.settledTurnOutcome(runId, entry, outcome);
     return true;
   }
 
@@ -10083,7 +10075,7 @@ export class RunManager {
       this.clearHeldHumanInputTimer(state);
       if (state.agentInputError) return false;
     }
-    this.writeTurnHeartbeat(runId, entry, { kind: 'park', keepsSlot: this.monitoring.has(runId) });
+    this.settledTurnOutcome(runId, entry, { kind: 'park', keepsSlot: this.monitoring.has(runId) });
     return true;
   }
 
@@ -10093,7 +10085,7 @@ export class RunManager {
     this.recordDoneAtBoundary(state, false, turn.doneRequest);
     this.clearHeldHumanInputTimer(state);
     if (state.agentInputError) return false;
-    this.writeTurnHeartbeat(runId, entry, { kind: 'nudge', cause: 'no-wait', autonomous: true });
+    this.settledTurnOutcome(runId, entry, { kind: 'nudge', cause: 'no-wait', autonomous: true });
     return true;
   }
 
@@ -10290,13 +10282,12 @@ export class RunManager {
     return this.parkedOutcome(runId);
   }
 
-  /** `turn complete — status=<word>` (spec 007): the handoff stays current when the agent writes
-   *  nothing. The completion gate's refusal outside a turn end writes none, and input readiness
-   *  writes none while the nudge still waits for it. */
-  private writeTurnHeartbeat(runId: string, entry: 'turn-end' | 'ack' | 'ready' | 'gate', outcome: TurnEndOutcome): void {
-    const word = turnEndHeartbeat(outcome);
-    if (!word || entry === 'gate' || (entry === 'ready' && outcome.kind === 'readiness')) return;
-    appendHandoffHeartbeat(this.dataDir, runId, `turn complete — status=${word}`);
+  /** The outcome a settled turn reached, for the parity cells that prove which path ran
+   *  (hearsay-tools/cezarion#1809, which removed the handoff heartbeat line that recorded it). No
+   *  outcome for the completion gate's refusal outside a turn end, nor while input readiness waits. */
+  private settledTurnOutcome(runId: string, entry: 'turn-end' | 'ack' | 'ready' | 'gate' | 'reply-timer',
+    outcome: TurnEndOutcome): TurnEndOutcome | undefined {
+    return entry === 'gate' || (entry === 'ready' && outcome.kind === 'readiness') ? undefined : outcome;
   }
 
   /** The nudge a turn end with no wait or done gets: one automatic turn, charged to the
@@ -10458,7 +10449,7 @@ export class RunManager {
       state.noWaitNudgeParked = session;
       // The note names the nudge left unanswered (hearsay-tools/cezarion#1301).
       this.openTurnEndHumanWait(runId, state, state.currentStepId, 'no-wait', state.completionNudged === session ? COMPLETION_NO_REPLY_NOTE : NO_WAIT_NO_REPLY_NOTE);
-      appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — status=waiting');
+      this.settledTurnOutcome(runId, 'reply-timer', { kind: 'park', keepsSlot: false });
     }, this.noWaitNudgeReplyMs);
     timer.unref?.();
     state.noWaitNudgeReplyTimer = timer;
@@ -10571,8 +10562,8 @@ export class RunManager {
 
   /** Keep a separate maintenance hold until autosave proves all its processes exited.
    *  Commits only while HEAD is the run's recorded branch (hearsay-tools/cezarion#1004), and
-   *  reports a commit or a skip in the handoff's `## Autosave (cezar)` section and as a note;
-   *  a periodic save reports only a commit, in the handoff alone, coalesced with the
+   *  records a commit or a skip in the run store, shown in the handoff's records block, and as a
+   *  note; a periodic save records only a commit, with no note, merged with the
    *  periodic commits right before it. A run with no recorded branch keeps committing on
    *  whatever HEAD is. */
   private async saveWorktree(runId: string, state: ActiveRun, reason: AutosaveReason): Promise<void> {
@@ -10624,12 +10615,12 @@ export class RunManager {
         // periodic commits and no note, as a note every 90 s would flood the timeline. A
         // periodic skip stays silent; the closing flush reports one with the final count.
         if (outcome.result === 'committed') {
-          try { recordHandoffPeriodicAutosave(this.dataDir, runId, outcome); } catch { /* The handoff is a journal, never a reason to fail. */ }
+          recordHandoffPeriodicAutosave(this.store, this.dataDir, runId, outcome);
         }
       } else if (outcome) {
         const message = autosaveReportLine(reason, outcome, taskBranch);
         note(message);
-        try { appendHandoffAutosaveReport(this.dataDir, runId, message); } catch { /* The handoff is a journal, never a reason to fail. */ }
+        recordHandoffAutosave(this.store, this.dataDir, runId, message);
       }
     }, error => note(`${reason} autosave failed: ${String(error)}; working files remain in ${state.cwd}`)).finally(() => {
       if (this.autosaveTasks.get(runId) === entry) this.autosaveTasks.delete(runId);
@@ -10740,7 +10731,6 @@ export class RunManager {
     });
     const endNote = worktreeSetupEndNote(outcome);
     emit({ type: 'note', message: endNote });
-    appendHandoffHeartbeat(this.dataDir, runId, endNote);
     return worktreeSetupAgentNote(outcome);
   }
 
@@ -10778,7 +10768,6 @@ export class RunManager {
       finishedAt: new Date().toISOString(),
     });
     emit({ type: 'step-end', stepId, status, ...(error ? { error } : {}) });
-    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=${status}`);
   }
 }
 

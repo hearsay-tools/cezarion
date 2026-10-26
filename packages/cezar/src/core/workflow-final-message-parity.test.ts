@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as realDelay } from 'node:timers/promises';
@@ -7,8 +7,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 import { FINAL_MESSAGE_CRITERIA, HARNESS_ADAPTERS, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
-import { handoffPath } from '../handoff.ts';
 import { NO_WAIT_NO_REPLY_NOTE, NO_WAIT_NUDGE_NOTE } from '../workflows/run.ts';
+import { watchTurnOutcomes } from '../workflows/turn-outcomes.testkit.ts';
 
 // Poll native process/store signals while the product's reply clock is frozen.
 async function waitForNativeContent(ready: () => boolean): Promise<void> {
@@ -74,11 +74,11 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           continue;
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
-          await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId, repoRoot }) => {
+          await withOwnedInputRun(backend, 'baseline', async ({ store, manager, runId, parentRunId }) => {
             manager.enqueueOwnedRun(runId);
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
             const startSeq = store.readEvents(runId).length;
-            const handoff = handoffPath(join(repoRoot, '.ai/cezar'), runId);
+            const turns = watchTurnOutcomes();
             expect(manager.steerWorker(runId, {
               id: randomUUID(), source: 'agent', parentRunId,
               text: promptFor(backend, 'silent-tail-ack-delay'), createdAt: new Date().toISOString(),
@@ -88,7 +88,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
             await waitFor(() => nudgeNotes(store.readEvents(runId).slice(startSeq)).length === 1);
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
-            expect(readFileSync(handoff, 'utf8')).toContain('status=running (no-wait nudge)');
+            expect(turns.words(runId)).toContain('running (no-wait nudge)');
           });
         }, 30_000);
         continue;
@@ -109,9 +109,9 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
           continue;
         }
         it(`${backend} ${row.id} ${row.name}`, async () => {
-          await withOwnedInputRun(backend, 'silent-tail-no-reply', async ({ store, manager, runId, repoRoot }) => {
+          await withOwnedInputRun(backend, 'silent-tail-no-reply', async ({ store, manager, runId }) => {
             shortenNudgeBound(manager as unknown as { noWaitNudgeReplyMs?: number });
-            const handoff = handoffPath(join(repoRoot, '.ai/cezar'), runId);
+            const turns = watchTurnOutcomes();
             const startSeq = store.readEvents(runId).length;
             manager.enqueueOwnedRun(runId);
             await waitFor(() => nudgeNotes(store.readEvents(runId).slice(startSeq)).length === 1);
@@ -124,7 +124,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             expect(manager['busySlots']()).toBe(0);
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(noReplyNotes(store.readEvents(runId))).toHaveLength(1);
-            expect(readFileSync(handoff, 'utf8')).toContain('status=waiting');
+            expect(turns.words(runId)).toContain('waiting');
           });
         }, 30_000);
         continue;
@@ -209,9 +209,9 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
       if (row.id === 'F10') {
         it(`${backend} ${row.id} ${row.name}`, async () => {
           const gateRoot = backend === 'cursor' ? mkdtempSync(join(tmpdir(), 'cez-nudge-content-')) : undefined;
-          try { await withOwnedInputRun(backend, 'silent-tail-slow-done', async ({ store, manager, runId, repoRoot }) => {
+          try { await withOwnedInputRun(backend, 'silent-tail-slow-done', async ({ store, manager, runId }) => {
             shortenNudgeBound(manager as unknown as { noWaitNudgeReplyMs?: number });
-            const handoff = handoffPath(join(repoRoot, '.ai/cezar'), runId);
+            const turns = watchTurnOutcomes();
             const startSeq = store.readEvents(runId).length;
             if (gateRoot) {
               // Cursor starts a new print process for the nudge. Its startup must not
@@ -251,7 +251,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             expect(store.getRun(runId)?.status).toBe('done');
             expect(nudgeNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(1);
             expect(noReplyNotes(store.readEvents(runId).slice(startSeq))).toHaveLength(0);
-            expect(readFileSync(handoff, 'utf8')).toContain('status=running (no-wait nudge)');
+            expect(turns.words(runId)).toContain('running (no-wait nudge)');
           }, gateRoot ? { env: { CEZ_MOCK_RELEASE_FILE: join(gateRoot, 'done') } } : {});
           } finally { if (gateRoot) rmSync(gateRoot, { recursive: true, force: true }); }
         }, 30_000);
@@ -259,8 +259,8 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
       }
       for (const mode of ['fresh', 'continuation'] as const) {
         it(`${backend} ${row.id} ${row.name} (${mode})`, async () => {
-          await withOwnedInputRun(backend, mode === 'continuation' ? 'baseline' : row.scenario, async ({ store, manager, runId, repoRoot }) => {
-            const handoff = handoffPath(join(repoRoot, '.ai/cezar'), runId);
+          await withOwnedInputRun(backend, mode === 'continuation' ? 'baseline' : row.scenario, async ({ store, manager, runId }) => {
+            const turns = watchTurnOutcomes();
             if (mode === 'continuation') {
               manager.enqueueOwnedRun(runId);
               await waitFor(() => store.getRun(runId)?.status === 'waiting');
@@ -287,7 +287,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
               expect(status).toBe('done');
               expect(notes).toHaveLength(1);
               expect(autonomousNotes(events)).toHaveLength(0);
-              expect(readFileSync(handoff, 'utf8')).toContain('status=running (no-wait nudge)');
+              expect(turns.words(runId)).toContain('running (no-wait nudge)');
             } else if (row.id === 'F2') {
               expect(status).toBe('waiting');
               expect(status).not.toBe('done');

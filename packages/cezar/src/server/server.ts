@@ -163,7 +163,7 @@ import {
 import { planChain, slugify } from '../planner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
 import { getTeamSkillsCached, refreshTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
-import { appendHandoffHeartbeat, readHandoff } from '../handoff.ts';
+import { readHandoff, renderHandoffRecords } from '../handoff.ts';
 import { ARCHIVED_WINDOW, type RepoHandle, type RunEvent, type RunRecord, type RunStatus, type RunStore } from '../runs/store.ts';
 import {
   HistoryCursorError,
@@ -3976,13 +3976,13 @@ export function createApp(deps: ServerDeps) {
       return c.json({ opened: true, path: dir });
     })
 
-    // Handoff journal (spec 007): the per-task handoff.md as markdown. 404 only
-    // when the task is unknown; a task without a (yet) seeded file returns ''.
+    // Handoff journal (spec 007): the per-task handoff.md as markdown, with cezar's records from the
+    // run store (hearsay-tools/cezarion#1809). 404 only when the task is unknown; no file returns ''.
     .get('/runs/:id/handoff', (c) => {
       const { dataDir, store } = c.get('project');
       const run = store.getRun(c.req.param('id'));
       if (!run) return c.json({ error: 'not found' }, 404);
-      return c.text(readHandoff(dataDir, run.id), 200, {
+      return c.text(renderHandoffRecords(readHandoff(dataDir, run.id), run.handoffRecords), 200, {
         'content-type': 'text/markdown; charset=utf-8',
       });
     })

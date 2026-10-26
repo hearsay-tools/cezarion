@@ -124,23 +124,10 @@ function decideWithoutDone(facts: TurnEndFacts): TurnEndDecision {
   return { kind: 'nudge', cause: 'no-wait', text: scoped(facts.tools ? NO_WAIT_NUDGE : NO_WAIT_NUDGE_MARKERS), ifRefused: 'human-wait' };
 }
 
-/** How a settled turn end left the run, for its heartbeat line. */
+/** How a settled turn end left the run. */
 export type TurnEndOutcome =
   | { kind: 'nudge'; cause: NudgeCause; autonomous: boolean }
   | { kind: 'readiness' }
   | { kind: 'running' }
   | { kind: 'park'; keepsSlot: boolean }
   | { kind: 'done' };
-
-/** The word after `turn complete — status=`. A done writes its own line (`closeAsDone`). */
-export function turnEndHeartbeat(outcome: TurnEndOutcome): string | undefined {
-  switch (outcome.kind) {
-    case 'nudge':
-      if (outcome.cause === 'completion') return 'running (completion nudge)';
-      return outcome.autonomous ? 'running (autonomous nudge)' : 'running (no-wait nudge)';
-    case 'readiness': return 'running (awaiting input readiness)';
-    case 'running': return 'running';
-    case 'park': return outcome.keepsSlot ? 'monitoring' : 'waiting';
-    case 'done': return undefined;
-  }
-}

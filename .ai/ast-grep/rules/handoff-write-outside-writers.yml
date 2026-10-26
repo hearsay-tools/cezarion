@@ -1,0 +1,23 @@
+id: handoff-write-outside-writers
+language: typescript
+severity: warning
+message: >-
+  The handoff file is the agent's (hearsay-tools/cezarion#1809). In handoff.ts only seedHandoffFile
+  writes it (the skeleton, once), writeHandoffRecords rewrites cezar's records block whole from
+  RunRecord.handoffRecords, and deleteHandoff removes it. Record an autosave through
+  recordHandoffAutosave or recordHandoffPeriodicAutosave; write no other line into the file.
+files:
+  - packages/cezar/src/handoff.ts
+# Every file write, copy, rename or removal in handoff.ts outside the three writers, bare
+# (`writeFileSync`) or through a namespace (`fs.promises.writeFile`). A write through another helper
+# that this file imports is not matched: the rule sees names, not what a call does.
+rule:
+  kind: call_expression
+  has:
+    field: function
+    regex: '(^|\.)(writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream|copyFileSync|copyFile|cpSync|cp|renameSync|rename|rmSync|rm|unlinkSync|unlink)$'
+  not:
+    inside:
+      kind: function_declaration
+      stopBy: end
+      has: { field: name, regex: '^(seedHandoffFile|writeHandoffRecords|deleteHandoff)$' }

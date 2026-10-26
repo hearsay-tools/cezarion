@@ -120,7 +120,8 @@ describe('worktree setup on task start (#917)', () => {
     const [opening] = openingMessages(f);
     expect(opening).toContain('Cezar prepared this worktree before your session started:');
     expect(opening).toContain('`pwd > "$CEZ_PROJECT_ROOT/.setup-cwd"`');
-    expect(readFileSync(handoffPath(f.dataDir, id), 'utf8')).toContain('worktree setup done in');
+    // The note is the setup's record; the handoff gets no line (hearsay-tools/cezarion#1809).
+    expect(readFileSync(handoffPath(f.dataDir, id), 'utf8')).not.toContain('worktree setup');
   }, 60_000);
 
   it('a failing setup still starts the agent and tells it', async () => {

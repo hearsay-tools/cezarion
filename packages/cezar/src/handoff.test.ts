@@ -2,208 +2,210 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { HANDOFF_AUTOSAVE_RECORDS_MAX, type HandoffRecords } from '@open-mercato/cezar-contract/handoff';
 
 import {
   HANDOFF_ONLY_INSTRUCTIONS,
-  appendHandoffAutosaveReport,
-  appendHandoffHeartbeat,
   handoffInstructions,
   handoffPath,
+  recordHandoffAutosave,
   recordHandoffPeriodicAutosave,
+  refreshHandoffRecords,
+  renderHandoffRecords,
   seedHandoffFile,
 } from './handoff.ts';
+import { RunStore } from './runs/store.ts';
+import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns } from './runs/run-store.testkit.ts';
 
-/** The top line of "## Progress log" ('' when it has none): the agent's summary line. */
-function progressTop(text: string): string {
-  const idx = text.indexOf('## Progress log');
-  if (idx < 0) return '';
-  for (const line of text.slice(idx + '## Progress log'.length).split('\n')) {
-    if (line.startsWith('## ')) break;
-    if (line.trim()) return line.trim();
-  }
-  return '';
-}
+const BEGIN = '<!-- cezar:records — cezar rewrites this block whole from its run store; edits here are replaced -->';
+const END = '<!-- /cezar:records -->';
+const block = (...lines: string[]) => `${BEGIN}\n## Cezar records\n\n### Autosave\n\n${lines.map((line) => `${line}\n`).join('')}${END}\n`;
+const records = (...notes: string[]): HandoffRecords => ({ autosave: notes.map((note) => ({ at: '2026-10-16T10:00:00.000Z', note })) });
+const SEEDED = '# Handoff — t\n\n**Task id:** run-1\n**Workflow:** quick-task\n\n## Goal\n\ndo it\n\n## Progress log\n\n## Resume notes\n';
 
 /**
- * hearsay-tools/cezarion#1004: the autosave report lives in its own section, so
- * the top of the Progress log stays the agent's own summary — the draft-PR
- * body (`buildPrBody`) reads it.
+ * hearsay-tools/cezarion#1809: cezar's records live in the run store and reach the file as one
+ * block that cezar rewrites whole. Nothing outside the block is read or changed.
  */
-describe('appendHandoffAutosaveReport', () => {
-  const RUN = 'run-1';
-  const REPORT = 'run finalize: cezar autosave committed abc1234 on cez/run-1';
-  let dataDir: string;
-  const file = () => handoffPath(dataDir, RUN);
-  const read = () => readFileSync(file(), 'utf8');
-  /** Text of one `## Header` section, up to the next `## ` header. */
-  const section = (header: string) => {
-    const text = read();
-    const start = text.indexOf(`${header}\n`);
-    if (start < 0) return '';
-    const rest = text.slice(start + header.length + 1);
-    const next = rest.indexOf('\n## ');
-    return next >= 0 ? rest.slice(0, next) : rest;
-  };
-  const seed = () => seedHandoffFile(dataDir, { id: RUN, title: 't', workflow: 'quick-task', task: 'do it', branch: 'cez/run-1' });
-
-  beforeEach(() => {
-    dataDir = mkdtempSync(join(tmpdir(), 'cez-handoff-'));
-    mkdirSync(join(dataDir, 'runs'));
+describe('renderHandoffRecords', () => {
+  it('inserts the block right before the seeded Goal and leaves every other byte', () => {
+    const text = renderHandoffRecords(SEEDED, records('turn end: committed abc1234'));
+    expect(text).toBe(SEEDED.replace('## Goal\n', `${block('- 2026-10-16T10:00:00.000Z — turn end: committed abc1234')}\n## Goal\n`));
+    expect(renderHandoffRecords(text, records('turn end: committed abc1234'))).toBe(text);
   });
 
-  afterEach(() => {
-    rmSync(dataDir, { recursive: true, force: true });
+  it('replaces the block whole, so an edit inside it does not survive', () => {
+    const text = renderHandoffRecords(SEEDED, records('first'));
+    const edited = text.replace('— first', '— first (agent edit)');
+    expect(renderHandoffRecords(edited, records('second', 'first'))).toBe(
+      SEEDED.replace('## Goal\n', `${block('- 2026-10-16T10:00:00.000Z — second', '- 2026-10-16T10:00:00.000Z — first')}\n## Goal\n`));
   });
 
-  it('is not seeded: the section appears only when cezar first reports', () => {
-    seed();
-    expect(read()).not.toContain('## Autosave (cezar)');
+  it('removes the block when there are no records, and writes none into a file without one', () => {
+    expect(renderHandoffRecords(renderHandoffRecords(SEEDED, records('first')), undefined)).toBe(SEEDED.replace('## Goal\n', '\n## Goal\n'));
+    expect(renderHandoffRecords(SEEDED, undefined)).toBe(SEEDED);
+    expect(renderHandoffRecords(SEEDED, { autosave: [] })).toBe(SEEDED);
   });
 
-  it('creates the section right before the Progress log, keeping the agent line first there', () => {
-    seed();
-    appendHandoffHeartbeat(dataDir, RUN, 'implemented the change');
-
-    appendHandoffAutosaveReport(dataDir, RUN, REPORT);
-
-    const text = read();
-    const autosave = text.indexOf('## Autosave (cezar)\n');
-    expect(autosave).toBeGreaterThan(text.indexOf('## Goal\n'));
-    expect(text.indexOf('## Progress log\n')).toBeGreaterThan(autosave);
-    expect(section('## Autosave (cezar)')).toMatch(new RegExp(`^\\n- \\d{4}-\\d\\d-\\d\\dT[\\d:.]+Z — ${REPORT}\\n$`));
-    expect(section('## Goal')).not.toContain(REPORT);
-    expect(section('## Progress log')).not.toContain(REPORT);
-    expect(progressTop(text)).toMatch(/^- \S+ — implemented the change$/);
-    expect(text.endsWith('## Resume notes\n')).toBe(true);
+  it('finds the block wherever the agent moved it', () => {
+    const moved = `${SEEDED}\n${block('- old')}`;
+    expect(renderHandoffRecords(moved, records('new'))).toBe(`${SEEDED}\n${block('- 2026-10-16T10:00:00.000Z — new')}`);
   });
 
-  it('inserts newest first under an existing header', () => {
-    seed();
-    appendHandoffAutosaveReport(dataDir, RUN, 'first report');
-    appendHandoffAutosaveReport(dataDir, RUN, 'second report');
-
-    const lines = section('## Autosave (cezar)').split('\n').filter(Boolean);
-    expect(lines).toHaveLength(2);
-    expect(lines[0]).toMatch(/ — second report$/);
-    expect(lines[1]).toMatch(/ — first report$/);
-    expect(read().match(/^## Autosave \(cezar\)$/gm)).toHaveLength(1);
-    expect(section('## Progress log')).not.toMatch(/report/);
+  it('reads the markers only as whole lines (hearsay-tools/cezarion#1147)', () => {
+    const quoted = SEEDED.replace('do it', `Explain the "${BEGIN}" line\n\n## Goal quoted`);
+    const text = renderHandoffRecords(quoted, records('first'));
+    expect(text).toContain(`Explain the "${BEGIN}" line`);
+    expect(text.startsWith(`# Handoff — t\n\n**Task id:** run-1\n**Workflow:** quick-task\n\n${BEGIN}\n`)).toBe(true);
+    // The next render replaces the real block, never the quoted marker.
+    expect(renderHandoffRecords(text, records('second'))).toBe(renderHandoffRecords(quoted, records('second')));
   });
 
-  it('finds an existing section wherever the agent moved it', () => {
-    writeFileSync(file(), '# Handoff\n\n## Progress log\n\n- agent line\n\n## Autosave (cezar)\n\n- old report\n');
-
-    appendHandoffAutosaveReport(dataDir, RUN, 'new report');
-
-    expect(read()).toMatch(/## Autosave \(cezar\)\n\n- \S+ — new report\n- old report\n$/);
-    expect(progressTop(read())).toBe('- agent line');
+  // An agent or an editor can save the file with CRLF endings (hearsay-tools/cezarion#1809).
+  it('finds the markers and the Goal in a file with CRLF endings, so a render adds no second block', () => {
+    const crlf = (text: string) => text.replaceAll('\n', '\r\n');
+    const seeded = crlf(SEEDED);
+    const first = renderHandoffRecords(seeded, records('first'));
+    expect(first).toBe(seeded.replace('## Goal\r\n', `${block('- 2026-10-16T10:00:00.000Z — first')}\n## Goal\r\n`));
+    expect(renderHandoffRecords(first, records('first'))).toBe(first);
+    // The agent saved the whole file, block included, with CRLF endings.
+    const saved = crlf(renderHandoffRecords(SEEDED, records('first')));
+    expect(renderHandoffRecords(saved, records('second'))).toBe(
+      seeded.replace('## Goal\r\n', `${block('- 2026-10-16T10:00:00.000Z — second')}\r\n## Goal\r\n`));
+    expect(renderHandoffRecords(saved, records())).toBe(seeded.replace('## Goal\r\n', '\r\n## Goal\r\n'));
   });
 
-  it('appends the section at the end of a file without a Progress log', () => {
-    writeFileSync(file(), '# Handoff\n\nfree-form notes');
-
-    appendHandoffAutosaveReport(dataDir, RUN, REPORT);
-
-    expect(read()).toMatch(new RegExp(`^# Handoff\\n\\nfree-form notes\\n\\n## Autosave \\(cezar\\)\\n\\n- \\S+ — ${REPORT}\\n$`));
+  it('takes a begin marker without its end marker as one line', () => {
+    const broken = SEEDED.replace('## Goal\n', `${BEGIN}\n## Goal\n`);
+    expect(renderHandoffRecords(broken, records('first'))).toBe(
+      SEEDED.replace('## Goal\n', `${block('- 2026-10-16T10:00:00.000Z — first')}## Goal\n`));
   });
 
-  it('is a no-op on a missing file', () => {
-    expect(() => appendHandoffAutosaveReport(dataDir, RUN, REPORT)).not.toThrow();
-    expect(() => readFileSync(file())).toThrow();
+  it('puts the block at the start of a file without a Goal, and keeps an empty text empty', () => {
+    expect(renderHandoffRecords('free-form notes', records('first'))).toBe(`${block('- 2026-10-16T10:00:00.000Z — first')}\nfree-form notes`);
+    expect(renderHandoffRecords('', records('first'))).toBe('');
   });
 
-  it('is the section the handoff instructions tell the agent to leave in place', () => {
-    seed();
-    appendHandoffAutosaveReport(dataDir, RUN, REPORT);
-    const header = read().split('\n').find((line) => line.startsWith('## Autosave'));
-
-    expect(HANDOFF_ONLY_INSTRUCTIONS).toContain(`"${header}"`);
-    expect(HANDOFF_ONLY_INSTRUCTIONS).toMatch(/"## Autosave \(cezar\)" section[^\n]*leave it in place/);
+  // A journal from before hearsay-tools/cezarion#1809 keeps its old section and lifecycle lines.
+  it('leaves a legacy Autosave section and heartbeat lines byte for byte', () => {
+    const legacy = SEEDED.replace('## Progress log\n\n', '## Autosave (cezar)\n\n- 2026-10-15T09:00:00.000Z — turn end: committed 0ld0000\n\n' +
+      '## Progress log\n\n- 2026-10-15T09:01:00.000Z — turn complete — status=waiting\n- 09:00 — agent line\n');
+    expect(renderHandoffRecords(legacy, records('first'))).toBe(
+      legacy.replace('## Goal\n', `${block('- 2026-10-16T10:00:00.000Z — first')}\n## Goal\n`));
   });
 });
 
-/**
- * hearsay-tools/cezarion#1004 review: the periodic timer's commits are reported too,
- * since a clean closing flush reports nothing. One line covers a run of consecutive
- * periodic commits on one branch, so a 90 s timer cannot bury the section.
- */
-describe('recordHandoffPeriodicAutosave', () => {
-  const RUN = 'run-1';
+describe('the store-backed autosave records', () => {
   const BRANCH = 'cez/run-1';
   let dataDir: string;
-  const file = () => handoffPath(dataDir, RUN);
+  let store: RunStore;
+  let runId: string;
+  const file = () => handoffPath(dataDir, runId);
   const read = () => readFileSync(file(), 'utf8');
-  const section = (header: string) => {
+  /** The block's record lines, newest first. */
+  const lines = () => {
     const text = read();
-    const start = text.indexOf(`${header}\n`);
-    if (start < 0) return '';
-    const rest = text.slice(start + header.length + 1);
-    const next = rest.indexOf('\n## ');
-    return next >= 0 ? rest.slice(0, next) : rest;
+    const start = text.indexOf(`${BEGIN}\n`);
+    if (start < 0) return [];
+    return text.slice(start, text.indexOf(`\n${END}\n`, start)).split('\n').filter((line) => line.startsWith('- '));
   };
-  const lines = () => section('## Autosave (cezar)').split('\n').filter(Boolean);
   const periodic = (count: number, first: string, latest: string, branch = BRANCH, fold = `${latest}~1`) =>
     `periodic: ${count} cezar autosave commit(s) on ${branch}, first ${first}, latest ${latest}; ` +
     `to fold the latest into your own commits while it is HEAD, run \`git reset --soft ${fold}\``;
-  const seed = () => seedHandoffFile(dataDir, { id: RUN, title: 't', workflow: 'quick-task', task: 'do it', branch: BRANCH });
   const at = (iso: string) => vi.setSystemTime(new Date(iso));
+  const recordPeriodic = (sha: string | null, branch: string | null = BRANCH) =>
+    recordHandoffPeriodicAutosave(store, dataDir, runId, { sha, branch });
 
   beforeEach(() => {
     dataDir = mkdtempSync(join(tmpdir(), 'cez-handoff-'));
     mkdirSync(join(dataDir, 'runs'));
+    store = RunStore.open(dataDir);
+    runId = store.createRun({ title: 't', workflow: 'quick-task', task: 'do it', steps: [] }).id;
+    store.updateRun(runId, { branch: BRANCH });
+    store.flush();
+    seedHandoffFile(dataDir, store.getRun(runId)!);
     vi.useFakeTimers({ toFake: ['Date'] });
     at('2026-10-16T10:00:00.000Z');
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    store.close();
     rmSync(dataDir, { recursive: true, force: true });
   });
 
-  it('creates the section right before the Progress log on the first periodic commit', () => {
-    seed();
-    appendHandoffHeartbeat(dataDir, RUN, 'implemented the change');
-
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'abc1234', branch: BRANCH });
-
-    const text = read();
-    expect(text.indexOf('## Progress log\n')).toBeGreaterThan(text.indexOf('## Autosave (cezar)\n'));
-    expect(section('## Autosave (cezar)')).toBe(`\n- 2026-10-16T10:00:00.000Z — ${periodic(1, 'abc1234', 'abc1234')}\n`);
-    expect(section('## Progress log')).not.toContain('periodic');
-    expect(progressTop(text)).toMatch(/^- \S+ — implemented the change$/);
-    expect(text.endsWith('## Resume notes\n')).toBe(true);
+  it('commits the record to the store and shows it in the file, outside the Progress log', () => {
+    recordHandoffAutosave(store, dataDir, runId, 'turn end: cezar autosave committed abc1234 on cez/run-1');
+    const committed = readPersistedRuns(dataDir).find((run) => run.id === runId);
+    expect(committed.handoffRecords).toEqual({ autosave: [{ at: '2026-10-16T10:00:00.000Z', note: 'turn end: cezar autosave committed abc1234 on cez/run-1' }] });
+    expect(lines()).toEqual(['- 2026-10-16T10:00:00.000Z — turn end: cezar autosave committed abc1234 on cez/run-1']);
+    expect(read().indexOf(BEGIN)).toBeLessThan(read().indexOf('## Goal\n'));
+    expect(read().slice(read().indexOf('## Progress log'))).toBe('## Progress log\n\n## Resume notes\n');
   });
 
-  it('coalesces consecutive commits on the same branch into one line: count, first, latest, time', () => {
-    seed();
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch: BRANCH });
+  it('never shows a record the store refused', () => {
+    const unmute = muteLockedDatabaseLogs();
+    const release = blockRunWrites(dataDir);
+    try {
+      expect(() => recordHandoffAutosave(store, dataDir, runId, 'turn end: refused')).not.toThrow();
+    } finally {
+      release();
+      unmute();
+    }
+    expect(read()).not.toContain('turn end: refused');
+    expect(readPersistedRuns(dataDir).find((run) => run.id === runId)).toMatchObject({ branch: BRANCH });
+    expect(readPersistedRuns(dataDir).find((run) => run.id === runId).handoffRecords).toBeUndefined();
+  });
+
+  // The agent owns the file. Before hearsay-tools/cezarion#1809 the file was the only copy, so a
+  // rewrite without the section lost every record and an edited periodic line restarted the count.
+  it('keeps every record when the agent rewrites the file without the block', () => {
+    recordHandoffAutosave(store, dataDir, runId, 'turn end: committed aaa1111');
+    writeFileSync(file(), '# My own handoff\n\n## Progress log\n\n- 10:00 — rewrote it\n');
+    recordHandoffAutosave(store, dataDir, runId, 'turn end: committed bbb2222');
+    expect(lines()).toEqual(['- 2026-10-16T10:00:00.000Z — turn end: committed bbb2222', '- 2026-10-16T10:00:00.000Z — turn end: committed aaa1111']);
+    expect(read().endsWith('# My own handoff\n\n## Progress log\n\n- 10:00 — rewrote it\n')).toBe(true);
+  });
+
+  it.each([
+    ['a truncated line', (line: string) => line.slice(0, 60)],
+    ['trailing text', (line: string) => `${line} (squashed)`],
+    ['a deleted line', () => ''],
+  ])('counts on after the agent edits the periodic line: %s', (_name, edit) => {
+    recordPeriodic('aaa1111');
+    const [line] = lines();
+    writeFileSync(file(), read().replace(`${line!}\n`, edit(line!) ? `${edit(line!)}\n` : ''));
     at('2026-10-16T10:01:30.000Z');
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'bbb2222', branch: BRANCH });
-    at('2026-10-16T10:03:00.000Z');
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'ccc3333', branch: BRANCH });
-
-    expect(lines()).toEqual([`- 2026-10-16T10:03:00.000Z — ${periodic(3, 'aaa1111', 'ccc3333')}`]);
-    expect(read().match(/^## Autosave \(cezar\)$/gm)).toHaveLength(1);
-    expect(progressTop(read())).toBe('');
+    recordPeriodic('bbb2222');
+    expect(lines()).toEqual([`- 2026-10-16T10:01:30.000Z — ${periodic(2, 'aaa1111', 'bbb2222')}`]);
   });
 
-  it('starts a new line on a different branch', () => {
-    seed();
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch: BRANCH });
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'bbb2222', branch: 'fix/1004-x' });
+  it('merges consecutive commits on one branch into one record: count, first, latest, time', () => {
+    recordPeriodic('aaa1111');
+    at('2026-10-16T10:01:30.000Z');
+    recordPeriodic('bbb2222');
+    at('2026-10-16T10:03:00.000Z');
+    recordPeriodic('ccc3333');
+    expect(lines()).toEqual([`- 2026-10-16T10:03:00.000Z — ${periodic(3, 'aaa1111', 'ccc3333')}`]);
+    expect(store.getRun(runId)?.handoffRecords?.autosave).toEqual([{
+      at: '2026-10-16T10:03:00.000Z', note: periodic(3, 'aaa1111', 'ccc3333'),
+      periodic: { branch: BRANCH, count: 3, first: 'aaa1111', latest: 'ccc3333' },
+    }]);
+  });
 
+  it('starts a new record on a different branch', () => {
+    recordPeriodic('aaa1111');
+    recordPeriodic('bbb2222', 'fix/1004-x');
     expect(lines()).toEqual([
       `- 2026-10-16T10:00:00.000Z — ${periodic(1, 'bbb2222', 'bbb2222', 'fix/1004-x')}`,
       `- 2026-10-16T10:00:00.000Z — ${periodic(1, 'aaa1111', 'aaa1111')}`,
     ]);
   });
 
-  it('starts a new line after a turn-end or run-finalize report, which ends the run of commits', () => {
-    seed();
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch: BRANCH });
-    appendHandoffAutosaveReport(dataDir, RUN, 'turn end: cezar autosave committed bbb2222 on cez/run-1');
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'ccc3333', branch: BRANCH });
-
+  it('starts a new record after a turn-end or run-finalize report, which ends the run of commits', () => {
+    recordPeriodic('aaa1111');
+    recordHandoffAutosave(store, dataDir, runId, 'turn end: cezar autosave committed bbb2222 on cez/run-1');
+    recordPeriodic('ccc3333');
     expect(lines()).toEqual([
       `- 2026-10-16T10:00:00.000Z — ${periodic(1, 'ccc3333', 'ccc3333')}`,
       '- 2026-10-16T10:00:00.000Z — turn end: cezar autosave committed bbb2222 on cez/run-1',
@@ -211,73 +213,75 @@ describe('recordHandoffPeriodicAutosave', () => {
     ]);
   });
 
-  it.each([
-    ['a truncated line', `- 2026-10-16T09:00:00.000Z — periodic: 2 cezar autosave commit(s) on ${BRANCH}, first aaa1111, latest bbb2222`],
-    ['a fold-back command that no longer names the latest', `- 2026-10-16T09:00:00.000Z — ${periodic(2, 'aaa1111', 'bbb2222', BRANCH, 'aaa1111~1')}`],
-    ['trailing text', `- 2026-10-16T09:00:00.000Z — ${periodic(2, 'aaa1111', 'bbb2222')} (squashed)`],
-    ['a count of zero', `- 2026-10-16T09:00:00.000Z — ${periodic(0, 'aaa1111', 'bbb2222')}`],
-    ['no timestamp', `- ${periodic(2, 'aaa1111', 'bbb2222')}`],
-  ])('starts a new line instead of guessing at an edited periodic line: %s', (_name, edited) => {
-    writeFileSync(file(), `# Handoff\n\n## Autosave (cezar)\n\n${edited}\n\n## Progress log\n\n## Resume notes\n`);
-
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'ccc3333', branch: BRANCH });
-
-    expect(lines()).toEqual([`- 2026-10-16T10:00:00.000Z — ${periodic(1, 'ccc3333', 'ccc3333')}`, edited]);
-  });
-
   it('counts a commit whose sha could not be read, folding back from HEAD', () => {
-    seed();
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: null, branch: BRANCH });
+    recordPeriodic(null);
     expect(lines()).toEqual([`- 2026-10-16T10:00:00.000Z — ${periodic(1, '(sha unavailable)', '(sha unavailable)', BRANCH, 'HEAD~1')}`]);
-
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'bbb2222', branch: BRANCH });
+    recordPeriodic('bbb2222');
     expect(lines()).toEqual([`- 2026-10-16T10:00:00.000Z — ${periodic(2, '(sha unavailable)', 'bbb2222')}`]);
-
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: null, branch: BRANCH });
+    recordPeriodic(null);
     expect(lines()).toEqual([`- 2026-10-16T10:00:00.000Z — ${periodic(3, '(sha unavailable)', '(sha unavailable)', BRANCH, 'HEAD~1')}`]);
   });
 
   it('names a detached HEAD and keeps it apart from a branch', () => {
-    seed();
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch: null });
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'bbb2222', branch: null });
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'ccc3333', branch: BRANCH });
-
+    recordPeriodic('aaa1111', null);
+    recordPeriodic('bbb2222', null);
+    recordPeriodic('ccc3333');
     expect(lines()).toEqual([
       `- 2026-10-16T10:00:00.000Z — ${periodic(1, 'ccc3333', 'ccc3333')}`,
       `- 2026-10-16T10:00:00.000Z — ${periodic(2, 'aaa1111', 'bbb2222', 'detached HEAD')}`,
     ]);
   });
 
-  // Git refuses only ASCII space and control characters in a ref name, so a branch can
-  // carry Unicode whitespace (`git check-ref-format --branch` accepts all three), and JS
-  // `\s` matches the first two while `.` misses the line separator (round 7 on
-  // hearsay-tools/cezarion#1111).
+  // Git refuses only ASCII space and control characters in a ref name, so a branch can carry
+  // Unicode whitespace (round 7 on hearsay-tools/cezarion#1111). The merge compares the stored
+  // branch, never a parsed line.
   it.each([
-    ['U+00A0 no-break space', 'fix/a\u00a0b'],
-    ['U+2003 em space', 'fix/a\u2003b'],
-    ['U+2028 line separator', 'fix/a\u2028b'],
-  ])('coalesces on a branch whose name holds Unicode whitespace: %s', (_name, branch) => {
-    seed();
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch });
+    ['U+00A0 no-break space', 'fix/a b'],
+    ['U+2003 em space', 'fix/a b'],
+  ])('merges on a branch whose name holds Unicode whitespace: %s', (_name, branch) => {
+    recordPeriodic('aaa1111', branch);
     at('2026-10-16T10:01:30.000Z');
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'bbb2222', branch });
-
+    recordPeriodic('bbb2222', branch);
+    expect(store.getRun(runId)?.handoffRecords?.autosave.map((record) => record.periodic?.count)).toEqual([2]);
     expect(lines()).toEqual([`- 2026-10-16T10:01:30.000Z — ${periodic(2, 'aaa1111', 'bbb2222', branch)}`]);
   });
 
-  it('appends the section at the end of a file without a Progress log', () => {
-    writeFileSync(file(), '# Handoff\n\nfree-form notes');
-
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch: BRANCH });
-    recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'bbb2222', branch: BRANCH });
-
-    expect(read()).toBe(`# Handoff\n\nfree-form notes\n\n## Autosave (cezar)\n\n- 2026-10-16T10:00:00.000Z — ${periodic(2, 'aaa1111', 'bbb2222')}\n`);
+  it(`keeps the newest ${HANDOFF_AUTOSAVE_RECORDS_MAX} records`, () => {
+    for (let n = 0; n <= HANDOFF_AUTOSAVE_RECORDS_MAX; n++) recordHandoffAutosave(store, dataDir, runId, `turn end: save ${n}`);
+    expect(lines()).toHaveLength(HANDOFF_AUTOSAVE_RECORDS_MAX);
+    expect(lines()[0]).toContain(`save ${HANDOFF_AUTOSAVE_RECORDS_MAX}`);
+    expect(lines().at(-1)).toContain('save 1');
   });
 
-  it('is a no-op on a missing file', () => {
-    expect(() => recordHandoffPeriodicAutosave(dataDir, RUN, { sha: 'aaa1111', branch: BRANCH })).not.toThrow();
-    expect(() => readFileSync(file())).toThrow();
+  it('still records when the file is missing, and the next launch shows it', () => {
+    rmSync(file());
+    recordHandoffAutosave(store, dataDir, runId, 'turn end: committed aaa1111');
+    expect(() => read()).toThrow();
+    expect(store.getRun(runId)?.handoffRecords?.autosave).toHaveLength(1);
+    seedHandoffFile(dataDir, store.getRun(runId)!);
+    refreshHandoffRecords(store, dataDir, runId);
+    expect(lines()).toEqual(['- 2026-10-16T10:00:00.000Z — turn end: committed aaa1111']);
+  });
+
+  it('does nothing for an unknown run or a closed store', () => {
+    expect(() => recordHandoffAutosave(store, dataDir, 'missing', 'turn end: x')).not.toThrow();
+    expect(() => refreshHandoffRecords(store, dataDir, 'missing')).not.toThrow();
+    store.close();
+    expect(() => recordHandoffAutosave(store, dataDir, runId, 'turn end: x')).not.toThrow();
+    expect(() => refreshHandoffRecords(store, dataDir, runId)).not.toThrow();
+    expect(read()).toBe(SEEDED.replace('run-1', runId).replace('quick-task\n', `quick-task\n**Branch:** ${BRANCH}\n`));
+    store = RunStore.open(dataDir);
+  });
+
+  it('a refresh restores a deleted block and leaves a file without records as it is', () => {
+    expect(() => refreshHandoffRecords(store, dataDir, runId)).not.toThrow();
+    const seeded = read();
+    refreshHandoffRecords(store, dataDir, runId);
+    expect(read()).toBe(seeded);
+    recordHandoffAutosave(store, dataDir, runId, 'turn end: committed aaa1111');
+    writeFileSync(file(), seeded);
+    refreshHandoffRecords(store, dataDir, runId);
+    expect(lines()).toEqual(['- 2026-10-16T10:00:00.000Z — turn end: committed aaa1111']);
   });
 });
 
@@ -296,7 +300,8 @@ describe('handoffInstructions', () => {
     for (const marker of ['CEZ:DONE', 'CEZ:MONITORING', 'CEZ:ASK']) expect(text).not.toContain(marker);
     expect(text).toContain('CEZ:PR=');
     expect(text).toContain('## Pasted attachments');
-    expect(text).toMatch(/"## Autosave \(cezar\)" section[^\n]*leave it in place/);
+    expect(text).toMatch(/"Cezar records" block[^\n]*never edit it/);
+    expect(text).not.toContain('Autosave (cezar)');
     expect(text).not.toContain('CEZ_TODOS_FILE');
   });
 
