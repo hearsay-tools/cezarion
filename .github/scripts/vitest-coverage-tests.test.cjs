@@ -36,13 +36,17 @@ function resolvedReporters({ env = {}, argv = [], overrides = {} }) {
 function vitest(args, { config, env = {} } = {}) {
   const childEnv = { ...process.env, ...env };
   for (const key of ['GITHUB_ACTIONS', 'CI', 'FORCE_COLOR']) if (!(key in env)) delete childEnv[key];
+  childEnv.NO_COLOR = '1';
   const result = spawnSync(vitestBin, ['run', ...(config ? ['--config', config] : []), '--project', 'contract', SPEC, ...args],
     { cwd: repoRoot, env: childEnv, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   return result.stdout + result.stderr;
 }
 
+// CI printed colour codes here once: they split a number from its unit and hide a line's first word.
+// The child runs with NO_COLOR, and this strips any that remain.
 const stable = (output) => output
+  .replace(/\u001B\[[0-9;]*m/g, '')
   .replace(/^\s*(Start at|Duration)\b.*$/gm, '')
   .replace(/\d+(\.\d+)?\s?m?s\b/g, '<time>')
   .replace(/\n{2,}/g, '\n');
