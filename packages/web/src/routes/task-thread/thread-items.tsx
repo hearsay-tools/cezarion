@@ -42,14 +42,14 @@ const MESSAGE_SURFACE = {
   user: {
     label: 'YOUR MESSAGE',
     speaker: 'Your message',
-    classes: 'border-message-user-border bg-message-user-bg',
+    classes: 'border-message-user-border bg-message-user-bg [html:not(.light)_&]:border-s-[3px] [html:not(.light)_&]:border-s-message-user-accent',
     accent: 'text-message-user-accent',
     body: 'max-md:text-[12px]',
   },
   agent: {
     label: 'AGENT RESPONSE',
     speaker: 'Agent response',
-    classes: 'border-message-agent-border bg-message-agent-bg',
+    classes: 'border-message-agent-border bg-message-agent-bg [html:not(.light)_&]:border-s-[3px] [html:not(.light)_&]:border-s-message-agent-accent',
     accent: 'text-message-agent-accent',
     body: 'text-[15px] md:text-[14px]',
   },
@@ -456,11 +456,11 @@ export function AssistantMessage({ text, ts }: { text: string; ts?: string | und
 
 const CONVERSATION_SURFACE = {
   outbound: {
-    classes: 'border-message-outbound-border bg-message-outbound-bg',
+    classes: 'border-message-outbound-border bg-message-outbound-bg [html:not(.light)_&]:border-s-[3px] [html:not(.light)_&]:border-s-message-outbound-accent',
     accent: 'text-message-outbound-accent',
   },
   inbound: {
-    classes: 'border-message-inbound-border bg-message-inbound-bg',
+    classes: 'border-message-inbound-border bg-message-inbound-bg [html:not(.light)_&]:border-s-[3px] [html:not(.light)_&]:border-s-message-inbound-accent',
     accent: 'text-message-inbound-accent',
   },
 } as const
