@@ -188,7 +188,7 @@ run, which took about 10 minutes at high load on hearsay-tools/cezarion#1772.
 
    No run for the head means CI has not seen it: push it, or dispatch.
 
-2. Wait for the `Merge Vitest coverage` job (about 12 to 20 minutes after the push). The
+2. Wait for the `Merge Vitest coverage` job (about 10 to 15 minutes after the push). The
    artifact exists as soon as that job ends, before the rest of the run does:
 
    ```sh
