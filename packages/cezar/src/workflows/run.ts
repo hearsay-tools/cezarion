@@ -2738,7 +2738,20 @@ export class RunManager {
   /** A delivery, a human or a terminal path ends a run of failed deliveries and its backoff. */
   private resetWakeDelivery(runId: string): void {
     this.clearWakeDeliveryFailures(runId);
+    this.clearWakeBackoff(runId);
+  }
+
+  private clearWakeBackoff(runId: string): void {
     const timer = this.wakeBackoffs.get(runId); if (timer) clearTimeout(timer); this.wakeBackoffs.delete(runId);
+  }
+
+  /** A human Continue answers every open human wait, ends a run of failed deliveries and restarts
+   *  the automatic-wake budget, in one best-effort commit that also saves what the continuation
+   *  left unsaved. True when it committed. */
+  private commitHumanContinue(runId: string): boolean {
+    const outcomes: RunOutcome[] = [{ kind: 'answered' }, { kind: 'counted', waitDeliveryFailures: undefined },
+      ...(this.store.getRun(runId)?.automaticWakes ? [{ kind: 'charged' as const, automaticWakes: 0 }] : [])];
+    return this.store.commitOutcome(runId, outcomes, {}, { bestEffort: true }).committed;
   }
 
   /** A message the agent received ends a run of failed deliveries, as a delivered wait result does
@@ -6976,11 +6989,9 @@ export class RunManager {
     // human got there first — and then the counter starts over, because the cap only exists to
     // bound UNATTENDED resumes.
     this.clearAutoResume(runId);
-    // Only a human Continue is immediate; it restarts the automatic-wake budget too, and answers
-    // every human wait once the answer itself is saved, below.
-    if (!deferForCapacity) {
-      this.resetWakeDelivery(runId); this.resetAutomaticWakes(runId);
-    }
+    // Only a human Continue is immediate; it ends a delivery backoff now, and restarts the
+    // automatic-wake budget and answers every human wait with the answer itself, below.
+    if (!deferForCapacity) this.clearWakeBackoff(runId);
 
     const previousStep = [...run.steps].reverse().find(step => step.status !== 'pending');
     const failure = previousStep?.status === 'failed' && previousStep.error
@@ -7028,11 +7039,12 @@ export class RunManager {
         return { ok: false, error: 'worker execution checkpoint unavailable' };
       }
     }
-    else { this.store.updateRun(runId, acceptedPatch); this.store.flush(); }
+    else this.store.updateRun(runId, acceptedPatch);
     // The continuation is admitted: only now does it supersede Cezar's fallback question.
     if (supersedes) this.supersedeWorkerFallback(runId);
-    // After the continuation checkpoint: a row that records the wait delivered also holds the answer.
-    if (!deferForCapacity) this.settleHumanWaits(runId);
+    // With the continuation, or after its checkpoint (hearsay-tools/cezarion#1805): a row that
+    // records the wait delivered or the budget restarted also holds the answer.
+    if (deferForCapacity || !this.commitHumanContinue(runId)) this.store.flush();
     this.continuationGenerations.set(runId, Symbol());
     // Keep fresh viewable images even if persistence failed; recovery uses saved URLs.
     const images = contentBlocksOf(opts.images ?? []).filter((block) => block.type === 'image');

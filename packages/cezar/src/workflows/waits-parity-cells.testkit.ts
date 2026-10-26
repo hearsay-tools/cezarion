@@ -900,9 +900,15 @@ function baseCells(runners: RunnerId[]): void {
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
       expect(manager.isActive(run.id)).toBe(false);
       const [budget] = humanOpen(run.id);
+      const commits = recordCommits(join(root, '.ai/cezar'));
       expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
       await until(() => settled(run.id, budget!.id)?.phase === 'delivered');
       expect(store.getRun(run.id)?.automaticWakes ?? 0).toBe(0);
+      // hearsay-tools/cezarion#1805: the restarted budget and the answered wait are committed with
+      // the Continue they come from, never before it.
+      const step = store.getRun(run.id)!.steps.at(-1)!.id;
+      commits.expectEveryCommit(run.id, row => (row.automaticWakes === MAX_AUTO_CONTINUES && !row.lastWaits?.some(wait => wait.id === budget!.id && wait.phase === 'delivered')) ||
+        row.continuationMessage?.text === 'carry on' || row.steps.some(entry => entry.id === step && entry.status !== 'pending'), 'a restarted budget and its Continue');
       await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
       expect(manager.finish(run.id)).toBe(true);
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
