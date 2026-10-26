@@ -110,6 +110,17 @@ test('a package whose tests are too many is skipped after they are counted, and 
   assert.deepEqual(h.calls.filter(c => c[0] === 'stryker').map(c => c[1]), ['contract']);
 });
 
+test('a package that no test imports is skipped with a reason, and Stryker is not started for it', async () => {
+  const h = harness({ diff: DIFF_BOTH, related: name => (name === 'web' ? 0 : 4) });
+  assert.equal(await main(['run'], env, h.deps), 0);
+  const packs = Object.fromEntries(artifactOf(h).packages.map(p => [p.name, p]));
+  assert.equal(packs.web.state, 'skipped');
+  assert.match(packs.web.reason, /no test file in this package imports the changed files/);
+  assert.equal(packs.web.relatedTests, 0);
+  assert.equal(packs.contract.state, 'completed');
+  assert.deepEqual(h.calls.filter(c => c[0] === 'stryker').map(c => c[1]), ['contract']);
+});
+
 test('MUTANTS_* variables lift the budget for the timing probe', async () => {
   const h = harness({ related: () => 264 });
   await main(['run'], { ...env, MUTANTS_MAX_RELATED_TESTS: '0', MUTANTS_DEADLINE_MINUTES: '90' }, h.deps);

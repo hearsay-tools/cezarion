@@ -89,8 +89,13 @@ function checkChangedLines(changedLines, budget) {
     ? `${changedLines} changed lines is over the budget of ${budget.maxChangedLines}` : null;
 }
 
-/** A reason to skip a package for the tests its mutants would run, or null. */
+/**
+ * A reason to skip a package for the tests its mutants would run, or null. With none, Stryker
+ * stops with "No tests were executed" (the probe saw it on a one-line api-client change), and
+ * nothing could kill a mutant anyway.
+ */
 function checkRelatedTests(relatedTests, budget) {
+  if (relatedTests === 0) return 'no test file in this package imports the changed files, so no test could kill a mutant';
   return relatedTests > budget.maxRelatedTests
     ? `${relatedTests} test files import the changed files, over the budget of ${budget.maxRelatedTests}` : null;
 }

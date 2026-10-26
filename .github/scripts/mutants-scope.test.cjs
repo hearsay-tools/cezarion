@@ -120,3 +120,8 @@ test('checkChangedLines and checkRelatedTests name what exceeded the budget', ()
   assert.match(checkRelatedTests(6, budget), /6 test files import.*budget of 5/);
   assert.equal(checkRelatedTests(10_000, { ...budget, maxRelatedTests: Infinity }), null);
 });
+
+test('checkRelatedTests skips a package that no test imports, whatever the budget', () => {
+  assert.match(checkRelatedTests(0, { maxChangedLines: 10, maxRelatedTests: 5, deadlineMinutes: 35 }), /no test file in this package imports/);
+  assert.match(checkRelatedTests(0, { maxChangedLines: Infinity, maxRelatedTests: Infinity, deadlineMinutes: 35 }), /no test file in this package imports/);
+});

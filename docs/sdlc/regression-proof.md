@@ -57,7 +57,8 @@ The report stands in for the recipe when all of these hold:
 
 1. The comment names the commit you pushed, and the package that holds the fix shows no `Skipped`,
    `Stopped` or `Failed` line. A package is skipped above the limits in
-   [`mutants-scope.cjs`](../../.github/scripts/mutants-scope.cjs).
+   [`mutants-scope.cjs`](../../.github/scripts/mutants-scope.cjs), and when no test file of the
+   package imports the changed files.
 2. The fix and the regression test are in the same package. The job runs only that package's tests.
 3. No mutant on the lines of the fix survived or was left `Not covered`. Each one that remains is
    named in the PR body with the reason it does not change behavior.
