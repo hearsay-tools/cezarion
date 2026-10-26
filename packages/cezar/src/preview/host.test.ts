@@ -1028,6 +1028,21 @@ describe('PreviewHost', () => {
         // A later open of the agent's page shows the home page, not the closed tab.
         expect(urls(viewer)).toContain('http://localhost/NEW');
       });
+
+      it('shows the home page again when the agent closed its tab while the pane looked elsewhere', async () => {
+        const { host, ctx, link, viewer, browser, conn } = await setup();
+        await host.handle(ctx, viewer, { t: 'open', target: { url: 'http://localhost:5173/' } });
+        await drive(link, 1, 'Target.createTarget', { url: 'about:blank' });
+        conn.gone.add('NEW');
+        const before = browser.cdpFake.sent('Page.startScreencast').length;
+        await host.handle(ctx, viewer, { t: 'open', target: { agent: true } });
+        await flush();
+        // The pane cleared its stage for this open: a restarted stream brings it a first frame.
+        expect(browser.cdpFake.sent('Page.startScreencast').length).toBeGreaterThan(before);
+        await host.handle(ctx, viewer, { t: 'open', target: { agent: true } });
+        await flush();
+        expect(conn.requests.filter(r => r.method === 'Target.attachToTarget' && r.sessionId === undefined)).toHaveLength(1);
+      });
     });
   });
 });

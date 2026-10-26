@@ -37,12 +37,14 @@ export function fakeCdp() {
  * browser session at once and answers every other command with an empty result, recording all.
  * `Target.createTarget` makes target `NEW`; `Target.attachToTarget` opens a page session `S<n>` (a `fakeCdp`, in `pages`);
  * `Target.getTargetInfo` calls a target a page unless its id starts with `W` (a worker).
+ * A target in `gone` refuses `Target.attachToTarget`, as a closed tab does.
  * `emit` sends a browser event to every `onEvent` listener.
  */
 export function fakeConnection() {
   const requests: Array<{ method: string; params: unknown; sessionId: string | undefined }> = [];
   const pages = new Map<string, ReturnType<typeof fakeCdp>>();
   const listeners = new Set<(msg: CdpMessage) => void>();
+  const gone = new Set<string>();
   let sessions = 0;
   let attached = 0;
   let markClosed!: () => void;
@@ -51,6 +53,7 @@ export function fakeConnection() {
     const targetId = (params as { targetId?: unknown } | undefined)?.targetId;
     if (method === 'Target.attachToBrowserTarget') return { result: { sessionId: `B${++sessions}` } };
     if (method === 'Target.createTarget') return { result: { targetId: 'NEW' } };
+    if (method === 'Target.attachToTarget' && typeof targetId === 'string' && gone.has(targetId)) return { error: { code: -32602, message: 'No target with given id found' } };
     if (method === 'Target.attachToTarget') return { result: { sessionId: `S${++attached}` } };
     if (method === 'Target.getTargetInfo' && typeof targetId === 'string') {
       return { result: { targetInfo: { targetId, type: targetId.startsWith('W') ? 'service_worker' : 'page', url: `http://localhost/${targetId}` } } };
@@ -80,7 +83,7 @@ export function fakeConnection() {
   const emit = (msg: CdpMessage) => {
     for (const fn of [...listeners]) fn(msg);
   };
-  return { connection, requests, pages, emit };
+  return { connection, requests, pages, emit, gone };
 }
 
 /** An agent's proxy socket, as the route hands it to the host. */

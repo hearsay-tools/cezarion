@@ -387,10 +387,7 @@ export class PreviewHost implements PreviewHostLike {
     }
   }
 
-  /**
-   * A new agent session's right to drive `runId`'s browser through the CDP proxy
-   * (hearsay-tools/cezarion#784). Nothing starts until the agent connects.
-   */
+  /** A new agent session's right to drive `runId`'s browser through the CDP proxy (hearsay-tools/cezarion#784): nothing starts until it connects. */
   grantAgent(runId: string, context: () => RunContext | undefined): AgentGrant {
     const token = randomBytes(32).toString('hex');
     const grant: GrantEntry = { runId, context, links: new Set() };
@@ -564,22 +561,15 @@ export class PreviewHost implements PreviewHostLike {
     if (entry.followAgent) await this.followAgentPage(entry);
   }
 
-  /**
-   * Streams the agent's page. The home page streams from the session cezar already has; another
-   * page gets a session of cezar's own on it, dropped when the agent closes that page.
-   */
+  /** Streams the agent's page: the home session cezar has, or a session of cezar's own on another page, dropped when the agent closes it. */
   private async followAgentPage(entry: RunEntry): Promise<void> {
     const browser = entry.browser;
     const target = entry.agentTarget;
     if (!browser || !entry.followAgent) return;
-    if (!target || target === browser.pageTargetId) {
-      this.dropFollowed(entry);
-      if (entry.home) this.streamFrom(entry, entry.home);
-      return;
-    }
+    if (!target || target === browser.pageTargetId) return this.showHome(entry);
     if (entry.followed?.targetId === target) return this.streamFrom(entry, entry.followed.session);
     const opened = await this.openPageSession(browser, target);
-    if (!opened) return;
+    if (!opened) return this.agentPageGone(entry, browser, target);
     const { session, sessionId } = opened;
     if (entry.browser !== browser || entry.agentTarget !== target || !entry.followAgent || entry.released || entry.followed?.targetId === target) {
       session.close();
@@ -592,6 +582,21 @@ export class PreviewHost implements PreviewHostLike {
     });
     entry.followed = { targetId: target, session, off };
     this.streamFrom(entry, session);
+  }
+
+  /** The pane shows cezar's own page. It cleared its stage for this open, so an unchanged stream restarts to announce itself. */
+  private showHome(entry: RunEntry): void {
+    const shown = entry.session === entry.home;
+    this.dropFollowed(entry);
+    if (!entry.home) return;
+    this.streamFrom(entry, entry.home);
+    if (shown && entry.viewer) entry.home.attach(entry.viewer);
+  }
+
+  /** The agent's page closed while the pane looked elsewhere: cezar's own page stands in for it. */
+  private agentPageGone(entry: RunEntry, browser: BrowserHandle, target: string): void {
+    if (entry.agentTarget === target) entry.agentTarget = undefined;
+    if (entry.browser === browser && entry.followAgent && !entry.released) this.showHome(entry);
   }
 
   /** A session of cezar's own on `targetId`, carrying the page's current URL. */
