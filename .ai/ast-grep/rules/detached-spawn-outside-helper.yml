@@ -1,0 +1,22 @@
+id: detached-spawn-outside-helper
+language: typescript
+severity: warning
+message: >-
+  Start a process that outlives its caller through packages/cezar/src/detached-process.ts
+  (hearsay-tools/cezarion#1815): startOwnedGroup or spawnDetached for one cezar stops later, with
+  stopGroup ending its whole group, or startAndForget for one cezar never stops.
+files:
+  - packages/cezar/src/**/*.ts
+ignores:
+  - packages/cezar/src/detached-process.ts
+  - packages/cezar/src/**/*.test.ts
+  - packages/cezar/src/**/*.testkit.ts
+# `detached: true` in an object literal, the spawn option that makes a process outlive its caller.
+# A `detached` that is not the literal `true` (a variable, a shorthand `{ detached }`) is not
+# matched: the rule sees syntax, not values. The repository scan skips hidden directories, so
+# `.ai/scripts` is out of its reach.
+rule:
+  kind: pair
+  all:
+    - has: { field: key, regex: '^[''"]?detached[''"]?$' }
+    - has: { field: value, kind: 'true' }
