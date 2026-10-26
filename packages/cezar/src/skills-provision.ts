@@ -1,12 +1,18 @@
-import { execFile } from 'node:child_process';
-import { createHash, type Hash } from 'node:crypto';
-import { copyFile, cp, lstat, mkdir, readdir, readFile, readlink, realpath, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { readFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
-import { promisify } from 'node:util';
 import type { Skill } from './skills.ts';
-import { excludeFromGit, landsInside, materializeSkillDir, TEAM_SKILL_AGENT_DIRS } from './skills-remote.ts';
-
-const execFileAsync = promisify(execFile);
+import { excludeFromGit, materializeSkillDir, TEAM_SKILL_AGENT_DIRS } from './skills-remote.ts';
+import {
+  fileIdentity,
+  identityOf,
+  LinkRefused,
+  withWorktreeFiles,
+  type EntryContent,
+  type PathState,
+  type WorktreeFiles,
+  type WorktreeFilesOptions,
+} from './worktree-manifest.ts';
 
 /**
  * Provision selected skills, the skills a step's prompt names as `/name`, and heuristically
@@ -76,161 +82,31 @@ export function skillClosure(
   return { skills };
 }
 
+
 // ---- installing, ignoring and recording ---------------------------------------------------
 
 /** First line of the `.gitignore` cezar owns inside a worktree skills dir. */
 export const PROVISION_IGNORE_MARK = '# cezar: skills installed for this task, not part of the repository';
 
-/** The ownership record, in the worktree's private git dir: outside the tree and every link target. */
-const MANIFEST_FILE = 'cezar-skills.json';
-
-/** Matches `TEAM_SKILL_MARKER` in skills-remote.ts: a team copy is cezar's while it carries it. */
+/** Matches `TEAM_SKILL_MARKER` in skills-remote.ts: it names the team source of a copy. */
 const TEAM_MARKER = '.cezar-team-skill.json';
-
-/**
- * One path cezar created in a worktree. `identity` is what cezar left there (a link's target, a
- * digest of a tree, a team copy's marker); an entry is removed or rewritten only while the path
- * still has it, so a path the user replaced stays theirs. `source` says what the entry was made
- * from, so a moved or changed skill is rewritten.
- */
-export interface ProvisionedEntry {
-  /** `/`-joined, relative to the worktree. */
-  path: string;
-  /** `pending` is saved before an entry is created, with the identity the finished entry will
-   *  have, and replaced once it exists. A pass that died between the two leaves a path that stays
-   *  out of git; it is rewritten only while it still matches, so one the user changed stays theirs. */
-  kind: 'link' | 'copy' | 'generated' | 'team-copy' | 'ignore-file' | 'pending';
-  skill?: string;
-  source?: string;
-  identity: string;
-  /** A pending entry's other finished form: the copy a failed link falls back to. */
-  alternate?: string;
-}
-
-/** `current` is what cezar left at the entry's path (either finished form of a pending one). */
-function matches(record: ProvisionedEntry, current: string | null): boolean {
-  return current !== null && (current === record.identity || current === record.alternate);
-}
-
-export interface SkillManifest {
-  version: 1;
-  /** Every skill a pass asked for in this worktree; later passes keep their closures. */
-  roots: string[];
-  entries: ProvisionedEntry[];
-}
 
 export interface ProvisionResult {
   /** Skills with at least one entry created or rewritten by this pass, in closure order. */
   installed: string[];
   /** The first skill `MAX_SKILL_CLOSURE` left out, if any. */
   truncated?: string;
-  /** Absolute directories a team directory skill was copied to, by skill name. */
+  /** Absolute directories that hold cezar's current copy of a team directory skill, by skill name. */
   teamCopies: Record<string, string[]>;
 }
 
-export interface ProvisionOptions {
-  /** Injected in tests to exercise the copy fallback. */
-  symlink?: (target: string, path: string, type?: 'dir' | 'file' | 'junction') => Promise<void>;
+export interface ProvisionOptions extends WorktreeFilesOptions {
   /** True once the run stopped: the pass writes nothing more from its next step on. */
   cancelled?: () => boolean;
 }
 
 /** Thrown inside a pass when `cancelled()` turns true; the pass ends as a best-effort failure. */
 class ProvisionCancelled extends Error {}
-
-/**
- * One pass at a time per worktree: every pass reads the record, changes entries and rewrites the
- * record and the ignore files, so two overlapping passes (two live `/name` messages) would each
- * save over the other's roots and entries.
- */
-const passes = new Map<string, Promise<unknown>>();
-
-function serialized<T>(worktree: string, pass: () => Promise<T>): Promise<T> {
-  const key = resolve(worktree);
-  const previous = passes.get(key) ?? Promise.resolve();
-  const next = previous.then(pass, pass);
-  const settled = next.then(() => undefined, () => undefined);
-  passes.set(key, settled);
-  void settled.then(() => { if (passes.get(key) === settled) passes.delete(key); });
-  return next;
-}
-
-/** Replace the record in one step: a crash leaves the old record or the new one, never half. */
-async function writeManifest(file: string, manifest: SkillManifest): Promise<void> {
-  const staging = `${file}.${process.pid}.tmp`;
-  await writeFile(staging, `${JSON.stringify(manifest, null, 2)}\n`, 'utf8');
-  await rename(staging, file);
-}
-
-async function gitDirOf(worktree: string): Promise<string | null> {
-  try {
-    const { stdout } = await execFileAsync('git', ['rev-parse', '--absolute-git-dir'], { cwd: worktree, timeout: 10_000 });
-    return stdout.trim() || null;
-  } catch {
-    return null;
-  }
-}
-
-async function readManifest(file: string): Promise<SkillManifest> {
-  try {
-    const parsed = JSON.parse(await readFile(file, 'utf8')) as Partial<SkillManifest>;
-    if (parsed.version === 1 && Array.isArray(parsed.entries) && Array.isArray(parsed.roots)) {
-      return { version: 1, roots: parsed.roots.filter((r) => typeof r === 'string'), entries: parsed.entries };
-    }
-  } catch {
-    // absent or unreadable: nothing is recorded as ours
-  }
-  return { version: 1, roots: [], entries: [] };
-}
-
-async function digestInto(hash: Hash, path: string, rel: string): Promise<void> {
-  const stat = await lstat(path);
-  if (stat.isSymbolicLink()) hash.update(`L ${rel} ${await readlink(path)}\n`);
-  else if (stat.isDirectory()) {
-    hash.update(`D ${rel}\n`);
-    for (const name of (await readdir(path)).sort()) await digestInto(hash, join(path, name), rel ? `${rel}/${name}` : name);
-  } else {
-    hash.update(`F ${rel} `);
-    hash.update(await readFile(path));
-    hash.update('\n');
-  }
-}
-
-/** What is at `path` now, comparable with a recorded identity; null when nothing is there. */
-async function identityOf(path: string, kind: ProvisionedEntry['kind']): Promise<string | null> {
-  const stat = await lstat(path).catch(() => null);
-  if (!stat) return null;
-  if (stat.isSymbolicLink()) return `link:${await readlink(path)}`;
-  if (kind === 'team-copy') {
-    const marker = await readFile(join(path, TEAM_MARKER), 'utf8').catch(() => null);
-    return marker === null ? `untracked-team:${path}` : `marker:${marker}`;
-  }
-  const hash = createHash('sha256');
-  await digestInto(hash, path, '');
-  return `tree:${hash.digest('hex')}`;
-}
-
-/** The identity `identityOf` reads from a directory holding exactly `files` (no subdirectories). */
-function treeIdentity(files: ReadonlyArray<{ name: string; link?: string; content?: string | Buffer }>): string {
-  const hash = createHash('sha256');
-  hash.update('D \n');
-  for (const file of [...files].sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))) {
-    if (file.link !== undefined) hash.update(`L ${file.name} ${file.link}\n`);
-    else {
-      hash.update(`F ${file.name} `);
-      hash.update(file.content ?? '');
-      hash.update('\n');
-    }
-  }
-  return `tree:${hash.digest('hex')}`;
-}
-
-async function removePath(path: string): Promise<void> {
-  const stat = await lstat(path).catch(() => null);
-  if (!stat) return;
-  if (stat.isDirectory()) await rm(path, { recursive: true, force: true });
-  else await unlink(path);
-}
 
 function skillMarkdown(skill: Skill): string {
   const front = [`name: ${JSON.stringify(skill.name)}`];
@@ -257,10 +133,21 @@ function planFor(skill: Skill): Plan {
   return { how: 'write', text, source: `body:${createHash('sha256').update(text).digest('hex')}` };
 }
 
+const entryPath = (agentDir: string, name: string) => `${agentDir}/skills/${name}`;
+
+/** One pass's shared state: what it installed, and every path its closure still wants. */
+interface Pass {
+  files: WorktreeFiles;
+  installed: Set<string>;
+  wanted: Set<string>;
+  checkpoint: () => void;
+}
+
 /**
- * Provision roots and companions only in an owned task worktree. Preserve unowned paths and
- * reject escaping destinations. Record owned changes after ignore rules are installed. On
- * failure retain the system-prompt fallback; never throw.
+ * Provision roots and companions only in an owned task worktree, through its manifest
+ * (`worktree-manifest.ts`): replace or remove only cezar's unchanged entries, and reject escaping
+ * destinations. Install ignore rules before entries. On failure retain the system-prompt
+ * fallback; never throw.
  */
 export function provisionSkills(
   worktree: string,
@@ -268,11 +155,12 @@ export function provisionSkills(
   catalog: readonly Skill[],
   options: ProvisionOptions = {},
 ): Promise<ProvisionResult> {
-  return serialized(worktree, () => provisionPass(worktree, roots, catalog, options));
+  return withWorktreeFiles(worktree, 'skills', options, { installed: [], teamCopies: {} },
+    (files) => provisionPass(files, roots, catalog, options));
 }
 
 async function provisionPass(
-  worktree: string,
+  files: WorktreeFiles,
   roots: readonly Skill[],
   catalog: readonly Skill[],
   options: ProvisionOptions,
@@ -281,229 +169,202 @@ async function provisionPass(
   const checkpoint = () => { if (options.cancelled?.()) throw new ProvisionCancelled(); };
   try {
     checkpoint();
-    const gitDir = await gitDirOf(worktree);
-    const root = await realpath(worktree).catch(() => null);
-    if (!gitDir || root === null) return result;
-    const manifestFile = join(gitDir, MANIFEST_FILE);
-    const manifest = await readManifest(manifestFile);
-    const records = new Map(manifest.entries.map((entry) => [entry.path, entry]));
-    const save = () => writeManifest(manifestFile, { ...manifest, entries: [...records.values()] });
-    // A recorded path is touched only while its skills dir still lands in this worktree: a
-    // redirected agent dir must not turn a cleanup into a delete in another checkout.
-    const contained = (rel: string) => landsInside(root, dirname(join(worktree, rel)));
-    const makeLink = options.symlink ?? ((target, path, type) => symlink(target, path, type));
-    const linkType = process.platform === 'win32' ? 'junction' : 'dir';
-
-    const safeRoots = roots.filter((skill) => SAFE_SKILL_NAME.test(skill.name));
-    const rootNames = [...new Set([...manifest.roots, ...safeRoots.map((skill) => skill.name)])];
-    const allRoots = rootNames.flatMap((name) => {
-      const found = safeRoots.find((skill) => skill.name === name) ?? catalog.find((skill) => skill.name === name);
-      return found ? [found] : [];
-    });
-    manifest.roots = allRoots.map((skill) => skill.name);
-    const closure = skillClosure(allRoots, catalog);
-    if (closure.truncated) result.truncated = closure.truncated;
-    const skills = closure.skills.filter((skill) => SAFE_SKILL_NAME.test(skill.name));
-
-    const installed = new Set<string>();
-    const wanted = new Set<string>();
-    const ownedNames = (agentDir: string): string[] => [...records.values()]
-      .filter((entry) => entry.kind !== 'ignore-file' && entry.path.startsWith(`${agentDir}/skills/`))
-      .map((entry) => entry.skill ?? '').filter(Boolean);
-
-    /** Keep `names` out of git in `<agentDir>/skills`, through cezar's own `.gitignore` when it may. */
-    const syncIgnore = async (agentDir: string, names: readonly string[]): Promise<void> => {
-      const rel = `${agentDir}/skills/.gitignore`;
-      const file = join(worktree, rel);
-      if (!(await landsInside(root, file))) return;
-      const record = records.get(rel);
-      const current = await identityOf(file, 'ignore-file');
-      if (current !== null && current !== record?.identity) {
-        if (record) records.delete(rel);
-        for (const name of names) await excludeFromGit(worktree, `${agentDir}/skills/${name}`);
-        return;
-      }
-      const sorted = [...new Set(names)].sort();
-      if (sorted.length === 0) {
-        if (current !== null) await unlink(file);
-        records.delete(rel);
-        return save();
-      }
-      const text = [PROVISION_IGNORE_MARK, '/.gitignore', ...sorted.map((name) => `/${name}`)].join('\n') + '\n';
-      await mkdir(dirname(file), { recursive: true });
-      await writeFile(file, text, 'utf8');
-      records.set(rel, { path: rel, kind: 'ignore-file', identity: (await identityOf(file, 'ignore-file'))! });
-      await save();
-    };
-
+    const skills = passClosure(files, roots, catalog, result);
+    const pass: Pass = { files, installed: new Set(), wanted: new Set(), checkpoint };
     for (const agentDir of TEAM_SKILL_AGENT_DIRS) {
       checkpoint();
       // Ignore first: an entry git could see must never exist, not even for a crash's length.
       // Only names cezar may write: a recorded entry or a free path, never the user's own skill.
       const planned: string[] = [];
       for (const skill of skills) {
-        const rel = `${agentDir}/skills/${skill.name}`;
-        if (records.has(rel) || !(await lstat(join(worktree, rel)).catch(() => null))) planned.push(skill.name);
+        const rel = entryPath(agentDir, skill.name);
+        if (files.entry(rel) || !(await files.present(rel))) planned.push(skill.name);
       }
-      if (await landsInside(root, join(worktree, agentDir, 'skills', '.gitignore'))) {
-        await syncIgnore(agentDir, [...ownedNames(agentDir), ...planned]);
-      }
+      await syncIgnore(files, agentDir, [...ownedNames(files, agentDir), ...planned]);
     }
-
     for (const skill of skills) {
       checkpoint();
       const plan = planFor(skill);
-      if (plan.how === 'team') {
-        // A record of another kind at a destination gives way first, while it is still ours.
-        for (const agentDir of TEAM_SKILL_AGENT_DIRS) {
-          const rel = `${agentDir}/skills/${skill.name}`;
-          const record = records.get(rel);
-          if (!record || record.kind === 'team-copy') continue;
-          if (await ownedAt(worktree, record, contained)) await removePath(join(worktree, rel));
-          records.delete(rel);
-        }
-        // A directory there without cezar's marker is the user's, even one replacing a copy.
-        const written = await materializeSkillDir(worktree, skill, async () => undefined, { onlyOwned: true })
-          .catch(() => [] as string[]);
-        result.teamCopies[skill.name] = written;
-        for (const dir of written) {
-          const rel = `${basename(dirname(dirname(dir)))}/skills/${skill.name}`;
-          wanted.add(rel);
-          const identity = await identityOf(dir, 'team-copy');
-          if (!identity?.startsWith('marker:')) continue;
-          if (records.get(rel)?.identity !== identity) installed.add(skill.name);
-          records.set(rel, { path: rel, kind: 'team-copy', skill: skill.name, identity });
-        }
-        await save();
-        continue;
-      }
-      // A copy follows its source's content too, not only its path; digested only for a copy.
-      let copyKey: Promise<string> | undefined;
-      const copySource = () => (copyKey ??= plan.how === 'write'
-        ? Promise.resolve(plan.source)
-        : identityOf(plan.target, 'copy').then((digest) => `${plan.source}#${digest}`));
-      for (const agentDir of TEAM_SKILL_AGENT_DIRS) {
-        checkpoint();
-        const rel = `${agentDir}/skills/${skill.name}`;
-        const dest = join(worktree, rel);
-        // The skills dir must land inside; the entry itself may be cezar's own link out of it.
-        if (!(await contained(rel))) {
-          records.delete(rel);
-          continue;
-        }
-        const record = records.get(rel);
-        const current = record ? await identityOf(dest, record.kind) : await lstat(dest).then(() => 'present', () => null);
-        const source = record?.kind === 'copy' ? await copySource() : plan.source;
-        if (record && record.kind !== 'pending' && current === record.identity && record.source === source) {
-          wanted.add(rel);
-          continue;
-        }
-        if (record && matches(record, current)) await removePath(dest);
-        else if (record?.kind === 'pending' && current !== null) {
-          // An interrupted entry that no longer matches: maybe the user's now. Leave it, ignored.
-          wanted.add(rel);
-          continue;
-        } else if (current !== null) {
-          // Not cezar's (tracked, or the user's own), or replaced since: leave it.
-          records.delete(rel);
-          continue;
-        }
-        const pending = async (identity: string, alternate?: string) => {
-          records.set(rel, { path: rel, kind: 'pending', skill: skill.name, identity, ...(alternate ? { alternate } : {}) });
-          await save();
-        };
-        await mkdir(dirname(dest), { recursive: true });
-        let kind: ProvisionedEntry['kind'];
-        if (plan.how === 'link-dir') {
-          await pending(`link:${plan.target}`);
-          kind = await makeLink(plan.target, dest, linkType).then(
-            () => 'link' as const,
-            async () => {
-              await pending(`link:${plan.target}`, (await identityOf(plan.target, 'copy')) ?? undefined);
-              await cp(plan.target, dest, { recursive: true, dereference: true });
-              return 'copy' as const;
-            },
-          );
-        } else if (plan.how === 'link-file') {
-          await pending(treeIdentity([{ name: 'SKILL.md', link: plan.target }]));
-          await mkdir(dest);
-          kind = await makeLink(plan.target, join(dest, 'SKILL.md'), 'file').then(
-            () => 'generated' as const,
-            async () => {
-              await pending(
-                treeIdentity([{ name: 'SKILL.md', link: plan.target }]),
-                treeIdentity([{ name: 'SKILL.md', content: await readFile(plan.target) }]),
-              );
-              await copyFile(plan.target, join(dest, 'SKILL.md'));
-              return 'copy' as const;
-            },
-          );
-        } else {
-          await pending(treeIdentity([{ name: 'SKILL.md', content: plan.text }]));
-          await mkdir(dest);
-          await writeFile(join(dest, 'SKILL.md'), plan.text, 'utf8');
-          kind = 'generated';
-        }
-        records.set(rel, {
-          path: rel, kind, skill: skill.name, source: kind === 'copy' ? await copySource() : plan.source,
-          identity: (await identityOf(dest, kind))!,
-        });
-        wanted.add(rel);
-        installed.add(skill.name);
-        await save();
-      }
+      if (plan.how === 'team') result.teamCopies[skill.name] = await placeTeamCopies(pass, skill);
+      else await placeLinkedSkill(pass, skill, plan);
     }
-
-    // Owned entries the closure no longer wants go, while they are still what cezar left.
     checkpoint();
-    for (const record of [...records.values()]) {
-      if (record.kind === 'ignore-file' || wanted.has(record.path)) continue;
-      if (await ownedAt(worktree, record, contained)) await removePath(join(worktree, record.path));
-      else if (record.kind === 'pending' && (await contained(record.path)) && (await lstat(join(worktree, record.path)).catch(() => null))) {
-        continue; // changed since the interrupted pass: never deleted, still kept out of git
-      }
-      records.delete(record.path);
-    }
-    await save();
-    for (const agentDir of TEAM_SKILL_AGENT_DIRS) await syncIgnore(agentDir, ownedNames(agentDir));
-
-    result.installed = skills.map((skill) => skill.name).filter((name) => installed.has(name));
+    await removeUnwanted(pass);
+    for (const agentDir of TEAM_SKILL_AGENT_DIRS) await syncIgnore(files, agentDir, ownedNames(files, agentDir));
+    result.installed = skills.map((skill) => skill.name).filter((name) => pass.installed.has(name));
   } catch {
     // Best effort: the skill body still rides the system prompt.
   }
   return result;
 }
 
+/** Every root this worktree asked for, earlier passes included, and the companions they name. */
+function passClosure(files: WorktreeFiles, roots: readonly Skill[], catalog: readonly Skill[], result: ProvisionResult): Skill[] {
+  const safeRoots = roots.filter((skill) => SAFE_SKILL_NAME.test(skill.name));
+  const rootNames = [...new Set([...files.roots, ...safeRoots.map((skill) => skill.name)])];
+  const allRoots = rootNames.flatMap((name) => {
+    const found = safeRoots.find((skill) => skill.name === name) ?? catalog.find((skill) => skill.name === name);
+    return found ? [found] : [];
+  });
+  files.roots = allRoots.map((skill) => skill.name);
+  const closure = skillClosure(allRoots, catalog);
+  if (closure.truncated) result.truncated = closure.truncated;
+  return closure.skills.filter((skill) => SAFE_SKILL_NAME.test(skill.name));
+}
+
+function ownedNames(files: WorktreeFiles, agentDir: string): string[] {
+  return files.entries()
+    .filter((entry) => entry.kind !== 'ignore-file' && entry.path.startsWith(`${agentDir}/skills/`))
+    .map((entry) => entry.skill ?? '').filter(Boolean);
+}
+
+/** Keep `names` out of git in `<agentDir>/skills`, through cezar's own `.gitignore` when it may. */
+async function syncIgnore(files: WorktreeFiles, agentDir: string, names: readonly string[]): Promise<void> {
+  const rel = `${agentDir}/skills/.gitignore`;
+  const state = await files.inspect(rel);
+  if (state.owner === 'outside') return;
+  if (state.owner === 'theirs' || state.owner === 'kept') {
+    files.forget(rel);
+    return excludeEach(files, agentDir, names);
+  }
+  const sorted = [...new Set(names)].sort();
+  if (sorted.length === 0) {
+    if (!(await files.remove(rel))) files.forget(rel);
+    return files.save();
+  }
+  const text = [PROVISION_IGNORE_MARK, '/.gitignore', ...sorted.map((name) => `/${name}`)].join('\n') + '\n';
+  if (state.owner === 'ours' && state.entry?.kind === 'ignore-file' && state.current === fileIdentity(text)) return;
+  // The agent wrote the ignore file while cezar staged it: it stays theirs, as above.
+  if ((await files.put(rel, { type: 'file', text }, { kind: 'ignore-file' })) === null) await excludeEach(files, agentDir, names);
+}
+
+async function excludeEach(files: WorktreeFiles, agentDir: string, names: readonly string[]): Promise<void> {
+  for (const name of names) await excludeFromGit(files.worktree, `${agentDir}/skills/${name}`);
+}
+
+/** The state of `rel` when this pass may write it; null when it must stay as it is. */
+async function claimPath(pass: Pass, rel: string): Promise<PathState | null> {
+  const state = await pass.files.inspect(rel);
+  // Not cezar's (tracked, or the user's own), changed since, or out of the worktree: leave it.
+  if (state.owner === 'outside' || state.owner === 'theirs') {
+    pass.files.forget(rel);
+    return null;
+  }
+  pass.wanted.add(rel);
+  // An interrupted entry that no longer matches may be the user's now: left alone, kept out of git.
+  return state.owner === 'kept' ? null : state;
+}
+
+/** A local, global or built-in skill: a link, a generated `SKILL.md`, or a copy where links fail. */
+async function placeLinkedSkill(pass: Pass, skill: Skill, plan: Exclude<Plan, { how: 'team' }>): Promise<void> {
+  const { files } = pass;
+  // A copy follows its source's content too, not only its path; digested only for a copy.
+  let copyKey: Promise<string> | undefined;
+  const copySource = () => (copyKey ??= plan.how === 'write'
+    ? Promise.resolve(plan.source)
+    : identityOf(plan.target).then((digest) => `${plan.source}#${digest}`));
+  for (const agentDir of TEAM_SKILL_AGENT_DIRS) {
+    pass.checkpoint();
+    const rel = entryPath(agentDir, skill.name);
+    const state = await claimPath(pass, rel);
+    if (!state) continue;
+    const { entry } = state;
+    if (state.owner === 'ours' && entry && entry.kind !== 'pending' && state.current === entry.identity
+      && entry.source === (entry.kind === 'copy' ? await copySource() : plan.source)) continue;
+    if (await placeEntry(files, rel, skill.name, plan, copySource)) pass.installed.add(skill.name);
+  }
+}
+
 /**
- * Remove every entry `provisionSkills` recorded in `worktree` that still is what cezar left, its
- * owned ignore files, and the record. A path the user replaced stays. Never throws. A later
- * skills design calls this before it installs its own view.
+ * Write one entry as `plan` says; a link the platform refuses falls back to a copy. False when the
+ * agent wrote at `rel` meanwhile, so nothing was placed.
+ */
+async function placeEntry(
+  files: WorktreeFiles,
+  rel: string,
+  skill: string,
+  plan: Exclude<Plan, { how: 'team' }>,
+  copySource: () => Promise<string>,
+): Promise<boolean> {
+  if (plan.how === 'write') {
+    const generated: EntryContent = { type: 'dir', files: [{ name: 'SKILL.md', text: plan.text }] };
+    return (await files.put(rel, generated, { kind: 'generated', skill, source: plan.source })) !== null;
+  }
+  const linked: EntryContent = plan.how === 'link-dir'
+    ? { type: 'link', target: plan.target, linkType: process.platform === 'win32' ? 'junction' : 'dir' }
+    : { type: 'dir', files: [{ name: 'SKILL.md', linkTo: plan.target }] };
+  try {
+    return (await files.put(rel, linked, { kind: plan.how === 'link-dir' ? 'link' : 'generated', skill, source: plan.source })) !== null;
+  } catch (error) {
+    if (!(error instanceof LinkRefused)) throw error;
+    const copied: EntryContent = plan.how === 'link-dir'
+      ? { type: 'copy', from: plan.target }
+      : { type: 'dir', files: [{ name: 'SKILL.md', copyOf: plan.target }] };
+    return (await files.put(rel, copied, { kind: 'copy', skill, source: await copySource() })) !== null;
+  }
+}
+
+/**
+ * A team directory skill: materialized in a staging dir, then placed in each agent dir whose
+ * path is free or still holds cezar's unchanged copy. A copy the agent changed, or added files
+ * to, stays as it is. Returns the worktree dirs that hold cezar's current copy.
+ */
+async function placeTeamCopies(pass: Pass, skill: Skill): Promise<string[]> {
+  const { files } = pass;
+  const staging = await files.stagingDir();
+  const written = new Set(await materializeSkillDir(staging, skill, async () => undefined).catch(() => [] as string[]));
+  const copies: string[] = [];
+  for (const agentDir of TEAM_SKILL_AGENT_DIRS) {
+    pass.checkpoint();
+    const rel = entryPath(agentDir, skill.name);
+    const staged = resolve(staging, agentDir, 'skills', skill.name);
+    if (!written.has(staged)) continue;
+    const state = await claimPath(pass, rel);
+    if (!state) continue;
+    const identity = await identityOf(staged);
+    const marker = await readFile(join(staged, TEAM_MARKER), 'utf8').catch(() => null);
+    if (identity === null || marker === null) continue;
+    const meta = { kind: 'team-copy' as const, skill: skill.name, source: `team:${JSON.stringify(JSON.parse(marker))}` };
+    if (state.owner === 'ours' && state.current === identity) {
+      if (state.entry?.kind !== 'team-copy') files.record(rel, meta, identity);
+    } else {
+      if ((await files.put(rel, { type: 'staged', path: staged }, meta)) === null) continue;
+      pass.installed.add(skill.name);
+    }
+    copies.push(resolve(files.worktree, rel));
+  }
+  return copies;
+}
+
+/** Owned entries the closure no longer wants go, while they are still what cezar left. */
+async function removeUnwanted({ files, wanted }: Pass): Promise<void> {
+  for (const entry of files.entries()) {
+    if (entry.kind === 'ignore-file' || wanted.has(entry.path)) continue;
+    // Changed since an interrupted pass, or not this cezar's to judge: never deleted, still out of git.
+    if ((await files.inspect(entry.path)).owner === 'kept') continue;
+    if (!(await files.remove(entry.path))) files.forget(entry.path);
+  }
+  await files.save();
+}
+
+/**
+ * Remove every entry `provisionSkills` recorded in `worktree` that still is what cezar left, and
+ * its owned ignore files, then drop its entries and roots from the manifest. A path the user
+ * replaced stays. Never throws. A later skills design calls this before it installs its own view.
  */
 export function removeProvisionedSkills(worktree: string): Promise<void> {
-  return serialized(worktree, async () => {
+  return withWorktreeFiles(worktree, 'skills', {}, undefined, async (files) => {
     try {
-      const gitDir = await gitDirOf(worktree);
-      const root = await realpath(worktree).catch(() => null);
-      if (!gitDir || root === null) return;
-      const manifestFile = join(gitDir, MANIFEST_FILE);
-      const manifest = await readManifest(manifestFile);
-      const contained = (rel: string) => landsInside(root, dirname(join(worktree, rel)));
-      for (const record of manifest.entries) {
-        if (await ownedAt(worktree, record, contained)) await removePath(join(worktree, record.path));
+      for (const entry of files.entries()) {
+        // Never deleted, and still kept out of git once cezar's ignore file is gone.
+        if ((await files.inspect(entry.path)).owner === 'kept') await excludeFromGit(files.worktree, `${entry.path}/`);
+        else if (await files.remove(entry.path)) continue;
+        files.forget(entry.path);
       }
-      await unlink(manifestFile).catch(() => undefined);
+      files.roots = [];
+      await files.save();
     } catch {
       // Best effort.
     }
   });
-}
-
-/** The recorded path still lands in the worktree and is what cezar left there. */
-async function ownedAt(
-  worktree: string,
-  record: ProvisionedEntry,
-  contained: (rel: string) => Promise<boolean>,
-): Promise<boolean> {
-  if (!(await contained(record.path))) return false;
-  return matches(record, await identityOf(join(worktree, record.path), record.kind));
 }

@@ -32,6 +32,6 @@ commit-keyed and staged before rename; passive fetch stamps are shared across pr
 - **Follow each account home for global skills.** Rejected because changing a login should not select another playbook library.
 - **Materialize managed skills in the main checkout.** Rejected because discovery would later treat those copies as higher-priority local content.
 
-Implementation: [skills.ts](../../packages/cezar/src/skills.ts), [skills-provision.ts](../../packages/cezar/src/skills-provision.ts), [skills-remote.ts](../../packages/cezar/src/skills-remote.ts).
+Implementation: [skills.ts](../../packages/cezar/src/skills.ts), [skills-provision.ts](../../packages/cezar/src/skills-provision.ts), [skills-remote.ts](../../packages/cezar/src/skills-remote.ts), [worktree-manifest.ts](../../packages/cezar/src/worktree-manifest.ts).
 
-Coverage: [skills.test.ts](../../packages/cezar/src/skills.test.ts), [skills-provision.test.ts](../../packages/cezar/src/skills-provision.test.ts), [skills-remote.test.ts](../../packages/cezar/src/skills-remote.test.ts).
+Coverage: [skills.test.ts](../../packages/cezar/src/skills.test.ts), [skills-provision.test.ts](../../packages/cezar/src/skills-provision.test.ts), [worktree-manifest.test.ts](../../packages/cezar/src/worktree-manifest.test.ts), [skills-remote.test.ts](../../packages/cezar/src/skills-remote.test.ts).
