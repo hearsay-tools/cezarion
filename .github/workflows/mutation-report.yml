@@ -3,22 +3,29 @@ name: Mutation report
 # Runs StrykerJS on the lines a pull request changes in packages/*/src and uploads what it found.
 # Advisory: it never blocks a merge. No required check, queue entry or failure reporter lists it,
 # a Stryker timeout or error is recorded in its artifact and the job still passes, and a newer push
-# cancels the run before it. mutation-report-comment.yml posts the one pull request comment; this
-# workflow runs the pull request's own code, so it has a read-only token and no secrets.
+# cancels the run before it. It also runs when an open pull request is retargeted, so the report
+# follows the new base; any other edit skips the job. mutation-report-comment.yml posts the one pull
+# request comment; this workflow runs the pull request's own code, so it has a read-only token and no
+# secrets.
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened, edited]
 
 permissions:
   contents: read
 
 concurrency:
-  group: mutation-report-${{ github.event.pull_request.number }}
+  # An edit that does not change the base skips the job, and it gets a group of its own so it cannot
+  # cancel a report that is still running for the same pull request.
+  group: ${{ github.event.action == 'edited' && !github.event.changes.base && format('mutation-report-edit-{0}', github.run_id) || format('mutation-report-{0}', github.event.pull_request.number) }}
   cancel-in-progress: true
 
 jobs:
   mutants:
     name: Surviving mutants in changed lines
+    # `edited` also fires for a title or body change, which has nothing new to mutate.
+    if: github.event.action != 'edited' || github.event.changes.base
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:

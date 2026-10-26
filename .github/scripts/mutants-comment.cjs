@@ -50,7 +50,7 @@ function decide(run, dir, core, ctx) {
 async function publish({ github, context, core, dir }) {
   const run = context.payload.workflow_run;
   const { owner, repo } = context.repo;
-  if (run.event !== 'pull_request' || run.conclusion === 'cancelled') {
+  if (run.event !== 'pull_request' || run.conclusion === 'cancelled' || run.conclusion === 'skipped') {
     core.info(`Nothing to post for a ${run.event} run that ${run.conclusion}.`);
     return;
   }

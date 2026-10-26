@@ -93,12 +93,15 @@ test('a failed or timed-out job replaces an existing report and never creates a 
   assert.doesNotMatch(bodies(github)[0], /stale-survivor/);
 });
 
-test('a run that a newer push cancelled touches nothing, not even the API', async t => {
-  const github = fakeGithub({ pulls: [pr(HEAD_1)] });
-  await go(github, run(HEAD_1, { conclusion: 'cancelled' }), withArtifact(t));
-  assert.deepEqual(github.state.writes, []);
-  assert.equal(github.state.reads, 0);
-});
+// A cancelled run has a successor that posts; a skipped run (an edit that changed no base) wrote no artifact.
+for (const conclusion of ['cancelled', 'skipped']) {
+  test(`a ${conclusion} run touches nothing, not even the API`, async t => {
+    const github = fakeGithub({ pulls: [pr(HEAD_1)] });
+    await go(github, run(HEAD_1, { conclusion }), withArtifact(t));
+    assert.deepEqual(github.state.writes, []);
+    assert.equal(github.state.reads, 0);
+  });
+}
 
 test('an artifact that is missing, not JSON, the wrong shape or too large reads as unreadable', async t => {
   const hostile = { ...artifact(HEAD_1, [pack()]), version: 9 };
