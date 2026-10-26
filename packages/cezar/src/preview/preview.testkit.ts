@@ -1,3 +1,5 @@
+import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import type { PreviewServerMessage } from '@open-mercato/cezar-contract';
 import { vi } from 'vitest';
 import type { Cdp } from './cdp.ts';
@@ -40,4 +42,43 @@ export function fakeViewer(userAgent = 'Firefox') {
     close(code: number, reason: string) { viewer.closed.push({ code, reason }); },
   };
   return viewer satisfies Viewer;
+}
+
+export interface FixtureProcessGuard {
+  /** Appended to every `fake-dev-server.mjs` launch: the fixture ignores it, and `ps` shows it. */
+  args: string[];
+  /** Waits for every tagged process to go, then kills any survivor and throws naming it. */
+  assertNoneLeft(): Promise<void>;
+}
+
+/**
+ * A leak check for tests that launch `__fixtures__/fake-dev-server.mjs` (hearsay-tools/cezarion#1880).
+ * The fixture never exits on its own before its lifetime ends, so a test that forgets one of its
+ * processes strands it on the host. Tag each launch with `args` and call `assertNoneLeft()` at the
+ * end of the test's teardown, so the leak fails the test that made it. The scan reads `ps`, so it
+ * also sees the shell and the port holder below a launch, which a pid list would miss. It does
+ * nothing on Windows, which has no `ps` and runs none of these fixtures.
+ */
+export function fixtureProcessGuard(): FixtureProcessGuard {
+  const token = `cez-fixture-${randomUUID()}`;
+  const tagged = (): Array<{ pid: number; command: string }> => {
+    if (process.platform === 'win32') return [];
+    // bound: `ps` lists a few thousand processes in milliseconds; this only stops a wedged `ps` from wedging the hook
+    const listing = execFileSync('ps', ['-A', '-ww', '-o', 'pid=,command='], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, timeout: 10_000 });
+    return listing.split('\n').flatMap(line => {
+      const match = /^\s*(\d+)\s+(.*)$/.exec(line);
+      return match && match[2]!.includes(token) ? [{ pid: Number(match[1]), command: match[2]! }] : [];
+    });
+  };
+  return {
+    args: ['--owner', token],
+    async assertNoneLeft() {
+      // bound: a SIGKILLed process leaves `ps` once the kernel reaps it; one still listed after this is a leak, which the throw below reports
+      await vi.waitFor(() => { if (tagged().length) throw new Error('fixture process still listed'); }, { timeout: 5_000, interval: 25 }).catch(() => undefined);
+      const left = tagged();
+      if (!left.length) return;
+      for (const { pid } of left) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
+      throw new Error(`${left.length} fixture process(es) outlived the test and were killed:\n${left.map(({ pid, command }) => `  ${pid} ${command}`).join('\n')}`);
+    },
+  };
 }

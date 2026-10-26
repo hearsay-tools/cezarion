@@ -10,6 +10,17 @@ const branchTypes = new Set([
   'DoWhileStatement', 'AssignmentPattern',
 ]);
 const classInitializers = new Set(['ClassProperty', 'ClassPrivateProperty', 'ClassAccessorProperty', 'StaticBlock']);
+const logicalAssignments = new Set(['&&=', '||=', '??=']);
+const optionalChains = new Set(['OptionalMemberExpression', 'OptionalCallExpression']);
+
+/** The label of the decision point a node adds to its function's complexity, or undefined. */
+function decisionKind(node) {
+  if (node.type === 'LogicalExpression') return `${node.type} ${node.operator}`;
+  if (branchTypes.has(node.type) || (node.type === 'SwitchCase' && node.test)) return node.type;
+  if (node.type === 'AssignmentExpression' && logicalAssignments.has(node.operator)) return `${node.type} ${node.operator}`;
+  if (optionalChains.has(node.type) && node.optional) return `${node.type} ?.`;
+  return undefined;
+}
 
 function* childNodes(node, skipKey) {
   for (const [key, value] of Object.entries(node)) {
@@ -52,7 +63,7 @@ export function analyzeSource(source, filename) {
       owner = {
         name: functionName(node, parent, ancestors),
         line: node.loc.start.line, column: node.loc.start.column + 1,
-        endLine: node.loc.end.line, complexity: 1,
+        endLine: node.loc.end.line, complexity: 1, points: [],
         start: node.start, end: node.end,
         bodyStart: node.body.start, bodyEnd: node.body.end,
         bodyLoc: node.body.loc.start, bodyEndLine: node.body.loc.end.line,
@@ -68,29 +79,32 @@ export function analyzeSource(source, filename) {
       if (owner) owner.excludedRanges.push([node.start, node.end]);
       owner = undefined;
     }
-    if (owner && (
-      branchTypes.has(node.type)
-      || (node.type === 'SwitchCase' && node.test)
-      || (node.type === 'AssignmentExpression' && ['&&=', '||=', '??='].includes(node.operator))
-      || (['OptionalMemberExpression', 'OptionalCallExpression'].includes(node.type) && node.optional)
-    )) owner.complexity++;
+    const kind = owner && decisionKind(node);
+    if (kind) {
+      owner.complexity++;
+      owner.points.push({ line: node.loc.start.line, kind });
+    }
     for (const child of childNodes(node, method)) visit(child, owner, node, [...ancestors, node]);
   }
   visit(ast.program, undefined, undefined, []);
+  for (const fn of functions) fn.points.sort((a, b) => a.line - b.line);
   return functions.sort((a, b) => a.start - b.start);
 }
 
-export function selectFunctions(functions, { name, line } = {}) {
+export function selectFunctions(functions, { name, line, column } = {}) {
   let selected = functions;
   if (name !== undefined) {
     selected = selected.filter(fn => fn.name === name || fn.name.split('.').at(-1) === name);
   }
-  if (line !== undefined) {
+  if (column !== undefined) {
+    // A function is the only one that starts at its line and column; a line alone also covers what is nested on it.
+    selected = selected.filter(fn => fn.line === line && fn.column === column);
+  } else if (line !== undefined) {
     selected = selected.filter(fn => fn.line <= line && fn.endLine >= line)
       .sort((a, b) => (a.end - a.start) - (b.end - b.start)).slice(0, 1);
   }
   if ((name !== undefined || line !== undefined) && !selected.length) {
-    throw new Error(`No function matches ${name ? JSON.stringify(name) : ''}${line ? ` at line ${line}` : ''}.`);
+    throw new Error(`No function matches ${name ? JSON.stringify(name) : ''}${line ? ` at line ${line}${column ? `, column ${column}` : ''}` : ''}.`);
   }
   if (name !== undefined && selected.length > 1) {
     throw new Error(`Several functions match ${JSON.stringify(name)} (lines ${selected.map(fn => fn.line).join(', ')}). Add --line.`);
@@ -176,9 +190,12 @@ export function measureCoverage(source, functions, entry) {
   }));
 }
 
-export function functionResults(functions, measurements, reason = 'No coverage report. Use --test or --coverage to calculate CRAP.') {
+export function functionResults(functions, measurements, reason = 'No coverage report. Use --test or --coverage to calculate CRAP.', breakdown = false) {
   return functions.map(fn => {
-    const { name, line, column, endLine, complexity } = fn;
-    return { name, line, column, endLine, complexity, ...(measurements?.get(fn) ?? unavailable(reason)) };
+    const { name, line, column, endLine, complexity, points } = fn;
+    return {
+      name, line, column, endLine, complexity, ...(breakdown ? { decisionPoints: points } : {}),
+      ...(measurements?.get(fn) ?? unavailable(reason)),
+    };
   });
 }

@@ -86,7 +86,7 @@ intentionally trading single-run latency for lower concurrency on a shared host.
 
 ### CI verification
 
-Verification runs in eight parallel jobs. Seven use the current Node LTS; the build/package job uses exactly the `engines.node` minimum (Node 24.21.0):
+Verification runs in eight parallel jobs, and a ninth, `complexity-gate`, gates pull requests. Seven of the eight use the current Node LTS; the build/package job uses exactly the `engines.node` minimum (Node 24.21.0):
 
 - Three Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/3 --maxWorkers=4` for N=1..3.
 - The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It runs the issue-citation check, typechecking, Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
@@ -96,7 +96,7 @@ The full Vitest suite runs once across the three LTS shards. There is no second 
 
 The legacy floor config, sequencer, reporter and duration manifest remain for PR compatibility. PR CI loads `ci.yml` from the target branch, whose old floor jobs still read these files from the PR checkout. The new workflow has no floor jobs and does not use these helpers. Remove the helpers only after the new workflow reaches the target branch.
 
-The required check keeps its name, **Unit, build, E2E, and package**. It succeeds only when the build/package job, all three Vitest shards, and all four cockpit browser shards succeed. Packaged CLI E2E and cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs remain on GitHub-hosted Ubuntu. Develop snapshot publishing still waits for this aggregate. Same-repository
+The required check keeps its name, **Unit, build, E2E, and package**. It succeeds only when the build/package job, all three Vitest shards, and all four cockpit browser shards succeed, and, on a pull request, the `complexity-gate` job (see [Checking function complexity and file length](#checking-function-complexity-and-file-length)). Packaged CLI E2E and cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs remain on GitHub-hosted Ubuntu. Develop snapshot publishing still waits for this aggregate. Same-repository
 PRs instead run `prepare-pr-snapshot` after verification, packing snapshot
 archives without publishing credentials. `publish-pr-snapshot.yml` listens for
 completed CI, validates the current open PR head, authoritative run/attempt,
@@ -240,6 +240,62 @@ with a historical source note. A change that removes an archive's source note
 fails every bare citation left in it. On a PR, the step checks the merge commit
 against its first parent (`--base HEAD^1`). A push to `main` skips the step,
 because every change reaches `main` through a PR that the step already checked.
+
+### Checking function complexity and file length
+
+Two gates stop long functions and long files from growing (hearsay-tools/cezarion#1800). Neither
+changes behavior at shipped defaults.
+
+**Function complexity.** The `complexity-gate` job runs
+`.ai/skills/check-code-quality/scripts/complexity-gate.mjs` on the functions a pull request
+changes. It fails when a changed function has classic complexity above 20 and is new or more
+complex than at the merge base. A pull request can lower a function's complexity, and it never
+fails because a function it does not touch is long. A changed function that is lowered but stays
+over 20 passes; the job lists it as a notice, and the pre-PR check (`check-code-quality`) still
+reports it. A moved or renamed function is compared with
+the function it came from: first one with an identical body, then the one same-named function that
+shares the most of its body lines, at least half of them. A copy of a long function is still new, and
+so is a function that only shares a name with a removed one or has two equally close origins. When
+one file holds several same-named functions that the gate cannot tell apart by their place, a changed one
+is compared with the one closest by body, or with the least complex when none is closest, so an unclear
+origin never hides growth. The job runs the workflow commit's own scripts and reads the pull
+request head from Git objects, so no head code runs and a pull request cannot change its own gate.
+It uses `github.sha`, not the event's `base.sha`, which stays at the tip from when the PR opened.
+`verify` requires it on every pull request and on every merge group.
+
+A merge group runs the same gate on the combined commit, against the base SHA it will land on, so two
+pull requests that each stay at or under 20 cannot add up to growth. The scripts come from the group's
+base SHA, because `github.sha` there is the combined commit and holds the pull request's own copy. The
+`baseline-growth` label is read live from the one pull request that the group's ref
+(`refs/heads/gh-readonly-queue/main/pr-<N>-<sha>`) names; the queue is serial, and any other ref reads no
+label, so growth then fails. The job's name is in the queue proof roster (`REQUIRED_QUEUE_JOBS`).
+
+A failure names each function, both complexity values, the `metrics.mjs` commands that print them
+and the decision points (`--breakdown`). Reproduce a run from the repository root:
+
+```bash
+node .ai/skills/check-code-quality/scripts/complexity-gate.mjs --base origin/main --head HEAD
+```
+
+For an owner-approved increase, the owner adds the `baseline-growth` label, then re-runs the failed
+`complexity-gate` job. An agent never adds the label. Auto-merge has no complexity check. CRAP joins
+the gate once CI publishes coverage (hearsay-tools/cezarion#1780).
+
+**File length.** `packages/cezar/src/file-length.test.ts` pins every non-test source file over
+1,000 lines in `file-length.baseline.json`, and Squeal re-runs it when any counted source file
+changes. It fails when a pinned file grows, when another file passes 1,000 lines, and when a pin is
+stale. After you cut a file, lower its pin:
+
+```bash
+FILE_LENGTH_UPDATE=1 npm test -- packages/cezar/src/file-length.test.ts
+```
+
+The update only lowers pins and drops entries. The `Reject baseline growth` step refuses a raised pin
+or a new entry, and the same `baseline-growth` label approves one.
+
+A PR that edits `ci.yml` does not run its own definition (see § Proving a `ci.yml` change). A bare
+`workflow_dispatch` runs `complexity-gate` on the dispatched branch against `main`, so the
+dispatch proves the job too.
 
 ### Upstream scan PRs
 
@@ -518,8 +574,8 @@ target workflow before opening PRs against it.
 ## Merge queue and exact-commit reuse
 
 CI accepts `merge_group: checks_requested` for `main`. It tests the immutable
-combined commit with all eight verification jobs, including the minimum-version
-build/package job and browser E2E. Queue runs never use docs/infra or release-bump exemptions. They have no
+combined commit with all nine verification jobs, including the function complexity
+gate, the minimum-version build/package job and browser E2E. Queue runs never use docs/infra or release-bump exemptions. They have no
 model keys, npm credentials, publishing jobs or OIDC permission.
 
 The required `Automated Code Review` check verifies existing PR-head review
