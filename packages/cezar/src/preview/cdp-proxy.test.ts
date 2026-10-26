@@ -90,6 +90,15 @@ describe('AgentCdpLink (hearsay-tools/cezarion#784)', () => {
     expect(agent.sent.filter(m => m.error).map(m => m.id)).toEqual([1, 3]);
   });
 
+  it('refuses Target.sendMessageToTarget, whose session and command sit in params where no guard reads them', async () => {
+    const { browser, agent, link } = await linked({ protectedTargetId: 'PANE' });
+    link.fromClient(JSON.stringify({ id: 1, method: 'Target.attachToTarget', params: { targetId: 'PANE', flatten: true } }));
+    browser.requests[0]!.reply({ id: 9, result: { sessionId: 'C1' }, sessionId: 'B1' });
+    link.fromClient(JSON.stringify({ id: 2, method: 'Target.sendMessageToTarget', params: { sessionId: 'C1', message: JSON.stringify({ id: 1, method: 'Page.close' }) } }));
+    expect(browser.requests.map(r => r.method)).toEqual(['Target.attachToTarget']);
+    expect(agent.sent.at(-1)).toEqual({ id: 2, error: { code: -32000, message: 'cezar refuses Target.sendMessageToTarget: use flat sessions (attach with flatten: true).' } });
+  });
+
   it('delivers events in wire order: its browser session without a sessionId, children as they came, nothing else', async () => {
     const { browser, agent } = await linked();
     browser.emit({ method: 'Target.attachedToTarget', params: { sessionId: 'C2', targetInfo: { targetId: 'T2' } }, sessionId: 'B1' });

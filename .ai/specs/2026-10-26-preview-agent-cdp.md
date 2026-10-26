@@ -25,7 +25,8 @@ port does not exist: the agent reaches the browser only through a cezar proxy.
    without `sessionId` goes to that session; a command naming a session passes only when this
    link opened it. Ids are remapped by the connection; replies and events keep wire order.
    Refused: `Browser.close`, `Browser.crash`, `Browser.crashGpuProcess`, `Target.closeTarget` or
-   `Page.close` on the page the pane streams, and detaching a session the link does not own.
+   `Page.close` on the page the pane streams, detaching a session the link does not own, and
+   `Target.sendMessageToTarget`, whose nested session and command no guard reads (use flat sessions).
 4. **The address is a session capability.** `CEZ_PREVIEW_CDP_URL=ws://<cockpit origin
    host>/api/v1/preview/cdp/<64 hex>` joins the session environment of every runner
    (`previewCdpSession`, `preview/agent-address.ts`). The grant is chained into the cezar tool

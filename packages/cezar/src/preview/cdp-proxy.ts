@@ -10,7 +10,8 @@ import type { CdpConnection, CdpMessage } from './cdp.ts';
  * - A message naming a session goes through only when this link opened that session.
  * - Replies and events come back in the order the browser sent them, the browser session's without
  *   a `sessionId`, as a client of a root WebSocket expects.
- * - Commands that would end the owner's browser or the page the pane streams are refused.
+ * - Commands that would end the owner's browser or the page the pane streams are refused, and so
+ *   is `Target.sendMessageToTarget`, which would carry such a command past these checks.
  * - Each target the agent creates, attaches to or activates is reported (`onTarget`): the pane's
  *   "agent's page" follows it, because `agent-browser --pin-tab` drives a fresh tab of its own.
  */
@@ -26,6 +27,8 @@ const BROWSER_ENDING = new Set(['Browser.close', 'Browser.crash', 'Browser.crash
 /** Commands that close a target or a session given in their params. */
 const CLOSES_TARGET = new Set(['Target.closeTarget']);
 const CLOSES_PAGE = new Set(['Page.close']);
+/** The legacy tunnel: its session and command sit inside `params`, where no guard here reads them. */
+const TUNNEL = 'Target.sendMessageToTarget';
 /** JSON-RPC's code for a request the server will not run: CDP uses it for unknown sessions too. */
 const REFUSED_CODE = -32000;
 
@@ -96,6 +99,7 @@ export class AgentCdpLink {
 
   private refusal(method: string, params: unknown, named: string | undefined): string | undefined {
     if (BROWSER_ENDING.has(method)) return `cezar refuses ${method}: the owner's preview pane shares this browser.`;
+    if (method === TUNNEL) return `cezar refuses ${TUNNEL}: use flat sessions (attach with flatten: true).`;
     const p = (params ?? {}) as { targetId?: unknown; sessionId?: unknown };
     if (CLOSES_TARGET.has(method) && this.protectedTargetId !== undefined && p.targetId === this.protectedTargetId) {
       return `cezar refuses ${method} on the page the owner's preview pane shows.`;
