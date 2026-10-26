@@ -570,7 +570,14 @@ test('the complexity gate runs the workflow commit and reads the pull request he
   assert.equal(checkouts.length, 1);
   // On pull_request_target github.sha is the current tip of the base branch. The event's base.sha is the
   // tip from when the PR opened and can lack the scripts this workflow calls (hearsay-tools/cezarion#1834).
-  assert.equal(checkouts[0].with.ref, '${{ github.sha }}');
+  // In a merge group github.sha is the combined commit, which holds the pull request's own scripts, so the
+  // group's base SHA supplies the trusted code there.
+  assert.equal(checkouts[0].with.ref, '${{ github.event.merge_group.base_sha || github.sha }}');
+  const { runInNewContext } = require('node:vm');
+  // Actions expressions read a missing property as null, so optional chaining stands in for that.
+  const ref = (event) => runInNewContext(checkouts[0].with.ref.replace(/^\$\{\{\s*|\s*\}\}$/g, '').replaceAll('.', '?.'), { github: { sha: 'workflow-sha', event } });
+  assert.equal(ref({}), 'workflow-sha');
+  assert.equal(ref({ merge_group: { base_sha: 'group-base-sha' } }), 'group-base-sha');
   assert.equal(checkouts[0].with['persist-credentials'], false);
   assert.equal(checkouts[0].with['fetch-depth'], 0);
   assert.doesNotMatch(JSON.stringify(job), /base\.sha|refs\/pull\/\{0\}\/merge|allow-unsafe-pr-checkout/);
@@ -582,12 +589,12 @@ test('the complexity gate runs the workflow commit and reads the pull request he
   assert.ok(ci.jobs.verify.needs.includes('complexity-gate'));
 });
 
-test('the complexity gate runs on pull requests and bare dispatches, and verify never lets a pull request skip it', () => {
+test('the complexity gate runs on pull requests, merge groups and bare dispatches, and verify never lets either of the first two skip it', () => {
   const { runInNewContext } = require('node:vm');
   const ci = workflow();
   const condition = ci.jobs['complexity-gate'].if.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
   const runs = (eventName, prNumber = '') => runInNewContext(condition, { github: { event_name: eventName }, inputs: { pr_number: prNumber } });
-  assert.deepEqual(['pull_request_target', 'merge_group', 'push', 'workflow_dispatch'].map(event => runs(event)), [true, false, false, true]);
+  assert.deepEqual(['pull_request_target', 'merge_group', 'push', 'workflow_dispatch'].map(event => runs(event)), [true, true, false, true]);
   assert.equal(runs('workflow_dispatch', '42'), false, 'a dispatched release PR changes manifests only');
   const gate = ci.jobs.verify.steps.find(step => step.name === 'Require every verification job');
   assert.equal(gate.env.COMPLEXITY_GATE_RESULT, "${{ needs['complexity-gate'].result }}");
@@ -597,11 +604,11 @@ test('the complexity gate runs on pull requests and bare dispatches, and verify 
   }).status;
   assert.equal(verify('pull_request_target', 'success'), 0);
   for (const result of ['failure', 'cancelled', 'skipped', '']) assert.notEqual(verify('pull_request_target', result), 0, result);
-  for (const event of ['merge_group', 'workflow_dispatch']) {
-    assert.equal(verify(event, 'skipped'), 0, event);
-    assert.equal(verify(event, 'success'), 0, event);
-    assert.notEqual(verify(event, 'failure'), 0, event);
-  }
+  for (const result of ['failure', 'cancelled', 'skipped', '']) assert.notEqual(verify('merge_group', result), 0, `merge_group ${result}`);
+  assert.equal(verify('merge_group', 'success'), 0);
+  assert.equal(verify('workflow_dispatch', 'skipped'), 0);
+  assert.equal(verify('workflow_dispatch', 'success'), 0);
+  assert.notEqual(verify('workflow_dispatch', 'failure'), 0);
 });
 
 // The step's own shell against a fixture: trusted scripts in the checkout, the pull request only as
@@ -615,6 +622,10 @@ function complexityGateFixture(t) {
     return result.stdout.trim();
   };
   const over = `export function over(x) {\n${'  if (x) x++;\n'.repeat(20)}  return x;\n}\n`;
+  // `shared` sits at complexity 19. Main and a pull request may each add one decision point, at opposite ends.
+  const IF = 'if (x) x++;';
+  const shared = (top, bottom) => `export function shared(x) {\n  ${top}\n${'  if (x) x++;\n'.repeat(18)}  ${bottom}\n  return x;\n}\n`;
+  const small = 'export function small(x) { return x; }\n';
   const write = (file, source) => fs.writeFileSync(path.join(dir, file), source);
   const commit = (message) => { git('add', '-A'); git('commit', '-qm', message); return git('rev-parse', 'HEAD'); };
   git('init', '-q', '-b', 'main');
@@ -627,13 +638,14 @@ function complexityGateFixture(t) {
   }
   fs.symlinkSync(path.join(repoRoot, 'node_modules'), path.join(dir, 'node_modules'));
   write('.gitignore', 'node_modules\n');
-  write('a.ts', 'export function small(x) { return x; }\n');
+  write('a.ts', small + shared('// top', '// bottom'));
   const forkPoint = commit('base');
   git('checkout', '-q', '-b', 'pr');
-  write('a.ts', `export function small(x) { return x; }\n${over}`);
+  write('a.ts', small + shared('// top', '// bottom') + over);
   const head = commit('pull request');
   git('checkout', '-q', 'main');
   write('later.ts', 'export const later = 1;\n');
+  write('a.ts', small + shared(IF, '// bottom'));
   const tip = commit('main moved on');
   git('remote', 'add', 'origin', dir);
   git('update-ref', 'refs/pull/7/head', head);
@@ -647,7 +659,24 @@ function complexityGateFixture(t) {
     GITHUB_REPOSITORY: 'owner/repo', PR_NUMBER: '7', EXPECTED_HEAD_SHA: head, EVENT_NAME: 'pull_request_target',
     GITHUB_SHA: tip, FAKE_PR: JSON.stringify({ head: { sha: head }, labels: [] }), ...env,
   } });
-  return { dir, git, run, head, tip, forkPoint };
+  // A pull request from the fork point that adds the one bottom decision point, and the merge group
+  // that the queue builds from the base tip and that pull request.
+  const queued = (number) => {
+    git('checkout', '-q', '-b', `pr${number}`, forkPoint);
+    write('a.ts', small + shared('// top', IF));
+    const prHead = commit('bottom decision point');
+    git('update-ref', `refs/pull/${number}/head`, prHead);
+    git('checkout', '-q', '-b', `group${number}`, 'main');
+    git('merge', '-q', '--no-edit', `pr${number}`);
+    const groupHead = git('rev-parse', 'HEAD');
+    git('checkout', '-q', 'main');
+    return { prHead, groupHead };
+  };
+  const group = (groupHead, number, env = {}) => run({
+    EVENT_NAME: 'merge_group', GROUP_BASE_SHA: tip, GROUP_HEAD_SHA: groupHead, GITHUB_SHA: groupHead,
+    GROUP_HEAD_REF: `refs/heads/gh-readonly-queue/main/pr-${number}-${groupHead}`, PR_NUMBER: '', EXPECTED_HEAD_SHA: '', ...env,
+  });
+  return { dir, git, run, head, tip, forkPoint, queued, group };
 }
 
 test('the complexity gate step compares the pull request with the merge base of the current base tip, without checking it out', (t) => {
@@ -673,6 +702,38 @@ test('the baseline-growth label read live approves the growth, and a stale or mo
   const moved = f.run({});
   assert.equal(moved.status, 1);
   assert.match(moved.stderr, /changed during the fetch/);
+});
+
+test('a merge group is gated against the base tip it lands on, so two pull requests that pass alone cannot add up to growth', (t) => {
+  const f = complexityGateFixture(t);
+  const { prHead, groupHead } = f.queued(8);
+  // Alone, the pull request takes `shared` from 19 to 20, which the limit allows.
+  const alone = f.run({ PR_NUMBER: '8', EXPECTED_HEAD_SHA: prHead, FAKE_PR: JSON.stringify({ head: { sha: prHead }, labels: [] }) });
+  assert.equal(alone.status, 0, alone.stdout + alone.stderr);
+  // Main already took it to 20, so the combined commit has 21.
+  const combined = f.group(groupHead, 8);
+  assert.equal(combined.status, 1, combined.stdout + combined.stderr);
+  assert.match(combined.stdout, /shared: complexity 21 \(was 20 at the merge base; limit 20\)/);
+  assert.match(combined.stdout, /For an owner-approved increase, the owner adds the baseline-growth label, then re-runs the failed complexity-gate job\./);
+  assert.equal(f.git('rev-parse', 'HEAD'), f.tip, 'the group head is fetched, never checked out');
+  assert.equal(f.git('status', '--porcelain'), '');
+});
+
+test('a merge group reads the baseline-growth label of the one pull request its ref names, and fails closed on any other ref', (t) => {
+  const f = complexityGateFixture(t);
+  const { groupHead } = f.queued(8);
+  const labelled = { FAKE_PR: JSON.stringify({ head: { sha: groupHead }, labels: [{ name: 'baseline-growth' }] }) };
+  const approved = f.group(groupHead, 8, labelled);
+  assert.equal(approved.status, 0, approved.stdout + approved.stderr);
+  assert.match(approved.stdout, /approved by the baseline-growth label; owner merge required/);
+  for (const ref of ['refs/heads/gh-readonly-queue/main/pr-8', `refs/heads/gh-readonly-queue/dev/pr-8-${groupHead}`, `pr-8-${groupHead}`, '']) {
+    const refused = f.group(groupHead, 8, { ...labelled, GROUP_HEAD_REF: ref });
+    assert.equal(refused.status, 1, `${ref}: ${refused.stdout}${refused.stderr}`);
+  }
+  const unlabelled = f.group(groupHead, 8);
+  assert.equal(unlabelled.status, 1, 'the label is read live, and its absence blocks the group');
+  const missing = f.group('0'.repeat(40), 8);
+  assert.notEqual(missing.status, 0, 'a group head that cannot be fetched fails the step');
 });
 
 test('a bare dispatch gates the dispatched commit against main', (t) => {

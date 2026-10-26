@@ -260,21 +260,24 @@ jobs:
   # `github.sha` is the workflow's own commit, the current tip of the base branch on
   # pull_request_target. The event's `base.sha` is the tip from when the PR opened, and
   # a checkout of it can lack scripts that this workflow calls. @babel/parser installs
-  # from that commit's lockfile with lifecycle scripts off. A bare dispatch gates the
-  # dispatched branch against main, which proves this job before merge.
+  # from that commit's lockfile with lifecycle scripts off. A merge group runs the same
+  # gate on the combined commit against the base tip it will land on, since two pull
+  # requests that each pass alone can add up to growth; its code comes from the group's
+  # base SHA, because `github.sha` there is the combined commit. A bare dispatch gates
+  # the dispatched branch against main, which proves this job before merge.
   complexity-gate:
     name: Check function complexity
-    if: ${{ github.event_name == 'pull_request_target' || (github.event_name == 'workflow_dispatch' && inputs.pr_number == '') }}
+    if: ${{ github.event_name == 'pull_request_target' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.pr_number == '') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: read
       pull-requests: read
     steps:
-      - name: Check out the workflow's own commit
+      - name: Check out the trusted workflow commit
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ github.event.merge_group.base_sha || github.sha }}
           persist-credentials: false
           fetch-depth: 0
       - name: Set up pnpm
@@ -294,11 +297,15 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           set -euo pipefail
           growth=()
+          pr=
           if [ "$EVENT_NAME" = pull_request_target ]; then
             pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
             if ! jq -e --arg head "$EXPECTED_HEAD_SHA" '.head.sha == $head' <<<"$pr" >/dev/null; then
@@ -312,13 +319,26 @@ jobs:
               exit 1
             fi
             base="$GITHUB_SHA"
-            # Live labels, so a re-run of this job sees a label added after the event.
-            if jq -e 'any(.labels[]; .name == "baseline-growth")' <<<"$pr" >/dev/null; then
-              growth=(--allow-growth)
+          elif [ "$EVENT_NAME" = merge_group ]; then
+            head="$GROUP_HEAD_SHA"
+            base="$GROUP_BASE_SHA"
+            git fetch --no-tags origin "$head"
+            if [ "$(git rev-parse FETCH_HEAD)" != "$head" ]; then
+              echo "::error::The merge group head could not be fetched." >&2
+              exit 1
+            fi
+            # The queue is serial (docs/sdlc/ci.md), so the group's ref names its one pull request.
+            # A ref of another shape reads no label, and growth then fails.
+            if [[ "$GROUP_HEAD_REF" =~ ^refs/heads/gh-readonly-queue/main/pr-([0-9]+)-[0-9a-f]{40}$ ]]; then
+              pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/${BASH_REMATCH[1]}")"
             fi
           else
             head="$GITHUB_SHA"
             base=origin/main
+          fi
+          # Live labels, so a re-run of this job sees a label added after the event.
+          if [ -n "$pr" ] && jq -e 'any(.labels[]; .name == "baseline-growth")' <<<"$pr" >/dev/null; then
+            growth=(--allow-growth)
           fi
           node .ai/skills/check-code-quality/scripts/complexity-gate.mjs --base "$base" --head "$head" "${growth[@]}"
 
@@ -625,9 +645,9 @@ jobs:
         run: |
           test "$CLASSIFY_RESULT" = success
           test "$SURFACE_RESULT" = success
-          # The complexity ratchet runs on pull requests and bare dispatches. Other
-          # events skip it, and a pull request may never skip it.
-          if [ "$EVENT_NAME" = pull_request_target ]; then
+          # The complexity ratchet runs on pull requests, merge groups and bare dispatches.
+          # Other events skip it, and a pull request or a merge group may never skip it.
+          if [ "$EVENT_NAME" = pull_request_target ] || [ "$EVENT_NAME" = merge_group ]; then
             test "$COMPLEXITY_GATE_RESULT" = success
           else
             test "$COMPLEXITY_GATE_RESULT" = success -o "$COMPLEXITY_GATE_RESULT" = skipped

@@ -261,7 +261,14 @@ is compared with the one closest by body, or with the least complex when none is
 origin never hides growth. The job runs the workflow commit's own scripts and reads the pull
 request head from Git objects, so no head code runs and a pull request cannot change its own gate.
 It uses `github.sha`, not the event's `base.sha`, which stays at the tip from when the PR opened.
-`verify` requires it on every pull request.
+`verify` requires it on every pull request and on every merge group.
+
+A merge group runs the same gate on the combined commit, against the base SHA it will land on, so two
+pull requests that each stay at or under 20 cannot add up to growth. The scripts come from the group's
+base SHA, because `github.sha` there is the combined commit and holds the pull request's own copy. The
+`baseline-growth` label is read live from the one pull request that the group's ref
+(`refs/heads/gh-readonly-queue/main/pr-<N>-<sha>`) names; the queue is serial, and any other ref reads no
+label, so growth then fails. The job's name is in the queue proof roster (`REQUIRED_QUEUE_JOBS`).
 
 A failure names each function, both complexity values, the `metrics.mjs` commands that print them
 and the decision points (`--breakdown`). Reproduce a run from the repository root:
@@ -567,8 +574,8 @@ target workflow before opening PRs against it.
 ## Merge queue and exact-commit reuse
 
 CI accepts `merge_group: checks_requested` for `main`. It tests the immutable
-combined commit with all eight verification jobs, including the minimum-version
-build/package job and browser E2E. Queue runs never use docs/infra or release-bump exemptions. They have no
+combined commit with all nine verification jobs, including the function complexity
+gate, the minimum-version build/package job and browser E2E. Queue runs never use docs/infra or release-bump exemptions. They have no
 model keys, npm credentials, publishing jobs or OIDC permission.
 
 The required `Automated Code Review` check verifies existing PR-head review
