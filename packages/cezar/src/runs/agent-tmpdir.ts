@@ -214,6 +214,12 @@ const FALLBACK_NAME_LENGTH = 12;
  *  another project's live ones in the shared root — and would delete them. */
 const OWNER_FILE = '.cez-owner';
 
+/** The dataDir itself, beside the marker (hearsay-tools/cezarion#1911). The digest cannot
+ *  name a dataDir that was deleted, so without this path no sweep could ever match that
+ *  dataDir's fallback directories again. It is a claim, not proof: the sweep trusts it only
+ *  when it digests to the marker. */
+const OWNER_DIR_FILE = '.cez-owner-dir';
+
 function dataDirOwner(dataDir: string): string {
   return createHash('sha256').update(`cez-agent-owner:${dataDir}`).digest('hex').slice(0, 16);
 }
@@ -241,6 +247,32 @@ function writeOwnerMarker(dir: string, dataDir: string): void {
     if (actual !== expected) {
       throw new AgentTempDirError(dir, new Error('ownership marker was replaced — remove the directory to re-mint it'));
     }
+  }
+  // A directory minted before this file existed gets it on its next spawn. An existing one is
+  // left as it is: the sweep checks it against the marker before it acts on it.
+  try {
+    writeFileSync(join(dir, OWNER_DIR_FILE), dataDir, { encoding: 'utf8', flag: 'wx' });
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'EEXIST') throw err;
+  }
+}
+
+/** True only when the fallback's recorded dataDir digests to its marker `owner` and that
+ *  dataDir no longer exists. A missing or mismatched record, or any error but ENOENT, keeps
+ *  the directory. */
+function ownerDataDirGone(dir: string, owner: string): boolean {
+  let dataDir: string;
+  try {
+    dataDir = readFileSync(join(dir, OWNER_DIR_FILE), 'utf8');
+  } catch {
+    return false;
+  }
+  if (!isAbsolute(dataDir) || dataDirOwner(dataDir) !== owner) return false;
+  try {
+    lstatSync(dataDir);
+    return false;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'ENOENT';
   }
 }
 
@@ -351,8 +383,8 @@ function moveFallbackScratch(dataDir: string, local: string, from: string, to: s
   // The destination keeps (or gets) its own marker; the source's is never
   // copied over it, so a foreign marker still refuses instead of being replaced.
   writeOwnerMarker(to, dataDir);
-  const marker = join(from, OWNER_FILE);
-  cpSync(from, to, { recursive: true, force: true, verbatimSymlinks: true, preserveTimestamps: true, filter: (src) => src !== marker });
+  const markers = new Set([join(from, OWNER_FILE), join(from, OWNER_DIR_FILE)]);
+  cpSync(from, to, { recursive: true, force: true, verbatimSymlinks: true, preserveTimestamps: true, filter: (src) => !markers.has(src) });
   checkpointFallbackRemoval(local, from, removals);
   rmSync(from, { recursive: true, force: true });
 }
@@ -712,16 +744,26 @@ export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>)
       }
     }
   }
-  // The #387 fallback locations, in every shared OS temp root. Kept narrow on
-  // purpose: exact prefix, 12 lowercase-hex name, directories only, and
-  // ownership — a directory is removed only when its `.cez-owner` marker
-  // names THIS dataDir (a marker that is missing or foreign is another
-  // project's, or unknown, and is never ours to remove) and none of this
-  // dataDir's kept runs claims it.
+  reaped.push(...sweepFallbackRoots(dataDir, keep));
+  return reaped;
+}
+
+/**
+ * The #387 fallback locations, in every shared OS temp root. Kept narrow on
+ * purpose: exact prefix, 12 lowercase-hex name, directories only, and
+ * ownership — a directory is removed only when its `.cez-owner` marker
+ * names THIS dataDir and none of this dataDir's kept runs claims it, or
+ * when its marker names a dataDir that no longer exists
+ * (hearsay-tools/cezarion#1911): nothing else will ever remove that one. A
+ * marker that is missing, unreadable or names a live dataDir is another
+ * project's, or unknown, and is never ours to remove.
+ */
+function sweepFallbackRoots(dataDir: string, keep: ReadonlySet<string>): string[] {
   const owner = dataDirOwner(dataDir);
   const claimed = new Set(
     [...keep].filter(safeRunId).map((id) => basename(fallbackTmpDir(osTempRoot(), dataDir, id))),
   );
+  const reaped: string[] = [];
   for (const osRoot of osTempRoots()) {
     let fallbackEntries: Dirent[];
     try {
@@ -730,16 +772,7 @@ export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>)
       continue; // an unreadable root is skipped, not fatal: others remain.
     }
     for (const entry of fallbackEntries) {
-      if (!entry.isDirectory() || !entry.name.startsWith(FALLBACK_PREFIX)) continue;
-      if (!/^[0-9a-f]{12}$/.test(entry.name.slice(FALLBACK_PREFIX.length))) continue;
-      let entryOwner: string;
-      try {
-        entryOwner = readFileSync(join(osRoot, entry.name, OWNER_FILE), 'utf8').trim();
-      } catch {
-        continue; // no readable marker: unknown ownership is never ours to remove.
-      }
-      if (entryOwner !== owner) continue;
-      if (claimed.has(entry.name)) continue;
+      if (!fallbackSweepable(osRoot, entry, owner, claimed)) continue;
       try {
         rmSync(join(osRoot, entry.name), { recursive: true, force: true });
         reaped.push(entry.name);
@@ -749,4 +782,16 @@ export function sweepAgentTmpDirs(dataDir: string, keepRunIds: Iterable<string>)
     }
   }
   return reaped;
+}
+
+function fallbackSweepable(osRoot: string, entry: Dirent, owner: string, claimed: ReadonlySet<string>): boolean {
+  if (!entry.isDirectory() || !entry.name.startsWith(FALLBACK_PREFIX)) return false;
+  if (!/^[0-9a-f]{12}$/.test(entry.name.slice(FALLBACK_PREFIX.length))) return false;
+  let entryOwner: string;
+  try {
+    entryOwner = readFileSync(join(osRoot, entry.name, OWNER_FILE), 'utf8').trim();
+  } catch {
+    return false; // no readable marker: unknown ownership is never ours to remove.
+  }
+  return entryOwner === owner ? !claimed.has(entry.name) : ownerDataDirGone(join(osRoot, entry.name), entryOwner);
 }
