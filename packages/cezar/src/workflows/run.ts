@@ -2770,7 +2770,7 @@ export class RunManager {
   private withFailuresCleared(runId: string, outcomes: RunOutcome[], ids: readonly string[], cleared = false): RunOutcome[] {
     const run = this.store.getRun(runId);
     const next = run && applyOutcomes(run, outcomes).next;
-    const received = !!next?.agentInputs?.some(input => (input.conversation || this.isUnnamedLifecycleInput(next, input)) && ids.includes(input.id) && input.deliveredAt && !input.awaitingRead);
+    const received = !!next?.agentInputs?.some(input => ids.includes(input.id) && !!input.deliveredAt && !input.awaitingRead && (!!input.conversation || this.isUnnamedLifecycleInput(next, input)));
     return cleared || received ? [...outcomes, { kind: 'counted', waitDeliveryFailures: undefined }] : outcomes;
   }
 

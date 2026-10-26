@@ -81,17 +81,19 @@ const waitOfKind = (id: string, kind: Wait['kind']) => store.getRun(id)?.waits?.
 const agentWaits = (id: string) => (store.getRun(id)?.waits ?? []).filter(wait => wait.source !== 'cezar');
 const settled = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(wait => wait.id === waitId);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
-const engine = () => manager as unknown as {
-  active: Map<string, { session: AgentSession & { end(): void }; ciGeneration: string }>;
-  waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
-  monitoring: Set<string>;
-  wakeRetryBackoff: Backoff;
-  wakeBackoffs: Map<string, NodeJS.Timeout>;
-  wakeRetries: Map<string, NodeJS.Timeout>;
-  queue: string[];
-  deferredMessages: Map<string, Array<{ content: Array<{ type: 'text'; text: string }>; messageId?: string }>>;
-  flushDeferred(id: string): void;
-};
+function engine() {
+  return manager as unknown as {
+    active: Map<string, { session: AgentSession & { end(): void }; ciGeneration: string }>;
+    waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
+    monitoring: Set<string>;
+    wakeRetryBackoff: Backoff;
+    wakeBackoffs: Map<string, NodeJS.Timeout>;
+    wakeRetries: Map<string, NodeJS.Timeout>;
+    queue: string[];
+    deferredMessages: Map<string, Array<{ content: Array<{ type: 'text'; text: string }>; messageId?: string }>>;
+    flushDeferred(id: string): void;
+  };
+}
 // The delivery bound, not the backoff, is what these cells pin: retries start at once.
 const retryAtOnce = () => { engine().wakeRetryBackoff = { fastMs: 0, fastCount: MAX_WAKE_DELIVERY_ATTEMPTS, capMs: 0 }; };
 const stepStatus = (id: string, stepId: string) => store.getRun(id)?.steps.find(step => step.id === stepId)?.status;
@@ -909,8 +911,10 @@ function baseCells(runners: RunnerId[]): void {
       // hearsay-tools/cezarion#1805: the restarted budget and the answered wait are committed with
       // the Continue they come from, never before it.
       const step = store.getRun(run.id)!.steps.at(-1)!.id;
-      commits.expectEveryCommit(run.id, row => (row.automaticWakes === MAX_AUTO_CONTINUES && !row.lastWaits?.some(wait => wait.id === budget!.id && wait.phase === 'delivered')) ||
-        row.continuationMessage?.text === 'carry on' || row.steps.some(entry => entry.id === step && entry.status !== 'pending'), 'a restarted budget and its Continue');
+      commits.expectEveryCommit(run.id, row => {
+        return (row.automaticWakes === MAX_AUTO_CONTINUES && !row.lastWaits?.some(wait => wait.id === budget!.id && wait.phase === 'delivered')) ||
+          row.continuationMessage?.text === 'carry on' || row.steps.some(entry => entry.id === step && entry.status !== 'pending');
+      }, 'a restarted budget and its Continue');
       await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
       expect(manager.finish(run.id)).toBe(true);
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
