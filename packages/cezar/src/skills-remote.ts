@@ -431,18 +431,16 @@ async function removeUnlisted(dir: string, keep: Set<string>, prefix = ''): Prom
 export const TEAM_SKILL_AGENT_DIRS = ['.claude', '.agents', '.cursor'] as const;
 
 /**
- * Copy a directory skill and its companion files into TEAM_SKILL_AGENT_DIRS in an owned task
- * worktree, excluding destinations from Git. Return only written directories; preserve
- * containment and use the cache fallback for other runs.
+ * Copy a directory skill and its companion files into TEAM_SKILL_AGENT_DIRS under `repoRoot`,
+ * excluding destinations from Git. Return only written directories and preserve containment.
+ * Task provisioning (`skills-provision.ts`) passes a staging dir and places each copy itself,
+ * through the worktree's manifest.
  */
 export async function materializeSkillDir(
   repoRoot: string,
   skill: Skill,
   /** Keeps one written copy out of git; defaults to the shared `info/exclude`. */
   ignore: (agentDir: string) => Promise<void> = (agentDir) => excludeFromGit(repoRoot, `${agentDir}/skills/${skill.name}/`),
-  /** `onlyOwned`: skip a destination that exists without cezar's marker instead of writing into
-   *  it. Task-worktree provisioning sets it: a directory there without the marker is the user's (#1408). */
-  options: { onlyOwned?: boolean } = {},
 ): Promise<string[]> {
   const source = await resolveSkillDirSource(skill);
   if (!source || !skill.team) return [];
@@ -460,7 +458,6 @@ export async function materializeSkillDir(
     // lstat: a marker that is a link elsewhere does not make the dir ours.
     const marked = (await lstat(join(destDir, TEAM_SKILL_MARKER)).catch(() => null))?.isFile() === true;
     const ours = !existsSync(destDir) || marked;
-    if (!ours && options.onlyOwned) continue;
     if (ours) {
       await mkdir(destDir, { recursive: true });
       await writeFile(join(destDir, TEAM_SKILL_MARKER), marker, 'utf8');
