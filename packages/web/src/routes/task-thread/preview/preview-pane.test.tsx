@@ -20,7 +20,7 @@ vi.mock('@/api/preview-socket', async () => ({
 }))
 
 const history = vi.hoisted(() => ({ events: [] as unknown[] }))
-vi.mock('@/api/run-history', () => ({ useRunHistory: () => ({ visibleEvents: history.events }) }))
+vi.mock('@/api/run-history', () => ({ useRunHistory: () => ({ visibleEvents: history.events, currentEvents: history.events }) }))
 
 vi.mock('@/lib/project-router', async () => {
   const actual = await vi.importActual<typeof import('@/lib/project-router')>('@/lib/project-router')

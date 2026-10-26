@@ -18,10 +18,11 @@ export function agentPageLive(events: readonly RunEvent[]): boolean {
 }
 
 /**
- * Whether the agent's page is live, so the pane lists it beside the registered servers. Shares the
- * history query with the thread view and `usePreviewServerStates`.
+ * Whether the agent's page is live, so the pane lists it beside the registered servers. Reads the
+ * current events: the server's history context keeps the latest `preview.agent-browser` event, so a
+ * long session that pushed it out of the loaded pages still shows the page.
  */
 export function useAgentPageLive(runId: string | undefined): boolean {
-  const { visibleEvents } = useRunHistory(runId)
-  return useMemo(() => agentPageLive(visibleEvents), [visibleEvents])
+  const { currentEvents } = useRunHistory(runId)
+  return useMemo(() => agentPageLive(currentEvents), [currentEvents])
 }

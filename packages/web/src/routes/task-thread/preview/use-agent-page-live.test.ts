@@ -1,8 +1,12 @@
-import { describe, expect, it } from 'vitest'
+import { renderHook } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
 
 import type { RunEvent } from '@open-mercato/cezar-api-client'
 
-import { agentPageLive } from './use-agent-page-live'
+import { agentPageLive, useAgentPageLive } from './use-agent-page-live'
+
+const history = vi.hoisted(() => ({ visible: [] as unknown[], current: [] as unknown[] }))
+vi.mock('@/api/run-history', () => ({ useRunHistory: () => ({ visibleEvents: history.visible, currentEvents: history.current }) }))
 
 function event(seq: number, fields: Record<string, unknown>): RunEvent {
   return { seq, ts: '2026-10-26T10:00:00.000Z', ...fields } as RunEvent
@@ -38,5 +42,13 @@ describe('agentPageLive (hearsay-tools/cezarion#784)', () => {
         event(2, { type: 'preview.agent-browser', state: 'unknown' }),
       ]),
     ).toBe(true)
+  })
+})
+
+describe('useAgentPageLive (hearsay-tools/cezarion#784)', () => {
+  it("reads the history context, so a connection pushed out of the loaded pages still shows the agent's page", () => {
+    history.visible = [event(90, { type: 'run.output', text: 'much later' })]
+    history.current = [event(2, { type: 'preview.agent-browser', state: 'connected' }), ...history.visible]
+    expect(renderHook(() => useAgentPageLive('r1')).result.current).toBe(true)
   })
 })
