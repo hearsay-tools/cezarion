@@ -49,7 +49,8 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     if (timing === 'late') await until(() => store.readEvents(run.id).some(event => event.type === 'turn-end'));
     register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
     await until(() => parkedOnWorkers(run.id) && !!engine.active.get(w.id)?.sessionEverOpened);
-    await new Promise(resolve => setTimeout(resolve, 400)); // Observe past the real 250ms runner auto-end timer.
+    // bound: negative window. It must outlast the real 250 ms runner auto-end timer, whose firing is what the assertions rule out.
+    await new Promise(resolve => setTimeout(resolve, 400));
     expect.soft(engine.active.get(run.id)?.session).toBe(first);
     expect.soft(first?.open).toBe(true);
     expect.soft(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
@@ -92,6 +93,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
           // The wake turn's own frames reach the runner while its acknowledgement is held. The wake is
           // cezar's text, so the mock answers it with its ordinary turn rather than an echo.
           await until(() => store.readEvents(run.id).filter(event => event.type === 'turn-end').length > boundaries);
+          // bound: negative window, as above: it must outlast the 250 ms runner auto-end timer.
           await new Promise(resolve => setTimeout(resolve, 400));
           const wake = store.getRun(run.id)?.agentInputs?.find(input => input.source === 'lifecycle');
           expect(wake).toBeDefined(); expect(wake?.deliveredAt).toBeUndefined();

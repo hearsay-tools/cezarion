@@ -7,6 +7,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { HistoryCompressor } from './history-compressor.ts';
 import * as historyFile from './history-file.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 const dirs: string[] = [];
 
 afterEach(() => {
@@ -29,6 +32,7 @@ describe('HistoryCompressor', () => {
     vi.spyOn(historyFile, 'compressHistory').mockImplementation(async (...args) => {
       inFlight++;
       max = Math.max(max, inFlight);
+      // bound: not a wait on the product. The fake holds each job open for 25 ms, so a second job started alongside it would raise `max` above 1.
       await new Promise((resolve) => setTimeout(resolve, 25));
       try {
         return await original(...args);
@@ -61,7 +65,7 @@ describe('HistoryCompressor', () => {
     const b = randomUUID();
     compressor.enqueue(a);
     compressor.enqueue(b);
-    await vi.waitFor(() => expect(started).toEqual([a]));
+    await vi.waitFor(() => expect(started).toEqual([a]), { timeout: HANG_GUARD_MS });
     compressor.cancel(b);
     release();
     await compressor.idle();
@@ -71,6 +75,7 @@ describe('HistoryCompressor', () => {
 
   it('idle resolves after the queue drains', async () => {
     vi.spyOn(historyFile, 'compressHistory').mockImplementation(async () => {
+      // bound: not a wait on the product. It keeps the queue draining when `idle()` is called; the test awaits `idle()`, never this timer.
       await new Promise((resolve) => setTimeout(resolve, 10));
       return 'compressed';
     });

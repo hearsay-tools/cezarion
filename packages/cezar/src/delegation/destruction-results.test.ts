@@ -67,10 +67,11 @@ describe('verified destruction retains results through explicit history deletion
     // first scheduled attempt is the one that sees the lock gone.
     const attempts = scheduledDestroyAttempts(f.service);
     execFileSync('git', ['worktree', 'unlock', workspace.path], { cwd: f.root });
-    // The 3 s bound covers only what starts that attempt: one 50 ms tick and a stat-only change check.
-    // The attempt itself (evidence capture, removal, the lock keeper: tens of Git and node spawns) is
-    // awaited, not timed: at load ~90 it outlasted 3 s and was caught mid-`cleaning` (hearsay-tools/cezarion#1109).
-    await vi.waitFor(() => expect(attempts.length).toBeGreaterThan(0), { timeout: 3_000 });
+    // The wait covers only what starts that attempt: one 50 ms tick and a stat-only change check, and
+    // its bound only ends a hang. The attempt itself (evidence capture, removal, the lock keeper: tens
+    // of Git and node spawns) is awaited, not timed: at load ~90 it outlasted 3 s and was caught
+    // mid-`cleaning` (hearsay-tools/cezarion#1109).
+    await vi.waitFor(() => expect(attempts.length).toBeGreaterThan(0), { timeout: 15_000 });
     await attempts[0];
     // That first retry after the unlock completes the destroy; it is not left to a later one.
     expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } });

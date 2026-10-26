@@ -66,7 +66,7 @@ describe('recover() contains backend session failures (#562)', () => {
     const firstManager = createFixtureManager(store, repoRoot);
     await firstManager.recover();
     await expect
-      .poll(() => store.getRun(record.id)?.error, { timeout: 5_000 })
+      .poll(() => store.getRun(record.id)?.error, { timeout: 15_000 })
       .toContain('no rollout found for thread id missing-thread');
     expect(store.getRun(record.id)?.status).toBe('failed');
     expect(store.getRun(record.id)?.error).toContain('no rollout found for thread id missing-thread');

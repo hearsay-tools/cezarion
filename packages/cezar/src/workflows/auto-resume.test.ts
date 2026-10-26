@@ -218,6 +218,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
       )
       .toBe(2);
     // Give a stampede every chance to happen before asserting it did not.
+    // bound: negative window. A stampede starts the queued runs in the same pump, so 1 s covers that pump and the runs' setup.
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     const started = runs.filter((r) => store.getRun(r.id)?.startedAt !== undefined);
     expect(started).toHaveLength(2);
@@ -256,6 +257,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
         { timeout: 20_000 },
       )
       .toBe(1);
+    // bound: negative window, as above: a second start would come in the same pump as the first.
     await new Promise((resolve) => setTimeout(resolve, 1_000));
     expect(runs.filter((r) => store.getRun(r.id)?.startedAt !== undefined)).toHaveLength(1);
     // Handed back untouched — plain `queued`, no half-started record left behind.
@@ -368,6 +370,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     // While a real appointment is ahead, sitting still is CORRECT and the watchdog must not
     // touch it — otherwise the failsafe becomes the stampede.
     await manager.rescueStalledQueue();
+    // bound: negative window. `rescueStalledQueue` has returned, so a start it triggered would be recorded in the pump it kicked; 500 ms covers that.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(store.getRun(waiting.id)?.startedAt).toBeUndefined();
 
@@ -413,6 +416,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     await expect.poll(() => store.getRun(waiting.id)?.startedAt, { timeout: 20_000 }).toBeDefined();
     // …and it STAYS started. A bounce at the second gate shows up as a return to `queued` with
     // `startedAt` cleared, which is exactly what the first assertion alone would miss.
+    // bound: negative window. The second gate runs in the same start path, right after the first; 500 ms covers it.
     await new Promise((resolve) => setTimeout(resolve, 500));
     expect(store.getRun(waiting.id)?.status).not.toBe('queued');
     expect(
@@ -441,7 +445,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
     await manager.recover();
 
     await expect
-      .poll(() => store.getRun(record.id)?.autoResumeAt, { timeout: 5_000 })
+      .poll(() => store.getRun(record.id)?.autoResumeAt, { timeout: 20_000 })
       .toBeUndefined();
     expect(manager.accountHolds().deadline.size).toBe(0);
     expect(
@@ -502,6 +506,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
         store.getRun(r.id)?.steps.some((s) => s.id.startsWith('continue-') && s.status === 'failed'),
       ).length;
     await expect.poll(spawned, { timeout: 30_000 }).toBe(1);
+    // bound: negative window. The second probe would spawn in the same pump as the first, so 1.5 s covers that pump and its spawn.
     await new Promise((resolve) => setTimeout(resolve, 1_500));
     expect(spawned()).toBe(1);
   }, 90_000);
@@ -630,7 +635,7 @@ describe('a run stopped by a usage limit resumes itself', () => {
 
     // The deadline is gone from the record too — leaving it would keep the thread promising a
     // resume that will never come.
-    await expect.poll(() => store.getRun(record.id)?.autoResumeAt, { timeout: 5_000 }).toBeUndefined();
+    await expect.poll(() => store.getRun(record.id)?.autoResumeAt, { timeout: 20_000 }).toBeUndefined();
     expect(store.getRun(record.id)?.status).toBe('failed');
     const events = store.readEvents(record.id);
     expect(events.some((event) => String(event.message ?? '').includes('automatic resume cancelled'))).toBe(true);

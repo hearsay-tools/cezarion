@@ -2,6 +2,9 @@ import { afterEach, expect, it, vi } from 'vitest';
 import type { CiWait, CiPrIdentity } from '@open-mercato/cezar-contract';
 import { CiWatcherSupervisor } from './supervisor.ts';
 import { CiGithubError, GithubCiClient, type GithubCheck } from './github.ts';
+
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
 // Vitest does not virtualize node:timers/promises; retain AbortSignal semantics
 // while putting only the timer source on the controlled clock.
 vi.mock('node:timers/promises', () => ({setTimeout: (ms:number, value:unknown, options:{signal:AbortSignal}) => new Promise((resolve,reject)=>{
@@ -152,10 +155,10 @@ it('rejects head changes during snapshot attribution and during a running watch'
 it('keeps at most four watchers and starts the fifth only after an owned watcher exits',async()=>{
  const github=new ScriptedGithub();github.rows=[{name:'build',state:'PENDING',bucket:'pending',link:''}];const s=new CiWatcherSupervisor({github});services.push(s);
  const cs=Array.from({length:5},()=>new AbortController());controllers.push(...cs);const pending=cs.map(c=>s.watch(wait(),c.signal));
- await vi.waitFor(()=>expect(github.active).toBe(4));cs[0]!.abort();await pending[0];await vi.waitFor(()=>expect(github.watchers).toBe(5));expect(github.peak).toBe(4);s.close();expect((await Promise.all(pending)).every(r=>r.outcome==='cancelled')).toBe(true);
+ await vi.waitFor(()=>expect(github.active).toBe(4), { timeout: HANG_GUARD_MS });cs[0]!.abort();await pending[0];await vi.waitFor(()=>expect(github.watchers).toBe(5), { timeout: HANG_GUARD_MS });expect(github.peak).toBe(4);s.close();expect((await Promise.all(pending)).every(r=>r.outcome==='cancelled')).toBe(true);
 });
 it('does not create two watchers for one wait identity',async()=>{
- const github=new ScriptedGithub();github.rows=[{name:'build',state:'PENDING',bucket:'pending',link:''}];const s=new CiWatcherSupervisor({github});services.push(s);const c=new AbortController();const w=wait();const a=s.watch(w,c.signal),b=s.watch(w,c.signal);expect(a).toBe(b);await vi.waitFor(()=>expect(github.active).toBe(1));c.abort();await a;
+ const github=new ScriptedGithub();github.rows=[{name:'build',state:'PENDING',bucket:'pending',link:''}];const s=new CiWatcherSupervisor({github});services.push(s);const c=new AbortController();const w=wait();const a=s.watch(w,c.signal),b=s.watch(w,c.signal);expect(a).toBe(b);await vi.waitFor(()=>expect(github.active).toBe(1), { timeout: HANG_GUARD_MS });c.abort();await a;
 });
 it('reports mixed outcomes with failure before cancellation before passing checks',async()=>{
  for(const [buckets,want] of [[['pass','skipping'],'passed'],[['skipping','cancel'],'cancelled'],[['cancel','fail'],'failed']] as const){const github=new ScriptedGithub();github.rows=buckets.map(bucket=>({name:'build',state:bucket,link:'',bucket}));expect((await start(github).result).outcome).toBe(want);}
@@ -163,7 +166,7 @@ it('reports mixed outcomes with failure before cancellation before passing check
 
 it('expires a queued wait on its original deadline without starting a fifth watcher',async()=>{
  const github=new ScriptedGithub();github.rows=[{name:'build',state:'PENDING',bucket:'pending',link:''}];const s=new CiWatcherSupervisor({github});services.push(s);
- const c=new AbortController();controllers.push(c);const first=Array.from({length:4},()=>s.watch(wait(),c.signal));await vi.waitFor(()=>expect(github.active).toBe(4));
+ const c=new AbortController();controllers.push(c);const first=Array.from({length:4},()=>s.watch(wait(),c.signal));await vi.waitFor(()=>expect(github.active).toBe(4), { timeout: HANG_GUARD_MS });
  expect((await s.watch(wait(1),c.signal)).outcome).toBe('deadline');expect(github.watchers).toBe(4);c.abort();await Promise.all(first);
 });
 it('sanitizes external names, control sequences and credential-bearing links',async()=>{

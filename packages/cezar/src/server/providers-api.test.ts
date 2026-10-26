@@ -16,6 +16,9 @@ import { ProjectContexts } from './project-context.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 import { WorkspaceEventBus, createApp } from './server.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 const CONNECTED_OUTPUT: Record<ProviderId, string> = {
   cursor: '{"status":"authenticated","isAuthenticated":true}',
   claude: '{"loggedIn":true}',
@@ -500,7 +503,7 @@ describe('workspace provider API', () => {
     const openTerminal = vi.fn(async () => true);
     const pending = connect(app({ providerAuth, openTerminal }), 'claude');
 
-    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6));
+    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6), { timeout: HANG_GUARD_MS });
     providerAuth.reportRuntimeAuthFailure('claude');
     release();
 

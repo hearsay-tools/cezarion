@@ -14,6 +14,9 @@ import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
 import { discoverRepoHandle, lookupMergedPullRequests } from './forge/github.ts';
 import { startServer } from './server.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 vi.mock('./forge/github.ts', async original => ({ ...await original<object>(), discoverRepoHandle: vi.fn(), lookupMergedPullRequests: vi.fn(async (_root: string, prs: ArchivePullRequestIdentity[]) => prs.filter(pr => pr.repo === 'r').map(pr => ({ ...pr, mergedAt: '2026-01-02T00:00:00Z' }))) }));
 const dirs: string[] = [];
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); dirs.splice(0).forEach(d => rmSync(d, { force: true, recursive: true })); clearProjectProbeCache(); });
@@ -43,17 +46,17 @@ it.each([{ single: false, repository: 'r' }, { single: true, repository: 'r' }, 
   const server = startServer({ repoRoot: boot, bootProjectId: bootProject.id, store, manager: { isActive: () => false } as unknown as RunManager, version: 'test', contexts }, 0);
   try {
     await new Promise<void>(resolve => server.once('listening', () => resolve()));
-    await vi.waitFor(() => expect(coordinator).toBeDefined());
+    await vi.waitFor(() => expect(coordinator).toBeDefined(), { timeout: HANG_GUARD_MS });
     await vi.waitFor(async () => {
       await coordinator!.tick();
       expect(readPersistedRuns(dataDir)[0].archived).toBe(!single && repository === 'r');
-    });
+    }, { timeout: HANG_GUARD_MS });
     expect(contexts.peek(other.id)).toBeUndefined(); expect(recover).not.toHaveBeenCalled();
     if (!single) {
       await vi.waitFor(async () => {
         await coordinator!.tick();
         expect(lookupMergedPullRequests).toHaveBeenCalledWith(cold, [{ owner: 'o', repo: repository, number: 42 }], expect.any(AbortSignal));
-      });
+      }, { timeout: HANG_GUARD_MS });
     }
   } finally {
     await new Promise<void>(resolve => server.close(() => resolve())); contexts.disposeAll(); store.close();

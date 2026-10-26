@@ -40,11 +40,11 @@ describe('Pi provider failure survives teardown (#73)', () => {
     const { id } = manager.startRun(workflow, { task, runner: 'pi', worktree: false });
     await vi.waitFor(() => expect(store.getRun(id)?.status).toBe('failed'), { timeout: 15_000 });
     expect.soft(store.getRun(id)?.steps[0]?.error).toBe(providerError);
-    await vi.waitFor(() => expect(manager.isActive(id)).toBe(false));
+    await vi.waitFor(() => expect(manager.isActive(id)).toBe(false), { timeout: 15_000 });
     expect(manager.continueRun(id, { text: task })).toEqual({ ok: true });
     await vi.waitFor(() => expect(store.getRun(id)?.steps.find((step) => step.id === 'continue-1')?.status).toBe('failed'), { timeout: 15_000 });
     expect(store.getRun(id)?.steps.find((step) => step.id === 'continue-1')?.error).toBe(providerError);
     expect(store.getRun(id)?.error).toBe(`continue failed: ${providerError}`);
-    await vi.waitFor(() => expect(manager.isActive(id)).toBe(false));
+    await vi.waitFor(() => expect(manager.isActive(id)).toBe(false), { timeout: 15_000 });
   }, 35_000);
 });

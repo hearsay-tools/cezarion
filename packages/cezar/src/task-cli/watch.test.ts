@@ -7,6 +7,9 @@ import { startTestCockpit, type TestCockpit } from './cockpit.testkit.ts';
 import type { Wait } from '@open-mercato/cezar-contract';
 import type { RunRecord } from '../runs/store.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 /** `cez task wait` / `log` / `log --follow` / `start --wait` (#504). */
 describe('cez task watching', () => {
   let harness: TestCockpit;
@@ -289,7 +292,7 @@ describe('cez task watching', () => {
         const following = run(['log', id, '--follow', '--until', until, '--timeout-seconds', '10']);
         await vi.waitFor(() => {
           expect(lines().filter((line) => line.type === 'text').map((line) => line.text)).toContain('before');
-        });
+        }, { timeout: HANG_GUARD_MS });
         harness.store.deleteRun(id);
         expect(await following).toBe(1);
         expect(lines().filter((line) => line.type === 'text').map((line) => line.text)).toEqual(['before']);

@@ -11,6 +11,9 @@ import { inspectGeneration, processesWithCwdUnder, processStartToken, recordedPr
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { requirePidText } from '../pid-file.testkit.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 describe.runIf(process.platform === 'linux')('fixture process enumeration safety', () => {
   it('retains real unrecorded holders and independently reads recorded PIDs outside the scope', async () => {
     const root = mkdtempSync(join(tmpdir(), 'cez-scope-holder-'));
@@ -61,11 +64,11 @@ else:
       launcher.stdin.end(); await exited;
       expect(processesWithCwdUnder(root)).toContain(pid); // now reparented, still the same token
       writeFileSync(join(root, 'stop'), '');
-      await vi.waitFor(() => expect(recordedProcessLive(holder!)).toBe(false));
+      await vi.waitFor(() => expect(recordedProcessLive(holder!)).toBe(false), { timeout: HANG_GUARD_MS });
       expect(inspectGeneration({ paths: [root] }).liveness).toBe('gone');
     } finally {
       writeFileSync(join(root, 'stop'), ''); launcher.stdin.end(); await exited;
-      if (holder) await vi.waitFor(() => expect(recordedProcessLive(holder!)).toBe(false));
+      if (holder) await vi.waitFor(() => expect(recordedProcessLive(holder!)).toBe(false), { timeout: HANG_GUARD_MS });
       restore(); rmSync(root, { recursive: true, force: true });
     }
   });
@@ -234,11 +237,11 @@ describe.runIf(process.platform === 'darwin')('macOS fixture process enumeration
       launcher.stdin.end(); await exited;
       expect(processesWithCwdUnder(root)).toContain(pid);
       writeFileSync(join(root, 'stop'), '');
-      await vi.waitFor(() => expect(recordedProcessLive(holder!)).toBe(false), { timeout: 5_000 });
+      await vi.waitFor(() => expect(recordedProcessLive(holder!)).toBe(false), { timeout: HANG_GUARD_MS });
       expect(inspectGeneration({ paths: [root] }).liveness).toBe('gone');
     } finally {
       writeFileSync(join(root, 'stop'), ''); launcher.stdin.end(); await exited;
-      if (holder) await vi.waitFor(() => expect(recordedProcessLive(holder!)).toBe(false), { timeout: 5_000 });
+      if (holder) await vi.waitFor(() => expect(recordedProcessLive(holder!)).toBe(false), { timeout: HANG_GUARD_MS });
       restore(); rmSync(root, { recursive: true, force: true });
     }
   });

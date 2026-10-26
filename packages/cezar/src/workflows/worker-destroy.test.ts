@@ -27,6 +27,9 @@ import { signalSession, spawnSessionLeader } from '../core/session-process.ts';
 import { blockRunWrites } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 const until = async (predicate: () => boolean) => vi.waitFor(() => expect(predicate()).toBe(true), { timeout: 15_000, interval: 10 });
 function gate() { let release!: () => void; const promise = new Promise<void>(resolve => { release = resolve; }); return { promise, release }; }
 
@@ -372,7 +375,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(() => store.commitWorkerExecutionStart(w.id)).toThrow();
     expect(await manager.awaitRunTermination(w.id, 10)).toBe(false);
     manager.enqueueOwnedRun(w.id);
-    await vi.waitFor(() => expect(store.getRun(w.id)?.status).toBe('failed'), { timeout: 500 });
+    await vi.waitFor(() => expect(store.getRun(w.id)?.status).toBe('failed'), { timeout: HANG_GUARD_MS });
     expect(store.getRun(w.id)?.error).toContain('checkpoint');
     expect(existsSync(workspace(w).path)).toBe(false);
   });
@@ -528,7 +531,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     engine.hydrateQueuedInput = () => { throw Error('fixture hydration failed'); };
     releases.push(() => { void engine.finishWorkerExecution(w.id); });
     manager.enqueueOwnedRun(w.id);
-    await vi.waitFor(() => expect(store.getRun(w.id)?.status).toBe('failed'), { timeout: 500 });
+    await vi.waitFor(() => expect(store.getRun(w.id)?.status).toBe('failed'), { timeout: HANG_GUARD_MS });
     expect(await manager.awaitRunTermination(w.id, 100)).toBe(true);
     expect(existsSync(workspace(w).path)).toBe(false);
   });

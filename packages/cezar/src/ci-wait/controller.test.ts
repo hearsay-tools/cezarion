@@ -11,6 +11,9 @@ import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 import { CiToolController, type CezarToolHandlers, type WaitRegistration } from './controller.ts';
 import { callCezarAsk, callCezarCancelWait, callCezarDone, callCezarWait } from './client.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 const wait = { id: '11111111-1111-4111-8111-111111111111', generation: 'generation', turnId: 'turn', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'registered' as const };
 const entry: Wait = { kind: 'pr', source: 'agent', via: 'cezar_wait', ...wait, phase: 'open' };
 const openWait = { wait_id: wait.id, kind: 'pr' as const, deadline: wait.deadline, summary: 'CI for owner/repo#1' };
@@ -65,7 +68,7 @@ describe('private CI controller', () => {
     let complete!: () => void; let signal!: AbortSignal;
     const session = (await controller()).provision(handlers({ registerWait: async (_request, _via, active) => { signal = active; await new Promise<void>(resolve => complete = resolve); active.throwIfAborted(); return registered; } }));
     const pending = callCezarWait({ kind: 'pr', pr: wait.prUrl }, session.env);
-    await vi.waitFor(() => expect(complete).toBeDefined());
+    await vi.waitFor(() => expect(complete).toBeDefined(), { timeout: HANG_GUARD_MS });
     session.revoke(); expect(signal.aborted).toBe(true); complete();
     await expect(pending).resolves.toMatchObject({ ok: false, code: 'unavailable' });
     await expect(callCezarWait({ kind: 'pr', pr: wait.prUrl }, session.env)).resolves.toMatchObject({ ok: false, code: 'unavailable' });
@@ -103,9 +106,9 @@ describe('private CI controller', () => {
       child.stdin.write(JSON.stringify({jsonrpc:'2.0',id:1,method:'initialize',params:{protocolVersion:'2024-11-05',capabilities:{},clientInfo:{name:'eof-test',version:'1'}}})+'\n');
       await initialized;
       child.stdin.end();
-      await vi.waitFor(() => expect(child.exitCode).toBe(0), { timeout: 1000 });
+      await vi.waitFor(() => expect(child.exitCode).toBe(0), { timeout: HANG_GUARD_MS });
     } finally { child.kill('SIGKILL'); }
-  }, 5000);
+  });
 
   it('hard controller death closes the connected MCP adapter without a model turn', async () => {
     const child = fork(fileURLToPath(new URL('./__fixtures__/controller-owner.mjs', import.meta.url)), [], { execArgv: ['--import', import.meta.resolve('tsx')], silent: true });
