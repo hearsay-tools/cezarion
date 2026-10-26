@@ -6,16 +6,17 @@ large-text threshold (24 px regular or about 18.67 px bold).
 
 These ratios use the opaque default palette in `src/styles/index.css`,
 with `--card-2` resolving to `--surface-muted`. Both themes must pass.
+Dark ratios reflect the lifted H1b palette in hearsay-tools/cezarion#1909.
 Opacity, overlays, hover surfaces and custom colors require a separate measurement.
 
 | Foreground utility | Dark | Light | Safe in both themes? |
 | --- | ---: | ---: | --- |
-| `text-foreground` | 14.57:1 | 15.66:1 | Yes — primary text |
-| `text-muted-foreground`, `text-supporting-foreground` | 7.43:1 | 6.60:1 | Yes — secondary text |
-| `text-link-foreground` | 10.31:1 | 4.80:1 | Yes — links |
-| `text-signal-word-red` | 5.51:1 | 5.67:1 | Yes — red words |
-| `text-soft-foreground` | 4.88:1 | 4.37:1 | No — use muted-foreground |
-| `text-danger`, `text-destructive` (alias) | 4.05:1 | 4.24:1 | No — use signal-word-red |
+| `text-foreground` | 10.12:1 | 15.66:1 | Yes — primary text |
+| `text-muted-foreground`, `text-supporting-foreground` | 5.70:1 | 6.60:1 | Yes — secondary text |
+| `text-link-foreground` | 7.60:1 | 4.80:1 | Yes — links |
+| `text-signal-word-red` | 5.11:1 | 5.67:1 | Yes — red words |
+| `text-soft-foreground` | 4.56:1 | 4.37:1 | No — use muted-foreground |
+| `text-danger`, `text-destructive` (alias) | 4.34:1 | 4.24:1 | No — use signal-word-red |
 
 Icons and non-text graphics have a separate 3:1 requirement; these text rules
 do not prohibit their use of danger.

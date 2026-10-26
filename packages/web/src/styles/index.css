@@ -73,12 +73,12 @@
   color-scheme: dark;
   --app-duration-1: 120ms;
   --page-gutter: clamp(1.125rem, 0.5rem + 2vw, 2.75rem);
-  --nav-scrim: oklch(0.20768191 0.03982432 265.754874 / 0.600000);
+  --nav-scrim: oklch(0.22 0.004 260 / 0.6);
 
   /* Role-named family selected by appearance.accent. Cezarion is the sole family today. */
   --action: oklch(0.84292398 0.15105370 88.300494);
   --action-foreground: oklch(0.16828084 0.01806226 263.904279);
-  --accent-strong: oklch(0.78451984 0.13252856 181.911977);
+  --accent-strong: oklch(0.74 0.105 182);
   --accent-strong-foreground: oklch(0.16828084 0.01806226 263.904279);
   --merged-strong: oklch(0.54133709 0.24658592 293.008968);
   --merged-text: oklch(0.84265465 0.09442880 302.443560);
@@ -91,12 +91,12 @@
   --status-running: oklch(0.70896895 0.15916821 293.541199);
   /* The sidebar task row (#617): neutral hover and selected fills, replacing the teal
    * --task-brand-selected on the row so "selected" stops reading as loud. */
-  --sidebar-row-hover: oklch(0.24913385 0.02998288 267.396242);
-  --sidebar-row-selected: oklch(0.29568726 0.03397710 270.005451);
+  --sidebar-row-hover: oklch(0.285 0.006 260);
+  --sidebar-row-selected: oklch(0.33 0.008 260);
   /* The Inbox nav count (#617 01c): soft amber, because follow-ups wait for you. A tinted fill
-   * with amber ink rather than the teal brand chip; 8.1:1 on the dark sidebar. */
-  --inbox-count: oklch(0.84292398 0.15105370 88.300494 / 0.149020);
-  --inbox-count-foreground: oklch(0.84292398 0.15105370 88.300494);
+   * with amber ink rather than the teal brand chip; readable on the lifted dark sidebar. */
+  --inbox-count: oklch(0.86 0.13 88 / 0.12);
+  --inbox-count-foreground: oklch(0.86 0.13 88);
   /* The project rail's pill numbers (#618). Amber is bright enough for dark ink in both themes
    * (11.0:1); red, violet and green take dark ink on the dark theme (4.76 / 6.59 / 10.05:1). */
   --signal-ink-amber: oklch(0.20502324 0.02337733 265.468208);
@@ -104,36 +104,36 @@
   /* The project signal as WORDS (#711): the state line under a project's name on the expanded
    * rail and the mobile drawer. 11px text needs 4.5:1 on the default, hover and selected rows
    * alike; `--danger` as text drops to 3.69:1 on the selected row, so red and amber have their
-   * own inks. Amber 11.8 / 9.9 / 8.5:1, red 6.9 / 5.8 / 5.0:1 (default / hover / selected). */
+   * own inks. Red retains at least 4.5:1 on the lifted selected surface. */
   --signal-word-amber: oklch(0.84292398 0.15105370 88.300494);
-  --signal-word-red: oklch(0.71062735 0.16614792 22.216224);
+  --signal-word-red: oklch(0.72 0.16614792 22.216224);
 
-  /* Cezarion surfaces from design.pen. Elevation comes from surface steps, not shadows. */
-  --surface-base: oklch(0.16828084 0.01806226 263.904279);
-  --surface-raised: oklch(0.20502324 0.02337733 265.468208);
-  --surface-muted: oklch(0.26713239 0.03085068 270.812067);
-  --border-subtle: oklch(0.31589964 0.03129597 271.795943);
-  --text-primary: oklch(0.98415186 0.00341267 247.857544);
-  --text-secondary: oklch(0.77337884 0.02371525 269.378111);
-  --text-muted: oklch(0.65939768 0.03151807 266.241095);
-  --accent-text: oklch(0.85488177 0.12507543 181.070723);
-  --accent-icon: oklch(0.78451984 0.13252856 181.911977 / 0.701961);
-  --task-brand-bg: oklch(0.16544886 0.02028162 251.891015);
+  /* H1b: lifted neutral surfaces and softer ink. Elevation comes from surface steps, not shadows. */
+  --surface-base: oklch(0.215 0.004 260);
+  --surface-raised: oklch(0.25 0.005 260);
+  --surface-muted: oklch(0.30 0.006 260);
+  --border-subtle: oklch(0.32 0.006 260);
+  --text-primary: oklch(0.90 0.004 260);
+  --text-secondary: oklch(0.73 0.008 260);
+  --text-muted: oklch(0.67 0.012 260);
+  --accent-text: oklch(0.80 0.095 182);
+  --accent-icon: oklch(0.74 0.105 182 / 0.75);
+  --task-brand-bg: var(--surface-base);
   --task-brand-selected: oklch(0.32665238 0.04598625 190.741863);
-  --composer-border: oklch(0.54138006 0.07357683 185.516756);
+  --composer-border: oklch(0.50 0.06 186);
 
-  /* Thread conversation surfaces (#252). Yellow is user intent; teal is the agent reply. */
-  --message-user-bg: oklch(0.21321465 0.01351055 93.978991);
-  --message-user-border: oklch(0.38512024 0.04879594 92.073965);
+  /* Thread cards share a neutral surface; kind accents live in labels and rails. */
+  --message-user-bg: var(--surface-raised);
+  --message-user-border: var(--border-subtle);
   --message-user-accent: oklch(0.84292398 0.15105370 88.300494);
-  --message-agent-bg: oklch(0.22894792 0.02180574 190.683667);
-  --message-agent-border: oklch(0.35768411 0.03133143 186.402701);
-  --message-agent-accent: oklch(0.85488177 0.12507543 181.070723);
-  --message-outbound-bg: oklch(0.20502250 0.02000954 248.830221);
-  --message-outbound-border: oklch(0.41855365 0.07679372 250.700245);
+  --message-agent-bg: var(--surface-raised);
+  --message-agent-border: var(--border-subtle);
+  --message-agent-accent: var(--accent-text);
+  --message-outbound-bg: var(--surface-raised);
+  --message-outbound-border: var(--border-subtle);
   --message-outbound-accent: oklch(0.77792681 0.11495880 254.588347);
-  --message-inbound-bg: oklch(0.21302869 0.03745740 297.672919);
-  --message-inbound-border: oklch(0.41805099 0.09252441 297.928962);
+  --message-inbound-bg: var(--surface-raised);
+  --message-inbound-border: var(--border-subtle);
   --message-inbound-accent: oklch(0.78270926 0.12895489 299.255507);
 
   /* Existing semantic names remain the compatibility layer for every screen. */
@@ -149,7 +149,7 @@
   --supporting-foreground: var(--text-secondary);
   --border: var(--border-subtle);
   --input: var(--border-subtle);
-  --control-border: oklch(0.54402337 0.03357110 264.243724);
+  --control-border: oklch(0.56 0.012 260);
   --selection-indicator: var(--accent-text);
   --contrast: var(--text-primary);
   --contrast-foreground: var(--surface-raised);
@@ -157,7 +157,7 @@
   --ring: var(--accent-text);
 
   /* status */
-  --danger: oklch(0.63683371 0.20784885 25.331328);
+  --danger: oklch(0.68 0.19 25);
   --danger-foreground: oklch(0.99999999 0.00000000 none);
   --success: oklch(0.79939674 0.11933177 158.659529);
   --pending: var(--action);

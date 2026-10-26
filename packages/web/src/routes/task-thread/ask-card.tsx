@@ -268,7 +268,7 @@ function PendingAsk({ ask, run, onShowOrigin }: { ask: ThreadAsk; run: ApiRun; o
       data-pinned={ask.placement === 'pinned' ? 'true' : undefined}
       data-delivery={delivery.mode}
       data-voice-proposal={voiceAnswers ? 'true' : undefined}
-      className="rounded-lg border border-accent-strong/25 bg-accent-strong/[0.04] px-4 pt-3.5 pb-3.5"
+      className="rounded-lg border border-accent-strong/25 bg-accent-strong/[0.04] [html:not(.light)_&]:bg-card px-4 pt-3.5 pb-3.5"
     >
       <div className="mb-2.5 flex items-center gap-2">
         <span className="text-xs font-medium text-link-foreground">The agent is asking</span>
@@ -415,8 +415,8 @@ function AskQuestionBlock({
                   onClick={() => pick(option.label)}
                   className={cn(
                     'flex min-h-11 w-full flex-col gap-0.5 rounded-md border px-3.5 py-2.5 text-left transition-colors',
-                    'hover:border-accent-strong/50 hover:bg-accent-strong/[0.06] disabled:pointer-events-none disabled:opacity-50',
-                    isSelected ? 'border-accent-strong/60 bg-accent-strong/[0.06]' : 'border-border bg-card',
+                    'hover:border-accent-strong/50 hover:bg-accent-strong/[0.06] [html:not(.light)_&]:hover:bg-card disabled:pointer-events-none disabled:opacity-50',
+                    isSelected ? 'border-accent-strong/60 bg-accent-strong/[0.06] [html:not(.light)_&]:bg-card' : 'border-border bg-card',
                   )}
                 >
                   <span className="flex min-w-0 items-start gap-2 text-[14px] font-semibold text-foreground">
@@ -455,7 +455,7 @@ function AskQuestionBlock({
               onClick={onOtherToggle}
               className={cn(
                 'w-full justify-start text-left',
-                isOther && 'border-accent-strong/60 bg-accent-strong/[0.06]',
+                isOther && 'border-accent-strong/60 bg-accent-strong/[0.06] [html:not(.light)_&]:bg-card',
               )}
             >
               Other

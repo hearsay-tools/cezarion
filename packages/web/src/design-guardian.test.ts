@@ -312,15 +312,15 @@ describe('design guardian', () => {
     expect(light['action'] ?? dark['action']).toBe('#f4c542')
 
     expect(dark).toMatchObject({
-      'accent-text': '#5eead4',
-      'accent-strong': '#2dd4bf',
+      'accent-text': '#71d2c2',
+      'accent-strong': '#50c0b0',
       'accent-strong-foreground': '#0b0f17',
-      'accent-icon': '#2dd4bfb3',
+      'accent-icon': '#50c0b0bf',
       'task-brand-selected': '#123c3a',
-      'composer-border': '#347d75',
-      'message-agent-accent': '#5eead4',
-      'message-agent-bg': '#10201f',
-      'message-agent-border': '#29423f',
+      'composer-border': '#376e68',
+      'message-agent-accent': 'var(--accent-text)',
+      'message-agent-bg': 'var(--surface-raised)',
+      'message-agent-border': 'var(--border-subtle)',
       'syn-key': '#5eead4',
       'merged-strong': '#7c3aed',
       'merged-text': '#d7bdff',

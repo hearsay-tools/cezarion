@@ -105,8 +105,8 @@ describe('sidebar tokens and the last teal (#617 01c)', () => {
     const block = (opener: string) => css.slice(css.indexOf(opener)).split(/\n}\n/)[0]
     const normalize = (value: string | undefined) => (value ?? '').replace(/oklch\([^)]*\)/g, paletteHex)
     const dark = normalize(block('\n:root {\n')), light = normalize(block('\n.light {\n'))
-    expect(dark).toMatch(/--inbox-count:\s*#f4c54226;/i)
-    expect(dark).toMatch(/--inbox-count-foreground:\s*#f4c542;/i)
+    expect(dark).toMatch(/--inbox-count:\s*#f4cc641f;/i)
+    expect(dark).toMatch(/--inbox-count-foreground:\s*#f4cc64;/i)
     expect(light).toMatch(/--inbox-count:\s*#f4c54240;/i)
     expect(light).toMatch(/--inbox-count-foreground:\s*#7a5200;/i)
     expect(css).toMatch(/--color-inbox-count:\s*var\(--inbox-count\);/)

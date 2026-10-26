@@ -497,6 +497,10 @@ describe('conversation message surfaces', () => {
     const agent = document.querySelector('[data-slot="assistant-message"]')
     expect(user?.getAttribute('data-role')).toBe('user')
     expect(agent?.getAttribute('data-role')).toBe('agent')
+    for (const [card, kind] of [[user, 'user'], [agent, 'agent']] as const) {
+      expect(card?.classList.contains('[html:not(.light)_&]:border-s-[3px]')).toBe(true)
+      expect(card?.classList.contains(`[html:not(.light)_&]:border-s-message-${kind}-accent`)).toBe(true)
+    }
     expect(user?.querySelector(':scope > p')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('YOUR MESSAGE')
     const agentHeader = agent?.querySelector(':scope > p')
     expect(agentHeader?.textContent).toContain('AGENT RESPONSE')
@@ -936,10 +940,14 @@ describe('message color tokens', () => {
       expect(lightBlock).toContain(`--${token}:`)
       expect(css).toContain(`--color-${token}: var(--${token})`)
     }
-    // Reference screenshot: blue sends, purple receives, never human-message amber.
-    for (const block of [rootBlock, lightBlock]) {
+    for (const kind of ['user', 'agent', 'outbound', 'inbound']) {
+      expect(rootBlock).toContain(`--message-${kind}-bg: var(--surface-raised)`)
+      expect(rootBlock).toContain(`--message-${kind}-border: var(--border-subtle)`)
+    }
+    // Light keeps its tints. Dark keeps the same kind distinction in labels and rails.
+    for (const [block, colorRole] of [[rootBlock, 'accent'], [lightBlock, 'bg']] as const) {
       const rgb = (role: string) => {
-        const token = block.match(new RegExp(`--message-${role}-bg: ([^;]+);`))![1]!
+        const token = block.match(new RegExp(`--message-${role}-${colorRole}: ([^;]+);`))![1]!
         const hex = paletteHex(token).slice(1)
         return [0, 2, 4].map(offset => Number.parseInt(hex.slice(offset, offset + 2), 16)) as [number, number, number]
       }

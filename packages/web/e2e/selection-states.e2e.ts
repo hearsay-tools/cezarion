@@ -109,11 +109,11 @@ function checkNavSelection(variant: ContrastQaVariant, { base, projectId, nav: n
   const mobile = variant.viewport.width === 360
   const container = mobile ? '[role="dialog"] ' : ''
   const fill = variant.theme === 'dark'
-    ? { hover: 'rgb(27, 33, 48)', selected: 'rgb(38, 44, 62)' }
+    ? { hover: 'rgb(40, 42, 45)', selected: 'rgb(51, 53, 58)' }
     : { hover: 'rgb(244, 245, 248)', selected: 'rgb(234, 237, 243)' }
   // The addendum's hex values, as the browser serialises them (0x26 → 0.15, 0x40 → 0.25).
   const amber = variant.theme === 'dark'
-    ? { fill: 'rgba(244, 197, 66, 0.15)', ink: 'rgb(244, 197, 66)' }
+    ? { fill: 'rgba(244, 204, 100, 0.12)', ink: 'rgb(244, 204, 100)' }
     : { fill: 'rgba(244, 197, 66, 0.25)', ink: 'rgb(122, 82, 0)' }
   const open = (path: string, ready: string) => {
     browser.setViewport(variant.viewport.width, variant.viewport.height)
@@ -301,7 +301,7 @@ describe('selection and control states (#171)', () => {
       const other = '[data-slot="task-row"][data-run-id="two"]'
       // The tokens the issue names, resolved by the real stylesheet in this theme.
       const fill = variant.theme === 'dark'
-        ? { hover: 'rgb(27, 33, 48)', selected: 'rgb(38, 44, 62)' }
+        ? { hover: 'rgb(40, 42, 45)', selected: 'rgb(51, 53, 58)' }
         : { hover: 'rgb(244, 245, 248)', selected: 'rgb(234, 237, 243)' }
       type Geometry = { title: string; row: number; bg: string; pin: string | null }
       const geometry = (selector: string) => `(() => {

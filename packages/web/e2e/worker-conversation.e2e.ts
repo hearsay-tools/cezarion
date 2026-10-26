@@ -236,8 +236,16 @@ describe('chronological worker conversation', () => {
         return card ? card.dataset.kind : row.querySelector('[data-slot="reasoning"]') ? 'thinking' : row.querySelector('[data-slot="tool-card"]') ? 'tool' : row.querySelector('[data-slot="assistant-message"]') ? 'assistant' : 'user';
       })`, value => value.length === 7)
       expect(kinds).toEqual(['user', 'request', 'thinking', 'tool', 'assistant', 'follow-up', 'reply'])
-      const colors = browser.waitForValue<string[]>(`['[data-slot="user-bubble"]', '${request}', '${replyCard}'].map(s => getComputedStyle(document.querySelector(s)).backgroundColor)`)
-      expect(new Set(colors).size).toBe(3)
+      const cards = `['[data-slot="user-bubble"]', '${request}', '${replyCard}']`
+      const colors = browser.waitForValue<string[]>(`${cards}.map(s => getComputedStyle(document.querySelector(s)).backgroundColor)`)
+      // Direction stays distinct: light uses tints; dark uses accent rails on a shared surface.
+      expect(new Set(colors).size).toBe(variant.theme === 'light' ? 3 : 1)
+      const rails = browser.waitForValue<{ width: string; color: string }[]>(`${cards}.map(s => {
+        const style = getComputedStyle(document.querySelector(s));
+        return { width: style.borderInlineStartWidth, color: style.borderInlineStartColor };
+      })`)
+      expect(rails.map(rail => rail.width)).toEqual(Array(3).fill(variant.theme === 'dark' ? '3px' : '1px'))
+      expect(new Set(rails.map(rail => rail.color)).size).toBe(3)
       for (const selector of [`${request} > div > div > p`, `${replyCard} > div > div > p`]) {
         const contrast = browser.waitForValue<ContrastSample>(contrastSampleExpression(selector))
         expect(contrast.ratio).toBeGreaterThanOrEqual(4.5)
