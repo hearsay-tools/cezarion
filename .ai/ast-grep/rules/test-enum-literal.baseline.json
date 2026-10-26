@@ -1352,10 +1352,10 @@
       "count": 1
     },
     {
-      "file": "packages/cezar/src/runs/run-search.test.ts",
+      "file": "packages/cezar/src/runs/run-search-prefilter.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'done'",
-      "count": 1
+      "count": 2
     },
     {
       "file": "packages/cezar/src/runs/session-transport.test.ts",
@@ -1637,6 +1637,48 @@
       "file": "packages/cezar/src/runs/store-live-set.test.ts",
       "rule": "test-enum-literal",
       "site": "via: 'monitoring-line' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-resume-time.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-resume-time.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-resume-time.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-resume-time.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-resume-time.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-resume-time.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/store-resume-time.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
       "count": 1
     },
     {
@@ -1931,7 +1973,7 @@
       "file": "packages/cezar/src/runs/webhook.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'human'",
-      "count": 2
+      "count": 4
     },
     {
       "file": "packages/cezar/src/runs/webhook.test.ts",
@@ -1943,13 +1985,13 @@
       "file": "packages/cezar/src/runs/webhook.test.ts",
       "rule": "test-enum-literal",
       "site": "phase: 'open'",
-      "count": 3
+      "count": 5
     },
     {
       "file": "packages/cezar/src/runs/webhook.test.ts",
       "rule": "test-enum-literal",
       "site": "source: 'agent'",
-      "count": 3
+      "count": 5
     },
     {
       "file": "packages/cezar/src/runs/webhook.test.ts",
@@ -1979,13 +2021,13 @@
       "file": "packages/cezar/src/runs/webhook.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'running'",
-      "count": 18
+      "count": 20
     },
     {
       "file": "packages/cezar/src/runs/webhook.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'waiting'",
-      "count": 11
+      "count": 13
     },
     {
       "file": "packages/cezar/src/runs/webhook.test.ts",
@@ -1997,7 +2039,7 @@
       "file": "packages/cezar/src/runs/webhook.test.ts",
       "rule": "test-enum-literal",
       "site": "via: 'cezar_ask'",
-      "count": 2
+      "count": 4
     },
     {
       "file": "packages/cezar/src/runs/webhook.test.ts",
@@ -2532,6 +2574,36 @@
       "rule": "test-enum-literal",
       "site": "status: 'waiting'",
       "count": 2
+    },
+    {
+      "file": "packages/cezar/src/task-cli/status-question.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/status-question.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/status-question.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/status-question.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/task-cli/status-question.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask'",
+      "count": 1
     },
     {
       "file": "packages/cezar/src/task-cli/watch.test.ts",
@@ -4523,7 +4595,7 @@
       "file": "packages/contract/src/attention.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'human'",
-      "count": 9
+      "count": 10
     },
     {
       "file": "packages/contract/src/attention.test.ts",
@@ -4541,13 +4613,13 @@
       "file": "packages/contract/src/attention.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'pr' as const",
-      "count": 3
+      "count": 4
     },
     {
       "file": "packages/contract/src/attention.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'process'",
-      "count": 1
+      "count": 2
     },
     {
       "file": "packages/contract/src/attention.test.ts",
@@ -4559,7 +4631,7 @@
       "file": "packages/contract/src/attention.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'timer'",
-      "count": 1
+      "count": 2
     },
     {
       "file": "packages/contract/src/attention.test.ts",
@@ -4625,13 +4697,13 @@
       "file": "packages/contract/src/attention.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'cancelled'",
-      "count": 1
+      "count": 2
     },
     {
       "file": "packages/contract/src/attention.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'done'",
-      "count": 2
+      "count": 3
     },
     {
       "file": "packages/contract/src/attention.test.ts",
@@ -4643,13 +4715,13 @@
       "file": "packages/contract/src/attention.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'failed'",
-      "count": 4
+      "count": 5
     },
     {
       "file": "packages/contract/src/attention.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'queued'",
-      "count": 3
+      "count": 4
     },
     {
       "file": "packages/contract/src/attention.test.ts",
@@ -4661,13 +4733,13 @@
       "file": "packages/contract/src/attention.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'review'",
-      "count": 3
+      "count": 4
     },
     {
       "file": "packages/contract/src/attention.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'running'",
-      "count": 9
+      "count": 12
     },
     {
       "file": "packages/contract/src/attention.test.ts",
@@ -4679,7 +4751,7 @@
       "file": "packages/contract/src/attention.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'waiting'",
-      "count": 52
+      "count": 63
     },
     {
       "file": "packages/contract/src/attention.test.ts",
@@ -4715,6 +4787,12 @@
       "file": "packages/contract/src/github.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/run-search.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
       "count": 1
     },
     {
@@ -4871,7 +4949,13 @@
       "file": "packages/contract/src/waits.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'waiting'",
-      "count": 2
+      "count": 6
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting' as const",
+      "count": 1
     },
     {
       "file": "packages/contract/src/waits.test.ts",
@@ -5843,55 +5927,61 @@
       "file": "packages/web/src/lib/voice/status-map.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'pr'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/lib/voice/status-map.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'process'",
       "count": 1
     },
     {
       "file": "packages/web/src/lib/voice/status-map.test.ts",
       "rule": "test-enum-literal",
       "site": "phase: 'resolved'",
-      "count": 1
-    },
-    {
-      "file": "packages/web/src/lib/voice/status-map.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'cancelled'",
-      "count": 1
-    },
-    {
-      "file": "packages/web/src/lib/voice/status-map.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'done'",
-      "count": 5
-    },
-    {
-      "file": "packages/web/src/lib/voice/status-map.test.ts",
-      "rule": "test-enum-literal",
-      "site": "status: 'failed'",
       "count": 2
     },
     {
       "file": "packages/web/src/lib/voice/status-map.test.ts",
       "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/voice/status-map.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 7
+    },
+    {
+      "file": "packages/web/src/lib/voice/status-map.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/lib/voice/status-map.test.ts",
+      "rule": "test-enum-literal",
       "site": "status: 'queued'",
-      "count": 1
+      "count": 2
     },
     {
       "file": "packages/web/src/lib/voice/status-map.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'review'",
-      "count": 1
+      "count": 2
     },
     {
       "file": "packages/web/src/lib/voice/status-map.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'running'",
-      "count": 4
+      "count": 6
     },
     {
       "file": "packages/web/src/lib/voice/status-map.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'waiting'",
-      "count": 5
+      "count": 16
     },
     {
       "file": "packages/web/src/routes/github/github-sidebar-model.test.ts",
@@ -6144,6 +6234,12 @@
       "rule": "test-enum-literal",
       "site": "status: 'waiting'",
       "count": 1
+    },
+    {
+      "file": "packages/web/src/test/e2e-spec-map.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 2
     },
     {
       "file": "packages/web/src/test/poll.test.ts",

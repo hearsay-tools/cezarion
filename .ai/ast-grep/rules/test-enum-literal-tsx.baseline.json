@@ -560,6 +560,30 @@
       "count": 1
     },
     {
+      "file": "packages/web/src/routes/task-git/task-commits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-git/task-commits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-git/task-commits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-git/task-commits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
       "file": "packages/web/src/routes/task-git/task-files.test.tsx",
       "rule": "test-enum-literal-tsx",
       "site": "kind: 'agent'",
