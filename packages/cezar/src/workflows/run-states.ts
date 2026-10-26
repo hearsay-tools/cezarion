@@ -86,7 +86,7 @@ export const RUN_EXITS = {
   'succeed-review': { from: ['running', 'waiting'], to: 'review' },
   'accept-review': { from: ['review'], to: 'done' },
   'fail-start': { from: ['queued', 'running'], to: 'failed' },
-  fail: { from: ['running', 'waiting'], to: 'failed' },
+  fail: { from: ['running', 'waiting', 'cancelled'], to: 'failed' },
   'fail-interrupted': { from: ['queued', 'running', 'waiting'], to: 'failed' },
   'fail-crash': { from: ['queued', 'running', 'waiting'], to: 'failed' },
   'withdraw-hold': { from: ['waiting'], to: 'failed' },
@@ -229,6 +229,9 @@ export const RUN_TRIGGERS: readonly TriggerRow[] = [
   // unified-waits lists no Stop on a settled run. cancel() records an owned worker cancelled at any
   // status, and POST /runs/:id/cancel calls it on a settled worker too.
   { id: 'worker.stop-settled', states: ['review', 'done', 'failed'], trigger: 'Stop on an owned worker that already settled', firedBy: 'human', when: 'an owned worker', behavior: 'cancelled: the settled status is replaced, and cancel() returns false', exit: 'stop-worker', to: ['cancelled'], via: ['cancel', 'persistWorkerCompletion', 'store:commitWorkerCancellation'], pinnedBy: { file: 'workflows/run-states-worker.test.ts', test: 'Stop on a worker that settled done records it cancelled' } },
+  // A Stop on an owned worker commits cancelled at once, while its failed Continue still waits for
+  // the process to exit. The failure then writes failed, and the Stop's cancel-late writes cancelled.
+  { id: 'worker.stop-failed-continue', states: ['cancelled'], trigger: 'A failed Continue settles after Stop recorded the owned worker cancelled', firedBy: 'runner', when: 'an owned worker', behavior: 'failed until the session is released, then cancelled again (failed.late-stop)', exit: 'fail', to: ['failed'], via: ['settleFailedContinuation'], pinnedBy: { file: 'workflows/worker-destroy.test.ts', test: 'post-spawn human flush failure retains resources until the session process closes' } },
   // failed
   { id: 'failed.hold', states: ['failed'], trigger: 'A usage-limit error, with auto-resume on and a session', firedBy: 'engine', when: 'the failure was a usage limit', behavior: 'waiting on the hold', exit: 'hold', to: ['waiting:usage-limit'], via: ['scheduleAutoResumeIfLimited', 'armAutoResume'], pinnedBy: { file: 'workflows/auto-resume.test.ts', test: 'schedules the resume for the provider' } },
   // A Stop accepted while a failed Continue saves its worktree, as settled.late-stop does after success.
