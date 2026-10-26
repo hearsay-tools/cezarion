@@ -194,14 +194,15 @@ async function parentOn(runner: RunnerId) {
 }
 
 /** A root parent on `runner`'s native wire, parked after its opening turn, and one worker it owns
- *  that never starts: `fixtureUpdateRun` settles it. Workers run on the Claude wire. */
-async function parentWithWorker(runner: RunnerId, step?: string) {
+ *  that never starts: `fixtureUpdateRun` settles it. Workers run on the Claude wire. A restart
+ *  starts the worker, so a cell that restarts gives it a `task` that settles on its own. */
+async function parentWithWorker(runner: RunnerId, step?: string, task?: string) {
   nativeWire(runner);
   process.env.CEZ_CLAUDE_BIN = HARNESS_ADAPTERS.claude.mockBin;
   const p = await parent(HARNESS_ADAPTERS[runner].scenarios.baseline!, runner);
   checkpoint('parent-opening-repark');
   await until(() => store.getRun(p.id)?.status === 'waiting', () => step ? `${step}: opening park\n${timeline(p.id)}` : timeline(p.id));
-  return { p, w: await worker(p.id) };
+  return { p, w: await worker(p.id, task) };
 }
 
 /** Claude U22c/k/x cross several real process launches. Keep the shared 15 s guard per
@@ -1994,12 +1995,13 @@ function workersCells(runners: RunnerId[]): void {
 
     it(`${runner} U21r after a restart, a deadline-less completion wait resolves on the worker's settlement and wakes the parent once`, async () => {
       process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
-      const { p, w } = await parentWithWorker(runner);
+      // Recovery re-queues the worker (`reviveQueuedRun`), which then runs its task and settles
+      // done: a store write cannot settle a queued run the scheduler starts (hearsay-tools/cezarion#1804).
+      const { p, w } = await parentWithWorker(runner, undefined, 'mock:done');
       const entry = await ignoreRefusal(runner, p.id, `Workers are still live: ${w.id}.`, () => workerWaits(p.id)[0]?.phase === 'open');
       store.flush();
       await restart(false, readPersistedRuns(join(root, '.ai/cezar')));
       expect(workerWaits(p.id)).toEqual([entry]);
-      fixtureUpdateRun(w.id, { status: 'done' });
       await until(() => settled(p.id, entry.id)?.phase === 'delivered' && prompted(runner, workerWake(entry)).length > 0);
       expect(settled(p.id, entry.id)).toMatchObject({ result: { reason: 'outcome' } });
       expect(inputsFor(p.id, entry.id)).toHaveLength(1);

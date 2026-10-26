@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import type { AgentInput } from '@open-mercato/cezar-contract';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { RunManager } from '../workflows/run.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
@@ -81,6 +82,7 @@ it('readiness hints ignore stale/disposed sessions and guard duplicate/reentrant
   };
   try {
     const record = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
+    store.updateRun(record.id, { status: RUN_STATUS.running }); // a live session never holds a queued run
     store.commitAgentInputs(record.id, [input]);
     let sends = 0;
     // Deterministic local session only for callback identity/reentrancy, not
@@ -161,6 +163,7 @@ it.each(['cancelled', 'finish requested', 'disposed', 'replacement session', 're
       agentInputFlight: undefined as { settled?: Promise<void> } | undefined };
     try {
       const run = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
+      store.updateRun(run.id, { status: RUN_STATUS.running }); // a live session never holds a queued run
       store.commitAgentInputs(run.id, [input]);
       internal.active.set(run.id, state);
       internal.handleAgentInputReady(run.id, state, session);
@@ -197,6 +200,7 @@ it('ACK cannot answer a newly visible human ask or drain its queued successor', 
     agentInputFlight: undefined as { settled?: Promise<void> } | undefined };
   try {
     const run = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
+    store.updateRun(run.id, { status: RUN_STATUS.running }); // a live session never holds a queued run
     store.commitAgentInputs(run.id, [input]); internal.active.set(run.id, state);
     internal.handleAgentInputReady(run.id, state, session);
     const settled = state.agentInputFlight?.settled;
@@ -226,6 +230,7 @@ it.each(['accepted', 'rejected'] as const)('%s ACK settles before a later provid
     agentInputFlight: undefined as { settled?: Promise<void> } | undefined };
   try {
     const run = store.createRun({ title: 'task', task: 'task', workflow: 'quick-task', steps: [] });
+    store.updateRun(run.id, { status: RUN_STATUS.running }); // a live session never holds a queued run
     store.commitAgentInputs(run.id, [input]); internal.active.set(run.id, state);
     internal.handleAgentInputReady(run.id, state, session);
     const settled = state.agentInputFlight?.settled;

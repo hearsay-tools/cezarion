@@ -18,6 +18,7 @@ import { recordCommits } from '../runs/outcome-crash.testkit.ts';
 import type { RunOutcome } from '../runs/outcome-commit.ts';
 import type { RunRecord } from '../runs/store.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 /** #505 PR B: a worker's question goes to its owning parent, not to the human. */
 describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () => {
@@ -80,6 +81,9 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expect(conversationOf(p.id)?.messages.some(m => m.question) ?? false).toBe(false);
     expect(store.getRun(p.id)?.agentInputs?.length ?? 0).toBe(inputs);
     expect(hasPendingAsk(store, w.id)).toBe(true);
+    // Its session is still live, which a reviewing parent never has: back to its park before
+    // teardown stops it (hearsay-tools/cezarion#1804).
+    store.updateRun(p.id, { status: RUN_STATUS.waiting });
   });
 
   it('a budget-spent worker plain-parks without routing', async () => {
@@ -519,6 +523,9 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expect(store.getRun(f.w.id)?.status).toBe('waiting');
     expect(manager.sendMessage(f.w.id, [{ type: 'text', text: 'mock:agent-echo human answer' }])).toBe(true);
     await until(() => eventsOf(f.w.id, 'human-input-delivered').length === 1);
+    // Its session is still live, which a reviewing parent never has: back to its park before
+    // teardown stops it (hearsay-tools/cezarion#1804).
+    store.updateRun(f.p.id, { status: RUN_STATUS.waiting });
   });
 
   it('hands a routed question to the human on recovery when the parent closed before the crash', async () => {
@@ -727,6 +734,9 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       manager.cancel(blocker.id);
       await until(() => answered(f.w.id).length === 1);
       expect(eventsOf(f.w.id, 'worker-question-fallback')).toEqual([]);
+      // Its session is still live, which a reviewing parent never has: back to its park before
+      // teardown stops it (hearsay-tools/cezarion#1804).
+      store.updateRun(f.p.id, { status: RUN_STATUS.waiting });
     } finally { f.close(); }
   });
 
