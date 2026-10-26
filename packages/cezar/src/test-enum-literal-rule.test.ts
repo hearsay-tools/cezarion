@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { join, matchesGlob } from 'node:path';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
+import { workerOutcomeSchema } from '@open-mercato/cezar-contract/delegation';
 import { runStatusSchema, stepStateSchema, stepStatusSchema } from '@open-mercato/cezar-contract/runs';
 import { timerWaitEntrySchema, waitPhaseSchema, waitSchema, waitViaSchema } from '@open-mercato/cezar-contract/waits';
 import { ruleTestsDir, rulesDir } from './ast-grep-rules.testkit.ts';
@@ -20,7 +21,7 @@ const read = (id: string): RuleFile => parse(readFileSync(join(rulesDir, `${id}.
 
 /** The object keys the rule reads, each with the values of the contract enum behind it. */
 const CONTRACT_VALUES: Record<string, string[]> = {
-  status: [...runStatusSchema.options, ...stepStatusSchema.options],
+  status: [...runStatusSchema.options, ...stepStatusSchema.options, ...workerOutcomeSchema.shape.status.options],
   kind: [...waitSchema.options.map((entry) => entry.shape.kind.value), ...stepStateSchema.shape.kind.options],
   phase: [...waitPhaseSchema.options],
   via: [...waitViaSchema.options],

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { workerOutcomeSchema } from './delegation.ts';
 import { humanAskClosedEventSchema, humanInputDeliveredEventSchema, runEventSchema } from './events.ts';
 import { runRecordSchema, runStatusSchema, stepStateSchema, stepStatusSchema } from './runs.ts';
 import { waitPhaseSchema, waitSchema, waitViaSchema } from './waits.ts';
@@ -10,6 +11,7 @@ import {
   WAIT_PHASE,
   WAIT_SOURCE,
   WAIT_VIA,
+  WORKER_OUTCOME_STATUS,
   makeHumanAskClosedEvent,
   makeHumanInputDeliveredEvent,
   makeHumanWait,
@@ -111,6 +113,7 @@ describe('the enum constants', () => {
     expect(Object.values(WAIT_PHASE).sort()).toEqual([...waitPhaseSchema.options].sort());
     expect(Object.values(WAIT_VIA).sort()).toEqual([...waitViaSchema.options].sort());
     expect(Object.values(WAIT_KIND).sort()).toEqual(waitSchema.options.map((entry) => entry.shape.kind.value).sort());
+    expect(Object.values(WORKER_OUTCOME_STATUS).sort()).toEqual([...workerOutcomeSchema.shape.status.options].sort());
   });
 
   it('name a via value the way a test reads it', () => {

@@ -7,6 +7,7 @@ import {
   WAIT_KIND,
   WAIT_PHASE,
   WAIT_SOURCE,
+  WORKER_OUTCOME_STATUS,
   makeHumanWait,
   makePrWait,
   makeRunRecord,
@@ -99,9 +100,7 @@ describe('toRunSummary', () => {
     const delegation = {
       role: 'root', permissions: [], receipts: [],
       wait: { id: REQUEST, workerIds: [PARENT, worker], deadline: '2026-10-04T10:10:00.000Z', phase: 'parked',
-        // A worker outcome's own status, inside a delegation that is loose on purpose (cast below).
-        // ast-grep-ignore: test-enum-literal
-        outcomes: [{ workerId: worker, status: 'done', observedAt: '2026-10-04T10:05:00.000Z', summary: 'secret' }] },
+        outcomes: [{ workerId: worker, status: WORKER_OUTCOME_STATUS.done, observedAt: '2026-10-04T10:05:00.000Z', summary: 'secret' }] },
     } as unknown as RunRecord['delegation'];
     expect(toRunSummary(record({ delegation })).delegation).toEqual({
       role: 'root',

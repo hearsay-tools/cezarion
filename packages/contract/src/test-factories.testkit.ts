@@ -1,3 +1,4 @@
+import { workerOutcomeSchema } from './delegation.ts';
 import type { HumanAskClosedEvent, HumanInputDeliveredEvent, RunEvent } from './events.ts';
 import { runStatusSchema, stepStateSchema, stepStatusSchema } from './runs.ts';
 import type { RunRecord, StepState } from './runs.ts';
@@ -39,6 +40,8 @@ export const STEP_KIND = stepStateSchema.shape.kind.enum;
 export const WAIT_PHASE = waitPhaseSchema.enum;
 export const WAIT_VIA = waitViaSchema.enum;
 export const WAIT_SOURCE = timerWaitEntrySchema.shape.source.enum;
+// A worker's outcome inside a delegation or a worker wait: its own enum, a subset of the run statuses.
+export const WORKER_OUTCOME_STATUS = workerOutcomeSchema.shape.status.enum;
 export const WAIT_KIND = {
   pr: prWaitEntrySchema.shape.kind.value,
   timer: timerWaitEntrySchema.shape.kind.value,
