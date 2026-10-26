@@ -1,0 +1,172 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const {
+  MARKER, LIMITS, collectPackage, validateArtifact, renderReport, renderUnavailable, shouldCreate,
+} = require('./mutants-report.cjs');
+const fixture = require('./fixtures/mutants/stryker-report.json');
+
+const FILE = 'packages/contract/src/attention.ts';
+const HEAD = 'abcdef0123456789abcdef0123456789abcdef01';
+const ctx = { head: HEAD, runUrl: 'https://github.com/o/r/actions/runs/7', blobBase: `https://github.com/o/r/blob/${HEAD}` };
+const clone = value => JSON.parse(JSON.stringify(value));
+const collect = (changed, report = fixture) =>
+  collectPackage({ name: 'contract', report, changed: new Map([[FILE, changed]]), durationMs: 16_000, relatedTests: 4 });
+const wrap = (...packages) => ({ version: 1, state: 'ran', head: HEAD, stryker: '10.1.1', packages });
+const mutant = (over = {}) => ({ file: FILE, line: 85, column: 48, mutator: 'ConditionalExpression', original: 'a', replacement: 'b', status: 'Survived', ...over });
+const pack = (over = {}) => ({
+  name: 'contract', state: 'completed', reason: '', changedLines: 21, relatedTests: 4, durationMs: 16_000,
+  counts: { killed: 0, survived: 0, noCoverage: 0, timeout: 0, error: 0, ignored: 0 }, mutants: [], ...over,
+});
+
+test('collectPackage counts every status and lists the mutants that start on a changed line', () => {
+  const result = collect([[80, 100]]);
+  assert.equal(result.state, 'completed');
+  assert.deepEqual(result.counts, { killed: 3, survived: 2, noCoverage: 1, timeout: 1, error: 0, ignored: 0 });
+  assert.equal(result.changedLines, 21);
+  assert.equal(result.relatedTests, 4);
+  const survivors = result.mutants.filter(m => m.status === 'Survived');
+  assert.deepEqual(survivors.map(m => [m.line, m.column, m.mutator, m.original, m.replacement]), [
+    [85, 48, 'ConditionalExpression', "run.status === 'waiting' || run.status === 'running'", 'true'],
+    [92, 50, 'BlockStatement', '{ return false; }', '{}'],
+  ]);
+});
+
+test('collectPackage lists undetected mutants before detected ones, each group in source order', () => {
+  const order = collect([[80, 100]]).mutants.map(m => `${m.status}:${m.line}:${m.column}`);
+  assert.deepEqual(order, [
+    'Survived:85:48', 'Survived:92:50', 'NoCoverage:85:10',
+    'Killed:84:61', 'Killed:85:10', 'Killed:85:10', 'Timeout:85:10',
+  ]);
+});
+
+test('collectPackage drops mutants outside the changed lines, and files the diff never touched', () => {
+  const one = collect([[85, 85]]);
+  assert.deepEqual(one.mutants.map(m => m.line), [85, 85, 85, 85, 85]);
+  assert.equal(one.counts.survived, 1);
+  const other = collectPackage({ name: 'contract', report: fixture, changed: new Map([['packages/contract/src/other.ts', [[1, 999]]]]), durationMs: 1, relatedTests: null });
+  assert.deepEqual(other.counts, pack().counts);
+  assert.equal(other.relatedTests, null);
+});
+
+test('collectPackage counts errors and ignored mutants without listing them', () => {
+  const report = clone(fixture);
+  const [first, second] = report.files[FILE].mutants;
+  first.status = 'CompileError';
+  second.status = 'Ignored';
+  const result = collect([[80, 100]], report);
+  assert.equal(result.counts.error, 1);
+  assert.equal(result.counts.ignored, 1);
+  assert.ok(result.mutants.every(m => ['Survived', 'NoCoverage', 'Killed', 'Timeout'].includes(m.status)));
+});
+
+test('collectPackage caps each list and keeps the counts whole', () => {
+  const report = clone(fixture);
+  const template = report.files[FILE].mutants.find(m => m.status === 'Survived');
+  report.files[FILE].mutants = Array.from({ length: LIMITS.undetected + 30 }, (_, i) => ({ ...template, id: String(i) }));
+  const result = collect([[1, 200]], report);
+  assert.equal(result.counts.survived, LIMITS.undetected + 30);
+  assert.equal(result.mutants.length, LIMITS.undetected);
+  assert.equal(result.omitted, 30);
+});
+
+test('validateArtifact keeps a well-formed artifact and strips every field it does not know', () => {
+  const artifact = wrap({ ...collect([[80, 100]]), extra: 'x' });
+  artifact.padding = 'y';
+  const clean = validateArtifact(JSON.parse(JSON.stringify(artifact)));
+  assert.equal(clean.padding, undefined);
+  assert.equal(clean.packages[0].extra, undefined);
+  assert.deepEqual(clean.packages[0].counts, artifact.packages[0].counts);
+  assert.equal(clean.packages[0].mutants.length, 7);
+});
+
+test('validateArtifact refuses a shape the job could not have written', () => {
+  const bad = {
+    'a wrong version': { ...wrap(), version: 2 },
+    'an unknown state': { ...wrap(), state: 'done' },
+    'a head that is not a sha': { ...wrap(), head: 'main; rm -rf' },
+    'a package outside the four': wrap(pack({ name: '../etc' })),
+    'a mutant path outside src': wrap(pack({ mutants: [mutant({ file: '../../etc/passwd' })] })),
+    'a mutant path with markup': wrap(pack({ mutants: [mutant({ file: 'packages/web/src/<b>.ts' })] })),
+    'a fractional line': wrap(pack({ mutants: [mutant({ line: 1.5 })] })),
+    'a negative count': wrap(pack({ counts: { ...pack().counts, killed: -1 } })),
+    'an unknown mutant status': wrap(pack({ mutants: [mutant({ status: 'Pending' })] })),
+    'a very long text': wrap(pack({ mutants: [mutant({ replacement: 'x'.repeat(LIMITS.text + 1) })] })),
+    'too many mutants': wrap(pack({ mutants: Array.from({ length: LIMITS.undetected + LIMITS.detected + 1 }, () => mutant()) })),
+    'too many packages': wrap(...Array.from({ length: 5 }, () => pack())),
+    'not an object': 'text',
+    'null': null,
+  };
+  for (const [name, value] of Object.entries(bad)) assert.throws(() => validateArtifact(value), Error, name);
+});
+
+test('renderReport opens with the marker once and reports survivors in a table', () => {
+  const body = renderReport(wrap(collect([[80, 100]])), ctx);
+  assert.ok(body.startsWith(`${MARKER}\n`));
+  assert.equal(body.split(MARKER).length, 2);
+  assert.match(body, /Advisory/);
+  assert.match(body, /never blocks a merge/);
+  assert.match(body, /`abcdef0`/);
+  assert.match(body, /\[job run\]\(https:\/\/github.com\/o\/r\/actions\/runs\/7\)/);
+  assert.match(body, /\[`packages\/contract\/src\/attention.ts:85`\]\(https:\/\/github.com\/o\/r\/blob\/abcdef0123456789abcdef0123456789abcdef01\/packages\/contract\/src\/attention.ts#L85\)/);
+  assert.match(body, /ConditionalExpression/);
+  assert.match(body, /2 survived/);
+  assert.match(body, /1 not covered/);
+  assert.match(body, /<details><summary>Killed and timed-out mutants \(4\)<\/summary>/);
+});
+
+test('renderReport says so when nothing survived, and names the tests the job ran', () => {
+  const body = renderReport(wrap(pack({ counts: { ...pack().counts, killed: 5 }, mutants: [mutant({ status: 'Killed' })] })), ctx);
+  assert.match(body, /No mutant survived/);
+  assert.match(body, /`contract` package's own unit tests/);
+});
+
+test('renderReport escapes every cell so a mutant cannot inject markup, a mention or a table break', () => {
+  const hostile = mutant({ original: '<img src=x onerror=alert(1)> @octocat | `x`', replacement: '</code><script>@all</script>\nnext' });
+  const body = renderReport(wrap(pack({ counts: { ...pack().counts, survived: 1 }, mutants: [hostile] })), ctx);
+  assert.doesNotMatch(body, /<img|<script|<\/code><|@octocat|@all/);
+  const row = body.split('\n').find(line => line.includes('&lt;img'));
+  assert.equal(row.split(/(?<!\\)\|/).length, 6, 'a row keeps exactly four cells');
+});
+
+test('renderReport states why a package was skipped, timed out or failed, with no mutants listed', () => {
+  const body = renderReport(wrap(
+    pack({ name: 'cezar', state: 'skipped', reason: '264 test files import the changed files, over the budget of 150', changedLines: 80 }),
+    pack({ name: 'web', state: 'timed-out', reason: 'stopped after 35 minutes' }),
+    pack({ name: 'contract', state: 'error', reason: 'Stryker exited with code 1' }),
+  ), ctx);
+  assert.match(body, /#### cezar\nSkipped: 264 test files import the changed files, over the budget of 150/);
+  assert.match(body, /#### web\nStopped: stopped after 35 minutes/);
+  assert.match(body, /#### contract\nFailed: Stryker exited with code 1/);
+  assert.match(body, /run Stryker on this change yourself/i);
+});
+
+test('renderReport for a push with no mutable lines carries no survivors from an earlier push', () => {
+  const body = renderReport({ version: 1, state: 'no-mutable-lines', head: HEAD, stryker: '10.1.1', packages: [] }, ctx);
+  assert.ok(body.startsWith(MARKER));
+  assert.match(body, /No product source line changed in `abcdef0`/);
+  assert.doesNotMatch(body, /survived|\|/);
+});
+
+test('renderReport stays under the comment limit and says what it left out', () => {
+  const many = Array.from({ length: LIMITS.undetected }, (_, i) => mutant({ line: i + 1, original: 'o'.repeat(LIMITS.text), replacement: 'r'.repeat(LIMITS.text) }));
+  const killed = Array.from({ length: LIMITS.detected }, (_, i) => mutant({ line: i + 1, status: 'Killed', original: 'o'.repeat(LIMITS.text), replacement: 'r'.repeat(LIMITS.text) }));
+  const heavy = pack({ counts: { ...pack().counts, survived: LIMITS.undetected, killed: LIMITS.detected }, mutants: [...many, ...killed] });
+  const body = renderReport(wrap(heavy, { ...heavy, name: 'web' }, { ...heavy, name: 'cezar' }), ctx);
+  assert.ok(body.length <= LIMITS.comment, String(body.length));
+  assert.match(body, /Left out to fit the comment/);
+  assert.ok(body.startsWith(MARKER));
+});
+
+test('renderUnavailable replaces the report when the job gave none, and keeps the marker', () => {
+  const failed = renderUnavailable('failed', ctx);
+  assert.ok(failed.startsWith(MARKER));
+  assert.match(failed, /did not finish for `abcdef0`/);
+  assert.match(renderUnavailable('unreadable', ctx), /could not be read/);
+  assert.doesNotMatch(failed, /survived/);
+});
+
+test('shouldCreate is false only when no product line changed', () => {
+  assert.equal(shouldCreate({ state: 'no-mutable-lines' }), false);
+  assert.equal(shouldCreate(wrap(pack({ state: 'skipped', reason: 'x' }))), true);
+  assert.equal(shouldCreate(wrap(pack())), true);
+});

@@ -46,6 +46,8 @@
     "@ast-grep/cli": "0.51.0",
     "@babel/parser": "^8.0.7",
     "@bcoe/v8-coverage": "1.0.2",
+    "@stryker-mutator/core": "10.1.1",
+    "@stryker-mutator/vitest-runner": "10.1.1",
     "@vitest/coverage-v8": "4.1.10",
     "ast-v8-to-istanbul": "1.0.7",
     "esbuild": "^0.28.1",
