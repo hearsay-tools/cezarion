@@ -2093,6 +2093,24 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     ]));
   }, 30_000);
 
+  it('records a Stop accepted while a failed Continue saves its worktree as cancelled', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:done', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'done' || candidate?.status === 'review');
+    await waitFor(record.id, () => !manager.isActive(record.id));
+    let cancelled = false;
+    let cancelAttempted = false;
+    store.on('run', candidate => {
+      if (!cancelAttempted && candidate.id === record.id && candidate.status === 'failed') {
+        cancelAttempted = true;
+        cancelled = manager.cancel(record.id);
+      }
+    });
+    expect(manager.continueRun(record.id, { text: 'mock:auth-error answer' })).toEqual({ ok: true });
+    await waitFor(record.id, candidate => candidate?.status === 'cancelled');
+    expect(cancelled).toBe(true);
+  }, 30_000);
+
   it('restart resumes a durably queued workflow after its completed waiting step', async () => {
     const workflow: WorkflowDef = {
       name: 'ask-then-later',

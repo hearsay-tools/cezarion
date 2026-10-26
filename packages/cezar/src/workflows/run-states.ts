@@ -73,7 +73,7 @@ export function statusOf(state: RunState): RunStatus {
 
 /** One kind of status write: the statuses it may leave from and the one it writes. */
 export const RUN_EXITS = {
-  start: { from: ['queued', 'running'], to: 'running' },
+  start: { from: ['queued', 'running', 'waiting'], to: 'running' },
   'start-held': { from: ['queued'], to: 'queued' },
   requeue: { from: ['queued', 'running', 'failed'], to: 'queued' },
   'continue-line': { from: ['waiting', 'review', 'done', 'failed', 'cancelled'], to: 'queued' },
@@ -91,7 +91,8 @@ export const RUN_EXITS = {
   'fail-crash': { from: ['queued', 'running', 'waiting'], to: 'failed' },
   'withdraw-hold': { from: ['waiting'], to: 'failed' },
   cancel: { from: ['queued', 'running', 'waiting'], to: 'cancelled' },
-  'cancel-late': { from: ['running', 'waiting', 'done', 'review'], to: 'cancelled' },
+  'stop-worker': { from: ['queued', 'running', 'waiting', 'review', 'done', 'failed'], to: 'cancelled' },
+  'cancel-late': { from: ['queued', 'running', 'waiting', 'done', 'review', 'failed'], to: 'cancelled' },
 } as const satisfies Record<string, { from: readonly RunStatus[]; to: RunStatus }>;
 export type RunExitId = keyof typeof RUN_EXITS;
 
@@ -216,13 +217,21 @@ export const RUN_TRIGGERS: readonly TriggerRow[] = [
   { id: 'plain.worker-restart', states: ['waiting:plain'], trigger: 'Restart', firedBy: 'recovery', when: 'an owned worker', behavior: 'Settles done, or resumes its CI recovery', exit: 'succeed', to: ['done'], via: ['recoverClosedWaitingRun'] },
   { id: 'plain.invalid-ask', states: ['waiting:plain'], trigger: 'Restart finds an ask it cannot show', firedBy: 'recovery', when: 'an owned worker', behavior: 'failed (invalid ask)', exit: 'fail', to: ['failed'], via: ['failRecoveredInvalidAsk'] },
   { id: 'plain.legacy', states: ['waiting:plain'], trigger: 'A row an older build stored as waiting, its input interrupted', firedBy: 'recovery', behavior: 'running, then interrupted recovery', exit: 'resume', to: ['running'], via: ['store:upgradeLegacyWaits'] },
+  // hearsay-tools/cezarion#1620: a done waits behind an input the inbox claimed, parked plain.
+  { id: 'plain.inbox-ack-step', states: ['waiting:plain'], trigger: 'The inbox ack settles the done a claimed input held, in a step that is not the last', firedBy: 'agent', when: 'a workflow with steps left', behavior: 'The next step starts: running', exit: 'start', to: ['running'], via: ['acknowledgeInbox', 'runWorkflowSteps'], pinnedBy: { file: 'workflows/worker-inbox-liveness.test.ts', test: 'keeps the agent→check recipient live until inbox' } },
   // review
   { id: 'review.draft-pr', states: ['review'], trigger: 'Draft PR', firedBy: 'human', behavior: 'done', exit: 'accept-review', to: ['done'], via: ['server:createDraftPr'] },
   { id: 'review.finish', states: ['review'], trigger: 'Finish', firedBy: 'human', behavior: 'done', exit: 'accept-review', to: ['done'], via: ['finish'] },
   // A Stop accepted during the final autosave, after success was recorded. No spec table lists it.
-  { id: 'settled.late-stop', states: ['running', 'review', 'done'], trigger: 'A Stop accepted during the final autosave', firedBy: 'human', behavior: 'cancelled', exit: 'cancel-late', to: ['cancelled'], via: ['releaseContinuationSession'] },
+  // queued: the Continue's done step queued the workflow remainder before the autosave yielded.
+  { id: 'settled.late-stop', states: ['queued', 'running', 'review', 'done'], trigger: 'A Stop accepted during a Continue\'s final autosave', firedBy: 'human', behavior: 'cancelled; a queued workflow remainder does not start', exit: 'cancel-late', to: ['cancelled'], via: ['releaseContinuationSession'], pinnedBy: { file: 'workflows/run.test.ts', test: 'does not launch a prepared workflow remainder when cancellation wins during continuation teardown' } },
+  // unified-waits lists no Stop on a settled run. cancel() records an owned worker cancelled at any
+  // status, and POST /runs/:id/cancel calls it on a settled worker too.
+  { id: 'worker.stop-settled', states: ['review', 'done', 'failed'], trigger: 'Stop on an owned worker that already settled', firedBy: 'human', when: 'an owned worker', behavior: 'cancelled: the settled status is replaced, and cancel() returns false', exit: 'stop-worker', to: ['cancelled'], via: ['cancel', 'persistWorkerCompletion', 'store:commitWorkerCancellation'], pinnedBy: { file: 'workflows/run-states-worker.test.ts', test: 'Stop on a worker that settled done records it cancelled' } },
   // failed
   { id: 'failed.hold', states: ['failed'], trigger: 'A usage-limit error, with auto-resume on and a session', firedBy: 'engine', when: 'the failure was a usage limit', behavior: 'waiting on the hold', exit: 'hold', to: ['waiting:usage-limit'], via: ['scheduleAutoResumeIfLimited', 'armAutoResume'] },
+  // A Stop accepted while a failed Continue saves its worktree, as settled.late-stop does after success.
+  { id: 'failed.late-stop', states: ['failed'], trigger: 'A Stop accepted during a failed Continue\'s final autosave', firedBy: 'human', behavior: 'cancelled', exit: 'cancel-late', to: ['cancelled'], via: ['releaseContinuationSession'], pinnedBy: { file: 'workflows/run.test.ts', test: 'records a Stop accepted while a failed Continue saves its worktree as cancelled' } },
   { id: 'failed.stop-results', states: ['failed'], trigger: 'Stop while it holds results', firedBy: 'human', behavior: 'Results discarded; stays failed', exit: null, to: 'same', via: ['cancel'] },
   { id: 'failed.restart', states: ['failed'], trigger: 'Restart after an interrupted run', firedBy: 'recovery', behavior: 'queued again, or continued (continue.now)', exit: 'requeue', to: ['queued'], via: ['requeueInterruptedRun', 'recoverInterruptedRun'] },
   { id: 'failed.legacy-hold', states: ['failed'], trigger: 'A row a schema-7 cezar stored: failed with autoResumeAt', firedBy: 'recovery', behavior: 'waiting on the hold', exit: 'hold', to: ['waiting:usage-limit'], via: ['store:reconcileLoadedRun'] },

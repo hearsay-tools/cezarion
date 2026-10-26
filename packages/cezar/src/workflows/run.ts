@@ -1105,7 +1105,7 @@ export class RunManager {
 
   private persistWorkerCompletion(runId: string, generation: string): void {
     try {
-      if (this.stoppedWorkers.has(runId)) transitionVia('cancel', () => this.store.getRun(runId), () => this.store.commitWorkerCancellation(runId));
+      if (this.stoppedWorkers.has(runId)) transitionVia('stop-worker', () => this.store.getRun(runId), () => this.store.commitWorkerCancellation(runId));
       if (this.store.commitWorkerExecutionComplete(runId, generation)) {
         this.finalizedWorkers.delete(runId);
         this.reapTerminalScratch(runId);
@@ -4517,7 +4517,7 @@ export class RunManager {
     if (this.store.writeRefusal(runId)) return false;
     if (this.store.getRun(runId)?.delegation?.role === 'worker') {
       const proof = this.store.readWorkerExecution(runId);
-      transitionVia('cancel', () => this.store.getRun(runId), () => this.store.commitWorkerCancellation(runId));
+      transitionVia('stop-worker', () => this.store.getRun(runId), () => this.store.commitWorkerCancellation(runId));
       this.stoppedWorkers.add(runId);
       if (!this.executions.has(runId) && !this.active.has(runId) && !this.starting.has(runId) && proof?.phase === 'queued') {
         this.store.commitWorkerExecutionComplete(runId, proof.generation);

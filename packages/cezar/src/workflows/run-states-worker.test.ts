@@ -24,4 +24,17 @@ describe('run states of an owned worker', { timeout: 45_000 }, () => {
     await until(() => store.getRun(w.id)?.status === 'done');
     expect(RUN_TRIGGERS.find((row) => row.id === 'plain.worker-idle')?.to).toEqual(['done']);
   });
+
+  // The cockpit's Stop calls cancel() on any run. For an owned worker it commits cancelled first,
+  // whatever the status, so a settled worker's done is replaced.
+  it('Stop on a worker that settled done records it cancelled', async () => {
+    const p = await parent();
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id, 'mock:done');
+    manager.enqueueOwnedRun(w.id);
+    await until(() => store.getRun(w.id)?.status === 'done' && !manager.isActive(w.id));
+    expect(manager.cancel(w.id)).toBe(false);
+    expect(store.getRun(w.id)?.status).toBe('cancelled');
+    expect(RUN_TRIGGERS.find((row) => row.id === 'worker.stop-settled')?.to).toEqual(['cancelled']);
+  });
 });
