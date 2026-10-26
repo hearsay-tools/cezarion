@@ -131,8 +131,26 @@ test('renderReport escapes every cell so a mutant cannot inject markup, a mentio
   const hostile = mutant({ original: '<img src=x onerror=alert(1)> @octocat | `x`', replacement: '</code><script>@all</script>\nnext' });
   const body = renderReport(wrap(pack({ counts: { ...pack().counts, survived: 1 }, mutants: [hostile] })), ctx);
   assert.doesNotMatch(body, /<img|<script|<\/code><|@octocat|@all/);
-  const row = body.split('\n').find(line => line.includes('&lt;img'));
+  const row = body.split('\n').find(line => line.includes('&#60;img'));
   assert.equal(row.split(/(?<!\\)\|/).length, 7, 'a row keeps exactly five cells');
+});
+
+test('renderReport shows an untrusted reason and mutant text as plain text: no link, image, autolink, reference or emphasis', () => {
+  const hostile = '[link](https://example.com) ![image](https://example.com/a.png) https://example.com www.example.com '
+    + '<https://example.com> #12 :+1: *bold* _it_ ~~gone~~ back\\slash [ref]: https://example.com';
+  const body = renderReport(wrap(
+    pack({ name: 'cezar', state: 'skipped', reason: hostile }),
+    pack({ counts: { ...pack().counts, survived: 1 }, mutants: [mutant({ original: hostile, replacement: hostile })] }),
+  ), ctx);
+  const notice = body.split('\n').find(line => line.startsWith('Skipped: ')).slice('Skipped: '.length);
+  const cells = [...body.matchAll(/<code>(.*?)<\/code>/g)].map(found => found[1]);
+  assert.equal(cells.length, 2);
+  for (const shown of [notice, ...cells]) {
+    // Only numeric character references remain: none of the characters that start syntax is left as itself.
+    assert.match(shown, /^(?:[^&<>|@`\\[\]()!*_~:#]|&#\d+;)*$/);
+    assert.doesNotMatch(shown, /www\./i);
+    assert.match(shown, /&#91;link&#93;&#40;https&#58;\/\/example\.com&#41;/);
+  }
 });
 
 test('renderReport states why a package was skipped, timed out or failed, with no mutants listed', () => {

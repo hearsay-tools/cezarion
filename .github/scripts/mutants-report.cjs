@@ -122,9 +122,17 @@ function validateArtifact(value) {
   };
 }
 
-/** Text for one table cell or one line: escaped so it cannot add markup, a mention or a column. */
-const esc = text => String(text).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-  .replace(/\|/g, '&#124;').replace(/@/g, '&#64;').replace(/`/g, '&#96;').replace(/\s+/g, ' ').trim();
+// Every character that can start HTML, a mention, a table column or Markdown: a link, an image, emphasis,
+// strikethrough, an issue reference, an escape. `:` also breaks `https://` and `:emoji:` into plain text.
+const MARKUP = /[&<>|@`\\[\]()!*_~:#]/g;
+
+/**
+ * Text for one table cell or one line of the comment: the artifact is untrusted, so it renders as plain
+ * text. Numeric character references show the character and start no syntax. A bare `www.` is the one
+ * link that needs no syntax character, so its dot is a reference too.
+ */
+const esc = text => String(text).replace(/\s+/g, ' ').trim()
+  .replace(MARKUP, char => `&#${char.charCodeAt(0)};`).replace(/(www)\./gi, '$1&#46;');
 const code = text => `<code>${esc(text)}</code>`;
 
 const place = (m, ctx) => ctx.blobBase
