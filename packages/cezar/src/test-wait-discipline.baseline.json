@@ -698,12 +698,6 @@
       "count": 2
     },
     {
-      "file": "preview/dev-server.test.ts",
-      "rule": "short-bound",
-      "site": "async function until(check: () => boolean, timeoutMs = 5_000): Promise<void> {",
-      "count": 1
-    },
-    {
       "file": "preview/host-teardown.test.ts",
       "rule": "short-bound",
       "site": "await expect.poll(() => dev.state, { timeout: 3000 }).toBe('stopped');",

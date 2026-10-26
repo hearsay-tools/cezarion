@@ -1,6 +1,10 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  baselinePath,
+  type Baseline,
+  baselines,
   blank,
   compareToBaseline,
   readBaseline,
@@ -17,13 +21,16 @@ import {
 /**
  * The server unit tests' wait discipline, as a source scan (hearsay-tools/cezarion#1155). A bare
  * sleep stands in for a condition nobody named; a wait bounded under 10 s puts a wall clock on a
- * fixture a loaded host can take longer than that to start. Each rule is pinned on a snippet here,
- * and the suite's real sites are pinned in a baseline that can only shrink, the same shape
+ * fixture a loaded host can take longer than that to start; a poll loop with no deadline, or one
+ * under 10 s, does the same (hearsay-tools/cezarion#1203). Each rule is pinned on a snippet here,
+ * and the suite's real sites are pinned in baselines that can only shrink, the same shape
  * `packages/web/src/test/e2e-wait-discipline.test.ts` uses for the cockpit specs.
  */
 const rules = (sites: Site[]) => sites.map((s) => s.rule);
 const lines = (sites: Site[]) => sites.map((s) => s.line);
-const scan = (...src: string[]) => scanSource('x.test.ts', src.join('\n'));
+/** The `sleep` and `short-bound` sites of a snippet; `polls` below holds the poll loops. */
+const scan = (...src: string[]) => scanSource('x.test.ts', src.join('\n')).filter((s) => s.rule !== 'poll-deadline');
+const polls = (...src: string[]) => scanSource('x.test.ts', src.join('\n')).filter((s) => s.rule === 'poll-deadline');
 const errors = (...src: string[]) => scanFile('x.test.ts', src.join('\n')).errors.map(({ line, construct }) => ({ line, construct }));
 
 describe('blanking strings and comments', () => {
@@ -382,6 +389,209 @@ describe('rule short-bound', () => {
   });
 });
 
+describe('rule poll-deadline', () => {
+  it('pins the same 10 s threshold as the short-bound rule', () => {
+    expect(polls('const deadline = Date.now() + 9_999;', 'while (Date.now() < deadline) await sleep(10);')).toHaveLength(1);
+    expect(polls('const deadline = Date.now() + 10_000;', 'while (Date.now() < deadline) await sleep(10);')).toEqual([]);
+  });
+
+  it('flags a loop that sleeps without a clock read or an attempt count, keyed on its first line', () => {
+    const sites = polls(
+      'while (!ready()) {',
+      '  await sleep(10);',
+      '}',
+      'do {',
+      '  await delay(10);',
+      '} while (!ready());',
+      'while (!ready()) await sleep(10);',
+      'for (;;) {',
+      '  if (ready()) break;',
+      '  await pause(5);',
+      '}',
+      'const churn = (async () => { while (churning) { await delay(15); } })();',
+    );
+    expect(lines(sites)).toEqual([1, 4, 7, 8, 12]);
+    expect(new Set(rules(sites))).toEqual(new Set(['poll-deadline']));
+    expect(sites[0]?.site).toBe('while (!ready()) {');
+  });
+
+  it('leaves a loop over a collection or a stream alone: its iterable bounds it', () => {
+    expect(polls(
+      'for (const x of xs) await sleep(10);',
+      'for (const k in obj) { await sleep(10); }',
+      'for await (const chunk of stream) {',
+      '  await pause(5);',
+      '}',
+    )).toEqual([]);
+  });
+
+  it('leaves a loop with a readable deadline of 10 s or more alone', () => {
+    expect(polls(
+      'const start = Date.now();',
+      'while (!ready()) {',
+      '  if (Date.now() - start > 15_000) throw new Error("late");',
+      '  await sleep(10);',
+      '}',
+      'const deadline = Date.now() + 20_000;',
+      'while (Date.now() < deadline) { if (ready()) break; await sleep(10); }',
+      'const end = performance.now() + 10_000;',
+      'while (!ready() && performance.now() < end) await sleep(10);',
+      'for (const limit = Date.now() + 12_000; !ready();) { if (Date.now() > limit) break; await sleep(10); }',
+      'while (Date.now() - start < 30_000) { await sleep(10); }',
+    )).toEqual([]);
+  });
+
+  it('flags a literal deadline under 10 s, in each form that names one', () => {
+    const sites = polls(
+      'const start = Date.now();',
+      'while (!ready()) {',
+      '  if (Date.now() - start > 9_000) throw new Error("late");',
+      '  await sleep(10);',
+      '}',
+      'const deadline = Date.now() + 5_000;',
+      'while (Date.now() < deadline) { await sleep(10); }',
+      'const end = performance.now() + 1_500;',
+      'while (!ready() && performance.now() < end) await sleep(10);',
+      'for (const limit = Date.now() + 8_000; !ready();) { if (Date.now() > limit) break; await sleep(10); }',
+      'while (Date.now() - start < 2_000) { await sleep(10); }',
+      'let until = Date.now() + 400;',
+      'do { await delay(20); } while (until > Date.now());',
+    );
+    expect(lines(sites)).toEqual([2, 7, 9, 10, 11, 13]);
+  });
+
+  it('reads a deadline held in a parameter through its default, or in a constant of the same function', () => {
+    const sites = polls(
+      'async function until(check: () => boolean, ms = 5_000): Promise<void> {',
+      '  const deadline = Date.now() + ms;',
+      '  while (!check()) {',
+      '    if (Date.now() > deadline) throw new Error("late");',
+      '    await sleep(10);',
+      '  }',
+      '}',
+      'const waitHere = async (check: () => boolean, timeoutMs: number = 15_000) => {',
+      '  const end = Date.now() + timeoutMs;',
+      '  while (Date.now() < end) { if (check()) return; await sleep(10); }',
+      '};',
+      'async function local(check: () => boolean) {',
+      '  const limitMs = 2_000;',
+      '  const stop = Date.now() + limitMs;',
+      '  while (Date.now() < stop) { if (check()) return; await sleep(10); }',
+      '}',
+    );
+    expect(lines(sites)).toEqual([3, 15]);
+  });
+
+  it('leaves a bound it cannot read alone', () => {
+    expect(polls(
+      'const deadline = Date.now() + HANG_CEILING_MS;',
+      'while (Date.now() < deadline) await sleep(10);',
+      'while (Math.floor(Date.now() / 1000) <= second) await sleep(10);',
+      'while (Date.now() < dueAt) await sleep(10);',
+      'const late = Date.now() + 5 * 1000;',
+      'while (Date.now() < late) await sleep(10);',
+      'async function noDefault(check: () => boolean, ms: number) {',
+      '  const deadline = Date.now() + ms;',
+      '  while (Date.now() < deadline) { await sleep(10); }',
+      '}',
+    )).toEqual([]);
+  });
+
+  it("looks for a deadline only in the loop's own function", () => {
+    const sites = polls(
+      'async function a() {',
+      '  const deadline = Date.now() + 1_000;',
+      '  while (Date.now() < deadline) await sleep(10);',
+      '}',
+      'async function b(deadline: number) {',
+      '  while (Date.now() < deadline) await sleep(10);',
+      '}',
+    );
+    expect(lines(sites)).toEqual([3]);
+  });
+
+  it('reads attempts x interval as the deadline when both are literals', () => {
+    const sites = polls(
+      'for (let attempt = 0; attempt < 20; attempt += 1) {',
+      '  if (ready()) break;',
+      '  await sleep(100);',
+      '}',
+      'for (let attempt = 0; attempt < 200 && state.status !== "error"; attempt += 1) {',
+      '  await sleep(100);',
+      '}',
+      'for (let i = 0; i < 10; i++) { await sleep(500); await sleep(400); }',
+      'for (let i = 0; i < 100; i++) { await sleep(100); }',
+      'for (let i = 0; i <= 99; i++) await new Promise(r => setTimeout(r, 90));',
+    );
+    expect(lines(sites)).toEqual([1, 8, 10]);
+  });
+
+  it('leaves any other attempt-count form alone: it is a bound the scan cannot read', () => {
+    expect(polls(
+      'for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) await sleep(100);',
+      'for (let attempt = 0; attempt < 20; attempt += 1) await sleep(interval);',
+      'for (let i = 0; i < items.length; i += 1) await sleep(100);',
+      'for (let left = 20; left > 0; left -= 1) await sleep(100);',
+      'let tries = 0;',
+      'while (!ready()) { if (tries++ > 20) throw new Error("late"); await sleep(100); }',
+      'while (!ready() && retries < 5) { retries += 1; await sleep(100); }',
+    )).toEqual([]);
+  });
+
+  it('reports one site per loop, on the innermost loop', () => {
+    const sites = polls(
+      'for (let a = 0; a < 3; a += 1) {',
+      '  while (!ready()) {',
+      '    await sleep(10);',
+      '    await sleep(20);',
+      '  }',
+      '}',
+    );
+    expect(lines(sites)).toEqual([2]);
+  });
+
+  it('does not take a sleep in a test a loop defines for a poll', () => {
+    expect(polls(
+      'for (const row of ROWS) {',
+      '  it(row.id, async () => {',
+      '    await sleep(300);',
+      '  });',
+      '}',
+      'for (const row of ROWS) it(row.id, async () => { await sleep(300); });',
+    )).toEqual([]);
+  });
+
+  it('does not read the clock from a string, a template or a comment', () => {
+    expect(lines(polls(
+      'while (!ready()) {',
+      "  const s = 'Date.now()';",
+      '  // if (Date.now() > deadline) throw new Error("late");',
+      '  const t = `${label} Date.now()`;',
+      '  await sleep(10);',
+      '}',
+    ))).toEqual([1]);
+  });
+
+  it('is reported next to the sleep rule: a sleep in a loop is a poll interval, not a bare sleep', () => {
+    const sites = scanSource('x.test.ts', ['await sleep(10);', 'while (!ready()) await sleep(10);'].join('\n'));
+    expect(sites.map((s) => [s.rule, s.line])).toEqual([['sleep', 1], ['poll-deadline', 2]]);
+  });
+
+  it('is accepted by a // bound: reason on the loop line or in the comment block above it', () => {
+    expect(polls(
+      'while (churning) { startUnrelated(); await delay(15); } // bound: the finally block clears churning',
+      '// bound: the fixture closes the socket, which ends the read',
+      'while (!socket.closed) await sleep(10);',
+      '// A load generator, not a poll.',
+      '// bound: churning is cleared in the finally block below',
+      'while (churning) {',
+      '  await delay(15);',
+      '}',
+    )).toEqual([]);
+    expect(lines(polls('// bound:', 'while (!ready()) await sleep(10);'))).toEqual([2]);
+  });
+});
+
 describe('a bound with a reason', () => {
   it('is accepted on the same line', () => {
     expect(scan(
@@ -476,6 +686,42 @@ describe('the baseline', () => {
       { file: 'a.test.ts', rule: 'sleep', site: 'gone', count: 1 },
     ]);
   });
+
+  it('keeps the poll loops in a baseline of their own, apart from the sleeps and short bounds', () => {
+    expect(baselines.map((b) => b.rules)).toEqual([['sleep', 'short-bound'], ['poll-deadline']]);
+    expect(new Set(baselines.map((b) => b.path)).size).toBe(baselines.length);
+    expect(baselines.every((b) => b.path.endsWith('.baseline.json'))).toBe(true);
+  });
+
+  describe('in update mode', () => {
+    const entry = (site: string, count: number) => ({ file: 'a.test.ts', rule: 'poll-deadline' as const, site, count });
+    const withBaseline = (run: (baseline: Baseline) => void) => {
+      const dir = mkdtempSync(join(tmpdir(), 'wait-discipline-'));
+      try {
+        run({ what: 'poll loop', path: join(dir, 'x.baseline.json'), comment: 'a comment', rules: ['poll-deadline'] });
+      } finally {
+        rmSync(dir, { recursive: true, force: true });
+      }
+    };
+
+    it('writes the first baseline of a rule from what the suite has', () => {
+      withBaseline((baseline) => {
+        shrinkBaseline([entry('while (!ready()) {', 2)], baseline);
+        expect(JSON.parse(readFileSync(baseline.path, 'utf8'))).toEqual({ $comment: 'a comment', sites: [entry('while (!ready()) {', 2)] });
+      });
+    });
+
+    it('then only lowers it: a count drops, a site that is gone leaves, a new site stays out', () => {
+      withBaseline((baseline) => {
+        shrinkBaseline([entry('old', 3), entry('gone', 1)], baseline);
+        shrinkBaseline([entry('old', 1), entry('new', 4)], baseline);
+        expect(readBaseline(baseline.path)).toEqual([entry('old', 1)]);
+        writeFileSync(baseline.path, readFileSync(baseline.path, 'utf8').replace('a comment', 'kept'));
+        shrinkBaseline([entry('old', 1)], baseline);
+        expect(JSON.parse(readFileSync(baseline.path, 'utf8')).$comment).toBe('a comment');
+      });
+    });
+  });
 });
 
 describe('the server unit suite', () => {
@@ -499,26 +745,35 @@ describe('the server unit suite', () => {
     ).toEqual([]);
   });
 
-  it('has no bare sleep or short bound outside the baseline, and the baseline names no site that is gone', () => {
-    const { sites } = suite();
-    const actual = tally(sites);
-    // Update mode shrinks the baseline to what the suite has now; it never adds to it.
-    if (process.env.TEST_WAIT_DISCIPLINE_UPDATE === '1') shrinkBaseline(actual);
-    const { added, stale } = compareToBaseline(actual, readBaseline());
-    const where = (entries: typeof added) =>
-      entries
-        .flatMap((e) => sites.filter((s) => s.file === e.file && s.rule === e.rule && s.site === e.site).map((s) => `  ${s.file}:${s.line} [${s.rule}] ${s.site}`))
-        .join('\n');
-    const listed = (entries: typeof stale) => entries.map((e) => `  ${e.file} [${e.rule}] ×${e.count}: ${e.site}`).join('\n');
-    expect(
-      added,
-      'New bare sleeps or short wait bounds. Wait on the product\'s own signal, or state the bound\'s reason at the site ' +
-        `as a \`// bound: <reason>\` comment (AGENTS.md § Validation). Never add a site to ${baselinePath}:\n${where(added)}`,
-    ).toEqual([]);
-    expect(
-      stale,
-      `Baseline entries no longer found; shrink ${baselinePath} ` +
-        `(TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts does it):\n${listed(stale)}`,
-    ).toEqual([]);
-  });
+  const remedy: Record<string, string> = {
+    'poll-deadline':
+      'A poll loop needs a deadline of 10 s or more, read from the clock in the loop or its function (or attempts x interval ' +
+      'with literals). Add one, or state why the loop ends as a `// bound: <reason>` comment on its first line (AGENTS.md § Validation)',
+  };
+  for (const baseline of baselines) {
+    it(`has no ${baseline.what} outside its baseline, and the baseline names no site that is gone`, () => {
+      const sites = suite().sites.filter((s) => baseline.rules.includes(s.rule));
+      const actual = tally(sites);
+      // Update mode shrinks the baseline to what the suite has now; it never adds to it.
+      if (process.env.TEST_WAIT_DISCIPLINE_UPDATE === '1') shrinkBaseline(actual, baseline);
+      const { added, stale } = compareToBaseline(actual, readBaseline(baseline.path));
+      const where = (entries: typeof added) =>
+        entries
+          .flatMap((e) => sites.filter((s) => s.file === e.file && s.rule === e.rule && s.site === e.site).map((s) => `  ${s.file}:${s.line} [${s.rule}] ${s.site}`))
+          .join('\n');
+      const listed = (entries: typeof stale) => entries.map((e) => `  ${e.file} [${e.rule}] ×${e.count}: ${e.site}`).join('\n');
+      expect(
+        added,
+        `New ${baseline.what} found. ` +
+          (remedy[baseline.rules[0] ?? ''] ??
+            'Wait on the product\'s own signal, or state the bound\'s reason at the site as a `// bound: <reason>` comment (AGENTS.md § Validation)') +
+          `. Never add a site to ${baseline.path}:\n${where(added)}`,
+      ).toEqual([]);
+      expect(
+        stale,
+        `Baseline entries no longer found; shrink ${baseline.path} ` +
+          `(TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts does it):\n${listed(stale)}`,
+      ).toEqual([]);
+    });
+  }
 });

@@ -2,13 +2,13 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 /**
- * A source scan of the server unit tests for the two ways a test waits on the wall clock instead
- * of on the product: a bare awaited sleep standing in for a condition nobody named, and a wait
- * bounded under SHORT_BOUND_MS. The last three load flakes under hearsay-tools/cezarion#902 had
- * that one cause (hearsay-tools/cezarion#1144, hearsay-tools/cezarion#1145,
- * hearsay-tools/cezarion#1146): a fixed bound on a fixture's own startup, or one bound for a
- * whole sequence of steps, which a loaded host overruns. The rule for authors is in AGENTS.md
- * § Validation.
+ * A source scan of the server unit tests for the three ways a test waits on the wall clock instead
+ * of on the product: a bare awaited sleep standing in for a condition nobody named, a wait
+ * bounded under SHORT_BOUND_MS, and a poll loop with no deadline or a deadline under
+ * SHORT_BOUND_MS. The last three load flakes under hearsay-tools/cezarion#902 had that one cause
+ * (hearsay-tools/cezarion#1144, hearsay-tools/cezarion#1145, hearsay-tools/cezarion#1146): a
+ * fixed bound on a fixture's own startup, or one bound for a whole sequence of steps, which a
+ * loaded host overruns. The rule for authors is in AGENTS.md § Validation.
  *
  * It is a heuristic over source text, not a parser: TypeScript 7 has no JS parser API, and the
  * tests are regular enough that each form fits a pattern. Strings, template literals and
@@ -17,11 +17,12 @@ import { join, resolve } from 'node:path';
  * `// bound: <reason>` comment at the site, which is what the rule asks of a real bound anyway.
  *
  * `test-wait-discipline.test.ts` runs it against every `*.test.ts` and `*.testkit.ts` under
- * `packages/cezar/src` and compares the tally with a checked-in baseline that can only shrink, so
- * today's sites stay where they are and no new one lands without a reason.
+ * `packages/cezar/src` and compares the tally with two checked-in baselines that can only shrink,
+ * so today's sites stay where they are and no new one lands without a reason. The poll loops have
+ * a baseline of their own, so a change to one list never conflicts with a change to the other.
  */
 
-export type Rule = 'sleep' | 'short-bound';
+export type Rule = 'sleep' | 'short-bound' | 'poll-deadline';
 
 export interface Site {
   file: string;
@@ -43,6 +44,7 @@ export const SHORT_BOUND_MS = 10_000;
 
 export const srcDir = resolve(import.meta.dirname);
 export const baselinePath = resolve(import.meta.dirname, 'test-wait-discipline.baseline.json');
+export const pollsBaselinePath = resolve(import.meta.dirname, 'test-wait-discipline-polls.baseline.json');
 const ownFiles = new Set(['test-wait-discipline.testkit.ts', 'test-wait-discipline.test.ts']);
 
 export type Construct = 'string' | 'template' | 'substitution' | 'comment';
@@ -358,64 +360,203 @@ function frameOf(code: string, open: number): Frame {
   return /\)\s*:[^;{}()=]*$/.test(code.slice(lineStart, open)) ? 'function' : 'block';
 }
 
+/** A loop that holds a poll sleep, as offsets into the blanked code. */
+interface PollLoop {
+  /** The loop's `for`, `while` or `do`: the site is the line this sits on. */
+  keyword: number;
+  /** The header's parentheses; for a `do`, those of its trailing `while (…)`; absent for `for (;;)`-less `do`. */
+  head?: [number, number];
+  /** The body's first and last character; a brace-less body runs to the `;` that ends its statement. */
+  body: [number, number];
+  /** Where the nearest enclosing function's parameter list starts, or 0: how far back a deadline may be defined. */
+  scope: number;
+}
+
+function startOfWord(code: string, end: number): number {
+  return end - wordEndingAt(code, end).length + 1;
+}
+
 /**
- * The offsets in `offsets` that sit in a loop body: inside a `for`/`while`/`do` block with no
- * function body between, or the brace-less body of a loop header (`while (!ready()) await …`).
- * A loop's own deadline is out of this scan's reach, so a sleep in one is read as a poll interval.
+ * The innermost loop each offset in `offsets` sits in, for the offsets that sit in one: inside a
+ * `for`/`while`/`do` block with no function body between, or the brace-less body of a loop header
+ * (`while (!ready()) await …`). A sleep in a loop is a poll interval, not a bare sleep; the loop's
+ * own deadline is judged by `pollDeadline`.
  *
  * A concise arrow's body is a function body too (`it(r, async () => await sleep(300))`). It opens
  * at a `=>` not followed by `{` and ends at the `,` or `;` that ends its expression, or at the
  * bracket that closes the one it sits in; `(` and `[` are tracked for that alone. Without its `;`,
  * a concise arrow statement runs to the enclosing `}`: that only flags more, never exempts more.
  */
-function inLoopBody(code: string, offsets: number[]): Set<number> {
-  const found = new Set<number>();
-  for (const offset of offsets) if (bracelessLoopBody(code, offset)) found.add(offset);
+function pollLoops(code: string, offsets: number[]): Map<number, PollLoop> {
+  const found = new Map<number, PollLoop>();
   const queue = [...offsets].sort((a, b) => a - b);
-  // A `{` frame, a `(`/`[` group, or a concise arrow's body.
-  const stack: Array<Frame | 'group' | 'arrow'> = [];
-  const endArrows = (): void => {
-    while (stack.at(-1) === 'arrow') stack.pop();
-  };
+  const stack: Entry[] = [];
   let q = 0;
   for (let i = 0; i < code.length && q < queue.length; i += 1) {
-    while (queue[q] === i) {
-      for (let f = stack.length - 1; f >= 0; f -= 1) {
-        if (stack[f] === 'function' || stack[f] === 'arrow') break;
-        if (stack[f] === 'loop') {
-          found.add(i);
-          break;
-        }
-      }
-      q += 1;
+    for (; queue[q] === i; q += 1) {
+      const loop = loopAround(code, stack, i);
+      if (loop) found.set(i, loop);
     }
-    const ch = code[i];
-    if (ch === '{') stack.push(frameOf(code, i));
-    else if (ch === '(' || ch === '[') stack.push('group');
-    else if (ch === '}' || ch === ')' || ch === ']') {
-      endArrows();
-      stack.pop();
-    } else if (ch === ',' || ch === ';') endArrows();
-    else if (ch === '=' && code[i + 1] === '>' && code[skipSpaceForward(code, i + 2)] !== '{') stack.push('arrow');
+    track(code, stack, i);
   }
   return found;
 }
 
-/** Whether the statement at `offset` is the brace-less body of a loop, through any `if (…)` heads. */
-function bracelessLoopBody(code: string, offset: number): boolean {
+/** A `{` frame, a `(`/`[` group, or a concise arrow's body; `open` is where it began. */
+interface Entry {
+  kind: Frame | 'group' | 'arrow';
+  open: number;
+}
+
+/** The innermost loop the code at `at` sits in, when no function body lies between them. */
+function loopAround(code: string, stack: Entry[], at: number): PollLoop | undefined {
+  let scope = 0;
+  let open: number | undefined;
+  for (let f = stack.length - 1; f >= 0; f -= 1) {
+    const frame = stack[f];
+    if (frame?.kind === 'function' || frame?.kind === 'arrow') {
+      scope = paramsStart(code, frame.open);
+      break;
+    }
+    if (frame?.kind === 'loop' && open === undefined) open = frame.open;
+  }
+  return bracelessLoop(code, at, scope) ?? (open === undefined ? undefined : bracedLoop(code, open, scope));
+}
+
+/** Update the frames for the character at `i`. */
+function track(code: string, stack: Entry[], i: number): void {
+  const ch = code[i];
+  const endArrows = (): void => {
+    while (stack.at(-1)?.kind === 'arrow') stack.pop();
+  };
+  if (ch === '{') stack.push({ kind: frameOf(code, i), open: i });
+  else if (ch === '(' || ch === '[') stack.push({ kind: 'group', open: i });
+  else if (ch === '}' || ch === ')' || ch === ']') {
+    endArrows();
+    stack.pop();
+  } else if (ch === ',' || ch === ';') endArrows();
+  else if (ch === '=' && code[i + 1] === '>' && code[skipSpaceForward(code, i + 2)] !== '{') stack.push({ kind: 'arrow', open: i });
+}
+
+/** The loop whose `{` is at `open`. */
+function bracedLoop(code: string, open: number, scope: number): PollLoop {
+  const body: [number, number] = [open, closeOf(code, open)];
+  const k = skipSpaceBack(code, open - 1);
+  if (code[k] === ')') {
+    const paren = openOf(code, k);
+    let keyword = startOfWord(code, skipSpaceBack(code, paren - 1));
+    if (code.startsWith('await', keyword)) keyword = startOfWord(code, skipSpaceBack(code, keyword - 1));
+    return { keyword, head: [paren, k], body, scope };
+  }
+  // `do { … } while (…)`: the trailing condition is the loop's header.
+  const keyword = startOfWord(code, k);
+  const after = skipSpaceForward(code, body[1] + 1);
+  const paren = code.startsWith('while', after) ? skipSpaceForward(code, after + 'while'.length) : -1;
+  return code[paren] === '(' ? { keyword, head: [paren, closeOf(code, paren)], body, scope } : { keyword, body, scope };
+}
+
+/** The loop the statement at `offset` is the brace-less body of, through any `if (…)` heads. */
+function bracelessLoop(code: string, offset: number, scope: number): PollLoop | undefined {
+  const semicolon = code.indexOf(';', offset);
+  const body: [number, number] = [offset, semicolon === -1 ? code.length : semicolon];
   let k = skipSpaceBack(code, offset - 1);
-  if (wordEndingAt(code, k) === 'do') return true;
+  if (wordEndingAt(code, k) === 'do') return { keyword: startOfWord(code, k), body, scope };
   while (code[k] === ')') {
     const paren = openOf(code, k);
-    if (paren === -1) return false;
+    if (paren === -1) return undefined;
     const headEnd = skipSpaceBack(code, paren - 1);
     const head = wordEndingAt(code, headEnd);
-    if (head === 'for' || head === 'while') return true;
-    if (head === 'await' && wordEndingAt(code, skipSpaceBack(code, headEnd - head.length)) === 'for') return true;
-    if (head !== 'if') return false;
-    k = skipSpaceBack(code, headEnd - head.length);
+    const before = skipSpaceBack(code, headEnd - head.length);
+    if (head === 'for' || head === 'while') return { keyword: startOfWord(code, headEnd), head: [paren, k], body, scope };
+    if (head === 'await' && wordEndingAt(code, before) === 'for') return { keyword: startOfWord(code, before), head: [paren, k], body, scope };
+    if (head !== 'if') return undefined;
+    k = before;
   }
-  return false;
+  return undefined;
+}
+
+/** Where the parameter list of the function whose body opens at `open` starts; `open` itself when it has none to read. */
+function paramsStart(code: string, open: number): number {
+  let k = skipSpaceBack(code, open - 1);
+  if (code[k] === '>' && code[k - 1] === '=') k = skipSpaceBack(code, k - 2);
+  if (code[k] !== ')') {
+    // `): T {`: a return type sits between the `)` and the `{`.
+    const lineStart = code.lastIndexOf('\n', open) + 1;
+    const typed = /\)\s*:[^;{}()=]*$/.exec(code.slice(lineStart, open));
+    if (!typed) return open;
+    k = lineStart + typed.index;
+  }
+  const paren = openOf(code, k);
+  return paren === -1 ? open : paren;
+}
+
+/** `Date.now()`, `performance.now()` and `process.hrtime()`, the clocks a deadline is read from. */
+const clockCall = String.raw`(?:Date\s*\.\s*now|performance\s*\.\s*now|process\s*\.\s*hrtime(?:\s*\.\s*bigint)?)\s*\(\s*\)`;
+const clockRead = new RegExp(clockCall);
+const comparator = String.raw`(?:<=?|>=?)`;
+/** `Date.now() - start > 15_000`: the bound is the last group, up to the end of the expression. */
+const elapsedBound = new RegExp(String.raw`${clockCall}\s*-\s*[\w$.]+\s*${comparator}\s*([^;)&|{,]+)`);
+/** `Date.now() < deadline` or `deadline < Date.now()`: the deadline's name. */
+const deadlineName = new RegExp(String.raw`${clockCall}\s*${comparator}\s*([A-Za-z_$][\w$]*)|\b([A-Za-z_$][\w$]*)\s*${comparator}\s*${clockCall}`);
+/** An attempt counter by its name, compared or stepped: a count the scan cannot turn into time. */
+const counterName = /\b\w*(?:attempt|retry|retries|tries|count|iteration|remaining)\w*\s*(?:<=?|>=?|\+\+|--)|(?:\+\+|--)\s*\w*(?:attempt|retry|retries|tries|count|iteration|remaining)/i;
+
+type Deadline = 'none' | 'unreadable' | number;
+
+/**
+ * The time a poll loop gives its sleeps before it gives up, in milliseconds. `none`: the loop reads
+ * no clock and counts no attempt, so only the test's own timeout ends it. `unreadable`: a bound
+ * exists but is held where this scan does not look (a caller's argument, a module constant, an
+ * expression), which it leaves alone like every other rule's bound it cannot read.
+ *
+ * It reads three forms: the elapsed time against a literal (`Date.now() - start > 15_000`); a
+ * deadline held in a name, defined as the clock plus a literal in the loop's own function
+ * (`const deadline = Date.now() + 15_000`); and an attempt count where the count and each sleep's
+ * delay are literals, whose product is the time (`attempt < 20` with `sleep(100)` is 2 s). A literal
+ * may also stand behind a name: a parameter's default, or a constant of the same function.
+ * A loop over a collection or a stream is bounded by it.
+ */
+function pollDeadline(code: string, loop: PollLoop, delays: Array<string | undefined>): Deadline {
+  const header = loop.head ? code.slice(loop.head[0] + 1, loop.head[1]) : '';
+  if (!header.includes(';') && /\s(?:of|in)\s/.test(header)) return 'unreadable';
+  const region = code.slice(loop.keyword, Math.max(loop.body[1], loop.head?.[1] ?? 0) + 1);
+  if (!clockRead.test(region)) return attemptDeadline(header, region, delays);
+  const elapsed = elapsedBound.exec(region);
+  if (elapsed) return literalBound(code, loop, (elapsed[1] ?? '').trim());
+  const name = deadlineName.exec(region);
+  const deadline = name?.[1] ?? name?.[2];
+  if (deadline === undefined) return 'unreadable';
+  // The last definition before the loop, or in its own header, wins.
+  const upto = loop.head ? Math.min(loop.head[1], loop.body[0]) : loop.keyword;
+  const definition = new RegExp(String.raw`\b${deadline.replace(/\$/g, '\\$')}\s*=\s*${clockCall}\s*\+\s*([^;,)]+)`, 'g');
+  const defined = [...code.slice(loop.scope, upto).matchAll(definition)].at(-1);
+  return defined ? literalBound(code, loop, (defined[1] ?? '').trim()) : 'unreadable';
+}
+
+/** The loop's bound `text` in milliseconds: a literal, or a name for one in the same function. */
+function literalBound(code: string, loop: PollLoop, text: string): Deadline {
+  const direct = literalMs(text);
+  if (direct !== undefined) return direct;
+  if (!/^[A-Za-z_$][\w$]*$/.test(text)) return 'unreadable';
+  const name = text.replace(/\$/g, '\\$');
+  const scope = code.slice(loop.scope, loop.keyword);
+  const parameter = new RegExp(String.raw`\b${name}\s*(?::[^=,);]*)?=\s*([^,);]+?)\s*[,)]`).exec(scope);
+  const constant = [...scope.matchAll(new RegExp(String.raw`\b(?:const|let)\s+${name}\s*(?::[^=;]*)?=\s*([^;,\n]+)`, 'g'))].at(-1);
+  return literalMs(parameter?.[1]?.trim()) ?? literalMs(constant?.[1]?.trim()) ?? 'unreadable';
+}
+
+/** A loop with no clock: an attempt count times the sleep's delay, when both are literals. */
+function attemptDeadline(header: string, region: string, delays: Array<string | undefined>): Deadline {
+  const clauses = header.split(';');
+  if (clauses.length === 3) {
+    const test = /^\s*[A-Za-z_$][\w$]*\s*(<=?)\s*([^&|]+?)\s*(?:&&|\|\||$)/.exec(clauses[1] ?? '');
+    const count = literalMs(test?.[2]);
+    const delay = delays.reduce<number | undefined>((sum, d) => (sum === undefined || literalMs(d) === undefined ? undefined : sum + (literalMs(d) ?? 0)), 0);
+    if (test) return count === undefined || delay === undefined ? 'unreadable' : (count + (test[1] === '<=' ? 1 : 0)) * delay;
+    // `for (…; test; step)` counts something this scan does not read.
+    if ((clauses[1] ?? '').trim() !== '' && (clauses[2] ?? '').trim() !== '') return 'unreadable';
+  }
+  return counterName.test(region) ? 'unreadable' : 'none';
 }
 
 /** Local sleep helpers in this tree go by these names. */
@@ -443,6 +584,12 @@ export function scanSource(file: string, source: string): Site[] {
   return scanFile(file, source).sites;
 }
 
+/** One rule's hit: the offset of the call (or loop) it is keyed on. */
+interface Found {
+  rule: Rule;
+  offset: number;
+}
+
 export function scanFile(file: string, source: string): { sites: Site[]; errors: ScanError[] } {
   const { code, lineComments, unterminated } = blankSource(source);
   const lines = source.split('\n');
@@ -458,14 +605,29 @@ export function scanFile(file: string, source: string): { sites: Site[]; errors:
     }
     return lo;
   };
-  const found: Array<{ rule: Rule; offset: number }> = [];
+  const accepted = boundAccepted(source, lineComments, lineStarts, lineOf);
 
-  // Rule `sleep`: an awaited timer with any delay but a literal 0 (one event-loop turn).
-  const sleeps: number[] = [];
+  const sites: Site[] = [];
+  for (const { rule, offset } of [...sleepSites(code), ...boundSites(code, source)]) {
+    const line = lineOf(offset);
+    if (accepted(line)) continue;
+    sites.push({ file, rule, line: line + 1, site: lines[line]?.trim() ?? '' });
+  }
+  const errors = unterminated.map(({ construct, offset }) => {
+    const line = lineOf(offset);
+    return { file, line: line + 1, construct, text: lines[line]?.trim() ?? '' };
+  });
+  return { sites: sites.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule)), errors };
+}
+
+/** Every awaited timer with any delay but a literal 0 (one event-loop turn), with its delay's text. */
+function awaitedSleeps(code: string): Array<{ offset: number; delay: string | undefined }> {
+  const sleeps: Array<{ offset: number; delay: string | undefined }> = [];
   for (const pattern of [namedSleep, promisedTimer]) {
     for (const match of code.matchAll(pattern)) {
       const open = match.index + match[0].length - 1;
-      if (literalMs(argsOf(code, open, closeOf(code, open))[0]?.text) !== 0) sleeps.push(match.index);
+      const delay = argsOf(code, open, closeOf(code, open))[0]?.text;
+      if (literalMs(delay) !== 0) sleeps.push({ offset: match.index, delay });
     }
   }
   for (const match of code.matchAll(promiseSleep)) {
@@ -473,12 +635,35 @@ export function scanFile(file: string, source: string): { sites: Site[]; errors:
     if (!/(?:setTimeout|SetTimeout)$/.test(match[3] ?? '')) continue;
     const open = match.index + match[0].length - 1;
     const [callback, delay] = argsOf(code, open, closeOf(code, open));
-    if (callback?.text === resolver && delay !== undefined && literalMs(delay.text) !== 0) sleeps.push(match.index);
+    if (callback?.text === resolver && delay !== undefined && literalMs(delay.text) !== 0) sleeps.push({ offset: match.index, delay: delay.text });
   }
-  const polls = inLoopBody(code, sleeps);
-  for (const offset of sleeps) if (!polls.has(offset)) found.push({ rule: 'sleep', offset });
+  return sleeps;
+}
 
-  // Rule `short-bound`: a Vitest wait with no bound (1 s), or with a literal one under 10 s.
+/**
+ * Rule `sleep`: an awaited timer outside a loop. Rule `poll-deadline`: a sleep in a loop is a poll
+ * interval, so the loop is judged by its own deadline instead, once per loop however many sleeps it holds.
+ */
+function sleepSites(code: string): Found[] {
+  const sleeps = awaitedSleeps(code);
+  const loops = pollLoops(code, sleeps.map((sleep) => sleep.offset));
+  const found: Found[] = [];
+  const delaysOf = new Map<number, { loop: PollLoop; delays: Array<string | undefined> }>();
+  for (const { offset, delay } of sleeps) {
+    const loop = loops.get(offset);
+    if (!loop) found.push({ rule: 'sleep', offset });
+    else delaysOf.set(loop.keyword, { loop, delays: [...(delaysOf.get(loop.keyword)?.delays ?? []), delay] });
+  }
+  for (const { loop, delays } of delaysOf.values()) {
+    const deadline = pollDeadline(code, loop, delays);
+    if (deadline === 'none' || (typeof deadline === 'number' && isShort(deadline))) found.push({ rule: 'poll-deadline', offset: loop.keyword });
+  }
+  return found;
+}
+
+/** Rule `short-bound`: a Vitest wait with no bound (1 s), or with a literal one under 10 s, and the local helpers alike. */
+function boundSites(code: string, source: string): Found[] {
+  const found: Found[] = [];
   for (const match of code.matchAll(vitestWait)) {
     const open = match.index + match[0].length - 1;
     const bound = argsOf(code, open, closeOf(code, open))[1];
@@ -502,9 +687,20 @@ export function scanFile(file: string, source: string): { sites: Site[]; errors:
       if (argsOf(code, open, close).some(shortDefault)) found.push({ rule: 'short-bound', offset: match.index });
     }
   }
+  return found;
+}
 
-  // Acceptance reads only the `//` comments blanking found, so `// bound:` written inside a string
-  // or a template accepts nothing.
+/**
+ * Whether the line at an index holds a `// bound: <reason>`, or sits under a block of comment lines
+ * that does. Acceptance reads only the `//` comments blanking found, so `// bound:` written inside
+ * a string or a template accepts nothing.
+ */
+function boundAccepted(
+  source: string,
+  lineComments: number[],
+  lineStarts: number[],
+  lineOf: (offset: number) => number,
+): (index: number) => boolean {
   const commentOn = new Map<number, string>();
   const commentOnly = new Set<number>();
   for (const start of lineComments) {
@@ -514,24 +710,11 @@ export function scanFile(file: string, source: string): { sites: Site[]; errors:
     // Only whitespace before the `//` in the original: `/* x */ // y` is not a comment line.
     if (source.slice(lineStarts[line], start).trim() === '') commentOnly.add(line);
   }
-  const commentLine = (index: number): boolean => commentOnly.has(index);
-  const accepted = (index: number): boolean => {
+  return (index) => {
     if (boundComment.test(commentOn.get(index) ?? '')) return true;
-    for (let j = index - 1; j >= 0 && commentLine(j); j -= 1) if (boundComment.test(commentOn.get(j) ?? '')) return true;
+    for (let j = index - 1; j >= 0 && commentOnly.has(j); j -= 1) if (boundComment.test(commentOn.get(j) ?? '')) return true;
     return false;
   };
-
-  const sites: Site[] = [];
-  for (const { rule, offset } of found) {
-    const line = lineOf(offset);
-    if (accepted(line)) continue;
-    sites.push({ file, rule, line: line + 1, site: lines[line]?.trim() ?? '' });
-  }
-  const errors = unterminated.map(({ construct, offset }) => {
-    const line = lineOf(offset);
-    return { file, line: line + 1, construct, text: lines[line]?.trim() ?? '' };
-  });
-  return { sites: sites.sort((a, b) => a.line - b.line || a.rule.localeCompare(b.rule)), errors };
 }
 
 /**
@@ -643,6 +826,35 @@ interface BaselineFile {
   sites: BaselineEntry[];
 }
 
+/** One checked-in baseline: the rules whose sites it holds, and the comment its file opens with. */
+export interface Baseline {
+  /** What its sites are, for the failure message. */
+  what: string;
+  path: string;
+  comment: string;
+  rules: readonly Rule[];
+}
+
+const baselineTail =
+  'Keyed by file, rule and the line text so a moved line does not churn it. ' +
+  'This list only shrinks: fix a site, then run TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts. ' +
+  'Rules: AGENTS.md § Validation.';
+
+export const baselines: readonly Baseline[] = [
+  {
+    what: 'bare sleep or short wait bound',
+    path: baselinePath,
+    comment: `Bare sleeps and short wait bounds the server unit tests carried when the ratchet landed (hearsay-tools/cezarion#1155). ${baselineTail}`,
+    rules: ['sleep', 'short-bound'],
+  },
+  {
+    what: 'poll loop with no deadline or one under 10 s',
+    path: pollsBaselinePath,
+    comment: `Poll loops the server unit tests carried when the deadline rule landed (hearsay-tools/cezarion#1203). ${baselineTail}`,
+    rules: ['poll-deadline'],
+  },
+];
+
 export function readBaseline(path = baselinePath): BaselineEntry[] {
   if (!existsSync(path)) return [];
   return (JSON.parse(readFileSync(path, 'utf8')) as BaselineFile).sites;
@@ -651,27 +863,26 @@ export function readBaseline(path = baselinePath): BaselineEntry[] {
 /**
  * Shrink the baseline to what the suite has now. Never grows it: a site the baseline does not
  * cover stays a failure, so the only way to land one is to wait on the product's signal or give
- * the bound a reason. Run through
+ * the bound a reason. A baseline that does not exist yet is written once from `actual`, which is
+ * how a new rule lands its first list. Run through
  * `TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts`.
  */
-export function shrinkBaseline(actual: BaselineEntry[], path = baselinePath): void {
-  const baseline = readBaseline(path);
+export function shrinkBaseline(actual: BaselineEntry[], baseline: Baseline = baselines[0]!): void {
+  if (!existsSync(baseline.path)) {
+    writeBaseline(actual, baseline);
+    return;
+  }
   const key = (e: BaselineEntry) => JSON.stringify([e.file, e.rule, e.site]);
   const seen = new Map(actual.map((e) => [key(e), e]));
-  const sites = baseline
+  const sites = readBaseline(baseline.path)
     .map((e) => ({ ...e, count: Math.min(e.count, seen.get(key(e))?.count ?? 0) }))
     .filter((e) => e.count > 0);
-  writeBaseline(sites, path);
+  writeBaseline(sites, baseline);
 }
 
-export function writeBaseline(sites: BaselineEntry[], path = baselinePath): void {
-  const file: BaselineFile = {
-    $comment:
-      'Bare sleeps and short wait bounds the server unit tests carried when the ratchet landed (hearsay-tools/cezarion#1155). ' +
-      'Keyed by file, rule and the line text so a moved line does not churn it. ' +
-      'This list only shrinks: fix a site, then run TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts. ' +
-      'Rules: AGENTS.md § Validation.',
-    sites,
-  };
-  writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`);
+export function writeBaseline(sites: BaselineEntry[], baseline: Baseline = baselines[0]!): void {
+  const file: BaselineFile = { $comment: baseline.comment, sites };
+  // `\u` escapes keep the checked-in files ASCII, so two runs on two branches write the same bytes.
+  const json = JSON.stringify(file, null, 2).replace(/[\u0080-\uffff]/g, (c) => `\\u${c.charCodeAt(0).toString(16).padStart(4, '0')}`);
+  writeFileSync(baseline.path, `${json}\n`);
 }

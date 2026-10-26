@@ -284,10 +284,10 @@ describe('GitHub automation API', () => {
     expect(queued.status).toBe(202);
     const { checkId } = (await queued.json()) as { checkId: string };
     let check: { status: string } = { status: 'queued' };
-    // Up to 2s, exiting the moment the check fails. The background pass shells out to `git` to
-    // read the repo's remote before it can decide there is none, and 200ms of budget was under
-    // that spawn's cost whenever the rest of the server suites were running beside this one.
-    for (let attempt = 0; attempt < 200 && check.status !== 'error'; attempt += 1) {
+    // Exits the moment the check fails; the bound only ends a hang. The background pass shells
+    // out to `git` to read the repo's remote before it can decide there is none, and 200ms of
+    // budget was under that spawn's cost whenever the rest of the server suites ran beside this one.
+    for (const deadline = Date.now() + 15_000; check.status !== 'error' && Date.now() < deadline;) {
       await new Promise((resolve) => setTimeout(resolve, 10));
       check = (await (await apiRequest(server, `/api/v1/automation-checks/${checkId}`)).json()) as { status: string };
     }

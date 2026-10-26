@@ -111,6 +111,7 @@ setTimeout(() => {}, ${ms});`], { cwd: repo, stdio: 'ignore' });
 
   it('commits through continuous unrelated process churn without a timeout or a cleanup hold', async () => {
     let churning = true;
+    // bound: a load generator, not a poll; the `finally` below clears `churning` and awaits it.
     const churn = (async () => { while (churning) { startUnrelated(60); await delay(15); } })();
     try {
       const started = Date.now();
