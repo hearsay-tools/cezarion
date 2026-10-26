@@ -881,5 +881,5 @@ describe('the baseline', () => {
       stale,
       `Baseline entries no longer found; shrink ${baselinePath} (UNIT_WAIT_DISCIPLINE_UPDATE=1 npm test -- unit-wait-discipline does it):\n${describeEntries(stale)}`,
     ).toEqual([])
-  })
+  }, 30_000) // bound: a hang guard; parsing every cockpit test file took 5.2 s under coverage, past the 5 s default (hearsay-tools/cezarion#1918).
 })
