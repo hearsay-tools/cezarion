@@ -14,6 +14,9 @@ import { COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, WORKER
 import type { AgentSession } from '../core/agent-runner.ts';
 import { bookkeeping, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, register, restart, root, semaphore, spendWorkerBudget, store, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
+import { recordCommits } from '../runs/outcome-crash.testkit.ts';
+import type { RunOutcome } from '../runs/outcome-commit.ts';
+import type { RunRecord } from '../runs/store.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 
 /** #505 PR B: a worker's question goes to its owning parent, not to the human. */
@@ -114,6 +117,36 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
       .toMatchObject({ message: `${WORKER_FALLBACK_REPLY_NOTE} (${wakes + 1}/${MAX_AUTO_CONTINUES})` });
     expect(answered(f.w.id)).toEqual([]);
     await until(() => said(f.w.id, 'Also lint'));
+  });
+
+  // hearsay-tools/cezarion#1805: the fallback reply's charge never commits apart from the delivery
+  // it pays for. A refused commit retries the whole batch, so no committed row reads the wake spent
+  // with the reply undelivered.
+  it("a refused fallback reply commit keeps the reply's charge with its delivery", async () => {
+    const { p, service, callerFor } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const w = await worker(p.id); manager.enqueueOwnedRun(w.id);
+    await until(() => eventsOf(w.id, 'worker-question-routed').length === 1 && store.getRun(w.id)?.status === 'waiting');
+    const wakes = store.getRun(w.id)?.automaticWakes ?? 0;
+    const commit = store.commitOutcome.bind(store);
+    let refusals = 0;
+    vi.spyOn(store, 'commitOutcome').mockImplementation((...args: Parameters<typeof store.commitOutcome>) => {
+      const charged = ([args[1]].flat() as RunOutcome[]).some(outcome => outcome.kind === 'charged');
+      if (args[0] === w.id && charged && !refusals++) throw Error('disk full');
+      return commit(...args);
+    });
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const commits = recordCommits(join(root, '.ai/cezar'));
+    const replyId = randomUUID();
+    const requestId = String(eventsOf(w.id, 'worker-question-routed')[0]!.messageId);
+    await service.send(callerFor(p.id), { id: replyId, recipientRunId: w.id, kind: 'reply', requestId, text: `${WORKER_FALLBACK_HEADER}: cez-dev`, timeoutSeconds: 600 });
+    await until(() => answered(w.id).length === 1);
+    expect(refusals).toBeGreaterThan(0);
+    store.flush();
+    const delivered = (row: RunRecord) => !!row.agentInputs?.find(input => input.id === replyId)?.deliveredAt;
+    commits.expectEveryCommit(w.id, row => (row.automaticWakes ?? 0) === wakes || delivered(row), 'the reply\'s charge and its delivery');
+    const disk = (readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[]).find(run => run.id === w.id)!;
+    expect({ wakes: disk.automaticWakes, delivered: delivered(disk) }).toEqual({ wakes: wakes + 1, delivered: true });
   });
 
   it('a Continue on a stopped worker supersedes its fallback question and proceeds', async () => {

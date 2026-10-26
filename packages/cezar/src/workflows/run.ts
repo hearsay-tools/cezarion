@@ -6013,22 +6013,22 @@ export class RunManager {
 
   /** Bundled messages rode the answer's own write: delivered now, read when that turn ends. The
    *  answer's own outcomes (`with`: the human waits it answers, its charge) commit with them. A
-   *  refused write still keeps a charge or a counter in memory, as their best-effort write does,
-   *  and returns why it was refused. */
+   *  refused write that carries a charge retries the whole batch best effort: the session has the
+   *  reply, and the charge never saves apart from it (hearsay-tools/cezarion#1805). Returns why the
+   *  first write was refused. */
   private commitBundledDelivery(runId: string, state: ActiveRun, ids: readonly string[], also: readonly RunOutcome[] = []): string | undefined {
     const deliveredAt = new Date().toISOString();
     const awaiting = state.inputDelivery?.consumption === 'observable' ? { awaitingRead: true as const } : {};
-    try {
-      this.store.commitOutcome(runId, [...also, ...(ids.length ? [{ kind: 'delivered' as const, inputIds: ids, at: deliveredAt, ...awaiting }] : [])]);
-      if (ids.length) state.bundledInputIds = [...(state.bundledInputIds ?? []), ...ids];
-      return undefined;
-    } catch (error) {
-      const refused = error instanceof Error ? error.message : String(error);
+    const outcomes = [...also, ...(ids.length ? [{ kind: 'delivered' as const, inputIds: ids, at: deliveredAt, ...awaiting }] : [])];
+    let refused: string | undefined;
+    try { this.store.commitOutcome(runId, outcomes); } catch (error) {
+      refused = error instanceof Error ? error.message : String(error);
       console.warn(`[cez] bundled delivery checkpoint failed: ${refused}`);
-      const counters = also.filter(outcome => outcome.kind === 'charged' || outcome.kind === 'counted');
-      if (counters.length) this.store.commitOutcome(runId, counters, {}, { bestEffort: true });
-      return refused;
+      if (!also.some(outcome => outcome.kind === 'charged')) return refused;
+      this.store.commitOutcome(runId, outcomes, {}, { bestEffort: true });
     }
+    if (ids.length) state.bundledInputIds = [...(state.bundledInputIds ?? []), ...ids];
+    return refused;
   }
 
   /** The fallback reply's charge, the question it answers and the reply it delivers are one commit
