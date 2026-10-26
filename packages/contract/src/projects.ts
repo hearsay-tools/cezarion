@@ -395,3 +395,8 @@ export type LaunchKeyResponse = z.infer<typeof launchKeyResponseSchema>;
 export const checkoutProgressParamsSchema = z.object({ checkoutId: z.string().min(1).max(128) });
 export const checkoutProgressResponseSchema = z.object({ progress: checkoutProgressEventSchema.nullable() });
 export type CheckoutProgressResponse = z.infer<typeof checkoutProgressResponseSchema>;
+
+/** Register an existing folder; validation precedes registry writes. */
+export const registerProjectInputSchema = z.object({
+  root: z.string().trim().min(1).max(4096),
+});

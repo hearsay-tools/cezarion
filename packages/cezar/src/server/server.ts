@@ -1,3 +1,20 @@
+import { automationCreateSchema, automationUpdateSchema, automationCheckRequestSchema, automationLogQuerySchema } from '@open-mercato/cezar-contract/automation-requests';
+import { providerConnectSchema, createAgentProfileSchema, openAgentAccountFileSchema, updateAgentProfileSchema, selectAgentProfileSchema, providerEnabledSchema, providerRetrySchema, providerRouteParamsSchema, agentProfileRouteParamsSchema } from '@open-mercato/cezar-contract/provider-requests';
+import { planSchema, parseWorkflowSchema } from '@open-mercato/cezar-contract/workflow-requests';
+import { uiStateBody } from '@open-mercato/cezar-contract/ui-state-requests';
+import { queuedMessagePatchSchema, continueSchema, archiveSchema, openInSchema } from '@open-mercato/cezar-contract/run-requests';
+import { queryValue, refreshQuery, waitQuery, modelDiscoveryQuerySchema, strictRefreshQuerySchema, browseQuerySchema, worktreeFilesQuerySchema } from '@open-mercato/cezar-contract/query-requests';
+import { mergeNumberParams, prChangesParams, prChangesQuery, mergeBodySchema } from '@open-mercato/cezar-contract/github-requests';
+import { gitCommitSchema, reclaimBodySchema, repoBranchSchema } from '@open-mercato/cezar-contract/repo-requests';
+import { setConfigSchema, setAgentConfigSchema } from '@open-mercato/cezar-contract/config-requests';
+import { saveWorkflowInputSchema as saveWorkflowSchema } from '@open-mercato/cezar-contract/workflows';
+import { patchRunInputSchema as patchRunSchema, messageInputSchema as messageSchema } from '@open-mercato/cezar-contract/runs';
+import { checkoutProjectInputSchema as checkoutSchema, registerProjectInputSchema as registerProjectSchema } from '@open-mercato/cezar-contract/projects';
+import { setWorkspaceConfigInputSchema as workspaceConfigUpdateSchema } from '@open-mercato/cezar-contract/workspace';
+import { reclaimRunParamsSchema } from '@open-mercato/cezar-contract/repo-requests';
+import { githubChecksQuerySchema } from '@open-mercato/cezar-contract/github-requests';
+import { githubRefsQuerySchema } from '@open-mercato/cezar-contract/github-requests';
+import { commitQuerySchema } from '@open-mercato/cezar-contract/query-requests';
 import { imageMimeType, isOsOpenableImage } from '@open-mercato/cezar-contract/image-path';
 import { providerForActiveRun } from '@open-mercato/cezar-contract/active-provider';
 import { defined } from '../core/defined.ts';
@@ -20,10 +37,7 @@ import { CheckoutProgressCache } from './checkout-progress.ts';
 import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract/projects';
 import { createLiveRoutes } from './live-routes.ts';
 import { subscribeRunFeed } from './run-event-feed.ts';
-import { teamSkillRefSchema } from '@open-mercato/cezar-contract/skills';
-import { sidebarLimitsSchema } from '@open-mercato/cezar-contract/workspace';
 import { engineOwnsRun } from '@open-mercato/cezar-contract/run-predicates';
-import { worktreeSetupConfigSchema } from '@open-mercato/cezar-contract/workspace';
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
 import { ARCHIVED_RUNS_PAGE_DEFAULT } from '@open-mercato/cezar-contract/run-limits';
 import { RUNS_SEARCH_PER_PROJECT_MAX, archivedRunsQuerySchema, runSummariesQuerySchema, runsSearchQuerySchema } from '@open-mercato/cezar-contract/runs';
@@ -40,7 +54,7 @@ import { workerEmptyRequestSchema, runRelationshipsSchema } from '@open-mercato/
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { AutomationStore } from '../automations/store.ts';
-import { automationCreateSchema, automationUpdateSchema, createAutomationService, onceCreateAnswer } from '../automations/service.ts';
+import { createAutomationService, onceCreateAnswer } from '../automations/service.ts';
 import { createAutomationToolService } from '../automations/tool-adapter.ts';
 import { AutomationCoordinator } from '../automations/coordinator.ts';
 import { AutomationCandidateChangedError, GithubPoller } from '../automations/github-poller.ts';
@@ -55,9 +69,7 @@ import {
   validateAutomationPrompt,
 } from '../automations/task-template.ts';
 import {
-  automationEventSchema,
   automationFiltersSchema,
-  automationLogResultSchema,
   automationTaskSchema,
   isGithubAutomation,
   isScheduleAutomation,
@@ -101,11 +113,9 @@ import { setWorkspaceUiStateInputSchema } from '@open-mercato/cezar-contract/wor
 // schema this route validates with is the same one the client compiles against.
 import {
   MODEL_DISCOVERY_RUNNERS,
-  modelDiscoveryRunnerSchema,
   openProjectInSchema,
 } from '@open-mercato/cezar-contract/workspace';
 import {
-  attachmentInputSchema,
   attachmentFileParamSchema,
 } from '@open-mercato/cezar-contract/runs';
 import {
@@ -149,7 +159,6 @@ import {
   skillsToSteps,
   stepsIssue,
   workflowFileSchema,
-  workflowStepSchema,
 } from '../workflows/types.ts';
 import { planChain, slugify } from '../planner.ts';
 import { discoverSkills, type Skill } from '../skills.ts';
@@ -421,46 +430,6 @@ export type ProjectApiEnv = { Variables: { project: ProjectContext; stoppedOnAdo
  *  contract explicit.) */
 const projectIdSchema = z.union([z.literal('default'), z.string().regex(PROJECT_ID_RE)]);
 
-const providerConnectSchema = z.object({
-  provider: z.enum(PROVIDER_IDS),
-  /** Which agent account to sign in (spec 2026-07-29-agent-profiles). Absent = the discovered
-   *  default, which is what every pre-profiles client sends. Without this, "Connect" on a second
-   *  Claude account would open a login for the FIRST one and report success. */
-  profileId: z.string().max(64).optional(),
-}).strict();
-
-/** Agent-account bodies (spec 2026-07-29-agent-profiles). Bounds mirror `agentProfileSchema` in
- *  src/workspace/config.ts exactly, so a value these accept can never be degraded away by the
- *  next load's `.catch`. The id is allocated server-side and is never a request field. */
-const createAgentProfileSchema = z.object({
-  provider: z.enum(PROVIDER_IDS),
-  label: z.string().trim().max(200).optional(),
-  configDir: z.string().trim().min(1).max(4096),
-}).strict();
-
-/** `POST …/agent-profiles/:id/open` — a catalog id (or `folder`) plus an optional open target. */
-const openAgentAccountFileSchema = z.object({
-  file: z.string().min(1).max(200),
-  target: z.string().min(1).max(64).optional(),
-}).strict();
-
-const updateAgentProfileSchema = z.object({
-  label: z.string().trim().max(200).optional(),
-  configDir: z.string().trim().min(1).max(4096).optional(),
-}).strict().refine(
-  (value) => value.label !== undefined || value.configDir !== undefined,
-  'send label or configDir',
-);
-
-/** `PUT …/agent-profiles/selection` — which account a project uses for one provider. `null`
- *  clears it back to the discovered account. */
-const selectAgentProfileSchema = z.object({
-  /** `null` targets the machine-wide default rather than one repo. */
-  projectId: z.string().min(1).max(64).nullable(),
-  provider: z.enum(PROVIDER_IDS),
-  profileId: z.string().max(64).nullable(),
-}).strict();
-
 /** The hosted-mode refusal, worded like the agent-config one it mirrors. */
 const HOSTED_GITHUB_CREATE_REFUSAL = 'Creating GitHub repositories is available from a local cockpit only';
 const HOSTED_GITHUB_OWNERS_REASON = 'GitHub repositories can be created from a local cockpit only';
@@ -481,27 +450,6 @@ function allocateAgentProfileId(source: string, taken: Iterable<string>): string
   // `^[a-z0-9][a-z0-9-]{0,63}$` shape, so `~/.claude-klaudiusz` slugs to `claude-klaudiusz`.
   return allocateProjectSlug(source, taken);
 }
-
-const providerParamSchema = z.enum(PROVIDER_IDS);
-const providerEnabledSchema = z.object({ enabled: z.boolean() }).strict();
-const providerRetrySchema = z.object({
-  authFailureId: z.string().min(1).max(128),
-}).strict();
-
-const automationCheckRequestSchema = z.object({ mode: z.enum(['preview', 'execute']) }).strict();
-const automationLogQuerySchema = z.object({
-  automationId: z.string().optional(),
-  result: automationLogResultSchema.optional(),
-  event: automationEventSchema.optional(),
-  since: z.string().datetime().optional(),
-  cursor: z.coerce.number().int().positive().optional(),
-  // Optional, not `.default(100)`: `AutomationStore.logs` already clamps `limit ?? 100` into
-  // 1..100, so the default here was a second copy of it — and a defaulted key is REQUIRED in the
-  // request type `queryZodValidator` publishes (see validators.ts on why the request side falls
-  // back to the schema's output), which would have made every caller send a `?limit=` this route
-  // never needed.
-  limit: z.coerce.number().int().min(1).max(100).optional(),
-});
 
 /** One row of the mirrored project-route table. */
 export interface ProjectRouteInfo {
@@ -641,190 +589,6 @@ const streamSSENoBuffer: typeof streamSSE = (c, cb, onError) => {
   return res;
 };
 
-const planSchema = z.object({
-  // Same bound as `createRunInputSchema.task` — this flows into `planChain` (#429).
-  task: z.string().trim().min(1).max(100_000, 'must be at most 100000 characters'),
-});
-
-// A saved workflow carries full `steps` OR the builder's `skills` stack
-// (spec 012). `overwrite: true` is the builder's Save on an existing file —
-// the GUI asks first; a plain POST still refuses to clobber.
-const saveWorkflowSchema = z
-  .object({
-    name: z.string().trim().min(1).max(80),
-    // Written into a YAML file on disk (#429) — a workflow description is a
-    // short blurb, so a 2k cap is generous without allowing a file-bloat write.
-    description: z.string().max(2_000, 'must be at most 2000 characters').optional(),
-    steps: z.array(workflowStepSchema).min(1).max(8).optional(),
-    skills: z.array(z.string().trim().min(1)).min(1).max(8).optional(),
-    overwrite: z.boolean().optional(),
-  })
-  .refine((b) => Boolean(b.steps) !== Boolean(b.skills), {
-    message: 'provide either "steps" or "skills", not both',
-  });
-
-const parseWorkflowSchema = z.object({
-  yaml: z.string().min(1).max(100_000),
-});
-
-// Small GUI preferences persisted in `.ai/cezar/ui-state.json` (files, not a
-// DB): today just the last-used task source, so the form preselects what you
-// actually run. Unknown keys pass through — future prefs won't need a schema
-// dance.
-
-/** Entry cap on the `skillUsage` map (#408). A real skill catalog is dozens of entries; this
- *  bounds the ui-state.json write without ever rejecting a legitimate one. */
-const SKILL_USAGE_MAX_ENTRIES = 200;
-
-// Belt-and-braces cap on the number of top-level ui-state keys so a
-// `.passthrough()` schema can't accumulate an unbounded key set (#429). Very
-// generous for GUI prefs; over-limit is a 400, never a silent strip. Shared by
-// BOTH ui-state routes (per-repo and workspace) via `parseUiStateBody`.
-const UI_STATE_MAX_KEYS = 200;
-
-/** Settings → Appearance (redesign R6): accent + density + reading width. ONE
- *  schema for both ui-state files — per-repo (the legacy home, kept so an older
- *  cezar in the same repo still honours it) and workspace
- *  (`~/.cezar/ui-state.json`, its post-migration home — multi-project spec,
- *  Data Model).
- *
- *  Every key is `.optional()` so an older ui-state.json parses unchanged, but
- *  each one must be listed HERE: the enclosing `workspaceUiStateSchema` is
- *  `.passthrough()` at the top level only, so an unlisted key inside
- *  `appearance` is stripped by zod and then wiped from the file by the shallow
- *  merge-on-write. The cockpit adopts the PUT response as authoritative, so a
- *  stripped key does not merely fail to persist — it visibly reverts the
- *  control the user just touched. Adding an appearance preference means adding
- *  it here in the same change. */
-const appearanceSchema = z.object({
-  accent: z.enum(['cezarion', 'lime', 'violet']).optional(),
-  density: z.enum(['comfortable', 'compact', 'ultra']).optional(),
-  width: z.enum(['narrow', 'wide']).optional(),
-});
-
-const uiStateSchema = z
-  .object({
-    sidebarLimits: sidebarLimitsSchema.optional(),
-    // `null` clears the recorded choice — the composer's "no skill, no workflow" state,
-    // which is a plain quick-task run. Written through to the file like any other value, so an
-    // older cockpit reading it falls back to its own default instead of restoring a stale skill.
-    lastTask: z
-      .object({
-        source: z.enum(['workflow', 'skill']),
-        ref: z.string().min(1).max(200),
-      })
-      .nullable()
-      .optional(),
-    // Composer picker recency (newest first, capped) + the remembered worktree
-    // choice for single-skill runs. Additive prefs, like the rest of ui-state.
-    recentSources: z
-      .array(
-        z.object({
-          source: z.enum(['workflow', 'skill']),
-          ref: z.string().min(1).max(200),
-        }),
-      )
-      .max(50)
-      .optional(),
-    lastWorktree: z.boolean().optional(),
-    lastAutonomous: z.boolean().optional(),
-    // Team skills this project switched off. Per project, never workspace state.
-    disabledTeamSkills: z.array(teamSkillRefSchema).max(UI_STATE_MAX_KEYS).optional(),
-    // Skill selection frequency (#408): name → times chosen, incremented on a successful run
-    // start from EITHER composer (`/new`'s SourcePill and the follow-up `SkillsPicker`). Drives
-    // the shared `orderSkillsByUsage` sort (web/app/src/lib/skills.ts) so both pickers float the
-    // skills a user actually reaches for above the rest, within the existing project-first
-    // grouping. ADDITIVE, like the rest of ui-state — the client always PUTs the whole map
-    // because the top-level merge below is shallow.
-    //
-    // Bounded on all three axes (key length, value, entry count) like every neighbour here: this
-    // map is written straight to `ui-state.json`, which the cockpit GETs on every load and this
-    // route re-reads on every PUT, so an unbounded map is an unbounded file write. Keys are skill
-    // names (`.min(1).max(200)`, matching `lastTask.ref`); SKILL_USAGE_MAX_ENTRIES sits far above
-    // any real catalog while capping the file at a few tens of KB.
-    skillUsage: z
-      .record(z.string().min(1).max(200), z.number().int().min(0).max(1_000_000))
-      .refine((usage) => Object.keys(usage).length <= SKILL_USAGE_MAX_ENTRIES, {
-        message: `skillUsage must have at most ${SKILL_USAGE_MAX_ENTRIES} entries`,
-      })
-      .optional(),
-    // Runs area presentation (#348): the sidebar-list + detail pane, or the
-    // full-width table ("task manager") view.
-    runsView: z.enum(['list', 'table']).optional(),
-    // The GitHub tab's last-selected sub-tab (#417): issues or PRs. ADDITIVE — an old
-    // ui-state.json without the key behaves as the default (issues).
-    githubView: z.enum(['issues', 'prs']).optional(),
-    // Settings → Appearance (redesign R6): accent + density. ADDITIVE — the theme itself
-    // stays in the browser (`cez-theme` localStorage, pre-paint). The cockpit always PUTs
-    // the whole object because the top-level merge below is shallow.
-    appearance: appearanceSchema.optional(),
-    // Follow-up prompt templates (#413): reusable snippets insertable into the GitHub hand-over
-    // and Inbox follow-up composers. Absent → the client's built-in defaults; present (even `[]`)
-    // is the user's own edited list, from Settings → Prompt templates. Additive, like the rest of
-    // ui-state — the cockpit is the only writer, so validation stays generous but bounded.
-    promptTemplates: z
-      .array(
-        z.object({
-          id: z.string().min(1).max(64),
-          label: z.string().trim().min(1).max(80),
-          text: z.string().trim().min(1).max(2000),
-          // Skill names this template auto-applies for. Optional and additive: templates
-          // written before this key existed keep validating, and stay manual-only.
-          skills: z.array(z.string().trim().min(1).max(200)).max(50).optional(),
-        }),
-      )
-      .max(50)
-      .optional(),
-  })
-  .passthrough();
-
-// Editable titles (#389), and the initial prompt while the run is still queued
-// (#472 — rejected with 409 on any other status by the handler).
-const patchRunSchema = z.object({
-  title: z.string().trim().min(1).max(300).optional(),
-  task: z.string().trim().min(1).max(100_000).optional(),
-  archiveWhenDone: z.boolean().optional(),
-  autoMergePr: z.boolean().optional(),
-});
-
-// Session commit (redesign R5 — §"Git/session API additions").
-const gitCommitSchema = z.object({
-  message: z.string().trim().min(1, 'must not be empty').max(5_000),
-});
-
-// "Open in…" (#open-in / #365): `target` selects the app; `path` (optional, worktree-relative)
-// narrows the target's own worktree/repo-root default to one file — used by the diff pane's
-// "open in default app" action for images. Containment is re-checked server-side via
-// `readWorktreePath`; this schema only shapes the request.
-const openInSchema = z.object({
-  // A short bound (#429): matched against a downstream allowlist, so an editor id is never long.
-  target: z.string().trim().min(1, 'target required').max(200),
-  path: z.string().max(1_000).optional(),
-});
-
-// Attachment-carrying bodies validate with the CONTRACT's `attachmentInputSchema` (#950) —
-// images plus the short PDF/TXT/MD allowlist, 7,000,000 encoded characters each. Imported rather
-// than mirrored here, so the wire cannot drift from what the cockpit compiles against.
-const messageSchema = z
-  .object({
-    text: z.string().max(100_000).default(''),
-    images: z.array(attachmentInputSchema).max(4).default([]),
-  })
-  .refine((m) => m.text.trim().length > 0 || m.images.length > 0, {
-    message: 'message needs text or at least one attachment',
-  });
-
-// PATCH semantics are load-bearing here: an omitted field keeps its current value.
-// In particular, the cockpit edits text without re-uploading existing attachments.
-const queuedMessagePatchSchema = z
-  .object({
-    text: z.string().max(100_000).optional(),
-    images: z.array(attachmentInputSchema).max(4).optional(),
-  })
-  .refine((m) => m.text !== undefined || m.images !== undefined, {
-    message: 'message edit needs text or attachments',
-  });
-
 // Queued prompt stack bounds (#472). The per-message bounds mirror `messageSchema`
 // above; the one that actually matters is the FOLDED total, because 20 messages of
 // 100 000 chars each would otherwise compose a ~2 M-character {{task}}.
@@ -843,30 +607,6 @@ function foldedLength(task: string, stack: Array<{ text: string }>): number {
     .join('\n\n').length;
 }
 
-// "Continue"/"Send back" body (spec 003 / #401): every field optional, so an empty POST reopens
-// the last session on the run's current backend (backward compat). A runner/model/account override
-// lets the follow-up composer choose which engine handles the continuation. `text` stays bounded
-// like the live-session message `text` (#429), and `images` like a live-session message's — the
-// follow-up composer is a full composer, so a screenshot pasted into it must reach the reopened
-// session rather than being silently dropped.
-const continueSchema = z.object({
-  text: z.string().max(100_000, 'must be at most 100000 characters').optional(),
-  images: z.array(attachmentInputSchema).max(4).optional(),
-  runner: z.enum(RUNNER_IDS).optional(),
-  model: z.string().max(200).optional(),
-  /** Reasoning-effort pin (#45). Omitted keeps the run's pin; empty string clears it. */
-  effort: z.string().max(32).optional(),
-  /** Agent account for the reopened session (spec 2026-07-29-agent-profiles). Bound mirrors
-   *  `POST /runs`' own `agentProfile`. Omitted = keep the account the run is already on. */
-  agentProfile: z.string().max(64).optional(),
-});
-
-// `POST /api/runs/:id/archive` (#429) — no body archives; `{archived:false}`
-// un-archives. A tiny schema so the route follows the safeParse convention.
-const archiveSchema = z.object({
-  archived: z.boolean().optional(),
-});
-
 // Request-body size guards (#429). A generous global cap keeps a single
 // localhost request from being unbounded (the largest legit body is 4 pasted
 // images at ~7 MB base64 each); the ui-state PUT gets a much tighter cap since
@@ -883,51 +623,6 @@ function stripHostPort(host: string): string {
   if (bracketed?.[1]) return bracketed[1];
   return host.replace(/:\d+$/, '');
 }
-
-/** The shared write-side half of BOTH ui-state routes (per-repo `/api/v1/ui-state`
- *  and workspace `/api/v1/workspace/ui-state`) — the factored split the
- *  multi-project spec calls for instead of a copy: the route's own schema, plus a
- *  cap on the top-level key count so a `.passthrough()` schema can't accumulate an
- *  unbounded key set (#429). The cap rides as a refinement so the whole thing is one
- *  schema and can go through `jsonBody` like every other mutating route. The
- *  merge-on-write stays with each route (they write different files) but is shallow
- *  in both. */
-function capUiStateKeys(data: unknown, ctx: z.RefinementCtx): void {
-  if (Object.keys(data as Record<string, unknown>).length > UI_STATE_MAX_KEYS) {
-    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `ui-state has too many keys (max ${UI_STATE_MAX_KEYS})` });
-  }
-}
-
-// Derived once per route instead of by a generic `wrap(schema)` helper called at the route: a
-// generic wrapper leaves the schema type unresolved where `jsonBody` needs it, and Hono answers
-// that by dropping the whole PUT from the route schema rather than erroring — both ui-state PUTs
-// silently vanished from `AppType`. Concrete consts keep them visible to `hc`.
-const uiStateBody = uiStateSchema.superRefine(capUiStateKeys);
-
-/**
- * Query schemas for the READ routes — deliberately permissive.
- *
- * These exist to make a query key VISIBLE to the route type (`hc` refuses a `query` argument for
- * a key no validator declares), NOT to narrow what the route accepts. Every one of these handlers
- * compares `=== '1'` and treats everything else as false, so `?refresh=0` is a successful request
- * today; a literal schema would silently turn it into a 400. The comparison stays in the handler
- * and the validator stays out of its way.
- *
- * The one route that really is strict on the wire — `GET /github/prs/:number/changes`, which 400s
- * on `?refresh=true` — keeps its own `z.enum(['1'])` schema next to the route.
- */
-/**
- * One query value, matching what `c.req.query('k')` did before these routes were validated.
- *
- * Hono's query validator hands a REPEATED key as an array (`?wait=1&wait=1` → `['1','1']`), where
- * `c.req.query()` silently took the first. A plain `z.string()` therefore turns a request that
- * used to answer 200 into a 400 — a wire change no caller asked for. Collapsing to the first
- * value keeps the old behaviour, and the client still sees a plain `key?: string`.
- */
-const queryValue = z.union([z.string(), z.array(z.string()).transform((v) => v[0] as string)]).optional();
-
-const refreshQuery = z.object({ refresh: queryValue });
-const waitQuery = z.object({ wait: queryValue });
 
 /**
  * HTTP content negotiation for the two routes that serve more than one FORMAT on one path:
@@ -1691,7 +1386,7 @@ export function createApp(deps: ServerDeps) {
     // `modelDiscoveryRunnerSchema` is the contract's own list of the runners with an
     // authoritative host-local catalog (#794), so the client compiles against exactly what this
     // validates, including Claude stream-json discovery (#89).
-    .get('/models', queryZodValidator(z.object({ runner: z.union([z.string(), z.array(z.string()).transform((v) => v[0] as string)]).pipe(modelDiscoveryRunnerSchema) }), { message: `runner must be ${MODEL_DISCOVERY_RUNNERS.slice(0, -1).join(', ')}, or ${MODEL_DISCOVERY_RUNNERS.at(-1)}` }), async (c) => {
+    .get('/models', queryZodValidator(modelDiscoveryQuerySchema, { message: `runner must be ${MODEL_DISCOVERY_RUNNERS.slice(0, -1).join(', ')}, or ${MODEL_DISCOVERY_RUNNERS.at(-1)}` }), async (c) => {
       const query = { data: c.req.valid('query') };
       return c.json(query.data.runner === 'cursor'
         ? modelCatalog.getCached('cursor')
@@ -1767,7 +1462,7 @@ export function createApp(deps: ServerDeps) {
   const providersRoutes = new Hono<ProjectApiEnv>()
     .get(
       '/providers/status',
-      queryZodValidator(z.object({ refresh: queryValue.refine((v) => v === undefined || v === '1') }), { message: 'refresh must be 1 when provided' }),
+      queryZodValidator(strictRefreshQuerySchema, { message: 'refresh must be 1 when provided' }),
       async (c) => {
         const query = { data: c.req.valid('query') };
         const refresh = query.data.refresh === '1';
@@ -1780,7 +1475,7 @@ export function createApp(deps: ServerDeps) {
 
     .put(
       '/providers/:provider/enabled',
-      paramZodValidator(z.object({ provider: providerParamSchema }), { message: 'provider and enabled boolean are required' }),
+      paramZodValidator(providerRouteParamsSchema, { message: 'provider and enabled boolean are required' }),
       jsonZodValidator(providerEnabledSchema, { message: 'provider and enabled boolean are required' }),
       async (c) => {
         const provider = { data: c.req.valid('param').provider };
@@ -1808,7 +1503,7 @@ export function createApp(deps: ServerDeps) {
 
     .post(
       '/providers/:provider/retry',
-      paramZodValidator(z.object({ provider: providerParamSchema }), { message: 'provider and current authFailureId are required' }),
+      paramZodValidator(providerRouteParamsSchema, { message: 'provider and current authFailureId are required' }),
       jsonZodValidator(providerRetrySchema, { message: 'provider and current authFailureId are required' }),
       async (c) => {
         const provider = { data: c.req.valid('param').provider };
@@ -2116,7 +1811,7 @@ export function createApp(deps: ServerDeps) {
 
     .patch(
       '/workspace/agent-profiles/:id',
-      paramZodValidator(z.object({ id: z.string() })),
+      paramZodValidator(agentProfileRouteParamsSchema),
       jsonZodValidator(() => updateAgentProfileSchema),
       async (c) => {
         if (!capabilities().localHandoff) return c.json(hostedProfileRefusal, 409);
@@ -2185,12 +1880,14 @@ export function createApp(deps: ServerDeps) {
      */
     .get(
       '/workspace/agent-profiles/:id/status',
-      paramZodValidator(z.object({ id: z.string() })),
-      queryZodValidator(z.object({ refresh: queryValue.refine((v) => v === undefined || v === '1') }), { message: 'refresh must be 1 when provided' }),
+      paramZodValidator(agentProfileRouteParamsSchema),
+      queryZodValidator(strictRefreshQuerySchema, { message: 'refresh must be 1 when provided' }),
       async (c) => {
+        // jscpd:ignore-start -- hearsay-tools/cezarion#1888: unchanged gate; only the validator arguments around it moved.
         if (!capabilities().localHandoff) return c.json(hostedProfileRefusal, 409);
         const account = await accountById(c.req.param('id'));
         if (!account) return c.json({ error: `unknown account: ${c.req.param('id')}` }, 404);
+        // jscpd:ignore-end
         const refresh = c.req.valid('query').refresh === '1';
         if (refresh) invalidateHostModels(account.provider);
         // The discovered account's row is the one `GET /api/v1/providers/status` owns, so it comes
@@ -2224,11 +1921,13 @@ export function createApp(deps: ServerDeps) {
      */
     .get(
       '/workspace/agent-profiles/:id/details',
-      paramZodValidator(z.object({ id: z.string() })),
+      paramZodValidator(agentProfileRouteParamsSchema),
       async (c) => {
+        // jscpd:ignore-start -- hearsay-tools/cezarion#1888: unchanged gate; only the validator arguments around it moved.
         if (!capabilities().localHandoff) return c.json(hostedProfileRefusal, 409);
         const account = await accountById(c.req.param('id'));
         if (!account) return c.json({ error: `unknown account: ${c.req.param('id')}` }, 404);
+        // jscpd:ignore-end
         return c.json(await readAccountIdentity(account.provider, account.path));
       },
     )
@@ -2243,12 +1942,14 @@ export function createApp(deps: ServerDeps) {
      */
     .post(
       '/workspace/agent-profiles/:id/open',
-      paramZodValidator(z.object({ id: z.string() })),
+      paramZodValidator(agentProfileRouteParamsSchema),
       jsonZodValidator(() => openAgentAccountFileSchema),
       async (c) => {
+        // jscpd:ignore-start -- hearsay-tools/cezarion#1888: unchanged gate; only the validator arguments around it moved.
         if (!capabilities().localHandoff) return c.json(hostedProfileRefusal, 409);
         const account = await accountById(c.req.param('id'));
         if (!account) return c.json({ error: `unknown account: ${c.req.param('id')}` }, 404);
+        // jscpd:ignore-end
         const { file, target } = c.req.valid('json');
 
         let path: string;
@@ -2348,7 +2049,7 @@ export function createApp(deps: ServerDeps) {
 
     .delete(
       '/workspace/agent-profiles/:id',
-      paramZodValidator(z.object({ id: z.string() })),
+      paramZodValidator(agentProfileRouteParamsSchema),
       async (c) => {
         if (!capabilities().localHandoff) return c.json(hostedProfileRefusal, 409);
         const id = c.req.param('id');
@@ -2810,9 +2511,6 @@ export function createApp(deps: ServerDeps) {
   // folder-browser dialog's commit step, step 4.2). Workspace-level like its
   // GET twin. Everything here is a guard; the registry write itself is one
   // idempotent `registerProject` call.
-  const registerProjectSchema = z.object({
-    root: z.string().trim().min(1).max(4096),
-  });
 
   /**
    * The register-a-folder half of `POST /api/projects`, factored out so the
@@ -2997,11 +2695,7 @@ export function createApp(deps: ServerDeps) {
   // events on the workspace stream. `checkoutId` is the cockpit's own
   // correlation token, echoed on every event so two tabs cloning at once never
   // render each other's progress.
-  const checkoutSchema = z.object({
-    url: z.string().trim().min(1).max(512),
-    name: z.string().trim().max(128).optional(),
-    checkoutId: z.string().trim().max(128).optional(),
-  });
+
   // ---- workspace settings (multi-project spec, step 2.7) -------------------
   // WORKSPACE-level routes: single-mount (never mirrored under /api/p/),
   // same-origin. The config routes carry the settings UI's slice of
@@ -3165,49 +2859,12 @@ export function createApp(deps: ServerDeps) {
   // Partial updates only — absent keys stay untouched. Bounds mirror the
   // workspace schema (src/workspace/config.ts, step 1.2) exactly, so a value
   // this route accepts can never be degraded away by the next load's `.catch`.
-  const workspaceConfigUpdateSchema = z.object({
-    browseRoot: z.string().trim().min(1).max(4096).optional(),
-    projectsDir: z.string().trim().min(1).max(4096).optional(),
-    archiveOnMerge: z.boolean().nullable().optional(),
-    composerDefaults: z
-      .object({
-        autonomous: z.boolean().nullable().optional(),
-        worktree: z.boolean().nullable().optional(),
-      })
-      .optional(),
-    resources: z
-      .object({
-        maxParallel: z.number().int().min(1).max(16).optional(),
-        maxMonitoringSessions: z.number().int().min(0).max(16).optional(),
-        monitoringWakeIntervalMinutes: z.number().int().min(1).max(60).nullable().optional(),
-        autoResumeOnUsageLimit: z.boolean().optional(),
-        memoryLimitMb: z.number().int().min(0).max(1_048_576).nullable().optional(),
-        worktreeRetentionDefault: z.number().int().min(0).max(1000).optional(),
-      })
-      .optional(),
-    // Bounds mirror `src/workspace/config.ts`, so a value this accepts is never degraded away by
-    // the next load's `.catch`. `null` clears a key back to "no opinion".
-    agentDefaults: z
-      .object({
-        runner: z.enum(PROVIDER_IDS).nullable().optional(),
-        models: z
-          .object({
-            claude: z.string().trim().min(1).max(200).nullable().optional(),
-            codex: z.string().trim().min(1).max(200).nullable().optional(),
-            opencode: z.string().trim().min(1).max(200).nullable().optional(),
-            pi: z.string().trim().min(1).max(200).nullable().optional(),
-            omp: z.string().trim().min(1).max(200).nullable().optional(),
-            cursor: z.string().trim().min(1).max(200).nullable().optional(),
-          })
-          .optional(),
-      })
-      .optional(),
-  });
+
   // ---- chained family: filesystem browse (workspace-level) ----
   const fsBrowseRoutes = new Hono<ProjectApiEnv>()
     .get(
       '/fs/browse',
-      queryZodValidator(z.object({ path: queryValue, showHidden: queryValue })),
+      queryZodValidator(browseQuerySchema),
       async (c) => {
         if (capabilities().singleProject) {
           return c.json(singleProjectRefusal('folder browsing'), 409);
@@ -4480,7 +4137,7 @@ export function createApp(deps: ServerDeps) {
     // An `Accept` that asks for images reaches the same raw branch without the flag — which is
     // what an `<img>` sends — while the flag still wins whenever it is present and `*<slash>*`
     // (every `fetch`) still gets the JSON listing. See `negotiate`.
-    .get('/runs/:id/files', queryZodValidator(z.object({ path: queryValue, raw: queryValue })), async (c) => {
+    .get('/runs/:id/files', queryZodValidator(worktreeFilesQuerySchema), async (c) => {
       const { root: repoRoot, store } = c.get('project');
       const query = c.req.valid('query');
       c.header('vary', 'Accept');
@@ -4781,7 +4438,7 @@ export function createApp(deps: ServerDeps) {
     // One row's reclaim (issue 08 §B4): the DIRECTORY only, by retention's own rule and helper —
     // the `cez/<id8>` branch is kept, which is what makes this safe to offer on every finished
     // row. `/runs/:id/remove-worktree` (directory AND branch) stays the task screen's action.
-    .post('/worktrees/:runId/reclaim', paramZodValidator(z.object({ runId: z.string().min(1) })), async (c) => {
+    .post('/worktrees/:runId/reclaim', paramZodValidator(reclaimRunParamsSchema), async (c) => {
       const { root: repoRoot, store, manager } = c.get('project');
       const run = store.getRun(c.req.valid('param').runId);
       if (!run) return c.json({ error: 'not found' }, 404);
@@ -4803,8 +4460,6 @@ export function createApp(deps: ServerDeps) {
       forgetRepoBranches(repoRoot);
       return c.json({ runId: run.id, worktreeReclaimedAt });
     });
-
-  const reclaimBodySchema = z.object({}).passthrough();
 
   // ---- chained family: SSE streams (project-scoped) ----
   const sseRoutes = new Hono<ProjectApiEnv>()
@@ -5005,12 +4660,6 @@ export function createApp(deps: ServerDeps) {
       });
     });
 
-  // ---- chained family: GitHub (project-scoped) ----
-  // These sit ABOVE the routes rather than with the family's other schemas below it, because a
-  // validator argument is evaluated when the route is REGISTERED — a schema declared further down
-  // would be in its temporal dead zone. (The schemas below are all read inside a handler, or
-  // passed as a thunk, which defers them past that point.)
-  const mergeNumberParams = z.object({ number: z.coerce.number().int().positive() });
   /** A ref-status list: `null` means malformed (the caller answers 400), `[]` means "not asked
    *  for". Absent and empty are the same request — neither names a number. */
   const parseRefNumbers = (raw: string | undefined): number[] | null => {
@@ -5024,8 +4673,7 @@ export function createApp(deps: ServerDeps) {
     }
     return numbers;
   };
-  const prChangesParams = z.object({ number: z.coerce.number().int().positive().safe() });
-  const prChangesQuery = z.object({ refresh: queryValue.refine((v) => v === undefined || v === '1') });
+
   const githubRoutes = new Hono<ProjectApiEnv>()
     .get(
       '/github',
@@ -5084,7 +4732,7 @@ export function createApp(deps: ServerDeps) {
     // `prs` is the one genuinely REQUIRED query key on this server, so it is the one validated
     // strictly — `.min(1)` because `?prs=` answered `missing prs query` before it answered
     // `invalid prs query`, and both spellings must keep their own words.
-    .get('/github/checks', queryZodValidator(z.object({ prs: z.string().min(1) }), { message: 'missing prs query' }), async (c) => {
+    .get('/github/checks', queryZodValidator(githubChecksQuerySchema, { message: 'missing prs query' }), async (c) => {
       const { root: repoRoot } = c.get('project');
       const raw = c.req.valid('query').prs;
       const parts = raw.split(',').map((p) => p.trim()).filter(Boolean);
@@ -5132,7 +4780,7 @@ export function createApp(deps: ServerDeps) {
     // but at least one must name something, or the request asks for nothing.
     .get(
       '/github/ref-status',
-      queryZodValidator(z.object({ prs: z.string().optional(), issues: z.string().optional() })),
+      queryZodValidator(githubRefsQuerySchema),
       async (c) => {
         const { root: repoRoot } = c.get('project');
         const { prs, issues } = c.req.valid('query');
@@ -5219,11 +4867,6 @@ export function createApp(deps: ServerDeps) {
     kind: z.enum(['issue', 'pr']),
     number: z.coerce.number().int().positive(),
   });
-  const mergeBodySchema = z.object({
-    method: z.enum(['merge', 'squash', 'rebase']),
-    expectedHeadSha: z.string().regex(/^[0-9a-f]{40}$/),
-    overrideRules: z.boolean().optional().default(false),
-  }).strict();
 
   /** What the branch classifier reads for one project, or null outside a repository. */
   const branchClassifyInput = async (
@@ -5326,7 +4969,7 @@ export function createApp(deps: ServerDeps) {
     // `Accept: application/json` reaches the same structured answer without the flag, and
     // `Accept: text/plain` asks for the blob; the flag still wins whenever it is present, and a
     // request with no opinion still gets the blob. See `negotiate`.
-    .get('/repo/commit/:sha', queryZodValidator(z.object({ structured: queryValue })), async (c) => {
+    .get('/repo/commit/:sha', queryZodValidator(commitQuerySchema), async (c) => {
       const { root: repoRoot } = c.get('project');
       c.header('vary', 'Accept');
       const { structured } = c.req.valid('query');
@@ -5540,49 +5183,6 @@ export function createApp(deps: ServerDeps) {
       return c.json(await configAnswer(repoRoot, await loadConfig(repoRoot)));
     });
 
-  // Set/clear the agents' config knobs (Settings → Agents; the Repo tab's
-  // base-branch picker). Merges into the RAW config.json so user keys
-  // (skillsRepos…) survive and schema defaults are never materialized into
-  // the file. All fields optional + additive: `null` (and `''` for the
-  // R6 keys) clears a knob back to its default.
-  const modelPresetSchema = z.string().trim().max(200).nullable().optional();
-  const setConfigSchema = z.object({
-    baseBranch: z.string().trim().min(1).max(200).nullable().optional(),
-    defaultRunner: z.enum(RUNNER_IDS).optional(),
-    systemPrompt: z.string().trim().max(20_000, 'must be at most 20000 characters').nullable().optional(),
-    defaultModels: z
-      .object({
-        claude: modelPresetSchema,
-        codex: modelPresetSchema,
-        opencode: modelPresetSchema,
-        pi: modelPresetSchema,
-        omp: modelPresetSchema,
-        cursor: modelPresetSchema,
-      })
-      .optional(),
-    // Concurrency + memory guard (Settings → Resources). maxParallel clamps to
-    // the schema's 1–16; memoryLimitMb null/0 clears the ceiling.
-    maxParallel: z.number().int().min(1).max(16).optional(),
-    memoryLimitMb: z.number().int().min(0).max(1_048_576).nullable().optional(),
-    // Worktree retention count (Settings → Resources, #483). 0 = unlimited;
-    // null clears the key back to the schema default (10). Unlike memoryLimitMb,
-    // 0 is a meaningful value (unlimited), so it is stored, not treated as clear.
-    worktreeRetention: z.number().int().min(0).max(1000).nullable().optional(),
-    // Live title updates toggle (Settings → Agents): null clears the key back
-    // to the env-default behavior.
-    liveTitleUpdates: z.boolean().nullable().optional(),
-    // Optional review gate toggle (Settings → Agents, #489): null clears the key
-    // back to the env-default behavior (OFF).
-    reviewGate: z.boolean().nullable().optional(),
-    archiveOnMerge: z.boolean().nullable().optional(),
-    // Worktree setup (Settings → Worktrees, #917): null or [] deletes the key.
-    worktreeSetup: worktreeSetupConfigSchema.nullable().optional(),
-  });
-  const setAgentConfigSchema = z.object({
-    content: z.string().max(2_000_000),
-    version: z.string().nullable(),
-  });
-
   // ---- chained family: agent-config (project-scoped) -----------------------
   // Agent config is project-scoped (spec #404, adapted to the multi-project
   // route seam from #521): handlers resolve the selected repo through the
@@ -5636,13 +5236,6 @@ export function createApp(deps: ServerDeps) {
       return c.json(out.read);
     });
 
-  // Repo view branch actions: switch to an existing branch, or create one
-  // (from `from` or HEAD) and switch. Predictable git failures — invalid
-  // name, unknown `from`, dirty-tree checkout conflict — are 409 + reason.
-  const repoBranchSchema = z.object({
-    name: z.string().trim().min(1).max(200),
-    from: z.string().trim().min(1).max(200).optional(),
-  });
   // ---- assemble the chained families --------------------------------------
   // Every chained family is registered ONCE and mounted into the versioned table. There is no
   // second, unversioned spelling: `/api/*` was removed once the whole API was reachable under

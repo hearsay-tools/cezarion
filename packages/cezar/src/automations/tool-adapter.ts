@@ -1,3 +1,4 @@
+import { automationCreateSchema, automationUpdateSchema } from '@open-mercato/cezar-contract/automation-requests';
 import { isValidTimeZone } from '@open-mercato/cezar-contract/zoned-time';
 import { onceInstant, unknownTimeZoneMessage } from '@open-mercato/cezar-contract/automation-schedule';
 import {
@@ -13,7 +14,7 @@ import {
   type ScheduledTasksRequest,
 } from '@open-mercato/cezar-contract/scheduled-tasks';
 import type { AutomationToolService } from '../workflows/run.ts';
-import { automationCreateSchema, automationUpdateSchema, onceStatus, type AutomationService, type AutomationServiceProject } from './service.ts';
+import { onceStatus, type AutomationService, type AutomationServiceProject } from './service.ts';
 import { isOnceSchedule, type AutomationDefinition } from './types.ts';
 
 /**

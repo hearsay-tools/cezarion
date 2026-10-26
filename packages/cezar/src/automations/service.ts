@@ -1,7 +1,7 @@
-import { z } from 'zod';
-import { automationKindSchema, type AutomationKind, type AutomationListQuery, type OnceStatus } from '@open-mercato/cezar-contract/automations';
-import { automationScheduleSchema, nextOccurrence, ONCE_PAST_DUE_MESSAGE, onceInstant } from '@open-mercato/cezar-contract/automation-schedule';
-import { singleRunVariantsSchema } from '@open-mercato/cezar-contract/runs';
+import type { z } from 'zod';
+import { type AutomationKind, type AutomationListQuery, type OnceStatus } from '@open-mercato/cezar-contract/automations';
+import { nextOccurrence, ONCE_PAST_DUE_MESSAGE, onceInstant } from '@open-mercato/cezar-contract/automation-schedule';
+import { automationCreateSchema, automationUpdateSchema, type AutomationEditable } from '@open-mercato/cezar-contract/automation-requests';
 import { SCHEDULED_TASK_NOTE } from '@open-mercato/cezar-contract/scheduled-tasks';
 import { MODEL_DISCOVERY_RUNNERS, type ModelDiscoveryRunner } from '@open-mercato/cezar-contract/workspace';
 import { loadConfig } from '../config.ts';
@@ -14,9 +14,6 @@ import { SCHEDULE_LEASE_HELD_REASON, ScheduleRunner, type ScheduleRunnerHandle }
 import type { AutomationStore } from './store.ts';
 import { validateAutomationPrompt } from './task-template.ts';
 import {
-  automationEventSchema,
-  automationFiltersSchema,
-  automationTaskSchema,
   isGithubAutomation,
   isOnceSchedule,
   isScheduleAutomation,
@@ -33,28 +30,6 @@ export const ONCE_PAST_DUE = ONCE_PAST_DUE_MESSAGE;
 export const ONCE_ARCHIVED = 'this one-time schedule is archived';
 export const ONCE_LAUNCH_IN_PROGRESS = 'a launch of this schedule is in progress; try again in a moment';
 export const ONCE_ONLY_CANCEL = 'only a one-time schedule can be cancelled; pause or delete it instead';
-
-/**
- * The editable body of both kinds. Every kind-specific key is optional here because which ones a
- * body must (or must not) carry depends on the kind, and on `PUT` the kind is the STORED one when
- * the body omits it — `resolveAutomationKind` below owns those rules.
- */
-export const automationEditableSchema = z
-  .object({
-    name: z.string().trim().min(1).max(200),
-    description: z.string().max(2_000).optional(),
-    enabled: z.boolean().optional(),
-    kind: automationKindSchema.optional(),
-    events: z.array(automationEventSchema).min(1).max(4).optional(),
-    intervalSeconds: z.number().int().min(60).max(86_400).optional(),
-    filters: automationFiltersSchema.optional(),
-    schedule: automationScheduleSchema.optional(),
-    task: automationTaskSchema.safeExtend({ variants: singleRunVariantsSchema }),
-  })
-  .strict();
-export type AutomationEditable = z.infer<typeof automationEditableSchema>;
-export const automationCreateSchema = automationEditableSchema.extend({ enable: z.boolean().optional() });
-export const automationUpdateSchema = automationEditableSchema.extend({ expectedRevision: z.number().int().positive() });
 
 /** What a project offers the service: its stores, its manager and where it lives. */
 export interface AutomationServiceProject {
