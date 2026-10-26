@@ -1036,8 +1036,65 @@ describe('a bound the scan computes, and one it leaves to the caller', () => {
     // The same object spread into a literal: the file declares it, so the spread may set any bound.
     expect(lines(scan('const base = { timeout: 20_000 };', 'await vi.waitFor(cb, { ...base });'))).toEqual([2]);
     expect(scan('const base = { timeout: 20_000 };', 'await vi.waitFor(cb, { ...base, timeout: 20_000 });')).toEqual([]);
-    expect(lines(scan('const key = "timeout";', 'await vi.waitFor(cb, { [key]: 20_000 });'))).toEqual([2]);
+    expect(lines(scan('const key = pick();', 'await vi.waitFor(cb, { [key]: 20_000 });'))).toEqual([2]);
     expect(scan('async function w(o: object) { await vi.waitFor(cb, { ...o }); }')).toEqual([]);
+  });
+
+  // One reader names every key, so the same spellings work wherever an options object is read. A template is a key only inside
+  // brackets: `{ `timeout`: 1 }` does not parse.
+  const keySpellings = [
+    'timeout', "'timeout'", '"timeout"', "'\\u0074imeout'", "['timeout']", '["timeout"]', '[`timeout`]',
+    '[KEY]', '[ALIAS]', "['timeout' as const]", '[(KEY)]', '[KEY as string]', '[KEY!]', '[KEY satisfies string]',
+  ];
+  const readers = (key: string, ms: string): Record<string, string[]> => ({
+    'vi.waitFor': [`await vi.waitFor(cb, { ${key}: ${ms} });`],
+    'vi.waitUntil': [`await vi.waitUntil(cb, { ${key}: ${ms} });`],
+    'expect.poll': [`await expect.poll(value, { ${key}: ${ms} }).toBe(1);`],
+    "vi['waitFor']": [`await vi['waitFor'](cb, { ${key}: ${ms} });`],
+    'an options object held in a name': [`const OPTIONS = { ${key}: ${ms} };`, 'await vi.waitFor(cb, OPTIONS);'],
+  });
+
+  it('reads the key `timeout` by every spelling the language has, in every reader of an options object', () => {
+    for (const key of keySpellings) {
+      for (const [reader, body] of Object.entries(readers(key, '500'))) {
+        expect(rules(scan("const KEY = 'timeout' as const;", 'const ALIAS = KEY;', ...body)), `${reader}, key ${key}, 500`).toEqual(['short-bound']);
+      }
+      for (const [reader, body] of Object.entries(readers(key, '20_000'))) {
+        expect(scan("const KEY = 'timeout' as const;", 'const ALIAS = KEY;', ...body), `${reader}, key ${key}, 20_000`).toEqual([]);
+      }
+    }
+  });
+
+  it('reads a numeric key as a key that is not `timeout`', () => {
+    expect(scan('await vi.waitFor(cb, { timeout: 20_000, 0: 1, 1e3: 2, [7]: 3, [0x8]: 4 });')).toEqual([]);
+    expect(lines(scan('await vi.waitFor(cb, { 5: 1, timeout: 500 });'))).toEqual([1]);
+  });
+
+  it('counts an options object with a key it cannot resolve as below the floor, unless the caller sizes it', () => {
+    // The file declares the key, so the key may be `timeout` and the value may be anything.
+    expect(lines(scan('const key = pick();', 'await vi.waitFor(cb, { timeout: 20_000, [key]: 1 });'))).toEqual([2]);
+    expect(lines(scan('const key = pick();', 'await vi.waitFor(cb, { [key + "x"]: 20_000, timeout: 500 });'))).toEqual([2]);
+    expect(lines(scan('function pick() { return "timeout"; }', 'await vi.waitFor(cb, { [pick()]: 20_000 });'))).toEqual([2]);
+    expect(lines(scan("const part = 'timeout';", 'await vi.waitFor(cb, { [`${part}`]: 20_000 });'))).toEqual([2]);
+    expect(lines(scan('let key = "size";', 'key = "timeout";', 'await vi.waitFor(cb, { [key]: 20_000 });'))).toEqual([3]);
+    expect(lines(scan('const base = pick();', 'await vi.waitFor(cb, { ...base });'))).toEqual([2]);
+    // A later explicit `timeout` still decides.
+    expect(scan('const key = pick();', 'await vi.waitFor(cb, { [key]: 1, timeout: 20_000 });')).toEqual([]);
+    // A key the caller gives, or one the file imports, is the caller's to size.
+    expect(scan('async function w(key: string) { await vi.waitFor(cb, { [key]: 20_000 }); }')).toEqual([]);
+    expect(scan("import { KEY } from './keys';", 'await vi.waitFor(cb, { [KEY]: 20_000 });')).toEqual([]);
+    expect(scan('await vi.waitFor(cb, { [pick()]: 20_000 });')).toEqual([]);
+  });
+
+  it('reads a Vitest wait written with a bracketed name as it reads a property key', () => {
+    const waits = [
+      "await vi['waitFor'](cb);", 'await vi["waitUntil"](cb);', "await expect['poll'](value).toBe(1);", 'await vi[`waitFor`](cb);', "await vi[('waitFor')](cb);",
+      "await vi['waitFor' as const](cb);", "await vi [ 'waitFor' ] (cb);", "await vi['\\u0077aitFor'](cb);",
+    ];
+    expect(lines(scan(...waits))).toEqual(waits.map((_, index) => index + 1));
+    expect(lines(scan("const NAME = 'waitFor';", 'await vi[NAME](cb);', "await vi['waitFor'](cb, { timeout: 20_000 });", "await vi['waitFor'](cb, { timeout: 500 });"))).toEqual([2, 4]);
+    // A name that is not a wait, or that the scan cannot resolve, is no wait.
+    expect(scan("await vi['spyOn'](x);", "await expect['extend']({});", 'await vi[pick()](cb);', 'await expect[key](cb);', 'const first = expect[0](1);')).toEqual([]);
   });
 
   it('reads a helper argument by its value only: a name it cannot read is not a bound by its position', () => {

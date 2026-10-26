@@ -1278,6 +1278,9 @@ const promiseSleep =
 
 /** Vitest's waits; each defaults to a 1 s bound. */
 const vitestWait = /\b(?:vi\s*\.\s*(?:waitFor|waitUntil)|expect\s*\.\s*poll)\s*\(/g;
+/** The same waits written with a bracketed name, `vi['waitFor'](…)`: the receiver, and the names it takes. */
+const vitestReceiver = /\b(vi|expect)\s*\[/g;
+const vitestNames: Record<string, ReadonlySet<string>> = { vi: new Set(['waitFor', 'waitUntil']), expect: new Set(['poll']) };
 const helperNames = 'waitFor|waitUntil|until|eventually|waitForCondition';
 /** A call to a local wait helper, not a method of something else. */
 const helperCall = new RegExp(`(?<!\\.\\s*)(?<![\\w$])(?:${helperNames})\\s*\\(`, 'g');
@@ -1383,7 +1386,8 @@ const ownNames = new Set(['Math', 'Number', 'Date', 'Infinity', 'NaN', 'undefine
 
 /** Whether the expression reads a name or path from outside the file: a parameter, an import or a global, so a value the caller sizes. */
 function sizedOutside(code: string, place: PollLoop, text: string, at: number): boolean {
-  const names = text.replace(/\b(?:as|satisfies)\s+[\w$.]+|<[\w$.[\]| ]+>/g, ' ').match(/(?<![\w$.])[A-Za-z_$][\w$]*/g) ?? [];
+  // The `$` of a template's `${` opens a slot; it is no name.
+  const names = text.replace(/\b(?:as|satisfies)\s+[\w$.]+|<[\w$.[\]| ]+>|\$(?=\{)/g, ' ').match(/(?<![\w$.])[A-Za-z_$][\w$]*/g) ?? [];
   return names.some((name) => !ownNames.has(name) && !declaredHere(code, place, name, at));
 }
 
@@ -1409,14 +1413,26 @@ function waitMs(code: string, at: number, text: string | undefined, source?: str
   return source !== undefined && !sizedOutside(code, place, trimmed, at) ? NaN : undefined;
 }
 
+/** Every Vitest wait: where its call starts and the `(` that opens its arguments. A bracketed name is read as a property key is. */
+function vitestWaits(code: string, source: string): Array<{ index: number; open: number }> {
+  const waits = [...code.matchAll(vitestWait)].map((match) => ({ index: match.index, open: match.index + match[0].length - 1 }));
+  for (const match of code.matchAll(vitestReceiver)) {
+    const bracket = match.index + match[0].length - 1;
+    const close = closeOf(code, bracket);
+    const call = /^\s*\(/.exec(code.slice(close + 1));
+    const name = keyText(code, source, source.slice(bracket + 1, close), bracket);
+    if (call && name !== undefined && vitestNames[match[1] ?? '']?.has(name)) waits.push({ index: match.index, open: close + call[0].length });
+  }
+  return waits;
+}
+
 /** Rule `short-bound`: a Vitest wait with no bound (1 s), or with a literal one under 10 s, and the local helpers alike. */
 function boundSites(code: string, source: string): Found[] {
   const found: Found[] = [];
-  for (const match of code.matchAll(vitestWait)) {
-    const open = match.index + match[0].length - 1;
+  for (const { index, open } of vitestWaits(code, source)) {
     const bound = argsOf(code, open, closeOf(code, open))[1];
     const ms = bound === undefined ? VITEST_DEFAULT_MS : bound.text.startsWith('{') ? optionsBound(code, source, bound) : waitMs(code, bound.start, bound.text, source);
-    if (isShort(ms)) found.push({ rule: 'short-bound', offset: match.index });
+    if (isShort(ms)) found.push({ rule: 'short-bound', offset: index });
   }
   // A local wait helper called with a short literal anywhere after its condition.
   for (const match of code.matchAll(helperCall)) {
@@ -1477,7 +1493,7 @@ function optionsBound(code: string, source: string, arg: Item, depth = 0): numbe
   if (closeOf(code, arg.start) !== close) return undefined;
   let bound: number | undefined = VITEST_DEFAULT_MS;
   for (const property of argsOf(code, arg.start, close)) {
-    const key = propertyKey(source, property);
+    const key = propertyKey(code, source, property);
     if (key === undefined) bound = entryBound(code, property);
     else if (key.name === 'timeout') bound = waitMs(code, property.start, key.value ?? key.name, source, depth);
   }
@@ -1501,14 +1517,63 @@ function unescaped(key: string): string | undefined {
 }
 
 /**
- * A property's key and value text. A quoted key is blanked in the code, so its name is read from
- * the original source at the same offsets: `{ "timeout": 100 }` names `timeout`. A spread, a
- * computed key or a quoted key with an escape other than `\u` and `\x` is `undefined`; a method or a numeric key gets an
- * empty name.
+ * A text without the wrappers that change its type and not its value: parentheses, a trailing `as X`, `satisfies X` or `!`, and a
+ * leading `<X>`.
  */
-function propertyKey(source: string, property: Item): { name: string; value?: string } | undefined {
+function unwrapped(text: string): string {
+  let inner = text.trim();
+  for (;;) {
+    const next = inner
+      .replace(/^\(([\s\S]*)\)$/, '$1')
+      .replace(/\s+(?:as|satisfies)\s+[\w$.]+(?:<[^<>]*>)?$/, '')
+      .replace(/!$/, '')
+      .replace(/^<[\w$.|\s]+>/, '')
+      .trim();
+    if (next === inner) return inner;
+    inner = next;
+  }
+}
+
+/** The value of a string literal, or of a template without substitutions, written as `text`; `undefined` for anything else, and for an escape other than `\u` and `\x`. */
+function stringLiteral(text: string): string | undefined {
+  const quoted = /^(?:'((?:[^'\\\n]|\\.)*)'|"((?:[^"\\\n]|\\.)*)"|`((?:[^`\\$]|\\.|\$(?!\{))*)`)$/.exec(unwrapped(text));
+  const body = quoted?.[1] ?? quoted?.[2] ?? quoted?.[3];
+  return body === undefined ? undefined : unescaped(body);
+}
+
+/**
+ * The one reader of a key written between brackets (`{ [key]: 1 }`, `vi[key](…)`), so that no reader of the scan compares a name the
+ * others cannot spell. The name is the string of a literal or of a template without substitutions, a number as it is written, or a
+ * name that every value the file gives it spells as one string, each with `as`, `satisfies`, `!` and parentheses taken off. The code
+ * has its strings blanked, so the text is read from the `source` at the same offsets. Anything else is `undefined`: the scan cannot
+ * say which key it is.
+ */
+function keyText(code: string, source: string, text: string, at: number, depth = 0): string | undefined {
+  const literal = stringLiteral(text);
+  if (literal !== undefined) return literal;
+  const inner = unwrapped(text);
+  if (numericLiteral.test(inner)) return inner;
+  if (depth > 3 || !/^[A-Za-z_$][\w$]*$/.test(inner)) return undefined;
+  const names = heldValues(code, placeAt(code, at), inner, at).map((held) =>
+    held.value === UNREAD ? undefined : keyText(code, source, source.slice(held.at, held.at + valueText(held.value).length), held.at, depth + 1));
+  return names.length > 0 && names.every((name) => name !== undefined && name === names[0]) ? names[0] : undefined;
+}
+
+/**
+ * A property's key and value text. A quoted key is blanked in the code, so its name is read from the original source at the same
+ * offsets: `{ "timeout": 100 }` names `timeout`. A bracketed key is read by `keyText`. A spread, a bracketed key `keyText` cannot
+ * resolve or a quoted key with an escape other than `\u` and `\x` is `undefined`; a method or a numeric key gets an empty name.
+ */
+function propertyKey(code: string, source: string, property: Item): { name: string; value?: string } | undefined {
   const { text, start } = property;
-  if (text.startsWith('...') || text.startsWith('[')) return undefined;
+  if (text.startsWith('...')) return undefined;
+  if (text.startsWith('[')) {
+    const close = closeOf(code, start);
+    const name = keyText(code, source, source.slice(start + 1, close), start);
+    if (name === undefined) return undefined;
+    const colon = /^\s*:/.exec(text.slice(close - start + 1));
+    return colon ? { name, value: text.slice(close - start + 1 + colon[0].length).trim() } : { name: '' };
+  }
   const quoted = /^(['"])( *)\1\s*:/.exec(text);
   if (quoted) {
     const name = unescaped(source.slice(start + 1, start + 1 + (quoted[2] ?? '').length));

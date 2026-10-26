@@ -179,8 +179,10 @@ function numberOf(node: Node | null | undefined, read: Read): number | undefined
 }
 
 /** `Number.POSITIVE_INFINITY` and the other numbers `Number` holds. */
-const memberNumber = (node: MemberExpression): number | undefined =>
-  node.object.type === 'Identifier' && node.object.name === 'Number' && !node.computed && node.property.type === 'Identifier' ? numberMembers.get(node.property.name) : undefined
+const memberNumber = (node: MemberExpression): number | undefined => {
+  const name = node.object.type === 'Identifier' && node.object.name === 'Number' ? keyName(node.property, node.computed) : undefined
+  return name === undefined ? undefined : numberMembers.get(name)
+}
 
 function unaryNumber(node: UnaryExpression, read: Read): number | undefined {
   const value = node.operator === '-' || node.operator === '+' ? numberOf(node.argument, read) : undefined
@@ -207,19 +209,49 @@ function binaryNumber(node: BinaryExpression, read: Read): number | undefined {
   return operations[node.operator]
 }
 
+/** A node without the wrappers that change its type and not its value: parentheses, `as`, `satisfies`, `!`. */
+function unwrap(node: Node): Node {
+  const wrapper = node.type === 'ParenthesizedExpression' || node.type === 'TSAsExpression' || node.type === 'TSSatisfiesExpression' || node.type === 'TSNonNullExpression' || node.type === 'TSTypeAssertion'
+  return wrapper ? unwrap(node.expression) : node
+}
+
+/** The text of a string literal or of a template without substitutions, else undefined. */
+function stringOf(node: Node): string | undefined {
+  const inner = unwrap(node)
+  if (inner.type === 'StringLiteral') return inner.value
+  return inner.type === 'TemplateLiteral' && inner.expressions.length === 0 ? inner.quasis[0]?.value.cooked ?? undefined : undefined
+}
+
+/**
+ * The one reader of a property key, for an object literal's keys and for a member access alike, so that no reader of the scan
+ * compares a name the others cannot spell. A plain key is an identifier, a string or a number: `timeout`, `'timeout'`, `500`.
+ * A computed key is a string, a template without substitutions, a number, or a name that every `const` of the file holds as one
+ * string (`[KEY]` after `const KEY = 'timeout'`), each with `as`, `satisfies`, `!` and parentheses taken off. Anything else
+ * is undefined: the scan cannot say which key it is.
+ */
+function keyName(key: Node, computed: boolean, place?: Place): string | undefined {
+  if (computed) return expressionName(key, place, 0)
+  if (key.type === 'Identifier') return key.name
+  return key.type === 'StringLiteral' ? key.value : key.type === 'NumericLiteral' ? String(key.value) : undefined
+}
+
+/** The name a bracketed key spells, followed through the names that hold it (`const ALIAS = KEY`) to a depth of three. */
+function expressionName(node: Node, place: Place | undefined, depth: number): string | undefined {
+  const literal = stringOf(node)
+  if (literal !== undefined) return literal
+  const inner = unwrap(node)
+  if (inner.type === 'NumericLiteral') return String(inner.value)
+  if (inner.type !== 'Identifier' || !place || depth > 3) return undefined
+  const names = heldBy(place.view, place.use, inner.name, true).map(held => expressionName(held.value, placeFor(place.view, held.use), depth + 1))
+  return names.length > 0 && names.every(name => name !== undefined && name === names[0]) ? names[0] : undefined
+}
+
 /** The `.name` of a callee, and the identifier it is called on (`vi` in `vi.waitFor`), when there is one. */
 function calleeOf(node: Node): { object?: string; name: string } | undefined {
   if (node.type === 'Identifier') return { name: node.name }
-  if (node.type !== 'MemberExpression' || node.computed || node.property.type !== 'Identifier') return undefined
-  return node.object.type === 'Identifier' ? { object: node.object.name, name: node.property.name } : { name: node.property.name }
-}
-
-/** The value of the `timeout` property of an options object. A key written twice takes the last, as the language does. */
-function timeoutOf(options: Node | undefined): Node | undefined {
-  if (options?.type !== 'ObjectExpression') return undefined
-  const timeouts = options.properties.flatMap(property =>
-    property.type === 'ObjectProperty' && !property.computed && property.key.type === 'Identifier' && property.key.name === 'timeout' ? [property.value] : [])
-  return timeouts.at(-1)
+  const name = node.type === 'MemberExpression' ? keyName(node.property, node.computed) : undefined
+  if (node.type !== 'MemberExpression' || name === undefined) return undefined
+  return node.object.type === 'Identifier' ? { object: node.object.name, name } : { name }
 }
 
 /** Where a wait bound is read: the function around it and the nodes above it, and what a name holds there. */
@@ -293,10 +325,14 @@ function vitestMs(node: Node, place: Place): number | undefined {
 const placeFor = (view: View, use: Use): Place => ({ view, use, read: nameReader(view, use, 1, true) })
 
 /** The options objects an argument stands for: the literal itself, or the ones a name holds, each with the place its own names are read from. */
-function optionObjects(node: Node, place: Place): Array<{ object: Node; place: Place }> {
+function optionObjects(argument: Node, place: Place): Array<{ object: ObjectExpression; place: Place }> {
+  const node = unwrap(argument)
   if (node.type === 'ObjectExpression') return [{ object: node, place }]
   if (node.type !== 'Identifier') return []
-  return heldBy(place.view, place.use, node.name, true).flatMap(held => (held.value.type === 'ObjectExpression' ? [{ object: held.value, place: placeFor(place.view, held.use) }] : []))
+  return heldBy(place.view, place.use, node.name, true).flatMap(held => {
+    const value = unwrap(held.value)
+    return value.type === 'ObjectExpression' ? [{ object: value, place: placeFor(place.view, held.use) }] : []
+  })
 }
 
 /** Vitest's `vi.waitFor`, `vi.waitUntil` and `expect.poll`: the bound in force, or undefined when the caller sizes it. */
@@ -309,22 +345,24 @@ function vitestBound(call: CallExpression, place: Place): number | undefined {
   if (!options) return VITEST_DEFAULT_MS
   const objects = optionObjects(options, place)
   if (objects.length === 0) return vitestMs(options, place)
-  return smallest(objects.map(({ object, place: at }) => optionsMs(object as ObjectExpression, at)))
+  return smallest(objects.map(({ object, place: at }) => optionsMs(object, at, VITEST_DEFAULT_MS, vitestMs)))
 }
 
+/** What a Testing Library wait is given as its `timeout`: `undefined` is its default, which `asyncUtilTimeout` covers. */
+const testingLibraryMs = (node: Node, place: Place): number | undefined => (node.type === 'Identifier' && node.name === 'undefined' ? undefined : sizeOf(node, place))
+
 /**
- * The bound an options object leaves, read in order as the language does: Vitest's default until a `timeout` names one. A spread or
- * a computed key may set any key, so after one the bound is the caller's (`undefined`) when it reads a name from outside the file,
- * and `NaN` when it reads only what the file declares, until a later explicit `timeout`.
+ * The bound an options object leaves, read in order as the language does, from `before` until a `timeout` names one. Every key
+ * is read by `keyName`. A spread, or a computed key that `keyName` cannot resolve, may set any key, so after one the bound is the
+ * caller's (`undefined`) when it reads a name from outside the file, and `NaN` when it reads only what the file declares, until
+ * a later explicit `timeout`.
  */
-function optionsMs(object: ObjectExpression, place: Place): number | undefined {
-  let bound: number | undefined = VITEST_DEFAULT_MS
+function optionsMs(object: ObjectExpression, place: Place, before: number | undefined, boundOf: (node: Node, place: Place) => number | undefined): number | undefined {
+  let bound = before
   for (const property of object.properties) {
-    if (property.type === 'ObjectProperty' && !property.computed && property.key.type === 'Identifier' && property.key.name === 'timeout') bound = vitestMs(property.value, place)
-    else if (property.type === 'SpreadElement' || (property.type !== 'ObjectMethod' && property.computed)) {
-      const source = property.type === 'SpreadElement' ? property.argument : property.key
-      bound = sizedOutside(source, place.view, place.use) ? undefined : NaN
-    }
+    const name = property.type === 'SpreadElement' ? undefined : keyName(property.key, property.computed, place)
+    if (name === 'timeout' && property.type === 'ObjectProperty') bound = boundOf(property.value, place)
+    else if (name === undefined) bound = sizedOutside(property.type === 'SpreadElement' ? property.argument : property.key, place.view, place.use) ? undefined : NaN
   }
   return bound
 }
@@ -337,12 +375,12 @@ function testingLibraryBound(call: CallExpression, ctx: Ctx, place: Place): numb
   const wait = callee.object === undefined ? ctx.tlWaits.has(callee.name) : ctx.tlNamespaces.has(callee.object) && /^waitFor(?:ElementToBeRemoved)?$/.test(callee.name)
   if (!query && !wait) return undefined
   // The wait's own options come last (`findBy*(text, queryOptions, waitForOptions)`), so the last `timeout` is the one in force.
-  const timeouts = call.arguments.flatMap(argument => optionObjects(argument, place).flatMap(({ object, place: at }) => {
-    const timeout = timeoutOf(object)
-    return timeout ? [{ timeout, place: at }] : []
-  }))
-  const last = timeouts.at(-1)
-  return last ? sizeOf(last.timeout, last.place) : undefined
+  let bound: number | undefined
+  for (const argument of call.arguments) {
+    const objects = optionObjects(argument, place)
+    if (objects.length > 0) bound = smallest(objects.map(({ object, place: at }) => optionsMs(object, at, bound, testingLibraryMs)))
+  }
+  return bound
 }
 
 /** The longest delay a timer keeps: a larger one fires after 1 ms. */
@@ -617,7 +655,7 @@ function valueOf(node: Node, cx: Probe, use: Use, depth = 0): number | undefined
 type Bound = number | 'unreadable' | undefined
 
 /** A name or a dotted path of names: `deadline`, `state.t0`. */
-const isPath = (node: Node): boolean => node.type === 'Identifier' || (node.type === 'MemberExpression' && !node.computed && node.property.type === 'Identifier' && isPath(node.object))
+const isPath = (node: Node): boolean => node.type === 'Identifier' || (node.type === 'MemberExpression' && keyName(node.property, node.computed) !== undefined && isPath(node.object))
 
 const impure = new Set(['AssignmentExpression', 'UpdateExpression', 'CallExpression', 'NewExpression', 'TaggedTemplateExpression', 'AwaitExpression', 'YieldExpression'])
 

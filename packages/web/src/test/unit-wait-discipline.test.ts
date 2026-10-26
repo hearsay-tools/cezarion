@@ -653,8 +653,69 @@ describe('a bound the scan computes, and one it leaves to the caller', () => {
     expect(scan('const base = { timeout: 20_000 }', 'await vi.waitFor(() => ok(), { ...base, timeout: 20_000 })')).toEqual([])
     expect(lines('await vi.waitFor(() => ok(), { timeout: 20_000, ...base })')).toEqual([])
     expect(lines('const base = { timeout: 500 }', 'await vi.waitFor(() => ok(), { timeout: 20_000, ...base })')).toEqual([2])
-    expect(lines('const key = "timeout"', 'await vi.waitFor(() => ok(), { [key]: 20_000 })')).toEqual([2])
+    expect(lines('const key = pick()', 'await vi.waitFor(() => ok(), { [key]: 20_000 })')).toEqual([2])
     expect(scan('async function w(o: object) { await vi.waitFor(() => ok(), { ...o }) }')).toEqual([])
+  })
+
+  // One reader names every key, so the same spellings work in every place an options object is read. A template is a key only inside
+  // brackets: `{ `timeout`: 1 }` does not parse.
+  const keySpellings = [
+    'timeout', "'timeout'", '"timeout"', "'\\u0074imeout'", "['timeout']", '["timeout"]', '[`timeout`]',
+    '[KEY]', '[ALIAS]', "['timeout' as const]", '[(KEY)]', '[KEY as string]', '[KEY!]', '[KEY satisfies string]',
+  ]
+  const readers = (key: string, ms: string): Record<string, string[]> => ({
+    'vi.waitFor': [`await vi.waitFor(() => ok(), { ${key}: ${ms} })`],
+    'vi.waitUntil': [`await vi.waitUntil(() => ok(), { ${key}: ${ms} })`],
+    'expect.poll': [`await expect.poll(() => value(), { ${key}: ${ms} }).toBe(1)`],
+    'an options object held in a name': [`const OPTIONS = { ${key}: ${ms} }`, 'await vi.waitFor(() => ok(), OPTIONS)'],
+    'Testing Library waitFor': [tlImport, `await waitFor(() => ok(), { ${key}: ${ms} })`],
+    'Testing Library findBy*': [tlImport, `await screen.findByText('x', {}, { ${key}: ${ms} })`],
+    'Testing Library options held in a name': [tlImport, `const OPTIONS = { ${key}: ${ms} }`, 'await waitFor(() => ok(), OPTIONS)'],
+  })
+
+  it('reads the key `timeout` by every spelling the language has, in every reader of an options object', () => {
+    for (const key of keySpellings) {
+      for (const [reader, body] of Object.entries(readers(key, '500'))) {
+        expect(rules("const KEY = 'timeout'", 'const ALIAS = KEY', ...body), `${reader}, key ${key}, 500`).toEqual(['short-bound'])
+      }
+      for (const [reader, body] of Object.entries(readers(key, '20_000'))) {
+        expect(rules("const KEY = 'timeout'", 'const ALIAS = KEY', ...body), `${reader}, key ${key}, 20_000`).toEqual([])
+      }
+    }
+  })
+
+  it('reads a numeric key as a key that is not `timeout`, and a member written as a string as the member', () => {
+    expect(scan('await vi.waitFor(() => ok(), { timeout: 20_000, 0: 1, 1e3: 2, [7]: 3, [`8`]: 4 })')).toEqual([])
+    expect(lines('await vi.waitFor(() => ok(), { 5: 1, timeout: 500 })')).toEqual([1])
+    expect(lines('await vi.waitFor(() => ok(), { timeout: Number["POSITIVE_INFINITY"] })')).toEqual([1])
+    expect(lines('await vi.waitFor(() => ok(), { timeout: Number[`NaN`] })')).toEqual([1])
+    expect(lines("await vi['waitFor'](() => ok())")).toEqual([1])
+    expect(lines('await vi["waitUntil"](() => ok())')).toEqual([1])
+    expect(lines("await expect['poll'](() => value()).toBe(1)")).toEqual([1])
+    expect(lines(tlImport, "await screen['findByText']('x', {}, { timeout: 500 })")).toEqual([2])
+    // A key the scan cannot evaluate is unreadable, whatever it would spell: see the next test.
+    expect(lines('await vi.waitFor(() => ok(), { ["time" + "out"]: 20_000 })')).toEqual([1])
+  })
+
+  it('counts an options object with a key it cannot resolve as below the floor, unless the caller sizes it', () => {
+    // The file declares the key, so the key may be `timeout` and the value may be anything.
+    expect(lines('const key = pick()', 'await vi.waitFor(() => ok(), { timeout: 20_000, [key]: 1 })')).toEqual([2])
+    expect(lines('const key = pick()', 'await vi.waitFor(() => ok(), { [key]: 20_000 })')).toEqual([2])
+    expect(lines('const key = pick()', 'await vi.waitFor(() => ok(), { [key + "x"]: 20_000, timeout: 500 })')).toEqual([2])
+    expect(lines('function pick() { return "timeout" }', 'await vi.waitFor(() => ok(), { [pick()]: 20_000 })')).toEqual([2])
+    expect(scan('await vi.waitFor(() => ok(), { [pick()]: 20_000 })')).toEqual([])
+    expect(lines('let key = "size"', 'key = "timeout"', 'await vi.waitFor(() => ok(), { [key]: 20_000 })')).toEqual([3])
+    expect(lines("const part = 'timeout'", 'await vi.waitFor(() => ok(), { [`${part}`]: 20_000 })')).toEqual([2])
+    expect(lines(tlImport, 'const key = pick()', 'await waitFor(() => ok(), { [key]: 20_000 })')).toEqual([3])
+    expect(lines(tlImport, 'const key = pick()', 'await screen.findByText("x", {}, { timeout: 20_000, [key]: 1 })')).toEqual([3])
+    expect(lines(tlImport, 'const base = pick()', 'await waitFor(() => ok(), { ...base })')).toEqual([3])
+    // A later explicit `timeout` still decides.
+    expect(scan('const key = pick()', 'await vi.waitFor(() => ok(), { [key]: 1, timeout: 20_000 })')).toEqual([])
+    // A key the caller gives, or a spread of what the caller gives, is the caller's to size.
+    expect(scan('async function w(key: string) { await vi.waitFor(() => ok(), { [key]: 20_000 }) }')).toEqual([])
+    expect(scan(tlImport, 'async function w(key: string) { await waitFor(() => ok(), { [key]: 20_000 }) }')).toEqual([])
+    expect(scan(tlImport, 'async function w(o: object) { await waitFor(() => ok(), { ...o }) }')).toEqual([])
+    expect(scan("import { KEY } from './keys'", 'await vi.waitFor(() => ok(), { [KEY]: 20_000 })')).toEqual([])
   })
 
   it('reads a Testing Library timeout held in an options object, and computes it like any other', () => {
@@ -683,6 +744,8 @@ describe('a bound the scan computes, and one it leaves to the caller', () => {
     expect(scan(
       'async function a(limit: number) { const start = Date.now(); while (Date.now() - start < limit) await sleep(10) }',
       'async function b(opts: { limit: number }) { const start = Date.now(); while (Date.now() - start < opts.limit) await sleep(10) }',
+      // A path written with a string key is the same path.
+      "async function b2(opts: { limit: number }) { const start = Date.now(); while (Date.now() - start < opts['limit']) await sleep(10) }",
       'async function c(n: number) { for (let i = 0; i < n; i++) await sleep(100) }',
       'async function d(step: number) { for (let i = 0; i < 20; i += step) await sleep(100) }',
       'async function e(ms: number) { for (let i = 0; i < 20; i++) await sleep(ms) }',
@@ -707,7 +770,8 @@ describe('a bound the scan computes, and one it leaves to the caller', () => {
       'for (let i = 0; i < 20; i += STEP) await sleep(100)',
       'const N = pick()',
       'for (let i = 0; i < N; i++) await sleep(100)',
-    )).toEqual([3, 5, 7, 10, 12, 14, 16])
+      'while (Date.now() - start < cfg["limit"]) await sleep(10)',
+    )).toEqual([3, 5, 7, 10, 12, 14, 16, 17])
   })
 })
 
