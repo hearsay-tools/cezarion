@@ -1,29 +1,4 @@
 {
   "$comment": "Poll loops the server unit tests carried when the deadline rule landed (hearsay-tools/cezarion#1203). Keyed by file, rule and the line text so a moved line does not churn it. This list only shrinks: fix a site, then run TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts. Rules: AGENTS.md \u00a7 Validation.",
-  "sites": [
-    {
-      "file": "core/claude-model-refusal.test.ts",
-      "rule": "poll-deadline",
-      "site": "while (!predicate() && performance.now() < deadline) await sleep(10);",
-      "count": 1
-    },
-    {
-      "file": "core/workflow-followup-parity.test.ts",
-      "rule": "poll-deadline",
-      "site": "while (Date.now() < rest) {",
-      "count": 2
-    },
-    {
-      "file": "core/workflow-followup-parity.test.ts",
-      "rule": "poll-deadline",
-      "site": "while (Date.now() < until) {",
-      "count": 2
-    },
-    {
-      "file": "core/workflow-followup-parity.test.ts",
-      "rule": "poll-deadline",
-      "site": "while (Date.now() < until) await new Promise(r => setTimeout(r, 20));",
-      "count": 1
-    }
-  ]
+  "sites": []
 }
