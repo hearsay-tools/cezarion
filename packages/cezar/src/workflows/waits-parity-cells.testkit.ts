@@ -23,6 +23,7 @@ import { watchTurnOutcomes, type TurnOutcomes } from './turn-outcomes.testkit.ts
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt, MONITORING_TEXT } from './monitoring-turn.testkit.ts';
 import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
+import { recordCommits } from '../runs/outcome-crash.testkit.ts';
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 import { withHeldAck, withRejectedInput } from '../core/owned-input-delivery.testkit.ts';
 import { ciNativeMessages, ciNativeSteers, gatedProviderFailure, MESSAGE_WAKE_OPENING, persistentWakeFailure, thenSay, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
@@ -672,18 +673,8 @@ function baseCells(runners: RunnerId[]): void {
       };
       const first = await open(60, 'u10 first'), second = await open(61, 'u10 second'), last = await open(62, 'u10 last');
       store.updateRun(run.id, { automaticWakes: 39, waitDeliveryFailures: 2 });
-      // What a crash at the charge would leave: the committed row, read as the charge's note is
-      // written, before any debounced save could land.
-      let committed: { automaticWakes?: number; waitDeliveryFailures?: number; delivered: string[] } | undefined;
-      const append = store.appendEvent.bind(store);
-      vi.spyOn(store, 'appendEvent').mockImplementation((id, event) => {
-        if (!committed && event.type === 'note' && String(event.message).startsWith('automatic timer wake-up (')) {
-          const row = readPersistedRuns(join(root, '.ai/cezar')).find(record => record.id === run.id);
-          committed = { automaticWakes: row?.automaticWakes, waitDeliveryFailures: row?.waitDeliveryFailures,
-            delivered: (row?.lastWaits ?? []).filter((wait: Wait) => wait.phase === 'delivered').map((wait: Wait) => wait.id).sort() };
-        }
-        return append(id, event);
-      });
+      // What a crash after any commit would leave (hearsay-tools/cezarion#1805): every committed row.
+      const commits = recordCommits(join(root, '.ai/cezar'));
       // Two timers resolve before one boundary: one admitted turn carries both and spends one wake.
       fireTimer(first.id); fireTimer(second.id);
       await until(() => store.getRun(run.id)?.waits?.filter(wait => wait.phase === 'resolved').length === 2);
@@ -694,8 +685,11 @@ function baseCells(runners: RunnerId[]): void {
       expect(store.getRun(run.id)?.automaticWakes).toBe(40);
       const charged = store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up ('));
       expect(charged.map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
-      // The delivery, its charge and the cleared failure count are one commit.
-      expect(committed).toEqual({ automaticWakes: 40, waitDeliveryFailures: undefined, delivered: [first.id, second.id].sort() });
+      // The delivery, its charge and the cleared failure count are one commit: no committed row
+      // holds a delivered timer without its charge.
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => [first.id, second.id].includes(wait.id) && wait.phase === 'delivered') ||
+        (row.automaticWakes === 40 && row.waitDeliveryFailures === undefined && row.lastWaits.filter(wait => wait.phase === 'delivered').length === 2), 'a delivered timer and its charge');
+      expect(commits.rows(run.id).some(row => row?.lastWaits?.some(wait => wait.id === first.id && wait.phase === 'delivered'))).toBe(true);
       await until(() => parkedOn(run.id, store.getRun(run.id)?.waits?.find(wait => wait.id === last.id)));
       const turns = turnEnds(run.id);
       // The budget is spent: the next timer to come due is cancelled and wakes nothing.
@@ -1317,22 +1311,15 @@ function baseCells(runners: RunnerId[]): void {
       engine().active.get(run.id)!.session.end();
       await until(() => !manager.isActive(run.id));
       rmSync(answers, { force: true });
-      // What a crash right after the answer settles the wait would leave: the committed row.
-      let committed: { answer?: string; delivered: boolean } | undefined;
-      const settle = store.commitHumanWaitsAnswered.bind(store);
-      vi.spyOn(store, 'commitHumanWaitsAnswered').mockImplementation((id, only) => {
-        const ids = settle(id, only);
-        if (!committed && ids.includes(wait!.id)) {
-          const row = readPersistedRuns(join(root, '.ai/cezar')).find(record => record.id === run.id);
-          committed = { answer: row?.continuationMessage?.text,
-            delivered: (row?.lastWaits ?? []).some((entry: Wait) => entry.id === wait!.id && entry.phase === 'delivered') };
-        }
-        return ids;
-      });
+      // What a crash after any commit would leave (hearsay-tools/cezarion#1805): every committed row.
+      const commits = recordCommits(join(root, '.ai/cezar'));
       const answer = toolCall('cezar_done', { summary: 'answered and shipped' });
       expect(manager.continueRun(run.id, { text: answer }).ok).toBe(true);
-      // The wait is never delivered in a row that lost the answer it was delivered with.
-      expect(committed).toEqual({ answer: answer.trim(), delivered: true });
+      // The wait is never delivered in a row that lost the answer it was delivered with: until the
+      // Continue's step starts, a row with the wait delivered holds the answer.
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') ||
+        row.continuationMessage?.text === answer.trim() || row.steps.some(step => step.id === 'continue-1' && step.status !== 'pending'), 'an answered wait and its answer');
+      expect(commits.rows(run.id).some(row => row?.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') && row.continuationMessage?.text === answer.trim())).toBe(true);
       // File creation precedes write completion in the mock child. Read its response only
       // after the native turn has finished, when the child has completed the write.
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? '') && !manager.isActive(run.id));

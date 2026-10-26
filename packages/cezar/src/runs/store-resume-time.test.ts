@@ -54,7 +54,7 @@ describe('a commit that leaves waiting', () => {
     const wait = resolvedTimer();
     const input: AgentInput = { id: wait.id, parentRunId: id, source: 'lifecycle', text: 'wake', createdAt: new Date().toISOString() };
     store.commitWait(id, wait, input);
-    store.commitWaitDelivery(id, [wait.id], {}, true);
+    store.commitOutcome(id, { kind: 'delivered', inputIds: [wait.id], at: new Date().toISOString() }, { patch: { status: 'running' } });
     expect(committed(id)).toMatchObject({ status: 'running', autoResumeAttempts: 2 });
     expect(committed(id)).not.toHaveProperty('autoResumeAt');
     expect(store.getRun(id)?.autoResumeAt).toBeUndefined();

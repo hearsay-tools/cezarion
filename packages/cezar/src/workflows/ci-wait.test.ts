@@ -781,7 +781,7 @@ describe('wait list through RunManager (hearsay-tools/cezarion#1233)', { timeout
     }
   });
 
-  it('commitWaitDelivery runs on the provider ACK of a batch containing several resolved waits', async () => {
+  it('the wait delivery outcome runs on the provider ACK of a batch containing several resolved waits', async () => {
     const external = githubByPr();
     const gate = join(root, 'turn-boundary');
     const wire = controlledWire({ firstResultGate: gate });

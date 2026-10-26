@@ -123,7 +123,7 @@ import { answersQuestion, openQuestions, questionMessage } from '../delegation/q
 import { messagedParentSince, parkNoticeMessage, parkNoticeWait, parkingTurn } from '../delegation/park-notice.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
-import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState, type WakeCounters } from '../runs/store.ts';
+import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
 import { isReclaimable, reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import {
   AgentTempDirError,
@@ -2500,7 +2500,7 @@ export class RunManager {
     if (!wait) return { cancelled: false, code: 'not_found' };
     if (wait.phase !== 'open') return { cancelled: false, code: 'already_resolved' };
     if (wait.kind === 'human' && wait.askSeq !== undefined) return { cancelled: false, code: 'human_question' };
-    this.store.commitWaitCancellation(runId, [waitId]);
+    this.store.commitOutcome(runId, { kind: 'cancelled', waitIds: [waitId] });
     this.disarmWait(waitId);
     return { cancelled: true };
   }
@@ -2666,7 +2666,7 @@ export class RunManager {
    *  (hearsay-tools/cezarion#1233, hearsay-tools/cezarion#1446). */
   private cancelAutomaticAtCap(runId: string, waits: readonly Wait[]): void {
     if (!waits.length) return;
-    this.store.commitWaitCancellation(runId, waits.map(wait => wait.id));
+    this.store.commitOutcome(runId, { kind: 'cancelled', waitIds: waits.map(wait => wait.id) });
     for (const wait of waits) {
       this.disarmWait(wait.id);
       this.store.appendEvent(runId, { type: 'note', message: wait.kind === 'process'
@@ -2715,7 +2715,7 @@ export class RunManager {
       const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId);
       return 'capped';
     }
-    this.writeWakeCounters(runId, { waitDeliveryFailures: failures });
+    this.store.commitOutcome(runId, { kind: 'counted', waitDeliveryFailures: failures }, {}, { bestEffort: true });
     const previous = this.wakeBackoffs.get(runId); if (previous) clearTimeout(previous);
     const timer = setTimeout(() => {
       if (this.wakeBackoffs.get(runId) !== timer) return;
@@ -2760,18 +2760,7 @@ export class RunManager {
 
   /** The failure count is on the run record, so a restart keeps it (hearsay-tools/cezarion#1234). */
   private clearWakeDeliveryFailures(runId: string): void {
-    if (this.store.getRun(runId)?.waitDeliveryFailures !== undefined) this.writeWakeCounters(runId, { waitDeliveryFailures: undefined });
-  }
-
-  /** The wake counters outside a delivery commit: committed at once, so a crash keeps them, and
-   *  best-effort, so a refused write never stops the path that changes them (a cancel, a Finish,
-   *  a nudge). A refused commit warns and leaves the change to the store's debounced save. */
-  private writeWakeCounters(runId: string, counters: WakeCounters): void {
-    try { this.store.commitWakeCounters(runId, counters); }
-    catch (error) {
-      console.warn(`[cez] wake counter checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
-      this.store.updateRun(runId, counters);
-    }
+    this.store.commitOutcome(runId, { kind: 'counted', waitDeliveryFailures: undefined }, {}, { bestEffort: true });
   }
 
   /**
@@ -2788,13 +2777,14 @@ export class RunManager {
   /** Spend one automatic wake on the record; returns the count after it. */
   private chargeAutomaticWake(runId: string): number {
     const next = (this.store.getRun(runId)?.automaticWakes ?? 0) + 1;
-    this.writeWakeCounters(runId, { automaticWakes: next });
+    // Best-effort: a refused write never stops the nudge or the cleanup that charges it.
+    this.store.commitOutcome(runId, { kind: 'charged', automaticWakes: next }, {}, { bestEffort: true });
     return next;
   }
 
   /** A human message or a human Continue restarts the budget. */
   private resetAutomaticWakes(runId: string): void {
-    if (this.store.getRun(runId)?.automaticWakes) this.writeWakeCounters(runId, { automaticWakes: 0 });
+    if (this.store.getRun(runId)?.automaticWakes) this.store.commitOutcome(runId, { kind: 'charged', automaticWakes: 0 }, {}, { bestEffort: true });
   }
 
   private retryWaitAdmission(runId: string): void {
@@ -3021,7 +3011,7 @@ export class RunManager {
   private cancelOpenWaits(runId: string): void {
     const before = this.store.getRun(runId)?.waits ?? [];
     const remaining = (this.store.getRun(runId)?.waits ?? []).map(wait => wait.id);
-    try { if (remaining.length) this.store.commitWaitCancellation(runId, remaining); }
+    try { if (remaining.length) this.store.commitOutcome(runId, { kind: 'cancelled', waitIds: remaining }); }
     catch (error) { console.warn(`[cez] wait cancellation failed: ${error instanceof Error ? error.message : String(error)}`); }
     for (const wait of before) this.disarmWait(wait.id);
     this.disarmRunWaits(runId);
@@ -5596,7 +5586,7 @@ export class RunManager {
     if (this.disposed || !['queued', 'running', 'waiting'].includes(run.status) || this.rootFinishRequested(parentId) || this.historyDeletionPending(parentId)) {
       throw new DelegationPolicyError('incompatible_state', 'Parent cannot cancel a worker wait');
     }
-    this.store.commitWaitCancellation(parentId, [waitId]);
+    this.store.commitOutcome(parentId, { kind: 'cancelled', waitIds: [waitId] });
     this.disarmWait(waitId);
     const cancelled = this.store.getRun(parentId)?.lastWaits?.filter((wait): wait is DeadlinedWorkerWaitEntry => wait.id === waitId && wait.kind === 'worker' && hasWorkerDeadline(wait)).at(-1);
     return workerWaitEntryToLegacy(cancelled ?? { ...entry, phase: 'cancelled', cancelledAt: new Date().toISOString() });
@@ -5753,7 +5743,7 @@ export class RunManager {
             // A settled parent waits on nobody: its worker waits are cancelled, which also lets a
             // stored wait upgraded onto a finished root go (hearsay-tools/cezarion#1301).
             const stale = (parent.waits ?? []).filter(wait => wait.kind === 'worker' && (wait.phase === 'open' || wait.phase === 'resolved')).map(wait => wait.id);
-            if (stale.length) { this.store.commitWaitCancellation(parent.id, stale); for (const id of stale) this.disarmWait(id); }
+            if (stale.length) { this.store.commitOutcome(parent.id, { kind: 'cancelled', waitIds: stale }); for (const id of stale) this.disarmWait(id); }
             this.fallbackRoutedQuestions(parent.id, `parent-${parent.status}`);
             for (const child of parent.delegation.role === 'root' && parent.status !== 'review' ? this.store.listWorkersOf(parent.id) : []) {
               if (['queued', 'running', 'waiting'].includes(child.status)) this.cancel(child.id);
@@ -5816,7 +5806,7 @@ export class RunManager {
     });
     // A result still owed for workers the executing turn has since destroyed is no longer news.
     const retired = entries.filter(entry => entry.phase === 'resolved' && destroyed(entry)).map(entry => entry.id);
-    if (retired.length) this.store.commitWaitCancellation(parent.id, retired);
+    if (retired.length) this.store.commitOutcome(parent.id, { kind: 'cancelled', waitIds: retired });
     for (const entry of entries.filter(wait => wait.phase === 'open')) {
       let selected = entry;
       if (entry.workerIds) {
@@ -5831,7 +5821,7 @@ export class RunManager {
       }
       const { entry: next, reason } = reconcileWorkerEntry(selected, outcomes, now, requests);
       if (reason && destroyed(next)) {
-        this.store.commitWaitCancellation(parent.id, [entry.id]);
+        this.store.commitOutcome(parent.id, { kind: 'cancelled', waitIds: [entry.id] });
         this.disarmWait(entry.id);
       } else if (reason) {
         // The deadline stays armed until the resolution is durable. A failed write is retried in a
@@ -5911,7 +5901,7 @@ export class RunManager {
     const facts = this.store.knownTranscriptFacts(runId);
     if (!legacy.length || !facts || facts.bytes === 0 || facts.pendingGateSeq !== undefined) return false;
     try {
-      return this.store.commitHumanWaitsAnswered(runId, legacy.map(wait => wait.id)).length > 0;
+      return this.store.commitOutcome(runId, { kind: 'answered', waitIds: legacy.map(wait => wait.id) }).answered.length > 0;
     } catch (error) {
       console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
       return false;
@@ -5943,7 +5933,7 @@ export class RunManager {
     if (!this.harnessOwesInput(state)) this.clearUnreadInputTimer(state);
     try {
       if (!read.length) return;
-      this.store.commitAgentInputsConsumed(runId, read, new Date().toISOString());
+      this.store.commitOutcome(runId, { kind: 'consumed', inputIds: read, at: new Date().toISOString() });
       this.clearFailuresOnMessageRead(runId, read);
       this.reconcileWorkerWaits(); // projects the consumed receipt
     } catch (error) { console.warn(`[cez] agent input consumption checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
@@ -5956,7 +5946,7 @@ export class RunManager {
     if (!ids.length || state.cancelled || this.active.get(runId) !== state) return;
     // Durable first: a failed checkpoint must never let this boundary finish (DONE, park)
     // over input that is still marked delivered but was never read.
-    try { this.store.requeueUnconsumedAgentInputs(runId, ids); }
+    try { this.store.commitOutcome(runId, { kind: 'requeued', inputIds: ids }); }
     catch (error) {
       if (state.agentInputError) return;
       state.agentInputError = `agent input requeue checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
@@ -5982,7 +5972,7 @@ export class RunManager {
     const inputs = this.store.getRun(runId)?.agentInputs ?? [];
     if (!inputs.some(input => input.id === id && !input.deliveredAt)) return;
     const deliveredAt = new Date().toISOString();
-    try { this.store.commitAgentInputs(runId, inputs.map(input => input.id === id ? { ...input, deliveredAt } : input)); }
+    try { this.store.commitOutcome(runId, { kind: 'delivered', inputIds: [id], at: deliveredAt }); }
     catch (error) { console.warn(`[cez] opening input acceptance checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
@@ -6003,8 +5993,7 @@ export class RunManager {
     const deliveredAt = new Date().toISOString();
     const awaiting = state.inputDelivery?.consumption === 'observable' ? { awaitingRead: true as const } : {};
     try {
-      this.store.commitAgentInputs(runId, (this.store.getRun(runId)?.agentInputs ?? []).map(input =>
-        ids.includes(input.id) && !input.deliveredAt ? { ...input, deliveredAt, ...awaiting } : input));
+      this.store.commitOutcome(runId, { kind: 'delivered', inputIds: ids, at: deliveredAt, ...awaiting });
       state.bundledInputIds = [...(state.bundledInputIds ?? []), ...ids];
     } catch (error) { console.warn(`[cez] bundled delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
@@ -6014,7 +6003,7 @@ export class RunManager {
     const ids = state.bundledInputIds ?? [];
     state.bundledInputIds = undefined;
     if (!ids.length || state.cancelled) return;
-    try { this.store.commitAgentInputsConsumed(runId, ids, new Date().toISOString()); this.reconcileWorkerWaits(); }
+    try { this.store.commitOutcome(runId, { kind: 'consumed', inputIds: ids, at: new Date().toISOString() }); this.reconcileWorkerWaits(); }
     catch (error) { console.warn(`[cez] bundled read checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
@@ -6031,7 +6020,7 @@ export class RunManager {
     if (!session || !ids.length || this.active.get(runId) !== state || state.session !== session) return;
     state.unreadInputIds?.clear();
     state.bundledInputIds = undefined;
-    try { this.store.requeueUnconsumedAgentInputs(runId, ids); }
+    try { this.store.commitOutcome(runId, { kind: 'requeued', inputIds: ids }); }
     catch (error) { console.warn(`[cez] agent input requeue failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
@@ -6260,7 +6249,8 @@ export class RunManager {
             const timers = batch.filter(chargesBudget);
             const spent = timers.length && flight.wakeReserved ? (this.store.getRun(runId)?.automaticWakes ?? 0) + 1 : undefined;
             // The delivery and the resume are one commit (hearsay-tools/cezarion#1235).
-            this.store.commitWaitDelivery(runId, resolvedIds, { waitDeliveryFailures: undefined, ...(spent === undefined ? {} : { automaticWakes: spent }) }, true, state.currentStepId);
+            this.store.commitOutcome(runId, [{ kind: 'delivered', inputIds: resolvedIds, at: new Date().toISOString() }, { kind: 'counted', waitDeliveryFailures: undefined },
+              ...(spent === undefined ? [] : [{ kind: 'charged' as const, automaticWakes: spent }])], { patch: { status: 'running' }, resumeStepId: state.currentStepId });
             if (spent !== undefined) {
               flight.wakeReserved = false;
               this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : timers.some(wait => wait.kind === 'timer') ? 'timer' : 'process'} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
@@ -6303,7 +6293,7 @@ export class RunManager {
               const early = accepted.filter(id => state.consumedBeforeAck?.has(id));
               for (const id of accepted) if (!early.includes(id)) state.unreadInputIds?.add(id);
               for (const id of early) state.consumedBeforeAck?.delete(id);
-              if (early.length) { this.store.commitAgentInputsConsumed(runId, early, deliveredAt); this.clearFailuresOnMessageRead(runId, early); }
+              if (early.length) { this.store.commitOutcome(runId, { kind: 'consumed', inputIds: early, at: deliveredAt }); this.clearFailuresOnMessageRead(runId, early); }
             }
           }
           this.reconcileWorkerWaits();
@@ -6437,7 +6427,7 @@ export class RunManager {
       const state = this.active.get(runId);
       if (state?.agentInputError || !this.sendMessage(runId, entry.content)) { unsent.push(entry); continue; }
       if (entry.messageId) {
-        try { this.store.commitQueuedMessageDelivery(runId, entry.messageId); }
+        try { this.store.commitOutcome(runId, { kind: 'message-delivered', messageId: entry.messageId }); }
         catch (error) {
           // As with agent input, stdin and disk cannot transact. Retain the
           // same queue ID for conservative recovery, and stop this invocation.
@@ -7453,11 +7443,7 @@ export class RunManager {
     const deliveredAt = new Date().toISOString();
     try {
       // The successful opening turn handled its instruction: delivered and read (#505).
-      this.store.commitAgentInputs(runId, (this.store.getRun(runId)?.agentInputs ?? []).map(input => {
-        if (input.id !== id) return input;
-        const { awaitingRead: _awaiting, ...handled } = input;
-        return { ...handled, deliveredAt: input.deliveredAt ?? deliveredAt, consumedAt: input.consumedAt ?? deliveredAt };
-      }), id);
+      this.store.commitOutcome(runId, { kind: 'opening-handled', inputId: id, at: deliveredAt });
     } catch (error) {
       state.agentInputError = `agent input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
       try { session.interrupt(); } finally {
@@ -8466,7 +8452,7 @@ export class RunManager {
   private expireStepDeadlineWaits(runId: string, step: WorkflowStepDef, failure: string | null, attemptStartedAt: number): void {
     if (failure && step.timeoutMs && Date.now() - attemptStartedAt >= step.timeoutMs) {
       const human = openWaits(this.store.getRun(runId) ?? {}).filter(wait => wait.kind === 'human').map(wait => wait.id);
-      if (human.length) this.store.commitWaitCancellation(runId, human);
+      if (human.length) this.store.commitOutcome(runId, { kind: 'cancelled', waitIds: human });
     }
   }
 
@@ -9233,7 +9219,7 @@ export class RunManager {
   private withdrawCezarHumanWaits(runId: string): void {
     const ids = openWaits(this.store.getRun(runId) ?? {}).filter(isCezarHumanWait).map(wait => wait.id);
     if (!ids.length) return;
-    try { this.store.commitWaitCancellation(runId, ids); }
+    try { this.store.commitOutcome(runId, { kind: 'cancelled', waitIds: ids }); }
     catch (error) { console.warn(`[cez] human wait checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
@@ -9245,7 +9231,7 @@ export class RunManager {
 
   /** A human message answers every open human wait, and nothing else (hearsay-tools/cezarion#1234). */
   private settleHumanWaits(runId: string, only?: readonly string[]): void {
-    try { this.store.commitHumanWaitsAnswered(runId, only); }
+    try { this.store.commitOutcome(runId, { kind: 'answered', ...(only ? { waitIds: only } : {}) }); }
     catch (error) { console.warn(`[cez] human wait settlement failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
