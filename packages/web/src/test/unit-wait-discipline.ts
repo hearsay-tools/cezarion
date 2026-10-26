@@ -1,7 +1,8 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join, relative, resolve } from 'node:path'
 import { parse } from '@babel/parser'
 import type { AwaitExpression, BinaryExpression, CallExpression, Comment, File, Node } from '@babel/types'
+import { type BaselineEntry as Entry, waitBaseline } from './wait-baseline'
 
 /**
  * A scan of the cockpit unit tests for the three ways a test waits on a clock instead of on the
@@ -37,12 +38,7 @@ export interface Site {
   line: number
 }
 
-export interface BaselineEntry {
-  file: string
-  rule: Rule
-  site: string
-  count: number
-}
+export type BaselineEntry = Entry<Rule>
 
 /** The cockpit's own floor. Testing Library gives up after `asyncUtilTimeout` (3 s) and Vitest ends a test
  *  at 5 s, so a wait below the first is shorter than the host's own bound. A test pins this against the setup. */
@@ -357,66 +353,20 @@ export function scanTree(root = srcDir, dir = root): Site[] {
   })
 }
 
-export function tally(sites: Site[]): BaselineEntry[] {
-  const counts = new Map<string, BaselineEntry>()
-  for (const { file, rule, site } of sites) {
-    const key = JSON.stringify([file, rule, site])
-    const entry = counts.get(key)
-    if (entry) entry.count += 1
-    else counts.set(key, { file, rule, site, count: 1 })
-  }
-  return [...counts.values()].sort((a, b) => a.file.localeCompare(b.file) || a.rule.localeCompare(b.rule) || a.site.localeCompare(b.site))
-}
+export { compareToBaseline, tally } from './wait-baseline'
 
-const keyOf = (entry: BaselineEntry) => JSON.stringify([entry.file, entry.rule, entry.site])
-
-/**
- * `added`: sites the baseline does not cover: a new key, or a known key seen more often than recorded.
- * `stale`: baseline entries the tests no longer have as many of: a fixed site, which the baseline must
- * shrink to match so the ratchet holds at the new level.
- */
-export function compareToBaseline(actual: BaselineEntry[], baseline: BaselineEntry[]): { added: BaselineEntry[]; stale: BaselineEntry[] } {
-  const recorded = new Map(baseline.map(entry => [keyOf(entry), entry]))
-  const seen = new Map(actual.map(entry => [keyOf(entry), entry]))
-  const added = actual
-    .filter(entry => (recorded.get(keyOf(entry))?.count ?? 0) < entry.count)
-    .map(entry => ({ ...entry, count: entry.count - (recorded.get(keyOf(entry))?.count ?? 0) }))
-  const stale = baseline.filter(entry => (seen.get(keyOf(entry))?.count ?? 0) < entry.count)
-  return { added, stale }
-}
-
-interface BaselineFile {
-  $comment: string
-  sites: BaselineEntry[]
-}
-
-export function readBaseline(path = baselinePath): BaselineEntry[] {
-  if (!existsSync(path)) return []
-  return (JSON.parse(readFileSync(path, 'utf8')) as BaselineFile).sites
-}
-
-export function writeBaseline(sites: BaselineEntry[], path = baselinePath): void {
-  const file: BaselineFile = {
-    $comment:
-      'Bare sleeps, short wait bounds and unbounded poll loops the cockpit unit tests carried when the ratchet landed (hearsay-tools/cezarion#1203). ' +
-      'Keyed by file, rule and the line text so a moved line does not churn it. ' +
-      'This list only shrinks: fix a site, then run UNIT_WAIT_DISCIPLINE_UPDATE=1 npm test -- unit-wait-discipline. ' +
-      'Rules: AGENTS.md § Validation.',
-    sites,
-  }
-  writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`)
-}
-
-/** Shrink the baseline to what the tests have now. Never grows it: a site it does not cover stays a failure.
- *  Writes the first baseline when the file is missing, from the sites the tests carry the day the ratchet lands. */
-export function shrinkBaseline(actual: BaselineEntry[], path = baselinePath): void {
-  if (!existsSync(path)) {
-    writeBaseline(actual, path)
-    return
-  }
-  const seen = new Map(actual.map(entry => [keyOf(entry), entry]))
-  const sites = readBaseline(path)
-    .map(entry => ({ ...entry, count: Math.min(entry.count, seen.get(keyOf(entry))?.count ?? 0) }))
-    .filter(entry => entry.count > 0)
-  writeBaseline(sites, path)
-}
+/** Shrink the baseline through `UNIT_WAIT_DISCIPLINE_UPDATE=1 npm test -- unit-wait-discipline`: a site it does not
+ *  cover stays a failure. The first shrink writes the baseline from the sites the tests carry the day the ratchet lands. */
+export const {
+  read: readBaseline,
+  write: writeBaseline,
+  shrink: shrinkBaseline,
+} = waitBaseline<Rule>({
+  path: baselinePath,
+  seedWhenMissing: true,
+  comment:
+    'Bare sleeps, short wait bounds and unbounded poll loops the cockpit unit tests carried when the ratchet landed (hearsay-tools/cezarion#1203). ' +
+    'Keyed by file, rule and the line text so a moved line does not churn it. ' +
+    'This list only shrinks: fix a site, then run UNIT_WAIT_DISCIPLINE_UPDATE=1 npm test -- unit-wait-discipline. ' +
+    'Rules: AGENTS.md § Validation.',
+})
