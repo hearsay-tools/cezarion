@@ -1,0 +1,17 @@
+id: worktree-write-outside-manifest
+valid:
+  - "import { readFile, lstat } from 'node:fs/promises'"
+  - "import { existsSync, readFileSync } from 'node:fs'"
+  - "import type { Stats } from 'node:fs'"
+  - "import { writeFile } from './worktree-manifest.ts'"
+  - "import { join } from 'node:path'"
+  - "const path = await import('node:path')"
+invalid:
+  - "import { writeFile } from 'node:fs/promises'"
+  - "import { readFile, rm } from 'fs/promises'"
+  - "import { mkdirSync } from 'node:fs'"
+  - "import { promises } from 'node:fs'"
+  - 'import { rename as move } from "node:fs/promises"'
+  - "import * as fs from 'node:fs'"
+  - "import fs from 'fs'"
+  - "const fs = await import('node:fs/promises')"
