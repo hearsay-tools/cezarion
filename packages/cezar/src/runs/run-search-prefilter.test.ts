@@ -113,7 +113,9 @@ describe('sqlPrefilterTokens never drops a run matchesRunSearch accepts', () => 
 });
 
 describe('known gaps of the prefilter (hearsay-tools/cezarion#1884)', () => {
-  const run = (over: Partial<RunSearchRun>): RunSearchRun => ({ id: 'run-1', title: 'T', workflow: 'w', ...over }) as RunSearchRun;
+  function run(over: Partial<RunSearchRun>): RunSearchRun {
+    return { id: 'run-1', title: 'T', workflow: 'w', ...over } as RunSearchRun;
+  }
 
   it('drops a number the predicate matches by value: #007 finds PR 7, the stored summary holds no 007', () => {
     const pr7 = run({ prNumber: 7 });
