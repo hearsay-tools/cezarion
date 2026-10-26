@@ -23,7 +23,7 @@ test('selects edited functions and ignores line shifts and untouched siblings', 
   assert.equal(result[0].name, 'a');
   assert.equal(result[0].line, 2);
   assert.equal(result[0].complexity, 2);
-  assert.deepEqual(result[0].baseline, { name: 'a', line: 1, complexity: 1 });
+  assert.deepEqual(result[0].baseline, { name: 'a', line: 1, column: 1, complexity: 1 });
 });
 
 test('nested body edits belong to the nested function; parent edits stay selected', () => {

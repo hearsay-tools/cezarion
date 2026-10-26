@@ -24,7 +24,10 @@ node <skill>/scripts/metrics.mjs <file> --line <line> --json
 ```
 
 Choose the matching command. Use `--line` to disambiguate a repeated function
-name. Add `--breakdown` to list the decision points behind each complexity as
+name. A line alone selects the innermost function on it, so when a nested
+function starts on the same line, add `--column <column>` (1-based, where the
+function starts) to select the function that starts there. The complexity gate
+prints both with every function it names. Add `--breakdown` to list the decision points behind each complexity as
 `line kind` rows, for example `1091 LogicalExpression ??`. The rows plus one
 equal the complexity, and a nested function's points appear only under that
 function. For several files, run one measurement per file. The command reports

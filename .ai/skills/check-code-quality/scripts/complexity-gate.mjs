@@ -113,13 +113,13 @@ const shellWord = text => `'${text.replaceAll("'", "'\\''")}'`;
 /** The commands that print each complexity: the head's, and the merge base's when a counterpart exists. */
 function reproduce({ fn, from }, { root, base }) {
   const metrics = relative(root, fileURLToPath(new URL('./metrics.mjs', import.meta.url)));
-  // An anonymous function is named by its position (anonymous@line:column), so the name picks it out where a
-  // line alone would pick the innermost function on that line.
-  const select = (name, line) => `--function ${shellWord(name)} --line ${line}`;
-  const head = `node ${metrics} ${shellWord(fn.file)} ${select(fn.name, fn.line)} --breakdown`;
+  // Line and column are where the function starts, which no other function shares. A name or a line alone
+  // also matches a function nested on the same line, and the innermost one would be measured instead.
+  const select = ({ name, line, column }) => `${isNamed(name) ? `--function ${shellWord(name)} ` : ''}--line ${line} --column ${column}`;
+  const head = `node ${metrics} ${shellWord(fn.file)} ${select(fn)} --breakdown`;
   if (!from) return [`head: ${head}`];
   const copy = `"\${TMPDIR:-/tmp}/complexity-base${extname(from.file)}"`;
-  return [`head: ${head}`, `base: git show ${shellWord(`${base}:${from.file}`)} > ${copy} && node ${metrics} ${copy} ${select(from.name, from.line)}`];
+  return [`head: ${head}`, `base: git show ${shellWord(`${base}:${from.file}`)} > ${copy} && node ${metrics} ${copy} ${select(from)}`];
 }
 
 function pointLines(fn) {

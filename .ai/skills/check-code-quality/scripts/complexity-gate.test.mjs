@@ -57,7 +57,7 @@ test('a new function passes at the limit and fails one point over, with both val
   assert.equal(result.code, 1, result.error);
   assert.match(result.output, /a\.ts:\d+ over: complexity 21 \(new function; limit 20\)/);
   assert.doesNotMatch(result.output, /atLimit/);
-  assert.match(result.output, /head: node .*metrics\.mjs 'a\.ts' --function 'over' --line \d+ --breakdown/);
+  assert.match(result.output, /head: node .*metrics\.mjs 'a\.ts' --function 'over' --line \d+ --column \d+ --breakdown/);
   assert.equal(result.output.split('\n').filter(line => /^ {6}\d+ IfStatement$/.test(line)).length, 20);
   assert.ok(result.output.includes(OWNER_NOTE));
 });
@@ -72,7 +72,7 @@ test('a function over the limit may fall or stay level but not rise; crossing th
   assert.match(result.output, /grow: complexity 26 \(was 25 at the merge base; limit 20\)/);
   assert.match(result.output, /cross: complexity 21 \(was 15 at the merge base; limit 20\)/);
   assert.doesNotMatch(result.output, /level|lower/);
-  assert.match(result.output, new RegExp(`base: git show '${f.base}:big\\.ts' > "\\$\\{TMPDIR:-/tmp\\}/complexity-base\\.ts" && node .*metrics\\.mjs .* --function 'grow' --line 1$`, 'm'));
+  assert.match(result.output, new RegExp(`base: git show '${f.base}:big\\.ts' > "\\$\\{TMPDIR:-/tmp\\}/complexity-base\\.ts" && node .*metrics\\.mjs .* --function 'grow' --line 1 --column 8$`, 'm'));
   assert.match(result.output, /^2 changed functions are over/m);
 });
 
@@ -192,17 +192,23 @@ test('the reproduce command quotes a file name with spaces and quotes', t => {
   assert.match(result.output, /head: node .*metrics\.mjs 'my dir\/it'\\''s \$\(x\)\.ts' --function 'big'/);
 });
 
-test('the reproduce command selects an anonymous function by its generated name, not by a line that a nested function shares', t => {
-  const f = repo(t, { 'a.ts': 'export const none = 1;\n' });
-  const source = `export const handlers = [(x) => { const id = () => x;\n${'  if (x) { x++; }\n'.repeat(21)}  return id();\n}];\n`;
-  const result = gate(f, f.commit({ 'a.ts': source }));
-  assert.equal(result.code, 1, result.output);
-  const command = result.output.split('\n').find(line => line.startsWith('  head: ')).slice('  head: '.length);
-  assert.match(command, /--function 'anonymous@1:\d+' --line 1 /);
-  const run = spawnSync('sh', ['-c', command], { cwd: f.cwd, encoding: 'utf8' });
-  assert.equal(run.status, 0, run.stderr);
-  assert.match(run.stdout, /anonymous@1:\d+ \(line 1\): complexity 22 = 1 \+ 21 decision points/);
-  assert.doesNotMatch(run.stdout, /\bid\b/, 'the nested function on the same line is not the one measured');
+test('the reproduce command selects a function by where it starts, not by a line or name that a nested function shares', t => {
+  const body = `${'  if (x) { x++; }\n'.repeat(21)}`;
+  const cases = {
+    'an anonymous function with a nested one on its first line': `export const handlers = [(x) => { const id = () => x;\n${body}  return id();\n}];\n`,
+    'a named function with a nested function of the same name on its first line': `export function dup(x) { function dup() { return 1; }\n${body}  return dup();\n}\n`,
+  };
+  for (const [label, source] of Object.entries(cases)) {
+    const f = repo(t, { 'a.ts': 'export const none = 1;\n' });
+    const result = gate(f, f.commit({ 'a.ts': source }));
+    assert.equal(result.code, 1, `${label}: ${result.output}`);
+    const command = result.output.split('\n').find(line => line.startsWith('  head: ')).slice('  head: '.length);
+    assert.match(command, / --line 1 --column \d+ --breakdown$/, label);
+    const run = spawnSync('sh', ['-c', command], { cwd: f.cwd, encoding: 'utf8' });
+    assert.equal(run.status, 0, `${label}: ${run.stderr}`);
+    assert.match(run.stdout, /\(line 1\): complexity 22 = 1 \+ 21 decision points/, label);
+    assert.doesNotMatch(run.stdout, /complexity 1 = /, `${label}: the nested function is not the one measured`);
+  }
 });
 
 test('an unparseable changed file, a missing argument and an unknown revision stop the check', t => {

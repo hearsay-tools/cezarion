@@ -40,7 +40,7 @@ const bodyHash = (fn, functions, source) =>
 // The trimmed lines of a function's own body, repeats included: what two copies of one function share.
 const bodyLines = (fn, functions, source) =>
   ownSource(fn, functions, source, fn.bodyStart).split('\n').map(line => line.trim()).filter(line => line.length > 3);
-const summary = ({ name, line, complexity }) => ({ name, line, complexity });
+const summary = ({ name, line, column, complexity }) => ({ name, line, column, complexity });
 const describe = (fn, functions, source, details) =>
   details ? { ...summary(fn), lines: bodyLines(fn, functions, source) } : summary(fn);
 

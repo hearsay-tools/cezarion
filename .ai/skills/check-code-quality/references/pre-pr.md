@@ -183,7 +183,7 @@ read its diff and baseline source, then choose an action:
 
 To plan a split along a flagged function's decision points, list them with
 `node <skill>/scripts/metrics.mjs <file> --function <name> --breakdown` (add
-`--line <line>` for a repeated name). Each `line kind` row is one counted
+`--line <line>` for a repeated name, and `--column <column>` when another function starts on that line). Each `line kind` row is one counted
 point, so the rows plus one equal the complexity.
 
 CI runs a looser ratchet on the same functions:

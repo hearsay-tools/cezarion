@@ -76,6 +76,15 @@ test('selects names, class methods and the innermost function at a line; refuses
   assert.throws(() => selectFunctions(functions, { name: 'missing' }), /No function matches/);
 });
 
+test('--column pins the function that starts at that line and column, even beside a same-named one nested on the line', () => {
+  const functions = analyzeSource('function dup() { function dup() { return 1; }\n  return 2; }', 'dup.ts');
+  assert.deepEqual(functions.map(fn => [fn.line, fn.column]), [[1, 1], [1, 18]]);
+  assert.equal(selectFunctions(functions, { name: 'dup', line: 1 })[0].column, 18, 'a line alone picks the innermost function');
+  assert.equal(selectFunctions(functions, { name: 'dup', line: 1, column: 1 })[0].endLine, 2);
+  assert.equal(selectFunctions(functions, { line: 1, column: 18 })[0].endLine, 1);
+  assert.throws(() => selectFunctions(functions, { name: 'dup', line: 1, column: 5 }), /No function matches "dup" at line 1, column 5/);
+});
+
 function coverageFor(source, functions, statements, calls = {}) {
   const point = marker => {
     const at = source.indexOf(marker);
@@ -214,7 +223,8 @@ test('CLI refuses older coverage instead of showing stale scores', async t => {
 test('CLI validates selection and arguments before running tests', async t => {
   const f = fixture(t);
   for (const args of [[], ['source.ts', 'extra.ts'], ['source.ts', '--line', '0'],
-    ['source.ts', '--line', '1.5'], ['source.ts', '--function', ''],
+    ['source.ts', '--line', '1.5'], ['source.ts', '--function', ''], ['source.ts', '--column', '3'],
+    ['source.ts', '--line', '1', '--column', '0'], ['source.ts', '--line', '1', '--column', '1.5'],
     ['source.ts', '--function', 'absent', '--test', 'unused.test.ts'],
     ['source.ts', '--coverage', 'report.json', '--test', 'unused.test.ts'], ['source.ts', '--unknown'],
     ['source.ts', '--test', '.'], ['source.ts', '--test', 'source.ts']]) {

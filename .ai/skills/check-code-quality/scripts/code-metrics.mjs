@@ -91,17 +91,20 @@ export function analyzeSource(source, filename) {
   return functions.sort((a, b) => a.start - b.start);
 }
 
-export function selectFunctions(functions, { name, line } = {}) {
+export function selectFunctions(functions, { name, line, column } = {}) {
   let selected = functions;
   if (name !== undefined) {
     selected = selected.filter(fn => fn.name === name || fn.name.split('.').at(-1) === name);
   }
-  if (line !== undefined) {
+  if (column !== undefined) {
+    // A function is the only one that starts at its line and column; a line alone also covers what is nested on it.
+    selected = selected.filter(fn => fn.line === line && fn.column === column);
+  } else if (line !== undefined) {
     selected = selected.filter(fn => fn.line <= line && fn.endLine >= line)
       .sort((a, b) => (a.end - a.start) - (b.end - b.start)).slice(0, 1);
   }
   if ((name !== undefined || line !== undefined) && !selected.length) {
-    throw new Error(`No function matches ${name ? JSON.stringify(name) : ''}${line ? ` at line ${line}` : ''}.`);
+    throw new Error(`No function matches ${name ? JSON.stringify(name) : ''}${line ? ` at line ${line}${column ? `, column ${column}` : ''}` : ''}.`);
   }
   if (name !== undefined && selected.length > 1) {
     throw new Error(`Several functions match ${JSON.stringify(name)} (lines ${selected.map(fn => fn.line).join(', ')}). Add --line.`);
