@@ -520,6 +520,11 @@ builder" unless a bullet says otherwise.
 
   **Transitions out** for the states retained by this change:
 
+  The code declares these exits in `packages/cezar/src/workflows/run-states.ts`
+  (hearsay-tools/cezarion#1804). It differs here: a Stop accepted during a Continue's final autosave
+  settles a `done`, `review` or queued run `cancelled`, and Stop on a settled owned worker replaces
+  its status with `cancelled`.
+
   | State | Trigger | Who or what fires it | Behavior at shipped defaults |
   | --- | --- | --- | --- |
   | Worker park | Worker/request outcome or registered deadline | Family reconciliation or deadline timer | Resume with the result; deadline-less completion waits rely on worker settlement |
@@ -706,6 +711,9 @@ nudge, and the dry-run mocks answering it) are recorded with it.
 
 ### Transitions out (phase 2a)
 
+The code declares these exits in `packages/cezar/src/workflows/run-states.ts`
+(hearsay-tools/cezarion#1804), and its tests check them.
+
 Required by AGENTS.md (hearsay-tools/cezarion#1247) for every state phase 2a adds or keeps. Added
 with the 2a pull request, after its implementation; review it with that PR. Defaults are the
 shipped ones: re-checks on, budget 40, no autonomy.
@@ -802,6 +810,9 @@ Calls made while building 2b (hearsay-tools/cezarion#1234), within "Left to the 
 
 ### Transitions out (phase 2b)
 
+The code declares these exits in `packages/cezar/src/workflows/run-states.ts`
+(hearsay-tools/cezarion#1804), and its tests check them.
+
 Required by AGENTS.md for every state 2b adds or keeps. Defaults are the shipped ones: re-checks
 on, budget 40, no autonomy. The 2a table above still holds for the states it lists.
 
@@ -867,6 +878,9 @@ Decisions made during execution:
 - The 32-input cap counts conversation inputs; the lifecycle wait-result input is outside it.
 
 ### Transitions out (phase 3a)
+
+The code declares these exits in `packages/cezar/src/workflows/run-states.ts`
+(hearsay-tools/cezarion#1804), and its tests check them.
 
 Required by AGENTS.md for every state 3a adds or keeps. Defaults are the shipped ones:
 `maxParallel: 2`, `maxMonitoringSessions: 2`, re-checks on, budget 40, no autonomy
@@ -1057,6 +1071,10 @@ Decisions made during execution:
 
 ### Transitions out (phase 3b)
 
+The code declares these exits in `packages/cezar/src/workflows/run-states.ts`
+(hearsay-tools/cezarion#1804). It differs here: a budget-spent owned worker's plain park also
+leaves by the idle close, which settles it `done`.
+
 Required by AGENTS.md for every state 3b adds or keeps. Shipped defaults: `maxParallel: 2`,
 `maxMonitoringSessions: 2`, budget 40, no autonomy, `IDLE_TIMEOUT_MS` 15 minutes, the no-wait
 nudge's reply bound (`NO_WAIT_NUDGE_REPLY_MS`, 5 minutes). Earlier tables hold for the states they
@@ -1190,6 +1208,9 @@ Calls made by the agent:
 
 ### Transitions out (phase 4a)
 
+The code declares these exits in `packages/cezar/src/workflows/run-states.ts`
+(hearsay-tools/cezarion#1804), and its tests check them.
+
 Required by AGENTS.md for every state 4a adds or keeps. Shipped defaults: `maxParallel: 2`,
 `maxMonitoringSessions: 2`, auto-resume on, at most 12 resumes. Earlier tables hold for the states
 they list. One row per exit.
@@ -1283,6 +1304,9 @@ Calls made by the agent:
   The `via: 'cezar_wait_for_ci'` enum value stays so old rows parse.
 
 ### Transitions out (phase 4b)
+
+The code declares these exits in `packages/cezar/src/workflows/run-states.ts`
+(hearsay-tools/cezarion#1804), and its tests check them.
 
 Required by AGENTS.md for every state 4b changes or keeps. Shipped defaults as in 4a. Earlier
 tables hold for the states they list. One row per exit.
@@ -1463,6 +1487,9 @@ and is not stopped by Cezar.
 
 ### Transitions out (process wait)
 
+The code declares these exits in `packages/cezar/src/workflows/run-states.ts`
+(hearsay-tools/cezarion#1804), and its tests check them.
+
 Shipped defaults: `maxParallel` 2, `maxMonitoringSessions` 2, wake budget 40,
 `IDLE_TIMEOUT_MS` 15 min, poll 5 s, deadline default 30 min and at most 2 h.
 
@@ -1512,6 +1539,9 @@ The combined implementation uses schema 9, required by the
 for the durable store version and downgrade rules.
 
 ### Transitions out (merge wait)
+
+The code declares these exits in `packages/cezar/src/workflows/run-states.ts`
+(hearsay-tools/cezarion#1804), and its tests check them.
 
 The merge wait is an `open` PR wait entry; it adds no run state. The run parks `waiting` on it
 as on any open wait.
