@@ -3478,15 +3478,8 @@ export class RunManager {
                 hydrated.persistedImages,
                 hydrated.persistedAttachments,
               );
-            })().catch((err: unknown) => {
-              const message = err instanceof Error ? err.message : String(err);
-              this.move(runId, 'fail-crash', {
-                error: `continue crashed: ${message}`,
-                finishedAt: new Date().toISOString(),
-              });
-              this.starting.delete(runId);
-              this.dropActive(runId);
-            }).finally(() => this.finishWorkerExecution(runId));
+            })().catch((err: unknown) => this.failCrashedContinuation(runId, err))
+              .finally(() => this.finishWorkerExecution(runId));
             continue;
           }
           if (!job) continue;
@@ -7069,18 +7062,20 @@ export class RunManager {
       targetRunner,
       prompt,
       images,
-    ).catch(
-      (err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        this.move(runId, 'fail-crash', {
-          error: `continue crashed: ${message}`,
-          finishedAt: new Date().toISOString(),
-        });
-        this.starting.delete(runId);
-        this.dropActive(runId);
-      },
-    ).finally(() => this.finishWorkerExecution(runId));
+    ).catch((err: unknown) => this.failCrashedContinuation(runId, err))
+      .finally(() => this.finishWorkerExecution(runId));
     return { ok: true };
+  }
+
+  /** A Continue whose engine threw: the run fails and leaves the active set (exit `fail-crash`). */
+  private failCrashedContinuation(runId: string, err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
+    this.move(runId, 'fail-crash', {
+      error: `continue crashed: ${message}`,
+      finishedAt: new Date().toISOString(),
+    });
+    this.starting.delete(runId);
+    this.dropActive(runId);
   }
 
   private async runContinuation(
