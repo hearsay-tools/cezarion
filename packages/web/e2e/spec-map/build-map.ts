@@ -22,7 +22,7 @@ import {
  * rules and refuses a map that fails `mapProblems`.
  */
 
-const repoRoot = resolve(import.meta.dirname, '../../../..')
+const REPO_ROOT = resolve(import.meta.dirname, '../../../..')
 /** The share of specs that must leave evidence; a lower share means the capture itself broke. */
 const MIN_EVIDENCE = 0.9
 
@@ -31,7 +31,8 @@ function write(file: string, value: unknown): void {
   writeFileSync(file, `${JSON.stringify(value)}\n`)
 }
 
-function partial(args: string[]): void {
+/** One shard's evidence. `repoRoot` is where the Vitest report's spec paths start. */
+export function partial(args: string[], repoRoot = REPO_ROOT): void {
   const { values } = parseArgs({
     args,
     options: {
@@ -55,7 +56,8 @@ function expectation(text: string): Expectation {
   return { source, spec }
 }
 
-function merge(args: string[]): void {
+/** The spec map for `repoRoot`, refused unless every spec there ran and `mapProblems` finds nothing. */
+export function merge(args: string[], repoRoot = REPO_ROOT): void {
   const { values } = parseArgs({
     args,
     options: {
@@ -81,10 +83,12 @@ function merge(args: string[]): void {
   console.log(`spec map: ${Object.keys(map.sources).length} sources, ${map.specs.length} specs, ${map.incomplete.length} incomplete`)
 }
 
-const [command, ...rest] = process.argv.slice(2)
-if (command === 'partial') partial(rest)
-else if (command === 'merge') merge(rest)
-else {
-  console.error('usage: build-map.ts partial|merge …')
-  process.exit(2)
+if (import.meta.main) {
+  const [command, ...rest] = process.argv.slice(2)
+  if (command === 'partial') partial(rest)
+  else if (command === 'merge') merge(rest)
+  else {
+    console.error('usage: build-map.ts partial|merge …')
+    process.exit(2)
+  }
 }

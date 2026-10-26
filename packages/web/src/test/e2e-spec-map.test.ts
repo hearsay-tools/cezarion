@@ -1,9 +1,10 @@
 // @vitest-environment node
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
+import { merge, partial } from '../../e2e/spec-map/build-map'
 import { Bundle, assertSameJavaScript } from '../../e2e/spec-map/bundle'
 import { moduleFacts, resolveImport, type ModuleFacts } from '../../e2e/spec-map/module-graph'
 import {
@@ -28,6 +29,7 @@ function put(root: string, path: string, text: string): void {
 }
 afterEach(() => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true })
+  vi.restoreAllMocks()
 })
 
 describe('V8 function-event log', () => {
@@ -281,5 +283,57 @@ describe('capture config', () => {
     const setup = capture.setupFiles as string[]
     expect(setup.slice(0, -1)).toEqual(base.setupFiles)
     expect(setup.at(-1)).toMatch(/\/e2e\/spec-map\/capture-setup\.ts$/)
+  })
+})
+
+describe('build-map commands', () => {
+  const readJson = (file: string): unknown => JSON.parse(readFileSync(file, 'utf8'))
+
+  it('partial writes one shard’s evidence after it checks the source-map build', () => {
+    const root = tempRoot()
+    bundleFixture(root)
+    put(root, 'logs/a/isolate-1-v8.log', [
+      'script-details,7,http://127.0.0.1:41000/assets/x.js,0,0,',
+      `function,interpreter-lazy,7,${SCRIPT.indexOf('return 1') + 3},30,0.1,2,x`,
+    ].join('\n'))
+    put(root, 'results.json', JSON.stringify({ testResults: [{ name: join(root, 'packages/web/e2e/a.e2e.ts'), status: 'passed' }] }))
+    const args = ['--logs', join(root, 'logs'), '--served', join(root, 'served'), '--sourcemaps', join(root, 'maps'),
+      '--results', join(root, 'results.json'), '--out', join(root, 'out/shard-1.json')]
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {})
+    partial(args, root)
+    expect(readJson(join(root, 'out/shard-1.json'))).toEqual({ version: 1, specs: {
+      'packages/web/e2e/a.e2e.ts': { status: 'passed', executed: ['packages/web/src/b.ts'], loaded: ['packages/web/src/a.tsx', 'packages/web/src/b.ts'] },
+    } })
+    expect(log).toHaveBeenCalledWith('spec map: 1 of 1 specs left V8 evidence')
+    put(root, 'maps/assets/x.js', `${SCRIPT}// rebuilt\n`)
+    expect(() => partial(args, root)).toThrow(/assets\/x\.js: differs from the source-map build/)
+    expect(() => partial(args.slice(2), root)).toThrow(/partial needs --logs/)
+  })
+
+  it('merge publishes a map only when every spec ran and each expected pair holds', () => {
+    const root = tempRoot()
+    put(root, 'packages/web/e2e/a.e2e.ts', '')
+    put(root, 'packages/web/e2e/b.e2e.ts', '')
+    put(root, 'packages/web/src/a.tsx', 'export function A() {}')
+    put(root, 'packages/web/src/b.ts', "export const B = 'b'")
+    const shard = (spec: string, executed: string[]) => JSON.stringify({ version: 1, specs: { [spec]: evidence('passed', executed, ['packages/web/src/a.tsx', 'packages/web/src/b.ts']) } })
+    put(root, 'partials/e2e-spec-map-partial-1/shard-1.json', shard('packages/web/e2e/a.e2e.ts', ['packages/web/src/a.tsx']))
+    put(root, 'partials/e2e-spec-map-partial-2/shard-2.json', shard('packages/web/e2e/b.e2e.ts', ['packages/web/src/b.ts']))
+    const commit = 'c'.repeat(40)
+    const run = (...extra: string[]) => merge(['--partials', join(root, 'partials'), '--commit', commit, '--out', join(root, 'map.json'), ...extra], root)
+    vi.spyOn(console, 'log').mockImplementation(() => {})
+    run('--expect', 'packages/web/src/a.tsx=packages/web/e2e/a.e2e.ts')
+    expect(readJson(join(root, 'map.json'))).toMatchObject({
+      version: 1, commit, specs: ['packages/web/e2e/a.e2e.ts', 'packages/web/e2e/b.e2e.ts'], incomplete: [],
+      sources: { 'packages/web/src/a.tsx': [0], 'packages/web/src/b.ts': [1] },
+    })
+    expect(() => run('--expect', 'packages/web/src/a.tsx=packages/web/e2e/b.e2e.ts')).toThrow(
+      /the spec map is not published:\n {2}packages\/web\/src\/a\.tsx does not reach packages\/web\/e2e\/b\.e2e\.ts/,
+    )
+    expect(() => run('--expect', 'packages/web/src/a.tsx')).toThrow(/--expect takes <source>=<spec>/)
+    put(root, 'packages/web/e2e/c.e2e.ts', '')
+    expect(() => run()).toThrow(/no capture shard ran packages\/web\/e2e\/c\.e2e\.ts/)
+    expect(() => merge(['--partials', join(root, 'partials'), '--commit', 'main', '--out', join(root, 'map.json')], root)).toThrow(/full commit id/)
+    expect(() => merge(['--commit', commit], root)).toThrow(/merge needs --partials/)
   })
 })
