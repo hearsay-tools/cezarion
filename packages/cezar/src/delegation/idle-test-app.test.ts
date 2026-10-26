@@ -8,6 +8,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, expect, it } from 'vitest';
 import { processStartToken } from '../detached-process.ts';
 import { createOwnedWorkspace, removeOwnedWorkspace } from './workspace.ts';
+import { withIdleTestApp } from './idle-test-app.ts';
 import { execFileSync } from 'node:child_process';
 
 const roots: string[] = [];
@@ -15,6 +16,22 @@ const children: Array<ReturnType<typeof spawn>> = [];
 afterEach(async () => {
   for (const child of children.splice(0)) { try { process.kill(-child.pid!, 'SIGKILL'); } catch {} }
   for (const root of roots.splice(0)) await rm(root, { recursive: true, force: true });
+});
+
+it.skipIf(process.platform !== 'linux')('keeps the lease claim durable after closing the database and clears it on refusal', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'cez-idle-claim-')); roots.push(root);
+  const qa = join(root, '.ai/qa'); await mkdir(qa, { recursive: true });
+  await writeFile(join(qa, 'test-env.json'), JSON.stringify({ startedByThisRepo: true, app: { pid: process.pid, start: processStartToken(process.pid) } }));
+  const db = new DatabaseSync(join(qa, 'test-env-lease.sqlite'));
+  db.exec('CREATE TABLE holders (id TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, start TEXT, pgid INTEGER)'); db.close();
+  await withIdleTestApp(root, async () => {
+    const observer = new DatabaseSync(join(qa, 'test-env-lease.sqlite'));
+    expect(observer.prepare('SELECT count(*) AS count FROM holders').get()).toMatchObject({ count: 1 });
+    observer.close(); return false;
+  });
+  const observer = new DatabaseSync(join(qa, 'test-env-lease.sqlite'));
+  expect(observer.prepare('SELECT count(*) AS count FROM holders').get()).toMatchObject({ count: 0 });
+  observer.close();
 });
 
 it.skipIf(process.platform !== 'linux')('removes the idle worker app but preserves another checkout and live leases', async () => {

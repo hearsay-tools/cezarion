@@ -6,6 +6,9 @@ on:
       - '.ai/scripts/e2e.sh'
       - '.github/scripts/test-env-windows*'
       - '.github/workflows/test-env-windows.yml'
+      - 'packages/cezar/src/delegation/idle-test-app*'
+      - 'packages/cezar/src/delegation/windows-test-app*'
+      - 'packages/cezar/src/delegation/workspace.ts'
   workflow_dispatch: {}
 permissions:
   contents: read
@@ -13,7 +16,7 @@ jobs:
   native-lease:
     name: Native Windows lease verification
     runs-on: windows-2025
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -21,6 +24,9 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24.21.0'
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
       - name: Probe native process lifetime and Git Bash identity
         shell: pwsh
         run: ./.github/scripts/test-env-windows-probe.ps1
@@ -80,3 +86,21 @@ jobs:
       - name: Verify production lease on native Windows
         shell: pwsh
         run: node --test .github/scripts/test-env-windows.test.mjs
+      - name: Prove worker cleanup regression on native Windows
+        shell: pwsh
+        run: |
+          git fetch --depth=1 origin 471fc954423631d021c94e870ef0bd3976e209a4
+          git show 471fc954423631d021c94e870ef0bd3976e209a4:packages/cezar/src/delegation/idle-test-app.ts > packages/cezar/src/delegation/idle-test-app.ts
+          try {
+            $output = npm test -- packages/cezar/src/delegation/windows-test-app.test.ts -t 'stops the owned app' 2>&1 | Out-String
+            $failed = $LASTEXITCODE -ne 0
+            Write-Output $output
+            if (!$failed -or $output -notmatch '"state": "complete"') {
+              throw 'Expected the pre-fix worker cleanup to remain incomplete'
+            }
+          } finally {
+            git checkout -- packages/cezar/src/delegation/idle-test-app.ts
+          }
+          $global:LASTEXITCODE = 0
+      - name: Verify worker cleanup on native Windows
+        run: npm test -- packages/cezar/src/delegation/windows-test-app.test.ts

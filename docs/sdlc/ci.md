@@ -86,6 +86,10 @@ intentionally trading single-run latency for lower concurrency on a shared host.
 
 ### CI verification
 
+The path-filtered `Windows test environment lease` workflow also runs the worker test-app
+cleanup regression on native Windows when its cleanup code changes. It checks the pre-fix
+failure and the fixed result, including lease and checkout isolation.
+
 Verification runs in eight parallel jobs, and a ninth, `complexity-gate`, gates pull requests. Seven of the eight use the current Node LTS; the build/package job uses exactly the `engines.node` minimum (Node 24.21.0):
 
 - Three Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/3 --maxWorkers=4` for N=1..3.

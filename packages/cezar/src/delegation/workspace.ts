@@ -355,7 +355,8 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         // Preview release may itself terminate a known owned holder. Check unrelated holders
         // only afterwards, immediately before destructive Git; they are never signalled.
         checkUnheld(assertUnheld);
-        const removed = await withIdleTestApp(workspace.path, async stopped => {
+        const removed = await withIdleTestApp(workspace.path, async (stopped, busy) => {
+          if (busy) { report?.unexplained?.(); return false; }
           if (stopped) await waitForTestAppWatcher(workspace.path);
           assertCurrent?.(); assertUnheld?.();
           const holders = inspectGeneration({ paths: [workspace.path] });
