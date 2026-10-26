@@ -42,6 +42,12 @@ describe('progressPreview', () => {
     expect(progressPreview(crlf)).toEqual(['10:01 — tests pass', '10:00 — started'])
   })
 
+  it('takes no more lines than maxLines, and none for a limit of 0', () => {
+    const log = journal('- 10:02 — c\n- 10:01 — b\n- 10:00 — a\n')
+    expect(progressPreview(log, 2)).toEqual(['10:02 — c', '10:01 — b'])
+    expect(progressPreview(log, 0)).toEqual([])
+  })
+
   it('answers nothing for a journal without progress', () => {
     expect(progressPreview('')).toEqual([])
     expect(progressPreview(journal(''))).toEqual([])

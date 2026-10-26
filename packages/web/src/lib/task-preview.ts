@@ -16,11 +16,10 @@ export function progressPreview(handoff: string, maxLines = 3): string[] {
   if (start < 0) return []
   const own: string[] = []
   for (const line of handoff.slice(nextLineIndex(handoff, start)).split('\n')) {
-    if (line.startsWith('## ')) break
+    if (own.length >= maxLines || line.startsWith('## ')) break
     const trimmed = line.trim()
     if (!trimmed || LEGACY_LIFECYCLE_LINE.test(trimmed)) continue
     own.push(trimmed.replace(/^[-*] /, ''))
-    if (own.length >= maxLines) break
   }
   return own
 }
