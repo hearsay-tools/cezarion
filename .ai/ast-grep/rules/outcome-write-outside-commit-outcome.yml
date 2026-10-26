@@ -1,0 +1,46 @@
+id: outcome-write-outside-commit-outcome
+language: typescript
+severity: warning
+message: >-
+  Write an outcome (a receipt, a settled wait, a charge, a failure count) through
+  RunStore.commitOutcome, with what it depends on, in one commit (hearsay-tools/cezarion#1805):
+  stage it as a RunOutcome in runs/outcome-commit.ts. A conversation request outcome goes through
+  RunStore.commitConversation, which commits it with the recipient's reply input.
+files:
+  - packages/cezar/src/**/*.ts
+ignores:
+  - packages/cezar/src/**/*.test.ts
+  - packages/cezar/src/**/*.testkit.ts
+  - packages/cezar/src/runs/outcome-commit.ts
+utils:
+  outcome-field: { regex: '^(deliveredAt|consumedAt|cancelledAt|automaticWakes|waitDeliveryFailures|lastWaits)$' }
+  # An object literal that is a write: a key or shorthand naming an outcome field, or a settled phase.
+  outcome-property:
+    any:
+      - { kind: pair, has: { field: key, matches: outcome-field } }
+      - { kind: shorthand_property_identifier, matches: outcome-field }
+      - all:
+          - kind: pair
+          - has: { field: key, regex: '^phase$' }
+          - has: { field: value, regex: "^['\"](delivered|cancelled)['\"]$" }
+rule:
+  all:
+    - any:
+        - matches: outcome-property
+        # `run.automaticWakes = 2`
+        - { kind: assignment_expression, has: { field: left, kind: member_expression, has: { field: property, matches: outcome-field } } }
+    # Left out: a RunOutcome payload (`{ kind: 'charged', automaticWakes }`, `{ kind: 'counted', … }`),
+    # which is the call itself; a schema (`z.…`, `…Schema.shape.…`); and the conversion of rows an
+    # older build stored, which reads a settled phase rather than records one. Reads, destructuring
+    # and type members are other node kinds. A patch passed as a variable built elsewhere is not
+    # seen: the rule sees literals, and `commitAgentInputs` refuses a changed receipt at run time.
+    - not:
+        inside:
+          kind: object
+          has: { kind: pair, all: [{ has: { field: key, regex: '^kind$' } }, { has: { field: value, regex: "^['\"](charged|counted)['\"]" } }] }
+    - not: { has: { field: value, regex: '^z\.|Schema\.' } }
+    - not:
+        inside:
+          stopBy: end
+          kind: function_declaration
+          has: { field: name, regex: '^(ciWaitEntry|workerWaitEntry|upgradeLegacyWaits)$' }
