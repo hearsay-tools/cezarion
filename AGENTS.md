@@ -217,17 +217,14 @@ Where readers hide, searched from the repo root (replace the example values):
   rg -l -F -e 'open-mercato/skills' -e 'skill-row' packages/web/e2e/*.e2e.ts
   ```
 
-- **Cockpit source changed**: browser specs, by the `data-slot`, `data-streamdown` and
-  `data-testid` values and distinctive class names that the changed file and the local
-  components it imports render. No tool maps a cockpit change to its specs:
-  `npm run test:changed` holds no browser spec, and Squeal's browser-spec inputs include
-  all of `packages/web/src/**`, so an edit marks every spec stale and names none. Walk
-  down to what the file renders, never up to what renders it: going up reaches most of
-  the suite. Shared renderers such as `packages/web/src/routes/task-thread/markdown.tsx`
-  and `packages/web/src/components/diff/*` matter most, because one edit reaches specs
-  written for other features — `markdown.tsx` renders no `data-slot`, yet an edit to it
-  broke `artifact-project-links.e2e.ts` through its siblings `task-link.tsx` and
-  `link-safety-dialog.tsx` (hearsay-tools/cezarion#1076).
+- **Cockpit source changed**: the browser specs that run the changed file.
+  `npm run test:e2e:affected -- --plan` lists them from the spec map
+  ([the e2e README](packages/web/e2e/README.md#choosing-specs-for-a-change)); without
+  `--plan` it runs them. When it reports no spec map, search the specs for the
+  `data-slot`, `data-streamdown` and `data-testid` values and class names that the file
+  and the local components it imports render. Walk down to what the file renders, never
+  up: going up reaches most of the suite. One edit to a shared renderer can reach specs
+  of other features (hearsay-tools/cezarion#1076).
 
   ```bash
   grep -lE 'link-safety|data-streamdown|thread-markdown' packages/web/e2e/*.e2e.ts
