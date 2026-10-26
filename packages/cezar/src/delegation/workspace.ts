@@ -1,4 +1,5 @@
 import { inspectGeneration } from './process-liveness.ts';
+import { waitForTestAppWatcher, withIdleTestApp } from './idle-test-app.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
@@ -27,6 +28,7 @@ const cleanupSchema = z.object({ workspace: workerWorkspaceSchema, gitDir: z.str
 type Cleanup = z.infer<typeof cleanupSchema>;
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const hash = (content: Buffer) => createHash('sha256').update(content).digest('hex');
+const checkUnheld = (assertUnheld?: () => void) => assertUnheld?.();
 
 async function branchLog(repoRoot: string, workspace: WorkerWorkspace) {
   const common = await gitCommonDir(repoRoot);
@@ -352,11 +354,17 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         assertCurrent?.();
         // Preview release may itself terminate a known owned holder. Check unrelated holders
         // only afterwards, immediately before destructive Git; they are never signalled.
-        assertUnheld?.();
-        const holders = inspectGeneration({ paths: [workspace.path] });
-        if (holders.liveness !== 'gone') { if (holders.pids.length) held(holders.pids); else report?.unexplained?.(); return result(); }
-        const removed = await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path]);
-        if (!removed.ok) { report?.unexplained?.(); return result(); }
+        checkUnheld(assertUnheld);
+        const removed = await withIdleTestApp(workspace.path, async stopped => {
+          if (stopped) await waitForTestAppWatcher(workspace.path);
+          assertCurrent?.(); assertUnheld?.();
+          const holders = inspectGeneration({ paths: [workspace.path] });
+          if (holders.liveness !== 'gone') { if (holders.pids.length) held(holders.pids); else report?.unexplained?.(); return false; }
+          const removal = await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path]);
+          if (!removal.ok) { report?.unexplained?.(); return false; }
+          return true;
+        });
+        if (!removed) return result();
         remaining = ['branch'];
       }
       if (!checkpoint) {
