@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LAST_WAITS_LIMIT, WAIT_LIMIT, type Wait } from '@open-mercato/cezar-contract/waits';
 import type { AgentInput, CiWaitResult } from '@open-mercato/cezar-contract';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 import { RunDatabase, RunDatabaseUnsupportedSchemaError, RUN_DATABASE_SCHEMA_VERSION, RUNS_DB_FILE } from './run-database.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
@@ -312,7 +313,7 @@ describe('wait checkpoints', () => {
     store.commitWait(runId, resolved, { ...input(resolved.id), parentRunId: runId });
     store.commitParked(runId, stepId);
     const commits = vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex');
-    store.commitOutcome(runId, { kind: 'delivered', inputIds: [resolved.id], at: iso(1_000) }, { patch: { status: 'running' }, resumeStepId: stepId });
+    store.commitOutcome(runId, { kind: 'delivered', inputIds: [resolved.id], at: iso(1_000) }, { patch: { status: RUN_STATUS.running }, resumeStepId: stepId });
     expect(commits).toHaveBeenCalledTimes(1);
     const before = store.getRun(runId)!;
     reopen();

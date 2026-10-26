@@ -3,7 +3,8 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AgentInput, Wait } from '@open-mercato/cezar-contract';
+import type { AgentInput, TimerWaitEntry, Wait } from '@open-mercato/cezar-contract';
+import { RUN_STATUS, STEP_KIND, STEP_STATUS, WAIT_PHASE, WAIT_VIA, makeHumanWait, makeRunRecord, makeStepState, makeTimerWait } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 import { applyOutcomes } from './outcome-commit.ts';
 import { blockRunWrites, crashStore, muteLockedDatabaseLogs, readPersistedRuns } from './run-store.testkit.ts';
@@ -21,15 +22,13 @@ let id: string;
 
 const committed = (): RunRecord => readPersistedRuns(directory).find((record) => record.id === id);
 const input = (overrides: Partial<AgentInput> = {}): AgentInput => ({ id: randomUUID(), parentRunId: id, source: 'lifecycle', text: 'wake', createdAt: at, ...overrides });
-const timer = (overrides: Partial<Wait> = {}): Wait => ({
-  id: randomUUID(), kind: 'timer', source: 'agent', via: 'cezar_wait', registeredAt: at, deadline: at, phase: 'open', turnId: 'turn-1', seconds: 300, ...overrides,
-} as Wait);
-const human = (): Wait => ({ id: randomUUID(), kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: at, phase: 'open', turnId: 'turn-1' } as Wait);
+const timer = (overrides: Partial<TimerWaitEntry> = {}): Wait => makeTimerWait({ id: randomUUID(), via: WAIT_VIA.cezar_wait, registeredAt: at, deadline: at, ...overrides });
+const human = (): Wait => makeHumanWait({ id: randomUUID(), registeredAt: at });
 
 beforeEach(() => {
   directory = join(mkdtempSync(join(tmpdir(), 'cez-outcome-')), '.ai/cezar');
   store = RunStore.open(directory, { keepLive: true });
-  id = store.createRun({ title: 'outcomes', workflow: 'quick-task', task: 'wait', steps: [{ id: 'main', name: 'main', kind: 'agent' }] }).id;
+  id = store.createRun({ title: 'outcomes', workflow: 'quick-task', task: 'wait', steps: [{ id: 'main', name: 'main', kind: STEP_KIND.agent }] }).id;
   store.flush();
 });
 afterEach(() => {
@@ -40,18 +39,18 @@ afterEach(() => {
 
 describe('commitOutcome', () => {
   it('commits every outcome of a call and what it depends on in one transaction', () => {
-    const wait = timer({ phase: 'resolved', resolvedAt: at } as Partial<Wait>);
-    const message = input({ source: 'agent' });
+    const wait = timer({ phase: WAIT_PHASE.resolved, resolvedAt: at });
+    const message = input({ text: 'a message' });
     store.commitWait(id, wait, input({ id: wait.id }));
     store.commitAgentInputs(id, [...store.getRun(id)!.agentInputs!, message]);
     const refusal = input({ purpose: 'completion-refusal' });
     const commits = vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex');
     store.commitOutcome(id, [{ kind: 'delivered', inputIds: [wait.id, message.id], at }, { kind: 'charged', automaticWakes: 7 }, { kind: 'counted', waitDeliveryFailures: undefined }],
-      { patch: { status: 'running' }, enqueue: [refusal] });
+      { patch: { status: RUN_STATUS.running }, enqueue: [refusal] });
     expect(commits).toHaveBeenCalledTimes(1);
     const row = committed();
-    expect(row).toMatchObject({ status: 'running', automaticWakes: 7 });
-    expect(row.lastWaits).toEqual([expect.objectContaining({ id: wait.id, phase: 'delivered', deliveredAt: at })]);
+    expect(row).toMatchObject({ status: RUN_STATUS.running, automaticWakes: 7 });
+    expect(row.lastWaits).toEqual([expect.objectContaining({ id: wait.id, phase: WAIT_PHASE.delivered, deliveredAt: at })]);
     expect(row.agentInputs?.map((entry: AgentInput) => [entry.id, entry.deliveredAt])).toEqual([[wait.id, at], [message.id, at], [refusal.id, undefined]]);
   });
 
@@ -68,7 +67,7 @@ describe('commitOutcome', () => {
     const continuationMessage = { id: 'continue-1', text: 'the answer', createdAt: at, origin: 'human' as const };
     const receipt = store.commitOutcome(id, { kind: 'answered' }, { patch: { continuationMessage } });
     expect(receipt).toEqual({ committed: true, answered: [wait.id] });
-    expect(committed()).toMatchObject({ continuationMessage: { text: 'the answer' }, lastWaits: [{ id: wait.id, phase: 'delivered' }] });
+    expect(committed()).toMatchObject({ continuationMessage: { text: 'the answer' }, lastWaits: [{ id: wait.id, phase: WAIT_PHASE.delivered }] });
   });
 
   it('a refused write throws with nothing changed', () => {
@@ -115,13 +114,12 @@ describe('commitOutcome', () => {
     expect(store.commitOutcome(id, { kind: 'answered', waitIds: [wait.id] }).answered).toEqual([wait.id]);
     crashStore(store);
     store = RunStore.open(directory, { keepLive: true });
-    expect(store.getRun(id)?.lastWaits).toEqual([expect.objectContaining({ id: wait.id, phase: 'delivered' })]);
+    expect(store.getRun(id)?.lastWaits).toEqual([expect.objectContaining({ id: wait.id, phase: WAIT_PHASE.delivered })]);
   });
 });
 
 describe('applyOutcomes', () => {
-  const base = (): RunRecord => ({ id: randomUUID(), title: 't', workflow: 'w', task: 't', status: 'running', createdAt: at, tokensUsed: 0, archived: false,
-    steps: [{ id: 'main', name: 'main', kind: 'agent', status: 'waiting', iterations: 0, tokensUsed: 0 }] } as RunRecord);
+  const base = (): RunRecord => makeRunRecord({ status: RUN_STATUS.running, steps: [makeStepState({ id: 'main', name: 'main', status: STEP_STATUS.waiting, iterations: 0 })] });
 
   it('reads and requeues inputs: consumed keeps deliveredAt, requeued drops every receipt', () => {
     const delivered = { ...input(), deliveredAt: at, awaitingRead: true as const };
@@ -149,9 +147,9 @@ describe('applyOutcomes', () => {
     const { next, changed } = applyOutcomes(run, [{ kind: 'cancelled', waitIds: [wait.id] }, { kind: 'message-delivered', messageId: 'm1' }], { resumeStepId: 'main' });
     expect(changed).toBe(true);
     expect(next.waits).toBeUndefined();
-    expect(next.lastWaits).toEqual([expect.objectContaining({ id: wait.id, phase: 'cancelled' })]);
+    expect(next.lastWaits).toEqual([expect.objectContaining({ id: wait.id, phase: WAIT_PHASE.cancelled })]);
     expect(next.agentInputs).toEqual([]);
     expect(next.queuedMessages).toEqual([]);
-    expect(next.steps[0]!.status).toBe('running');
+    expect(next.steps[0]!.status).toBe(STEP_STATUS.running);
   });
 });

@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentInput, Wait } from '@open-mercato/cezar-contract';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 import { readPersistedRuns } from './run-store.testkit.ts';
 import { RunStore } from './store.ts';
@@ -54,7 +55,7 @@ describe('a commit that leaves waiting', () => {
     const wait = resolvedTimer();
     const input: AgentInput = { id: wait.id, parentRunId: id, source: 'lifecycle', text: 'wake', createdAt: new Date().toISOString() };
     store.commitWait(id, wait, input);
-    store.commitOutcome(id, { kind: 'delivered', inputIds: [wait.id], at: new Date().toISOString() }, { patch: { status: 'running' } });
+    store.commitOutcome(id, { kind: 'delivered', inputIds: [wait.id], at: new Date().toISOString() }, { patch: { status: RUN_STATUS.running } });
     expect(committed(id)).toMatchObject({ status: 'running', autoResumeAttempts: 2 });
     expect(committed(id)).not.toHaveProperty('autoResumeAt');
     expect(store.getRun(id)?.autoResumeAt).toBeUndefined();
