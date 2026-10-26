@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFailed, vi } from 'vitest';
 import { workerWaitRequestSchema, type WorkerWait } from '@open-mercato/cezar-contract/delegation';
+import {
+  RUN_STATUS, STEP_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA, makeWorkerWait,
+} from '@open-mercato/cezar-contract/test-factories.testkit';
 import { RunStore, type RunRecord } from '../runs/store.ts';
 import * as runnerFactory from '../core/runner-factory.ts';
 import { CLAUDE_SPEC_SUPPORT } from '../core/claude-cli-runner.ts';
@@ -126,7 +129,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const generation = store.commitWorkerExecutionStart(w.id);
     const wait = register(p.id, [w.id]);
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    store.updateRun(w.id, { status: 'cancelled' }); manager.reconcileWorkerWaits();
+    store.updateRun(w.id, { status: RUN_STATUS.cancelled }); manager.reconcileWorkerWaits();
     expect(waitOf(store.getRun(p.id))?.phase).toBe('parked');
     expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
     expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
@@ -162,7 +165,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
 
   it('readiness review preserves workers live and through recovery', async () => {
     const p = await parent(); const w = await worker(p.id);
-    store.updateRun(p.id, { status: 'review' }); manager.reconcileWorkerWaits();
+    store.updateRun(p.id, { status: RUN_STATUS.review }); manager.reconcileWorkerWaits();
     expect(store.getRun(w.id)?.status).toBe('queued');
     await restart();
     expect(store.getRun(w.id)?.status).not.toBe('cancelled');
@@ -170,10 +173,10 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
 
   it('readiness worker Continue requires continuing a reviewing parent first', async () => {
     const p = await parent(); const w = await worker(p.id);
-    store.updateRun(w.id, { status: 'done' });
-    store.updateStep(w.id, 'task', { status: 'done', sessionId: randomUUID(), backend: 'claude' });
+    store.updateRun(w.id, { status: RUN_STATUS.done });
+    store.updateStep(w.id, 'task', { status: STEP_STATUS.done, sessionId: randomUUID(), backend: 'claude' });
     const generation = store.commitWorkerExecutionStart(w.id); store.commitWorkerExecutionComplete(w.id, generation);
-    store.updateRun(p.id, { status: 'review' });
+    store.updateRun(p.id, { status: RUN_STATUS.review });
     expect(manager.continueRun(w.id, { text: 'more' })).toMatchObject({ ok: false, error: expect.stringMatching(/parent.*review|parent.*continu/i) });
   });
 
@@ -211,7 +214,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const refused = () => store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).startsWith(`Completion blocked: Workers are still live: ${w.id}.`));
     await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && refused().length === 1 && store.getRun(p.id)?.status === 'waiting');
     expect(completionNudges(p.id)).toHaveLength(1);
-    expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ id: timer!.id, phase: 'open' })]);
+    expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ id: timer!.id, phase: WAIT_PHASE.open })]);
     expect(store.getRun(p.id)?.delegation).not.toHaveProperty('completion');
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
     expect(store.getRun(p.id)?.agentInputs?.filter(input => input.source === 'lifecycle') ?? []).toEqual([]);
@@ -232,7 +235,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => store.readEvents(p.id).filter(event => event.type === 'turn-end').length > boundaries && store.getRun(p.id)?.status === 'waiting');
     expect(completionNudges(p.id)).toEqual([]);
     expect(sentTexts(sent, `Workers are still live: ${w.id}.`)).toEqual([]);
-    expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ kind: 'human', source: 'cezar', via: 'budget', phase: 'open' })]);
+    expect(store.getRun(p.id)?.waits).toEqual([expect.objectContaining({ kind: WAIT_KIND.human, source: WAIT_SOURCE.cezar, via: WAIT_VIA.budget, phase: WAIT_PHASE.open })]);
     expect(store.readEvents(p.id).some(event => event.type === 'note' && String(event.message).includes(`Workers are still live: ${w.id}.`))).toBe(true);
     expect(store.getRun(p.id)?.automaticWakes).toBe(MAX_AUTO_CONTINUES);
     expect(waitOf(store.getRun(p.id))).toBeUndefined();
@@ -266,9 +269,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id);
     manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true); await collect(w.id);
-    store.commitWorkerContinuation(w.id, { status: 'queued' });
+    store.commitWorkerContinuation(w.id, { status: RUN_STATUS.queued });
     expect(manager.finish(p.id)).toBe(false);
-    fixtureUpdateRun(w.id, { status: 'done' });
+    fixtureUpdateRun(w.id, { status: RUN_STATUS.done });
     expect(manager.finish(p.id)).toBe(false);
     await collect(w.id);
     expect(manager.finish(p.id)).toBe(true);
@@ -304,13 +307,13 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   it('readiness discards cached unsettled observations lacking current private proof', async () => {
     const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
     const generation = store.commitWorkerExecutionStart(first.id);
-    store.updateRun(first.id, { status: 'cancelled' });
+    store.updateRun(first.id, { status: RUN_STATUS.cancelled });
     // An agent's worker wait is a list entry (hearsay-tools/cezarion#1301).
     const now = Date.now();
-    store.commitWait(p.id, { kind: 'worker', id: randomUUID(), source: 'agent', via: 'cez-worker-wait', registeredAt: new Date(now).toISOString(),
-      deadline: new Date(now + 600000).toISOString(), timeoutSeconds: 600, phase: 'open', turnId: 'turn-1', mode: 'all',
+    store.commitWait(p.id, makeWorkerWait({ registeredAt: new Date(now).toISOString(),
+      deadline: new Date(now + 600000).toISOString(), mode: 'all',
       workerIds: [first.id, second.id], revisions: [{ workerId: first.id, revision: 0 }, { workerId: second.id, revision: 0 }],
-      outcomes: [{ workerId: first.id, revision: 0, status: 'cancelled', observedAt: new Date(now).toISOString() }] });
+      outcomes: [{ workerId: first.id, revision: 0, status: RUN_STATUS.cancelled, observedAt: new Date(now).toISOString() }] }));
     manager.reconcileWorkerWaits();
     expect(waitOf(store.getRun(p.id))?.outcomes).toEqual([]);
     expect(store.commitWorkerExecutionComplete(first.id, generation)).toBe(true);
@@ -376,15 +379,15 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
     manager.registerWorkerWait(p.id, { workerIds: [first.id, second.id], timeoutSeconds: 600, mode: 'all' });
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    fixtureUpdateRun(first.id, { status: 'review' }); manager.reconcileWorkerWaits();
+    fixtureUpdateRun(first.id, { status: RUN_STATUS.review }); manager.reconcileWorkerWaits();
     expect(waitOf(store.getRun(p.id))?.outcomes).toHaveLength(1);
-    store.commitWorkerContinuation(first.id, { status: 'queued' });
-    fixtureUpdateRun(second.id, { status: 'done' }); manager.reconcileWorkerWaits();
+    store.commitWorkerContinuation(first.id, { status: RUN_STATUS.queued });
+    fixtureUpdateRun(second.id, { status: RUN_STATUS.done }); manager.reconcileWorkerWaits();
     expect(waitOf(store.getRun(p.id))).toMatchObject({ phase: 'parked', outcomes: [{ workerId: second.id }] });
     expect(waitOf(store.getRun(p.id))?.revisions).toContainEqual({ workerId: first.id, revision: 1 });
-    fixtureUpdateRun(first.id, { status: 'review' }); manager.reconcileWorkerWaits();
+    fixtureUpdateRun(first.id, { status: RUN_STATUS.review }); manager.reconcileWorkerWaits();
     await until(() => !waitOf(store.getRun(p.id)));
-    expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ outcomes: expect.arrayContaining([{ workerId: first.id, revision: 1, status: 'review', observedAt: expect.any(String) }]) });
+    expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ outcomes: expect.arrayContaining([{ workerId: first.id, revision: 1, status: RUN_STATUS.review, observedAt: expect.any(String) }]) });
     expect(store.readEvents(p.id)).toContainEqual(expect.objectContaining({ type: 'worker-outcome', outcome: expect.objectContaining({ workerId: first.id, revision: 1 }) }));
   });
 
@@ -392,10 +395,10 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent(); const first = await worker(p.id); const second = await worker(p.id);
     const wait = manager.registerWorkerWait(p.id, { workerIds: [first.id, second.id], timeoutSeconds: 600, mode: 'all' });
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
-    fixtureUpdateRun(first.id, { status: 'done' }); manager.reconcileWorkerWaits();
+    fixtureUpdateRun(first.id, { status: RUN_STATUS.done }); manager.reconcileWorkerWaits();
     expect(waitOf(store.getRun(p.id))).toMatchObject({ phase: 'parked', mode: 'all', outcomes: [{ workerId: first.id }] });
     expect(store.getRun(p.id)?.agentInputs).toBeUndefined();
-    fixtureUpdateRun(second.id, { status: 'done' }); manager.reconcileWorkerWaits();
+    fixtureUpdateRun(second.id, { status: RUN_STATUS.done }); manager.reconcileWorkerWaits();
     await until(() => !waitOf(store.getRun(p.id)));
     expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === wait.id)).toHaveLength(1);
     expect(lastWaitOf(store.getRun(p.id))).toMatchObject({ id: wait.id, reason: 'outcome' });

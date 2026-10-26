@@ -21,8 +21,9 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  // Build config: tests never reach `dist` or the bundle `inline-contract.mjs` folds into the CLI.
-  // They are still typechecked — tsconfig.test.json adds them back.
+  // Build config: tests and their `*.testkit.ts` helpers never reach `dist` or the bundle
+  // `inline-contract.mjs` folds into the CLI. They are still typechecked — tsconfig.test.json adds
+  // them back.
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts"]
+  "exclude": ["src/**/*.test.ts", "src/**/*.testkit.ts"]
 }

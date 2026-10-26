@@ -1,0 +1,1301 @@
+{
+  "$comment": "Matches the rule found when it landed (hearsay-tools/cezarion#1802), keyed by file and the first line of the match so a moved line does not churn it. This list only shrinks: fix a match, then run AST_GREP_RULES_UPDATE=1 npm test -- packages/cezar/src/ast-grep-rules.test.ts. Rules: .ai/ast-grep/README.md.",
+  "sites": [
+    {
+      "file": "packages/web/src/api/global-events.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/api/global-events.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 29
+    },
+    {
+      "file": "packages/web/src/api/global-events.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/api/global-events.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'queued'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/api/global-events.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/api/global-events.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 6
+    },
+    {
+      "file": "packages/web/src/api/global-events.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 12
+    },
+    {
+      "file": "packages/web/src/api/queries.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 5
+    },
+    {
+      "file": "packages/web/src/api/queries.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/api/queries.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/app-shell-container.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/components/app-shell-container.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/components/app-shell-container.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 6
+    },
+    {
+      "file": "packages/web/src/components/command-palette-voice.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 6
+    },
+    {
+      "file": "packages/web/src/components/command-palette-voice.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'failed'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/components/command-palette-voice.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/components/command-palette.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/command-palette.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/command-palette.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/command-palette.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/command-palette.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'cezar'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/components/command-palette.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 5
+    },
+    {
+      "file": "packages/web/src/components/command-palette.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/command-palette.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/command-palette.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 8
+    },
+    {
+      "file": "packages/web/src/components/command-palette.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/components/command-palette.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "via: 'cez-worker-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/composer/composer.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'cezar'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/github-item-detail.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/mobile-sidebar-tasks.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/reference-conflict-action.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/reference-conflict-action.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/run-notifications.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/run-notifications.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/run-notifications.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/run-notifications.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/run-notifications.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'review'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/components/run-notifications.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 15
+    },
+    {
+      "file": "packages/web/src/components/run-notifications.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 38
+    },
+    {
+      "file": "packages/web/src/components/run-notifications.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "via: 'cez-worker-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/sidebar-archive.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/sidebar-project-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/sidebar-project-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 5
+    },
+    {
+      "file": "packages/web/src/components/sidebar-project-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/sidebar-project-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/sidebar-project-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/task-quick-list.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'process'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/task-quick-list.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/task-quick-list.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/components/task-quick-list.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/components/task-quick-list.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'cancelled'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/components/task-quick-list.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 28
+    },
+    {
+      "file": "packages/web/src/components/task-quick-list.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/task-quick-list.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'failed'",
+      "count": 5
+    },
+    {
+      "file": "packages/web/src/components/task-quick-list.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'queued'",
+      "count": 6
+    },
+    {
+      "file": "packages/web/src/components/task-quick-list.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'review'",
+      "count": 18
+    },
+    {
+      "file": "packages/web/src/components/task-quick-list.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 42
+    },
+    {
+      "file": "packages/web/src/components/task-quick-list.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 28
+    },
+    {
+      "file": "packages/web/src/components/task-quick-list.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "via: 'cezar_wait'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/components/use-swipe-to-archive.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/voice/use-voice-command.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 14
+    },
+    {
+      "file": "packages/web/src/components/voice/use-voice-command.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'failed'",
+      "count": 18
+    },
+    {
+      "file": "packages/web/src/components/voice/use-voice-command.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/components/voice/use-voice-command.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/cross-project-task-navigation.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/github/github-route-wiring.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'pr' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/github/github-sidebar-filters.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/github/github-sidebar-filters.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/github/github.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'pr'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/routes/github/github.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/github/github.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/github/github.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/github/issue-linked-tasks.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/routes/global-tasks.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/global-tasks.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/global-tasks.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 5
+    },
+    {
+      "file": "packages/web/src/routes/global-tasks.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/global-tasks.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/global-tasks.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/global-tasks.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes/global-tasks.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/repo-git/git-sidebar.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/repo-git/repo-git.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/repo-git/repo-git.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/repo-git/repo-git.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/repo-git/worktrees-panel.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/repo-git/worktrees-panel.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/repo-git/worktrees-panel.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/skills.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'cezar'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-git/task-changes.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-git/task-changes.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-git/task-changes.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-git/task-commits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-git/task-commits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-git/task-commits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-git/task-commits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-git/task-files.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-git/task-files.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-git/task-files.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-github/task-github-item.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-github/task-github-item.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-github/task-github-item.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/agents-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/agents-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/ask-card.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/ask-card.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/ask-card.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/completion-status.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/follow-up-engine.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/follow-up-engine.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/follow-up-engine.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/follow-up-engine.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'pending'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/handoff-action.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/pending-ask-navigation.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/permission-card.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'pending'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/plan-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'cancelled'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/review-panel.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/review-panel.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'check'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'open'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'agent'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'cancelled'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 14
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'pending'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 6
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'skipped'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 5
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "via: 'cez-worker-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-activity-dock.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "via: 'cezar_wait'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header-mobile.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header-mobile.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header-mobile.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'pr'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'timer'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'resolved'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-header.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "via: 'cezar_wait'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-relationships.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'worker'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-relationships.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-relationships.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-relationships.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'cezar'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-relationships.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 11
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-relationships.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done' as const",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-relationships.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-relationships.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-relationships.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-relationships.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-relationships.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "via: 'cez-worker-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-relationships.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "via: 'completion'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-session-details.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-session-details.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-waits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-waits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-waits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-waits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'process'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-waits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-waits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'worker'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-waits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'cancelled'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-waits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'delivered'",
+      "count": 8
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-waits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'open'",
+      "count": 8
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-waits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'resolved'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-waits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'agent'",
+      "count": 5
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-waits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-waits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "via: 'cez-worker-wait'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-waits.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "via: 'cezar_wait'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/session-transcript.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/session-transcript.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'pending'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/session-transcript.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/step-rail.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/step-rail.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'check'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/subagent-sheet.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'agent'",
+      "count": 14
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'check'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'timer'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "kind: 'worker' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'open' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "phase: 'resolved'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'agent' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'cezar' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'cancelled'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 6
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'pending'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "via: 'cez-worker-wait' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "via: 'monitoring-line'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/task-thread.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "via: 'no-wait' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/thread-items.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/thread-open-cards.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/tasks-overview.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/tasks-overview.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'done'",
+      "count": 27
+    },
+    {
+      "file": "packages/web/src/routes/tasks-overview.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'failed'",
+      "count": 6
+    },
+    {
+      "file": "packages/web/src/routes/tasks-overview.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'queued'",
+      "count": 11
+    },
+    {
+      "file": "packages/web/src/routes/tasks-overview.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'review'",
+      "count": 11
+    },
+    {
+      "file": "packages/web/src/routes/tasks-overview.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'running'",
+      "count": 11
+    },
+    {
+      "file": "packages/web/src/routes/tasks-overview.test.tsx",
+      "rule": "test-enum-literal-tsx",
+      "site": "status: 'waiting'",
+      "count": 5
+    }
+  ]
+}

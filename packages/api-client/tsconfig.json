@@ -23,8 +23,9 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  // Build config: tests never reach `dist` (or the published tarball). They are still
-  // typechecked — tsconfig.test.json adds them back.
+  // Build config: tests and the `*.testkit.ts` re-export of the contract's test factories never
+  // reach `dist` (or the published tarball). They are still typechecked — tsconfig.test.json adds
+  // them back.
   "include": ["src/**/*.ts"],
-  "exclude": ["src/**/*.test.ts"]
+  "exclude": ["src/**/*.test.ts", "src/**/*.testkit.ts"]
 }

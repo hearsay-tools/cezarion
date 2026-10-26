@@ -188,20 +188,17 @@ the Task routing rows for run search, pending asks and skills list their readers
 Where readers hide, searched from the repo root (replace the example values):
 
 - **A `RunRecord` field renamed, moved or removed**: packaged and browser fixtures, by
-  its old and new names or paths (hearsay-tools/cezarion#1300).
-
-  ```bash
-  rg -l -F -e 'delegation.wait' -e 'waits' packages/cezar/test/e2e/*.test.ts packages/web/e2e/*.e2e.ts
-  ```
+  its old and new names or paths, searched as below (hearsay-tools/cezarion#1300); a unit
+  test using `makeRunRecord` fails to compile instead.
 
 - **An enum or discriminant value renamed** (a wait kind, outcome, status or attention
-  label): the quoted old value in tests, searched before each push that renames one,
-  not only before the PR opens. A rejection test that passes only because the
-  old value is now unknown must be updated to test its intended constraint
+  label): the quoted old value in tests, searched before each push that renames one; the
+  `test-enum-literal` baseline lists tests still on literals. A rejection test that
+  passes only because the old value is now unknown must test its constraint
   (hearsay-tools/cezarion#1504).
 
   ```bash
-  rg -n -F -e "'ci'" -e '"ci"' packages --glob '*.test.*' --glob '*.e2e.ts'
+  rg -n -F -e 'delegation.wait' -e "'ci'" packages --glob '*.test.*' --glob '*.e2e.ts'
   ```
 
 - **A default removed** (a catalog, a source or a seeded entry): browser specs, by its

@@ -1,6 +1,7 @@
 // @vitest-environment node
 
 import { summaryOf } from '@/test/run-summary-fixture'
+import { RUN_STATUS, STEP_KIND, makeRunRecord, makeStepState } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { describe, expect, it } from 'vitest'
 
 import type { ProcessUsage, RunRecord, RunSummary } from '@open-mercato/cezar-api-client'
@@ -28,19 +29,22 @@ let seq = 0
 
 function run(over: Partial<RunRecord> = {}): RunSummary {
   seq += 1
-  return summaryOf({
-    id: `r${seq}`,
-    title: `Task ${seq}`,
-    workflow: 'default',
-    task: `task ${seq}`,
-    status: 'done',
-    createdAt: '2026-07-14T10:00:00.000Z',
-    tokensUsed: 0,
-    archived: false,
-    steps: [],
-    ...over,
-  })
+  return summaryOf(
+    makeRunRecord({
+      id: `r${seq}`,
+      title: `Task ${seq}`,
+      workflow: 'default',
+      task: `task ${seq}`,
+      status: RUN_STATUS.done,
+      createdAt: '2026-07-14T10:00:00.000Z',
+      ...over,
+    }),
+  )
 }
+
+// A task item tab's kind, a cockpit type of its own: not a wait kind, though `pr` is both.
+// ast-grep-ignore: test-enum-literal
+const prTab = (number: number) => ({ kind: 'pr' as const, number })
 
 const SAMPLE: ProcessUsage = { cpuPct: 38.4, rssBytes: 612 * 1024 ** 2, procCount: 5 }
 
@@ -63,7 +67,7 @@ describe('formatMem', () => {
 describe('scheduledResume', () => {
   const NOW = new Date('2026-08-03T19:00:00.000Z')
   const scheduled = (autoResumeAt?: string) =>
-    scheduledResume(run({ status: 'waiting', autoResumeAt }), NOW)
+    scheduledResume(run({ status: RUN_STATUS.waiting, autoResumeAt }), NOW)
 
   it('is the clock time alone for an appointment later the same day', () => {
     const answer = scheduled('2026-08-03T19:33:53.000Z')
@@ -83,7 +87,7 @@ describe('scheduledResume', () => {
     // A row must never print `Invalid Date` beside the word "scheduled".
     expect(scheduled('not-a-date')).toBeUndefined()
     // Only a FAILED run is waiting on one — a running record with a stale stamp is not.
-    expect(scheduledResume(run({ status: 'running', autoResumeAt: '2026-08-03T19:33:53.000Z' }), NOW))
+    expect(scheduledResume(run({ status: RUN_STATUS.running, autoResumeAt: '2026-08-03T19:33:53.000Z' }), NOW))
       .toBeUndefined()
   })
 })
@@ -109,8 +113,8 @@ describe('workflowLabel', () => {
 
   it('replaces the (planned)/(inbox) placeholders with the first agent step', () => {
     const steps = [
-      { id: 's1', name: 'lint', kind: 'check' as const, status: 'done' as const, iterations: 1, tokensUsed: 0 },
-      { id: 's2', name: 'om-fix', kind: 'agent' as const, status: 'done' as const, iterations: 1, tokensUsed: 0 },
+      makeStepState({ id: 's1', name: 'lint', kind: STEP_KIND.check }),
+      makeStepState({ id: 's2', name: 'om-fix', kind: STEP_KIND.agent }),
     ]
     expect(workflowLabel(run({ workflow: '(planned)', steps }))).toBe('om-fix')
     expect(workflowLabel(run({ workflow: '(inbox)', steps }))).toBe('om-fix')
@@ -129,7 +133,7 @@ describe('filterRuns', () => {
       id: 'c',
       title: 'Inbox follow-up',
       workflow: '(inbox)',
-      steps: [{ id: 's', name: 'om-fix', kind: 'agent', status: 'done', iterations: 1, tokensUsed: 0 }],
+      steps: [makeStepState({ id: 's', name: 'om-fix' })],
     }),
   ]
   const ids = (query: string) => filterRuns(runs, query).map((r) => r.id)
@@ -217,16 +221,16 @@ describe('finishedRunCount', () => {
   it('counts unarchived done/failed/cancelled only', () => {
     expect(
       finishedRunCount([
-        run({ status: 'done' }),
-        run({ status: 'failed' }),
-        run({ status: 'cancelled' }),
+        run({ status: RUN_STATUS.done }),
+        run({ status: RUN_STATUS.failed }),
+        run({ status: RUN_STATUS.cancelled }),
         // Still wants a human or still working — not sweepable.
-        run({ status: 'review' }),
-        run({ status: 'waiting' }),
-        run({ status: 'running' }),
-        run({ status: 'queued' }),
+        run({ status: RUN_STATUS.review }),
+        run({ status: RUN_STATUS.waiting }),
+        run({ status: RUN_STATUS.running }),
+        run({ status: RUN_STATUS.queued }),
         // Already archived — nothing to archive again.
-        run({ status: 'done', archived: true }),
+        run({ status: RUN_STATUS.done, archived: true }),
       ]),
     ).toBe(3)
   })
@@ -234,9 +238,9 @@ describe('finishedRunCount', () => {
   it('does not count owned workers as finished project tasks', () => {
     expect(
       finishedRunCount([
-        run({ status: 'done' }),
+        run({ status: RUN_STATUS.done }),
         run({
-          status: 'done',
+          status: RUN_STATUS.done,
           delegation: {
             role: 'worker' as const,
             permissions: [],
@@ -271,17 +275,17 @@ describe('sweepableRunCount / isSweepable', () => {
     },
   }
   const fixture = () => [
-    run({ status: 'done' }),
-    run({ status: 'failed' }),
-    run({ status: 'cancelled' }),
-    run({ status: 'done', pinned: true }),
-    run({ status: 'running', pinned: true }),
-    run({ status: 'waiting', autoResumeAt: '2026-10-03T10:00:00.000Z' }),
-    run({ status: 'waiting', pinned: true, autoResumeAt: '2026-10-03T10:00:00.000Z' }),
-    run({ status: 'running' }),
-    run({ status: 'review' }),
-    run({ status: 'done', archived: true }),
-    run({ status: 'done', delegation: worker }),
+    run({ status: RUN_STATUS.done }),
+    run({ status: RUN_STATUS.failed }),
+    run({ status: RUN_STATUS.cancelled }),
+    run({ status: RUN_STATUS.done, pinned: true }),
+    run({ status: RUN_STATUS.running, pinned: true }),
+    run({ status: RUN_STATUS.waiting, autoResumeAt: '2026-10-03T10:00:00.000Z' }),
+    run({ status: RUN_STATUS.waiting, pinned: true, autoResumeAt: '2026-10-03T10:00:00.000Z' }),
+    run({ status: RUN_STATUS.running }),
+    run({ status: RUN_STATUS.review }),
+    run({ status: RUN_STATUS.done, archived: true }),
+    run({ status: RUN_STATUS.done, delegation: worker }),
   ]
 
   it.each([
@@ -294,7 +298,7 @@ describe('sweepableRunCount / isSweepable', () => {
 
   it('finishedRunCount is the unscoped sweep and skips scheduled runs', () => {
     expect(finishedRunCount(fixture())).toBe(sweepableRunCount(fixture()))
-    expect(finishedRunCount([run({ status: 'waiting', autoResumeAt: '2026-10-03T10:00:00.000Z' })])).toBe(0)
+    expect(finishedRunCount([run({ status: RUN_STATUS.waiting, autoResumeAt: '2026-10-03T10:00:00.000Z' })])).toBe(0)
   })
 })
 
@@ -568,7 +572,7 @@ describe('githubRepoBase', () => {
 
 describe('taskReference', () => {
   it('shows the known issue while an issue-driven task is queued', () => {
-    expect(taskReference(run({ status: 'queued', issueNumber: 554 }))).toEqual({
+    expect(taskReference(run({ status: RUN_STATUS.queued, issueNumber: 554 }))).toEqual({
       kind: 'Issue',
       number: 554,
     })
@@ -600,24 +604,24 @@ describe('prNumber', () => {
 
 describe('usageCells', () => {
   it('reports a live sample for a running run, emphasized', () => {
-    expect(usageCells(run({ status: 'running' }), SAMPLE)).toEqual({
+    expect(usageCells(run({ status: RUN_STATUS.running }), SAMPLE)).toEqual({
       cpu: { text: '38%', kind: 'live' },
       mem: { text: '612 MB', kind: 'live' },
     })
   })
 
   it('believes a sample for a waiting run too — the CLI process is still alive', () => {
-    expect(usageCells(run({ status: 'waiting' }), SAMPLE).cpu.kind).toBe('live')
+    expect(usageCells(run({ status: RUN_STATUS.waiting }), SAMPLE).cpu.kind).toBe('live')
   })
 
   it('ignores a sample that raced a run into a terminal status', () => {
-    const cells = usageCells(run({ status: 'done' }), SAMPLE)
+    const cells = usageCells(run({ status: RUN_STATUS.done }), SAMPLE)
     expect(cells.cpu).toEqual({ text: '', kind: 'none' })
     expect(cells.mem).toEqual({ text: '', kind: 'none' })
   })
 
   it('falls back to the persisted peak, dimmed, when there is no live sample', () => {
-    const cells = usageCells(run({ status: 'done', peakRssBytes: 401 * 1024 ** 2, peakProcCount: 7 }), undefined)
+    const cells = usageCells(run({ status: RUN_STATUS.done, peakRssBytes: 401 * 1024 ** 2, peakProcCount: 7 }), undefined)
     expect(cells.cpu).toEqual({ text: '', kind: 'none' }) // no persisted peak CPU exists
     expect(cells.mem).toEqual({
       text: 'peak 401 MB',
@@ -627,13 +631,13 @@ describe('usageCells', () => {
   })
 
   it('drops the proc count from the tooltip when none was recorded', () => {
-    expect(usageCells(run({ status: 'done', peakRssBytes: 1024 ** 2 }), undefined).mem.title).toBe(
+    expect(usageCells(run({ status: RUN_STATUS.done, peakRssBytes: 1024 ** 2 }), undefined).mem.title).toBe(
       'peak — run finished',
     )
   })
 
   it('shows a running run without a sample yet as empty, not as zero', () => {
-    const cells = usageCells(run({ status: 'running' }), undefined)
+    const cells = usageCells(run({ status: RUN_STATUS.running }), undefined)
     expect(cells.cpu).toEqual({ text: '', kind: 'none' })
     expect(cells.mem).toEqual({ text: '', kind: 'none' })
   })
@@ -645,7 +649,7 @@ describe('taskItemTabs', () => {
   it('keeps own-repo references in taskReferences order, mapped to item tabs', () => {
     const r = run({ pullRequestUrl: `${BASE}/pull/801`, issueNumber: 692 })
     expect(taskItemTabs(r, BASE)).toEqual([
-      { kind: 'pr', number: 801 },
+      prTab(801),
       { kind: 'issue', number: 692 },
     ])
   })
@@ -664,11 +668,11 @@ describe('taskItemTabs', () => {
   it('matches owner/repo case-insensitively', () => {
     const reference = { kind: 'PR' as const, number: 5, url: 'https://github.com/Hearsay-Tools/Cezarion/pull/5' }
     expect(isOwnRepoReference(reference, BASE)).toBe(true)
-    expect(taskItemTabs(run({ pullRequestUrl: reference.url }), BASE)).toEqual([{ kind: 'pr', number: 5 }])
+    expect(taskItemTabs(run({ pullRequestUrl: reference.url }), BASE)).toEqual([prTab(5)])
   })
 
   it('includes an uncorroborated CEZ:PR declaration', () => {
-    expect(taskItemTabs(run({ markerRefs: { pr: 9 } }), BASE)).toEqual([{ kind: 'pr', number: 9 }])
+    expect(taskItemTabs(run({ markerRefs: { pr: 9 } }), BASE)).toEqual([prTab(9)])
   })
 
   it('builds the task item path for an own-repo reference', () => {
@@ -680,8 +684,8 @@ describe('taskItemTabs', () => {
   it('projects five collection PRs into tabs before issues and preserves scoped collisions', () => {
     const task = run({ pullRequests: Array.from({ length: 5 }, (_, i) => ({ number: 812 + i, source: 'declared' })), issueNumber: 20 });
     expect(taskItemTabs(task, 'https://github.com/o/r')).toEqual([
-      { kind: 'pr', number: 812 }, { kind: 'pr', number: 813 }, { kind: 'pr', number: 814 },
-      { kind: 'pr', number: 815 }, { kind: 'pr', number: 816 }, { kind: 'issue', number: 20 },
+      prTab(812), prTab(813), prTab(814),
+      prTab(815), prTab(816), { kind: 'issue', number: 20 },
     ]);
     const scoped = run({ pullRequests: [
       { number: 812, source: 'declared' },

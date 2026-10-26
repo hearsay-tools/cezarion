@@ -1,0 +1,94 @@
+id: test-enum-literal-tsx
+language: tsx
+severity: warning
+message: >-
+  Name a contract enum value in a test through its constant, and build run records, waits and events
+  with the typed factories: RUN_STATUS, STEP_STATUS, STEP_KIND, WAIT_KIND, WAIT_PHASE, WAIT_VIA,
+  WAIT_SOURCE and makeRunRecord, makeTimerWait and the rest, from
+  packages/contract/src/test-factories.testkit.ts (@open-mercato/cezar-api-client/contract/test-factories.testkit
+  in the cockpit). A renamed field or value then stops compiling in every test that uses it, where
+  a literal still compiles and asserts the old value (hearsay-tools/cezarion#1300,
+  hearsay-tools/cezarion#1504, hearsay-tools/cezarion#1812). An object that only shares the word, such as a
+  GitHub status, takes `// ast-grep-ignore: <this rule's id>` on the line above, with the reason.
+files:
+  - packages/*/src/**/*.test.tsx
+  - packages/web/src/test/**/*.tsx
+  - packages/web/e2e/**/*.tsx
+# Keep this file and test-enum-literal.yml the same below `files`: ast-grep parses .ts and .tsx
+# files with different grammars, so one rule cannot cover both. test-enum-literal-rule.test.ts
+# compares them, and checks each key's values against the contract's schemas.
+#
+# Matches an object property whose key is a contract enum's field and whose value is a string of
+# that enum, bare or with `as const`. Not every string that equals an enum value: `'done'` and
+# `'open'` are ordinary words, and 7,675 strings matched where 2,726 properties did. An assertion of
+# a renamed value fails loudly; the silent failures are fixtures and inputs, which are properties.
+# The rule sees names, not types, so another object's `status: 'done'` matches too: ignore it.
+utils:
+  # run and step statuses (runStatusSchema, stepStatusSchema)
+  status-literal:
+    kind: string
+    has:
+      kind: string_fragment
+      regex: '^(queued|running|waiting|review|done|failed|cancelled|pending|skipped)$'
+  # wait kinds (waitSchema) and step kinds (stepStateSchema)
+  kind-literal:
+    kind: string
+    has:
+      kind: string_fragment
+      regex: '^(pr|timer|human|worker|process|agent|check)$'
+  # waitPhaseSchema
+  phase-literal:
+    kind: string
+    has:
+      kind: string_fragment
+      regex: '^(open|resolved|delivered|cancelled)$'
+  # waitViaSchema
+  via-literal:
+    kind: string
+    has:
+      kind: string_fragment
+      regex: '^(cezar_wait|cezar_wait_for_ci|cezar_ask|monitoring-line|schedule-wakeup|ask-line|native-ask|no-wait|budget|cez-worker-wait|completion)$'
+  # a wait's `source`
+  source-literal:
+    kind: string
+    has:
+      kind: string_fragment
+      regex: '^(agent|cezar)$'
+rule:
+  kind: pair
+  any:
+    - all:
+        - has: { field: key, regex: '^(status|"status"|''status'')$' }
+        - has:
+            field: value
+            any:
+              - matches: status-literal
+              - { kind: as_expression, has: { matches: status-literal } }
+    - all:
+        - has: { field: key, regex: '^(kind|"kind"|''kind'')$' }
+        - has:
+            field: value
+            any:
+              - matches: kind-literal
+              - { kind: as_expression, has: { matches: kind-literal } }
+    - all:
+        - has: { field: key, regex: '^(phase|"phase"|''phase'')$' }
+        - has:
+            field: value
+            any:
+              - matches: phase-literal
+              - { kind: as_expression, has: { matches: phase-literal } }
+    - all:
+        - has: { field: key, regex: '^(via|"via"|''via'')$' }
+        - has:
+            field: value
+            any:
+              - matches: via-literal
+              - { kind: as_expression, has: { matches: via-literal } }
+    - all:
+        - has: { field: key, regex: '^(source|"source"|''source'')$' }
+        - has:
+            field: value
+            any:
+              - matches: source-literal
+              - { kind: as_expression, has: { matches: source-literal } }
