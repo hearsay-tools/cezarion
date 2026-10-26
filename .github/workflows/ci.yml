@@ -342,6 +342,72 @@ jobs:
           fi
           node .ai/skills/check-code-quality/scripts/complexity-gate.mjs --base "$base" --head "$head" "${growth[@]}"
 
+  clone-gate:
+    name: Check new code clones
+    if: ${{ github.event_name == 'pull_request_target' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.pr_number == '') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out the trusted workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.merge_group.base_sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: '12.11.2'
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install dependencies without lifecycle scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Reject new code clones
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = pull_request_target ]; then
+            pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
+            if ! jq -e --arg head "$EXPECTED_HEAD_SHA" '.head.sha == $head' <<<"$pr" >/dev/null; then
+              echo "::error::The pull request changed after this run started. Re-run CI for the current head." >&2
+              exit 1
+            fi
+            git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head"
+            head="$(git rev-parse FETCH_HEAD)"
+            if [ "$head" != "$EXPECTED_HEAD_SHA" ]; then
+              echo "::error::The pull request changed during the fetch. Re-run CI for the current head." >&2
+              exit 1
+            fi
+            base="$GITHUB_SHA"
+          elif [ "$EVENT_NAME" = merge_group ]; then
+            head="$GROUP_HEAD_SHA"
+            base="$GROUP_BASE_SHA"
+            git fetch --no-tags origin "$head"
+            if [ "$(git rev-parse FETCH_HEAD)" != "$head" ]; then
+              echo "::error::The merge group head could not be fetched." >&2
+              exit 1
+            fi
+          else
+            head="$GITHUB_SHA"
+            base=origin/main
+          fi
+          node .github/scripts/check-clones.cjs --base "$base" --head "$head"
+
   build-and-package:
     name: Typecheck, unit, build, and package
     needs: queue-proof
@@ -618,7 +684,7 @@ jobs:
   # cockpit browser jobs.
   verify:
     name: Unit, build, E2E, and package
-    needs: [queue-proof, change-surface, classify-pr, complexity-gate, build-and-package, vitest, cockpit-browser]
+    needs: [queue-proof, change-surface, classify-pr, complexity-gate, clone-gate, build-and-package, vitest, cockpit-browser]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -633,6 +699,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           CLASSIFY_RESULT: ${{ needs.classify-pr.result }}
           SURFACE_RESULT: ${{ needs.change-surface.result }}
+          CLONE_GATE_RESULT: ${{ needs['clone-gate'].result }}
           COMPLEXITY_GATE_RESULT: ${{ needs['complexity-gate'].result }}
           BUILD_AND_PACKAGE_RESULT: ${{ needs['build-and-package'].result }}
           VITEST_RESULT: ${{ needs.vitest.result }}
@@ -649,8 +716,10 @@ jobs:
           # Other events skip it, and a pull request or a merge group may never skip it.
           if [ "$EVENT_NAME" = pull_request_target ] || [ "$EVENT_NAME" = merge_group ]; then
             test "$COMPLEXITY_GATE_RESULT" = success
+            test "$CLONE_GATE_RESULT" = success
           else
             test "$COMPLEXITY_GATE_RESULT" = success -o "$COMPLEXITY_GATE_RESULT" = skipped
+            test "$CLONE_GATE_RESULT" = success -o "$CLONE_GATE_RESULT" = skipped
           fi
           if [ "$EVENT_NAME" = push ] && [ "$PROOF_RESULT" = success ] && [ "$PROOF_VERIFIED" = true ]; then
             test "$BUILD_AND_PACKAGE_RESULT" = skipped
