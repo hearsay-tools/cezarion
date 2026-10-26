@@ -26,12 +26,26 @@ export interface ModuleFacts {
 
 const EXTENSIONS = ['', '.ts', '.tsx', '/index.ts', '/index.tsx']
 
-/** The repository path an import names, or null for a package or a file that does not exist. */
+/** The workspace packages the cockpit imports by name; each exports `./*` as `./src/*.ts`. */
+export const WORKSPACE_PACKAGES: ReadonlyArray<readonly [name: string, source: string]> = [
+  ['@open-mercato/cezar-api-client', 'packages/api-client/src'],
+  ['@open-mercato/cezar-contract', 'packages/contract/src'],
+]
+
+function importBase(from: string, specifier: string): string | null {
+  if (specifier.startsWith('@/')) return join('packages/web/src', specifier.slice(2))
+  if (specifier.startsWith('.')) return normalize(join(dirname(from), specifier))
+  for (const [name, source] of WORKSPACE_PACKAGES) {
+    if (specifier === name) return `${source}/index`
+    if (specifier.startsWith(`${name}/`)) return join(source, specifier.slice(name.length + 1))
+  }
+  return null
+}
+
+/** The repository path an import names, or null for another package or a file that does not exist. */
 export function resolveImport(repoRoot: string, from: string, specifier: string): string | null {
-  let base: string
-  if (specifier.startsWith('@/')) base = join('packages/web/src', specifier.slice(2))
-  else if (specifier.startsWith('.')) base = normalize(join(dirname(from), specifier))
-  else return null
+  const base = importBase(from, specifier)
+  if (base === null) return null
   const stem = base.replace(/\.(?:m?js|jsx)$/, '')
   for (const candidate of [base, ...EXTENSIONS.map((extension) => stem + extension)]) {
     if (/\.tsx?$/.test(candidate) && existsSync(join(repoRoot, candidate))) return candidate.split('\\').join('/')

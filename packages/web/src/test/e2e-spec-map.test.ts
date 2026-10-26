@@ -1,12 +1,12 @@
 // @vitest-environment node
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { dirname, join, resolve } from 'node:path'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import { merge, partial } from '../../e2e/spec-map/build-map'
 import { Bundle, assertSameJavaScript } from '../../e2e/spec-map/bundle'
-import { moduleFacts, resolveImport, type ModuleFacts } from '../../e2e/spec-map/module-graph'
+import { WORKSPACE_PACKAGES, moduleFacts, resolveImport, type ModuleFacts } from '../../e2e/spec-map/module-graph'
 import {
   buildMap, joinPartials, mapProblems, partialMap, reach, specStatuses,
   type SpecEvidence, type SpecMap,
@@ -152,6 +152,32 @@ describe('module facts', () => {
       "export { DiffView } from '../components/diff'",
     ].join('\n'))
     expect(page.imports).toEqual(['packages/web/src/components/diff/index.ts', 'packages/web/src/lib/utils.ts'])
+  })
+
+  it('resolves the workspace packages the cockpit bundles to their source files', () => {
+    const root = tempRoot()
+    put(root, 'packages/api-client/src/index.ts', '')
+    put(root, 'packages/api-client/src/contract/defined.ts', '')
+    put(root, 'packages/contract/src/waits.ts', '')
+    const from = 'packages/web/src/routes/page.tsx'
+    expect(resolveImport(root, from, '@open-mercato/cezar-api-client')).toBe('packages/api-client/src/index.ts')
+    expect(resolveImport(root, from, '@open-mercato/cezar-api-client/contract/defined')).toBe('packages/api-client/src/contract/defined.ts')
+    expect(resolveImport(root, 'packages/api-client/src/index.ts', '@open-mercato/cezar-contract/waits')).toBe('packages/contract/src/waits.ts')
+    expect(resolveImport(root, from, '@open-mercato/cezar-contractual')).toBeNull()
+  })
+
+  it('names every workspace package the cockpit bundle depends on, with the export pattern it resolves', () => {
+    const repo = resolve(import.meta.dirname, '../../../..')
+    const manifest = (dir: string) => JSON.parse(readFileSync(join(repo, dir, 'package.json'), 'utf8'))
+    const workspaces = new Map(readdirSync(join(repo, 'packages')).map((dir) => [manifest(`packages/${dir}`).name as string, `packages/${dir}`]))
+    const bundled = ['packages/web', 'packages/api-client']
+      .flatMap((dir) => Object.keys(manifest(dir).dependencies ?? {}))
+      .filter((name) => workspaces.has(name))
+    expect(WORKSPACE_PACKAGES.map(([name]) => name).sort()).toEqual([...new Set(bundled)].sort())
+    for (const [name, source] of WORKSPACE_PACKAGES) {
+      expect(source).toBe(`${workspaces.get(name)}/src`)
+      expect(manifest(workspaces.get(name)!).exports).toMatchObject({ '.': './src/index.ts', './*': './src/*.ts' })
+    }
   })
 })
 
