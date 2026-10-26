@@ -20,8 +20,10 @@ import {
 import { readManifest } from './worktree-manifest.testkit.ts';
 
 const execFileAsync = promisify(execFile);
-/** The `tree:` identity a cezar before hearsay-tools/cezarion#1814 recorded for a file holding `text`. */
-const legacyFileIdentity = (text: string) => `tree:${createHash('sha256').update(`F  ${text}\n`).digest('hex')}`;
+/** The `tree:` identity a cezar before hearsay-tools/cezarion#1814 recorded over `records`. */
+const legacyIdentity = (records: string) => `tree:${createHash('sha256').update(records).digest('hex')}`;
+/** The same, for a file holding `text`. */
+const legacyFileIdentity = (text: string) => legacyIdentity(`F  ${text}\n`);
 const GIT_ID = ['-c', 'user.name=test', '-c', 'user.email=test@local'];
 
 describe('worktree manifest', { timeout: 30_000 }, () => {
@@ -239,6 +241,41 @@ describe('worktree manifest', { timeout: 30_000 }, () => {
     expect((await readManifest(worktree))?.entries[0]?.identity).toBe(fileIdentity('v1'));
     writeFileSync(join(worktree, 'kept.txt'), 'v2');
     await pass('skills', async (files) => expect((await files.inspect('kept.txt')).owner).toBe('theirs'));
+  });
+
+  // The older encoding has no lengths: `SKILL.md` holding 'v1\nF other y' reads as `SKILL.md`
+  // holding 'v1' plus `other` holding 'y'. Each row is an imported entry and the tree on disk now.
+  const legacyRows: Array<[string, { entry: Record<string, string>; disk: Record<string, string>; owner: PathState['owner'] }]> = [
+    ['a generated SKILL.md, unchanged', {
+      entry: { kind: 'generated', identity: legacyIdentity('D \nF SKILL.md v1\n') }, disk: { 'SKILL.md': 'v1' }, owner: 'ours',
+    }],
+    ['a generated SKILL.md the agent split into the same records', {
+      entry: { kind: 'generated', identity: legacyIdentity('D \nF SKILL.md v1\nF other y\n') }, disk: { 'SKILL.md': 'v1', other: 'y' }, owner: 'theirs',
+    }],
+    ['a copy that reads the same as another tree', {
+      entry: { kind: 'copy', identity: legacyIdentity('D \nF a \nF b y\n') }, disk: { a: '', b: 'y' }, owner: 'kept',
+    }],
+    ['an interrupted link whose copy reads the same as another tree', {
+      entry: { kind: 'pending', identity: 'link:/nowhere', alternate: legacyIdentity('D \nF a \nF b y\n') }, disk: { a: '', b: 'y' }, owner: 'kept',
+    }],
+    ['an interrupted SKILL.md link that was copied', {
+      entry: { kind: 'pending', identity: legacyIdentity('D \nL SKILL.md /nowhere\n'), alternate: legacyIdentity('D \nF SKILL.md v1\n') },
+      disk: { 'SKILL.md': 'v1' }, owner: 'ours',
+    }],
+  ];
+
+  it.each(legacyRows)('trusts an imported tree identity only where its older encoding is unambiguous: %s', async (_name, row) => {
+    const dir = join(worktree, 'skills', 'x');
+    mkdirSync(dir, { recursive: true });
+    for (const [name, text] of Object.entries(row.disk)) writeFileSync(join(dir, name), text);
+    writeFileSync(join(gitDir, LEGACY_SKILLS_MANIFEST_FILE), JSON.stringify({
+      version: 1, roots: [], entries: [{ path: 'skills/x', skill: 'x', ...row.entry }],
+    }));
+    const owner = await pass('skills', async (files) => {
+      const state = await files.inspect('skills/x');
+      return state.owner;
+    });
+    expect(owner).toBe(row.owner);
   });
 
   // The Worktree cases rows for a crash inside one write, read from what the crash committed.

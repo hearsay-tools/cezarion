@@ -343,17 +343,32 @@ export class WorktreeFiles {
     if (current === null) return { owner: 'free', current, entry: listed };
     if (!listed) return { owner: 'theirs', current, entry: undefined };
     if (current === listed.identity || current === listed.alternate) return { owner: 'ours', current, entry: listed };
-    const upgraded = await this.upgradeLegacy(at, listed, current);
-    if (upgraded) return { owner: 'ours', current, entry: upgraded };
+    const legacy = await this.checkLegacy(at, listed, current);
+    if (legacy === 'kept') return { owner: 'kept', current, entry: listed };
+    if (legacy) return { owner: 'ours', current, entry: legacy };
     return { owner: listed.kind === 'pending' || !verifiable(listed.identity) ? 'kept' : 'theirs', current, entry: listed };
   }
 
-  /** An imported `tree:` identity that still matches, in its older encoding, is recorded again as `current`. */
-  private async upgradeLegacy(at: string, listed: ManifestEntry, current: string): Promise<ManifestEntry | null> {
+  /**
+   * An imported `tree:` identity, checked in its older encoding, which has no lengths: one tree can
+   * read the same as another. A match proves the path unchanged only for a single file, or for a
+   * dir holding only `SKILL.md` where cezar wrote just that. Then the entry is recorded again as
+   * `current`. Any other match is kept: it may be cezar's copy or the agent's edit. Null when
+   * nothing matched, so the path has changed.
+   */
+  private async checkLegacy(at: string, listed: ManifestEntry, current: string): Promise<ManifestEntry | 'kept' | null> {
     if (!listed.identity.startsWith('tree:') && !listed.alternate?.startsWith('tree:')) return null;
     const old = await digestOf(at, 'tree');
-    if (old !== listed.identity && old !== listed.alternate) return null;
-    const entry = old === listed.identity ? { ...listed, identity: current } : { ...listed, alternate: current };
+    const field = old === listed.identity ? 'identity' : old === listed.alternate ? 'alternate' : null;
+    if (!field) return null;
+    const stat = await lstat(at);
+    if (!stat.isFile()) {
+      // An older cezar wrote these as one `SKILL.md`; a copy of a whole source dir has no known shape.
+      const oneSkillFile = listed.kind === 'generated' || (listed.kind === 'pending' && listed.identity.startsWith('tree:'));
+      if (!oneSkillFile) return 'kept';
+      if (!stat.isDirectory() || (await readdir(at)).join('/') !== 'SKILL.md') return null;
+    }
+    const entry = { ...listed, [field]: current };
     this.byPath.set(entry.path, entry);
     return entry;
   }
