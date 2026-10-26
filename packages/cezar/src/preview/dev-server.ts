@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, rmSync, statSync, truncateSync, appendFileSync, writeFileSync, fstatSync } from 'node:fs';
 import { Socket } from 'node:net';
@@ -62,6 +62,14 @@ async function terminatePid(pid: number): Promise<void> {
  *  resolves once no member runs, and "stopped" means the port is free. On Windows, the leader's tree. */
 async function terminateGroup(leader: GroupLeader): Promise<void> {
   await stopGroup(leader, { graceMs: KILL_GRACE_MS, killWaitMs: KILL_SETTLE_MS });
+}
+
+/** Windows, once the shell leader exited on its own: `taskkill` the tree at its pid, as cezar did
+ *  before the detached-process helper. By then the pid names no process, or one that reused it;
+ *  a Job Object per started server replaces this (hearsay-tools/cezarion#1876). */
+function endExitedLeaderTree(pid: number): Promise<void> {
+  spawnSync('taskkill', ['/pid', String(pid), '/t', '/f'], { windowsHide: true, timeout: 5_000 });
+  return Promise.resolve();
 }
 
 /** Keep the last 1 MiB once the log passes 5 MiB. The child holds the file open in append mode, so it keeps writing at the end. */
@@ -150,7 +158,8 @@ export class DevServer extends EventEmitter {
         // the way a stop does (SIGKILL after the grace period, so a holder that ignores SIGTERM goes
         // too), and keep the pid record until the group is gone: `stop()` awaits the same cleanup.
         this.finish('exited', { keepRecord: true });
-        this.stopping = terminateGroup({ pid, child }).finally(() => this.removeRecord(pid));
+        const cleanup = process.platform === 'win32' ? endExitedLeaderTree(pid) : terminateGroup({ pid, child });
+        this.stopping = cleanup.finally(() => this.removeRecord(pid));
       });
     });
     if (child.pid !== undefined) {
