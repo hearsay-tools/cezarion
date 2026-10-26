@@ -165,19 +165,28 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
 
   it('readiness review preserves workers live and through recovery', async () => {
     const p = await parent(); const w = await worker(p.id);
+    await until(() => store.getRun(p.id)?.status === RUN_STATUS.waiting);
     store.updateRun(p.id, { status: RUN_STATUS.review }); manager.reconcileWorkerWaits();
     expect(store.getRun(w.id)?.status).toBe('queued');
-    await restart();
+    // A reviewing parent holds no session, but this one is live: the disk keeps review, and the
+    // old manager stops the session from the park it really has (hearsay-tools/cezarion#1804).
+    store.flush(); const disk = readPersistedRuns(join(root, '.ai/cezar'));
+    store.updateRun(p.id, { status: RUN_STATUS.waiting });
+    await restart(false, disk);
     expect(store.getRun(w.id)?.status).not.toBe('cancelled');
   });
 
   it('readiness worker Continue requires continuing a reviewing parent first', async () => {
     const p = await parent(); const w = await worker(p.id);
+    await until(() => store.getRun(p.id)?.status === RUN_STATUS.waiting);
     store.updateRun(w.id, { status: RUN_STATUS.done });
     store.updateStep(w.id, 'task', { status: STEP_STATUS.done, sessionId: randomUUID(), backend: 'claude' });
     const generation = store.commitWorkerExecutionStart(w.id); store.commitWorkerExecutionComplete(w.id, generation);
     store.updateRun(p.id, { status: RUN_STATUS.review });
     expect(manager.continueRun(w.id, { text: 'more' })).toMatchObject({ ok: false, error: expect.stringMatching(/parent.*review|parent.*continu/i) });
+    // Its session is still live, which a reviewing parent never has: back to its park before
+    // teardown stops it (hearsay-tools/cezarion#1804).
+    store.updateRun(p.id, { status: RUN_STATUS.waiting });
   });
 
   it.each(['review', 'failed', 'cancelled'] as const)('readiness requires settled collection of %s and accepts partial failures', async status => {
