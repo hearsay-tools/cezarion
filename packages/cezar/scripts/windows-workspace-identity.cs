@@ -174,14 +174,19 @@ public static class CezWorkspaceIdentity {
   static void Rename(SafeFileHandle file, string path) {
     byte[] name = Encoding.Unicode.GetBytes(path);
     int offset = (int)Marshal.OffsetOf(typeof(RenameInformation), "Name");
-    int size = offset + name.Length;
+    // The Win32 path conversion needs a terminated string; Length excludes its NUL.
+    int size = offset + name.Length + 2;
     IntPtr memory = Marshal.AllocHGlobal(size);
     try {
       // Zero padding as well as RootDirectory; use the pinned absolute destination.
-      Marshal.Copy(new byte[size], 0, memory, size); Marshal.WriteInt32(memory, 1);
+      // REPLACE_IF_EXISTS | POSIX_SEMANTICS permits replacing the destination while
+      // its verified read handle stays open. Never close it to make rename work.
+      Marshal.Copy(new byte[size], 0, memory, size); Marshal.WriteInt32(memory, 3);
       Marshal.WriteInt32(memory, (int)Marshal.OffsetOf(typeof(RenameInformation), "Length"), name.Length);
       Marshal.Copy(name, 0, IntPtr.Add(memory, offset), name.Length);
-      if (!SetFileInformationByHandle(file, 3, memory, (uint)size)) throw new Win32Exception();
+      if (!SetFileInformationByHandle(file, 22 /* FileRenameInfoEx */, memory, (uint)size)) {
+        int error = Marshal.GetLastWin32Error(); throw new Win32Exception(error, "Cannot rename workspace checkpoint (" + error + ")");
+      }
     } finally { Marshal.FreeHGlobal(memory); }
   }
   public static void Write(string input, string content, bool replace, bool privateParent) {
