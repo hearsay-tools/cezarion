@@ -1,11 +1,11 @@
 import type { RunSummary } from '@open-mercato/cezar-api-client'
+import { isSweepable } from '@open-mercato/cezar-api-client/contract/run-predicates'
 import type * as React from 'react'
 import { ArchiveIcon } from '@/components/design-icons'
 import { PinToggle } from '@/components/pin-toggle'
 import { StatusDot } from '@/components/status-dot'
 import type { useSwipeToArchive } from '@/components/use-swipe-to-archive'
 import { unreadMarkerTone } from '@/lib/read-state'
-import { isSweepable } from '@/lib/tasks-table'
 import { cn } from '@/lib/utils'
 
 const ROW_PIN_CLASS =

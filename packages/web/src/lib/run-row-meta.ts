@@ -1,6 +1,6 @@
 import type { RunSummary } from '@open-mercato/cezar-api-client'
 import { resolveWaitingOn } from '@open-mercato/cezar-api-client/contract/waits'
-import type { Attention } from '@/lib/attention'
+import type { Attention, AttentionRung } from '@/lib/attention'
 import { checkTimeText, resumeLabel, shortAge } from '@/lib/format'
 import { refPrefixMatches, runTitle, splitRefPrefix } from '@/lib/task-groups'
 import { taskReference, taskReferences, type TaskReference } from '@/lib/tasks-table'
@@ -11,33 +11,59 @@ import { taskReference, taskReferences, type TaskReference } from '@/lib/tasks-t
  * every case without rendering a row — `task-quick-list.tsx` only lays the results out.
  */
 
-/** The meta line's state word (#617): the attention label only for the states the issue lists,
- *  where the dot alone cannot say it — monitoring, the dependency waits (waiting on N workers,
- *  on worker replies, on a parent reply), needs review, needs permission, failed, usage limit,
- *  queued (with its position, `queued #2`) and running. `needs you`, `done` and `cancelled` get
- *  none: the amber, green and grey filled dots already are the whole story. */
+/** What the meta line's state word (hearsay-tools/cezarion#617) says on each rung, beside the dot: nothing where the
+ *  dot is the whole story (the amber, green and grey filled dots of needs you, done and
+ *  cancelled), the label, or the label with the detail the dot cannot carry. Exhaustive: a new
+ *  rung fails to compile until it says (hearsay-tools/cezarion#1496). */
+const STATE_WORD: Record<AttentionRung, 'none' | 'label' | 'queue-position' | 'resume' | 'next-check' | 'until'> = {
+  'needs-permission': 'label',
+  failed: 'label',
+  'needs-you': 'none',
+  'needs-review': 'label',
+  running: 'label',
+  'usage-limit': 'resume',
+  'waiting-on-workers': 'label',
+  'waiting-for-ci': 'label',
+  'waiting-for-merge': 'label',
+  'waiting-for-command': 'until',
+  monitoring: 'next-check',
+  'waiting-for-capacity': 'label',
+  queued: 'queue-position',
+  done: 'none',
+  cancelled: 'none',
+  unseen: 'label',
+}
+
+/** The meta line's state word (hearsay-tools/cezarion#617): the attention label for the states the dot alone cannot
+ *  say, with the queue position (`queued #2`), the resume (`usage limit, resumes in 12m`), the
+ *  timer's next check or the command's deadline where the rung has one. */
 export function metaStateWord(attention: Attention, queuePosition: number | null, run: RunSummary, now: number): string | undefined {
   const { label } = attention
-  if (label === 'queued') return queuePosition !== null ? `queued #${queuePosition}` : label
-  if (label === 'needs you' || label === 'done' || label === 'cancelled') return undefined
-  // When, not just that (#617 01b): `usage limit, resumes in 12m`, or `usage limit` once due.
-  if (label === 'usage limit') {
-    const resume = resumeLabel(run.autoResumeAt, now)
-    return resume === 'scheduled' ? label : `${label}, ${resume}`
+  switch (STATE_WORD[attention.rung]) {
+    case 'none':
+      return undefined
+    case 'queue-position':
+      return queuePosition !== null ? `queued #${queuePosition}` : label
+    case 'resume': {
+      // When, not just that (hearsay-tools/cezarion#617 01b): `usage limit, resumes in 12m`, or `usage limit` once due.
+      const resume = resumeLabel(run.autoResumeAt, now)
+      return resume === 'scheduled' ? label : `${label}, ${resume}`
+    }
+    case 'next-check': {
+      // The same detail for a timer: `monitoring, next check 15:05` (phase 4b, hearsay-tools/cezarion#1236).
+      const waitingOn = resolveWaitingOn(run)
+      const at = waitingOn?.kind === 'timer' ? new Date(waitingOn.at) : undefined
+      return at && Number.isFinite(at.getTime()) ? `${label}, next check ${checkTimeText(at, new Date(now))}` : label
+    }
+    case 'until': {
+      // And for a process wait: `waiting for a command, until 15:40` (hearsay-tools/cezarion#1446).
+      const waitingOn = resolveWaitingOn(run)
+      const until = waitingOn?.kind === 'process' ? new Date(waitingOn.deadline) : undefined
+      return until && Number.isFinite(until.getTime()) ? `${label}, until ${checkTimeText(until, new Date(now))}` : label
+    }
+    case 'label':
+      return label
   }
-  // The same detail for a timer: `monitoring, next check 15:05` (phase 4b, hearsay-tools/cezarion#1236).
-  const waitingOn = label === 'monitoring' ? resolveWaitingOn(run) : undefined
-  if (waitingOn?.kind === 'timer') {
-    const at = new Date(waitingOn.at)
-    if (Number.isFinite(at.getTime())) return `${label}, next check ${checkTimeText(at, new Date(now))}`
-  }
-  // And for a process wait: `waiting for a command, until 15:40` (hearsay-tools/cezarion#1446).
-  const command = label === 'waiting for a command' ? resolveWaitingOn(run) : undefined
-  if (command?.kind === 'process') {
-    const until = new Date(command.deadline)
-    if (Number.isFinite(until.getTime())) return `${label}, until ${checkTimeText(until, new Date(now))}`
-  }
-  return label
 }
 
 export interface RunRowMeta {
@@ -61,7 +87,7 @@ export function runRowMeta({ run, attention, queuePosition, inWorkingGroup, scop
   const references = taskReferences(run, undefined, scope ?? undefined)
   // A queued row's position rides in its state word instead of an age.
   const age = queuePosition !== null ? '' : shortAge(run.finishedAt ?? run.createdAt, now)
-  const stateWord = inWorkingGroup && attention.label === 'running' ? undefined : metaStateWord(attention, queuePosition, run, now)
+  const stateWord = inWorkingGroup && attention.rung === 'running' ? undefined : metaStateWord(attention, queuePosition, run, now)
   const key = `${age}|${stateWord ?? ''}|${references.map((ref) => `${ref.kind}-${ref.number}-${ref.url}`).join(',')}|${run.notify ? 1 : 0}`
   return { stateWord, references, age, key }
 }

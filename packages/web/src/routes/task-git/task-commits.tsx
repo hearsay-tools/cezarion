@@ -14,7 +14,7 @@ import { DiffStatLabel } from '@/components/diff-stat'
 import { Button } from '@/components/ui/button'
 import { useIsDesktop } from '@/lib/use-desktop'
 
-import { isRunActive } from '../task-thread/run-actions'
+import { engineOwnsRun } from '@open-mercato/cezar-api-client/contract/run-predicates'
 import { RunHeader } from '../task-thread/run-header'
 import { CommitList } from './commit-list'
 import { GitTabLoadError, GitTabLoading } from './git-tab-loading'
@@ -36,7 +36,7 @@ export function TaskCommitsRoute() {
 
 function CommitsView({ run }: { run: ApiRun }) {
   const { sha } = useParams<{ sha: string }>()
-  const commits = useRunCommits(run.id, isRunActive(run))
+  const commits = useRunCommits(run.id, engineOwnsRun(run))
 
   return (
     <div data-route="task-commits" className="flex min-h-full flex-col">
@@ -153,7 +153,7 @@ function CommitDiffView({ runId, sha }: { runId: string; sha: string }) {
 
 /** Reuses the task diff payload; paths lead to the existing structured Changes view. */
 function TaskChangedFiles({ run }: { run: ApiRun }) {
-  const changes = useRunChanges(run.id, isRunActive(run))
+  const changes = useRunChanges(run.id, engineOwnsRun(run))
   if (changes.isPending) return <p className="mt-[22px] text-xs text-muted-foreground">Loading changed files…</p>
   if (changes.isError) return <p role="status" className="mt-[22px] text-xs text-danger">Could not load changed files: {changes.error.message}</p>
   if (changes.data.files.length === 0) return null

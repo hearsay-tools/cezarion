@@ -20,6 +20,7 @@ import { createLiveRoutes } from './live-routes.ts';
 import { subscribeRunFeed } from './run-event-feed.ts';
 import { teamSkillRefSchema } from '@open-mercato/cezar-contract/skills';
 import { sidebarLimitsSchema } from '@open-mercato/cezar-contract/workspace';
+import { engineOwnsRun } from '@open-mercato/cezar-contract/run-predicates';
 import { worktreeSetupConfigSchema } from '@open-mercato/cezar-contract/workspace';
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
 import { ARCHIVED_RUNS_PAGE_DEFAULT } from '@open-mercato/cezar-contract/run-limits';
@@ -4279,11 +4280,8 @@ export function createApp(deps: ServerDeps) {
       if (cliRunner) {
         const blocked = await providerActionError([cliRunner]);
         if (blocked) return c.json({ error: blocked }, 409);
-        // A usage-limit hold is `waiting` with no session until its resume (hearsay-tools/cezarion#1236),
-        // so the engine owns nothing there and the session resumes.
-        const usageLimitHold = run.status === 'waiting' && run.autoResumeAt !== undefined;
-        const engineOwnsSession = !usageLimitHold && (run.status === 'running' || run.status === 'queued' || run.status === 'waiting');
-        const sessionStep = engineOwnsSession ? undefined : [...run.steps].reverse().find((s) => s.sessionId);
+        // A usage-limit hold has no session until its resume (hearsay-tools/cezarion#1236), so it resumes.
+        const sessionStep = engineOwnsRun(run) ? undefined : [...run.steps].reverse().find((s) => s.sessionId);
         const sessionId = sessionStep?.sessionId;
         // An id resumeCommand refuses (#431) degrades to a fresh CLI in the worktree,
         // exactly like a run that never recorded a session.

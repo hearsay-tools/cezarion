@@ -12,7 +12,8 @@ import { toast } from '@/components/ui/toaster'
 import { gitActionPolicy, type GitActionId } from '@/lib/git-actions'
 import { useIsDesktop } from '@/lib/use-desktop'
 
-import { isRunActive, lastSessionId } from '../task-thread/run-actions'
+import { engineOwnsRun } from '@open-mercato/cezar-api-client/contract/run-predicates'
+import { lastSessionId } from '../task-thread/run-actions'
 import { RunHeader } from '../task-thread/run-header'
 import { ChangesTree } from './changes-tree'
 import { CommitDialog } from './commit-dialog'
@@ -46,7 +47,7 @@ function ChangesView({ run }: { run: ApiRun }) {
   // repo reported no remote for every project (#791).
   const repo = useRepo()
   // Poll while the run is active so writes appear as the agent makes them.
-  const changes = useRunChanges(run.id, isRunActive(run))
+  const changes = useRunChanges(run.id, engineOwnsRun(run))
   const desktop = useIsDesktop()
 
   const [mode, setMode] = useState<DiffMode>('unified')

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { RunSummary } from '@open-mercato/cezar-api-client'
-import { deriveAttention, type Attention } from '@/lib/attention'
+import { deriveAttention, type Attention, type AttentionRung } from '@/lib/attention'
 import { metaStateWord, runRowMeta, runRowTitle } from '@/lib/run-row-meta'
 import { summaryOf } from '@/test/run-summary-fixture'
 
@@ -25,8 +25,17 @@ function run(over: Partial<RunSummary> = {}): RunSummary {
   }
 }
 
-/** Only `label` is read by the state word; the rest of an attention is the dot's business. */
-const labelled = (label: string): Attention => ({ bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label })
+/** The rung of each label below: the state word decides on the rung and prints the label. */
+const RUNG_OF: Record<string, AttentionRung> = {
+  'needs you': 'needs-you', done: 'done', cancelled: 'cancelled', failed: 'failed', running: 'running',
+  'needs review': 'needs-review', 'needs permission': 'needs-permission', 'waiting on 2 workers': 'waiting-on-workers',
+  'waiting on worker replies': 'waiting-on-workers', 'waiting on parent reply': 'waiting-on-workers', queued: 'queued',
+  'usage limit': 'usage-limit', monitoring: 'monitoring', 'waiting for a command': 'waiting-for-command',
+  'waiting for CI': 'waiting-for-ci', 'waiting for merge': 'waiting-for-merge', 'waiting for capacity': 'waiting-for-capacity',
+}
+
+/** Only `rung` and `label` are read by the state word; the rest of an attention is the dot's business. */
+const labelled = (label: string): Attention => ({ rung: RUNG_OF[label]!, bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label })
 
 /** The clock text the meta line prints for a time: the time alone on today's date, the date too otherwise. */
 function clockText(at: string): string {
@@ -44,7 +53,7 @@ describe('metaStateWord (#617: the states the dot alone cannot say)', () => {
     expect(metaStateWord(labelled(label), null, plain, NOW)).toBeUndefined()
   })
 
-  it.each(['failed', 'running', 'needs review', 'needs permission', 'waiting on 2 workers', 'waiting on worker replies', 'waiting on parent reply'])(
+  it.each(['failed', 'running', 'needs review', 'needs permission', 'waiting on 2 workers', 'waiting on worker replies', 'waiting on parent reply', 'waiting for CI', 'waiting for merge', 'waiting for capacity'])(
     'says the attention label for %s',
     (label) => {
       expect(metaStateWord(labelled(label), null, plain, NOW)).toBe(label)

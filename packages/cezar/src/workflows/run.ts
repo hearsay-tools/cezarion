@@ -4,7 +4,7 @@ import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } f
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { askErrorMessage, doneErrorMessage, scheduleRefusal, waitErrorMessage } from '../ci-wait/errors.ts';
 import type { ScheduleTaskAnswer, ScheduleTaskRequest, ScheduledTasksAnswer, ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
-import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type CezarWaitRequestInput, type DoneErrorCode, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
+import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type CezarWaitRequestInput, type DoneErrorCode, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, turnEndHeartbeat, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
@@ -649,17 +649,6 @@ function resumeInFlight(run: Pick<RunRecord, 'status' | 'autoResumeAttempts'>): 
   return (
     run.autoResumeAttempts !== undefined && (run.status === 'queued' || run.status === 'running')
   );
-}
-
-/**
- * Is this run parked on a usage limit, waiting for its resume (hearsay-tools/cezarion#1236)?
- *
- * Such a run is `waiting` with its appointment, not `failed`: it holds no slot and no session,
- * nothing but its resume wakes it, and every wait that resolves meanwhile is delivered with the
- * resume. A withdrawn appointment settles it `failed` with the error it kept.
- */
-function onUsageLimitHold(run: Partial<Pick<RunRecord, 'status' | 'autoResumeAt'>>): boolean {
-  return run.status === 'waiting' && run.autoResumeAt !== undefined;
 }
 
 const AUTO_RESUME_PROMPT =
@@ -2880,7 +2869,7 @@ export class RunManager {
     const resolved = run ? resolvedWaits(run) : [];
     // A run on a usage-limit hold is woken by its resume only, which delivers what resolved
     // meanwhile (hearsay-tools/cezarion#1236).
-    if (this.disposed || this.recoveringRun(run) || !run || onUsageLimitHold(run) || !this.owesWake(run) ||
+    if (this.disposed || this.recoveringRun(run) || !run || isUsageLimitHold(run) || !this.owesWake(run) ||
       !['running', 'waiting', 'queued'].includes(run.status) || run.stopping ||
       this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
     // A failed delivery waits out its backoff; the backoff's own timer queues this wake again.
@@ -3791,7 +3780,7 @@ export class RunManager {
     if (this.rootFinishRequested(found.id)) return this.settleRequestedRootFinish(found.id);
     // A usage-limit hold ran no process, so nothing was interrupted: its waits re-arm and resolve,
     // and `reconcileAutoResumes` re-arms the resume that delivers them (hearsay-tools/cezarion#1236).
-    if (onUsageLimitHold(found)) {
+    if (isUsageLimitHold(found)) {
       for (const wait of openWaits(found)) this.armWait(found.id, wait);
       return undefined;
     }
@@ -4209,7 +4198,7 @@ export class RunManager {
   private fireAutoResume(runId: string): void {
     this.autoResumeTimers.delete(runId);
     const run = this.store.getRun(runId);
-    if (!run || !onUsageLimitHold(run)) return;
+    if (!run || !isUsageLimitHold(run)) return;
     // Belt and braces against the one gap `reconcileAutoResumes` cannot close: the setting going
     // off in the window between the last pump and this tick.
     if (!this.semaphore.autoResumeOnUsageLimit()) {
@@ -4253,7 +4242,8 @@ export class RunManager {
       // a deadline hold — so nothing new starts on that account, `rescueStalledQueue` treats the
       // phantom appointment as a legitimate reason to sit still, and the cockpit shows a
       // `scheduled` row for a resume that will never come. `clearAutoResume` covers the armed
-      // ones too, so this one loop is the whole cancellation.
+      // ones too, so this one loop is the whole cancellation. It reads any resume time, not
+      // `isUsageLimitHold`, so a stale one is retired too.
       const pending = new Set([
         ...this.autoResumeTimers.keys(),
         ...this.store.listRuns().filter((run) => run.autoResumeAt !== undefined).map((run) => run.id),
@@ -4262,9 +4252,9 @@ export class RunManager {
       return;
     }
     for (const run of this.store.listRuns()) {
-      if (!onUsageLimitHold(run)) continue;
+      if (!isUsageLimitHold(run)) continue;
       if (this.autoResumeTimers.has(run.id)) continue;
-      const deadline = Date.parse(run.autoResumeAt!);
+      const deadline = Date.parse(run.autoResumeAt);
       // A deadline that is unreadable, belongs to a run that has spent its cap, or belongs to a
       // task the user has archived is retired rather than re-armed: it can only mislead. One
       // that has just passed arms at zero — the window is open, which is the point.
@@ -4358,8 +4348,8 @@ export class RunManager {
     if (this.semaphore.busy() > 0) return;
     // A future deadline is a real reason to sit still: that timer will fire and pump.
     for (const run of this.store.listRuns()) {
-      if (!onUsageLimitHold(run)) continue;
-      const deadline = Date.parse(run.autoResumeAt!);
+      if (!isUsageLimitHold(run)) continue;
+      const deadline = Date.parse(run.autoResumeAt);
       if (Number.isFinite(deadline) && deadline > now) return;
     }
     if (this.semaphore.accountHolds().inFlight.size === 0) {
@@ -4387,8 +4377,8 @@ export class RunManager {
       // A holding run always carries the runner it actually ran on, so the fallback is unused
       // here — it is spelled out rather than `!` so a future record shape degrades, not throws.
       const key = () => runAccountKey(this.withExecutionAccount(run), run.runner ?? 'claude');
-      if (onUsageLimitHold(run)) {
-        const at = Date.parse(run.autoResumeAt!);
+      if (isUsageLimitHold(run)) {
+        const at = Date.parse(run.autoResumeAt);
         if (Number.isFinite(at) && at > now) deadline.add(key());
       } else if (resumeInFlight(run)) {
         inFlight.add(key());
@@ -4408,6 +4398,7 @@ export class RunManager {
   cancelAutoResume(runId: string): boolean {
     const run = this.store.getRun(runId);
     if (!run) return false;
+    // Any resume time, not `isUsageLimitHold`: a withdrawal also retires one a record kept by mistake.
     const pending = run.autoResumeAt !== undefined || this.autoResumeTimers.has(runId);
     this.withdrawAutoResume(runId, pending ? 'automatic resume cancelled for this task' : undefined);
     if (pending) {
@@ -4429,10 +4420,11 @@ export class RunManager {
     // A continuation's own status write retires the appointment of a run on hold
     // (hearsay-tools/cezarion#1236): clearing it first would show a waiting run with no
     // appointment, which reads as Needs you, for the moment between the two writes.
-    if (onUsageLimitHold(run)) {
+    if (isUsageLimitHold(run)) {
       if (run.autoResumeAttempts !== undefined) this.store.updateRun(runId, { autoResumeAttempts: undefined });
       return;
     }
+    // Any resume time, not `isUsageLimitHold`: it retires a stale one too.
     if (run.autoResumeAt !== undefined || run.autoResumeAttempts !== undefined) {
       this.store.updateRun(runId, { autoResumeAt: undefined, autoResumeAttempts: undefined });
     }
@@ -4551,7 +4543,7 @@ export class RunManager {
       // Stop on a failed run that held wait results discards them, and the automatic resume that
       // would start a session on it later; the run stays failed. A usage-limit hold is that failed
       // run waiting for its resume (hearsay-tools/cezarion#1236), and settles failed the same way.
-      if ((hadWaits || retiredRefusal) && (run?.status === 'failed' || onUsageLimitHold(run ?? {}))) {
+      if ((hadWaits || retiredRefusal) && (run?.status === 'failed' || isUsageLimitHold(run ?? {}))) {
         this.store.appendEvent(runId, { type: 'note', message: hadWaits ? WAITS_DISCARDED_NOTE : REFUSAL_DISCARDED_NOTE });
         this.cancelAutoResume(runId);
         this.store.flush();
@@ -6822,7 +6814,7 @@ export class RunManager {
       }
     } catch (error) { if (error instanceof WorkerIdentityError) return { ok: false, error: error.message }; throw error; }
     if (run.delegation?.role === 'root' && this.isActive(runId)) return { ok: false, error: 'run is still active' };
-    if (run.status === 'waiting' && !onUsageLimitHold(run) && !hasRegisteredRunProcess(runId) && (run.delegation === undefined || run.delegation.role === 'root') && !this.isActive(runId) &&
+    if (run.status === 'waiting' && !isUsageLimitHold(run) && !hasRegisteredRunProcess(runId) && (run.delegation === undefined || run.delegation.role === 'root') && !this.isActive(runId) &&
       this.waitingBeforeFinalWorkflowStep(run) && (!run.workflowDef || this.waitingWorkflowStepIndex(run) < 0)) {
       return { ok: false, error: 'cannot continue a waiting run before its final workflow step' };
     }
@@ -6845,7 +6837,7 @@ export class RunManager {
     const disconnectedCiWait = !!run.waits?.length && !this.isActive(runId) && !hasRegisteredRunProcess(runId);
     // `review` is continuable too — that's the "Send back" path (spec 009).
     // A run on a usage-limit hold continues as the failed run it was (hearsay-tools/cezarion#1236).
-    if (!disconnectedCiWait && !['done', 'failed', 'cancelled', 'review'].includes(run.status) && !onUsageLimitHold(run) && !(pendingHumanAsk && run.status === 'waiting') &&
+    if (!disconnectedCiWait && !['done', 'failed', 'cancelled', 'review'].includes(run.status) && !isUsageLimitHold(run) && !(pendingHumanAsk && run.status === 'waiting') &&
       !(run.status === 'waiting' && !this.isActive(runId) && ((!hasRegisteredRunProcess(runId) &&
         (run.delegation === undefined || run.delegation.role === 'root')) ||
         (deferForCapacity && run.delegation?.role === 'worker' && (!!run.waits?.length || this.ciWorkflowResumeStepIndex(run) >= 0))))) {
@@ -6973,7 +6965,7 @@ export class RunManager {
     // joins the line as a wake instead of starting at once: another run's known deadline on the
     // same account still holds it (hearsay-tools/cezarion#1236). It stays the human's own
     // continuation in every other way. `fireAutoResume` always defers, so this is never the resume.
-    const toLine = deferForCapacity || onUsageLimitHold(run);
+    const toLine = deferForCapacity || isUsageLimitHold(run);
     // A continuation bound for the line reserves its worker execution unadmitted, so the pump can
     // admit it when it leaves; an admitted one with no session is refused by `canLeaveLine`.
     try { this.beginWorkerExecution(runId, !toLine); }

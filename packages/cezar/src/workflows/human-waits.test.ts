@@ -51,7 +51,7 @@ const gates = (id: string) => store.readEvents(id).filter(event => event.type ==
 const humanOpen = (id: string) => store.getRun(id)?.waits?.filter((wait): wait is HumanWaitEntry => wait.kind === 'human') ?? [];
 const settled = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(wait => wait.id === waitId);
 // A card sets `hasPendingHumanAsk`; the gate (no card) reads Needs you from the park alone.
-const needsYou = (id: string) => store.getRun(id)?.status === 'waiting' && deriveAttention(store.getRun(id)!).label === 'needs you';
+const needsYou = (id: string) => store.getRun(id)?.status === 'waiting' && deriveAttention(store.getRun(id)!).rung === 'needs-you';
 
 describe('human waits (hearsay-tools/cezarion#1234)', { timeout: 45_000 }, () => {
   useWorkerWaitFixture({ nudgeReply: 'card' });

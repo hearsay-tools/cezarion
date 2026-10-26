@@ -182,7 +182,7 @@ describe('computeWaitingOn', () => {
     expect(computeWaitingOn({ waits: [timer, ci] })?.kind).toBe('pr');
     expect(computeWaitingOn({ waits: [timer] })?.kind).toBe('timer');
     expect(computeWaitingOn({ waits: [ci, ...completionWaits()] })?.kind).toBe('workers');
-    expect(computeWaitingOn({ waits: [ci], autoResumeAt: '2026-10-17T16:00:00.000Z' })?.kind).toBe('usage-limit');
+    expect(computeWaitingOn({ status: 'waiting', waits: [ci], autoResumeAt: '2026-10-17T16:00:00.000Z' })?.kind).toBe('usage-limit');
     expect(computeWaitingOn({ waits: [ci, openHuman()] })).toEqual({ kind: 'human' });
     expect(computeWaitingOn({ waits: [ci, openHuman({ askSeq: 4 })] })).toEqual({ kind: 'human', shown: true });
     expect(computeWaitingOn({ waits: [{ ...ci, phase: 'resolved' }] })).toBeUndefined();
@@ -209,7 +209,7 @@ describe('computeWaitingOn', () => {
   });
 
   it('carries the usage-limit instant and the count of workers still owed', () => {
-    expect(computeWaitingOn({ autoResumeAt: '2026-10-17T16:00:00.000Z' })).toEqual({ kind: 'usage-limit', at: '2026-10-17T16:00:00.000Z' });
+    expect(computeWaitingOn({ status: 'waiting', autoResumeAt: '2026-10-17T16:00:00.000Z' })).toEqual({ kind: 'usage-limit', at: '2026-10-17T16:00:00.000Z' });
     expect(computeWaitingOn({ waits: completionWaits() })).toEqual({ kind: 'workers', count: 2 });
   });
 
@@ -226,7 +226,7 @@ describe('computeWaitingOn', () => {
     for (const input of [
       { waits: [openHuman()] },
       { waits: [openHuman({ askSeq: 4 })] },
-      { autoResumeAt: '2026-10-17T16:00:00.000Z' },
+      { status: 'waiting' as const, autoResumeAt: '2026-10-17T16:00:00.000Z' },
       { waits: completionWaits() },
       { waits: [openCi()] },
       { waits: [openTimer({ note: 'deploy' })] },
@@ -321,7 +321,7 @@ describe('human waits', () => {
   });
 
   it('an open human wait outranks usage limit, workers, ci and timer', () => {
-    expect(computeWaitingOn({ waits: [openCi(), openTimer(), openHuman()], autoResumeAt: '2026-10-17T16:00:00.000Z' }))
+    expect(computeWaitingOn({ status: 'waiting', waits: [openCi(), openTimer(), openHuman()], autoResumeAt: '2026-10-17T16:00:00.000Z' }))
       .toEqual({ kind: 'human' });
     for (const phase of ['delivered', 'cancelled'] as const) {
       expect(computeWaitingOn({ waits: [openCi(), openHuman({ phase })] })?.kind).toBe('pr');
@@ -618,7 +618,7 @@ describe('computeWaitingOn with worker entries', () => {
     const waits = [openCi(), openTimer(), openWorkerWait()];
     expect(computeWaitingOn({ waits })).toEqual({ kind: 'workers', count: 2 });
     expect(computeWaitingOn({ waits: [openWorkerWait({ phase: 'resolved' })] })).toBeUndefined();
-    expect(computeWaitingOn({ waits, autoResumeAt: '2026-10-19T12:00:00.000Z' })?.kind).toBe('usage-limit');
+    expect(computeWaitingOn({ status: 'waiting', waits, autoResumeAt: '2026-10-19T12:00:00.000Z' })?.kind).toBe('usage-limit');
     expect(waitingOnSchema.parse(computeWaitingOn({ waits }))).toEqual({ kind: 'workers', count: 2 });
   });
 
