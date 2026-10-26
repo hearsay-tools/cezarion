@@ -92,6 +92,37 @@ describe('worktree manifest', { timeout: 30_000 }, () => {
     });
   });
 
+  it('keeps the fields of an entry it does not know when a write replaces the entry, and replaces the ones it does', async () => {
+    mkdirSync(join(worktree, 'conf'));
+    writeFileSync(join(worktree, 'conf/a.json'), '{}');
+    writeFileSync(join(worktree, 'rec.txt'), 'r');
+    writeFileSync(join(worktree, 'other.txt'), 'o');
+    writeManifest({
+      version: 1,
+      entries: [
+        { path: 'conf/a.json', writer: 'seed', kind: 'file', skill: 'old', source: 'old', identity: fileIdentity('{}'), hint: 'a', nested: { x: [1] } },
+        { path: 'rec.txt', writer: 'seed', kind: 'pending', identity: fileIdentity('r'), alternate: 'link:old', hint: 'b' },
+        { path: 'other.txt', writer: 'skills', kind: 'file', identity: fileIdentity('o'), hint: 'c' },
+      ],
+    });
+    await pass('seed', async (files) => {
+      await files.put('conf/a.json', { type: 'file', text: '{"v":2}' }, { kind: 'file', source: 'new' });
+      files.record('rec.txt', { kind: 'file' }, fileIdentity('r'));
+      // Another writer's entry is no entry of this writer: its unknown fields do not carry over.
+      files.record('other.txt', { kind: 'file' }, fileIdentity('o'));
+      await files.save();
+    });
+    // The bytes on disk, not the pass's in-memory entries.
+    expect(JSON.parse(readFileSync(manifestFile(), 'utf8'))).toEqual({
+      version: 1,
+      entries: [
+        { path: 'conf/a.json', writer: 'seed', kind: 'file', source: 'new', identity: fileIdentity('{"v":2}'), hint: 'a', nested: { x: [1] } },
+        { path: 'rec.txt', writer: 'seed', kind: 'file', identity: fileIdentity('r'), hint: 'b' },
+        { path: 'other.txt', writer: 'seed', kind: 'file', identity: fileIdentity('o') },
+      ],
+    });
+  });
+
   it('removes the file once it lists nothing, and keeps it while it holds unknown keys', async () => {
     await pass('seed', async (files) => {
       await files.put('a.json', { type: 'file', text: '{}' }, { kind: 'file' });

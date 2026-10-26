@@ -55,6 +55,13 @@ const entrySchema = z.object({
 }).passthrough();
 export type ManifestEntry = z.infer<typeof entrySchema>;
 
+const ENTRY_KEYS: ReadonlySet<string> = new Set(Object.keys(entrySchema.shape));
+
+/** What a newer cezar of the same version added to `entry`; the rest is rebuilt from the write. */
+function unknownFields(entry: ManifestEntry | undefined): Record<string, unknown> {
+  return Object.fromEntries(Object.entries(entry ?? {}).filter(([key]) => !ENTRY_KEYS.has(key)));
+}
+
 const manifestSchema = z.object({
   version: z.literal(MANIFEST_VERSION),
   entries: z.array(z.unknown()),
@@ -487,6 +494,7 @@ export class WorktreeFiles {
     for (const dir of this.staged) await rm(dir, { recursive: true, force: true }).catch(() => undefined);
   }
 
+  /** The entry that replaces this writer's entry for `path`, if any: it keeps that entry's unknown fields. */
   private newEntry(path: string, meta: Omit<EntryMeta, 'kind'> & { kind: string }, identity: string, alternate?: string): ManifestEntry {
     return {
       path,
@@ -496,6 +504,7 @@ export class WorktreeFiles {
       ...(meta.source !== undefined ? { source: meta.source } : {}),
       identity,
       ...(alternate !== undefined ? { alternate } : {}),
+      ...unknownFields(this.entry(path)),
     };
   }
 
