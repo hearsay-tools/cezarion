@@ -5,8 +5,10 @@ import { mkdir, mkdtemp, open, rename, rm } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, delimiter, dirname, join } from 'node:path';
 import { promisify } from 'node:util';
+import type { Readable, Writable } from 'node:stream';
 import { z } from 'zod';
 import { processStartToken } from '../delegation/process-liveness.ts';
+import { cdpOverPipe, type CdpConnection } from './cdp.ts';
 
 /**
  * The preview's Chromium: find one, download Chrome for Testing when there is none, launch it
@@ -366,9 +368,11 @@ const KILLED_EXIT_WAIT_MS = 5_000;
 
 /** Chromium's argv: the prototype's, without its automatic `--no-sandbox` for root.
  *  `--proxy-server=direct://` so Linux Chrome does not inherit HTTP(S)_PROXY: it will not send
- *  proxy auth the way curl does, and a render-blocking third-party stylesheet then never paints. */
+ *  proxy auth the way curl does, and a render-blocking third-party stylesheet then never paints.
+ *  `--remote-debugging-pipe` opens no port: only cezar reaches the browser, and an agent drives it
+ *  through cezar's CDP proxy alone (hearsay-tools/cezarion#784). */
 export function chromiumArgs(profileDir: string, env: NodeJS.ProcessEnv): string[] {
-  const args = ['--headless=new', '--remote-debugging-port=0', `--user-data-dir=${profileDir}`, '--no-first-run', '--no-default-browser-check', '--proxy-server=direct://', 'about:blank'];
+  const args = ['--headless=new', '--remote-debugging-pipe', `--user-data-dir=${profileDir}`, '--no-first-run', '--no-default-browser-check', '--proxy-server=direct://', 'about:blank'];
   return env.CEZ_PREVIEW_NO_SANDBOX === '1' ? ['--no-sandbox', ...args] : args;
 }
 
@@ -403,19 +407,19 @@ function disablePasswordManagerLeakDetection(profileDir: string): void {
 }
 
 /**
- * Starts headless Chromium on a loopback DevTools port of its choosing and resolves once it has
- * written `DevToolsActivePort` into the profile. A launch that misses the deadline is killed and
- * tried once more (`LAUNCH_ATTEMPTS`); any other failure kills the process and says why at once.
- * While it runs, `CHROMIUM_PID_FILE` in the profile's parent names it. Leak detection is turned
- * off in the profile Preferences before spawn so Chrome's leaked-password dialog cannot freeze
- * preview input (hearsay-tools/cezarion#972).
+ * Starts headless Chromium with its DevTools on a pipe and resolves once the browser answers
+ * `Browser.getVersion` on it. A launch that misses the deadline is killed and tried once more
+ * (`LAUNCH_ATTEMPTS`); any other failure kills the process and says why at once. While it runs,
+ * `CHROMIUM_PID_FILE` in the profile's parent names it. Leak detection is turned off in the profile
+ * Preferences before spawn so Chrome's leaked-password dialog cannot freeze preview input
+ * (hearsay-tools/cezarion#972).
  */
 export async function launchChromium(
   bin: string,
   profileDir: string,
   env: NodeJS.ProcessEnv,
   opts: { timeoutMs?: number } = {},
-): Promise<{ proc: ChildProcess; port: number }> {
+): Promise<{ proc: ChildProcess; browser: CdpConnection }> {
   mkdirSync(profileDir, { recursive: true });
   disablePasswordManagerLeakDetection(profileDir);
   const timeoutMs = opts.timeoutMs ?? LAUNCH_TIMEOUT_MS;
@@ -425,7 +429,7 @@ export async function launchChromium(
     } catch (error) {
       if (!(error instanceof ChromiumError) || error.kind !== 'timeout') throw error;
       if (attempt >= LAUNCH_ATTEMPTS) {
-        throw new ChromiumError('timeout', error.stderrTail, `Chromium did not open its DevTools port within ${timeoutMs / 1000} s, twice (${bin})`);
+        throw new ChromiumError('timeout', error.stderrTail, `Chromium did not answer on its DevTools pipe within ${timeoutMs / 1000} s, twice (${bin})`);
       }
     }
   }
@@ -433,12 +437,9 @@ export async function launchChromium(
 
 /** One launch attempt. A timed-out attempt is killed and has exited (or had `KILLED_EXIT_WAIT_MS`
  *  to) before it rejects, so a retry does not share the profile with it. */
-async function launchOnce(bin: string, profileDir: string, env: NodeJS.ProcessEnv, timeoutMs: number): Promise<{ proc: ChildProcess; port: number }> {
-  const portFile = join(profileDir, 'DevToolsActivePort');
-  // A file from an earlier launch would hand back a port nobody listens on.
-  rmSync(portFile, { force: true });
-
-  const proc = spawn(bin, chromiumArgs(profileDir, env), { stdio: ['ignore', 'ignore', 'pipe'] });
+async function launchOnce(bin: string, profileDir: string, env: NodeJS.ProcessEnv, timeoutMs: number): Promise<{ proc: ChildProcess; browser: CdpConnection }> {
+  // fd 3 carries commands into Chromium, fd 4 carries its replies and events out.
+  const proc = spawn(bin, chromiumArgs(profileDir, env), { stdio: ['ignore', 'ignore', 'pipe', 'pipe', 'pipe'] });
   const pid = proc.pid;
   if (pid !== undefined) {
     const record = join(dirname(profileDir), CHROMIUM_PID_FILE);
@@ -457,38 +458,57 @@ async function launchOnce(bin: string, profileDir: string, env: NodeJS.ProcessEn
   let exit: string | undefined;
   let ended: { exitCode?: number; signal?: string } = {};
   let missing = false;
+  let wake!: () => void;
+  const changed = new Promise<void>(resolve => (wake = resolve));
   const closed = new Promise<void>(resolve => proc.once('close', () => resolve()));
   proc.once('close', (code, signal) => {
     exit ??= `Chromium exited (${signal ?? code})`;
     ended = signal ? { signal } : code === null ? {} : { exitCode: code };
+    wake();
   });
   proc.on('error', err => {
     exit ??= `Chromium could not start: ${err.message}`;
     missing ||= (err as NodeJS.ErrnoException).code === 'ENOENT';
     tail = Buffer.from(err.message);
+    wake();
   });
 
   const fail = (kind: 'timeout' | 'exited', message: string): ChromiumError => {
+    browser?.close();
     proc.kill('SIGKILL');
     const stderrTail = tail.toString('utf8');
     if (missing) return new ChromiumError('not-installed', stderrTail, message);
     return new ChromiumError(SANDBOX_FAILURE.test(stderrTail) ? 'sandbox' : kind, stderrTail, message, kind === 'exited' ? ended : {});
   };
 
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    if (exit) throw fail('exited', exit);
-    if (existsSync(portFile)) {
-      const port = Number(readFileSync(portFile, 'utf8').split('\n')[0]);
-      if (port > 0) return { proc, port };
-    }
-    if (Date.now() >= deadline) {
-      const error = fail('timeout', `Chromium did not open its DevTools port within ${timeoutMs / 1000} s (${bin})`);
-      let timer: NodeJS.Timeout | undefined;
-      await Promise.race([closed, new Promise<void>(resolve => (timer = setTimeout(resolve, KILLED_EXIT_WAIT_MS)))]);
-      clearTimeout(timer);
-      throw error;
-    }
-    await new Promise(resolve => setTimeout(resolve, 50));
+  const toBrowser = proc.stdio[3] as Writable | null | undefined;
+  const fromBrowser = proc.stdio[4] as Readable | null | undefined;
+  const browser = toBrowser && fromBrowser ? cdpOverPipe(toBrowser, fromBrowser) : undefined;
+  // The first answer on the pipe is the ready signal; a closed pipe answers with an error.
+  let ready = false;
+  let pipeClosed = !browser;
+  if (browser) void browser.call('Browser.getVersion', {}, undefined).then(reply => {
+    ready = !reply.error;
+    pipeClosed = !ready;
+    wake();
+  });
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<void>(resolve => (timer = setTimeout(resolve, timeoutMs)));
+  await Promise.race([changed, deadline]);
+  clearTimeout(timer);
+  // A browser that dies closes the pipe before `close` reports its exit code: wait for that
+  // report, bounded, so the failure says how Chromium ended.
+  if (!exit && pipeClosed) {
+    let closeTimer: NodeJS.Timeout | undefined;
+    await Promise.race([closed, new Promise<void>(resolve => (closeTimer = setTimeout(resolve, KILLED_EXIT_WAIT_MS)))]);
+    clearTimeout(closeTimer);
+    exit ??= 'Chromium closed its DevTools pipe';
   }
+  if (exit) throw fail('exited', exit);
+  if (ready && browser) return { proc, browser };
+  const error = fail('timeout', `Chromium did not answer on its DevTools pipe within ${timeoutMs / 1000} s (${bin})`);
+  let killedTimer: NodeJS.Timeout | undefined;
+  await Promise.race([closed, new Promise<void>(resolve => (killedTimer = setTimeout(resolve, KILLED_EXIT_WAIT_MS)))]);
+  clearTimeout(killedTimer);
+  throw error;
 }

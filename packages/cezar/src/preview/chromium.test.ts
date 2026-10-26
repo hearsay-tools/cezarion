@@ -20,7 +20,6 @@ vi.mock('node:child_process', async (original) => {
   }) as typeof actual.spawn };
 });
 import { processStartToken } from '../delegation/process-liveness.ts';
-import { connectCdp } from './cdp.ts';
 import {
   ChromiumError,
   chromiumArgs,
@@ -453,6 +452,11 @@ describe('downloadChromium (#781)', () => {
   });
 });
 
+/** A fake Chromium's DevTools pipe (hearsay-tools/cezarion#784): it reads commands on fd 3 and
+ *  answers each on fd 4, NUL-terminated, the way `--remote-debugging-pipe` does. */
+const ANSWER_PIPE = `const net=require('net');const into=new net.Socket({fd:3,readable:true,writable:false});const out=new net.Socket({fd:4,readable:false,writable:true});
+let buf='';into.on('data',d=>{buf+=d;for(let i=buf.indexOf('\\0');i>=0;i=buf.indexOf('\\0')){const m=JSON.parse(buf.slice(0,i));buf=buf.slice(i+1);out.write(JSON.stringify({id:m.id,result:{product:'Fake'}})+'\\0');}});`;
+
 describe('launchChromium (#781)', () => {
   let dir: string;
   beforeEach(() => {
@@ -473,7 +477,7 @@ describe('launchChromium (#781)', () => {
 
   it('passes the prototype args, and --no-sandbox only for CEZ_PREVIEW_NO_SANDBOX=1, even as root', () => {
     vi.spyOn(process, 'getuid').mockReturnValue(0);
-    const base = ['--headless=new', '--remote-debugging-port=0', '--user-data-dir=/p', '--no-first-run', '--no-default-browser-check', '--proxy-server=direct://', 'about:blank'];
+    const base = ['--headless=new', '--remote-debugging-pipe', '--user-data-dir=/p', '--no-first-run', '--no-default-browser-check', '--proxy-server=direct://', 'about:blank'];
     expect(chromiumArgs('/p', {})).toEqual(base);
     expect(chromiumArgs('/p', { CEZ_PREVIEW_NO_SANDBOX: '0' })).toEqual(base);
     expect(chromiumArgs('/p', { CEZ_PREVIEW_NO_SANDBOX: 'true' })).toEqual(base);
@@ -491,20 +495,19 @@ describe('launchChromium (#781)', () => {
     expect(args.join(' ')).not.toMatch(/proxy\.example|user:secret|3128/);
   });
 
-  it.skipIf(!posix)('spawns the binary with those args, reads DevToolsActivePort and resolves with the port', async () => {
+  it.skipIf(!posix)('spawns the binary with those args and resolves once the browser answers on its DevTools pipe (hearsay-tools/cezarion#784)', async () => {
     const argvFile = join(dir, 'argv.json');
     const bin = script(
       'fake-chrome',
       `const fs=require('fs');const path=require('path');
 fs.writeFileSync(${JSON.stringify(argvFile)}, JSON.stringify(process.argv.slice(2)));
-const arg=process.argv.find(a=>a.startsWith('--user-data-dir='));
-fs.writeFileSync(path.join(arg.split('=')[1],'DevToolsActivePort'),'41234\\n/devtools/browser/abc\\n');
+${ANSWER_PIPE}
 setInterval(()=>{},1000);`,
     );
     const profile = join(dir, 'profile');
-    const { proc, port } = await launchChromium(bin, profile, { CEZ_PREVIEW_NO_SANDBOX: '1' });
+    const { proc, browser } = await launchChromium(bin, profile, { CEZ_PREVIEW_NO_SANDBOX: '1' });
     try {
-      expect(port).toBe(41234);
+      expect(await browser.call('Browser.getVersion', {}, undefined)).toMatchObject({ result: { product: 'Fake' } });
       expect(JSON.parse(readFileSync(argvFile, 'utf8'))).toEqual(chromiumArgs(profile, { CEZ_PREVIEW_NO_SANDBOX: '1' }));
     } finally {
       proc.kill();
@@ -515,8 +518,7 @@ setInterval(()=>{},1000);`,
     const bin = script(
       'fake-chrome-pid',
       `const fs=require('fs');const path=require('path');
-const arg=process.argv.find(a=>a.startsWith('--user-data-dir='));
-fs.writeFileSync(path.join(arg.split('=')[1],'DevToolsActivePort'),'41235\\n/devtools/browser/abc\\n');
+${ANSWER_PIPE}
 setInterval(()=>{},1000);`,
     );
     const record = join(dir, 'chromium.pid.json');
@@ -575,26 +577,25 @@ setInterval(()=>{},1000);`,
     expect(readFileSync(runs, 'utf8')).toBe('run\n');
   });
 
-  it.skipIf(!posix)('kills a launch that never opens its port and retries once, after the first process exited (#1474)', async () => {
+  it.skipIf(!posix)('kills a launch that never answers on its pipe and retries once, after the first process exited (#1474)', async () => {
     const runs = join(dir, 'runs');
-    // Run 1 stalls, as Chrome did on a CI runner; run 2 opens its port.
+    // Run 1 stalls, as Chrome did on a CI runner; run 2 answers on its pipe.
     const bin = script(
       'stalls-once',
       `const fs=require('fs');const path=require('path');
 fs.appendFileSync(${JSON.stringify(runs)}, 'run\\n');
 if (fs.readFileSync(${JSON.stringify(runs)}, 'utf8').split('\\n').length > 2) {
-  const arg=process.argv.find(a=>a.startsWith('--user-data-dir='));
-  fs.writeFileSync(path.join(arg.split('=')[1],'DevToolsActivePort'),'41236\\n/devtools/browser/abc\\n');
+  ${ANSWER_PIPE}
 }
 setInterval(()=>{},1000);`,
     );
     // The budget covers both attempts, and only the first is meant to stall: the second must start Node and
-    // write its port inside it, which 400 ms does not allow on a loaded host (hearsay-tools/cezarion#1203).
+    // answer on its pipe inside it, which 400 ms does not allow on a loaded host (hearsay-tools/cezarion#1203).
     // Provenance: this case alone under `taskset -c 3` beside 8 busy loops pinned to CPU 3. At 400 ms it failed
     // 2 of 2 runs ("did not open its DevTools port within 0.4 s, twice"); at 2_000 ms it passed 3 of 3.
-    const { proc, port } = await launchChromium(bin, join(dir, 'profile'), {}, { timeoutMs: 2_000 });
+    const { proc, browser } = await launchChromium(bin, join(dir, 'profile'), {}, { timeoutMs: 2_000 });
     try {
-      expect(port).toBe(41236);
+      expect(await browser.call('Browser.getVersion', {}, undefined)).toMatchObject({ result: { product: 'Fake' } });
       expect(readFileSync(runs, 'utf8')).toBe('run\nrun\n');
       const attempts = spawned.flatMap((child, index) => (child.spawnfile === bin ? [index] : []));
       expect(attempts).toHaveLength(2);
@@ -606,13 +607,13 @@ setInterval(()=>{},1000);`,
     }
   });
 
-  it.skipIf(!posix)('kills both attempts and reports kind timeout when the port never appears twice', async () => {
+  it.skipIf(!posix)('kills both attempts and reports kind timeout when the pipe never answers twice', async () => {
     const bin = script('hang', `setInterval(()=>{},1000);`);
     const err = await launchChromium(bin, join(dir, 'profile'), {}, { timeoutMs: 400 }).catch(e => e);
     expect(err).toBeInstanceOf(ChromiumError);
     expect(err.kind).toBe('timeout');
     // The owner's diagnostics name the binary, the deadline it missed, and that it missed it twice.
-    expect(err.message).toBe(`Chromium did not open its DevTools port within 0.4 s, twice (${bin})`);
+    expect(err.message).toBe(`Chromium did not answer on its DevTools pipe within 0.4 s, twice (${bin})`);
     const children = spawned.filter(candidate => candidate.spawnfile === bin);
     expect(children).toHaveLength(2);
     // Reaping the killed child is OS work, the same class as the 1 s vi.waitFor default that
@@ -657,8 +658,7 @@ describe('launchChromium leak-detection Preferences (#972)', () => {
     script(
       name,
       `const fs=require('fs');const path=require('path');
-const arg=process.argv.find(a=>a.startsWith('--user-data-dir='));
-fs.writeFileSync(path.join(arg.split('=')[1],'DevToolsActivePort'),'41240\\n/devtools/browser/abc\\n');
+${ANSWER_PIPE}
 setInterval(()=>{},1000);`,
     );
 
@@ -754,16 +754,15 @@ describe('launchChromium leak-detection Chromium regression (#972)', () => {
       });
       const profile = join(dir, 'profile');
       // bound: a cold Chrome start on a loaded CI runner took over the product's 30 s
-      // (job 119853707395, hearsay-tools/cezarion#1467). The wait still ends on DevToolsActivePort.
-      const { proc, port } = await launchChromium(bin!, profile, { CEZ_PREVIEW_NO_SANDBOX: '1' }, { timeoutMs: LAUNCH_BUDGET_MS });
+      // (job 119853707395, hearsay-tools/cezarion#1467). The wait still ends on the pipe's first answer.
+      const { proc, browser } = await launchChromium(bin!, profile, { CEZ_PREVIEW_NO_SANDBOX: '1' }, { timeoutMs: LAUNCH_BUDGET_MS });
       procs.push(proc);
-      const targets = (await (await fetch(`http://127.0.0.1:${port}/json/list`)).json()) as Array<{
-        type: string;
-        webSocketDebuggerUrl?: string;
-      }>;
-      const page = targets.find(target => target.type === 'page' && target.webSocketDebuggerUrl);
-      if (!page?.webSocketDebuggerUrl) throw new Error('Chromium opened no page');
-      const cdp = await connectCdp(page.webSocketDebuggerUrl);
+      const root = browser.session(undefined);
+      const { targetInfos } = await root.send<{ targetInfos: Array<{ type: string; targetId: string }> }>('Target.getTargets');
+      const page = targetInfos.find(target => target.type === 'page');
+      if (!page) throw new Error('Chromium opened no page');
+      const { sessionId } = await root.send<{ sessionId: string }>('Target.attachToTarget', { targetId: page.targetId, flatten: true });
+      const cdp = browser.session(sessionId);
       try {
         await cdp.send('Page.enable');
         await cdp.send('Runtime.enable');

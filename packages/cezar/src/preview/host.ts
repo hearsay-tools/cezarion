@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import type { PreviewStopRequest, PreviewStopResult, PreviewClientMessage, PreviewServer, PreviewServerMessage, PreviewStateMessage } from '@open-mercato/cezar-contract';
 import { z } from 'zod';
 import type { RunStore } from '../runs/store.ts';
-import { connectCdp, type Cdp } from './cdp.ts';
+import type { Cdp, CdpConnection } from './cdp.ts';
 import { ChromiumError, downloadChromium, downloadTarget, installCommand, launchChromium, resolveChromium } from './chromium.ts';
 import { DevServer, probePort, type DevServerState } from './dev-server.ts';
 import { previewStopResult, type PreviewHostLike } from './registration.ts';
@@ -34,8 +34,9 @@ export type RunContext = {
 export type PreviewTarget = { port: number } | { url: string };
 
 export type BrowserExit = { signal?: string; exitCode?: number; stderrTail: string };
-/** A launched Chromium with its page's CDP connection. `exited` settles when the process is gone. */
-export type BrowserHandle = { cdp: Cdp; exited: Promise<BrowserExit>; close(): void };
+/** A launched Chromium: its page's CDP session, and the browser connection the agent's proxy
+ *  opens its own sessions on (hearsay-tools/cezarion#784). `exited` settles when the process is gone. */
+export type BrowserHandle = { cdp: Cdp; connection: CdpConnection; exited: Promise<BrowserExit>; close(): void };
 
 /** What the host uses of a `DevServer`: its state, its controls and its two events. */
 export type DevServerLike = Pick<DevServer, 'state' | 'attempts' | 'exitCode' | 'stopReason' | 'start' | 'stop' | 'keepWaiting' | 'logTail'> & {
@@ -99,7 +100,8 @@ function sameOrigin(a: string, b: string): boolean {
   }
 }
 
-const targetsSchema = z.array(z.object({ type: z.string(), webSocketDebuggerUrl: z.string().optional() }).passthrough());
+const targetsSchema = z.object({ targetInfos: z.array(z.object({ type: z.string(), targetId: z.string() }).passthrough()) });
+const attachedSchema = z.object({ sessionId: z.string() });
 
 /** A closed browser's exit, bounded: a profile is deleted only once Chromium let go of it. */
 async function waitForExit(browser: BrowserHandle): Promise<void> {
@@ -108,11 +110,11 @@ async function waitForExit(browser: BrowserHandle): Promise<void> {
   clearTimeout(timer);
 }
 
-/** resolve → launch → the page target's CDP socket. */
+/** resolve → launch → a flat session on the page target. */
 async function launchBrowser(profileDir: string, env: NodeJS.ProcessEnv): Promise<BrowserHandle> {
   const bin = resolveChromium(undefined, env);
   if (!bin) throw new ChromiumMissingError('No Chromium found');
-  const { proc, port } = await launchChromium(bin, profileDir, env);
+  const { proc, browser: connection } = await launchChromium(bin, profileDir, env);
   let tail = '';
   proc.stderr?.on('data', (chunk: Buffer) => {
     tail = (tail + chunk.toString('utf8')).slice(-STDERR_TAIL_CHARS);
@@ -121,12 +123,15 @@ async function launchBrowser(profileDir: string, env: NodeJS.ProcessEnv): Promis
     proc.once('exit', (code, signal) => resolve({ ...(signal ? { signal } : code !== null ? { exitCode: code } : {}), stderrTail: tail })),
   );
   try {
-    const targets = targetsSchema.parse(await (await fetch(`http://127.0.0.1:${port}/json/list`)).json());
-    const page = targets.find(target => target.type === 'page' && target.webSocketDebuggerUrl);
-    if (!page?.webSocketDebuggerUrl) throw new ChromiumError('exited', tail, 'Chromium opened no page');
-    const cdp = await connectCdp(page.webSocketDebuggerUrl);
-    return { cdp, exited, close: () => { cdp.close(); proc.kill(); } };
+    const root = connection.session(undefined);
+    const { targetInfos } = targetsSchema.parse(await root.send('Target.getTargets'));
+    const page = targetInfos.find(target => target.type === 'page');
+    if (!page) throw new ChromiumError('exited', tail, 'Chromium opened no page');
+    const { sessionId } = attachedSchema.parse(await root.send('Target.attachToTarget', { targetId: page.targetId, flatten: true }));
+    const cdp = connection.session(sessionId);
+    return { cdp, connection, exited, close: () => { connection.close(); proc.kill(); } };
   } catch (error) {
+    connection.close();
     proc.kill('SIGKILL');
     throw error;
   }

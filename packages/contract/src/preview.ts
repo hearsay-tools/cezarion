@@ -82,6 +82,17 @@ export const previewServerStateSchema = z.enum([
 ]);
 export type PreviewServerState = z.infer<typeof previewServerStateSchema>;
 
+/**
+ * The `preview.agent-browser` run event (hearsay-tools/cezarion#784): appended when the first agent
+ * CDP connection to the task's browser opens and when the last one closes. The pane lists the
+ * agent's page beside the registered servers while the latest one says `connected`.
+ */
+export const previewAgentBrowserEventSchema = z.object({
+  type: z.literal('preview.agent-browser'),
+  state: z.enum(['connected', 'disconnected']),
+});
+export type PreviewAgentBrowserEvent = z.infer<typeof previewAgentBrowserEventSchema>;
+
 const port = z.number().int().min(1).max(65535);
 const clampViewport = (value: number) => Math.min(4000, Math.max(100, Math.round(value)));
 
@@ -98,7 +109,8 @@ export const previewClientMessageSchema = z.discriminatedUnion('t', [
     /** Automatic reconnects may reclaim only this pane's last ownership. */
     viewerId: z.string().min(1).max(128).optional(),
     resume: z.boolean().optional(),
-    target: z.union([z.object({ port }), z.object({ url: z.string().min(1).max(2048) })]),
+    /** `agent`: the page an agent drives through cezar's CDP proxy, shown as it is, never navigated (hearsay-tools/cezarion#784). */
+    target: z.union([z.object({ port }), z.object({ url: z.string().min(1).max(2048) }), z.object({ agent: z.literal(true) })]),
   }),
   /** The owner's explicit approval; the only message that runs a registered command. */
   z.object({ t: z.literal('run'), port }),
@@ -196,6 +208,8 @@ export const previewStateMessageSchema = z.discriminatedUnion('stage', [
   z.object({ t: z.literal('state'), stage: z.literal('worktree-removed'), server: previewServerSchema.optional() }),
   z.object({ t: z.literal('state'), stage: z.literal('loading'), step: z.enum(['browser', 'page', 'frame']) }),
   z.object({ t: z.literal('state'), stage: z.literal('streaming'), adopted: z.boolean() }),
+  /** The pane asked for the agent's page, and no agent is connected to the browser now (hearsay-tools/cezarion#784). */
+  z.object({ t: z.literal('state'), stage: z.literal('agent-idle') }),
 ]);
 
 /** Server to client JSON messages. JPEG frames travel as binary and have no schema here. */
