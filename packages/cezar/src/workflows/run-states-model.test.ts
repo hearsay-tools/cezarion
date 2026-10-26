@@ -259,7 +259,9 @@ describe('the run state table drives a real run', { timeout: 600_000 }, () => {
       const model: Model = { state: 'running', open: new Set(), question: false, session: true };
       expect(target('queued.start', 'queued')).toBe('running');
       const turns = endTurn(model, first);
-      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: prompt(first), runner: 'claude' });
+      // No worktree: past 10 finished runs, retention removes worktrees in the background, and the
+      // fixture's teardown cannot wait for that (ENOTEMPTY in CI run 40313882525).
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: prompt(first), runner: 'claude', worktree: false });
       const real = { id: run.id };
       await settle(real, model, 0, turns);
       try {
