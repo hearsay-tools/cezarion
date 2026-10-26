@@ -1,16 +1,18 @@
-import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
+import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { configure } from '@testing-library/react'
 import { afterAll, afterEach, beforeEach } from 'vitest'
 
 import { highlighterSettledForTests } from '@/lib/highlighter'
 
+import { createTestSandbox, removeTestSandboxes } from '../../scripts/test-sandbox.mjs'
+
 // Web unit tests also create Git fixtures. Keep those Git calls independent of
-// the developer's global and system config, just like the server suite.
-const osTempRoot = process.platform === 'win32'
-  ? (process.env.SystemRoot ? join(process.env.SystemRoot, 'Temp') : 'C:\\Temp')
-  : '/tmp'
-const gitSandbox = mkdtempSync(join(realpathSync(osTempRoot), 'cez-web-test-git-'))
+// the developer's global and system config, just like the server suite. The
+// sandbox names this worker, so the next worker removes it when this one dies
+// before `afterAll`; a signal removes it before the worker ends
+// (hearsay-tools/cezarion#1395).
+const gitSandbox = createTestSandbox('cez-web-test-git-')
 const gitConfig = join(gitSandbox, 'gitconfig')
 // No automatic maintenance (hearsay-tools/cezarion#1279): Git 2.54+ repacks in a
 // detached process after a commit or fetch, and that repack deletes loose objects
@@ -28,7 +30,7 @@ const pinGitEnvironment = () => {
 pinGitEnvironment()
 beforeEach(pinGitEnvironment)
 afterEach(pinGitEnvironment)
-afterAll(() => rmSync(gitSandbox, { recursive: true, force: true }))
+afterAll(() => removeTestSandboxes([gitSandbox]))
 
 // Drain any cold Shiki load a case started so it cannot run into the next case's waitFor
 // budget (#601; measured 223ms vs 62ms on the Files-tab snapshot case). Free when nothing

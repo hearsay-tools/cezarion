@@ -1,7 +1,7 @@
-import { execFileSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
-import { basename, join, sep } from 'node:path';
+import { basename, isAbsolute, join, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { agentHomePaths } from './paths.ts';
@@ -49,8 +49,24 @@ describe('test runs never read the host home (hearsay-tools/cezarion#1361)', () 
     expect(homedir()).toBe(home);
   });
 
+  it('keeps both sandbox homes inside the owned temp sandbox, so its cleanup removes them (hearsay-tools/cezarion#1395)', () => {
+    const temp = process.env.TMPDIR!;
+    expect(basename(temp)).toMatch(/^cez-vitest-tmp-/);
+    expect(existsSync(join(temp, '.cez-test-owner'))).toBe(true);
+    for (const home of [process.env.HOME!, process.env.CEZ_HOME!]) expect(home.startsWith(temp + sep), home).toBe(true);
+  });
+
   it('vitest.setup.ts clears the host variables that move an agent home', () => {
     expect(agentHomeEnv()).toEqual(unset);
+  });
+
+  it('links the sandbox home to one omp natives cache outside every sandbox (hearsay-tools/cezarion#1911)', () => {
+    const natives = join(homedir(), '.omp', 'natives');
+    expect(lstatSync(natives).isSymbolicLink()).toBe(true);
+    const cache = readlinkSync(natives);
+    expect(isAbsolute(cache)).toBe(true);
+    expect(basename(cache)).toBe('test-omp-natives');
+    expect(cache.startsWith(process.env.TMPDIR! + sep)).toBe(false);
   });
 
   it('every agent home resolves inside the sandbox', () => {
@@ -120,3 +136,52 @@ it('keeps the file flag and existing per-test cleanup', () => {
     rmSync(scratch, { recursive: true, force: true });
   }
 }, 90_000);
+
+// hearsay-tools/cezarion#1395: a worker that dies before `afterAll` used to leave its whole
+// sandbox in the OS temp root. The first run kills its own worker mid-file; the second run's
+// setup must remove what the first left.
+it('a run stopped mid-file leaves no sandbox once the next run starts (hearsay-tools/cezarion#1395)', () => {
+  const repo = fileURLToPath(new URL('../../../', import.meta.url));
+  mkdirSync(join(repo, '.ai/qa'), { recursive: true });
+  const scratch = mkdtempSync(join(repo, '.ai/qa/unit-env-'));
+  try {
+    const log = join(scratch, 'sandboxes.log');
+    const fixture = join(scratch, 'sandbox.test.ts');
+    writeFileSync(fixture, `
+import { appendFileSync } from 'node:fs';
+import { it } from 'vitest';
+it('records its sandbox', () => {
+  appendFileSync(process.env.SANDBOX_LOG!, process.env.TMPDIR + '\\n');
+  if (process.env.KILL_WORKER === '1') process.kill(process.pid, 'SIGKILL');
+});
+`);
+    const config = join(scratch, 'vitest.config.mjs');
+    writeFileSync(config, `export default ${JSON.stringify({ test: {
+      environment: 'node', include: [fixture],
+      setupFiles: [join(repo, 'packages/cezar/vitest.setup.ts')],
+      passWithNoTests: false, maxWorkers: 1,
+    } })}`);
+    const env = Object.fromEntries(['PATH', 'SystemRoot', 'SYSTEMROOT', 'ComSpec', 'PATHEXT']
+      .flatMap(key => process.env[key] === undefined ? [] : [[key, process.env[key]!]]));
+    const run = (kill: '0' | '1') => spawnSync(process.execPath, [join(repo, 'node_modules/vitest/vitest.mjs'),
+      'run', '--config', config], {
+      // bound: a hang guard for one nested Vitest run, as in the test above.
+      cwd: repo, encoding: 'utf8', timeout: 60_000,
+      env: { ...env, CEZ_HOME: scratch, SANDBOX_LOG: log, KILL_WORKER: kill },
+    });
+
+    const stopped = run('1');
+    expect(stopped.status, stopped.stdout + stopped.stderr).not.toBe(0);
+    const [left] = readFileSync(log, 'utf8').trim().split('\n');
+    expect(basename(left!)).toMatch(/^cez-vitest-tmp-/);
+    expect(existsSync(left!), 'SIGKILL runs no cleanup').toBe(true);
+
+    const next = run('0');
+    expect(next.status, next.stdout + next.stderr).toBe(0);
+    const [, own] = readFileSync(log, 'utf8').trim().split('\n');
+    expect(existsSync(left!)).toBe(false);
+    expect(existsSync(own!)).toBe(false);
+  } finally {
+    rmSync(scratch, { recursive: true, force: true });
+  }
+}, 150_000);
