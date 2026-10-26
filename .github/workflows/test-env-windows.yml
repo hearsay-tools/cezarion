@@ -8,6 +8,8 @@ on:
       - '.github/workflows/test-env-windows.yml'
       - 'packages/cezar/src/delegation/idle-test-app*'
       - 'packages/cezar/src/delegation/windows-test-app*'
+      - 'packages/cezar/src/delegation/windows-workspace*'
+      - 'packages/cezar/scripts/windows-workspace-identity.*'
       - 'packages/cezar/src/delegation/workspace.ts'
   workflow_dispatch: {}
 permissions:
@@ -27,6 +29,8 @@ jobs:
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
+      - name: Verify private Windows workspace identities
+        run: npm test -- packages/cezar/src/delegation/windows-workspace-security.test.ts packages/cezar/src/delegation/windows-workspace-identity.test.ts
       - name: Probe native process lifetime and Git Bash identity
         shell: pwsh
         run: ./.github/scripts/test-env-windows-probe.ps1
@@ -103,4 +107,4 @@ jobs:
           }
           $global:LASTEXITCODE = 0
       - name: Verify worker cleanup on native Windows
-        run: npm test -- packages/cezar/src/delegation/windows-test-app.test.ts
+        run: npm test -- packages/cezar/src/delegation/windows-test-app.test.ts packages/cezar/src/delegation/idle-test-app-refusal.test.ts
