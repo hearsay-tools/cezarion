@@ -1259,7 +1259,8 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
                 const real = engine[name].bind(recovered);
                 engine[name] = (...args) => { (adopting ? startedByAdoption : startedByContinue).push(name); return real(...args); };
               }
-              vi.useFakeTimers();
+              // Recovery dispatches transcript work with setImmediate; keep that signal real.
+              vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
               adopted = await recovered.adoptOrphanedRun(runId);
               await vi.advanceTimersByTimeAsync(300);
               vi.useRealTimers();
@@ -1313,7 +1314,8 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
                 const real = engine[name].bind(recovered);
                 engine[name] = (...args) => { started.push(name); return real(...args); };
               }
-              vi.useFakeTimers();
+              // Recovery dispatches transcript work with setImmediate; keep that signal real.
+              vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
               adopted = await recovered.adoptOrphanedRun(runId, { stop: true });
               await vi.advanceTimersByTimeAsync(300);
               vi.useRealTimers();
