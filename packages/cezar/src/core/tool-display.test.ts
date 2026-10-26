@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { toolDisplay, type ToolDisplay } from './tool-display.ts';
+import { toolDisplay, type ToolDisplay } from '@open-mercato/cezar-contract/tool-display';
 
 describe('toolDisplay', () => {
   describe('known tools across backends', () => {

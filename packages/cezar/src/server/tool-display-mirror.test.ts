@@ -1,23 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
-import { toolDisplay as webToolDisplay } from '@open-mercato/cezar-api-client/protocol/tool-display';
-import { toolDisplay, type ToolDisplay } from '../core/tool-display.ts';
+import { toolDisplay as webToolDisplay } from '@open-mercato/cezar-contract/tool-display';
+import { toolDisplay, type ToolDisplay } from '@open-mercato/cezar-contract/tool-display';
 
-/**
- * The behavior half of the protocol-v2 mirror guard (`api-types.test.ts` is the shape half).
- *
- * `web/api-client/src/protocol/tool-display.ts` is a hand-mirrored copy of `src/core/tool-display.ts`
- * — the bundle cannot import the server's module graph (NodeNext vs bundler, see
- * `packages/api-client/src/dto/types.ts`), but the two implementations must keep SAYING the same thing, or
- * the thread would title a tool call differently from the server-side consumers. So this suite
- * runs BOTH over one representative table (a case per branch of the display model: every tool
- * family, the MCP naming schemes, the unknown-tool heuristic, normalization, and hostile wire
- * junk) and asserts, per input, that each matches the expected literal — the same literals the
- * server's own `tool-display.test.ts` pins — and therefore each other.
- *
- * Lives on the server side because that is the program that can import both modules (the web
- * mirror is written with `.js` relative specifiers for exactly this reason).
- */
+/** Both package entry points expose the same contract display model. The table retains
+ * the expected output checks from the former mirror guard, including malformed wire input. */
 
 /** One case per behavior branch — drawn from `src/core/tool-display.test.ts`'s tables. */
 const TABLE: Array<{ name: string; input?: unknown; expected: ToolDisplay }> = [
@@ -168,7 +155,11 @@ const TABLE: Array<{ name: string; input?: unknown; expected: ToolDisplay }> = [
   },
 ];
 
-describe('web protocol mirror — toolDisplay says exactly what the server says', () => {
+describe('shared contract toolDisplay through server and browser subpaths', () => {
+  it('exports one implementation through both package subpaths', () => {
+    expect(webToolDisplay).toBe(toolDisplay);
+  });
+
   it.each(TABLE)('$name → $expected.title', ({ name, input, expected }) => {
     expect(toolDisplay(name, input)).toEqual(expected);
     expect(webToolDisplay(name, input)).toEqual(expected);

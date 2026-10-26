@@ -49,7 +49,7 @@ import type {
   UiToolItem,
   UiUsageUpdatedEvent,
 } from './ui-events.ts';
-import { toolDisplay } from './tool-display.ts';
+import { toolDisplay } from '@open-mercato/cezar-contract/tool-display';
 
 /** Per-message telemetry: `message.updated` snapshots (cumulative per
  *  message) and summed `step-finish` increments are tracked separately —

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { afterEach, describe, expect, it } from 'vitest'
 
-import { toolDisplay } from '@open-mercato/cezar-api-client/protocol/tool-display'
+import { toolDisplay } from '@open-mercato/cezar-api-client/contract/tool-display'
 import type { UiToolItem } from '@open-mercato/cezar-api-client'
 
 import bashAndScreenshot from '../../../../cezar/src/core/__fixtures__/claude/bash-and-screenshot.expected.json'

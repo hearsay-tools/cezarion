@@ -1,8 +1,8 @@
+import { providerForActiveRun } from '@open-mercato/cezar-contract/active-provider';
 import { describe, expect, it } from 'vitest';
 import type { RunRecord } from '../runs/store.ts';
 import type { WorkflowDef } from '../workflows/types.ts';
 import {
-  providerForActiveRun,
   providerForExistingRun,
   providersRequiredByWorkflow,
   unavailableProviderMessage,

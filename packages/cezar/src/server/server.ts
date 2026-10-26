@@ -1,3 +1,5 @@
+import { imageMimeType, isOsOpenableImage } from '@open-mercato/cezar-contract/image-path';
+import { providerForActiveRun } from '@open-mercato/cezar-contract/active-provider';
 import { defined } from '../core/defined.ts';
 import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
 import { CompletionActionCoordinator } from './completion-actions.ts';
@@ -188,8 +190,6 @@ import {
   collectRunCommits,
   commitAll,
   createOrSwitchBranch,
-  imageMimeType,
-  isOsOpenableImage,
   pushCurrentBranch,
   readWorktreePath,
 } from './git-changes.ts';
@@ -273,7 +273,6 @@ import { agentCliRunner, detectOpenTargets, openFileInDefaultApp, openInApp } fr
 import { createDraftPr } from './pr.ts';
 import { ProviderRuntimeAuthObserver } from './provider-auth-runtime.ts';
 import {
-  providerForActiveRun,
   providerForExistingRun,
   providersRequiredByWorkflow,
 } from './provider-action-gate.ts';

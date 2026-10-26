@@ -1,5 +1,5 @@
 import type { PlanEntry, PlanStatus, RunEvent, StopReason, UiAskQuestion, UiItem, UiPermissionRequestedEvent, UiToolItem } from '@open-mercato/cezar-api-client'
-import { toolDisplay } from '@open-mercato/cezar-api-client/protocol/tool-display'
+import { toolDisplay } from '@open-mercato/cezar-api-client/contract/tool-display'
 import {
   agentInputEventSchema,
   conversationMessageEventSchema,
