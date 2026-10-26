@@ -13,6 +13,8 @@ message: >-
 files:
   - packages/*/src/**/*.test.ts
   - packages/*/src/**/*.testkit.ts
+  - packages/cezar/test/**/*.test.ts
+  - packages/web/e2e/**/*.e2e.ts
 # Keep this file and test-enum-literal-tsx.yml the same below `files`: ast-grep parses .ts and .tsx
 # files with different grammars, so one rule cannot cover both. test-enum-literal-rule.test.ts
 # compares them, and checks each key's values against the contract's schemas.

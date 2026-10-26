@@ -4478,6 +4478,24 @@
       "count": 5
     },
     {
+      "file": "packages/cezar/test/e2e/serve-port.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/test/e2e/task-cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/test/unit/test-env-launcher.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
       "file": "packages/contract/src/ask-schema.test.ts",
       "rule": "test-enum-literal",
       "site": "kind: 'human'",
@@ -4890,6 +4908,354 @@
       "rule": "test-enum-literal",
       "site": "via: 'no-wait'",
       "count": 2
+    },
+    {
+      "file": "packages/web/e2e/artifact-project-links.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/assistant-line-breaks.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/assistant-line-breaks.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/assistant-reply-copy.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/assistant-reply-copy.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/git-sidebar.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/git-sidebar.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/github-sidebar.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/github-sidebar.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/issue-linked-tasks.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/pending-question.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/e2e/pending-question.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/pending-question.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/pending-question.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/pending-question.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/e2e/pending-question.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/pending-question.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/pending-question.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'ask-line'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/progressive-history.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/e2e/quick-list.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/quick-list.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/quick-list.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 5
+    },
+    {
+      "file": "packages/web/e2e/quick-list.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/quick-list.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 6
+    },
+    {
+      "file": "packages/web/e2e/quick-list.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/e2e/run-header-ci-wait.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/run-header-ci-wait.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/run-header-ci-wait.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/run-header-ci-wait.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/e2e/run-header-ci-wait.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/e2e/run-header-ci-wait.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/e2e/run-header-ci-wait.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/run-header-ci-wait.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/run-header-ci-wait.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/run-header-ci-wait.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/e2e/selection-states.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/selection-states.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/sidebar-ellipsis-click.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/sidebar-ellipsis-click.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/e2e/sidebar-reference-status.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/sidebar-reference-status.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/e2e/task-github-items.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/task-github-items.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/task-handoff.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/task-pr-collection.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/task-thread.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/task-thread.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/task-thread.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/e2e/task-views-layout.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/touch-targets.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/touch-targets.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/e2e/worker-relationships.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/e2e/worker-relationships.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/worker-relationships.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/worker-relationships.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/e2e/worker-relationships.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/e2e/worker-relationships.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/e2e/worker-relationships.e2e.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'ask-line'",
+      "count": 1
     },
     {
       "file": "packages/web/src/api/client.test.ts",

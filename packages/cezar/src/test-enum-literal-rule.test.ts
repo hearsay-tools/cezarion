@@ -69,4 +69,14 @@ describe('the test-enum-literal rules', () => {
     expect(globsOf('test-enum-literal').every((glob) => !glob.endsWith('.tsx'))).toBe(true);
     expect(globsOf('test-enum-literal-tsx').every((glob) => glob.endsWith('.tsx'))).toBe(true);
   });
+
+  it('reach every place a test of this repository lives, the packaged and browser specs included', () => {
+    expect(globsOf('test-enum-literal')).toEqual([
+      'packages/*/src/**/*.test.ts',
+      'packages/*/src/**/*.testkit.ts',
+      'packages/cezar/test/**/*.test.ts',
+      'packages/web/e2e/**/*.e2e.ts',
+    ]);
+    expect(globsOf('test-enum-literal-tsx')).toEqual(['packages/*/src/**/*.test.tsx']);
+  });
 });
