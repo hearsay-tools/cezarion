@@ -1,0 +1,25 @@
+id: ask-requested-read-outside-projection
+valid:
+  # An emitter writes the event; a dispatch table and a type list name it without reading a payload.
+  - "store.appendEvent(runId, { type: 'ask.requested', requestId, questions })"
+  - "sink.handle({ type: 'ask.requested', requestId, questions: [] })"
+  - "const reducers = new Map([['ask.requested', reduceAskRequested]])"
+  - "const kept = ['ask.requested', 'human-input-delivered']"
+  # Another event type, and a string that only contains the name.
+  - "const turn = events.find((event) => event.type === 'turn.completed')"
+  - "if (event.type === 'ask.requested.v2') return"
+  - "const note = type === 'my ask.requested'"
+  # The projection's own readers.
+  - "const ask = pendingAskOf(events); const questions = ask?.questions"
+  - "const payload = askPayloadOf(event)"
+invalid:
+  # The find-then-read shape of the old status command and webhook.
+  - "const ask = [...events].reverse().find((event) => event.type === 'ask.requested')"
+  - "const ask = events.find((event) => event.type === \"ask.requested\")"
+  - "const ask = events.find(e => e.type == 'ask.requested')"
+  - "const other = events.filter((event) => event.type !== 'ask.requested')"
+  # A guard before a payload read, and the operands the other way round.
+  - "if (event.type === 'ask.requested') { use(event.questions) }"
+  - "if ('ask.requested' === event.type) return event.context"
+  # A switch over event types.
+  - "switch (event.type) { case 'ask.requested': return event.questions }"

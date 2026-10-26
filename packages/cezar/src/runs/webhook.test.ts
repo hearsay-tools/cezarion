@@ -137,6 +137,44 @@ describe('TaskWebhook', () => {
     expect(calls[0]!.body.task).toMatchObject({ question: questions, questionContext: '## Findings' });
   });
 
+  // hearsay-tools/cezarion#1808: the payload's question fields are the ones `cez task status` prints,
+  // from the same ask projection. Each case pins the delivered task fields as stored.
+  const choice = [{ header: 'Choice', question: 'Which module?', options: [{ label: 'Parser' }, { label: 'Runner', description: 'The executor' }] }];
+  const open = [{ header: 'Name', question: 'What should it be called?' }, { header: 'Tags', question: 'Which tags?', options: [{ label: 'a' }, { label: 'b' }], multiSelect: true }];
+  it.each([
+    ['an ask without context', [{ requestId: 'ask-1', questions: choice }], { question: choice }, ['questionContext']],
+    ['open and multiSelect questions', [{ requestId: 'ask-1', context: 'Two.', questions: open }], { question: open, questionContext: 'Two.' }, []],
+    ['only the newest of two asks', [{ requestId: 'ask-1', context: 'old', questions: open }, { requestId: 'ask-2', questions: choice }], { question: choice }, ['questionContext']],
+    ['an ask the questions schema rejects', [{ requestId: 'ask-1', context: 'ctx', questions: [{ header: 'Far too long a header', question: 'Which?' }] }], {}, ['question', 'questionContext']],
+  ])('delivers %s in task.question', async (_name, asks, expected, absent) => {
+    const { calls, fetchImpl } = recorder();
+    const webhook = attach(fetchImpl);
+    const run = optedIn();
+    store.updateRun(run.id, { status: 'running' });
+    for (const ask of asks) store.appendEvent(run.id, { type: 'ask.requested', ...ask });
+    store.commitWait(run.id, { id: '00000000-0000-4000-8000-0000000000ae', kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: '2026-09-05T00:00:00.000Z', phase: 'open', turnId: 'turn-1' });
+    store.updateRun(run.id, { status: 'waiting' });
+    await webhook.idle();
+    expect(calls.map((call) => call.body.event)).toEqual(['task.question']);
+    expect(calls[0]!.body.task).toMatchObject(expected);
+    for (const key of absent) expect(calls[0]!.body.task).not.toHaveProperty(key);
+  });
+
+  it('delivers no question once a delivery answered the ask', async () => {
+    const { calls, fetchImpl } = recorder();
+    const webhook = attach(fetchImpl);
+    const run = optedIn();
+    store.updateRun(run.id, { status: 'running' });
+    const asked = store.appendEvent(run.id, { type: 'ask.requested', requestId: 'ask-1', context: 'ctx', questions: choice });
+    store.appendEvent(run.id, { type: 'human-input-delivered', askSeq: asked.seq, source: 'human' });
+    store.commitWait(run.id, { id: '00000000-0000-4000-8000-0000000000af', kind: 'human', source: 'agent', via: 'cezar_ask', registeredAt: '2026-09-05T00:00:00.000Z', phase: 'open', turnId: 'turn-1' });
+    store.updateRun(run.id, { status: 'waiting' });
+    await webhook.idle();
+    expect(calls.map((call) => call.body.event)).toEqual(['task.question']);
+    expect(calls[0]!.body.task).not.toHaveProperty('question');
+    expect(calls[0]!.body.task).not.toHaveProperty('questionContext');
+  });
+
   it('with no stored triggers sends only Needs you, Failed, Done and Cancelled', async () => {
     const { calls, fetchImpl } = recorder();
     const webhook = attach(fetchImpl);
