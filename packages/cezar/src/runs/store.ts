@@ -2430,6 +2430,11 @@ export class RunStore extends EventEmitter {
     const run = this.peek(id);
     if (!run) throw new Error('missing agent input target');
     const agentInputs = inputs.map(input => agentInputSchema.parse(input));
+    // Receipts are outcomes (hearsay-tools/cezarion#1805): only `commitOutcome` writes them.
+    const stored = new Map((run.agentInputs ?? []).map(input => [input.id, input]));
+    if (agentInputs.some(input => input.deliveredAt !== stored.get(input.id)?.deliveredAt || input.consumedAt !== stored.get(input.id)?.consumedAt)) {
+      throw new Error('agent input receipts change only through commitOutcome');
+    }
     const now = new Date().toISOString();
     for (const input of run.agentInputs ?? []) {
       const claim = input.inboxClaim;

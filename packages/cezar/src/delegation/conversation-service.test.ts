@@ -147,7 +147,7 @@ describe('durable conversations', () => {
     const w = await worker();
     const message = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Result', timeoutSeconds: 600 });
     const deliveredAt = '2026-09-22T14:32:54.554Z';
-    f.store.commitAgentInputs(w.id, f.store.getRun(w.id)!.agentInputs!.map(input => ({ ...input, deliveredAt })));
+    f.store.commitOutcome(w.id, { kind: 'delivered', inputIds: f.store.getRun(w.id)!.agentInputs!.map(input => input.id), at: deliveredAt });
     vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-09-22T15:00:00.000Z'));
     try {
       projectConversationEvents(f.store, f.store.getRun(f.parent.id)!);

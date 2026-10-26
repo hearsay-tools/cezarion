@@ -93,6 +93,19 @@ describe('commitOutcome', () => {
     expect(committed().waitDeliveryFailures).toBe(2);
   });
 
+  it('the queue checkpoint refuses a receipt, which only an outcome writes', () => {
+    const queued = input();
+    store.commitAgentInputs(id, [queued]);
+    for (const receipts of [{ deliveredAt: at }, { consumedAt: at }]) {
+      expect(() => store.commitAgentInputs(id, [{ ...queued, ...receipts }])).toThrow('agent input receipts change only through commitOutcome');
+    }
+    expect(() => store.commitAgentInputs(id, [queued, input({ deliveredAt: at })])).toThrow('agent input receipts change only through commitOutcome');
+    store.commitOutcome(id, { kind: 'delivered', inputIds: [queued.id], at });
+    expect(() => store.commitAgentInputs(id, [{ ...store.getRun(id)!.agentInputs![0]!, deliveredAt: undefined }])).toThrow('agent input receipts change only through commitOutcome');
+    store.commitAgentInputs(id, [...store.getRun(id)!.agentInputs!, input()]);
+    expect(committed().agentInputs?.map((entry: AgentInput) => entry.deliveredAt)).toEqual([at, undefined]);
+  });
+
   // AGENTS.md § Test the path with no live session: recovery reaches the call with nothing but the row.
   it('commits for a run no session holds, read back by a store reopened after a crash', () => {
     const wait = human();

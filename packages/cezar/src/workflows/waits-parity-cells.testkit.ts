@@ -1769,10 +1769,14 @@ function workersCells(runners: RunnerId[]): void {
       await until(() => store.getRun(f.p.id)?.waitDeliveryFailures === 1 && engine().wakeBackoffs.has(f.p.id) && !manager.isActive(f.p.id));
       expect(store.getRun(f.p.id)?.status).toBe('waiting');
       f.failure.lift();
+      const commits = recordCommits(join(root, '.ai/cezar'));
       const backoff = engine().wakeBackoffs.get(f.p.id) as NodeJS.Timeout & { _onTimeout(): void };
       backoff._onTimeout(); clearTimeout(backoff);
       await until(() => delivered(f.p.id, id) && store.getRun(f.p.id)?.agentInputs?.find(input => input.id === id)?.awaitingRead !== true);
       expect(store.getRun(f.p.id)?.waitDeliveryFailures).toBeUndefined();
+      // hearsay-tools/cezarion#1805: the receipt or the read that ends the failures clears them in its commit.
+      commits.expectEveryCommit(f.p.id, row => { const message = row.agentInputs?.find(input => input.id === id); return !message?.deliveredAt || !!message.awaitingRead || row.waitDeliveryFailures === undefined; },
+        'a received message and its cleared failure count');
       await until(() => store.getRun(f.p.id)?.status === 'waiting');
       expect(store.getRun(f.p.id)?.waitDeliveryFailures).toBeUndefined();
     });
