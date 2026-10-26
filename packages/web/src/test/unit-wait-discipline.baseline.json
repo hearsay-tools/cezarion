@@ -1,0 +1,203 @@
+{
+  "$comment": "Bare sleeps, short wait bounds and unbounded poll loops the cockpit unit tests carried when the ratchet landed (hearsay-tools/cezarion#1203). Keyed by file, rule and the line text so a moved line does not churn it. This list only shrinks: fix a site, then run UNIT_WAIT_DISCIPLINE_UPDATE=1 npm test -- unit-wait-discipline. Rules: AGENTS.md § Validation.",
+  "sites": [
+    {
+      "file": "api/client.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))",
+      "count": 2
+    },
+    {
+      "file": "api/global-events.test.tsx",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() =>",
+      "count": 3
+    },
+    {
+      "file": "api/global-events.test.tsx",
+      "rule": "sleep",
+      "site": "await new Promise(resolve => setTimeout(resolve, 70))",
+      "count": 2
+    },
+    {
+      "file": "components/diff/diff.test.tsx",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 20))",
+      "count": 1
+    },
+    {
+      "file": "components/project-rail.test.tsx",
+      "rule": "sleep",
+      "site": "await act(async () => { await new Promise((resolve) => setTimeout(resolve, 5)) })",
+      "count": 1
+    },
+    {
+      "file": "components/project-rail.test.tsx",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 300))",
+      "count": 1
+    },
+    {
+      "file": "components/sidebar-archive.test.tsx",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(api.archiveProjectRun).toHaveBeenCalledTimes(2))",
+      "count": 1
+    },
+    {
+      "file": "components/sidebar-archive.test.tsx",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(api.pinProjectRun).toHaveBeenCalledWith('p1', 'r1', true))",
+      "count": 1
+    },
+    {
+      "file": "components/sidebar-archive.test.tsx",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(api.pinProjectRun).toHaveBeenCalledWith('p1', 'y', true))",
+      "count": 1
+    },
+    {
+      "file": "components/sidebar-archive.test.tsx",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(document.activeElement).toBe(host.querySelector('a[href=\"#z\"]')))",
+      "count": 1
+    },
+    {
+      "file": "components/sidebar-archive.test.tsx",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(document.activeElement).toBe(ui.link('a')))",
+      "count": 1
+    },
+    {
+      "file": "components/sidebar-archive.test.tsx",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(document.activeElement).toBe(ui.link('c')))",
+      "count": 1
+    },
+    {
+      "file": "components/sidebar-archive.test.tsx",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(document.activeElement).toBe(ui.list))",
+      "count": 1
+    },
+    {
+      "file": "components/sidebar-archive.test.tsx",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(order).toEqual(['unarchive a']))",
+      "count": 1
+    },
+    {
+      "file": "components/sidebar-archive.test.tsx",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(result.current.sweeping).toBeNull())",
+      "count": 2
+    },
+    {
+      "file": "components/sidebar-archive.test.tsx",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(toastMock).toHaveBeenCalled())",
+      "count": 3
+    },
+    {
+      "file": "components/sidebar-archive.test.tsx",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(toastMock).toHaveBeenCalledTimes(1))",
+      "count": 3
+    },
+    {
+      "file": "components/sidebar-archive.test.tsx",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(toastMock).toHaveBeenCalledWith('Nope', { tone: 'danger' }))",
+      "count": 1
+    },
+    {
+      "file": "components/sidebar-archive.test.tsx",
+      "rule": "sleep",
+      "site": "await new Promise((r) => setTimeout(r, 20))",
+      "count": 1
+    },
+    {
+      "file": "routes/automations/editor.test.tsx",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 20))",
+      "count": 1
+    },
+    {
+      "file": "routes/automations/log.test.tsx",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(calls.some((call) => call.method === 'POST' && call.path.endsWith('/automation-log/r1/retry'))).toBe(true))",
+      "count": 1
+    },
+    {
+      "file": "routes/github/github-sidebar-filters.test.tsx",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 900))",
+      "count": 2
+    },
+    {
+      "file": "routes/github/github.test.tsx",
+      "rule": "sleep",
+      "site": "await act(async () => { await new Promise(resolve => setTimeout(resolve, 450)) })",
+      "count": 2
+    },
+    {
+      "file": "routes/github/github.test.tsx",
+      "rule": "sleep",
+      "site": "await new Promise((r) => setTimeout(r, 20))",
+      "count": 2
+    },
+    {
+      "file": "routes/github/github.test.tsx",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 100))",
+      "count": 1
+    },
+    {
+      "file": "routes/github/github.test.tsx",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 50)) // inside the 350 ms debounce",
+      "count": 1
+    },
+    {
+      "file": "routes/github/github.test.tsx",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 700)) // past the 350 ms debounce",
+      "count": 1
+    },
+    {
+      "file": "routes/global-tasks.test.tsx",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 350))",
+      "count": 1
+    },
+    {
+      "file": "routes/task-github/task-github-item.test.tsx",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 50))",
+      "count": 1
+    },
+    {
+      "file": "routes/task-thread/task-thread.test.tsx",
+      "rule": "short-bound",
+      "site": "await waitFor(() => expect(queryClient.getQueryState(queryKeys.runs.detail('r1'))?.fetchStatus).toBe('idle'), { timeout: 250 })",
+      "count": 1
+    },
+    {
+      "file": "routes/task-thread/task-thread.test.tsx",
+      "rule": "short-bound",
+      "site": "await waitFor(() => expect(requests).toHaveLength(2), { timeout: 2_000 })",
+      "count": 1
+    },
+    {
+      "file": "routes/task-thread/task-thread.test.tsx",
+      "rule": "short-bound",
+      "site": "await waitFor(() => expect(screen.getByRole('heading', { level: 1 }).textContent).toBe('Updated by stream'), { timeout: 250 })",
+      "count": 1
+    },
+    {
+      "file": "test/poll.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(fixture.sockets.size).toBe(0), { timeout: 1000, interval: 10 })",
+      "count": 2
+    }
+  ]
+}

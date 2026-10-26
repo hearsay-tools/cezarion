@@ -116,6 +116,7 @@ describe('armPreview', () => {
       const host = { release: () => Promise.reject(new Error('boom')), ownsServer: () => false, ownsBrowser: () => false } as unknown as PreviewHost;
       armPreview(store as unknown as RunStore, a.dataDir, host);
       store.emit('deleted', 'run-x');
+      // bound: negative window. An unhandled rejection from the deleted handler surfaces within a few event-loop turns; 20 ms covers them.
       await new Promise(resolve => setTimeout(resolve, 20));
     } finally {
       process.off('unhandledRejection', onUnhandled);

@@ -13,6 +13,9 @@ import { ProjectAutomationScheduler } from './scheduler.ts';
 import { GithubPoller } from './github-poller.ts';
 import type { GithubAutomationDefinition, ScheduleAutomationDefinition } from './types.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 const definition: GithubAutomationDefinition = {
   id: 'one', revision: 1, name: 'Review', enabled: true, kind: 'github', events: ['issue.opened'], intervalSeconds: 300,
   filters: { lookbackDays: 7, maxRecords: 25 }, task: { prompt: 'Review #{{github.number}}: {{github.title}} at {{github.url}}' },
@@ -260,7 +263,7 @@ describe('automation task templates', () => {
         expect(automations.logs({ automationId: 'one' })).toEqual([
           expect.objectContaining({ result: 'failed', receiptId: 'lost-poll', event: 'issue.opened', githubNumber: 7, githubUrl: candidate.url }),
         ]);
-      });
+      }, { timeout: HANG_GUARD_MS });
     } finally { await rm(root, { recursive: true, force: true }); }
   });
 
@@ -277,6 +280,9 @@ describe('automation task templates', () => {
       expect(building.latestReceipts().get(reserved.receiptKey)).toMatchObject({ status: 'reserved' });
       launching.appendReceipt({ ...reserved, status: 'launched', runId: 'run-1', updatedAt: occurrence.at });
       expect(building.isReservationInFlight(reserved.receiptId)).toBe(false);
+      // bound: negative window. A wrongly reconciled reservation would append its `failed` row
+      // through withLogLease, which takes the free log lock at once, so 20 ms is several turns of
+      // the event loop; the case proves no such row follows.
       await new Promise((resolve) => setTimeout(resolve, 20));
       expect(building.logs({ automationId: 'nightly' })).toEqual([]);
     } finally { await rm(root, { recursive: true, force: true }); }

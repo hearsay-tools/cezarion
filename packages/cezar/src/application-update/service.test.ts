@@ -4,6 +4,9 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ApplicationUpdateConflictError, ApplicationUpdateService, validateInstalledPackage } from './service.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 function fixture(targetVersion: string | null = '2.0.0') {
@@ -93,7 +96,7 @@ describe('application update preparation', () => {
       await install(args);
     });
     const first = service.apply();
-    await vi.waitFor(() => expect(service.snapshot().status).toBe('preparing'));
+    await vi.waitFor(() => expect(service.snapshot().status).toBe('preparing'), { timeout: HANG_GUARD_MS });
     const other = new ApplicationUpdateService({ packageRoot: original, launchEntry: join(original, 'dist/index.js'),
       npmPrefix: join(root, 'prefix'), npmCache: join(root, 'cache'), home, targetVersion: () => '2.0.0', runNpm });
     const second = other.apply();
@@ -151,7 +154,7 @@ describe('application update preparation', () => {
     armRestart.mockImplementation(() => new Promise<void>((resolve) => { release = resolve; }));
     const first = service.restart();
     await expect(service.restart()).rejects.toThrow();
-    await vi.waitFor(() => expect(armRestart).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(armRestart).toHaveBeenCalledTimes(1), { timeout: HANG_GUARD_MS });
     release();
     expect((await first).status).toBe('restarting');
     expect(armRestart).toHaveBeenCalledTimes(1);
@@ -245,7 +248,7 @@ describe('application update preparation', () => {
       await install(args);
     });
     const first = service.apply();
-    await vi.waitFor(() => expect(service.snapshot().status).toBe('preparing'));
+    await vi.waitFor(() => expect(service.snapshot().status).toBe('preparing'), { timeout: HANG_GUARD_MS });
     const other = new ApplicationUpdateService({ packageRoot: original, launchEntry: join(original, 'dist/index.js'),
       npmPrefix: join(root, 'prefix'), npmCache: join(root, 'cache'), home, targetVersion: () => '2.0.0',
       runNpm, lockWaitMs: 50 });

@@ -5,6 +5,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CI_PROCESS_WRAPPER, GithubCiClient, runCiCommand } from './github.ts';
+
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
 const fixture=fileURLToPath(new URL('./fixtures/gh.mjs',import.meta.url));
 const dirs:string[]=[];
 const aborts:AbortController[]=[];
@@ -17,15 +20,15 @@ it('kills the owned watcher when the controller dies without running cleanup',as
  const source=`const {spawn}=require('node:child_process'); const c=spawn(process.execPath,['-e',${JSON.stringify(CI_PROCESS_WRAPPER)},${JSON.stringify(JSON.stringify({file:process.execPath,args:[fixture,'pr','checks','12','--watch']}))}],{stdio:['pipe','ignore','ignore']});setInterval(()=>{},1000);`;
  const parent=spawn(process.execPath,['-e',source],{env:{...process.env,CI_FIXTURE_MODE:'stubborn',CI_FIXTURE_LOG:log},stdio:'ignore'});
  try {
-  await vi.waitFor(async()=>expect((await calls(log)).length).toBe(1));const pid=(await calls(log))[0]!.pid;parent.kill('SIGKILL');
+  await vi.waitFor(async()=>expect((await calls(log)).length).toBe(1), { timeout: HANG_GUARD_MS });const pid=(await calls(log))[0]!.pid;parent.kill('SIGKILL');
   await vi.waitFor(async()=>{
    try{process.kill(pid,0);}catch{return;}
    // Linux init can retain an exited orphan as a zombie; it is no longer executing.
    if(process.platform==='linux'){expect((await readFile(`/proc/${pid}/stat`,'utf8')).split(' ')[2]).toBe('Z');return;}
    throw new Error('Owned watcher is still alive');
-  },{timeout:5000,interval:50});
+  },{timeout:HANG_GUARD_MS,interval:50});
  }finally{parent.kill('SIGKILL');}
-},10000);
+});
 it('bounds structured subprocess output and discards watch redraws',async()=>{
  const c=new AbortController();aborts.push(c);
  await expect(runCiCommand({file:process.execPath,args:[fixture]},c.signal,false,{...process.env,CI_FIXTURE_MODE:'overflow'})).rejects.toMatchObject({code:'output_limit'});
@@ -36,7 +39,7 @@ it('limits short queries to four and removes an aborted queued query',async()=>{
  const client=new GithubCiClient({command:{file:process.execPath,args:['-e',`require('node:fs').appendFileSync(process.env.CI_FIXTURE_LOG,process.pid+'\\n');setInterval(()=>{},1000);`]},env:{...process.env,CI_FIXTURE_LOG:log}});
  const cs=Array.from({length:5},()=>new AbortController());aborts.push(...cs);
  const queries=cs.map(c=>client.resolve('https://github.com/org/repo/pull/12',c.signal).catch(e=>e));
- await vi.waitFor(async()=>expect((await readFile(log,'utf8')).trim().split('\n')).toHaveLength(4));
+ await vi.waitFor(async()=>expect((await readFile(log,'utf8')).trim().split('\n')).toHaveLength(4), { timeout: HANG_GUARD_MS });
  cs[4]!.abort();await queries[4];cs[0]!.abort();await queries[0];
  expect((await readFile(log,'utf8')).trim().split('\n')).toHaveLength(4);
  for(const c of cs)c.abort();await Promise.all(queries);

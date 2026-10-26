@@ -33,6 +33,7 @@ const CAP_ROW_TIMEOUT_MS = 30_000 + (MAX_AUTO_CONTINUES + 1) * CAP_TURN_BUDGET_M
 async function waitForProgressing(cond: () => boolean, progress: () => unknown, stallMs: number): Promise<void> {
   let last = progress();
   let since = Date.now();
+  // bound: the deadline restarts whenever progress changes, so the loop ends once nothing has changed for stallMs.
   while (!cond()) {
     const now = progress();
     if (now !== last) { last = now; since = Date.now(); }

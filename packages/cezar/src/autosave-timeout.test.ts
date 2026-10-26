@@ -147,7 +147,13 @@ exec ${shQuote(realGit)} "$@"
   it('preserves a pre-existing agent while saving its worktree', async () => {
     const agent = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { cwd: repo, stdio: 'ignore' });
     try {
-      expect((await save()).result).toBe('committed');
+      // Nothing is stalled here, so the save runs with the product budget. The shrunk one is for the
+      // stalled commands above: a real Git command can outlast 500 ms on a loaded host (hearsay-tools/cezarion#1203).
+      // Provenance: a `git` shim first on PATH (`sleep 0.7; exec git "$@"`), this case and the serialize case below.
+      // With the 500 ms budget both failed (1 run of 2, "expected 'failed' to be 'committed'"); without it both passed (1 run of 2).
+      const job = autosaveCommit(repo, 'run finalize');
+      jobs.push(job);
+      expect(await job).toBe('committed');
       expect(() => process.kill(agent.pid!, 0)).not.toThrow();
     } finally {
       agent.kill('SIGKILL');
@@ -155,8 +161,9 @@ exec ${shQuote(realGit)} "$@"
     }
   });
   it('serializes overlapping autosaves without losing later work', async () => {
-    const first = autosaveCommit(repo, 'periodic', budget);
-    const second = autosaveCommit(repo, 'run finalize', budget);
+    // Nothing is stalled here, so both saves run with the product budget (see the agent case above).
+    const first = autosaveCommit(repo, 'periodic');
+    const second = autosaveCommit(repo, 'run finalize');
     jobs.push(first, second);
     expect(await first).toBe('committed');
     expect(await second).toBe('nothing-to-do');

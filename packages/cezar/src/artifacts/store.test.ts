@@ -92,6 +92,8 @@ describe('publication limits and locking', () => {
     const source = join(root, 'report.md'); await writeFile(source, 'original');
     let completed = false;
     const publication = publishArtifact(dir, runId, source).then(value => { completed = true; return value; });
+    // bound: negative window. publishArtifact retries a held lock every 20 ms (the delay in its
+    // lock loop), so 75 ms spans at least three retries; the case proves they all refuse.
     await new Promise(resolve => setTimeout(resolve, 75));
     const publishedEarly = completed;
     await rm(join(dir, '.publish.lock'), { recursive: true, force: true });
@@ -104,6 +106,8 @@ describe('publication limits and locking', () => {
     const source = join(root, 'report.md'); await writeFile(source, 'original');
     let completed = false;
     const publication = publishArtifact(dir, runId, source).then(value => { completed = true; return value; });
+    // bound: negative window. publishArtifact retries a held lock every 20 ms (the delay in its
+    // lock loop), so 75 ms spans at least three retries; the case proves they all refuse.
     await new Promise(resolve => setTimeout(resolve, 75));
     const publishedEarly = completed;
     await rm(join(dir, '.publish.lock'), { recursive: true });

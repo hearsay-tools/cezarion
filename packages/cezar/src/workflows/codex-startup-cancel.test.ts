@@ -15,7 +15,7 @@ const workflow: WorkflowDef = {
   steps: [{ id: 'task', name: 'Task', prompt: '{{task}}' }],
 };
 const fixture = fileURLToPath(new URL('./__fixtures__/codex-no-turn.mjs', import.meta.url));
-const waitOptions = { timeout: 5000, interval: 10 };
+const waitOptions = { timeout: 10_000, interval: 10 };
 const processExited = (pid: number): boolean => {
   try { process.kill(pid, 0); return false; }
   catch (error) {

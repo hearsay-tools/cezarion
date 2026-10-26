@@ -9,6 +9,9 @@ import type { RunManager } from '../workflows/run.ts';
 import { createApp } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 function git(root: string, ...args: string[]): string {
   return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
@@ -233,7 +236,7 @@ describe('project checkout pull', () => {
     chmodSync(hook, 0o755);
     const pending = post();
     try {
-      await vi.waitFor(() => expect(existsSync(started)).toBe(true));
+      await vi.waitFor(() => expect(existsSync(started)).toBe(true), { timeout: HANG_GUARD_MS });
       const other = await post();
       expect(other.status).toBe(409);
       expect(await other.json()).toMatchObject({ error: expect.stringMatching(/in progress/i) });
@@ -258,7 +261,7 @@ describe('project checkout pull', () => {
     const pending = apiRequest(app, '/api/v1/repo/branch', { method: 'POST',
       headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: 'feature' }) });
     try {
-      await vi.waitFor(() => expect(existsSync(started)).toBe(true));
+      await vi.waitFor(() => expect(existsSync(started)).toBe(true), { timeout: HANG_GUARD_MS });
       const other = await post();
       expect(other.status).toBe(409);
       expect(await other.json()).toMatchObject({ error: expect.stringMatching(/in progress/i) });

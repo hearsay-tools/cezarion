@@ -11,6 +11,9 @@ import { DelegationService } from '../delegation/service.ts';
 import { agentTmpDir, agentTmpEnv, agentTmpDirLocations } from '../runs/agent-tmpdir.ts';
 import { manager, root, store, worker, until, executions, bookkeeping, reopenRuntime, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 // Node's os.tmpdir reads the original environment, including after this fixture replaces process.env.
 const nativeEnvironment = process.env;
 function setTmpRoot(value: string | undefined) {
@@ -98,7 +101,7 @@ describe.runIf(process.platform === 'linux' && process.getuid?.() !== 0)('R43 or
       expect(manager.finishBlockedReason(parent.id)).toBeUndefined();
       expect(manager.finish(parent.id)).toBe(true);
       await until(() => store.getRun(parent.id)?.status === 'done');
-      await vi.waitFor(() => expect(existsSync(scratch)).toBe(false));
+      await vi.waitFor(() => expect(existsSync(scratch)).toBe(false), { timeout: HANG_GUARD_MS });
     } finally {
       detach(); credentials.close();
       holder.stdin.end(); await exited;

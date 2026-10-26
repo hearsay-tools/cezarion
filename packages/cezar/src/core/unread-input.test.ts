@@ -20,6 +20,7 @@ describe('unread agent input is resubmitted (#505)', () => {
       // Codex marks it read when it enters the thread history, before the reply text lands.
       const echoes = () => store.readEvents(runId).filter(e => e.type === 'text' && String(e.text).includes('late parent guidance'));
       await waitFor(() => echoes().length > 0, 15_000);
+      // bound: negative window. A second resubmission of the same input would reach the mock within a few event-loop turns of the first echo; 300 ms covers them.
       await new Promise(resolve => setTimeout(resolve, 300));
       expect(echoes()).toHaveLength(1);
     });
@@ -67,6 +68,7 @@ describe('unread agent input is resubmitted (#505)', () => {
         // Re-delivered exactly once after the restart.
         const echoes = () => store.readEvents(runId).filter(e => e.type === 'text' && String(e.text).includes('late parent guidance'));
         await waitFor(() => echoes().length > 0, 15_000);
+        // bound: negative window. A second delivery after the restart would reach the mock within a few event-loop turns of the first echo; 500 ms covers them.
         await new Promise(resolve => setTimeout(resolve, 500));
         expect(echoes()).toHaveLength(1);
       });

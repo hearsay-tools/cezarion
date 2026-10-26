@@ -9,6 +9,9 @@ import { processStartToken } from '../delegation/process-liveness.ts';
 import type { CockpitOwnership } from './cockpit-ownership.ts';
 import { ProjectContexts, ProjectContextsClosedError, type ProjectWarmCandidate } from './project-context.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 /**
  * Background warm-up (#667): after the server listens, every registered project's context is
  * built one at a time, most recently opened first, so the first click on a project finds it
@@ -194,7 +197,7 @@ describe('ProjectContexts.warmAll', () => {
     const projects: ProjectWarmCandidate[] = [{ id: 'busy', root: root(), status: 'not-git' }];
     const contexts = new ProjectContexts({ listProjects: async () => projects });
     const building = contexts.context('busy');
-    await vi.waitFor(() => expect(recover).toHaveBeenCalled());
+    await vi.waitFor(() => expect(recover).toHaveBeenCalled(), { timeout: HANG_GUARD_MS });
     const manager = recover.mock.contexts[0] as RunManager;
 
     contexts.disposeAll();

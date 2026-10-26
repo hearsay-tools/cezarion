@@ -152,6 +152,7 @@ describe('ProjectContexts', () => {
       expect(release).toHaveBeenCalledWith(run.id);
 
       await contexts.context('a');
+      // bound: negative window. A kill would be delivered at once and the child would exit within milliseconds; 300 ms is far longer.
       await new Promise(resolve => setTimeout(resolve, 300));
       expect(child.exitCode).toBeNull();
       expect(child.signalCode).toBeNull();

@@ -373,7 +373,7 @@ describe('delegation service durable authority', () => {
     const generation = f.store.readWorkerExecution(workerId)?.generation;
     expect(generation).toBeDefined();
     expect(f.store.commitWorkerExecutionComplete(workerId, generation!)).toBe(true);
-    await vi.waitFor(() => expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } }), { timeout: 3_000 });
+    await vi.waitFor(() => expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } }), { timeout: 10_000 });
   });
   it('resumes a persisted destroy after recovery and cancels pending retries on detach', async () => {
     const { workerId } = await f.service.spawn(f.caller, input());
@@ -393,6 +393,7 @@ describe('delegation service durable authority', () => {
     const detach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
     restarted.armDestroyRetries('project');
     detach();
+    // bound: negative window. The ticks are 50 ms apart, so 120 ms spans two of them: a retry the detach failed to cancel would have run by now.
     await new Promise(resolve => setTimeout(resolve, 120));
     expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'incomplete' } });
     expect(existsSync(workspace.path)).toBe(true);
@@ -402,6 +403,7 @@ describe('delegation service durable authority', () => {
     const replacementManager = createFixtureManager(f.store, f.root);
     const replaced = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
     stale(); // a stale detach must not detach the replacement
+    // bound: negative window, as above. The replaced project's armed timer fires within one 50 ms tick and must find itself replaced; 120 ms spans two ticks.
     await new Promise(resolve => setTimeout(resolve, 120));
     expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'incomplete' } });
     replaced();
@@ -409,7 +411,7 @@ describe('delegation service durable authority', () => {
 
     const attach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
     restarted.armDestroyRetries('project');
-    await vi.waitFor(() => expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } }), { timeout: 3_000 });
+    await vi.waitFor(() => expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } }), { timeout: 10_000 });
     expect(existsSync(workspace.path)).toBe(false);
     attach();
   });
@@ -430,7 +432,7 @@ describe('delegation service durable authority', () => {
     const held = new Promise<boolean>(resolve => { release = resolve; });
     const termination = vi.spyOn(f.manager, 'awaitRunTermination').mockReturnValue(held);
     f.service.armDestroyRetries('project');
-    await vi.waitFor(() => expect(termination).toHaveBeenCalledOnce(), { timeout: 3_000 });
+    await vi.waitFor(() => expect(termination).toHaveBeenCalledOnce(), { timeout: 10_000 });
     const replacementManager = createFixtureManager(f.store, f.root);
     const detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
     const writes = vi.spyOn(f.store, 'commitDelegation');
@@ -486,7 +488,7 @@ describe('delegation service durable authority', () => {
     let detachReplacement: (() => void) | undefined;
     let replacementManager: RunManager | undefined;
     try {
-      await vi.waitFor(() => expect(existsSync(blocked)).toBe(true), { timeout: 5_000 });
+      await vi.waitFor(() => expect(existsSync(blocked)).toBe(true), { timeout: 10_000 });
       replacementManager = createFixtureManager(f.store, f.root);
       detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
       const oldResults = results.mock.calls.length;
@@ -662,7 +664,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     const scans = listings();
     const results = dirname(f.store.workerResultSnapshotPath(f.parent.id, workerId, randomUUID()));
     const snapshots = readdirSync(results).sort();
-    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(4), { timeout: 5_000 });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(4), { timeout: 10_000 });
     // No transcript read, no /proc scan, no snapshot written: nothing it could see changed.
     expect(reads).not.toHaveBeenCalled();
     expect(listings()).toBe(scans);
@@ -682,6 +684,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     const termination = f.manager.awaitRunTermination.bind(f.manager);
     vi.spyOn(f.manager, 'awaitRunTermination').mockImplementation(async (...args) => {
       most = Math.max(most, ++inFlight);
+      // bound: not a wait on the product. It holds each termination open for 150 ms, so a second attempt that started at the same 40 ms tick would overlap it and raise `most` above 1.
       try { await sleep(150); return await termination(...args); } finally { inFlight--; }
     });
     const restarted = new DelegationService();
@@ -720,16 +723,17 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     await f.service.destroy(f.caller, { workerId });
     // Past the fixture's one real change (review -> cancelled): from here every tick skips, so
     // only the holder's exit can start the next full attempt.
-    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 5_000 });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
     const reached = destroyOf(workerId)!.retry!.attempts;
     const writes = vi.spyOn(f.store, 'commitDestroyRetry');
     const full = scheduledDestroyAttempts(f.service);
     await holder!.close();
     // "Within the fast window" is counted in ticks below, not in wall clock: the window promises the
-    // exit is noticed at the next fast tick, which the 5 s bound covers (one 200 ms tick, a readlink and
-    // a stat-only check). The full attempt that tick starts is real Git and `/proc` work, awaited rather
-    // than timed: at load ~90 it outlasted 5 s and was caught mid-`cleaning` (hearsay-tools/cezarion#1109).
-    await vi.waitFor(() => expect(full.length).toBeGreaterThan(0), { timeout: 5_000 });
+    // exit is noticed at the next fast tick, which the 10 s bound covers many times over (one 200 ms tick,
+    // a readlink and a stat-only check). The full attempt that tick starts is real Git and `/proc` work,
+    // awaited rather than timed: at load ~90 it outlasted 5 s and was caught mid-`cleaning`
+    // (hearsay-tools/cezarion#1109).
+    await vi.waitFor(() => expect(full.length).toBeGreaterThan(0), { timeout: 10_000 });
     await full[0];
     expect(destroyOf(workerId)).toEqual({ requestedAt: expect.any(String), phase: 'complete', remaining: [] });
     // A completed destroy drops the run's retry state too.
@@ -747,7 +751,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     const gate = new Promise<boolean>(resolve => { release = resolve; });
     vi.spyOn(f.manager, 'awaitRunTermination').mockReturnValue(gate);
     const explicit = f.service.destroy(f.caller, { workerId });
-    await vi.waitFor(() => expect(destroyOf(workerId)?.phase).toBe('terminating'), { timeout: 3_000 });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.phase).toBe('terminating'), { timeout: 10_000 });
     const replacementManager = createFixtureManager(f.store, f.root);
     const detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
     const armed = () => (f.service as unknown as { destroyRetryTimers: Map<string, Map<string, unknown>> }).destroyRetryTimers.get('project')?.has(workerId);
@@ -888,13 +892,13 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     const { workerId } = await settled();
     await f.service.destroy(f.caller, { workerId });
     // The first tick reaches attention at once; the next one is four seconds out.
-    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.needsAttention).toBe(true), { timeout: 5_000 });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.needsAttention).toBe(true), { timeout: 10_000 });
     const reads = vi.spyOn(f.store, 'readEventsAsync');
     expect(await f.service.destroyForHuman('project', workerId)).toMatchObject({ state: 'incomplete' });
     expect(reads).toHaveBeenCalledOnce();
     expect(destroyOf(workerId)?.retry).toBeUndefined();
     const reset = Date.now();
-    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBe(1), { timeout: 3_000, interval: 20 });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBe(1), { timeout: 10_000, interval: 20 });
     expect(Date.now() - reset).toBeLessThan(2_500);
   });
 
@@ -905,7 +909,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     await expect(f.service.destroy(f.caller, { workerId })).rejects.toThrow('transcript unreadable');
     expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', remaining: ['worktree', 'branch'], error: 'transcript unreadable' });
     // Nothing a tick can observe explains a throw, so it is never skipped: the next tick completes.
-    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 5_000 });
+    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
   });
 
   it.runIf(linux)('a failed Git step with no holder to name is retried in full once it clears, never skipped', async () => {
@@ -934,6 +938,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     const detach = restarted.registerProject({ id: 'project', root: f.root, store: f.store, manager: f.manager });
     try {
       restarted.armDestroyRetries('project');
+      // bound: negative window. The persisted next attempt is 2 s out; a restart that ignored it would tick at the 40 ms floor and reach attempt 8 well within 300 ms.
       await sleep(300);
       expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', retry: { attempts: 7 } });
       expect(existsSync(workspace.path)).toBe(true);
@@ -944,7 +949,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     cadence();
     const a = await settled(), b = await settled();
     for (const { workerId } of [a, b]) await f.service.destroy(f.caller, { workerId });
-    await vi.waitFor(() => { for (const { workerId } of [a, b]) expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(3); }, { timeout: 5_000 });
+    await vi.waitFor(() => { for (const { workerId } of [a, b]) expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(3); }, { timeout: 10_000 });
     const parent = f.store.getRun(f.parent.id)!;
     if (parent.delegation?.role !== 'root') throw Error('root');
     expect(parent.delegation.results?.map(entry => entry.workerId).sort()).toEqual([a.workerId, b.workerId].sort());
@@ -955,7 +960,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     cadence();
     const { workerId } = await settled();
     await f.service.destroy(f.caller, { workerId });
-    await vi.waitFor(() => expect(f.store.getRun(workerId)?.destroyRetry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 5_000 });
+    await vi.waitFor(() => expect(f.store.getRun(workerId)?.destroyRetry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
     const run = f.store.getRun(workerId)!;
     if (run.delegation?.role !== 'worker') throw Error('worker');
     // The pre-#879 destroy keys exactly: a strict reader that has never heard of retries still parses it.
@@ -973,13 +978,14 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     const termination = vi.spyOn(f.manager, 'awaitRunTermination').mockReturnValue(gate);
     // The holder exits, so the next tick makes a full attempt; hold it inside termination.
     await holder!.close();
-    await vi.waitFor(() => expect(termination).toHaveBeenCalled(), { timeout: 3_000 });
+    await vi.waitFor(() => expect(termination).toHaveBeenCalled(), { timeout: 10_000 });
     const before = structuredClone(destroyOf(workerId));
     const replacementManager = createFixtureManager(f.store, f.root);
     const detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
     const writes = vi.spyOn(f.store, 'commitDelegation'), retries = vi.spyOn(f.store, 'commitDestroyRetry');
     try {
       release(true);
+      // bound: negative window. The released attempt continues into real Git work and then writes; on an idle host 300 ms is long enough to see that write, and a miss under load hides a regression without failing a good run.
       await sleep(300);
       expect(writes).not.toHaveBeenCalled();
       expect(retries).not.toHaveBeenCalled();

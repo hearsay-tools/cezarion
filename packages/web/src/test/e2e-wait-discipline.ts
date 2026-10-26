@@ -1,5 +1,6 @@
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join, resolve } from 'node:path'
+import { type BaselineEntry as Entry, waitBaseline } from './wait-baseline'
 
 /**
  * A source scan of the cockpit e2e specs for the ways a spec fakes a state or samples instead of
@@ -31,12 +32,7 @@ export interface Site {
   line: number
 }
 
-export interface BaselineEntry {
-  file: string
-  rule: Rule
-  site: string
-  count: number
-}
+export type BaselineEntry = Entry<Rule>
 
 export const e2eDir = resolve(import.meta.dirname, '../../e2e')
 export const baselinePath = resolve(import.meta.dirname, 'e2e-wait-discipline.baseline.json')
@@ -332,72 +328,20 @@ export function scanSuite(dir = e2eDir, packaged = dir === e2eDir ? resolve(e2eD
     .flatMap(name => scanSource(`packages/cezar/test/e2e/${name}`, readFileSync(join(packaged, name), 'utf8')))]
 }
 
-/** Sites folded to `(file, rule, site) → count`, sorted for a stable file. */
-export function tally(sites: Site[]): BaselineEntry[] {
-  const counts = new Map<string, BaselineEntry>()
-  for (const { file, rule, site } of sites) {
-    const key = JSON.stringify([file, rule, site])
-    const entry = counts.get(key)
-    if (entry) entry.count += 1
-    else counts.set(key, { file, rule, site, count: 1 })
-  }
-  return [...counts.values()].sort(
-    (a, b) => a.file.localeCompare(b.file) || a.rule.localeCompare(b.rule) || a.site.localeCompare(b.site),
-  )
-}
+export { compareToBaseline, tally } from './wait-baseline'
 
-/**
- * `added`: sites the baseline does not cover — a new key, or a known key seen more often than
- * recorded. `stale`: baseline entries the suite no longer has as many of — a fixed site, which
- * the baseline must shrink to match so the ratchet holds at the new level.
- */
-export function compareToBaseline(
-  actual: BaselineEntry[],
-  baseline: BaselineEntry[],
-): { added: BaselineEntry[]; stale: BaselineEntry[] } {
-  const key = (e: BaselineEntry) => JSON.stringify([e.file, e.rule, e.site])
-  const recorded = new Map(baseline.map((e) => [key(e), e]))
-  const seen = new Map(actual.map((e) => [key(e), e]))
-  const added = actual
-    .filter((e) => (recorded.get(key(e))?.count ?? 0) < e.count)
-    .map((e) => ({ ...e, count: e.count - (recorded.get(key(e))?.count ?? 0) }))
-  const stale = baseline.filter((e) => (seen.get(key(e))?.count ?? 0) < e.count)
-  return { added, stale }
-}
-
-interface BaselineFile {
-  $comment: string
-  sites: BaselineEntry[]
-}
-
-export function readBaseline(path = baselinePath): BaselineEntry[] {
-  if (!existsSync(path)) return []
-  return (JSON.parse(readFileSync(path, 'utf8')) as BaselineFile).sites
-}
-
-/**
- * Shrink the baseline to what the suite has now. Never grows it: a site the baseline does not
- * cover stays a failure, so the only way to land one is to give it a wait. Run through
- * `E2E_WAIT_DISCIPLINE_UPDATE=1 npm test -- e2e-wait-discipline`.
- */
-export function shrinkBaseline(actual: BaselineEntry[], path = baselinePath): void {
-  const baseline = readBaseline(path)
-  const key = (e: BaselineEntry) => JSON.stringify([e.file, e.rule, e.site])
-  const seen = new Map(actual.map((e) => [key(e), e]))
-  const sites = baseline
-    .map((e) => ({ ...e, count: Math.min(e.count, seen.get(key(e))?.count ?? 0) }))
-    .filter((e) => e.count > 0)
-  writeBaseline(sites, path)
-}
-
-export function writeBaseline(sites: BaselineEntry[], path = baselinePath): void {
-  const file: BaselineFile = {
-    $comment:
-      'Wait-discipline sites the cockpit e2e suite carried when the ratchet landed (issue 409). ' +
-      'Keyed by file, rule and the line text so a moved line does not churn it. ' +
-      'This list only shrinks: fix a site, then run E2E_WAIT_DISCIPLINE_UPDATE=1 npm test -- e2e-wait-discipline. ' +
-      'Rules: packages/web/e2e/README.md.',
-    sites,
-  }
-  writeFileSync(path, `${JSON.stringify(file, null, 2)}\n`)
-}
+/** Shrink the baseline through `E2E_WAIT_DISCIPLINE_UPDATE=1 npm test -- e2e-wait-discipline`: a site the
+ *  baseline does not cover stays a failure, so the only way to land one is to give it a wait. */
+export const {
+  read: readBaseline,
+  write: writeBaseline,
+  shrink: shrinkBaseline,
+} = waitBaseline<Rule>({
+  path: baselinePath,
+  seedWhenMissing: false,
+  comment:
+    'Wait-discipline sites the cockpit e2e suite carried when the ratchet landed (issue 409). ' +
+    'Keyed by file, rule and the line text so a moved line does not churn it. ' +
+    'This list only shrinks: fix a site, then run E2E_WAIT_DISCIPLINE_UPDATE=1 npm test -- e2e-wait-discipline. ' +
+    'Rules: packages/web/e2e/README.md.',
+})

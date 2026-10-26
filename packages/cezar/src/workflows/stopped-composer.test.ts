@@ -39,7 +39,7 @@ afterEach(async () => {
 });
 // The waits cover a run manager spawning its (mocked) session. vi.waitFor's 1 s default lost that
 // race under the full suite's load (PR #1019 CI, Vitest shard 3/3, the stopping row at 1084 ms).
-const SETTLE = { timeout: 8_000 };
+const SETTLE = { timeout: 10_000 };
 describe('stopped composer engine', { timeout: 15_000 }, () => {
   it('requeues the same untouched workflow durably, preserving prompt, attachments and execution inputs across restart', async () => {
     const { root, data, store, manager } = fixture();

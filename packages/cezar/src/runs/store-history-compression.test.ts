@@ -13,6 +13,9 @@ import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
 import type { AgentRunSpec } from '../core/agent-runner.ts';
 import type { RunManager } from '../workflows/run.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 const captured = vi.hoisted(() => ({
   specs: [] as AgentRunSpec[],
   release: undefined as (() => void) | undefined,
@@ -212,7 +215,7 @@ describe('RunStore history compression', () => {
     await vi.waitFor(() => {
       const seqs = store.readEvents(run.id).map((event) => event.seq).filter((seq): seq is number => typeof seq === 'number');
       expect(Math.max(0, ...seqs)).toBeGreaterThan(first.seq);
-    });
+    }, { timeout: HANG_GUARD_MS });
     const events = store.readEvents(run.id);
     expect(events).toContainEqual(expect.objectContaining({ seq: first.seq, type: 'note', message: 'before' }));
     const seqs = events.map((event) => event.seq).filter((seq): seq is number => typeof seq === 'number');
@@ -240,7 +243,7 @@ describe('RunStore history compression', () => {
       store.setArchived(run.id, true);
       return run.id;
     });
-    await vi.waitFor(() => expect(started.length).toBeGreaterThanOrEqual(1));
+    await vi.waitFor(() => expect(started.length).toBeGreaterThanOrEqual(1), { timeout: HANG_GUARD_MS });
     store.close();
     release();
     await store.historyIdle();
@@ -597,7 +600,7 @@ describe('RunStore history compression', () => {
     });
     try {
       store.setArchived(run.id, true);
-      await vi.waitFor(() => expect(spy).toHaveBeenCalled());
+      await vi.waitFor(() => expect(spy).toHaveBeenCalled(), { timeout: HANG_GUARD_MS });
       store.flush();
       const other = openStore(dir).store;
       expect(other.pin(run.id, 'active')).toBeDefined();

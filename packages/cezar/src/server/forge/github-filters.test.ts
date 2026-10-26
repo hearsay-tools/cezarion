@@ -1,4 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
+
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
 const run = vi.hoisted(() => vi.fn());
 vi.mock('node:child_process', async (original) => ({
   ...await original<typeof import('node:child_process')>(),
@@ -186,7 +189,7 @@ it('isolates generations and repositories, so an older completion cannot replace
   });
   const first = await fetchGithub('/filters-generation', true);
   const waiting = fetchGithubProjects('/filters-generation', first.projectsGeneration!);
-  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'), { timeout: HANG_GUARD_MS });
   mockGh(true);
   const next = await fetchGithub('/filters-generation', true);
   await fetchGithubProjects('/filters-generation', next.projectsGeneration!);
@@ -239,7 +242,7 @@ it.each(['GH_HOST', 'GH_CONFIG_DIR'] as const)('isolates deferred hydration by %
   const first = await fetchGithub(root, true);
   expect(first).toMatchObject({ available: true, projectsState: 'refreshing' });
   expect(first.issues[0]?.projectIds).toBeUndefined();
-  await vi.waitFor(() => expect(finish).toBeTypeOf('function'));
+  await vi.waitFor(() => expect(finish).toBeTypeOf('function'), { timeout: HANG_GUARD_MS });
   vi.stubEnv(variable, 'context-b');
   const foreign = fetchGithubProjects(root, first.projectsGeneration!);
   finish();

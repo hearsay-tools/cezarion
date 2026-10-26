@@ -11,6 +11,9 @@ import type { TopicPublisher } from './ws.ts';
 import { createApp, WorkspaceEventBus, type ServerDeps } from './server.ts';
 import { apiRequest } from './loopback-request.testkit.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 vi.mock('../core/backend-detect.ts', () => ({ detectEnvironment: vi.fn() }));
 const roots: string[] = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); vi.restoreAllMocks(); });
@@ -138,6 +141,6 @@ it.each([false, true])('publishes completed availability without a health subscr
     expect(await (await apiRequest(app, '/api/v1/health')).json()).toMatchObject({ checks: [] });
     finish(checks);
   }
-  await vi.waitFor(() => expect(published).toHaveBeenCalledWith('health', expect.objectContaining({ checks })));
+  await vi.waitFor(() => expect(published).toHaveBeenCalledWith('health', expect.objectContaining({ checks })), { timeout: HANG_GUARD_MS });
   expect(await (await apiRequest(app, '/api/v1/health')).json()).toMatchObject({ checks });
 });

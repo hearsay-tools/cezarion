@@ -5,6 +5,9 @@ import * as cp from 'node:child_process';
 import { watchWindowsAutosave, windowsAutosaveProcessLive, windowsAutosaveProcessToken } from './autosave-windows.ts';
 import { autosaveGit } from './autosave-git.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 vi.mock('node:child_process', async original => ({ ...await original<typeof cp>(), execFile: vi.fn(), execFileSync: vi.fn(), spawn: vi.fn() }));
 const row = (pid: number, parent: number, token: string) => ({ pid, parent, token });
 describe('Windows autosave process proof', () => {
@@ -60,10 +63,10 @@ describe('Windows autosave process proof', () => {
     vi.spyOn(console, 'warn').mockImplementation(() => {});
     let settled = false;
     const job = autosaveGit('/worktree', ['status'], { timeoutMs: 20, killGraceMs: 20, confirmMs: 20, onWarning: warning }).then(result => { settled = true; return result; });
-    await vi.waitFor(() => expect(commands.some(script => script.includes('.Kill()'))).toBe(true));
+    await vi.waitFor(() => expect(commands.some(script => script.includes('.Kill()'))).toBe(true), { timeout: HANG_GUARD_MS });
     child!.emit('exit', null); child!.emit('close', null);
     rows = [row(101, 100, '1001')];
-    await vi.waitFor(() => expect(warning).toHaveBeenCalledWith(expect.stringContaining('termination not confirmed')));
+    await vi.waitFor(() => expect(warning).toHaveBeenCalledWith(expect.stringContaining('termination not confirmed')), { timeout: HANG_GUARD_MS });
     expect(settled).toBe(false);
     rows = [];
     expect(await job).toEqual({ ok: false, stdout: '', code: null });

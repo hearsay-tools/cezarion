@@ -1,5 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 // `vi.hoisted` so `execFileMock` exists before the (hoisted) vi.mock factory runs. `gh()` builds
 // its subprocess runner from `promisify(execFile)` at module load, so the availability-probe tests
 // below drive `gh repo view` entirely through this mock — no real `gh` on the box. Everything else
@@ -3657,9 +3660,11 @@ describe('asynchronous list project metadata (#662)', () => {
     const pending = fetchGithub('/repo/async-662', true);
     let delivered = false;
     void pending.then(() => { delivered = true; });
-    await vi.waitFor(() => expect(finishMembership).toBeTypeOf('function'));
+    await vi.waitFor(() => expect(finishMembership).toBeTypeOf('function'), { timeout: HANG_GUARD_MS });
     try {
-      await vi.waitFor(() => expect(delivered).toBe(true), { timeout: 100 });
+      // Membership is held open until the `finally`, so a response that waited on it could never be delivered:
+      // any bound fails that, and this one only has to outlast a loaded host.
+      await vi.waitFor(() => expect(delivered).toBe(true), { timeout: HANG_GUARD_MS });
       const initial = await pending;
       expect(initial).toMatchObject({ projectsState: 'refreshing', issues: [{ number: 1 }] });
       expect(initial.issues[0]?.projectIds).toBeUndefined();
@@ -3667,7 +3672,7 @@ describe('asynchronous list project metadata (#662)', () => {
     await vi.waitFor(async () => {
       const hydrated = await fetchGithub('/repo/async-662');
       expect(hydrated).toMatchObject({ projectsState: 'ready', issues: [{ projectIds: ['P1'] }] });
-    });
+    }, { timeout: HANG_GUARD_MS });
   });
 });
 

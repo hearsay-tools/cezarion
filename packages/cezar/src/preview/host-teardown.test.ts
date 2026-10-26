@@ -10,6 +10,9 @@ import { fakeViewer, fixtureProcessGuard } from './preview.testkit.ts';
 
 // Tags the fixture launch below, so a process left after the test fails it (hearsay-tools/cezarion#1880).
 const guard = fixtureProcessGuard();
+
+/** Hang guard for the polls below: each ends the moment its state holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
 afterEach(() => guard.assertNoneLeft());
 
 it.each(['release', 'replacement'] as const)('reopening during real process teardown keeps %s waiting for the owned group', async action => {
@@ -33,15 +36,16 @@ it.each(['release', 'replacement'] as const)('reopening during real process tear
   try {
     await host.open(ctx, fakeViewer(), { port });
     await host.run(run.id, port);
-    await expect.poll(() => dev.state, { timeout: 3000 }).toBe('up');
+    await expect.poll(() => dev.state, { timeout: HANG_GUARD_MS }).toBe('up');
     stopping = host.stopPreview(run.id, { port, restart: true });
-    await expect.poll(() => dev.state, { timeout: 3000 }).toBe('stopped');
+    await expect.poll(() => dev.state, { timeout: HANG_GUARD_MS }).toBe('stopped');
     // The shell exited, but the child ignores TERM and still owns the port until KILL.
     expect(await probePort(port)).toBe(true);
     await host.open(ctx, fakeViewer(), { port });
     if (action === 'replacement') run.previewServers = [{ ...registration, command: 'changed' }];
     let settled = false;
     cleanup = (action === 'release' ? host.release(run.id) : host.replaced(run.id, port)).then(() => { settled = true; });
+    // bound: negative window. The child holds the port until KILL, so a release that settled early would do so within a few event-loop turns; 25 ms covers them.
     await new Promise(resolve => setTimeout(resolve, 25));
     expect(settled).toBe(false);
     await cleanup;
@@ -53,4 +57,4 @@ it.each(['release', 'replacement'] as const)('reopening during real process tear
     await host.release(run.id);
     rmSync(root, { recursive: true, force: true });
   }
-}, 15000);
+});

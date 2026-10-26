@@ -34,8 +34,9 @@ function fixtureRepo(): string {
   return root;
 }
 
+// Each wait ends when its condition holds; the 15 s deadline only ends a hang.
 async function waitForRuns(store: RunStore, ids: string[]): Promise<void> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     if (ids.every((id) => ['done', 'failed', 'cancelled'].includes(store.getRun(id)?.status ?? ''))) {
       return;
@@ -46,7 +47,7 @@ async function waitForRuns(store: RunStore, ids: string[]): Promise<void> {
 }
 
 async function waitFor(predicate: () => boolean, what: string): Promise<void> {
-  const deadline = Date.now() + 5_000;
+  const deadline = Date.now() + 15_000;
   while (Date.now() < deadline) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 10));

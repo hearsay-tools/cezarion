@@ -12,6 +12,9 @@ import { apiRequest } from './loopback-request.testkit.ts';
 import { ProviderAuthService } from '../core/provider-auth.ts';
 import { createApp, type ServerDeps } from './server.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 /**
  * `/api/v1/workspace/agent-profiles` (spec 2026-07-29-agent-profiles): extra config dirs for a
  * second login of the same agent CLI.
@@ -619,7 +622,7 @@ describe('agent profiles API', () => {
         const res = await apiRequest(app, '/api/v1/workspace/agent-profiles');
         body = (await res.json()) as AgentProfilesResponse;
         expect(body.profiles.every((p) => p.status !== undefined)).toBe(true);
-      });
+      }, { timeout: HANG_GUARD_MS });
       // Including the extra account, which `providerAuth.status()` alone would never have covered.
       expect(body!.profiles.find((p) => p.label === 'work')?.status).toMatchObject({
         status: 'connected',

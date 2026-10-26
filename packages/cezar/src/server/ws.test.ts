@@ -15,6 +15,9 @@ import {
   type WsUpgradeVerdict,
 } from './ws.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 /**
  * The hub is exercised over REAL sockets — a Node http server plus the `ws`
  * client — because the contract under test is transport behavior: upgrade
@@ -146,7 +149,7 @@ describe('createSocketHub', () => {
     client.send({ type: 'subscribe', topic: 'ticker' });
     await client.next();
     client.send({ type: 'unsubscribe', topic: 'ticker' });
-    await vi.waitFor(() => expect(state.stopped).toBe(1));
+    await vi.waitFor(() => expect(state.stopped).toBe(1), { timeout: HANG_GUARD_MS });
     client.ws.close();
   });
 
@@ -158,7 +161,7 @@ describe('createSocketHub', () => {
     client.send({ type: 'subscribe', topic: 'ticker' });
     await client.next();
     client.ws.terminate(); // an abrupt vanish, not a close handshake
-    await vi.waitFor(() => expect(state.stopped).toBe(1));
+    await vi.waitFor(() => expect(state.stopped).toBe(1), { timeout: HANG_GUARD_MS });
   });
 
   it('answers an unknown topic with an error frame and keeps the connection', async () => {
@@ -262,8 +265,8 @@ describe('createSocketHub', () => {
     ws.on('message', () => undefined); // drain frames (snapshot + pings); we assert server-side
     ws.send(JSON.stringify({ type: 'subscribe', topic: 'ticker' }));
 
-    await vi.waitFor(() => expect(state.started).toBe(1)); // subscription registered
-    await vi.waitFor(() => expect(state.stopped).toBe(1), { timeout: 2_000 }); // …then reaped, releasing it
+    await vi.waitFor(() => expect(state.started).toBe(1), { timeout: HANG_GUARD_MS }); // subscription registered
+    await vi.waitFor(() => expect(state.stopped).toBe(1), { timeout: HANG_GUARD_MS }); // …then reaped, releasing it
     ws.terminate();
   });
 });
