@@ -86,7 +86,7 @@ for example, `--coverage-timeout 900000` allows fifteen minutes. It requires
 zero does not disable the bound. A timeout produces exit 2, names the effective
 limit and explains how to raise it. Temporary coverage is removed on failure;
 `--coverage <coverage-final.json>` requires a current Istanbul report collected
-separately. Failed tests produce exit 2 and no accepted verdict. `--test-timeout <ms>` sets the per-test timeout of the coverage run.
+separately (this repository's CI publishes one: see pre-pr.md, Coverage from CI). Failed tests produce exit 2 and no accepted verdict. `--test-timeout <ms>` sets the per-test timeout of the coverage run.
 With Vitest it replaces the `testTimeout` of every selected project; hook
 timeouts keep their configured values. With Node it passes `--test-timeout` to
 `node --test`. Use it when tests time out under host load but pass alone. Missing, stale or unmatched function coverage remains incomplete. A

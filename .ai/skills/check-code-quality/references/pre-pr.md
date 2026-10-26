@@ -22,6 +22,10 @@ pass repository setup modules through repeatable `--node-import`. For an existin
 current Istanbul report, replace runner and test options with
 `--coverage <coverage-final.json>`.
 
+In this repository, CI already collects Vitest coverage for the head you push. For a
+change whose functions and tests run under `npm test`, download it instead of running
+the tests again: see [Coverage from CI](#coverage-from-ci) below.
+
 A change with no changed JS or TS file (`.js`, `.jsx`, `.ts`, `.tsx`, or their
 `.cjs`, `.mjs`, `.cts` and `.mts` forms) measures nothing, so it needs no
 `--runner` or `--test`:
@@ -161,6 +165,58 @@ number of milliseconds. The timeout remains an incomplete check (exit 2).
 Alternatively, supply a separately collected current Istanbul report through
 `--coverage <coverage-final.json>` instead of `--test`; temporary reports from
 the stopped collection are removed.
+
+### Coverage from CI
+
+CI's `Vitest coverage shard N/3` jobs run the same three shards as the required Vitest
+shards, with V8 coverage, and `Merge Vitest coverage` uploads one artifact for the head:
+`vitest-coverage-<head SHA>`, holding `coverage-final.json` (paths relative to the
+repository root, test files included) and `provenance.json`. It runs on every pull request
+and on a dispatch of `ci.yml`, and it is not a required check. This saves a local coverage
+run, which took about 10 minutes at high load on hearsay-tools/cezarion#1772.
+
+1. Get the run for the exact head you have checked out, with a clean tree:
+
+   ```sh
+   head=$(git rev-parse HEAD)
+   # After the PR exists:
+   gh run list --workflow ci.yml --event pull_request_target --commit "$head" --json databaseId,status,conclusion
+   # Before a PR exists: push the branch and dispatch CI on it, once per head.
+   gh workflow run ci.yml --ref <branch>
+   gh run list --workflow ci.yml --event workflow_dispatch --branch <branch> --commit "$head" --json databaseId,status
+   ```
+
+   No run for the head means CI has not seen it: push it, or dispatch.
+
+2. Wait for the `Merge Vitest coverage` job (about 12 to 20 minutes after the push). The
+   artifact exists as soon as that job ends, before the rest of the run does:
+
+   ```sh
+   gh run view <run-id> --json jobs --jq '.jobs[] | select(.name == "Merge Vitest coverage") | .status + " " + (.conclusion // "")'
+   ```
+
+3. Download it and run the check against it. `--coverage` replaces `--runner` and `--test`:
+
+   ```sh
+   gh run download <run-id> -n "vitest-coverage-$head" -D .ai/qa/<issue>/coverage
+   node .ai/skills/check-code-quality/scripts/check.mjs --base origin/main \
+     --coverage .ai/qa/<issue>/coverage/coverage-final.json --output .ai/qa/<issue>/code-quality.md
+   ```
+
+Limits, each with its fix:
+
+- The report is for the pushed head. A pull request run tests `refs/pull/<N>/merge`, not the
+  head itself, so bring the branch up to date with `origin/main` and push before you rely on
+  it. A local edit after the push needs a new push and a new artifact: the tool matches
+  functions by position, and `provenance.json` names the tested ref and the head SHA.
+- A pull request that only changes docs or infrastructure runs no coverage job. Neither does
+  the merge queue or a push to `main`.
+- Only Vitest's four unit projects are covered. Node `node:test` files and mock child
+  processes are not (hearsay-tools/cezarion#1711, hearsay-tools/cezarion#1696). Exit 2 names a
+  file the report lacks: collect that coverage with `--runner` and `--test` as above.
+- When a shard or the merge failed, no artifact exists. The `Merge Vitest coverage` job stays
+  green and shows a warning annotation and a summary line that name the missing shard or the
+  failed step. Use the local `--test` run then.
 
 A coverage run is a distinct measurement even when background validation passed.
 For dependencies, runner limits or a collection failure, read
