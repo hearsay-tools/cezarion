@@ -667,7 +667,7 @@ export const archivedRunsQuerySchema = z.object({
   /** `nextCursor` from the previous page. Opaque: a malformed one answers 400. */
   before: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(ARCHIVED_RUNS_PAGE_MAX).optional(),
-  /** Only runs that match (`matchesRunQuery`): title, id, branch, workflow, PR or issue. */
+  /** Only runs that match (`matchesRunSearch`): title, id, branch, workflow, PR or issue. */
   q: z.string().optional(),
 });
 export type ArchivedRunsQuery = z.infer<typeof archivedRunsQuerySchema>;
@@ -701,7 +701,7 @@ export const RUNS_SEARCH_PER_PROJECT_MAX = 50;
 
 /** `GET /workspace/runs-search` (#864): ⌘K's reach past each project's run-list window. */
 export const runsSearchQuerySchema = z.object({
-  /** Every whitespace-separated token must match (`matchesRunQuery`). At least two characters:
+  /** Every whitespace-separated token must match (`matchesRunSearch`). At least two characters:
    *  one matches nearly every run. */
   q: z.string().trim().min(2),
   limit: z.coerce.number().int().min(1).max(RUNS_SEARCH_PER_PROJECT_MAX).optional(),
