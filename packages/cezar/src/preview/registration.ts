@@ -1,6 +1,8 @@
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import type { PreviewStopRequest, PreviewStopResult, PreviewResultCode, PreviewServeRequest, PreviewServeResult, PreviewServer } from '@open-mercato/cezar-contract';
 import { previewRefusal } from '../ci-wait/errors.ts';
+// RunManager's one import for the preview: the agent's CDP address (hearsay-tools/cezarion#784) too.
+export { previewCdpSession, previewRunContext } from './agent-address.ts';
 
 /**
  * Registration semantics for `cezar_preview_serve` (#781, spec 2026-10-02-live-preview-v1): which
@@ -11,6 +13,8 @@ import { previewRefusal } from '../ci-wait/errors.ts';
 export const PREVIEW_MAX_SERVERS = 8;
 
 /** What the run manager needs from the workspace-wide preview host; `PreviewHost` implements it. */
+import type { AgentGrant, RunContext } from './host.ts';
+
 export interface PreviewHostLike {
   /** Stop/restart only a server started for this run under an unchanged owner approval. */
   stopPreview(runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult>;
@@ -23,6 +27,9 @@ export interface PreviewHostLike {
   /** The agent re-registered `port` with a different command, cwd or path: the running copy
    *  belongs to the old registration, so it stops and the next run needs the owner's approval. */
   replaced(runId: string, port: number): Promise<void>;
+  /** hearsay-tools/cezarion#784: one agent session's right to drive the run's browser through the
+   *  CDP proxy. Optional so a host without a browser (a test fake) gives the agent no address. */
+  grantAgent?(runId: string, context: () => RunContext | undefined): AgentGrant;
 }
 
 export type PreviewRegistrationInput = {

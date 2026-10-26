@@ -17,7 +17,7 @@ prototype at `~/projects/cdp-screencast-proto` (server.mjs, client.html, smoke.m
 | Slice | Scope |
 |---|---|
 | **v1 (this spec)** | Agent registers a dev server through a cezar tool; cezar owns the server process and one Chromium per task; the owner drives it in a docked pane. Experimental, behind `CEZ_PREVIEW=1`. |
-| v2 | The agent drives the same Chromium (`agent-browser --cdp <url> --pin-tab`), so the owner watches what it does; recording comes from agent-browser's `record start/stop`. |
+| v2 | The agent drives the same Chromium (`agent-browser --cdp <url> --pin-tab`), so the owner watches what it does; recording comes from agent-browser's `record start/stop`. Spec: [2026-10-26-preview-agent-cdp](2026-10-26-preview-agent-cdp.md) (hearsay-tools/cezarion#784). |
 | v3 | Turn-based control: while the run is working, the agent holds the browser and the owner's input is view-only; parked, review and Needs You hand it to the owner. No mid-turn pause. |
 
 ## Decisions

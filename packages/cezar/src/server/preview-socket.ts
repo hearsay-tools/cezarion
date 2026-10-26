@@ -39,13 +39,29 @@ export interface PreviewSocketDeps {
 
 export interface PreviewSocket {
   route: UpgradeRoute;
-  /** Terminates every open pane socket. Idempotent. */
+  /** Terminates every open socket. Idempotent. */
   close(): void;
 }
 
-function reject(socket: Duplex, status: 403 | 404): void {
+/** Refuses an upgrade before the handshake. Shared with the agent's CDP socket. */
+export function reject(socket: Duplex, status: 403 | 404): void {
   socket.write(`HTTP/1.1 ${status} ${status === 403 ? 'Forbidden' : 'Not Found'}\r\nconnection: close\r\n\r\n`);
   socket.destroy();
+}
+
+/** Pings `ws` every `heartbeatMs` and terminates it after a missed pong. Returns the stop. */
+export function keepAlive(ws: WebSocket, heartbeatMs: number): () => void {
+  let alive = true;
+  const beat = setInterval(() => {
+    if (!alive) return ws.terminate();
+    alive = false;
+    ws.ping();
+  }, heartbeatMs);
+  beat.unref?.();
+  ws.on('pong', () => {
+    alive = true;
+  });
+  return () => clearInterval(beat);
 }
 
 export function createPreviewSocket(deps: PreviewSocketDeps): PreviewSocket {
@@ -57,7 +73,6 @@ export function createPreviewSocket(deps: PreviewSocketDeps): PreviewSocket {
 
   const connected = (ws: WebSocket, req: IncomingMessage, ctx: RunContext | undefined): void => {
     open.add(ws);
-    let alive = true;
     let warned = false;
     const send = (msg: PreviewServerMessage) => {
       if (ws.readyState === 1) ws.send(JSON.stringify(msg));
@@ -70,17 +85,9 @@ export function createPreviewSocket(deps: PreviewSocketDeps): PreviewSocket {
       },
       close: (code, reason) => ws.close(code, reason),
     };
-    const beat = setInterval(() => {
-      if (!alive) return ws.terminate();
-      alive = false;
-      ws.ping();
-    }, heartbeatMs);
-    beat.unref?.();
-    ws.on('pong', () => {
-      alive = true;
-    });
+    const stopBeat = keepAlive(ws, heartbeatMs);
     ws.on('close', () => {
-      clearInterval(beat);
+      stopBeat();
       open.delete(ws);
       if (ctx) deps.host?.detach(ctx.runId, viewer);
     });

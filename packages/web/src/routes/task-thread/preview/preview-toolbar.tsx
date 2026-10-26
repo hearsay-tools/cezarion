@@ -19,7 +19,7 @@ import {
   TabletIcon,
   XIcon,
 } from 'lucide-react'
-import { useEffect, useRef, useState, type RefObject } from 'react'
+import { useEffect, useRef, useState, type ComponentProps, type RefObject } from 'react'
 
 import type { PreviewServer } from '@open-mercato/cezar-api-client'
 import { StatusDot, type StatusDotTone } from '@/components/status-dot'
@@ -41,7 +41,8 @@ import type { ThreadPreviewServer } from '../thread-state'
 
 /**
  * The pane's toolbar (design 04, 4.1 to 4.3 and the mobile frame). Order: Session (only where the
- * pane replaces the transcript), back, forward, reload, server switcher (two or more servers),
+ * pane replaces the transcript), back, forward, reload, server switcher (two or more entries: the
+ * registered servers and, while an agent drives the browser, the agent's page),
  * address, viewport, stats, Experimental badge, More, close.
  *
  * Room rule: the switcher or the adopted label take space from the address, so the stats shrink
@@ -71,8 +72,12 @@ export interface PreviewToolbarProps {
   /** The page's full URL; empty before anything is open. */
   url: string
   servers: readonly PreviewServer[]
-  /** The registered server being shown. Absent for a typed URL. */
+  /** The registered server being shown. Absent for a typed URL and the agent's page. */
   current?: PreviewServer | undefined
+  /** An agent drives the task's browser now: the switcher lists its page (hearsay-tools/cezarion#784). */
+  agentLive?: boolean
+  /** The pane shows the agent's page. */
+  agentShown?: boolean
   /** The page comes from a server cezar did not start (5.18). */
   adopted: boolean
   viewport: PreviewViewport
@@ -98,6 +103,7 @@ export interface PreviewToolbarProps {
   onForward: () => void
   onReload: (ignoreCache: boolean) => void
   onPickServer: (port: number) => void
+  onPickAgent?: (() => void) | undefined
   onViewport: (viewport: PreviewViewport) => void
   onCopyUrl: () => void
   onStop: (port: number) => void
@@ -143,9 +149,58 @@ function Stats({ stats, shrunk }: { stats: PreviewStatsValue; shrunk: boolean })
   )
 }
 
+/** The switcher's trigger: the server shown, the agent's page, or neither (a typed URL). */
+function SwitcherButton({ current, agentShown, ...rest }: { current: PreviewServer | undefined; agentShown: boolean } & ComponentProps<typeof Button>) {
+  const name = current ? current.label : agentShown ? "Agent's page" : 'Server'
+  return (
+    <Button
+      variant="outline"
+      size="sm"
+      className="max-w-[11rem] min-w-0 gap-1.5 max-md:h-11"
+      aria-label={current ? `Server: ${current.label} :${current.port}` : agentShown ? `Server: ${name}` : 'Server'}
+      {...rest}
+    >
+      {current || agentShown ? <StatusDot tone="neutral" shape="ring" aria-hidden="true" /> : <ServerIcon aria-hidden="true" />}
+      <span className="truncate">{name}</span>
+      {current ? <span className="font-mono font-normal text-muted-foreground">:{current.port}</span> : null}
+      <ChevronDownIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
+    </Button>
+  )
+}
+
+/** The switcher's entry for the page an agent drives (hearsay-tools/cezarion#784). */
+function AgentPageItem({ shown, live, onSelect }: { shown: boolean; live: boolean; onSelect: () => void }) {
+  return (
+    <DropdownMenuItem className="min-h-11 gap-2.5 md:min-h-0" onSelect={onSelect}>
+      <StatusDot tone={live ? 'success' : 'neutral'} aria-hidden="true" />
+      <span className="font-semibold">Agent's page</span>
+      <span className="ml-auto text-xs text-muted-foreground">agent-browser</span>
+      {shown ? <CheckIcon className="size-4" aria-hidden="true" /> : null}
+    </DropdownMenuItem>
+  )
+}
+
+/** The mobile toolbar's title. */
+function shownTitle(current: PreviewServer | undefined, agentShown: boolean): string {
+  if (current) return `${current.label} :${current.port}`
+  return agentShown ? "Agent's page" : 'Preview'
+}
+
+/**
+ * The switcher's "Agent's page" entry. An agent that left keeps it while the pane still shows its
+ * page, so the servers stay one pick away.
+ */
+function agentEntry(props: PreviewToolbarProps): { agentLive: boolean; agentShown: boolean; agentListed: boolean } {
+  const pickable = props.onPickAgent !== undefined
+  const agentLive = props.agentLive === true && pickable
+  const agentShown = props.agentShown === true
+  return { agentLive, agentShown, agentListed: agentLive || (agentShown && pickable) }
+}
+
 export function PreviewToolbar(props: PreviewToolbarProps) {
   const { url, servers, current, adopted, viewport, compact = false, navEnabled, loading = false, stats, status, badge = true } = props
-  const switcher = servers.length >= 2
+  const { agentLive, agentShown, agentListed } = agentEntry(props)
+  const switcher = servers.length + (agentListed ? 1 : 0) >= 2
   const crowded = switcher || adopted
   const ownInput = useRef<HTMLInputElement | null>(null)
   const input = props.urlInputRef ?? ownInput
@@ -174,17 +229,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
   const switcherMenu = switcher ? (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="outline"
-          size="sm"
-          className="max-w-[11rem] min-w-0 gap-1.5 max-md:h-11"
-          aria-label={current ? `Server: ${current.label} :${current.port}` : 'Server'}
-        >
-          {current ? <StatusDot tone="neutral" shape="ring" aria-hidden="true" /> : <ServerIcon aria-hidden="true" />}
-          <span className="truncate">{current ? current.label : 'Server'}</span>
-          {current ? <span className="font-mono font-normal text-muted-foreground">:{current.port}</span> : null}
-          <ChevronDownIcon className="size-3.5 text-muted-foreground" aria-hidden="true" />
-        </Button>
+        <SwitcherButton current={current} agentShown={agentShown} />
       </DropdownMenuTrigger>
       <DropdownMenuContent
         align="start"
@@ -196,6 +241,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
           input.current?.focus()
         }}
       >
+        {agentListed ? <AgentPageItem shown={agentShown} live={agentLive} onSelect={() => props.onPickAgent?.()} /> : null}
         {servers.map(server => {
           const look = serverStatus(entryFor(server, props.serverStates))
           return (
@@ -382,7 +428,7 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
           <div className="flex min-w-0 flex-1 flex-col items-center leading-tight">
             <span className="flex max-w-full items-center gap-1.5 text-sm font-semibold text-foreground">
               {stats ? <StatusDot tone="success" aria-hidden="true" /> : null}
-              <span className="truncate">{current ? `${current.label} :${current.port}` : 'Preview'}</span>
+              <span className="truncate">{shownTitle(current, agentShown)}</span>
             </span>
             {badge ? <span className="text-xs text-muted-foreground">Experimental</span> : null}
           </div>

@@ -39,6 +39,26 @@ describe('buildChildEnv — delegation session isolation', () => {
   }
 });
 
+describe('buildChildEnv — preview CDP address isolation (hearsay-tools/cezarion#784)', () => {
+  for (const backend of RUNNER_IDS) {
+    for (const full of ['0', '1']) {
+      it(`${backend} drops an inherited preview CDP address with CEZ_AGENT_ENV_FULL=${full}, even when passed through`, () => {
+        const env = buildChildEnv({ backend, source: {
+          PATH: '/usr/bin', CEZ_AGENT_ENV_FULL: full, CEZ_ENV_PASSTHROUGH: 'CEZ_PREVIEW_CDP_URL',
+          cez_preview_cdp_url: 'ws://127.0.0.1:4321/api/v1/preview/cdp/parent',
+        }, extraEnv: { CEZ_TASK_ID: 'nested' } });
+        expect(Object.keys(env).filter(name => /^CEZ_PREVIEW_CDP_URL$/i.test(name))).toEqual([]);
+      });
+
+      it(`${backend} keeps the address its own controller set with CEZ_AGENT_ENV_FULL=${full}`, () => {
+        const env = buildChildEnv({ backend, source: { CEZ_AGENT_ENV_FULL: full, CEZ_PREVIEW_CDP_URL: 'ws://127.0.0.1:4321/api/v1/preview/cdp/parent' },
+          extraEnv: { CEZ_PREVIEW_CDP_URL: 'ws://127.0.0.1:5555/api/v1/preview/cdp/own' } });
+        expect(env.CEZ_PREVIEW_CDP_URL).toBe('ws://127.0.0.1:5555/api/v1/preview/cdp/own');
+      });
+    }
+  }
+});
+
 describe('buildChildEnv — cockpit address isolation (#774)', () => {
   for (const backend of RUNNER_IDS) {
     for (const full of ['0', '1']) {

@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const state = vi.hoisted(() => ({
   preview: true,
+  agentLive: false,
+  agentReads: [] as Array<string | undefined>,
   runs: {} as Record<string, Record<string, unknown>>,
 }))
 
@@ -14,6 +16,12 @@ vi.mock('@/api/queries', () => ({
 }))
 
 vi.mock('./use-preview-server-states', () => ({ usePreviewServerStates: () => new Map() }))
+vi.mock('./use-agent-page-live', () => ({
+  useAgentPageLive: (id: string | undefined) => {
+    state.agentReads.push(id)
+    return state.agentLive
+  },
+}))
 
 vi.mock('./preview-pane', () => ({
   PreviewPane: ({ onClose }: { onClose: () => void }) => <button type="button" onClick={onClose}>pane</button>,
@@ -36,6 +44,7 @@ function Tab({ name }: { name: string }) {
       {pane ? <button type="button" onClick={() => pane.openPane({})}>toggle</button> : <span>no pane</span>}
       {pane ? <span data-testid="removed">{String(pane.worktreeRemoved)}</span> : null}
       {pane ? <span data-testid="open">{String(pane.open)}</span> : null}
+      {pane ? <span data-testid="agent">{String(pane.agentLive)}</span> : null}
       <button type="button" onClick={() => navigate('/tasks/r2')}>other task</button>
     </div>
   )
@@ -58,6 +67,8 @@ function renderAt(path: string) {
 describe('TaskPreviewLayout', () => {
   beforeEach(() => {
     state.runs = {}
+    state.agentLive = false
+    state.agentReads = []
     mounts.mockClear()
   })
 
@@ -104,6 +115,16 @@ describe('TaskPreviewLayout', () => {
     state.preview = false
     renderAt('/tasks/r1')
     expect(screen.getByText('no pane')).toBeTruthy()
+    // Off, the task view never reads its events for the agent's page.
+    expect(state.agentReads).toEqual([])
+  })
+
+  it("tells the toggle whether the agent's page is live (hearsay-tools/cezarion#784)", () => {
+    state.preview = true
+    state.agentLive = true
+    renderAt('/tasks/r1/files')
+    expect(screen.getByTestId('agent').textContent).toBe('true')
+    expect(state.agentReads).toContain('r1')
   })
 
   it('leaves the task view exactly as it was with the feature off: no split around the tab', () => {

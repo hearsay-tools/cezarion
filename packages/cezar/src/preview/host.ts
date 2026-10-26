@@ -1,9 +1,12 @@
+import { randomBytes } from 'node:crypto';
 import { readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PreviewStopRequest, PreviewStopResult, PreviewClientMessage, PreviewServer, PreviewServerMessage, PreviewStateMessage } from '@open-mercato/cezar-contract';
 import { z } from 'zod';
 import type { RunStore } from '../runs/store.ts';
-import { connectCdp, type Cdp } from './cdp.ts';
+import type { Cdp, CdpConnection } from './cdp.ts';
+import { recordAgentBrowser } from './agent-marker.ts';
+import { AgentCdpLink, type AgentClient } from './cdp-proxy.ts';
 import { ChromiumError, downloadChromium, downloadTarget, installCommand, launchChromium, resolveChromium } from './chromium.ts';
 import { DevServer, probePort, type DevServerState } from './dev-server.ts';
 import { previewStopResult, type PreviewHostLike } from './registration.ts';
@@ -31,11 +34,22 @@ export type RunContext = {
   store: Pick<RunStore, 'getRun' | 'appendEvent'>;
 };
 
-export type PreviewTarget = { port: number } | { url: string };
+export type PreviewTarget = { port: number } | { url: string } | { agent: true };
 
 export type BrowserExit = { signal?: string; exitCode?: number; stderrTail: string };
-/** A launched Chromium with its page's CDP connection. `exited` settles when the process is gone. */
-export type BrowserHandle = { cdp: Cdp; exited: Promise<BrowserExit>; close(): void };
+/** A launched Chromium: its page's CDP session, and the browser connection the agent's proxy
+ *  opens its own sessions on (hearsay-tools/cezarion#784). `exited` settles when the process is gone. */
+export type BrowserHandle = { cdp: Cdp; connection: CdpConnection; pageTargetId?: string | undefined; exited: Promise<BrowserExit>; close(): void };
+
+/**
+ * One agent session's right to drive its run's browser (hearsay-tools/cezarion#784). The token is
+ * the secret in `CEZ_PREVIEW_CDP_URL`; `revoke` (the session's tool capability ending) closes every
+ * socket it opened. `context` is read at each connection: undefined (no worktree) refuses it.
+ */
+export type AgentGrant = { token: string; revoke(): void };
+type GrantEntry = { runId: string; context: () => RunContext | undefined; links: Set<AgentCdpLink> };
+/** Why an agent connection was refused, for the proxy route's close reason. */
+export type AgentRefusal = { refused: string };
 
 /** What the host uses of a `DevServer`: its state, its controls and its two events. */
 export type DevServerLike = Pick<DevServer, 'state' | 'attempts' | 'exitCode' | 'stopReason' | 'start' | 'stop' | 'keepWaiting' | 'logTail'> & {
@@ -84,6 +98,16 @@ type RunEntry = {
   adopted: boolean;
   idleTimers: { server?: NodeJS.Timeout | undefined; browser?: NodeJS.Timeout | undefined };
   released: boolean;
+  /** Agent CDP connections: each is demand for the browser, like a viewer (hearsay-tools/cezarion#784). */
+  agents: Set<AgentCdpLink>;
+  /** The session on the page Chromium opened at launch: what a registered server or a typed URL loads in. */
+  home?: PreviewSession | undefined;
+  /** The page the agent last created, attached to or brought to front. */
+  agentTarget?: string | undefined;
+  /** The pane asked for the agent's page, and follows it while no other target is asked for. */
+  followAgent: boolean;
+  /** cezar's own session on the agent's page, while that page is not the home page. */
+  followed?: { targetId: string; session: PreviewSession; off: () => void } | undefined;
 };
 
 const live = (server: ServerEntry | undefined): server is DevServerLike =>
@@ -99,7 +123,8 @@ function sameOrigin(a: string, b: string): boolean {
   }
 }
 
-const targetsSchema = z.array(z.object({ type: z.string(), webSocketDebuggerUrl: z.string().optional() }).passthrough());
+const targetsSchema = z.object({ targetInfos: z.array(z.object({ type: z.string(), targetId: z.string() }).passthrough()) });
+const attachedSchema = z.object({ sessionId: z.string() });
 
 /** A closed browser's exit, bounded: a profile is deleted only once Chromium let go of it. */
 async function waitForExit(browser: BrowserHandle): Promise<void> {
@@ -108,11 +133,11 @@ async function waitForExit(browser: BrowserHandle): Promise<void> {
   clearTimeout(timer);
 }
 
-/** resolve → launch → the page target's CDP socket. */
+/** resolve → launch → a flat session on the page target. */
 async function launchBrowser(profileDir: string, env: NodeJS.ProcessEnv): Promise<BrowserHandle> {
   const bin = resolveChromium(undefined, env);
   if (!bin) throw new ChromiumMissingError('No Chromium found');
-  const { proc, port } = await launchChromium(bin, profileDir, env);
+  const { proc, browser: connection } = await launchChromium(bin, profileDir, env);
   let tail = '';
   proc.stderr?.on('data', (chunk: Buffer) => {
     tail = (tail + chunk.toString('utf8')).slice(-STDERR_TAIL_CHARS);
@@ -121,12 +146,15 @@ async function launchBrowser(profileDir: string, env: NodeJS.ProcessEnv): Promis
     proc.once('exit', (code, signal) => resolve({ ...(signal ? { signal } : code !== null ? { exitCode: code } : {}), stderrTail: tail })),
   );
   try {
-    const targets = targetsSchema.parse(await (await fetch(`http://127.0.0.1:${port}/json/list`)).json());
-    const page = targets.find(target => target.type === 'page' && target.webSocketDebuggerUrl);
-    if (!page?.webSocketDebuggerUrl) throw new ChromiumError('exited', tail, 'Chromium opened no page');
-    const cdp = await connectCdp(page.webSocketDebuggerUrl);
-    return { cdp, exited, close: () => { cdp.close(); proc.kill(); } };
+    const root = connection.session(undefined);
+    const { targetInfos } = targetsSchema.parse(await root.send('Target.getTargets'));
+    const page = targetInfos.find(target => target.type === 'page');
+    if (!page) throw new ChromiumError('exited', tail, 'Chromium opened no page');
+    const { sessionId } = attachedSchema.parse(await root.send('Target.attachToTarget', { targetId: page.targetId, flatten: true }));
+    const cdp = connection.session(sessionId);
+    return { cdp, connection, pageTargetId: page.targetId, exited, close: () => { connection.close(); proc.kill(); } };
   } catch (error) {
+    connection.close();
     proc.kill('SIGKILL');
     throw error;
   }
@@ -143,6 +171,7 @@ function readOsRelease(): string {
 export class PreviewHost implements PreviewHostLike {
   private readonly stopping = new Map<DevServerLike, Promise<void>>();
   private readonly entries = new Map<string, RunEntry>();
+  private readonly grants = new Map<string, GrantEntry>();
   private readonly deps: Required<Omit<PreviewHostDeps, 'env' | 'platform' | 'arch'>> & { env: NodeJS.ProcessEnv; platform: string; arch: string };
   /** Chromium lands in one shared cache, so there is one download for the whole host. */
   private download?: { controller: AbortController; promise: Promise<string>; watchers: Set<RunEntry> } | undefined;
@@ -168,7 +197,7 @@ export class PreviewHost implements PreviewHostLike {
   async open(ctx: RunContext, viewer: Viewer, target: PreviewTarget, options: { viewerId?: string | undefined; resume?: boolean | undefined } = {}): Promise<void> {
     const entry = this.entryFor(ctx);
     if (entry.released) return;
-    if (options.resume && ((entry.viewerId !== undefined && entry.viewerId !== options.viewerId) || (entry.viewer && entry.viewer !== viewer && (!options.viewerId || entry.viewerId !== options.viewerId)))) {
+    if (options.resume && this.heldByAnotherTab(entry, viewer, options.viewerId)) {
       viewer.send({ t: 'replaced', by: entry.viewer?.userAgent ?? 'another tab' });
       viewer.close(4001, 'replaced');
       return;
@@ -177,6 +206,12 @@ export class PreviewHost implements PreviewHostLike {
     this.claim(entry, viewer);
     // Whatever this open shows, a show still waiting on Chromium for an older target is stale.
     entry.targetGen += 1;
+    if ('agent' in target) {
+      entry.port = undefined;
+      return this.showAgentPage(entry);
+    }
+    // A server or a URL loads in cezar's own page; the agent's tab is left as it is.
+    this.leaveAgentPage(entry);
     if ('url' in target) {
       let url: string;
       try {
@@ -318,13 +353,15 @@ export class PreviewHost implements PreviewHostLike {
     entry.viewer = undefined;
     entry.session?.detach(viewer);
     this.clearIdle(entry);
+    // An agent still driving the browser keeps it, and the servers it drives, open.
+    if (entry.agents.size > 0) return;
     entry.idleTimers.browser = setTimeout(() => this.closeBrowser(entry), PREVIEW_BROWSER_IDLE_MS);
     this.armServerIdle(entry);
   }
 
   /** Agent restarts without a viewer need a bound even after the previous idle timer fired. */
   private armServerIdle(entry: RunEntry): void {
-    if (entry.viewer || entry.released || entry.idleTimers.server) return;
+    if (entry.viewer || entry.agents.size > 0 || entry.released || entry.idleTimers.server) return;
     entry.idleTimers.server = setTimeout(() => {
       entry.idleTimers.server = undefined;
       for (const server of entry.servers.values()) if (live(server)) void this.stopServer(server, 'idle');
@@ -348,6 +385,72 @@ export class PreviewHost implements PreviewHostLike {
         // A refused URL or a CDP call on a page that just went away changes nothing for the pane.
         await entry.session?.handle(msg).catch(() => {});
     }
+  }
+
+  /** A new agent session's right to drive `runId`'s browser through the CDP proxy (hearsay-tools/cezarion#784): nothing starts until it connects. */
+  grantAgent(runId: string, context: () => RunContext | undefined): AgentGrant {
+    const token = randomBytes(32).toString('hex');
+    const grant: GrantEntry = { runId, context, links: new Set() };
+    this.grants.set(token, grant);
+    return {
+      token,
+      revoke: () => {
+        if (this.grants.get(token) !== grant) return;
+        this.grants.delete(token);
+        for (const link of [...grant.links]) link.close(1008, "The agent's session ended");
+      },
+    };
+  }
+
+  /** Whether `token` names a live grant: the proxy route refuses the upgrade before the handshake otherwise. */
+  hasAgentGrant(token: string): boolean {
+    return this.grants.has(token);
+  }
+
+  /**
+   * An agent opened the proxy socket. Its connection is demand: the run's Chromium starts when none
+   * runs, and no idle timer runs while it stays. A browser that failed stays failed until the
+   * owner's Retry, so a page that crashes Chromium cannot loop through the agent either.
+   */
+  async connectAgent(token: string, client: AgentClient): Promise<AgentCdpLink | AgentRefusal> {
+    const grant = this.grants.get(token);
+    if (!grant) return { refused: "This preview address is no longer valid: the agent's session ended" };
+    const ctx = grant.context();
+    if (!ctx) return { refused: 'This task has no worktree, so it has no preview browser' };
+    const entry = this.entryFor(ctx);
+    if (entry.released) return { refused: 'The preview of this task was released' };
+    if (entry.browserFailure) return { refused: 'The preview browser failed; the owner can retry it from the preview pane' };
+    this.clearIdle(entry);
+    const session = await this.ensureSession(entry);
+    const browser = entry.browser;
+    const stillValid = () => this.grants.get(token) === grant && this.entries.get(ctx.runId) === entry && !entry.released && entry.browser === browser;
+    if (!session || !browser || !stillValid()) {
+      this.armIdleWithoutDemand(entry);
+      return { refused: entry.browserFailure ? 'The preview browser could not start' : 'The preview browser is not available' };
+    }
+    let link: AgentCdpLink;
+    try {
+      link = await AgentCdpLink.open(browser.connection, client, {
+        protectedTargetId: browser.pageTargetId,
+        onClose: () => this.agentLeft(entry, grant, link),
+        onTarget: targetId => void this.agentTargeted(entry, targetId).catch(() => undefined),
+      });
+    } catch (error) {
+      this.armIdleWithoutDemand(entry);
+      return { refused: error instanceof Error ? error.message : String(error) };
+    }
+    if (!stillValid()) {
+      // Never registered, so its close found no agent to remove: the idle timers start here.
+      link.close(1001, 'The preview browser closed');
+      this.armIdleWithoutDemand(entry);
+      return { refused: 'The preview browser is not available' };
+    }
+    grant.links.add(link);
+    entry.agents.add(link);
+    // The last agent may have left during this handshake and started the idle timers.
+    this.clearIdle(entry);
+    if (entry.agents.size === 1) recordAgentBrowser(entry.ctx, 'connected');
+    return link;
   }
 
   /**
@@ -381,6 +484,11 @@ export class PreviewHost implements PreviewHostLike {
     return live(this.entries.get(runId)?.servers.get(port));
   }
 
+  /** Whether an agent is connected to the run's browser now: its crash marker is this process's. */
+  hasAgents(runId: string): boolean {
+    return (this.entries.get(runId)?.agents.size ?? 0) > 0;
+  }
+
   /** Whether this host runs the run's Chromium (`<runId>/chromium.pid.json`): the sweep spares it. */
   ownsBrowser(runId: string): boolean {
     const entry = this.entries.get(runId);
@@ -397,13 +505,159 @@ export class PreviewHost implements PreviewHostLike {
     await Promise.all([...this.entries.values()].map(entry => this.releaseEntry(entry, false, false)));
   }
 
+  private agentLeft(entry: RunEntry, grant: GrantEntry, link: AgentCdpLink): void {
+    grant.links.delete(link);
+    if (!entry.agents.delete(link)) return;
+    if (entry.agents.size > 0) return;
+    // `preview.agent-browser`, on the first connection and the last close only.
+    recordAgentBrowser(entry.ctx, 'disconnected');
+    this.armIdleWithoutDemand(entry);
+  }
+
+  /** The last viewer or agent left: the idle timers start, as `detach` starts them for a pane. */
+  private armIdleWithoutDemand(entry: RunEntry): void {
+    if (entry.viewer || entry.agents.size > 0 || entry.released) return;
+    if (!entry.idleTimers.browser && (entry.browser || entry.launching)) {
+      entry.idleTimers.browser = setTimeout(() => this.closeBrowser(entry), PREVIEW_BROWSER_IDLE_MS);
+    }
+    this.armServerIdle(entry);
+  }
+
+  private closeAgents(entry: RunEntry, code: number, reason: string): void {
+    // Each close calls agentLeft, which records `disconnected` once the set is empty.
+    for (const link of [...entry.agents]) link.close(code, reason);
+  }
+
+
+  /** The pane asked for the agent's page: shown as it is, never navigated. */
+  private async showAgentPage(entry: RunEntry): Promise<void> {
+    if (entry.browserFailure) return this.tell(entry, entry.browserFailure);
+    if (entry.agents.size === 0 || !entry.browser) return this.tell(entry, { t: 'state', stage: 'agent-idle' });
+    entry.followAgent = true;
+    entry.adopted = false;
+    await this.followAgentPage(entry);
+  }
+
+  private leaveAgentPage(entry: RunEntry): void {
+    entry.followAgent = false;
+    this.dropFollowed(entry);
+  }
+
+  /** An agent's command made `targetId` its own: the pane follows it when that is a page. */
+  private async agentTargeted(entry: RunEntry, targetId: string): Promise<void> {
+    const browser = entry.browser;
+    if (!browser) return;
+    const reply = await browser.connection.call('Target.getTargetInfo', { targetId }, undefined);
+    const type = (reply.result as { targetInfo?: { type?: unknown } } | undefined)?.targetInfo?.type;
+    if (type !== 'page' || entry.browser !== browser) return;
+    entry.agentTarget = targetId;
+    if (entry.followAgent) await this.followAgentPage(entry);
+  }
+
+  /** Streams the agent's page: the home session cezar has, or a session of cezar's own on another page, dropped when the agent closes it. */
+  private async followAgentPage(entry: RunEntry): Promise<void> {
+    const browser = entry.browser;
+    const target = entry.agentTarget;
+    if (!browser || !entry.followAgent) return;
+    if (!target || target === browser.pageTargetId) return this.showHome(entry);
+    if (entry.followed?.targetId === target) return this.streamFrom(entry, entry.followed.session);
+    const opened = await this.openPageSession(browser, target);
+    if (!opened) return this.agentPageGone(entry, browser, target);
+    const { session, sessionId } = opened;
+    if (entry.browser !== browser || entry.agentTarget !== target || !entry.followAgent || entry.released || entry.followed?.targetId === target) {
+      session.close();
+      return;
+    }
+    this.dropFollowed(entry);
+    const off = browser.connection.onEvent(msg => {
+      const detached = (msg.params as { sessionId?: unknown } | undefined)?.sessionId;
+      if (msg.method === 'Target.detachedFromTarget' && msg.sessionId === undefined && detached === sessionId) this.followedGone(entry, session);
+    });
+    entry.followed = { targetId: target, session, off };
+    this.streamFrom(entry, session);
+  }
+
+  /** The pane shows cezar's own page. It cleared its stage for this open, so an unchanged stream restarts to announce itself. */
+  private showHome(entry: RunEntry): void {
+    const shown = entry.session === entry.home;
+    this.dropFollowed(entry);
+    if (!entry.home) return;
+    this.streamFrom(entry, entry.home);
+    if (shown && entry.viewer) entry.home.attach(entry.viewer);
+  }
+
+  /** The agent's page closed while the pane looked elsewhere: cezar's own page stands in for it. */
+  private agentPageGone(entry: RunEntry, browser: BrowserHandle, target: string): void {
+    if (entry.agentTarget === target) entry.agentTarget = undefined;
+    if (entry.browser === browser && entry.followAgent && !entry.released) this.showHome(entry);
+  }
+
+  /** A session of cezar's own on `targetId`, carrying the page's current URL. */
+  private async openPageSession(browser: BrowserHandle, targetId: string): Promise<{ session: PreviewSession; sessionId: string } | undefined> {
+    const attached = await browser.connection.call('Target.attachToTarget', { targetId, flatten: true }, undefined);
+    const sessionId = attachedSchema.safeParse(attached.result).data?.sessionId;
+    if (!sessionId) return undefined;
+    let session: PreviewSession;
+    try {
+      session = await PreviewSession.create(browser.connection.session(sessionId), {
+        onFirstFrame: viewer => viewer.send({ t: 'state', stage: 'streaming', adopted: false }),
+      });
+    } catch {
+      browser.connection.request('Target.detachFromTarget', { sessionId }, undefined, () => {});
+      return undefined;
+    }
+    const info = await browser.connection.call('Target.getTargetInfo', { targetId }, undefined);
+    const url = (info.result as { targetInfo?: { url?: unknown } } | undefined)?.targetInfo?.url;
+    if (typeof url === 'string' && url) session.url ??= url;
+    return { session, sessionId };
+  }
+
+  /** The agent closed the page the pane followed: the pane shows cezar's own page again. */
+  private followedGone(entry: RunEntry, session: PreviewSession): void {
+    if (entry.followed?.session !== session) return;
+    if (entry.agentTarget === entry.followed.targetId) entry.agentTarget = undefined;
+    this.dropFollowed(entry);
+  }
+
+  private dropFollowed(entry: RunEntry): void {
+    const followed = entry.followed;
+    entry.followed = undefined;
+    if (!followed) return;
+    followed.off();
+    if (entry.session === followed.session && entry.home) this.streamFrom(entry, entry.home);
+    followed.session.close();
+  }
+
+  /**
+   * Makes `session` the one the pane streams, with its URL. The viewer is attached only on a change:
+   * `claim` already attached it to the current session, and a second attach restarts its screencast.
+   */
+  private streamFrom(entry: RunEntry, session: PreviewSession): void {
+    const viewer = entry.viewer;
+    const changed = entry.session !== session;
+    if (changed) {
+      if (viewer) entry.session?.detach(viewer);
+      entry.session = session;
+    }
+    entry.lastUrl = session.url ?? entry.lastUrl;
+    if (!viewer) return;
+    if (session.url) viewer.send({ t: 'url', url: session.url });
+    if (changed) session.attach(viewer);
+  }
+
+  /** A resumed pane whose run another tab took since: that tab keeps it. */
+  private heldByAnotherTab(entry: RunEntry, viewer: Viewer, viewerId: string | undefined): boolean {
+    if (entry.viewerId !== undefined && entry.viewerId !== viewerId) return true;
+    return !!entry.viewer && entry.viewer !== viewer && (!viewerId || entry.viewerId !== viewerId);
+  }
+
   private entryFor(ctx: RunContext): RunEntry {
     const existing = this.entries.get(ctx.runId);
     if (existing) {
       existing.ctx = ctx;
       return existing;
     }
-    const entry: RunEntry = { ctx, servers: new Map(), startedAt: new Map(), approvals: new Map(), browserGen: 0, targetGen: 0, adopted: false, idleTimers: {}, released: false };
+    const entry: RunEntry = { ctx, servers: new Map(), startedAt: new Map(), approvals: new Map(), browserGen: 0, targetGen: 0, adopted: false, idleTimers: {}, released: false, agents: new Set(), followAgent: false };
     this.entries.set(ctx.runId, entry);
     return entry;
   }
@@ -572,7 +826,7 @@ export class PreviewHost implements PreviewHostLike {
       return undefined;
     }
     entry.browser = browser;
-    entry.session = session;
+    entry.session = entry.home = session;
     if (entry.viewer) session.attach(entry.viewer);
     void browser.exited.then(exit => this.browserExited(entry, browser, exit));
     return session;
@@ -607,7 +861,9 @@ export class PreviewHost implements PreviewHostLike {
   private browserExited(entry: RunEntry, browser: BrowserHandle, exit: BrowserExit): void {
     if (entry.browser !== browser) return;
     entry.lastUrl = entry.session?.url ?? entry.lastUrl;
+    this.forgetPages(entry);
     entry.session = entry.browser = undefined;
+    this.closeAgents(entry, 1011, 'The preview browser exited');
     entry.browserFailure = {
       t: 'state',
       stage: 'browser-exited',
@@ -685,10 +941,20 @@ export class PreviewHost implements PreviewHostLike {
     entry.browserGen += 1;
     // The page the owner was on outlives the browser: 5.9 shows it, and Start again reopens it.
     entry.lastUrl = session?.url ?? entry.lastUrl;
+    const followed = entry.followed?.session;
+    this.forgetPages(entry);
     entry.browser = entry.session = undefined;
+    this.closeAgents(entry, 1001, 'The preview browser closed');
+    followed?.close();
     session?.close();
     browser?.close();
     return browser;
+  }
+
+  /** The browser is going: no page of it is home, followed or the agent's any more. */
+  private forgetPages(entry: RunEntry): void {
+    entry.followed?.off();
+    entry.followed = entry.home = entry.agentTarget = undefined;
   }
 
   private clearIdle(entry: RunEntry): void {
@@ -704,6 +970,7 @@ export class PreviewHost implements PreviewHostLike {
     this.download?.watchers.delete(entry);
     // A launch in flight has no browser on the entry yet; it sees `released` and closes its own.
     const launching = entry.launching;
+    // closeBrowser closes the agents' sockets; their `disconnected` is recorded before the run goes.
     const browser = this.closeBrowser(entry);
     const stops = [...entry.servers.values()].filter(owned).map(server => this.stopServer(server, 'release'));
     await Promise.all(stops);

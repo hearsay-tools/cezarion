@@ -14,7 +14,7 @@ import { nextLineEntry } from './line-order.ts';
 import { executionAccount } from './execution-account.ts';
 import { chargesBudget, ciWatchRequest, hasPrWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
-import { previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
+import { previewCdpSession, previewRunContext, previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import { artifactInstructions, provisionArtifactDirectory } from '../artifacts/lifecycle.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -2095,7 +2095,7 @@ export class RunManager {
     const controller = await this.ciResources.controller();
     state.toolless = !controller;
     if (!controller || this.disposed || state.cancelled || this.active.get(runId) !== state) return;
-    const provisioned = controller.provision(this.cezarToolHandlers(runId, generation));
+    const provisioned = previewCdpSession(controller.provision(this.cezarToolHandlers(runId, generation)), { host: this.preview, cockpitOrigin: this.cockpit?.origin, runId, worktree: !!this.store.getRun(runId)?.worktreePath, context: () => previewRunContext(this.store, this.dataDir, runId) });
     state.revokeCiTools = provisioned.revoke;
     return provisioned;
   }

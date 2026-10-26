@@ -37,7 +37,8 @@ const PING_MS = 2_000
 const STATS_MS = 500
 const ONE_SECOND = 1_000
 
-type Target = { port: number } | { url: string }
+/** What the pane asks the server to show: a registered server, a typed URL, or the agent's page. */
+type Target = Extract<PreviewClientMessage, { t: 'open' }>['target']
 
 export interface PreviewPaneProps {
   run: ApiRun
@@ -45,6 +46,8 @@ export interface PreviewPaneProps {
   servers: readonly PreviewServer[]
   /** Where each registered server stands now (from the task's events). Absent reads as registered. */
   serverStates?: ReadonlyMap<number, ThreadPreviewServer> | undefined
+  /** An agent drives the task's browser now: its page is one more entry to pick (hearsay-tools/cezarion#784). */
+  agentLive?: boolean | undefined
   /** What the owner asked for: a server to show, and whether they already approved running it. */
   request?: PreviewOpenRequest | undefined
   /** Set where the pane replaces the transcript (below 1180 px): the way back to the conversation. */
@@ -103,7 +106,12 @@ function statusFor(
   if (takenOver) return { tone: 'neutral', label: 'paused' }
   if (everOpened && (transport.state === 'reconnecting' || transport.state === 'closed')) return { tone: 'danger', label: 'offline' }
   if (transport.state !== 'open') return { tone: 'neutral', label: 'connecting…' }
-  switch (stage?.stage) {
+  return stage ? stageStatus(stage) : undefined
+}
+
+/** The toolbar's reading for a stage, once the socket is open and the pane is its own. */
+function stageStatus(stage: PreviewStateMessage): { tone: StatusDotTone; label: string } | undefined {
+  switch (stage.stage) {
     case 'downloading': return { tone: 'pending', label: 'downloading' }
     case 'download-failed': return { tone: 'danger', label: 'download failed' }
     case 'sandbox-failed': return { tone: 'danger', label: 'browser failed' }
@@ -114,12 +122,18 @@ function statusFor(
     case 'server-stalled': return { tone: 'pending', label: 'waiting · 2 min' }
     case 'server-exited': return { tone: 'danger', label: 'server exited' }
     case 'server-stopped': return { tone: 'neutral', label: 'stopped' }
+    case 'agent-idle': return { tone: 'neutral', label: 'agent idle' }
     case 'loading': return { tone: 'neutral', label: 'connecting…' }
     default: return undefined
   }
 }
 
-function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPort, onLive, onClose }: PreviewPaneProps) {
+/** The owner asked for a server or the agent's page, whose open is on its way. */
+function awaitsTarget(request: PreviewOpenRequest | undefined): boolean {
+  return request?.port !== undefined || request?.agent === true
+}
+
+function PreviewPaneBody({ run, servers, serverStates, agentLive, request, onSession, onPort, onLive, onClose }: PreviewPaneProps) {
   const pageActive = usePageActive()
   const viewerId = useRef(crypto.randomUUID())
   const opened = useRef(false)
@@ -133,6 +147,8 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
   const [stage, setStage] = useState<PreviewStateMessage | undefined>(undefined)
   const [url, setUrl] = useState('')
   const [port, setPort] = useState<number | undefined>(undefined)
+  /** The pane shows the agent's page (or asked for it and got `agent-idle`). */
+  const [agent, setAgent] = useState(false)
   const [hasTarget, setHasTarget] = useState(false)
   const [hasFrame, setHasFrame] = useState(false)
   const [cursor, setCursor] = useState<string | undefined>(undefined)
@@ -150,8 +166,8 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
   const target = useRef<Target | undefined>(undefined)
   /** A port whose approval the owner already gave on a card: the next approval stage sends `run`. */
   const autoRun = useRef<number | undefined>(undefined)
-  const latest = useRef({ port, stage })
-  latest.current = { port, stage }
+  const latest = useRef({ port, stage, agent })
+  latest.current = { port, stage, agent }
   const frames = useRef<Array<{ at: number; bytes: number }>>([])
   const rtt = useRef<number | undefined>(undefined)
   const seenFrame = useRef(false)
@@ -298,6 +314,7 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
       setAddressError(undefined)
       setUrl(shownUrl)
       setPort('port' in next ? next.port : undefined)
+      setAgent('agent' in next)
       send({ t: 'open', target: next, viewerId: viewerId.current })
       opened.current = socketOpen.current
     },
@@ -312,9 +329,18 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
     [servers, openTarget],
   )
 
+  // The agent's page is shown as it is: the server attaches, never navigates. Its URL arrives as a
+  // `url` message once the page is on screen.
+  const openAgent = useCallback(() => openTarget({ agent: true }, ''), [openTarget])
+
   // Each open request re-applies once. Asking again for the server already on screen must not
   // navigate it away from where the owner is: only an approval to run is worth repeating.
   useEffect(() => {
+    if (request?.agent) {
+      if (latest.current.agent && latest.current.stage?.stage === 'streaming') return
+      openAgent()
+      return
+    }
     if (request?.port === undefined) return
     const showing = latest.current.port === request.port && latest.current.stage?.stage === 'streaming'
     if (showing && request.run !== true) return
@@ -325,7 +351,7 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
   const empty = !hasTarget && !takenOver && transport.state !== 'blocked'
   // The empty state invites typing. A pane opened for a server is not empty, even in the commit
   // before its target lands: focusing then would hide the page URL and pop a phone's keyboard.
-  const awaitingRequest = request?.port !== undefined
+  const awaitingRequest = awaitsTarget(request)
   useEffect(() => {
     if (empty && !awaitingRequest) urlInput.current?.focus()
   }, [empty, awaitingRequest])
@@ -334,7 +360,8 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
     const address = resolveAddress(input, servers)
     if (address.kind === 'error') return setAddressError(address.message)
     if (address.kind === 'server') return openServer(address.port)
-    if (latest.current.stage?.stage === 'streaming') {
+    // On the agent's page a typed URL opens the pane's own page, never moves the agent's.
+    if (latest.current.stage?.stage === 'streaming' && !latest.current.agent) {
       // The live page navigates in place, and from now on it is this URL, not a server: a
       // reconnect reopens it, and the switcher and header no longer mark a server as shown.
       target.current = { url: address.url }
@@ -374,6 +401,7 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
   const current = servers.find(server => server.port === port)
   const adopted = stage?.stage === 'streaming' && stage.adopted
   const lost = everOpened && (transport.state === 'reconnecting' || transport.state === 'closed')
+  const stageName = stage?.stage
 
   let overlay: ReactNode = null
   let dim = false
@@ -382,9 +410,18 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
   } else if (takenOver !== undefined) {
     dim = true
     overlay = <PreviewStates state={{ stage: 'taken-over', by: takenOver }} actions={actions} />
-  } else if (empty) {
-    overlay = <PreviewEmptyState servers={servers} states={serverStates} onOpen={serverPort => openServer(serverPort)} />
-  } else if (stage?.stage === 'streaming' || (stage?.stage === 'loading' && hasFrame)) {
+  } else if (empty || stageName === 'agent-idle') {
+    overlay = (
+      <PreviewEmptyState
+        servers={servers}
+        states={serverStates}
+        onOpen={serverPort => openServer(serverPort)}
+        agentLive={agentLive === true}
+        agentIdle={!empty && stageName === 'agent-idle'}
+        onOpenAgent={openAgent}
+      />
+    )
+  } else if (stageName === 'streaming' || (stageName === 'loading' && hasFrame)) {
     overlay = null
   } else if (stage) {
     overlay = <PreviewStates state={stage as PreviewStageState} actions={actions} url={url} worktree={run.worktreePath} />
@@ -395,7 +432,7 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
 
   // The page takes input while it is on screen and live: not behind a state, not while a dialog freezes it.
   const interactive = connected && overlay === null && !dialog
-  const showPage = hasFrame && (stage?.stage === 'streaming' || stage?.stage === 'loading' || dim)
+  const showPage = hasFrame && (stageName === 'streaming' || stageName === 'loading' || dim)
 
   return (
     <section data-slot="preview-pane-body" aria-label="Live preview" className="flex h-full min-h-0 flex-col bg-background text-foreground">
@@ -405,6 +442,8 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
         serverStates={serverStates}
         badge={transport.state !== 'blocked'}
         current={current}
+        agentLive={agentLive === true}
+        agentShown={agent}
         adopted={adopted}
         viewport={compact ? 'fit' : viewport}
         compact={compact}
@@ -419,6 +458,7 @@ function PreviewPaneBody({ run, servers, serverStates, request, onSession, onPor
         onForward={() => send({ t: 'forward' })}
         onReload={ignoreCache => send({ t: 'reload', ...(ignoreCache ? { ignoreCache: true } : {}) })}
         onPickServer={serverPort => openServer(serverPort)}
+        onPickAgent={openAgent}
         onViewport={setViewport}
         onCopyUrl={() => copyText(url)}
         onStop={serverPort => send({ t: 'stop', port: serverPort })}

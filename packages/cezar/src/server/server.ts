@@ -270,7 +270,7 @@ import { applicationUpdateInputSchema, type ApplicationUpdateState } from '@open
 import { ApplicationUpdateConflictError, ApplicationUpdateFailureError, type ApplicationUpdateServiceLike } from '../application-update/service.ts';
 import { createSocketHub, socketHubRoute, type SocketHub, type WsUpgradeVerdict } from './ws.ts';
 import { attachUpgradeRouter } from './upgrade-router.ts';
-import { createPreviewSocket } from './preview-socket.ts';
+import { createPreviewSockets } from './preview-sockets.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
 import { parseRemote, resolveForge, forgeWebRoot, type ForgeAvailability } from './forge/index.ts';
@@ -5807,19 +5807,19 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
   else server.once('listening', startBackgroundServices);
   // The boot store's preview leftovers and run deletions; lazy projects arm theirs at build.
   armPreview(deps.store, join(deps.repoRoot, '.ai/cezar'), deps.previewHost);
-  const previewSocket = createPreviewSocket({
-    host: deps.previewHost,
+  const previewSockets = createPreviewSockets({
+    host: deps.previewHost, cockpitOrigin: () => cockpitOrigin,
     verify: (req) => verifyWsUpgrade(req, deps.bindHost),
     resolveProject: async (projectId) => projectLookup.resolve?.(projectId),
   });
   server.once('close', () => {
     unsubscribe(); archiveOnMerge.stop(); completionActions.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close();
     socketHub.close();
-    previewSocket.close();
+    previewSockets.close();
     void deps.previewHost?.close().catch(() => undefined);
   });
-  // The one `upgrade` listener: the subscription bus and the preview pane's socket (#781).
-  attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), previewSocket.route]);
+  // The one `upgrade` listener: the subscription bus and the preview's sockets (hearsay-tools/cezarion#781).
+  attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), ...previewSockets.routes]);
   const shutdownForRestart = async (): Promise<void> => {
     archiveOnMerge.stop(); completionActions.stop();
     sharedContexts.disposeAll(); // close every built secondary project before old process exits
@@ -5828,7 +5828,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     // Dev servers run in their own process groups: they outlive cezar unless stopped here.
     // A failed release must not abort the restart halfway, with the store flushed and the port still bound.
     await deps.previewHost?.close().catch(() => undefined);
-    previewSocket.close();
+    previewSockets.close();
     await deps.delegation?.close();
     await new Promise<void>((resolve) => {
       server.close(() => resolve());

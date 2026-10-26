@@ -401,6 +401,15 @@ describe('live cursor replay and compact context', () => {
   });
 });
 
+it('compact context keeps the latest agent-browser state however old it is (hearsay-tools/cezarion#784)', async () => {
+  const context = await contextFrom([
+    { seq: 1, type: 'preview.agent-browser', state: 'disconnected' },
+    { seq: 2, type: 'preview.agent-browser', state: 'connected' },
+    ...Array.from({ length: 50 }, (_, index) => ({ seq: 3 + index, type: 'note' as const, message: `n${index}` })),
+  ]);
+  expect(context.contextEvents.filter(({ type }) => type === 'preview.agent-browser')).toMatchObject([{ seq: 2, state: 'connected' }]);
+});
+
 const question = { seq: 10, type: 'ask.requested', requestId: 'pending-question', questions: [{ header: 'Choice', question: 'Choose a path?', options: [{ label: 'First' }, { label: 'Second' }] }] };
 it.each(['agent-input', 'user-message', 'turn.started', 'lifecycle'])('compact context retains a pending human ask through %s without an answer receipt', async type => {
   const context = await contextFrom([question, { seq: 11, type, text: 'not a successful human answer' },

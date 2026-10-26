@@ -534,13 +534,29 @@ interface ContextItem {
 const isSettledContextStatus = (status: string | undefined) =>
   status !== undefined && status !== 'pending' && status !== 'running';
 
-/** One forward pass retaining the latest Plan snapshot and only the selector-equivalent agent episode. */
+/**
+ * One forward pass retaining the latest Plan snapshot, the latest agent-browser state
+ * (hearsay-tools/cezarion#784) and only the selector-equivalent agent episode.
+ */
 export async function deriveRunContextEvents(dataDir: string, id: string): Promise<RunHistoryContext> {
   return withHistorySource(dataDir, id, contextFromSource);
 }
 
+/** Permission requests still waiting on an answer: a resolution or a session or turn boundary ends them. */
+function trackPendingPermission(pending: Map<string, RunHistoryEvent>, event: RunHistoryEvent): void {
+  if (event.type === 'permission.requested') {
+    const { seq: _seq, ts: _ts, stepId: _stepId, ...payload } = event;
+    if (permissionRequestedSchema.safeParse(payload).success) pending.set(event.requestId as string, event);
+  } else if (event.type === 'permission.resolved' && typeof event.requestId === 'string') {
+    pending.delete(event.requestId);
+  } else if (event.type === 'session.ended' || event.type === 'session.started' || event.type === 'turn.completed') {
+    pending.clear();
+  }
+}
+
 async function contextFromSource(source: HistorySource): Promise<RunHistoryContext> {
   let latestPlan: RunHistoryEvent | undefined;
+  let latestAgentBrowser: RunHistoryEvent | undefined;
   let pendingAsk: RunHistoryEvent | undefined;
   const pendingPermissions = new Map<string, RunHistoryEvent>();
   /** The pending ask's latest routing transition (#505): routed to the parent or handed back. */
@@ -599,15 +615,13 @@ async function contextFromSource(source: HistorySource): Promise<RunHistoryConte
       // Match manager delivery receipts: agent/lifecycle input and refused human
       // attempts do not answer a question. Retain one current ask, not its history.
       pendingAsk = advancePendingHumanAsk(pendingAsk, event);
-      if (event.type === 'permission.requested') {
-        const { seq: _seq, ts: _ts, stepId: _stepId, ...payload } = event;
-        if (permissionRequestedSchema.safeParse(payload).success) pendingPermissions.set(event.requestId as string, event);
-      } else if (event.type === 'permission.resolved' && typeof event.requestId === 'string') {
-        pendingPermissions.delete(event.requestId);
-      } else if (event.type === 'session.ended' || event.type === 'session.started' || event.type === 'turn.completed') {
-        pendingPermissions.clear();
-      }
+      trackPendingPermission(pendingPermissions, event);
       if ((event.type === 'worker-question-routed' || event.type === 'worker-question-fallback') && event.askSeq === pendingAsk?.seq) askRouting = event;
+      // The cockpit lists the agent's page while it is connected, however many events came since.
+      if (event.type === 'preview.agent-browser') {
+        latestAgentBrowser = event;
+        continue;
+      }
       if (event.type === 'plan.updated' || (event.type === 'tool-call' && stringField(event, 'tool') === 'TodoWrite')) {
         latestPlan = event;
         continue;
@@ -672,6 +686,7 @@ async function contextFromSource(source: HistorySource): Promise<RunHistoryConte
   );
   const contextEvents = new Map<number, RunHistoryEvent>();
   if (latestPlan) contextEvents.set(latestPlan.seq, latestPlan);
+  if (latestAgentBrowser) contextEvents.set(latestAgentBrowser.seq, latestAgentBrowser);
   if (pendingAsk) contextEvents.set(pendingAsk.seq, pendingAsk);
   for (const event of pendingPermissions.values()) contextEvents.set(event.seq, event);
   if (pendingAsk && askRouting?.askSeq === pendingAsk.seq) contextEvents.set(askRouting.seq, askRouting);

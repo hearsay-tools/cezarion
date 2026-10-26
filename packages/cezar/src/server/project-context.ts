@@ -7,6 +7,7 @@ import { DEFAULT_WORKTREE_RETENTION, resolveWorktreeRetention } from '../config.
 import { pruneOrphans } from '../git-worktree.ts';
 import { sweepPreviewLeftovers } from '../preview/dev-server.ts';
 import type { PreviewHost } from '../preview/host.ts';
+import { reconcileAgentMarkers } from '../preview/agent-marker.ts';
 import { armRepoHandle } from '../runs/arm-repo-handle.ts';
 import { ensureDataGitignore } from '../data-gitignore.ts';
 import { reclaimWorktrees } from '../runs/retention.ts';
@@ -106,6 +107,8 @@ function sweepPreviewOnce(dataDir: string, host: PreviewHost | undefined): Promi
  * preview is released with its profile.
  */
 export function armPreview(store: RunStore, dataDir: string, host: PreviewHost | undefined): void {
+  // Before the sweep's first await: a crash's agent state is reconciled before any agent can connect.
+  reconcileAgentMarkers(dataDir, store, runId => host?.hasAgents(runId) ?? false);
   void sweepPreviewOnce(dataDir, host);
   if (host) store.on('deleted', (runId: string) => void host.release(runId, { deleteProfile: true, dataDir }).catch(() => undefined));
 }

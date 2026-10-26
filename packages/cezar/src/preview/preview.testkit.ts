@@ -2,7 +2,8 @@ import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import type { PreviewServerMessage } from '@open-mercato/cezar-contract';
 import { vi } from 'vitest';
-import type { Cdp } from './cdp.ts';
+import type { Cdp, CdpConnection, CdpMessage } from './cdp.ts';
+import type { AgentClient } from './cdp-proxy.ts';
 import type { Viewer } from './session.ts';
 
 /** Fakes shared by the preview session and host tests (#781). */
@@ -29,6 +30,71 @@ export function fakeCdp() {
     for (const fn of listeners.get(event) ?? []) fn(params);
   };
   return { cdp, calls, emit, sent: (method: string) => calls.filter(call => call.method === method) };
+}
+
+/**
+ * A browser connection for the agent's CDP proxy (hearsay-tools/cezarion#784): it grants each
+ * browser session at once and answers every other command with an empty result, recording all.
+ * `Target.createTarget` makes target `NEW`; `Target.attachToTarget` opens a page session `S<n>` (a `fakeCdp`, in `pages`);
+ * `Target.getTargetInfo` calls a target a page unless its id starts with `W` (a worker).
+ * A target in `gone` refuses `Target.attachToTarget`, as a closed tab does.
+ * `emit` sends a browser event to every `onEvent` listener.
+ */
+export function fakeConnection() {
+  const requests: Array<{ method: string; params: unknown; sessionId: string | undefined }> = [];
+  const pages = new Map<string, ReturnType<typeof fakeCdp>>();
+  const listeners = new Set<(msg: CdpMessage) => void>();
+  const gone = new Set<string>();
+  let sessions = 0;
+  let attached = 0;
+  let markClosed!: () => void;
+  const closed = new Promise<void>(resolve => (markClosed = resolve));
+  const answer = (method: string, params: unknown): CdpMessage => {
+    const targetId = (params as { targetId?: unknown } | undefined)?.targetId;
+    if (method === 'Target.attachToBrowserTarget') return { result: { sessionId: `B${++sessions}` } };
+    if (method === 'Target.createTarget') return { result: { targetId: 'NEW' } };
+    if (method === 'Target.attachToTarget' && typeof targetId === 'string' && gone.has(targetId)) return { error: { code: -32602, message: 'No target with given id found' } };
+    if (method === 'Target.attachToTarget') return { result: { sessionId: `S${++attached}` } };
+    if (method === 'Target.getTargetInfo' && typeof targetId === 'string') {
+      return { result: { targetInfo: { targetId, type: targetId.startsWith('W') ? 'service_worker' : 'page', url: `http://localhost/${targetId}` } } };
+    }
+    return { result: {} };
+  };
+  const request: CdpConnection['request'] = (method, params, sessionId, onReply) => {
+    requests.push({ method, params, sessionId });
+    onReply(answer(method, params));
+  };
+  const connection: CdpConnection = {
+    request,
+    call: (method, params, sessionId) => new Promise<CdpMessage>(resolve => request(method, params, sessionId, resolve)),
+    onEvent: fn => {
+      listeners.add(fn);
+      return () => void listeners.delete(fn);
+    },
+    session: id => {
+      const key = id ?? 'root';
+      const page = pages.get(key) ?? fakeCdp();
+      pages.set(key, page);
+      return page.cdp;
+    },
+    close: () => markClosed(),
+    closed,
+  };
+  const emit = (msg: CdpMessage) => {
+    for (const fn of [...listeners]) fn(msg);
+  };
+  return { connection, requests, pages, emit, gone };
+}
+
+/** An agent's proxy socket, as the route hands it to the host. */
+export function fakeAgentClient() {
+  const client = {
+    sent: [] as unknown[],
+    closed: [] as Array<{ code: number; reason: string }>,
+    send(text: string) { client.sent.push(JSON.parse(text)); },
+    close(code: number, reason: string) { client.closed.push({ code, reason }); },
+  };
+  return client satisfies AgentClient;
 }
 
 export function fakeViewer(userAgent = 'Firefox') {

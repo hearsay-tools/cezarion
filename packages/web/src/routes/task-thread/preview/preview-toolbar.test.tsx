@@ -145,6 +145,40 @@ describe('PreviewToolbar', () => {
     expect(screen.getByRole('menuitem', { name: 'Type a URL instead' })).toBeTruthy()
   })
 
+  it("one server and the live agent's page make two entries: the switcher lists both (hearsay-tools/cezarion#784)", () => {
+    const onPickAgent = vi.fn()
+    const onPickServer = vi.fn()
+    render(<PreviewToolbar {...props({ agentLive: true, onPickAgent, onPickServer })} />)
+    openMenu(screen.getByRole('button', { name: /^Server: web :5173/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /Agent's page/ }))
+    expect(onPickAgent).toHaveBeenCalledTimes(1)
+    openMenu(screen.getByRole('button', { name: /^Server: web :5173/ }))
+    fireEvent.click(screen.getByRole('menuitem', { name: /web.*:5173/ }))
+    expect(onPickServer).toHaveBeenCalledWith(5173)
+  })
+
+  it("no switcher for one server while no agent drives the browser", () => {
+    render(<PreviewToolbar {...props({ agentLive: false, onPickAgent: vi.fn() })} />)
+    expect(screen.queryByRole('button', { name: /^Server/ })).toBeNull()
+  })
+
+  it("keeps the switcher while the pane shows the agent's page after the agent left, so the server stays one pick away", () => {
+    const onPickServer = vi.fn()
+    render(<PreviewToolbar {...props({ current: undefined, agentLive: false, agentShown: true, onPickAgent: vi.fn(), onPickServer })} />)
+    openMenu(screen.getByRole('button', { name: "Server: Agent's page" }))
+    expect(screen.getByRole('menuitem', { name: /Agent's page/ })).toBeTruthy()
+    fireEvent.click(screen.getByRole('menuitem', { name: /web.*:5173/ }))
+    expect(onPickServer).toHaveBeenCalledWith(5173)
+  })
+
+  it("names the agent's page in the switcher and the phone title while it is shown", () => {
+    render(<PreviewToolbar {...props({ current: undefined, agentLive: true, agentShown: true, onPickAgent: vi.fn() })} />)
+    expect(screen.getByRole('button', { name: "Server: Agent's page" })).toBeTruthy()
+    cleanup()
+    render(<PreviewToolbar {...props({ compact: true, current: undefined, agentLive: true, agentShown: true, onPickAgent: vi.fn() })} />)
+    expect(screen.getByText("Agent's page")).toBeTruthy()
+  })
+
   it('Stop is disabled with the reason on an adopted server', () => {
     const onStop = vi.fn()
     render(<PreviewToolbar {...props({ adopted: true, onStop })} />)

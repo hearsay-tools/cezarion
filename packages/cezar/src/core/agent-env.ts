@@ -346,6 +346,9 @@ function curateEnv(
     // automations in a project it does not belong to.
     'CEZ_COCKPIT_URL',
     'CEZ_PROJECT_ID',
+    // hearsay-tools/cezarion#784: the address of THIS session's preview browser. An inherited one
+    // would point a nested agent at its parent's browser.
+    'CEZ_PREVIEW_CDP_URL',
   ]);
 
   // Escape hatch: restore legacy full-inheritance (opt-in, off by default).

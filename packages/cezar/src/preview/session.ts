@@ -100,6 +100,8 @@ export class PreviewSession {
   private streaming?: { w: number; h: number } | undefined;
   private watchdog?: ReturnType<typeof setTimeout> | undefined;
   private silentStarts = 0;
+  /** Chromium refused the last start, so no stream runs and no watchdog will start one. */
+  private startRefused = false;
   /** The top-level frame, so a subframe's load steps do not count as page activity. */
   private mainFrameId?: string | undefined;
 
@@ -278,8 +280,10 @@ export class PreviewSession {
       await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: QUALITY, maxWidth: w, maxHeight: h, everyNthFrame: 1 });
     } catch (error) {
       this.streaming = undefined;
+      this.startRefused = true;
       throw error;
     }
+    this.startRefused = false;
     this.armWatchdog();
   }
 
@@ -293,6 +297,12 @@ export class PreviewSession {
     this.silentStarts = 0;
     // Mid-restart, the start arms its own watchdog, now with fresh tries.
     if (this.streaming) this.armWatchdog(ACTIVITY_FRAME_WAIT_MS);
+    // "Not attached to an active page": a page that has not committed its first document refuses a
+    // start (hearsay-tools/cezarion#784, the agent's browser over a pipe). Its next activity starts one.
+    else if (this.startRefused) {
+      this.startRefused = false;
+      void this.setViewport(this.viewport.w, this.viewport.h).catch(() => {});
+    }
   }
 
   private isMainFrame(frameId: string | undefined): boolean {

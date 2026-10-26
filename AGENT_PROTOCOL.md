@@ -1166,6 +1166,10 @@ harness forwards to the adapter all read it. `cezar_preview_serve` and
 and Claude, Codex and Cursor forward it explicitly because they start MCP servers
 from an environment allowlist. Harness row R35 lists the tools through every
 runner's native mock wire and the real bundled adapter, with the flag on and off.
+Under `CEZ_PREVIEW=1` the session environment also carries `CEZ_PREVIEW_CDP_URL`, the agent's
+address for the task's preview browser (hearsay-tools/cezarion#784, spec
+`2026-10-26-preview-agent-cdp`); its grant ends when the session's tool capability is revoked.
+Harness row R125 reads it in every runner's native process, with the flag on and off.
 The stop tool uses the same run-scoped session capability on fresh, continued and
 recovered launches. It accepts only a port and optional restart, stops only owned
 servers, and reuses owner approval only while command, cwd and path remain unchanged.
