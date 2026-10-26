@@ -34,6 +34,34 @@ describe('transcript facts fold', () => {
     expect(facts.pendingAsk).toBeUndefined();
   });
 
+  // hearsay-tools/cezarion#1808: the facts hold the ask as the event stored it. Only the questions are
+  // validated, so a context that is not a string, or an empty one, is carried as it came.
+  it.each([
+    ['carries a context', { context: '## Findings' }, { context: '## Findings' }],
+    ['has no context key without one', {}, {}],
+    ['carries an empty context as stored', { context: '' }, { context: '' }],
+    ['carries a context that is not a string as stored', { context: 42 }, { context: 42 }],
+  ])('a pending ask %s', (_name, fields, expected) => {
+    const facts = emptyFacts();
+    const asked = ev('ask.requested', { requestId: 'r', questions, ...fields });
+    expect(foldEvent(facts, asked)).toBe(true);
+    expect(facts.pendingAsk).toStrictEqual({ seq: asked.seq, requestId: 'r', questions, ...expected });
+  });
+
+  it('keeps no ask whose questions fail the schema, or that has no requestId, and a valid one replaces the last', () => {
+    const facts = emptyFacts();
+    expect(foldEvent(facts, ev('ask.requested', { requestId: 'r', questions: [{ header: 'Far too long a header', question: 'Which?' }] }))).toBe(false);
+    expect(foldEvent(facts, ev('ask.requested', { questions }))).toBe(false);
+    expect(facts.pendingAsk).toBeUndefined();
+    const first = ev('ask.requested', { requestId: 'a', context: 'old', questions });
+    foldEvent(facts, first);
+    foldEvent(facts, ev('worker-question-routed', { askSeq: first.seq, messageId: 'm' }));
+    const second = ev('ask.requested', { requestId: 'b', questions });
+    expect(foldEvent(facts, second)).toBe(true);
+    // The new ask starts clean: no routing and no context from the one it replaced.
+    expect(facts.pendingAsk).toStrictEqual({ seq: second.seq, requestId: 'b', questions });
+  });
+
   it('records routing and fallback for the current ask only', () => {
     const facts = emptyFacts();
     const asked = ask();
