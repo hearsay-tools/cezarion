@@ -1,0 +1,5807 @@
+{
+  "$comment": "Matches the rule found when it landed (hearsay-tools/cezarion#1802), keyed by file and the first line of the match so a moved line does not churn it. This list only shrinks: fix a match, then run AST_GREP_RULES_UPDATE=1 npm test -- packages/cezar/src/ast-grep-rules.test.ts. Rules: .ai/ast-grep/README.md.",
+  "sites": [
+    {
+      "file": "packages/cezar/src/artifacts/lifecycle.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/automations/automation-cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/automations/schedule-runner.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/automations/tool-adapter.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/ci-wait/contract.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/ci-wait/contract.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'process'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/ci-wait/controller.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/ci-wait/controller.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 15
+    },
+    {
+      "file": "packages/cezar/src/ci-wait/controller.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/ci-wait/controller.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 8
+    },
+    {
+      "file": "packages/cezar/src/ci-wait/controller.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/ci-wait/controller.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind:'pr'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/ci-wait/controller.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/ci-wait/controller.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/ci-wait/controller.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/ci-wait/scheduled-tasks.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/ci-tools.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/ci-tools.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/core/ci-tools.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/ci-tools.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/ci-tools.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/ci-tools.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/ci-tools.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/ci-tools.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/ci-tools.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/claude-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/claude-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 17
+    },
+    {
+      "file": "packages/cezar/src/core/claude-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/codex-permission-recovery.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/codex-provider-failure.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/codex-startup.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/codex-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/core/codex-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 13
+    },
+    {
+      "file": "packages/cezar/src/core/codex-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/core/conversation-batch-ack.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/conversation-delivery.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/conversation-questions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/cursor-print-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/cursor-print-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/core/cursor-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/core/cursor-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 8
+    },
+    {
+      "file": "packages/cezar/src/core/dry-run-backends.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'check'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'process'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 7
+    },
+    {
+      "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 15
+    },
+    {
+      "file": "packages/cezar/src/core/harness-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/harness-parity.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/harness-parity.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/omp-runner.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/omp-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/omp-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/core/omp-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/omp-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/opencode-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/opencode-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/opencode-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 11
+    },
+    {
+      "file": "packages/cezar/src/core/opencode-ui-mapper.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 19
+    },
+    {
+      "file": "packages/cezar/src/core/owned-attach-placement.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/owned-attach-placement.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/owned-input-delivery.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 7
+    },
+    {
+      "file": "packages/cezar/src/core/owned-input-failure.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/skill-resume-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/skill-resume-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/skill-resume-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/tool-display.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/ui-events.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/unread-input.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/workflow-autonomous-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/core/workflow-final-message-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/core/workflow-no-progress-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/capacity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'check'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/conversation-service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/conversation-service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/conversation-service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/conversation-service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/conversation-service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/conversation-service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/conversation-service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/conversation-service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/conversation-service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/delegation/conversation-service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cez-worker-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/conversations.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/conversations.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/destroy-observation.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/destruction-results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/destruction-results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/destruction-results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/delegation/destruction-results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/destruction-results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/destruction-results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/destruction-results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/delegation/destruction-results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/delegation/destruction-results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/destruction-results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cez-worker-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/explicit-comparison.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/input.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/input.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/input.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/delegation/park-notice.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/park-notice.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/park-notice.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'delivered'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/park-notice.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/park-notice.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/park-notice.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/park-notice.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'monitoring-line'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/policy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/policy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/policy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/policy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/policy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/provision-workflows.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 7
+    },
+    {
+      "file": "packages/cezar/src/delegation/provision-workflows.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'check'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/provision-workflows.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/provision-workflows.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 7
+    },
+    {
+      "file": "packages/cezar/src/delegation/provision-workflows.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/provision-workflows.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/delegation/questions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/delegation/results.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/delegation/routes.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/routes.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'check'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/routes.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/delegation/routes.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/delegation/routes.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/delegation/scratch-cleanup.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/delegation/scratch-cleanup.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/delegation/service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'check'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/delegation/service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/delegation/service.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/service.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/service.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/service.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/service.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/service.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cez-worker-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/delegation/wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/workspace.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/workspace.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/delegation/workspace.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/archive-on-merge.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/archive-on-merge.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/archive-on-merge.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/archive-on-merge.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/archive-on-merge.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/archive-on-merge.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/archive-on-merge.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/archive-on-merge.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/ci-wait-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/ci-wait-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'delivered'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/ci-wait-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/ci-wait-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/ci-wait-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/client-request.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/completion-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 17
+    },
+    {
+      "file": "packages/cezar/src/runs/completion-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/runs/completion-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/delegation-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/delegation-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/delegation-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/delegation-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/delegation-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/delegation-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/delegation-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/delegation-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/event-history.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source:'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/event-history.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/event-history.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/runs/legacy-pending-ask.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/runs/legacy-pending-ask.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/legacy-pending-ask.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/legacy-pending-ask.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/legacy-pending-ask.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/legacy-pending-ask.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'ask-line'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/legacy-pending-ask.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/raw-record.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/raw-record.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/runs/raw-record.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/retention-enforce.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/retention-rematerialize.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/retention-rematerialize.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/run-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/run-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/run-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/runs/run-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/runs/run-index.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/run-index.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/run-index.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/run-index.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/run-row.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/run-row.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'delivered'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/run-row.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/run-row.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/run-row.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/run-row.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/run-row.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/run-row.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/run-row.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/run-row.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/run-search.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/session-transport.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/session-transport.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-claims.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/store-claims.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/store-claims.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-claims.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-claims.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/store-claims.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/store-claims.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/runs/store-claims.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'monitoring-line'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/runs/store-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/store-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/runs/store-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 7
+    },
+    {
+      "file": "packages/cezar/src/runs/store-database.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'ask-line'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-history-compression.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-history-compression.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/runs/store-history-compression.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-history-compression.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-history-compression.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-import.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-import.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-import.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 10
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-live-set.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'monitoring-line' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-run-window.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-run-window.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store-run-window.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/runs/store-run-window.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store-transcript-facts.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/runs/store-transcript-facts.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 12
+    },
+    {
+      "file": "packages/cezar/src/runs/store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 12
+    },
+    {
+      "file": "packages/cezar/src/runs/store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/runs/store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 8
+    },
+    {
+      "file": "packages/cezar/src/runs/store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/transcript-facts.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/ui-event-sink.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/ui-event-sink.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/ui-event-sink.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 10
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 11
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'cancelled'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'delivered'",
+      "count": 13
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 12
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 13
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 10
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 8
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 8
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cez-worker-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait_for_ci'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'completion'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'completion' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/waits-store.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'monitoring-line'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/webhook.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/webhook.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/webhook.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/webhook.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/webhook.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/runs/webhook.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/webhook.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 12
+    },
+    {
+      "file": "packages/cezar/src/runs/webhook.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/webhook.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/webhook.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 18
+    },
+    {
+      "file": "packages/cezar/src/runs/webhook.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 11
+    },
+    {
+      "file": "packages/cezar/src/runs/webhook.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/runs/webhook.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/runs/webhook.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server-install/platforms/ubuntu-vps.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server-install/state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/server-install/state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server-install/state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server-install/state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'skipped'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server-install/types.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/server-install/types.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'skipped'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/archive-on-merge-boot.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/archive-on-merge.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/archive-on-merge.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/attachments-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/server/auto-resume-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/automations-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/server/automations-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/completion-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/completion-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/finishability.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/server/finishability.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/finishability.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/server/forge/github-coalescing.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/server/forge/github.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 7
+    },
+    {
+      "file": "packages/cezar/src/server/github-item-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/live-routes.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/open-in-cli-resume.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/open-in-cli-resume.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/open-in-cli-resume.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/project-context-repo-handle.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/server/project-context.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/server/projects-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/provider-action-gate.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 8
+    },
+    {
+      "file": "packages/cezar/src/server/provider-action-gate.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 7
+    },
+    {
+      "file": "packages/cezar/src/server/provider-action-gate.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/server/provider-action-gating.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/server/provider-action-gating.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/server/provider-action-gating.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/server/provider-action-gating.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/provider-action-gating.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/server/provider-action-gating.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/provider-auth-runtime.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 9
+    },
+    {
+      "file": "packages/cezar/src/server/providers-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/queued-messages.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/queued-messages.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/ref-status-invalidation.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/repo-branches-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/repo-branches-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/server/repo-branches-witness.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/repo-pull.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/request-validation.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/route-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/run-ownership-controls.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/run-ownership-controls.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/server/run-ownership-controls.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/run-ownership-controls.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/server/run-relationships.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/run-relationships.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/server/run-summaries-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/run-summaries-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/runs-index-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/server/runs-index-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/server/runs-index-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/server/runs-index-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/server/runs-index-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/runs-index-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/server/runs-index-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/runs-index-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/server/runs-index-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/server/runs-index-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/task-webhook-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/task-webhook-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/voice-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/workspace-events.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/worktrees-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/worktrees-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/server/worktrees-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 10
+    },
+    {
+      "file": "packages/cezar/src/server/worktrees-api.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/session-context.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'skipped'",
+      "count": 20
+    },
+    {
+      "file": "packages/cezar/src/skills.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/task-cli/cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/task-cli/cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 7
+    },
+    {
+      "file": "packages/cezar/src/task-cli/cli.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'monitoring-line' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/projections.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/projections.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 11
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 23
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cez-worker-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/task-cli/watch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'monitoring-line'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/voice/decide.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/voice/decide.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/voice/decide.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/voice/fake-engine.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/voice/pending-ask.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/voice/pending-ask.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/voice/pending-ask.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/voice/pending-ask.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/voice/pending-ask.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/voice/replay-set.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/voice/replay-set.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/agent-profile-wiring.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/agent-tmpdir.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/agent-tmpdir.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/agent-tmpdir.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/workflows/auto-resume.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/auto-resume.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/auto-resume.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/auto-resume.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/auto-resume.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/workflows/auto-resume.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/auto-resume.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/workflows/auto-resume.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/automations-prompt.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/autonomous-nudge-guards.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/autonomous-nudge-guards.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/autonomous-nudge-guards.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/autonomous-nudge-guards.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/autonomous-nudge-guards.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/autonomous-nudge-guards.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/autonomous-nudge-guards.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/autonomous-nudge-guards.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/autonomous-nudge-guards.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'no-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-conflict-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-conflict-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-conflict-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-failure-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-failure-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'delivered'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-failure-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-failure-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-failure-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-refusal.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-refusal.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-refusal.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-registration.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 7
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-registration.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-registration.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-rerun-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase:'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-retry-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind:'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait-retry-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase:'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 8
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/ci-wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cez-worker-wait'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/codex-startup-cancel.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/codex-startup-cancel.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/codex-startup-cancel.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/completion-gate-entry.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/completion-gate-entry.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/completion-gate-entry.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/completion-gate-entry.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/completion-gate-entry.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/completion-gate-entry.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/completion-options-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/continuation-tools.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/continuation-tools.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/continuation-tools.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/continuation-tools.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/continue-unarchive.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/workflows/continue-unarchive.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/workflows/continue-unarchive.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/continue-unarchive.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/continue-unarchive.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/conversation-batch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/conversation-batch.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/conversation-resume-wait.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/cursor-bootstrap-continue.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/cursor-bootstrap-continue.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/cursor-bootstrap-continue.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/dead-owner-claims.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/delegation-integration.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/delegation-reconcile.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/delegation-reconcile.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/delegation-reconcile.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/delegation-reconcile.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/delegation-reconcile.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/delegation-reconcile.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/delegation-reconcile.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/delegation-reconcile.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/delegation-reconcile.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/execution-account.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/execution-account.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/execution-account.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/execution-account.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/execution-account.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/fixture-cleanup.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/fixture-cleanup.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/fixture-cleanup.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/human-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/workflows/human-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/human-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'delivered'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/human-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/human-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/human-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/human-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'budget'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/human-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/human-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'monitoring-line'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/immediate-delivery.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/immediate-delivery.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'ask-line'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/maintenance-claims.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/monitoring-channel-order.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/monitoring-turn.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/monitoring-turn.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/monitoring-turn.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'no-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/pasted-attachments.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/pasted-attachments.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/workflows/pasted-attachments.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/permissions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/permissions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/permissions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/pr-merge-wait-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/pr-merge-wait-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/pr-merge-wait-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/prelaunch-cancel.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/prelaunch-cancel.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/prelaunch-cancel.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/prelaunch-cancel.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/process-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'process'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/recover-autonomous.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/recover-autonomous.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/recover-followups.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/recover-session-failure.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/recover-session-failure.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/recovery-order.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/recovery-order.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/resume-diagnostics-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/resume-diagnostics-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/run-active-run-factory.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/run-active-run-factory.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/run-active-run-factory.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/run-preview.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/run-preview.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/run-settlement.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/run-settlement.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/run-settlement.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/run-settlement.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/run-settlement.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 11
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'check'",
+      "count": 15
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human' as const",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open' as const",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 30
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 9
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 7
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 8
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 9
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'ask-line' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'monitoring-line'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'no-wait' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'schedule-wakeup'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/scoped-recovery.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/scoped-recovery.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/session-context-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/skill-resume-continuation.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/skill-resume-continuation.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/skill-resume-continuation.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/skill-resume-continuation.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/stopped-composer.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/stopped-composer.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/stopped-composer.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/stopped-composer.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/stopped-composer.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/turn-end.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'budget'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/workflows/turn-end.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'completion'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/turn-end.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'no-wait'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/unread-liveness.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/usage-limit-worker-continue.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/usage-limit-worker-continue.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 8
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 12
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'process'",
+      "count": 8
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 22
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 17
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'cancelled'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'delivered'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 31
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 10
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 24
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 10
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'budget'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 9
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'completion'",
+      "count": 11
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'monitoring-line'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'no-wait'",
+      "count": 14
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-wake.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-wake.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-wake.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 7
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-wake.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-wake.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-wake.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits-wake.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'budget'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 10
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'process'",
+      "count": 7
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 7
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 8
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 11
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 8
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cez-worker-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask'",
+      "count": 4
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'completion'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'monitoring-line'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'no-wait'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'schedule-wakeup'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-destroy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-destroy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-destroy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-destroy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-destroy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-destroy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-destroy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-destroy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-destroy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-destroy.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cez-worker-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-inbox-liveness.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-location-evidence.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-location-evidence.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-parent-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-parent-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-park-notice.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'monitoring-line'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-questions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'no-wait'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-reboot-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-reboot-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-reboot-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-reboot-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-restart-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-restart-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-restart-parity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-capacity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-capacity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-capacity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-capacity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-capacity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-capacity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-capacity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-capacity.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-continuation.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-continuation.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-continuation.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-conversations.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-conversations.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-durability.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-durability.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-durability.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'delivered'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-durability.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-durability.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 5
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-durability.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-durability.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-durability.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait-durability.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-wait.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 9
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 10
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 13
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cez-worker-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/worker-waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/workspace-semaphore.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/cezar/src/workflows/workspace-semaphore.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/workspace-semaphore.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 6
+    },
+    {
+      "file": "packages/cezar/src/workflows/worktree-setup-run.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/worktree-setup.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/cezar/src/worktree-setup.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 5
+    },
+    {
+      "file": "packages/contract/src/ask-schema.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/ask-schema.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/ask-schema.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/ask-schema.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 9
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 2
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr' as const",
+      "count": 3
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'process'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'process' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 3
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'delivered' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 3
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open' as const",
+      "count": 5
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 6
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved' as const",
+      "count": 4
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 3
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 5
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 4
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 3
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 3
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 9
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 52
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 3
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait' as const",
+      "count": 3
+    },
+    {
+      "file": "packages/contract/src/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'completion'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/github.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/session-transport.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/session-transport.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/test-factories.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/contract/src/test-factories.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/test-factories.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/test-factories.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/test-factories.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/test-factories.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/contract/src/test-factories.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'monitoring-line'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 11
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 21
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'process'",
+      "count": 12
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 9
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 20
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'delivered'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 7
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 11
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 7
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 9
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'budget'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cez-worker-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask'",
+      "count": 2
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 4
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'completion'",
+      "count": 7
+    },
+    {
+      "file": "packages/contract/src/waits.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'no-wait'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/api/client.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/api/events.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/api/events.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/api/events.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/api/events.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/api/events.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/api/github-pages.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open' as const",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 6
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 16
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait' as const",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/lib/attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'completion'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/git-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/git-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/git-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/lib/git-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/github-task.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/lib/global-tasks.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/lib/global-tasks.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/global-tasks.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/global-tasks.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/notifications.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/notifications.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/notifications.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/notifications.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/notifications.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/lib/notifications.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/notifications.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/notifications.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 5
+    },
+    {
+      "file": "packages/web/src/lib/notifications.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/project-signal.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/project-signal.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/project-signal.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/project-signal.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 6
+    },
+    {
+      "file": "packages/web/src/lib/project-signal.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/project-signal.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/project-signal.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 8
+    },
+    {
+      "file": "packages/web/src/lib/project-signal.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 10
+    },
+    {
+      "file": "packages/web/src/lib/read-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 5
+    },
+    {
+      "file": "packages/web/src/lib/read-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/read-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 7
+    },
+    {
+      "file": "packages/web/src/lib/read-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/lib/read-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent' as const",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cez-worker-wait' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/request-wait-attention.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/run-row-meta.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'process' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/run-row-meta.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/run-row-meta.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/run-row-meta.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/lib/run-row-meta.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/run-row-meta.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/lib/skills.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'cezar'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/task-groups.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/task-groups.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 21
+    },
+    {
+      "file": "packages/web/src/lib/task-groups.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done' as const",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/task-groups.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 6
+    },
+    {
+      "file": "packages/web/src/lib/task-groups.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 14
+    },
+    {
+      "file": "packages/web/src/lib/task-groups.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/lib/task-groups.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 19
+    },
+    {
+      "file": "packages/web/src/lib/task-groups.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 30
+    },
+    {
+      "file": "packages/web/src/lib/task-origin.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/lib/task-origin.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/lib/task-origin.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 6
+    },
+    {
+      "file": "packages/web/src/lib/task-origin.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/task-origin.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 5
+    },
+    {
+      "file": "packages/web/src/lib/task-origin.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/voice/fixture.testkit.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/voice/resolve-open.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/lib/voice/resolve-open.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/voice/resolve-open.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed' as const",
+      "count": 8
+    },
+    {
+      "file": "packages/web/src/lib/voice/resolve-open.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/voice/status-map.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/voice/status-map.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/voice/status-map.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/voice/status-map.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 5
+    },
+    {
+      "file": "packages/web/src/lib/voice/status-map.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/lib/voice/status-map.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/voice/status-map.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/lib/voice/status-map.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/lib/voice/status-map.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 5
+    },
+    {
+      "file": "packages/web/src/routes/github/github-sidebar-model.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/active-provider.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/active-provider.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/active-provider.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/ask-answer.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/ask-answer.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/conversation-presentation.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/conversation-presentation.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/conversation-presentation.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'delivered'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'cancelled'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'queued'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-actions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-reconcile.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 7
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-reconcile.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'check'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-reconcile.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-reconcile.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-reconcile.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-status.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'pr'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-status.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-status.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-status.test.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'resolved'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-status.test.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/run-status.test.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_wait'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/subagent-dock.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/thread-groups.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/thread-permissions.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/thread-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 4
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/thread-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/thread-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'failed'",
+      "count": 5
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/thread-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'pending'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/thread-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 3
+    },
+    {
+      "file": "packages/web/src/routes/task-thread/thread-state.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/test/poll.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/test/poll.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'review'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/test/poll.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'running'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/test/poll.test.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'waiting'",
+      "count": 1
+    }
+  ]
+}

@@ -1,0 +1,69 @@
+id: test-enum-literal
+valid:
+  # The constant, a factory, and an object with no contract field.
+  - 'const x = { status: RUN_STATUS.done }'
+  - 'const x = { kind: WAIT_KIND.timer, phase: WAIT_PHASE.open }'
+  - "const x = { via: WAIT_VIA['monitoring-line'] }"
+  - 'const x = makeRunRecord({ status: RUN_STATUS.running })'
+  - "const x = { state: 'done', result: 'open' }"
+  # A key of the contract with a value of another enum or of none: the sets are per key.
+  - "const x = { status: 'parked' }"
+  - "const x = { kind: 'done' }"
+  - "const x = { phase: 'running' }"
+  - "const x = { source: 'lifecycle' }"
+  - "const x = { via: 'open' }"
+  # Not a literal property: a comparison, a subscript, a template and a computed value.
+  - "expect(run.status).toBe('done')"
+  - "const x = run['status']"
+  - 'const x = { status: `done` }'
+  - 'const x = { status: pick(run) }'
+  - "const { status = 'done' } = run"
+  # An object that only shares the word says so.
+  - |
+    // ast-grep-ignore: test-enum-literal
+    const pr = { status: 'open' }
+invalid:
+  # status
+  - "const x = { status: 'queued' }"
+  - "const x = { status: 'running' }"
+  - "const x = { status: 'waiting' }"
+  - "const x = { status: 'review' }"
+  - "const x = { status: 'done' }"
+  - "const x = { status: 'failed' }"
+  - "const x = { status: 'cancelled' }"
+  - "const x = { status: 'pending' }"
+  - "const x = { status: 'skipped' }"
+  # kind
+  - "const x = { kind: 'pr' }"
+  - "const x = { kind: 'timer' }"
+  - "const x = { kind: 'human' }"
+  - "const x = { kind: 'worker' }"
+  - "const x = { kind: 'process' }"
+  - "const x = { kind: 'agent' }"
+  - "const x = { kind: 'check' }"
+  # phase
+  - "const x = { phase: 'open' }"
+  - "const x = { phase: 'resolved' }"
+  - "const x = { phase: 'delivered' }"
+  - "const x = { phase: 'cancelled' }"
+  # via
+  - "const x = { via: 'cezar_wait' }"
+  - "const x = { via: 'cezar_wait_for_ci' }"
+  - "const x = { via: 'cezar_ask' }"
+  - "const x = { via: 'monitoring-line' }"
+  - "const x = { via: 'schedule-wakeup' }"
+  - "const x = { via: 'ask-line' }"
+  - "const x = { via: 'native-ask' }"
+  - "const x = { via: 'no-wait' }"
+  - "const x = { via: 'budget' }"
+  - "const x = { via: 'cez-worker-wait' }"
+  - "const x = { via: 'completion' }"
+  # source
+  - "const x = { source: 'agent' }"
+  - "const x = { source: 'cezar' }"
+  # A quoted key, a double-quoted value, `as const`, and a property in a nested call.
+  - "const x = { 'status': 'running' }"
+  - 'const x = { "phase": "open" }'
+  - "const x = { status: 'done' as const }"
+  - "makeRun({ steps: [{ id: 's', kind: 'agent', status: 'running' }] })"
+  - "expect(entry).toMatchObject({ kind: 'timer', phase: 'open' })"
