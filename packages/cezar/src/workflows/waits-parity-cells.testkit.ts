@@ -315,7 +315,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
 
@@ -2421,6 +2421,33 @@ function workersCells(runners: RunnerId[]): void {
       commits.expectEveryCommit(w.id, row => row.automaticWakes !== wakes + 1 || owed(row), 'the reply\'s charge and its delivery');
       commits.expectEveryCommit(w.id, row => !row.lastWaits?.some(wait => wait.id === fallback && wait.phase === 'delivered') || owed(row), 'the answered question and its reply');
       commits.expectEveryCommit(w.id, row => !reply(row)?.consumedAt || !row.waits?.some(wait => wait.id === fallback), 'the read reply and its question');
+    });
+
+    // hearsay-tools/cezarion#1805: the reply opens a continuation, and the opening turn's
+    // acknowledgement reads the reply and answers the worker's question in one commit, so a reopened
+    // store never reads the reply consumed with the question still open.
+    it(`${runner} U24r a parent's reply to a worker question whose session closed opens a continuation that answers it in one commit`, async () => {
+      nativeWire(runner);
+      const { p, service, callerFor } = await delegatingParent({ task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner, permissions: ['spawn', 'wait', 'steer'] });
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+      const w = await worker(p.id, toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner);
+      manager.enqueueOwnedRun(w.id);
+      const routed = () => store.readEvents(w.id).find(event => event.type === 'worker-question-routed');
+      await until(() => routed() !== undefined && humanOpen(w.id)[0]?.askSeq !== undefined && store.getRun(w.id)?.status === 'waiting');
+      const [question] = humanOpen(w.id);
+      engine().active.get(w.id)!.session.end();
+      await until(() => !manager.isActive(w.id) && store.getRun(w.id)?.status === 'waiting');
+      expect(humanOpen(w.id).map(wait => wait.id)).toEqual([question!.id]);
+      const commits = recordCommits(join(root, '.ai/cezar'));
+      const replyId = randomUUID();
+      await service.send(callerFor(p.id), { id: replyId, recipientRunId: w.id, kind: 'reply', requestId: String(routed()!.messageId), text: 'Choice: Parser', timeoutSeconds: 600 });
+      await until(() => store.readEvents(w.id).some(event => event.type === 'human-input-delivered' && event.source === 'parent'));
+      await until(() => !!store.getRun(w.id)?.agentInputs?.find(input => input.id === replyId)?.consumedAt && humanOpen(w.id).every(wait => wait.id !== question!.id));
+      expect(settled(w.id, question!.id)?.phase).toBe('delivered');
+      const reply = (row: RunRecord) => row.agentInputs?.find(input => input.id === replyId);
+      commits.expectEveryCommit(w.id, row => !reply(row)?.consumedAt || !row.waits?.some(wait => wait.id === question!.id), 'the read reply and its question');
+      commits.expectEveryCommit(w.id, row => !row.lastWaits?.some(wait => wait.id === question!.id && wait.phase === 'delivered') || !!reply(row)?.deliveredAt ||
+        row.continuationMessage?.agentInputId === replyId, 'the answered question and its reply');
     });
 
     // hearsay-tools/cezarion#1301: an automatic message to a worker supersedes Cezar's pending fallback

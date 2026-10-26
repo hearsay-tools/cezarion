@@ -7435,38 +7435,35 @@ export class RunManager {
    */
   private acknowledgeOpeningTurn(runId: string, state: ActiveRun, answer: OpeningAnswer): boolean {
     if (state.cancelled) return true;
-    if (state.openingAgentInputId && state.session?.open) {
-      if (!this.acknowledgeOpeningInput(runId, state, state.session, state.openingAgentInputId)) return false;
-    }
-    if (answer.askSeq !== undefined && state.session?.open) {
-      this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: answer.askSeq, ...(answer.parentAnswer ? { source: 'parent' } : {}) });
-      this.settleHumanWaits(runId, answer.waits);
+    const session = state.session?.open ? state.session : undefined;
+    const opening = session ? state.openingAgentInputId : undefined;
+    const askSeq = session ? answer.askSeq : undefined;
+    // One commit (hearsay-tools/cezarion#1805): a store reopened after a crash never reads the
+    // opening input handled while the question it answers is still open.
+    const outcomes: RunOutcome[] = [
+      ...(opening ? [{ kind: 'opening-handled' as const, inputId: opening, at: new Date().toISOString() }] : []),
+      ...(askSeq !== undefined ? [{ kind: 'answered' as const, waitIds: answer.waits }] : []),
+    ];
+    // Only the opening input's checkpoint stops the turn end; the answer and the cleared
+    // continuation are best effort, as they were before.
+    try { this.store.commitOutcome(runId, outcomes, { patch: { continuationMessage: undefined } }, { bestEffort: !opening }); }
+    catch (error) { this.failOpeningInput(runId, state, session!, error); return false; }
+    if (opening) { state.openingAgentInputId = undefined; this.reconcileWorkerWaits(); }
+    if (askSeq !== undefined) {
+      this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq, ...(answer.parentAnswer ? { source: 'parent' } : {}) });
       answer.askSeq = undefined;
       state.openingAnswerAskSeq = undefined;
     }
-    this.store.updateRun(runId, { continuationMessage: undefined });
-    this.store.flush();
     return true;
   }
 
-  /** Record the opening agent input as delivered and read. A failed checkpoint records an agent
-   *  input error, interrupts the session and returns false. */
-  private acknowledgeOpeningInput(runId: string, state: ActiveRun, session: AgentSession, id: string): boolean {
-    const deliveredAt = new Date().toISOString();
-    try {
-      // The successful opening turn handled its instruction: delivered and read (#505).
-      this.store.commitOutcome(runId, { kind: 'opening-handled', inputId: id, at: deliveredAt });
-    } catch (error) {
-      state.agentInputError = `agent input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
-      try { session.interrupt(); } finally {
-        try { this.store.appendEvent(runId, { type: 'error', message: state.agentInputError }); }
-        catch { console.error(`[cez] ${state.agentInputError}`); }
-      }
-      return false;
+  /** The opening input's checkpoint failed: record an agent input error and interrupt the session. */
+  private failOpeningInput(runId: string, state: ActiveRun, session: AgentSession, error: unknown): void {
+    state.agentInputError = `agent input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
+    try { session.interrupt(); } finally {
+      try { this.store.appendEvent(runId, { type: 'error', message: state.agentInputError }); }
+      catch { console.error(`[cez] ${state.agentInputError}`); }
     }
-    state.openingAgentInputId = undefined;
-    this.reconcileWorkerWaits();
-    return true;
   }
 
   /**
