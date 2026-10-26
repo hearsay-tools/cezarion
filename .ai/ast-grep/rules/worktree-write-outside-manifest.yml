@@ -1,0 +1,41 @@
+id: worktree-write-outside-manifest
+language: typescript
+severity: warning
+message: >-
+  Write into a task worktree through withWorktreeFiles (packages/cezar/src/worktree-manifest.ts),
+  which records each path cezar wrote and never replaces or removes one the agent changed
+  (hearsay-tools/cezarion#1814). A module that writes there imports no file-changing node:fs function.
+# The modules that write into a task worktree. A new one goes here, and through the manifest.
+files:
+  - packages/cezar/src/skills-provision.ts
+  - packages/cezar/src/agent-config/seed.ts
+utils:
+  fs-source:
+    regex: "^['\"](node:)?fs(/promises)?['\"]$"
+  fs-import:
+    kind: import_statement
+    has: { field: source, matches: fs-source }
+# A call into a helper module that writes (skills-remote.ts's `materializeSkillDir` and
+# `excludeFromGit`) is not matched: the rule sees imports, not what a callee does.
+# `excludeFromGit` writes the shared `info/exclude`, outside the worktree.
+rule:
+  any:
+    # `import { writeFile } from 'node:fs/promises'`, aliased or not, and `import { promises }`.
+    - all:
+        - kind: import_specifier
+        - has:
+            field: name
+            regex: '^(writeFile|appendFile|copyFile|cp|rename|rm|rmdir|unlink|symlink|link|mkdir|mkdtemp|truncate|chmod|chown|lchown|utimes|lutimes|open|write|writev|createWriteStream|promises)(Sync)?$'
+        - inside: { matches: fs-import, stopBy: end }
+    # `import * as fs from 'node:fs'` and `import fs from 'node:fs'` reach every function.
+    - all:
+        - kind: namespace_import
+        - inside: { matches: fs-import, stopBy: end }
+    - all:
+        - kind: identifier
+        - inside: { kind: import_clause, inside: { matches: fs-import } }
+    # `await import('node:fs/promises')`.
+    - all:
+        - kind: call_expression
+        - has: { field: function, kind: import }
+        - has: { field: arguments, has: { kind: string, matches: fs-source } }
