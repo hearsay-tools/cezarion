@@ -680,6 +680,28 @@ export function buildClaudeArgs(
   if (features.replayUserMessages) args.push('--replay-user-messages');
   // Every hook's lifecycle, so the transcript can show what hooks told the agent (#961).
   if (features.includeHookEvents) args.push('--include-hook-events');
+  args.push(...claudePermissionArgs(env));
+  const settingSources = env.CEZ_CLAUDE_SETTING_SOURCES;
+  if (settingSources) {
+    args.push('--setting-sources', settingSources);
+  }
+  if (spec.systemPrompt) {
+    args.push('--append-system-prompt', spec.systemPrompt);
+  }
+  args.push(...claudeSessionArgs(spec), ...claudeToolArgs(spec));
+  if (spec.model) {
+    args.push('--model', spec.model);
+  }
+  const effort = parseEffort(spec.effort);
+  if (effort) args.push('--effort', effort);
+  for (const dir of spec.additionalDirectories ?? []) {
+    args.push('--add-dir', dir);
+  }
+  return args;
+}
+
+function claudePermissionArgs(env: NodeJS.ProcessEnv): string[] {
+  const args: string[] = [];
   const permissionMode = env.CEZ_CLAUDE_PERMISSION_MODE;
   if (permissionMode === 'bypass') {
     args.push('--dangerously-skip-permissions');
@@ -691,13 +713,11 @@ export function buildClaudeArgs(
       env.CEZ_APPROVAL_GATE === '1' ? 'acceptEdits' : 'dontAsk',
     );
   }
-  const settingSources = env.CEZ_CLAUDE_SETTING_SOURCES;
-  if (settingSources) {
-    args.push('--setting-sources', settingSources);
-  }
-  if (spec.systemPrompt) {
-    args.push('--append-system-prompt', spec.systemPrompt);
-  }
+  return args;
+}
+
+function claudeSessionArgs(spec: AgentRunSpec): string[] {
+  const args: string[] = [];
   // Pin the session so the user can `claude --resume <sessionId>` in the repo
   // to take over interactively after a run. With `resume` we reopen the
   // existing on-disk conversation instead.
@@ -708,6 +728,11 @@ export function buildClaudeArgs(
       args.push('--session-id', spec.sessionId);
     }
   }
+  return args;
+}
+
+function claudeToolArgs(spec: AgentRunSpec): string[] {
+  const args: string[] = [];
   // Claude 2.1.260 --help: per-process deny rules; Agent is current, Task
   // remains the name in older harnesses/recorded fixtures. Workflow runs a
   // script that starts subagents; a free 2.1.303 probe (`/reload-plugins` as
@@ -727,14 +752,6 @@ export function buildClaudeArgs(
   }
   if (allowed.length > 0) {
     args.push('--allowedTools', allowed.join(','));
-  }
-  if (spec.model) {
-    args.push('--model', spec.model);
-  }
-  const effort = parseEffort(spec.effort);
-  if (effort) args.push('--effort', effort);
-  for (const dir of spec.additionalDirectories ?? []) {
-    args.push('--add-dir', dir);
   }
   return args;
 }
