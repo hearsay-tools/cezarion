@@ -12,6 +12,9 @@ import { fixtureProcessGuard } from './preview.testkit.ts';
 
 const FIXTURE = fileURLToPath(new URL('./__fixtures__/fake-dev-server.mjs', import.meta.url));
 
+// The guard reads `ps`, and the cases start POSIX process groups and `/bin/sh`: Windows has none of them.
+const describePosix = describe.skipIf(process.platform === 'win32');
+
 const strays: ChildProcess[] = [];
 
 afterEach(() => {
@@ -32,7 +35,7 @@ const exited = (child: ChildProcess) => new Promise<{ code: number | null; signa
   else child.once('exit', (code, signal) => resolve({ code, signal }));
 });
 
-describe('fixtureProcessGuard', () => {
+describePosix('fixtureProcessGuard', () => {
   it('passes when nothing carries its tag', async () => {
     await fixtureProcessGuard().assertNoneLeft();
   });
@@ -65,7 +68,7 @@ describe('fixtureProcessGuard', () => {
   });
 });
 
-describe('fake-dev-server --lifetime', () => {
+describePosix('fake-dev-server --lifetime', () => {
   it('ends the process by itself, so a killed test run strands it for minutes at most', async () => {
     const child = launch(['--delay', '600000', '--lifetime', '300']);
     expect(await exited(child)).toEqual({ code: 0, signal: null });
