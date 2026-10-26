@@ -16,6 +16,9 @@ import {
   watchProviderRuntimeAuthFailures,
 } from './provider-auth-runtime.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 const CONNECTED_OUTPUT: Record<ProviderId, string> = {
   claude: '{"loggedIn":true}',
   cursor: '{"isAuthenticated":true}',
@@ -91,7 +94,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
   /** The self-check now runs behind the async account resolution, so it is posted, not synchronous
    *  with `appendEvent` — wait for the call, then for its answer. */
   const verified = async (verifying: ReturnType<typeof vi.spyOn>) => {
-    await vi.waitFor(() => expect(verifying).toHaveBeenCalled());
+    await vi.waitFor(() => expect(verifying).toHaveBeenCalled(), { timeout: HANG_GUARD_MS });
     await verifying.mock.results[0]!.value;
   };
 
@@ -521,7 +524,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
         message: 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
       });
       // The watcher resolves the account (and gets nothing) before deciding to skip the probe.
-      await vi.waitFor(() => expect(workAccountResolver).toHaveBeenCalled());
+      await vi.waitFor(() => expect(workAccountResolver).toHaveBeenCalled(), { timeout: HANG_GUARD_MS });
       await workAccountResolver.mock.results[0]!.value;
 
       // No resolvable account, no probe, no recovery: the incident stands for Try again to clear.
@@ -626,7 +629,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
         stepId: 'implement',
         message: 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
       });
-      await vi.waitFor(() => expect(gatingResolver).toHaveBeenCalled());
+      await vi.waitFor(() => expect(gatingResolver).toHaveBeenCalled(), { timeout: HANG_GUARD_MS });
       // The newer failure advances the incident while A's resolution is still pending.
       store.appendEvent(run.id, {
         type: 'error',
@@ -634,7 +637,7 @@ describe('watchProviderRuntimeAuthFailures', () => {
         message: 'Failed to authenticate. API Error: 401 OAuth access token has been revoked.',
       });
       releaseResolver({ kind: 'profile', id: 'work', configDir: '/work' });
-      await vi.waitFor(() => expect(verifying).toHaveBeenCalled());
+      await vi.waitFor(() => expect(verifying).toHaveBeenCalled(), { timeout: HANG_GUARD_MS });
       await verifying.mock.results[0]!.value;
 
       // The stalled check stood down: A's CLI was never asked, and the incident stands.

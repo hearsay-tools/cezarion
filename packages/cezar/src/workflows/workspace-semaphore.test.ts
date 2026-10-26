@@ -163,6 +163,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     // Third run, third project slot — but the WORKSPACE cap is 2, so it must
     // queue even though manager A alone only holds one slot.
     const third = a.manager.startRun(INSTANT, { task: 'third — must queue' });
+    // bound: negative window. A pump that wrongly admitted the run would start it within a few event-loop turns of startRun; 300 ms is far longer.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(a.store.getRun(third.id)?.status).toBe('queued');
 
@@ -198,6 +199,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     );
 
     const queued = b.manager.startRun(INSTANT, { task: 'queued in the OTHER project' });
+    // bound: negative window, as above: an admission would come within a few event-loop turns of startRun.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(b.store.getRun(queued.id)?.status).toBe('queued');
 
@@ -222,9 +224,11 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     // B queues first, then A — the freed slot must go to B despite the slot
     // being freed by (and the pump originating in) A.
     const older = b.manager.startRun(INSTANT, { task: 'queued first, other project' });
+    // bound: not a wait on the product. `release()` orders managers by the epoch ms of their oldest queued run, so 50 ms keeps B's timestamp apart from A's.
     await new Promise((resolve) => setTimeout(resolve, 50));
     const newerGate = slotHolder(roots);
     const newer = a.manager.startRun(newerGate.workflow, { task: 'queued second, same project' });
+    // bound: negative window, as above: an admission would come within a few event-loop turns of startRun.
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(b.store.getRun(older.id)?.status).toBe('queued');
     expect(a.store.getRun(newer.id)?.status).toBe('queued');
@@ -306,6 +310,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     const a1 = a.manager.startRun(holder.workflow, { task: 'A slot 1' });
     const a2 = a.manager.startRun(holder.workflow, { task: 'A slot 2 — must queue on A per-project cap' });
     await waitFor(() => a.store.getRun(a1.id)?.status === 'running', 'A first run to run');
+    // bound: negative window, as above: an admission would come within a few event-loop turns of startRun.
     await new Promise((resolve) => setTimeout(resolve, 300));
     expect(a.store.getRun(a2.id)?.status).toBe('queued'); // blocked by A's own cap, not the workspace
 
@@ -363,6 +368,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
       () => runs.slice(0, 4).every((run) => store.getRun(run.id)?.status === 'running'),
       'four runs to fill the owning project cap',
     );
+    // bound: negative window. A fifth admission would come within a few event-loop turns of the fourth run starting; 300 ms is far longer.
     await new Promise((resolve) => setTimeout(resolve, 300));
 
     expect(runs.slice(0, 4).every((run) => store.getRun(run.id)?.status === 'running'),
@@ -548,6 +554,7 @@ describe('workspace semaphore across RunManagers (step 2.5)', () => {
     const holder = a.manager.startRun(gate.workflow, { task: 'hold the only slot' });
     const queued = a.manager.startRun(INSTANT, { task: 'wait for capacity' });
     await waitFor(() => a.store.getRun(holder.id)?.status === 'running', 'the holder to run');
+    // bound: negative window, as above: an admission would come within a few event-loop turns of startRun.
     await new Promise((resolve) => setTimeout(resolve, 200));
     expect(a.store.getRun(queued.id)?.status).toBe('queued');
 

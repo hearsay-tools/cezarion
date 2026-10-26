@@ -346,7 +346,7 @@ describe('an older cezar still writing runs.json', () => {
    *  `saving`: it also saves runs.json every 50 ms, by temp file and rename, as one at work does. */
   async function olderCockpit(lifetimeMs = 60_000, saving = false): Promise<ChildProcess> {
     const child = runChild('older-cockpit', `
-      const [dataDir] = process.argv.slice(2);
+      const [dataDir, scratch] = process.argv.slice(2);
       const { renameSync } = await import('node:fs');
       if (${saving}) {
         let saves = 0;
@@ -356,9 +356,10 @@ describe('an older cezar still writing runs.json', () => {
           renameSync(dataDir + '/runs.json.tmp', dataDir + '/runs.json');
         }, 50);
       }
+      writeFileSync(scratch + '/older-cockpit.ready', '');
       setTimeout(() => process.exit(0), ${lifetimeMs});
     `);
-    await new Promise((resolve) => setTimeout(resolve, 200));
+    await waitForFile(join(scratch, 'older-cockpit.ready'));
     const startToken = processStartToken(child.pid!);
     writeFileSync(join(dataDir, 'cockpit.lock'), JSON.stringify({
       pid: child.pid, token: '7d3c2b1a-0f9e-4d8c-b7a6-5e4d3c2b1a0f', url: 'http://127.0.0.1:4321', ...(startToken ? { startToken } : {}),

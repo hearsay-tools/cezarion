@@ -9,6 +9,9 @@ import { reconcileAutomationReceipts } from './task-template.ts';
 import { AutomationProjectUnavailableError, SCHEDULE_AUTO_PAUSE_AFTER, ScheduleLeaseHeldError, ScheduleRunner } from './schedule-runner.ts';
 import type { OnceScheduleDefinition, ScheduleAutomationDefinition } from './types.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 const dirs: string[] = [];
 afterEach(async () => Promise.all(dirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true }))));
 
@@ -203,7 +206,7 @@ describe('ScheduleRunner', () => {
       expect(store.latestReceipts().get(`nightly:schedule:${iso(FIRST_RUN)}`)).toMatchObject({ receiptId: 'lost', status: 'launch-error' });
       await vi.waitFor(() => {
         expect(store.logs({ automationId: 'nightly', result: 'failed' })).toEqual([expect.objectContaining({ receiptId: 'lost' })]);
-      });
+      }, { timeout: HANG_GUARD_MS });
       expect(store.state('nightly')?.nextRunAt).toBe(iso(FIRST_RUN + DAY));
     });
 

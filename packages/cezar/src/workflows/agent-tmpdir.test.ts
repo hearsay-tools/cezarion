@@ -15,6 +15,9 @@ import {
 import { registerProject } from '../workspace/projects.ts';
 import { RunManager, agentDirectories } from './run.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 /**
  * #785 wiring: the per-run temp directory has to reach the SPAWN, be gone when
  * the run ends, and fail the run loudly when it cannot be had.
@@ -146,7 +149,7 @@ describe('RunManager — task-scoped agent TMPDIR (#785)', () => {
     store.updateStep(run.id, 's', { status: 'waiting' });
     store.updateRun(run.id, { status: 'waiting', currentStepId: 's' });
     expect(manager.finish(run.id)).toBe(true);
-    await vi.waitFor(() => expect(store.getRun(run.id)?.status).toBe('done'));
+    await vi.waitFor(() => expect(store.getRun(run.id)?.status).toBe('done'), { timeout: HANG_GUARD_MS });
     expect(existsSync(env.TMPDIR!)).toBe(false);
   });
 

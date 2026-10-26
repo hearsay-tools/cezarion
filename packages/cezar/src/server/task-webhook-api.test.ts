@@ -16,6 +16,9 @@ import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import { seedRuns } from '../runs/run-store.testkit.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 /**
  * The task webhook's HTTP surface (#589): the registry field and its write-only token, the
  * `notify` opt-in on `POST /runs`, `POST /runs/:id/notify`, and "Send test".
@@ -191,7 +194,8 @@ describe('task webhook API', () => {
       const res = await send(`/api/v1/runs/${id}/notify`, 'POST', { notify: true, message: 'take over from here' });
       expect(res.status).toBe(200);
       expect(res.body.notify).toBe(true);
-      await new Promise((done) => setTimeout(done, 50));
+      // The webhook log row is written after the response, so wait for it.
+      await vi.waitFor(() => expect(store.readEvents(id).some((event) => event.type === 'webhook.dry-run')).toBe(true), { timeout: HANG_GUARD_MS });
       const events = store.readEvents(id);
       expect(events.find((event) => event.type === 'handoff')).toMatchObject({ notify: true, message: 'take over from here' });
       expect(events.find((event) => event.type === 'webhook.dry-run')).toMatchObject({
@@ -206,8 +210,8 @@ describe('task webhook API', () => {
       await setWebhook({ url: 'https://bot.example/hook', token: 'secret-token' });
       const { id } = run();
       await send(`/api/v1/runs/${id}/notify`, 'POST', { notify: true, message: 'note' });
-      await new Promise((done) => setTimeout(done, 50));
-      expect(posted).toHaveLength(1);
+      // The webhook POST is sent after the response, so wait for it.
+      await vi.waitFor(() => expect(posted).toHaveLength(1), { timeout: HANG_GUARD_MS });
       expect(posted[0]!.headers.authorization).toBe('Bearer secret-token');
       expect(posted[0]!.body).toMatchObject({ event: 'task.subscribed', message: 'note', runId: id });
     });
@@ -256,7 +260,7 @@ describe('task webhook API', () => {
             event: 'task.status',
             payload: { previousStatus: 'running', status: after.status },
           });
-        });
+        }, { timeout: HANG_GUARD_MS });
       } finally {
         rmSync(other, { recursive: true, force: true });
       }

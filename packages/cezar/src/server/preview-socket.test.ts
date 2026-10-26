@@ -15,6 +15,9 @@ import { createPreviewSocket, type PreviewSocket, type PreviewSocketHost } from 
 import { startServer, verifyWsUpgrade } from './server.ts';
 import { attachUpgradeRouter } from './upgrade-router.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 /**
  * The preview WebSocket (#781, spec 2026-10-02-live-preview-v1 "WebSocket") over a real
  * `http.Server` and the real upgrade guard: every refusal happens before the handshake, and once
@@ -132,7 +135,7 @@ describe('the preview WebSocket', () => {
     const { status, ws } = await connect(url('/api/v1/runs/run-1/preview/ws'));
     expect(status).toBe('open');
     ws.send(JSON.stringify({ t: 'ping', ts: 1 }));
-    await vi.waitFor(() => expect(calls).toHaveLength(1));
+    await vi.waitFor(() => expect(calls).toHaveLength(1), { timeout: HANG_GUARD_MS });
     ws.close();
   });
 
@@ -141,8 +144,9 @@ describe('the preview WebSocket', () => {
     const { url } = await boot({ host });
     const { status, ws, messages } = await connect(url('/api/v1/p/proj/runs/gone/preview/ws'));
     expect(status).toBe('open');
-    await vi.waitFor(() => expect(messages).toEqual([JSON.stringify({ t: 'state', stage: 'worktree-removed' })]));
+    await vi.waitFor(() => expect(messages).toEqual([JSON.stringify({ t: 'state', stage: 'worktree-removed' })]), { timeout: HANG_GUARD_MS });
     ws.send(JSON.stringify({ t: 'open', target: { port: 5173 } }));
+    // bound: negative window. The server handles the frame within a few event-loop turns on loopback; a host call it wrongly made would be in `calls` by then.
     await new Promise(resolve => setTimeout(resolve, 50));
     expect(calls).toEqual([]);
     ws.close();
@@ -157,7 +161,7 @@ describe('the preview WebSocket', () => {
     ws.send(JSON.stringify({ t: 'exec', code: 'rm -rf /' }));
     ws.send(Buffer.from([1, 2, 3]));
     ws.send(JSON.stringify({ t: 'ping', ts: 7 }));
-    await vi.waitFor(() => expect(messages).toContain(JSON.stringify({ t: 'pong', ts: 7 })));
+    await vi.waitFor(() => expect(messages).toContain(JSON.stringify({ t: 'pong', ts: 7 })), { timeout: HANG_GUARD_MS });
     expect(ws.readyState).toBe(WebSocket.OPEN);
     expect(calls).toEqual([expect.objectContaining({ kind: 'handle', msg: { t: 'ping', ts: 7 } })]);
     expect(log).toHaveBeenCalledTimes(1);
@@ -169,12 +173,12 @@ describe('the preview WebSocket', () => {
     const { url } = await boot({ host });
     const { ws, messages } = await connect(url(SCOPED));
     ws.send(JSON.stringify({ t: 'open', target: { port: 5173 } }));
-    await vi.waitFor(() => expect(messages).toHaveLength(1));
+    await vi.waitFor(() => expect(messages).toHaveLength(1), { timeout: HANG_GUARD_MS });
     expect(Buffer.isBuffer(messages[0])).toBe(true);
     const first = calls[0];
     expect(first?.kind === 'handle' && first.ctx).toMatchObject({ runId: 'run-1', title: 'Build the card', worktreePath: worktree, dataDir: join(worktree, 'data') });
     ws.close();
-    await vi.waitFor(() => expect(calls.at(-1)).toEqual({ kind: 'detach', runId: 'run-1' }));
+    await vi.waitFor(() => expect(calls.at(-1)).toEqual({ kind: 'detach', runId: 'run-1' }), { timeout: HANG_GUARD_MS });
   });
 
   it('reaps a viewer that stops answering the protocol ping', async () => {
@@ -193,7 +197,7 @@ describe('the preview WebSocket', () => {
       ws.once('open', resolve);
       ws.once('error', reject);
     });
-    await vi.waitFor(() => expect(calls).toContainEqual({ kind: 'detach', runId: 'run-1' }), { timeout: 2_000 });
+    await vi.waitFor(() => expect(calls).toContainEqual({ kind: 'detach', runId: 'run-1' }), { timeout: HANG_GUARD_MS });
     ws.terminate();
   });
 });
@@ -218,7 +222,7 @@ describe('startServer routes both sockets through one upgrade listener', () => {
         const pane = await connect(`${base}${path}`);
         expect(pane.status).toBe('open');
         pane.ws.send(JSON.stringify({ t: 'ping', ts: 1 }));
-        await vi.waitFor(() => expect(pane.messages).toContain(JSON.stringify({ t: 'pong', ts: 1 })));
+        await vi.waitFor(() => expect(pane.messages).toContain(JSON.stringify({ t: 'pong', ts: 1 })), { timeout: HANG_GUARD_MS });
         pane.ws.close();
       }
       expect(calls.filter(call => call.kind === 'handle').map(call => call.kind === 'handle' && call.ctx.worktreePath)).toEqual(Array(3).fill(join(repoRoot, 'wt')));

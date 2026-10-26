@@ -566,6 +566,7 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
         await f.reply('mock:agent-echo Use the parser');
         // Another message while the answer waits for admission must not deliver it early.
         await f.service.send(f.parentCaller, { id: randomUUID(), recipientRunId: f.w.id, kind: 'progress', text: 'mock:agent-echo Still here', timeoutSeconds: 600 });
+        // bound: negative window. An early delivery would happen in the pump the message above kicked, a few event-loop turns away; 300 ms covers them.
         await new Promise(resolve => setTimeout(resolve, 300));
         expect(answered(f.w.id)).toEqual([]);
         // Freeing the slot admits the worker, and the held answer goes in.

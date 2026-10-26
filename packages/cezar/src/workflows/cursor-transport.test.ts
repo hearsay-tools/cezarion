@@ -88,6 +88,7 @@ describe('Cursor print workflow transport', () => {
     expect(before).toBe(1);
     expect(store.getRun(run.id)?.status).toBe('waiting');
     expect(manager.continueRun(run.id)).toEqual({ ok: false, error: 'run is still active' });
+    // bound: negative window. The refusal above is synchronous, so this only guards against a launch that ignored it; a miss under load hides a regression without failing a good run.
     await new Promise(resolve => setTimeout(resolve, 100));
     expect(readFileSync(log, 'utf8').trim().split('\n')).toHaveLength(before);
     expect(hasPendingAsk(store, run.id)).toBe(true);

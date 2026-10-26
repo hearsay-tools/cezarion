@@ -15,10 +15,10 @@ const pause = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
 afterEach(async () => {
   // Release paused Git even when an assertion failed, before removing the fixture.
   for (const root of roots) writeFileSync(join(root, 'release'), '');
-  for (const child of children.splice(0)) {
-    if (child.exitCode === null) child.kill();
-  }
-  await pause(100);
+  const running = children.splice(0).filter(child => child.exitCode === null && child.signalCode === null);
+  for (const child of running) child.kill();
+  // The drivers end on SIGTERM; wait for that, not for a fixed pause. The removal below retries a busy directory.
+  await Promise.all(running.map(child => new Promise<void>(resolve => child.once('exit', () => resolve()))));
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true, maxRetries: 10 });
 });
 
@@ -139,6 +139,8 @@ describe.skipIf(process.platform !== 'linux')('worktree registration vs prune (#
     await until(() => existsSync(victim.result), 'caller observed keeper failure');
     const peer = start(linked, 'create', 'peer', 'peer00000000');
     await until(() => existsSync(peer.result + '.started'), 'peer entered helper');
+    // bound: negative window. The lock helper re-checks a held claim every 25 ms, so 1 s spans some
+    // 40 checks; the case proves each one refuses while the surviving Git holds the checkout.
     await pause(1000);
     const preserved = existsSync(join(root, '.git/worktrees/victim000000'));
     const waited = !existsSync(peer.result);
@@ -156,6 +158,8 @@ describe.skipIf(process.platform !== 'linux')('worktree registration vs prune (#
     await new Promise<void>(resolve => victim.child.once('exit', () => resolve()));
     const peer = start(linked, 'create', 'peer', 'peer00000000');
     await until(() => existsSync(peer.result + '.started'), 'peer entered helper');
+    // bound: negative window. The lock helper re-checks a held claim every 25 ms, so 1 s spans some
+    // 40 checks; the case proves each one refuses while the orphaned Git holds the checkout.
     await pause(1000);
     expect(existsSync(join(root, '.git/worktrees/victim000000'))).toBe(true);
     expect(existsSync(peer.result)).toBe(false);

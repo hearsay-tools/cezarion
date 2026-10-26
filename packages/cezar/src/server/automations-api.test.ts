@@ -284,10 +284,10 @@ describe('GitHub automation API', () => {
     expect(queued.status).toBe(202);
     const { checkId } = (await queued.json()) as { checkId: string };
     let check: { status: string } = { status: 'queued' };
-    // Up to 2s, exiting the moment the check fails. The background pass shells out to `git` to
-    // read the repo's remote before it can decide there is none, and 200ms of budget was under
-    // that spawn's cost whenever the rest of the server suites were running beside this one.
-    for (let attempt = 0; attempt < 200 && check.status !== 'error'; attempt += 1) {
+    // Exits the moment the check fails; the bound only ends a hang. The background pass shells
+    // out to `git` to read the repo's remote before it can decide there is none, and 200ms of
+    // budget was under that spawn's cost whenever the rest of the server suites ran beside this one.
+    for (const deadline = Date.now() + 15_000; check.status !== 'error' && Date.now() < deadline;) {
       await new Promise((resolve) => setTimeout(resolve, 10));
       check = (await (await apiRequest(server, `/api/v1/automation-checks/${checkId}`)).json()) as { status: string };
     }
@@ -724,6 +724,7 @@ describe('GitHub automation API', () => {
       await new Promise<void>((resolve) => server.once('listening', () => resolve()));
       await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
       // Long enough for a past-due poll armed at boot to fire and launch.
+      // bound: negative window. A past-due poll is armed with a zero delay, so it fires on the first timer turn; 300 ms is far longer.
       await new Promise((resolve) => setTimeout(resolve, 300));
       return { stale, poll: poll.mock.calls.length, launches: manager.startRun.mock.calls.length };
     } finally {
@@ -794,7 +795,7 @@ describe('GitHub automation API', () => {
         await vi.waitFor(() => {
           const rows = AutomationStore.open(join(root, '.ai/cezar')).logs({ automationId: 'nightly' });
           expect(rows.some((row) => row.result === awaited)).toBe(true);
-        }, { timeout: 5_000, interval: 20 });
+        }, { timeout: 15_000, interval: 20 });
       } finally {
         await new Promise<void>((resolve) => server.close(() => resolve()));
         started.mockRestore();
@@ -847,8 +848,9 @@ describe('GitHub automation API', () => {
     try {
       await new Promise<void>((resolve) => server.once('listening', () => resolve()));
       await vi.waitFor(() => expect(started).toHaveBeenCalledTimes(1), { timeout: 15_000, interval: 10 });
-      await vi.waitFor(() => expect(fired).toHaveBeenCalled(), { timeout: 5_000, interval: 20 });
+      await vi.waitFor(() => expect(fired).toHaveBeenCalled(), { timeout: 15_000, interval: 20 });
       // Long enough for a fire that would launch to have launched, failed and been recorded.
+      // bound: negative window. The fire has already run (the `fired` wait above), so a launch is a few event-loop turns behind it; 300 ms is far longer.
       await new Promise((resolve) => setTimeout(resolve, 300));
       const automations = AutomationStore.open(dataDir);
       expect(manager.startRun).not.toHaveBeenCalled();
@@ -907,6 +909,7 @@ describe('GitHub automation API', () => {
       expect(receipt).toMatchObject({ status: 'launched', runId: expect.any(String) });
       expect(automations.receipts().filter((row) => row.status === 'launch-error')).toEqual([]);
       // Give a best-effort reconcile row time to land before asserting it never did.
+      // bound: negative window. The reconcile row is one best-effort write after the launch receipt, a few event-loop turns away; 100 ms covers it.
       await new Promise((resolve) => setTimeout(resolve, 100));
       expect(automations.logs({ automationId: 'nightly' }).map((row) => row.result)).toEqual(['launched']);
       expect(second.id).not.toBe(boot.id);

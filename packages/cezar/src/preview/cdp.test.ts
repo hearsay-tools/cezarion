@@ -1,7 +1,10 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { WebSocketServer, type WebSocket } from 'ws';
 import type { AddressInfo } from 'node:net';
 import { connectCdp } from './cdp.ts';
+
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
 
 let server: WebSocketServer | undefined;
 
@@ -80,10 +83,11 @@ describe('connectCdp (#781)', () => {
     cdp.on('Page.frameNavigated', params => second.push(params));
     cdp.on('Page.loadEventFired', params => other.push(params));
     serverSock.send(JSON.stringify({ method: 'Page.frameNavigated', params: { n: 1 } }));
-    await new Promise(resolve => setTimeout(resolve, 50));
+    // `second` is registered after `first`, so once it has the event `first` has had it too.
+    await vi.waitFor(() => expect(second).toEqual([{ n: 1 }]), { timeout: HANG_GUARD_MS });
     off();
     serverSock.send(JSON.stringify({ method: 'Page.frameNavigated', params: { n: 2 } }));
-    await new Promise(resolve => setTimeout(resolve, 50));
+    await vi.waitFor(() => expect(second).toEqual([{ n: 1 }, { n: 2 }]), { timeout: HANG_GUARD_MS });
     expect(first).toEqual([{ n: 1 }]);
     expect(second).toEqual([{ n: 1 }, { n: 2 }]);
     expect(other).toEqual([]);
@@ -92,12 +96,15 @@ describe('connectCdp (#781)', () => {
 
   it('settles `closed` and rejects in-flight and later sends when the socket closes', async () => {
     let serverSock!: WebSocket;
+    let requestArrived!: () => void;
+    const arrived = new Promise<void>(resolve => { requestArrived = resolve; });
     const url = await startServer(sock => {
       serverSock = sock;
+      sock.on('message', () => requestArrived());
     });
     const cdp = await connectCdp(url);
     const inFlight = cdp.send('Page.enable');
-    await new Promise(resolve => setTimeout(resolve, 20));
+    await arrived; // the server never answers it, so it is in flight when the socket closes
     serverSock.close();
     await expect(inFlight).rejects.toThrow(/closed/i);
     await cdp.closed;

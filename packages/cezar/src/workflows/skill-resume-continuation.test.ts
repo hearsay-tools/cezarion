@@ -207,7 +207,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     const started = Date.now();
 
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
-    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: 8_000 });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
     expect(Date.now() - started).toBeLessThan(4_000);
     expect(wait).toHaveBeenCalledTimes(1);
     expect(store.readEvents(id).filter((event) => event.type === 'lifecycle' && event.message === MISSING_SKILL_LIFECYCLE)).toHaveLength(1);
@@ -267,7 +267,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     const started = Date.now();
 
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
-    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: 8_000 });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
     expect(Date.now() - started).toBeLessThan(4_000);
     expect(store.readEvents(id).filter((event) => event.type === 'lifecycle' && event.message === MISSING_SKILL_LIFECYCLE)).toHaveLength(1);
     expect(launches[0]!.spec.systemPrompt ?? '').not.toContain(`Selected skill: /${TEAM_SKILL}`);
@@ -280,7 +280,7 @@ describe('skill resume continuation follow-ups (#790 review)', { timeout: 20_000
     const started = Date.now();
 
     expect(manager.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
-    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: 8_000 });
+    await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: LAUNCH_WAIT_MS });
     expect(Date.now() - started).toBeLessThan(4_000);
     expect(store.readEvents(id).filter((event) => event.type === 'lifecycle' && event.message === MISSING_SKILL_LIFECYCLE)).toHaveLength(1);
     expect(launches[0]!.spec.systemPrompt ?? '').not.toContain(TEAM_SKILL_BODY);

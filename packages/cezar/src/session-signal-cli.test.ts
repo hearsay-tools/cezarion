@@ -10,6 +10,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RunStore } from './runs/store.ts';
 import { requirePid } from './pid-file.testkit.ts';
 
+/** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
+const HANG_GUARD_MS = 15_000;
+
 /**
  * cezar's own SIGINT and SIGTERM reach the agents (hearsay-tools/cezarion#890), through the real CLI.
  *
@@ -155,7 +158,7 @@ describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM
     const exited = once(cez!, 'exit');
     process.kill(-cez!.pid!, 'SIGINT'); // the terminal signals the foreground job's group
     await exited;
-    await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: 5_000 });
+    await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: HANG_GUARD_MS });
     // keepLive: read the run as serve left it, before any reader reconciles a live run as failed.
     const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
     try { expect(store.getRun(id)?.status).toBe('running'); } finally { store.close(); }
@@ -167,7 +170,7 @@ describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM
     const exited = once(cez!, 'exit');
     process.kill(cez!.pid!, 'SIGTERM'); // `kill <pid>`: no terminal involved
     await exited;
-    await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: 5_000 });
+    await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: HANG_GUARD_MS });
   }, 60_000);
 
   it('Ctrl-C on cez run stops the agent and still ends cez by SIGINT', async () => {
@@ -180,7 +183,7 @@ describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM
     process.kill(-cez.pid!, 'SIGINT');
     const [, signal] = await exited;
     expect(signal).toBe('SIGINT');
-    await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: 5_000 });
+    await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: HANG_GUARD_MS });
   }, 60_000);
 
   describe('SIGHUP when the terminal closes (hearsay-tools/cezarion#915)', () => {
@@ -195,7 +198,7 @@ describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM
       const agent = await agentPid();
       terminal.hangUp();
       await terminal.ended;
-      await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: 5_000 });
+      await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: HANG_GUARD_MS });
       const store = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
       try { expect(store.getRun(id)?.status).toBe('running'); } finally { store.close(); }
     }, 60_000);
@@ -205,7 +208,7 @@ describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM
       const agent = await agentPid();
       terminal.hangUp();
       expect(await terminal.ended).toBe('signal 1');
-      await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: 5_000 });
+      await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: HANG_GUARD_MS });
     }, 60_000);
 
     it('nohup cez serve survives a hangup and its agent keeps running', async () => {
@@ -222,6 +225,7 @@ describe.skipIf(process.platform === 'win32')('cezar forwards SIGINT and SIGTERM
       await stalledRun(url);
       const agent = await agentPid();
       process.kill(cez.pid!, 'SIGHUP');
+      // bound: negative window. A signal arrives within milliseconds and Node acts on it in the next event-loop turn; 1 s is far longer.
       await new Promise(resolve => setTimeout(resolve, 1_000));
       expect(alive(cez.pid!)).toBe(true);
       expect(alive(agent)).toBe(true);

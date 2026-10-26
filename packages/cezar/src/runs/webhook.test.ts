@@ -496,6 +496,7 @@ describe('TaskWebhooks', () => {
 
     const run = store.createRun({ title: 't', workflow: 'quick-task', task: 't', notify: true, steps: [] });
     store.updateRun(run.id, { status: 'done' });
+    // bound: negative window. A delivery that was not held would reach the recorder within a few event-loop turns of the status change; 20 ms covers them.
     await new Promise((done) => setTimeout(done, 20));
     expect(calls).toEqual([]);
 

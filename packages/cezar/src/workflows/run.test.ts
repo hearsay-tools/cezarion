@@ -1421,7 +1421,7 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     await waitFor(record.id, () => {
       const events = readFileSync(join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`), 'utf8');
       return events.includes(eventNeedle);
-    }, 3_000);
+    });
 
     // hearsay-tools/cezarion#1233: the backend's own turn runs on the pool slot it parked with,
     // and its timer stays open until it fires.
