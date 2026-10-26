@@ -14,8 +14,10 @@ import type {
   AgentToolCallRecord,
   ContentBlock,
   SessionOptions,
+  ToolGrant,
 } from './agent-runner.js';
 import { isSignalTerminationExit } from './agent-runner.js';
+import { ompRequestedTools } from './runner-tool-grants.ts';
 import { signalSession, spawnSessionLeader } from './session-process.js';
 import { buildChildEnv } from './agent-env.js';
 import type { UiEvent } from './ui-events.js';
@@ -88,12 +90,11 @@ export const OMP_SPEC_SUPPORT: AgentRunSpecSupport = {
   userPrompt: { honored: true, via: 'RPC prompt.message' },
   images: { honored: true, via: "RPC prompt.images ({type:'image', data, mimeType})" },
   cwd: { honored: true, via: 'spawn cwd' },
-  allowedTools: { honored: true, via: '--tools, mapped onto OMP names; unmapped names dropped (fail closed)' },
+  toolGrant: { honored: true, via: "--tools, mapped onto OMP names; unmapped names dropped (fail closed); a bashAllowlist has no prefix equivalent, so bash is dropped from --tools (Pi's rule), and an unset grant names OMP's default set first so bash can be left out" },
   restrictNativeDelegation: {
     honored: true,
-    via: '--config overlay denying task, and task/wait left out of --tools (D1); eval is left out too, since OMP v18.4.11 has no setting that disables its agent()/workpool() helpers; with allowedTools undefined D1 passes an explicit --tools list (OMP\'s default set minus those), failing closed rather than widening to the defaults',
+    via: '--config overlay denying task, and task/wait left out of --tools (D1); eval is left out too, since OMP v18.4.11 has no setting that disables its agent()/workpool() helpers; with an unset grant D1 passes an explicit --tools list (OMP\'s default set minus those), failing closed rather than widening to the defaults',
   },
-  bashAllowlist: { honored: true, via: "no prefix equivalent: bash dropped from --tools when an allowlist is set (Pi's rule); with allowedTools unset, OMP's default set is named first so bash can be left out" },
   additionalDirectories: { honored: true, via: '--add-dir per directory; an omp build that rejects --add-dir is respawned once without it, with a v1 note (Ruling 22)' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
   model: { honored: true, via: '--model provider/model' },
@@ -113,14 +114,13 @@ export interface OmpToolSelection {
 }
 
 /**
- * Maps cezar's tool names onto OMP's `--tools` allowlist (spec § Tools). Fails closed: a
+ * Maps a grant's cezar tool names onto OMP's `--tools` allowlist (spec § Tools). Fails closed: a
  * non-empty request that maps to nothing disables every built-in rather than widening to OMP's
  * defaults, and every narrowing (`bashAllowlist`, D1) only ever removes names.
  */
 export function ompTools(
-  allowedTools: string[] | undefined,
+  grant: ToolGrant,
   opts: {
-    bashAllowlist?: string[] | undefined;
     restrictNativeDelegation?: boolean | undefined;
     cezarTools?: boolean;
     /** Env the extension will read: `CEZ_PREVIEW=1` there decides which cezar tools it registers. */
@@ -129,10 +129,7 @@ export function ompTools(
     exclude?: readonly string[] | undefined;
   },
 ): OmpToolSelection {
-  // OMP's default set includes task, wait, eval and unrestricted bash: D1 and a bash allowlist
-  // each have to name a list to leave something out.
-  const narrows = opts.restrictNativeDelegation || (opts.bashAllowlist?.length ?? 0) > 0;
-  const requested = allowedTools ?? (narrows ? [...OMP_DEFAULT_TOOL_NAMES] : undefined);
+  const requested = ompRequestedTools(grant, OMP_DEFAULT_TOOL_NAMES, opts.restrictNativeDelegation);
   if (requested === undefined) return { flag: null, tools: [], dropped: [] };
   const tools = new Set<string>();
   const dropped = new Set<string>();
@@ -146,7 +143,7 @@ export function ompTools(
     else tools.add(mapped);
   }
   // OMP can allow or deny the whole bash tool but has no command-prefix equivalent.
-  if (opts.bashAllowlist && opts.bashAllowlist.length > 0) tools.delete('bash');
+  if (grant.bashAllowlist && grant.bashAllowlist.length > 0) tools.delete('bash');
   if (opts.restrictNativeDelegation) for (const name of OMP_DELEGATION_TOOLS) tools.delete(name);
   if (tools.size === 0) return { flag: 'no-tools', tools: [], dropped: [...dropped] };
   // Narrow before the CI tool joins: a refusal never leaves a CI-only list where --no-tools belongs.
@@ -200,8 +197,7 @@ export function buildOmpArgs(
   if (effort) args.push('--thinking', effort);
   if (!opts.omitAddDir) for (const dir of spec.additionalDirectories ?? []) args.push('--add-dir', dir);
   if (spec.restrictNativeDelegation) args.push('--config', ompScriptPath('omp-restrict-delegation.yml'));
-  const selection = ompTools(spec.allowedTools, {
-    bashAllowlist: spec.bashAllowlist,
+  const selection = ompTools(spec.toolGrant, {
     restrictNativeDelegation: spec.restrictNativeDelegation,
     cezarTools: spec.cezarTools !== undefined,
     env: spec.env,
@@ -531,8 +527,7 @@ export class OmpRunner implements AgentRunner {
       interruptKillTimer.unref?.();
     };
 
-    const dropped = ompTools(spec.allowedTools, {
-      bashAllowlist: spec.bashAllowlist,
+    const dropped = ompTools(spec.toolGrant, {
       restrictNativeDelegation: spec.restrictNativeDelegation,
     }).dropped;
     if (dropped.length > 0) {

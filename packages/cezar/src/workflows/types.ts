@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { RUNNER_IDS, type AgentBackend, type RunnerId } from '../core/agent-runner.ts';
+import { RUNNER_IDS, type AgentBackend, type RunnerId, type ToolGrant } from '../core/agent-runner.ts';
 
 /**
  * A workflow is an ordered list of steps. Two step kinds:
@@ -220,6 +220,35 @@ export function allowedToolsForStep(
 function extrasFor(backend: AgentBackend | undefined): readonly string[] {
   if (backend === undefined || backend === 'claude-cli') return HARNESS_EXTRA_TOOLS.claude;
   return HARNESS_EXTRA_TOOLS[backend];
+}
+
+/** Tool lists as a workflow step and a worker identity store them. */
+export type ToolGrantLists = { allowedTools?: string[] | undefined; bashAllowlist?: string[] | undefined };
+
+/**
+ * The `ToolGrant` one step's session runs with, resolved once before the runner
+ * (hearsay-tools/cezarion#1810). An owned worker's pinned grants come from its parent at
+ * spawn and win over its step; otherwise the step's own list, or this runner's default
+ * when it sets none. Lists stay lists on disk; only the runner sees the kind.
+ */
+export function stepToolGrant(
+  pinned: ToolGrantLists | undefined,
+  step: ToolGrantLists | undefined,
+  backend: AgentBackend | undefined,
+): ToolGrant {
+  const source = pinned ?? step;
+  const bash = source?.bashAllowlist === undefined ? {} : { bashAllowlist: [...source.bashAllowlist] };
+  if (pinned) return pinned.allowedTools === undefined ? { kind: 'unset', ...bash } : { kind: 'inherited', tools: [...pinned.allowedTools], ...bash };
+  if (step?.allowedTools) return { kind: 'explicit', tools: [...step.allowedTools], ...bash };
+  return { kind: 'step-default', tools: allowedToolsForStep(undefined, backend), ...bash };
+}
+
+/** A grant's lists, for the settings the session's workers inherit (`narrowGrants`). */
+export function toolGrantLists(grant: ToolGrant): ToolGrantLists {
+  return {
+    ...(grant.kind === 'unset' ? {} : { allowedTools: [...grant.tools] }),
+    ...(grant.bashAllowlist === undefined ? {} : { bashAllowlist: [...grant.bashAllowlist] }),
+  };
 }
 
 /** One task step applying the selected skill to the user's task. */

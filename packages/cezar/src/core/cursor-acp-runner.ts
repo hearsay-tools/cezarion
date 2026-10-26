@@ -5,6 +5,7 @@ import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import type { AgentEvent, AgentInputOptions, AgentRunResult, AgentRunner, AgentRunSpec, AgentRunSpecSupport, AgentSession, AgentToolCallRecord, ContentBlock, InputDelivery, SessionOptions } from './agent-runner.ts';
 import { prependSystemPrompt, trackChildExit } from './agent-runner.ts';
+import { cursorAcpToolGrantFields } from './runner-tool-grants.ts';
 import { signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { cursorArgs, noteCursorAutoUpdateFlagRejected, rejectsCursorAutoUpdateFlag,
@@ -50,8 +51,7 @@ export const CURSOR_SPEC_SUPPORT: AgentRunSpecSupport = {
   userPrompt: { honored: true, via: 'session/prompt text content' },
   images: { honored: true, via: 'ACP image content blocks' },
   cwd: { honored: true, via: 'spawn cwd and session/new or session/load cwd' },
-  allowedTools: { honored: false, reason: 'Cursor ACP has no per-session tool allowlist; --force follows the existing auto permission preset' },
-  bashAllowlist: { honored: false, reason: 'Cursor ACP has no per-session command-prefix allowlist' },
+  toolGrant: { honored: false, reason: 'Cursor ACP has no per-session tool or command-prefix allowlist; --force follows the existing auto permission preset' },
   restrictNativeDelegation: { honored: true, via: 'initialize clientCapabilities._meta.subagents=false; Cursor 2026.09.15 negotiates native delegation from this capability' },
   additionalDirectories: { honored: true, via: '--add-dir per additional workspace root' },
   env: { honored: true, via: 'buildChildEnv cursor backend with per-run env' },
@@ -331,6 +331,7 @@ class CursorSession implements AgentSession {
     const resume = this.spec.resume && this.spec.sessionId;
     const response = await this.request(resume ? 'session/load' : 'session/new', {
       cwd: this.spec.cwd,
+      ...cursorAcpToolGrantFields(this.spec.toolGrant),
       // ACP stdio uses an SDK environment allowlist that excludes CEZ_ vars.
       // Forward only this capability; the descriptor itself remains secret-free.
       mcpServers: this.spec.cezarTools ? [{

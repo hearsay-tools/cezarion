@@ -7,6 +7,7 @@ import type {
   AgentSession, AgentToolCallRecord, ContentBlock, InputDelivery, SessionOptions,
 } from './agent-runner.ts';
 import { prependSystemPrompt } from './agent-runner.ts';
+import { cursorPrintToolGrantArgs } from './runner-tool-grants.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { parseAskMarker } from './ask.ts';
 import { cezarToolEnvNames } from '../ci-wait/tools.ts';
@@ -26,8 +27,7 @@ export const CURSOR_PRINT_SPEC_SUPPORT: AgentRunSpecSupport = {
   userPrompt: { honored: true, via: 'print stdin' },
   images: { honored: true, via: 'private temporary image files passed with --image' },
   cwd: { honored: true, via: 'spawn cwd' },
-  allowedTools: { honored: false, reason: 'No general Cezar tool-name to native Cursor tool-name mapping exists' },
-  bashAllowlist: { honored: false, reason: 'Cursor print has no per-command prefix allowlist' },
+  toolGrant: { honored: false, reason: 'No general Cezar tool-name to native Cursor tool-name mapping exists, and Cursor print has no per-command prefix allowlist' },
   restrictNativeDelegation: { honored: true, via: 'strict --allowed-tools native catalog omitting delegation entries on every turn' },
   additionalDirectories: { honored: true, via: '--add-dir per workspace root on every turn' },
   env: { honored: true, via: 'buildChildEnv with per-run env' },
@@ -227,6 +227,7 @@ class CursorPrintSession implements AgentSession {
     const args = cursorArgs(this.bin, ['-p', '--force', '--trust', '--output-format', 'stream-json']);
     if (this.model) args.push('--model', this.model);
     if (this.nativeId) args.push('--resume', this.nativeId);
+    args.push(...cursorPrintToolGrantArgs(this.spec.toolGrant));
     if (this.spec.restrictNativeDelegation) {
       args.push('--allowed-tools', (this.options.allowedTools ?? SAFE_CURSOR_PRINT_TOOLS).join(','));
     }

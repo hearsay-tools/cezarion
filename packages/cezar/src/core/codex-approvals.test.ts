@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { UiEvent } from './ui-events.ts';
 import { codexApproval, isCodexApprovalRequest } from './codex-approvals.ts';
 import { CodexAppServerRunner } from './codex-app-server-runner.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const bin = fileURLToPath(new URL('../../scripts/mock-codex-app-server.mjs', import.meta.url));
 
@@ -20,7 +21,7 @@ describe('Codex approvals over the native mock wire (hearsay-tools/cezarion#1049
 
   it.each(['accept', 'decline', 'cancel'])('waits for an explicit %s response and echoes the exact native reply', async decision => {
     const ui: UiEvent[] = [];
-    const session = new CodexAppServerRunner({ bin, timeoutMs: 0 }).startSession({ cwd: process.cwd(), userPrompt: 'mock:approval' }, undefined,
+    const session = new CodexAppServerRunner({ bin, timeoutMs: 0 }).startSession({ toolGrant: UNSET_TOOL_GRANT, cwd: process.cwd(), userPrompt: 'mock:approval' }, undefined,
       { onUiEvent: event => ui.push(event) });
     try {
       await vi.waitFor(() => expect(ui.some(e => e.type === 'permission.requested')).toBe(true), { timeout: 2000 });
@@ -46,7 +47,7 @@ describe('Codex approvals over the native mock wire (hearsay-tools/cezarion#1049
   ] as const;
   // A hang guard only: each wait ends on the runner's own UI event.
   const seen = (ui: UiEvent[], type: UiEvent['type']) => vi.waitFor(() => expect(ui.some(e => e.type === type)).toBe(true), { timeout: 15_000 });
-  const mcpSession = (userPrompt: string, ui: UiEvent[]) => new CodexAppServerRunner({ bin, timeoutMs: 0 }).startSession({ cwd: process.cwd(), userPrompt,
+  const mcpSession = (userPrompt: string, ui: UiEvent[]) => new CodexAppServerRunner({ bin, timeoutMs: 0 }).startSession({ toolGrant: UNSET_TOOL_GRANT, cwd: process.cwd(), userPrompt,
     cezarTools: { name: 'cezar_ci_test', command: 'node', args: ['/never/started.mjs'] } }, undefined, { onUiEvent: event => ui.push(event) });
 
   it.each(mcpReplies)('asks before another server\'s MCP tool and %s reaches Codex exactly', async (label, kind, reply) => {
@@ -99,7 +100,7 @@ describe('Codex approvals over the native mock wire (hearsay-tools/cezarion#1049
 
   it.each([['mock:mcp-approval-form', -32601], ['mock:mcp-approval-null-turn', -32602]])('%s is answered with %i and no card', async (prompt, code) => {
     const ui: UiEvent[] = [];
-    const session = new CodexAppServerRunner({ bin, timeoutMs: 0 }).startSession({ cwd: process.cwd(), userPrompt: prompt }, undefined,
+    const session = new CodexAppServerRunner({ bin, timeoutMs: 0 }).startSession({ toolGrant: UNSET_TOOL_GRANT, cwd: process.cwd(), userPrompt: prompt }, undefined,
       { autoEndAfterFirstTurn: true, onUiEvent: event => ui.push(event) });
     try {
       expect((await session.result).text).toContain(`Approval error: ${code}`);
@@ -108,7 +109,7 @@ describe('Codex approvals over the native mock wire (hearsay-tools/cezarion#1049
   });
 
   it('answers an unsupported server request and lets the native server continue', async () => {
-    const session = new CodexAppServerRunner({ bin, timeoutMs: 0 }).startSession({ cwd: process.cwd(), userPrompt: 'mock:approval-unsupported' }, undefined,
+    const session = new CodexAppServerRunner({ bin, timeoutMs: 0 }).startSession({ toolGrant: UNSET_TOOL_GRANT, cwd: process.cwd(), userPrompt: 'mock:approval-unsupported' }, undefined,
       { autoEndAfterFirstTurn: true });
     try {
       expect((await session.result).text).toContain('Approval error: -32601');

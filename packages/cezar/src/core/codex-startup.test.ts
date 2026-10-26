@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent, AgentSession } from './agent-runner.ts';
 import { CodexAppServerRunner } from './codex-app-server-runner.ts';
 import type { UiEvent } from './ui-events.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const spawnHook = vi.hoisted(() => ({ child: undefined as unknown }));
 vi.mock('node:child_process', async (original) => ({
@@ -54,7 +55,7 @@ let readyHints: number;
 const flush = () => vi.advanceTimersByTimeAsync(0);
 
 function start(resume = false, timeoutMs = 0) {
-  session = new CodexAppServerRunner({ bin: 'fake-only', timeoutMs }).startSession({
+  session = new CodexAppServerRunner({ bin: 'fake-only', timeoutMs }).startSession({ toolGrant: UNSET_TOOL_GRANT,
     cwd: process.cwd(), userPrompt: 'test', ...(resume ? { resume: true, sessionId: 'thread_1' } : {}),
   }, (event) => events.push(event), { onUiEvent: (event) => ui.push(event), onAgentInputReady: () => { readyHints += 1; } });
   void session.result.then(() => { outcome = 'resolved'; }, (error: unknown) => { failure = error; outcome = 'rejected'; });
@@ -406,7 +407,7 @@ describe('Codex startup and Stop (#493)', () => {
   });
 
   it('still owns process termination when a startup diagnostic consumer throws', async () => {
-    session = new CodexAppServerRunner({ bin: 'fake-only', timeoutMs: 0 }).startSession({ cwd: process.cwd(), userPrompt: 'test' }, () => {
+    session = new CodexAppServerRunner({ bin: 'fake-only', timeoutMs: 0 }).startSession({ toolGrant: UNSET_TOOL_GRANT, cwd: process.cwd(), userPrompt: 'test' }, () => {
       throw new Error('journal unavailable');
     });
     void session.result.then(() => { outcome = 'resolved'; }, (error: unknown) => { outcome = 'rejected'; failure = error; });

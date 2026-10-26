@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 // Capture the real child only to break its OS transport; native mock frames and
 // the production runner still own startup, input delivery and settlement.
@@ -81,7 +82,7 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
   const events: AgentEvent[] = [];
   spawned.length = 0;
   eventStreams.length = 0;
-  const session = createRunner(backend).startSession({
+  const session = createRunner(backend).startSession({ toolGrant: UNSET_TOOL_GRANT,
     cwd, userPrompt: promptFor(backend, scenario), timeoutMs: 0,
   }, event => events.push(event), { autoEndAfterFirstTurn: false });
   const settled = session.result.catch(error => error);

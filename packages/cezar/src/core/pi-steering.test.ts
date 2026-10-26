@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentEvent, SessionOptions } from './agent-runner.ts';
 import { PiRunner } from './pi-runner.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const mockBin = fileURLToPath(new URL('../../scripts/mock-pi-rpc.mjs', import.meta.url));
 const waitUntil = async (cond: () => boolean) => {
@@ -18,7 +19,7 @@ const start = (prompt: string, opts: SessionOptions = {}, extraEnv: Record<strin
   const stdinLog = join(dir, 'stdin.ndjson');
   const events: AgentEvent[] = [];
   const session = new PiRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
-    { userPrompt: prompt, cwd: dir, env: { CEZ_MOCK_STDIN_FILE: stdinLog, ...extraEnv } }, event => events.push(event), opts);
+    { toolGrant: UNSET_TOOL_GRANT, userPrompt: prompt, cwd: dir, env: { CEZ_MOCK_STDIN_FILE: stdinLog, ...extraEnv } }, event => events.push(event), opts);
   const stdin = () => readFileSync(stdinLog, 'utf8').trim().split('\n').filter(Boolean).map(line => JSON.parse(line) as Record<string, unknown>);
   const prompts = () => stdin().filter(row => typeof row.userText === 'string') as Array<{ userText: string; streamingBehavior?: string }>;
   return { session, events, prompts, stdin };
@@ -94,7 +95,7 @@ describe('pi agent input steering (#505)', () => {
     const consumed: string[][] = [];
     const dir = mkdtempSync(join(tmpdir(), 'cez-pi-steer-fail-')); dirs.push(dir);
     const events: AgentEvent[] = [];
-    const session = new PiRunner({ bin: mockBin, timeoutMs: 0 }).startSession({ userPrompt: 'inspect the working tree', cwd: dir, env: { CEZ_MOCK_PI_NO_USER_START: '1' } },
+    const session = new PiRunner({ bin: mockBin, timeoutMs: 0 }).startSession({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'inspect the working tree', cwd: dir, env: { CEZ_MOCK_PI_NO_USER_START: '1' } },
       event => events.push(event), { onAgentInputConsumed: ids => consumed.push([...ids]) });
     await waitUntil(() => events.some(e => e.type === 'turn-end'));
     await session.sendAgentMessage([{ type: 'text', text: 'mock:provider-error guidance' }], ['in-failed']);
@@ -127,7 +128,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
 }
 `, { mode: 0o755 });
     const events: AgentEvent[] = []; const order: string[] = [];
-    const session = new PiRunner({ bin: script, timeoutMs: 0 }).startSession({ userPrompt: 'opening', cwd: dir },
+    const session = new PiRunner({ bin: script, timeoutMs: 0 }).startSession({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'opening', cwd: dir },
       event => { events.push(event); if (event.type === 'turn-end') order.push('turn-end'); },
       { onAgentInputConsumed: ids => order.push('read:' + ids.join(',')), onAgentInputReady: () => undefined });
     await waitUntil(() => session.sendAgentMessage([{ type: 'text', text: 'steer' }], ['late']) !== false);

@@ -24,6 +24,7 @@ import {
   type ClaudeUiMapping,
 } from './claude-ui-mapper.ts';
 import { ClaudeCliRunner } from './claude-cli-runner.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(HERE, '__fixtures__', 'claude');
@@ -753,7 +754,7 @@ describe('ClaudeCliRunner v2 wiring (against the bundled mock CLI)', () => {
       const runner = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 60_000 });
       const v1: AgentEvent[] = [];
       const session = runner.startSession(
-        { userPrompt: 'mock:auth-error', cwd, sessionId: 'sess-auth-error' },
+        { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'mock:auth-error', cwd, sessionId: 'sess-auth-error' },
         (event) => v1.push(event),
         { autoEndAfterFirstTurn: true },
       );
@@ -776,7 +777,7 @@ describe('ClaudeCliRunner v2 wiring (against the bundled mock CLI)', () => {
       const v1: AgentEvent[] = [];
       const v2: UiEvent[] = [];
       const session = runner.startSession(
-        { userPrompt: 'fix the login redirect', cwd, sessionId: 'sess-mock-1' },
+        { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'fix the login redirect', cwd, sessionId: 'sess-mock-1' },
         (e) => v1.push(e),
         { autoEndAfterFirstTurn: true, onUiEvent: (e) => v2.push(e) },
       );
@@ -828,7 +829,7 @@ describe('ClaudeCliRunner v2 wiring (against the bundled mock CLI)', () => {
       const runner = new ClaudeCliRunner({ bin: mockBin, timeoutMs: 60_000 });
       const v2: UiEvent[] = [];
       const session = runner.startSession(
-        { userPrompt: 'mock:subagents', cwd, sessionId: 'sess-mock-sub' },
+        { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'mock:subagents', cwd, sessionId: 'sess-mock-sub' },
         () => {},
         { autoEndAfterFirstTurn: true, onUiEvent: (e) => v2.push(e) },
       );

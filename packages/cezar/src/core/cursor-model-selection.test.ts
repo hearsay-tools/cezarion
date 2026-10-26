@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentEvent } from './agent-runner.ts';
 import { discoverCursorModels } from './cursor-model-catalog.ts';
 import { CursorRunner } from './cursor-runner.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const dirs: string[] = [];
 afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true }); });
@@ -77,7 +78,7 @@ describe('Cursor discovered models through print admission', () => {
     });
     expect(discovered.some(option => option.id === model)).toBe(true);
     const events: AgentEvent[] = [];
-    const result = await new CursorRunner({ bin: f.bin }).run({
+    const result = await new CursorRunner({ bin: f.bin }).run({ toolGrant: UNSET_TOOL_GRANT,
       cwd: f.cwd, userPrompt: 'first', model, effort, env: f.env,
     }, event => events.push(event));
     expect(events.filter(event => event.type === 'error')).toEqual([]);
@@ -89,7 +90,7 @@ describe('Cursor discovered models through print admission', () => {
 
   it('keeps the native model selection on follow-up and exact print Continue', async () => {
     const f = fixture();
-    const spec = { cwd: f.cwd, userPrompt: 'first', model: 'grok-4.6', effort: 'high' as const, env: f.env };
+    const spec = { cwd: f.cwd, userPrompt: 'first', toolGrant: UNSET_TOOL_GRANT, model: 'grok-4.6', effort: 'high' as const, env: f.env };
     const events: AgentEvent[] = [];
     const session = new CursorRunner({ bin: f.bin }).startSession(spec, event => events.push(event));
     try {
@@ -113,7 +114,7 @@ describe('Cursor discovered models through print admission', () => {
       catalog[0]!.configOptions[0]!, { ...catalog[0]!.configOptions[1]!, currentValue: 'unlisted' },
     ] }]);
     const events: AgentEvent[] = [];
-    await new CursorRunner({ bin: f.bin }).run({ cwd: f.cwd, userPrompt: 'unused', model: 'grok-4.6',
+    await new CursorRunner({ bin: f.bin }).run({ toolGrant: UNSET_TOOL_GRANT, cwd: f.cwd, userPrompt: 'unused', model: 'grok-4.6',
       effort: 'high', env: f.env }, event => events.push(event));
     expect(events).toContainEqual(expect.objectContaining({ type: 'error', message: expect.stringContaining('verify') }));
     expect(existsSync(f.log)).toBe(false);
@@ -123,7 +124,7 @@ describe('Cursor discovered models through print admission', () => {
     'opaque[context=]', 'opaque[context=unlisted]'])('rejects unverifiable embedded parameters: %s', async model => {
     const f = fixture([{ ...catalog[3]!, value: model }]);
     const events: AgentEvent[] = [];
-    await new CursorRunner({ bin: f.bin }).run({ cwd: f.cwd, userPrompt: 'unused', model,
+    await new CursorRunner({ bin: f.bin }).run({ toolGrant: UNSET_TOOL_GRANT, cwd: f.cwd, userPrompt: 'unused', model,
       effort: 'high', env: f.env }, event => events.push(event));
     expect(events).toContainEqual(expect.objectContaining({ type: 'error', message: expect.stringContaining('verify') }));
     expect(existsSync(f.log)).toBe(false);
@@ -136,7 +137,7 @@ describe('Cursor discovered models through print admission', () => {
     { model: 'grok-4.6', effort: 'high' as const, account: 'other' },
   ])('rejects an unadvertised selection before inference: $model/$effort/$account', async ({ model, effort, account }) => {
     const f = fixture(); const events: AgentEvent[] = [];
-    await new CursorRunner({ bin: f.bin }).run({ cwd: f.cwd, userPrompt: 'unused', model, effort,
+    await new CursorRunner({ bin: f.bin }).run({ toolGrant: UNSET_TOOL_GRANT, cwd: f.cwd, userPrompt: 'unused', model, effort,
       env: { ...f.env, CEZ_TEST_ACCOUNT: account } }, event => events.push(event));
     expect(events).toContainEqual(expect.objectContaining({ type: 'error', message: expect.stringMatching(/advertis|verify/) }));
     expect(existsSync(f.log)).toBe(false);

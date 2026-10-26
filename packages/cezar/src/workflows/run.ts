@@ -83,7 +83,7 @@ import {
   isImageMediaType,
 } from '@open-mercato/cezar-contract/attachments';
 import { askRequestSchema } from '@open-mercato/cezar-contract/ask-schema';
-import type { AgentEvent, ContentBlock } from '../core/agent-runner.ts';
+import type { AgentEvent, ContentBlock, ToolGrant } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
 import { readProjectUiState, readProjectUiStateSync } from '../ui-state.ts';
 import { discoverSkills, filterDisabledTeamSkills, readDisabledTeamSkills, type Skill } from '../skills.ts';
@@ -144,9 +144,10 @@ import { UiEventSink } from '../runs/ui-event-sink.ts';
 import type { UiEvent } from '../core/ui-events.ts';
 import {
   QUICK_TASK_WORKFLOW,
-  allowedToolsForStep,
   chainStepNote,
   stepKind,
+  stepToolGrant,
+  toolGrantLists,
   type WorkflowDef,
   type WorkflowStepDef,
 } from './types.ts';
@@ -947,7 +948,7 @@ type StepSessionLaunch = {
   opening: LaunchOpening;
   skillPrompt: string | undefined;
   extraSystemPrompt: string | undefined;
-  grants: WorkerStepIdentity['grants'];
+  toolGrant: ToolGrant;
   profile: StepProfile;
   model: StepModel;
   delegation: LaunchDelegation;
@@ -969,11 +970,11 @@ type ContinuationOpening = {
  *  when the opening turn ends. The turn end clears `askSeq`. */
 type OpeningAnswer = { askSeq: number | undefined; waits: string[]; parentAnswer: boolean };
 /** What a Continue resolved before its pre-spawn checks: the step that owns its session, the
- *  workflow step it extends, and its grants, model, effort and account. */
+ *  workflow step it extends, and its tool grant, model, effort and account. */
 type ContinuationSettings = {
   owningStep: RunRecord['steps'][number] | undefined;
   toolsStep: WorkflowStepDef | undefined;
-  grants: WorkerStepIdentity['grants'];
+  toolGrant: ToolGrant;
   backendModel: string | undefined;
   effort: string | undefined;
   profile: StepProfile;
@@ -7507,14 +7508,12 @@ export class RunManager {
     // Rebuilding with the bare DEFAULT_ALLOWED_TOOLS silently revoked every per-step grant
     // (MCP servers, subagents) on Continue, restart recovery and the usage-limit auto-resume
     // — and dropping `bashAllowlist` WIDENED Bash from an allowlist to unrestricted
-    // (`AgentRunSpec.allowedTools`, #430). Record steps share ids with `workflowDef.steps`;
+    // (`AgentRunSpec.toolGrant`, #430). Record steps share ids with `workflowDef.steps`;
     // a synthetic `continue-N` owner and a fresh-session continuation (backend switch — no
     // owning session) both extend the run's tail, so they resolve from the definition's last
     // agent step. A legacy record without `workflowDef` (#367), or a session no step owns,
     // keeps today's defaults.
-    const grants = stepIdentity?.grants ?? {
-      allowedTools: allowedToolsForStep(toolsStep, backend), bashAllowlist: toolsStep?.bashAllowlist,
-    };
+    const toolGrant = stepToolGrant(stepIdentity?.grants, toolsStep, backend);
     const model = await this.continuationModel(runId, state, record, toolsStep, stepIdentity, backend);
     if (typeof model === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, model); return undefined; }
     const effort = this.continuationEffort(record, toolsStep, stepIdentity);
@@ -7529,7 +7528,7 @@ export class RunManager {
     });
     if (typeof profile === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, profile); return undefined; }
     return {
-      owningStep, toolsStep, grants, backendModel: model.backendModel, effort: effort.effort, profile,
+      owningStep, toolsStep, toolGrant, backendModel: model.backendModel, effort: effort.effort, profile,
       extraSystemPrompt: record?.systemPrompt,
     };
   }
@@ -7628,7 +7627,7 @@ export class RunManager {
     this.store.updateStep(runId, stepId, { profileId: settings.profile.profileId });
     state.delegationSettings = { cwd: state.cwd, runner: backend, model: settings.backendModel,
       effort: settings.effort, agentProfile: settings.profile.profileId, accountBinding: settings.profile.accountBinding,
-      systemPrompt: settings.extraSystemPrompt, allowedTools: settings.grants.allowedTools, bashAllowlist: settings.grants.bashAllowlist };
+      systemPrompt: settings.extraSystemPrompt, ...toolGrantLists(settings.toolGrant) };
   }
 
   /** The Continue's runner, and whether it resumes into a thread that already holds the skill
@@ -7787,8 +7786,7 @@ export class RunManager {
             : resumed.userPrompt,
           ...(opening.openingImages.length ? { images: opening.openingImages } : {}),
           cwd: state.cwd,
-          allowedTools: settings.grants.allowedTools,
-          bashAllowlist: settings.grants.bashAllowlist,
+          toolGrant: settings.toolGrant,
           additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), settings.profile.env),
           env: { ...settings.profile.env, ...delegation?.env, ...ciTools?.env },
           ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
@@ -8725,14 +8723,12 @@ export class RunManager {
     if (state.cancelled || (beforeSpawn && this.executionBlockedByRootFinish(beforeSpawn))) return null;
     this.store.updateStep(runId, step.id, { profileId: stepProfile.profileId });
 
-    const grants = stepIdentity?.grants ?? {
-      allowedTools: allowedToolsForStep(step, stepBackend), bashAllowlist: step.bashAllowlist,
-    };
+    const toolGrant = stepToolGrant(stepIdentity?.grants, step, stepBackend);
     // Workers inherit only the extra prompt, never the parent's selected skill (#778).
     state.delegationSettings = { cwd: state.cwd, runner: stepBackend, model: model.backendModel,
       effort: model.effectiveEffort,
       agentProfile: stepProfile.profileId, accountBinding: stepProfile.accountBinding, systemPrompt: extraSystemPrompt,
-      allowedTools: grants.allowedTools, bashAllowlist: grants.bashAllowlist };
+      ...toolGrantLists(toolGrant) };
     const runner = createRunner(stepBackend);
     state.agentSessionError = undefined;
     state.currentStepId = step.id;
@@ -8753,7 +8749,7 @@ export class RunManager {
     const launchOpening = this.launchOpening(runId, state, step.id, { body: opening.userPrompt, ciTools });
     const session = this.startStepSession(runId, state, runner, {
       step, sessionId, images, opening: launchOpening, skillPrompt: opening.skillPrompt, extraSystemPrompt,
-      grants, profile: stepProfile, model, delegation, webhooksPart, ciTools,
+      toolGrant, profile: stepProfile, model, delegation, webhooksPart, ciTools,
     }, onEvent, turn, sink);
     if (typeof session === 'string') return session;
     return this.awaitStepSession(runId, state, session, { stepId: step.id, nextStep, sink, turn, startTokens, delegation, ciTools });
@@ -8983,8 +8979,7 @@ export class RunManager {
           userPrompt: launch.opening.userPrompt,
           images: launch.images,
           cwd: state.cwd,
-          allowedTools: launch.grants.allowedTools,
-          bashAllowlist: launch.grants.bashAllowlist,
+          toolGrant: launch.toolGrant,
           // The handoff file lives outside the worktree — grant access.
           additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), profile.env),
           env: { ...profile.env, ...delegation?.env, ...ciTools?.env },

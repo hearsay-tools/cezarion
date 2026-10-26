@@ -27,6 +27,7 @@ import {
   type OpencodeUiMapping,
 } from './opencode-ui-mapper.ts';
 import { OpencodeServerRunner } from './opencode-server-runner.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(HERE, '__fixtures__', 'opencode');
@@ -1068,7 +1069,7 @@ describe('OpencodeServerRunner v2 wiring (against the bundled mock server)', () 
     try {
       const events: AgentEvent[] = [];
       const session = new OpencodeServerRunner({ bin: mockBin, timeoutMs: 60_000 }).startSession(
-        { userPrompt: 'check the working tree', cwd: isolatedCwd() }, event => events.push(event), { autoEndAfterFirstTurn: true },
+        { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'check the working tree', cwd: isolatedCwd() }, event => events.push(event), { autoEndAfterFirstTurn: true },
       );
       await session.result;
       expect(events.filter(event => event.type === 'error')).toEqual([]);
@@ -1081,7 +1082,7 @@ describe('OpencodeServerRunner v2 wiring (against the bundled mock server)', () 
     const v1: AgentEvent[] = [];
     const v2: UiEvent[] = [];
     const session = runner.startSession(
-      { userPrompt: 'check the working tree', cwd: isolatedCwd() },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'check the working tree', cwd: isolatedCwd() },
       (e) => v1.push(e),
       { autoEndAfterFirstTurn: true, onUiEvent: (e) => v2.push(e) },
     );
