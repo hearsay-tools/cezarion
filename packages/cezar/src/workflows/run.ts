@@ -124,6 +124,7 @@ import { messagedParentSince, parkNoticeMessage, parkNoticeWait, parkingTurn } f
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
 import { applyOutcomes, type RunOutcome } from '../runs/outcome-commit.ts';
+import { acknowledgedBatch, answerOutcomes, chargedIf } from './outcome-batches.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
 import { isReclaimable, reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import {
@@ -2745,12 +2746,21 @@ export class RunManager {
     const timer = this.wakeBackoffs.get(runId); if (timer) clearTimeout(timer); this.wakeBackoffs.delete(runId);
   }
 
-  /** A human Continue answers every human wait, ends failed deliveries and restarts the budget, in
-   *  one best-effort commit with what the continuation left unsaved. True when it committed. */
-  private commitHumanContinue(runId: string): boolean {
+  /** Saves an accepted continuation. A human Continue also answers every human wait, ends failed
+   *  deliveries and restarts the budget, in the same best-effort commit. */
+  private commitContinuation(runId: string, human: boolean): void {
     const outcomes: RunOutcome[] = [{ kind: 'answered' }, { kind: 'counted', waitDeliveryFailures: undefined },
       ...(this.store.getRun(runId)?.automaticWakes ? [{ kind: 'charged' as const, automaticWakes: 0 }] : [])];
-    return this.store.commitOutcome(runId, outcomes, {}, { bestEffort: true }).committed;
+    if (!human || !this.store.commitOutcome(runId, outcomes, {}, { bestEffort: true }).committed) this.store.flush();
+  }
+
+  /** An acknowledged wake turn runs: a retry stops unless a wake is still `owed`. Pool membership
+   *  changes only at a turn end or a terminal path; a worker park's idle timer belongs to the park,
+   *  not to the wake turn. */
+  private spendWakeAdmission(runId: string, state: ActiveRun, owed: boolean): void {
+    if (!owed) { const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId); }
+    this.waiting.delete(runId); this.clearIdleTimer(state);
+    this.store.updateRun(runId, { status: 'running' });
   }
 
   /** `outcomes`, clearing the failure count when they deliver a wait result (`cleared`) or leave one
@@ -5508,12 +5518,7 @@ export class RunManager {
     const bundle = state.atTurnBoundary === state.session ? this.pendingConversationBatch(runId, state, reply.id) : undefined;
     if (!state.session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])])) return;
     this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: routed.askSeq, source: 'parent' });
-    // The fallback reply's charge, the question it answers and the reply it delivers are one commit
-    // (hearsay-tools/cezarion#1805): no restart reads the charge without the reply.
-    const spent = fallback ? (this.store.getRun(runId)?.automaticWakes ?? 0) + 1 : undefined;
-    const delivered = [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])];
-    this.commitBundledDelivery(runId, state, delivered, [{ kind: 'answered' }, ...(spent === undefined ? [] : [{ kind: 'charged' as const, automaticWakes: spent }])]);
-    if (spent !== undefined) this.store.appendEvent(runId, { type: 'note', message: `${WORKER_FALLBACK_REPLY_NOTE} (${spent}/${MAX_AUTO_CONTINUES})` });
+    this.commitRoutedAnswer(runId, state, [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])], fallback);
     // As in submitAgentInput: the wake that admitted this answer is spent, and a stale one
     // would hold back every later message until the answer's turn ends.
     if (this.waitWakeAdmitted.delete(runId)) state.waitWakeTurn = state.session;
@@ -6026,6 +6031,24 @@ export class RunManager {
     }
   }
 
+  /** The fallback reply's charge, the question it answers and the reply it delivers are one commit
+   *  (hearsay-tools/cezarion#1805): no restart reads the charge without the reply. */
+  private commitRoutedAnswer(runId: string, state: ActiveRun, delivered: readonly string[], fallback: boolean): void {
+    const spent = fallback ? (this.store.getRun(runId)?.automaticWakes ?? 0) + 1 : undefined;
+    this.commitBundledDelivery(runId, state, delivered, [{ kind: 'answered' }, ...chargedIf(spent)]);
+    if (spent !== undefined) this.store.appendEvent(runId, { type: 'note', message: `${WORKER_FALLBACK_REPLY_NOTE} (${spent}/${MAX_AUTO_CONTINUES})` });
+  }
+
+  /** One commit (hearsay-tools/cezarion#1805): the human waits a message answers, the messages bundled
+   *  with it and a deferred message's queue entry. A refused queue entry interrupts the session:
+   *  stdin and disk cannot transact, so it stays for conservative recovery. */
+  private commitAnswer(runId: string, state: ActiveRun, bundle: { inputs: AgentInput[] } | undefined, messageId: string | undefined): void {
+    const refused = this.commitBundledDelivery(runId, state, bundle?.inputs.map(input => input.id) ?? [], answerOutcomes(messageId));
+    if (!refused || !messageId) return;
+    state.agentInputError = `human input delivery checkpoint failed: ${refused}`;
+    state.session?.interrupt();
+  }
+
   /** The turn that carried bundled messages has ended: the model read them. */
   private readBundledInputs(runId: string, state: ActiveRun): void {
     const ids = state.bundledInputIds ?? [];
@@ -6233,12 +6256,7 @@ export class RunManager {
       !!this.store.getRun(runId) && !this.executionBlockedByRootFinish(this.store.getRun(runId)!);
     const fail = (error: unknown, checkpoint: boolean): void => {
       if (!current() || state.agentSessionError || state.agentInputError) return;
-      state.agentInputError = `${checkpoint ? 'agent input delivery checkpoint failed' : 'agent input delivery failed'}: ${error instanceof Error ? error.message : String(error)}`;
-      // Latch before interrupt: a transport failure caused by interruption is secondary.
-      try { session.interrupt(); } finally {
-        try { this.store.appendEvent(runId, { type: 'error', message: state.agentInputError }); }
-        catch { console.error(`[cez] ${state.agentInputError}`); }
-      }
+      this.latchAgentInputError(runId, state, session, `${checkpoint ? 'agent input delivery checkpoint failed' : 'agent input delivery failed'}: ${error instanceof Error ? error.message : String(error)}`);
     };
     let acknowledgement: false | Promise<void>;
     // A wake beside a pending question tells the runner so: native wires refuse agent input while
@@ -6291,31 +6309,16 @@ export class RunManager {
           // One commit (hearsay-tools/cezarion#1805): the messages, then each wait's delivery (a message
           // a wait carries keeps its read receipt), the charge, the early reads, the cleared failure
           // count and the resume (hearsay-tools/cezarion#1235).
-          this.store.commitOutcome(runId, this.withFailuresCleared(runId, [
-            ...(accepted.length ? [{ kind: 'delivered' as const, inputIds: accepted, at, ...(observable ? { awaitingRead: true as const } : {}) }] : []),
-            ...(resolvedIds.length ? [{ kind: 'delivered' as const, inputIds: resolvedIds, at }] : []),
-            ...(spent === undefined ? [] : [{ kind: 'charged' as const, automaticWakes: spent }]),
-            ...(early.length ? [{ kind: 'consumed' as const, inputIds: early, at }] : []),
-          ], accepted, resolvedIds.length > 0), resolvedIds.length || messageWake ? { patch: { status: 'running' }, resumeStepId: resolvedIds.length ? state.currentStepId : undefined } : {});
-          if (resolvedIds.length) {
-            if (spent !== undefined) {
-              flight.wakeReserved = false;
-              this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : timers.some(wait => wait.kind === 'timer') ? 'timer' : 'process'} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
-            }
-            this.waitWakeAdmitted.delete(runId);
-            if (!resolvedWaits(this.store.getRun(runId) ?? {}).length) {
-              const retry = this.wakeRetries.get(runId);
-              if (retry) clearTimeout(retry);
-              this.wakeRetries.delete(runId);
-            }
-            // Pool membership changes only at a turn end or a terminal path. A worker park's idle
-            // timer belongs to the park, not to the wake turn.
-            this.waiting.delete(runId); this.clearIdleTimer(state);
-            this.store.updateRun(runId, { status: 'running' });
-          } else if (messageWake && this.waitWakeAdmitted.delete(runId)) {
-            if (!owedBefore) { const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId); }
-            this.waiting.delete(runId); this.clearIdleTimer(state);
-            this.store.updateRun(runId, { status: 'running' });
+          const resumes = resolvedIds.length > 0 || messageWake;
+          this.store.commitOutcome(runId, this.withFailuresCleared(runId, acknowledgedBatch({ accepted, resolvedIds, early, spent, observable, at }), accepted, resolvedIds.length > 0),
+            resumes ? { patch: { status: 'running' }, resumeStepId: resolvedIds.length ? state.currentStepId : undefined } : {});
+          if (spent !== undefined) {
+            flight.wakeReserved = false;
+            this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : timers.some(wait => wait.kind === 'timer') ? 'timer' : 'process'} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
+          }
+          // A wake of results always spends its admission; a wake of messages alone, only one it holds.
+          if (resumes && (this.waitWakeAdmitted.delete(runId) || resolvedIds.length > 0)) {
+            this.spendWakeAdmission(runId, state, resolvedIds.length ? resolvedWaits(this.store.getRun(runId) ?? {}).length > 0 : owedBefore);
           }
           // The wake's checkpoint clears the park's timers, the nudge's reply bound with them: a
           // refusal's bound belongs to its turn (hearsay-tools/cezarion#1301).
@@ -6577,15 +6580,8 @@ export class RunManager {
         if (answeringAskSeq !== undefined) {
           this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: answeringAskSeq });
         }
-        // One commit (hearsay-tools/cezarion#1805): the human waits it answers, the messages bundled
-        // with it and a deferred message's queue entry. The budget restarts after the rest steer.
-        const refused = this.commitBundledDelivery(runId, state, bundle?.inputs.map(input => input.id) ?? [],
-          [{ kind: 'answered' }, ...(messageId ? [{ kind: 'message-delivered' as const, messageId }] : [])]);
-        if (refused && messageId) {
-          // stdin and disk cannot transact: the queue entry stays for conservative recovery.
-          state.agentInputError = `human input delivery checkpoint failed: ${refused}`;
-          state.session.interrupt();
-        }
+        // The budget restarts after the rest steer (`sendMessage`).
+        this.commitAnswer(runId, state, bundle, messageId);
         state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
         // A native answer continues the turn, and a bundle can leave messages that did not
         // fit its batch: either way the rest steer right behind the answer.
@@ -7043,7 +7039,7 @@ export class RunManager {
     if (supersedes) this.supersedeWorkerFallback(runId);
     // With the continuation, or after its checkpoint (hearsay-tools/cezarion#1805): a row that
     // records the wait delivered or the budget restarted also holds the answer.
-    if (deferForCapacity || !this.commitHumanContinue(runId)) this.store.flush();
+    this.commitContinuation(runId, !deferForCapacity);
     this.continuationGenerations.set(runId, Symbol());
     // Keep fresh viewable images even if persistence failed; recovery uses saved URLs.
     const images = contentBlocksOf(opts.images ?? []).filter((block) => block.type === 'image');
@@ -7457,7 +7453,7 @@ export class RunManager {
     ];
     // Only the opening input's checkpoint stops the turn end; the rest is best effort, as before.
     try { this.store.commitOutcome(runId, outcomes, { patch: { continuationMessage: undefined } }, { bestEffort: !opening }); }
-    catch (error) { this.failOpeningInput(runId, state, session!, error); return false; }
+    catch (error) { this.latchAgentInputError(runId, state, session!, `agent input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); return false; }
     if (opening) { state.openingAgentInputId = undefined; this.reconcileWorkerWaits(); }
     if (askSeq !== undefined) {
       this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq, ...(answer.parentAnswer ? { source: 'parent' } : {}) });
@@ -7467,12 +7463,12 @@ export class RunManager {
     return true;
   }
 
-  /** The opening input's checkpoint failed: record an agent input error and interrupt the session. */
-  private failOpeningInput(runId: string, state: ActiveRun, session: AgentSession, error: unknown): void {
-    state.agentInputError = `agent input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
+  /** Latch an agent input error, then interrupt: a transport failure the interrupt causes is secondary. */
+  private latchAgentInputError(runId: string, state: ActiveRun, session: AgentSession, message: string): void {
+    state.agentInputError = message;
     try { session.interrupt(); } finally {
-      try { this.store.appendEvent(runId, { type: 'error', message: state.agentInputError }); }
-      catch { console.error(`[cez] ${state.agentInputError}`); }
+      try { this.store.appendEvent(runId, { type: 'error', message }); }
+      catch { console.error(`[cez] ${message}`); }
     }
   }
 
