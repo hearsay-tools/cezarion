@@ -39,7 +39,7 @@ import {
 } from '@open-mercato/cezar-contract/waits';
 import { engineOwnsRun, isSweepable } from '@open-mercato/cezar-contract/run-predicates';
 import type { ArchiveFinishedScope, ArchivedRunsResponse, ArchivePullRequestIdentity, CiWait, PrWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, MergedPullRequest, RunPullRequest, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry, WorkerWait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
-import { matchesRunQuery, sqlPrefilterTokens, type AutomationNames } from './run-search.ts';
+import { matchesRunSearch, sqlPrefilterTokens, type AutomationNames } from '@open-mercato/cezar-contract/run-search';
 import { storedDelegationStateSchema } from './delegation-state.ts';
 import { HistoryCompressor } from './history-compressor.ts';
 import { LiveItemSnapshots } from './live-item-snapshots.ts';
@@ -2286,7 +2286,7 @@ export class RunStore extends EventEmitter {
   }
 
   /** The archived roots in `runs.db`, each by its key: every one without `q` (no record, no
-   *  summary read), and with `q` the searched rows `matchesRunQuery` keeps, which carry the summary
+   *  summary read), and with `q` the searched rows `matchesRunSearch` keeps, which carry the summary
    *  the search read. A deleted, held or unreadable run's row is left out; a held run joins in
    *  `overlayHeldArchived`. */
   private rankArchivedRows(q: string, automationNames: AutomationNames | undefined): Map<string, ArchivedKey> {
@@ -2295,10 +2295,10 @@ export class RunStore extends EventEmitter {
     if (q === '') {
       for (const key of this.db?.listKeysWhere(ARCHIVED_ROOT) ?? []) if (!skipped(key.id)) ranked.set(key.id, key);
     } else {
-      for (const row of this.db?.searchRootSummaries(sqlPrefilterTokens(q, automationNames)) ?? []) {
+      for (const row of this.db?.searchRootSummaries(sqlPrefilterTokens(q, { automationNames })) ?? []) {
         if (skipped(row.id)) continue;
         const summary = parseStoredSummary(row.summary) ?? this.coldSummary(row.id);
-        if (summary?.archived && matchesRunQuery(summary, q, automationNames)) ranked.set(row.id, { ...row, summary });
+        if (summary?.archived && matchesRunSearch(summary, q, { automationNames })) ranked.set(row.id, { ...row, summary });
       }
     }
     return ranked;
@@ -2310,7 +2310,7 @@ export class RunStore extends EventEmitter {
     for (const [id, run] of this.held) {
       if (!run.archived || run.delegation?.role === 'worker') continue;
       const summary = toRunSummary(run);
-      if (q === '' || matchesRunQuery(summary, q, automationNames)) ranked.set(id, { ...this.listOrder(run), summary });
+      if (q === '' || matchesRunSearch(summary, q, { automationNames })) ranked.set(id, { ...this.listOrder(run), summary });
     }
   }
 
@@ -2341,7 +2341,7 @@ export class RunStore extends EventEmitter {
   }
 
   /**
-   * The ROOT runs, archived or not, that match `query` (`matchesRunQuery`), newest first: at most
+   * The ROOT runs, archived or not, that match `query` (`matchesRunSearch`), newest first: at most
    * `limit`, and whether more matched. The owned half of the workspace search (#864); held runs
    * match by their record.
    */
@@ -2352,13 +2352,13 @@ export class RunStore extends EventEmitter {
     this.db?.visitRootSummaries(sqlPrefilterTokens(query), (row) => {
       if (this.deleted.has(row.id) || this.held.has(row.id) || this.unreadable.has(row.id)) return true;
       const summary = parseStoredSummary(row.summary) ?? this.coldSummary(row.id);
-      if (summary && matchesRunQuery(summary, query)) matched.set(row.id, [summary, row]);
+      if (summary && matchesRunSearch(summary, query)) matched.set(row.id, [summary, row]);
       return matched.size <= limit;
     });
     for (const [id, run] of this.held) {
       if (run.delegation?.role === 'worker') continue;
       const summary = toRunSummary(run);
-      if (matchesRunQuery(summary, query)) matched.set(id, [summary, this.listOrder(run)]);
+      if (matchesRunSearch(summary, query)) matched.set(id, [summary, this.listOrder(run)]);
     }
     const runs = sortNewestFirst(matched.values());
     return { runs: runs.slice(0, limit), truncated: runs.length > limit };

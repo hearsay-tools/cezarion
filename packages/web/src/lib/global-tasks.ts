@@ -1,6 +1,8 @@
 import type { ProjectListEntry, RunIndexEntry } from '@open-mercato/cezar-api-client'
 
-import { matchesTaskReferenceNumber } from '@/lib/tasks-table'
+import { matchesRunSearch, type RunSearchExtras } from '@open-mercato/cezar-api-client/contract/run-search'
+
+import { shownReferenceNumbers } from '@/lib/tasks-table'
 import { allProjectTags } from '@/lib/project-tags'
 import { isOwnedWorker, runTitle } from '@/lib/task-groups'
 import { matchesOrigin, parseOrigin, type TaskOrigin } from '@/lib/task-origin'
@@ -223,8 +225,9 @@ const matchesTags = (task: GlobalTask, selected: readonly string[]): boolean => 
 }
 
 /**
- * Search text for one row: the displayed title, the project name, the workflow, the tags — and
- * the branch, which is the one thing here the table does NOT print.
+ * What one row prints, for the shared search (`matchesRunSearch`, shown scope): the displayed
+ * title, the project name, the workflow, the tags — and the branch, which is the one thing here
+ * the table does NOT print.
  *
  * The rule it bends is a real one (matching on text the table never shows makes rows appear for
  * no visible reason, which is why the run id and a title hidden behind a summary stay out), but
@@ -233,18 +236,15 @@ const matchesTags = (task: GlobalTask, selected: readonly string[]): boolean => 
  * branch name from a terminal to find the task that made it is a deliberate gesture, not an
  * accidental match, so dropping the column here does not mean dropping the ability.
  */
-function haystack(task: GlobalTask, automationName: AutomationNameOf): string {
-  return [
-    runTitle(task.run),
-    task.projectName,
-    task.run.workflow,
-    task.run.branch ?? '',
-    ...task.tags,
+function searchExtras(task: GlobalTask, automationName: AutomationNameOf): RunSearchExtras {
+  return {
+    displayTitle: runTitle(task.run),
+    projectName: task.projectName,
+    tags: task.tags,
     // The origin line under the title names the automation, so a search can too (#1616).
-    task.run.automationId === undefined ? '' : automationName(task) ?? task.run.automationId,
-  ]
-    .join('\n')
-    .toLowerCase()
+    automation: task.run.automationId === undefined ? undefined : automationName(task) ?? task.run.automationId,
+    references: () => shownReferenceNumbers(task.run),
+  }
 }
 
 /**
@@ -261,7 +261,7 @@ export function filterGlobalTasks(
   view: 'active' | 'archived',
   automationName: AutomationNameOf = () => undefined,
 ): GlobalTask[] {
-  const tokens = filters.query.trim().toLowerCase().split(/\s+/).filter(Boolean)
+  const searching = filters.query.trim() !== ''
   return tasks.filter((task) => {
     if (view === 'archived' ? !task.run.archived : task.run.archived) return false
     if (!matchesOrigin(task.run, filters.origin ?? 'all')) return false
@@ -269,9 +269,12 @@ export function filterGlobalTasks(
     if (!matchesFacet(filters.statuses, [task.run.status])) return false
     if (!matchesFacet(filters.workflows, [task.run.workflow])) return false
     if (!matchesTags(task, filters.tags)) return false
-    if (tokens.length === 0) return true
-    const text = haystack(task, automationName)
-    return tokens.every((token) => text.includes(token) || matchesTaskReferenceNumber(task.run, token))
+    // Its rows and its workflow facet use the raw workflow name, so a search does not read the label
+    // of a placeholder workflow (`omit`); the per-project table prints that label and searches it
+    // (kept as on `main`, hearsay-tools/cezarion#1884).
+    return !searching || matchesRunSearch(task.run, filters.query, {
+      scope: 'shown', omit: ['workflowLabel'], extras: searchExtras(task, automationName),
+    })
   })
 }
 

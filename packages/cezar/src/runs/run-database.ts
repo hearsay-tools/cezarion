@@ -755,7 +755,7 @@ export class RunDatabase {
 
   /** Every root row (archived or not) whose stored summary contains each `prefilter` token,
    *  lowercased, newest first: the candidates of a run search (#864), which the caller still
-   *  checks with `matchesRunQuery`. No tokens, every root. */
+   *  checks with `matchesRunSearch`. No tokens, every root. */
   searchRootSummaries(prefilter: readonly string[]): RunSummaryRow[] {
     const rows: RunSummaryRow[] = [];
     this.visitRootSummaries(prefilter, (row) => { rows.push(row); return true; });

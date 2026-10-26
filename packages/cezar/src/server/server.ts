@@ -162,7 +162,7 @@ import {
 } from '../runs/event-history.ts';
 import { readRunIndexFromDisk, searchRunIndexFromDisk } from '../runs/run-index.ts';
 import { workerDestroyView } from '../runs/delegation-state.ts';
-import { searchTokens } from '../runs/run-search.ts';
+import { searchTokens } from '@open-mercato/cezar-contract/run-search';
 import { ownPullRequestNumbers } from '../runs/pull-requests.ts';
 import { ColdRepoHandles } from './cold-repo-handles.ts';
 import { isV2WireEventType } from '../runs/ui-event-sink.ts';

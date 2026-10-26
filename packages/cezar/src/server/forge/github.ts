@@ -12,7 +12,7 @@ import { GITHUB_COMMENT_COUNTS_MAX, GITHUB_SEARCH_MAX, REFERENCE_STATUS_MAX, typ
 import { fetchIssueProjects, fetchRepositoryProjects, fetchViewerLogin } from './github-filters.ts';
 import { fetchGithubMergeRequirements, type GithubMergeRequirements } from './github-merge-requirements.ts';
 import { autosaveCommit } from '../../git-worktree.ts';
-import { refNumberFromUrl } from '../../runs/run-search.ts';
+import { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 import type {
   DraftPrInput,
   DraftPrOutcome,
@@ -2309,7 +2309,7 @@ export function readCachedRefStatuses(
 }
 
 // The `#N` in a forge URL. Defined beside the run search matcher, which reads it too (#864).
-export { refNumberFromUrl } from '../../runs/run-search.ts';
+export { refNumberFromUrl } from '@open-mercato/cezar-contract/run-search';
 
 /** A closed issue or an abandoned PR can be REOPENED, so this is long rather than forever — but
  *  it is the rare event, and re-asking a hundred settled references every minute to catch it is
