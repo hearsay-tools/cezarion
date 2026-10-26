@@ -5,7 +5,7 @@ import { runnerSchema } from './health.ts';
 const RUNNER_IDS = runnerSchema.options;
 import { workflowStepDefSchema as workflowStepSchema } from './workflows.ts';
 
-export const automationEventSchema = z.enum([
+export const storedAutomationEventSchema = z.enum([
   'pull_request.opened',
   'issue.opened',
   'issue.labeled',
@@ -15,7 +15,7 @@ export const automationEventSchema = z.enum([
 const boundedString = z.string().trim().min(1).max(200);
 const stringList = z.array(boundedString).max(100).optional();
 
-export const automationFiltersSchema = z
+export const storedAutomationFiltersSchema = z
   .object({
     includeExisting: z.boolean().optional(),
     /** Require an open item and matching live labels before reservation and launch. */
@@ -31,7 +31,7 @@ export const automationFiltersSchema = z
   })
   .passthrough();
 
-export const automationTaskSchema = z
+export const storedAutomationTaskSchema = z
   .object({
     prompt: z.string().min(1).max(100_000),
     workflow: z.string().trim().min(1).max(200).optional(),
@@ -68,7 +68,7 @@ const fillGithubDefaults = (raw: unknown): unknown => {
 };
 
 /** The definition's object shape, before the poll-default preprocess. */
-export const automationDefinitionObjectSchema = z
+export const storedAutomationDefinitionObjectSchema = z
   .object({
     id: z.string().min(1).max(100),
     revision: z.number().int().positive(),
@@ -77,12 +77,12 @@ export const automationDefinitionObjectSchema = z
     enabled: z.boolean().default(false),
     /** A definition written before schedules has no `kind`: it is a poll. */
     kind: automationKindSchema.default('github'),
-    events: z.array(automationEventSchema).min(1).max(4).optional(),
+    events: z.array(storedAutomationEventSchema).min(1).max(4).optional(),
     intervalSeconds: z.number().int().min(60).max(86_400).optional(),
-    filters: automationFiltersSchema.optional(),
+    filters: storedAutomationFiltersSchema.optional(),
     // Passthrough like every other persisted layer: a schedule key a later build adds survives a save here.
     schedule: automationScheduleSchema.passthrough().optional(),
-    task: automationTaskSchema,
+    task: storedAutomationTaskSchema,
     /** `once` schedules only (hearsay-tools/cezarion#1465): the archive record. */
     archived: z
       .object({
@@ -127,9 +127,9 @@ export const automationDefinitionObjectSchema = z
     }
   });
 
-export const automationDefinitionSchema = z.preprocess(fillGithubDefaults, automationDefinitionObjectSchema);
+export const storedAutomationDefinitionSchema = z.preprocess(fillGithubDefaults, storedAutomationDefinitionObjectSchema);
 
-export const automationDefinitionsFileSchema = z
+export const storedAutomationDefinitionsFileSchema = z
   .object({
     version: z.literal(1).default(1),
     automations: z.array(z.unknown()).default([]),
@@ -137,7 +137,7 @@ export const automationDefinitionsFileSchema = z
   })
   .passthrough();
 
-export const automationCursorSchema = z
+export const storedAutomationCursorSchema = z
   .object({
     timestamp: z.string().datetime(),
     tieBreaker: z.string().optional(),
@@ -145,28 +145,28 @@ export const automationCursorSchema = z
   .passthrough();
 
 /** Durable position inside a bounded historical search, independent of the live overlap. */
-export const automationHistoryScanSchema = z.object({
+export const storedAutomationHistoryScanSchema = z.object({
   since: z.string().datetime(),
   until: z.string().datetime(),
   source: z.number().int().min(0).max(2),
   page: z.number().int().min(1).max(10),
   item: z.number().int().min(0).max(100),
   event: z.number().int().min(0).max(100),
-  cursor: automationCursorSchema.optional(),
+  cursor: storedAutomationCursorSchema.optional(),
 });
 
-export const automationRuntimeStateSchema = z
+export const storedAutomationRuntimeStateSchema = z
   .object({
     revision: z.number().int().positive().optional(),
     baselineAt: z.string().datetime().optional(),
     /** Arming time, independent of a history window's older lower bound. */
     armedAt: z.string().datetime().optional(),
-    historyScan: automationHistoryScanSchema.optional(),
-    cursor: automationCursorSchema.optional(),
-    frozenHighWatermark: automationCursorSchema
+    historyScan: storedAutomationHistoryScanSchema.optional(),
+    cursor: storedAutomationCursorSchema.optional(),
+    frozenHighWatermark: storedAutomationCursorSchema
       .extend({ tieBreaker: z.string() })
       .optional(),
-    backlogAfter: automationCursorSchema.extend({ tieBreaker: z.string() }).optional(),
+    backlogAfter: storedAutomationCursorSchema.extend({ tieBreaker: z.string() }).optional(),
     nextCheckAt: z.string().datetime().optional(),
     lastSuccessAt: z.string().datetime().optional(),
     /** schedule kind: the next occurrence's instant and the last fired one's. */
@@ -180,14 +180,14 @@ export const automationRuntimeStateSchema = z
   })
   .passthrough();
 
-export const automationStateFileSchema = z
+export const storedAutomationStateFileSchema = z
   .object({
     version: z.literal(1).default(1),
-    states: z.record(z.string(), automationRuntimeStateSchema).default({}),
+    states: z.record(z.string(), storedAutomationRuntimeStateSchema).default({}),
   })
   .passthrough();
 
-export const automationReceiptSchema = z
+export const storedAutomationReceiptSchema = z
   .object({
     receiptId: z.string().min(1),
     receiptKey: z.string().min(1),
@@ -203,7 +203,7 @@ export const automationReceiptSchema = z
     occurrenceAt: z.string().datetime().optional(),
     candidate: z
       .object({
-        eventId: z.string(), event: automationEventSchema, timestamp: z.string().datetime(),
+        eventId: z.string(), event: storedAutomationEventSchema, timestamp: z.string().datetime(),
         tieBreaker: z.string(), repo: z.string(), nodeId: z.string(), number: z.number().int().positive(),
         title: z.string().max(500), url: z.string().url(), author: z.string().max(200),
         assignees: z.array(z.string().max(200)).max(100), labels: z.array(z.string().max(200)).max(100),
@@ -214,7 +214,7 @@ export const automationReceiptSchema = z
   })
   .passthrough();
 
-export const automationLogResultSchema = z.enum([
+export const storedAutomationLogResultSchema = z.enum([
   'launched',
   'no-match',
   'duplicate',
@@ -231,14 +231,14 @@ export const automationLogResultSchema = z.enum([
   'missed',
 ]);
 
-export const automationLogRecordSchema = z
+export const storedAutomationLogRecordSchema = z
   .object({
     seq: z.number().int().positive(),
     ts: z.string().datetime(),
     automationId: z.string().min(1),
     revision: z.number().int().positive(),
-    event: automationEventSchema.optional(),
-    result: automationLogResultSchema,
+    event: storedAutomationEventSchema.optional(),
+    result: storedAutomationLogResultSchema,
     reason: z.string().max(2_000).optional(),
     durationMs: z.number().int().nonnegative().optional(),
     receiptId: z.string().optional(),
@@ -257,48 +257,48 @@ export const automationLogRecordSchema = z
   })
   .passthrough();
 
-export type AutomationEvent = z.infer<typeof automationEventSchema>;
-export type AutomationDefinition = z.infer<typeof automationDefinitionSchema>;
-export type AutomationArchive = NonNullable<AutomationDefinition['archived']>;
-export type AutomationRuntimeState = z.infer<typeof automationRuntimeStateSchema>;
-export type AutomationReceipt = z.infer<typeof automationReceiptSchema>;
-export type AutomationLogRecord = z.infer<typeof automationLogRecordSchema>;
+export type StoredAutomationEvent = z.infer<typeof storedAutomationEventSchema>;
+export type StoredAutomationDefinition = z.infer<typeof storedAutomationDefinitionSchema>;
+export type StoredAutomationArchive = NonNullable<StoredAutomationDefinition['archived']>;
+export type StoredAutomationRuntimeState = z.infer<typeof storedAutomationRuntimeStateSchema>;
+export type StoredAutomationReceipt = z.infer<typeof storedAutomationReceiptSchema>;
+export type StoredAutomationLogRecord = z.infer<typeof storedAutomationLogRecordSchema>;
 
 /**
- * The two kinds, narrowed: the poller and the GitHub scheduler take a `GithubAutomationDefinition`
+ * The two kinds, narrowed: the poller and the GitHub scheduler take a `StoredGithubAutomationDefinition`
  * so the poll keys are plain required fields there; the schedule runner takes the other.
  * `superRefine` above guarantees the guards hold for every definition the store hands out.
  */
-export type GithubAutomationDefinition = AutomationDefinition & {
+export type StoredGithubAutomationDefinition = StoredAutomationDefinition & {
   kind: 'github';
-  events: AutomationEvent[];
+  events: StoredAutomationEvent[];
   intervalSeconds: number;
-  filters: NonNullable<AutomationDefinition['filters']>;
+  filters: NonNullable<StoredAutomationDefinition['filters']>;
 };
-export type ScheduleAutomationDefinition = AutomationDefinition & {
+export type StoredScheduleAutomationDefinition = StoredAutomationDefinition & {
   kind: 'schedule';
   schedule: AutomationSchedule;
 };
 
 /** A `once` schedule: the shape fires a single time, then the definition is archived. */
-export type OnceScheduleDefinition = ScheduleAutomationDefinition & {
+export type StoredOnceScheduleDefinition = StoredScheduleAutomationDefinition & {
   schedule: AutomationSchedule & { type: 'once'; at: string; timeZone: string };
 };
 
-export function isOnceSchedule(definition: AutomationDefinition): definition is OnceScheduleDefinition {
-  return isScheduleAutomation(definition)
+export function storedIsOnceSchedule(definition: StoredAutomationDefinition): definition is StoredOnceScheduleDefinition {
+  return storedIsScheduleAutomation(definition)
     && definition.schedule.type === 'once'
     && typeof definition.schedule.at === 'string'
     && typeof definition.schedule.timeZone === 'string';
 }
 
-export function isGithubAutomation(definition: AutomationDefinition): definition is GithubAutomationDefinition {
+export function storedIsGithubAutomation(definition: StoredAutomationDefinition): definition is StoredGithubAutomationDefinition {
   return definition.kind === 'github'
     && Array.isArray(definition.events)
     && definition.intervalSeconds !== undefined
     && definition.filters !== undefined;
 }
 
-export function isScheduleAutomation(definition: AutomationDefinition): definition is ScheduleAutomationDefinition {
+export function storedIsScheduleAutomation(definition: StoredAutomationDefinition): definition is StoredScheduleAutomationDefinition {
   return definition.kind === 'schedule' && definition.schedule !== undefined;
 }

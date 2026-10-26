@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { automationKindSchema, automationLogResultSchema, automationEventSchema } from './automations.ts';
-import { automationFiltersSchema, automationTaskSchema } from './automation-storage.ts';
+import { storedAutomationFiltersSchema as automationFiltersSchema, storedAutomationTaskSchema as automationTaskSchema } from './automation-storage.ts';
 import { automationScheduleSchema } from './automation-schedule.ts';
 import { singleRunVariantsSchema } from './runs.ts';
 
