@@ -90,14 +90,13 @@ on-by-default exit is "a human types something" is a dead end, however well it r
 
 **Commit an outcome with what it depends on, or after it.** A write that records an
 outcome (`delivered`, `charged`, `settled`, `answered`) must commit atomically with the
-write holding what that outcome needs, or after that write commits. Check every crash
-boundary between the writes: a delivered answer must already be saved, and a delivered
-automatic wake must already be charged. A best-effort write in a cleanup path must
-never throw past the cleanup and prevent it from finishing. Test the boundary by
-reading the **committed row** at the point a crash would hit, rather than checking only
-the final state or the in-memory object (hearsay-tools/cezarion#1250: a wake delivered
-without its charge, a counter write blocking Finish, a Continue settling its human wait
-before saving `continuationMessage`).
+write holding what that outcome needs, or after that write commits. A best-effort write
+in a cleanup path must never throw past the cleanup and prevent it from finishing. In
+the run store, commit a `RunOutcome` and what it needs in one `RunStore.commitOutcome`
+call (`bestEffort` in cleanup), and a request outcome through `commitConversation`; the
+`outcome-write-outside-commit-outcome` rule refuses other writes, and `recordCommits`
+reads the **committed row** after each commit. Elsewhere, test each crash boundary on the
+committed row, not the final state or the in-memory object (hearsay-tools/cezarion#1250).
 
 **Test the path with no live session.** When changing a path that reads
 `this.active.get(runId)`, add a test with no session. Restart recovery and scheduler

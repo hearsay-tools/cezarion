@@ -23,6 +23,7 @@ import { watchTurnOutcomes, type TurnOutcomes } from './turn-outcomes.testkit.ts
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt, MONITORING_TEXT } from './monitoring-turn.testkit.ts';
 import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
+import { recordCommits } from '../runs/outcome-crash.testkit.ts';
 import { PROSE_HUMAN_GATE } from '../runs/transcript-facts.ts';
 import { withHeldAck, withRejectedInput } from '../core/owned-input-delivery.testkit.ts';
 import { ciNativeMessages, ciNativeSteers, gatedProviderFailure, MESSAGE_WAKE_OPENING, persistentWakeFailure, thenSay, TIMER_WAKE_OPENING, toolCall, WAIT_CRITERIA } from './waits-parity.testkit.ts';
@@ -80,15 +81,19 @@ const waitOfKind = (id: string, kind: Wait['kind']) => store.getRun(id)?.waits?.
 const agentWaits = (id: string) => (store.getRun(id)?.waits ?? []).filter(wait => wait.source !== 'cezar');
 const settled = (id: string, waitId: string) => store.getRun(id)?.lastWaits?.find(wait => wait.id === waitId);
 const inputsFor = (id: string, waitId: string) => store.getRun(id)?.agentInputs?.filter(input => input.id === waitId) ?? [];
-const engine = () => manager as unknown as {
-  active: Map<string, { session: AgentSession & { end(): void }; ciGeneration: string }>;
-  waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
-  monitoring: Set<string>;
-  wakeRetryBackoff: Backoff;
-  wakeBackoffs: Map<string, NodeJS.Timeout>;
-  wakeRetries: Map<string, NodeJS.Timeout>;
-  queue: string[];
-};
+function engine() {
+  return manager as unknown as {
+    active: Map<string, { session: AgentSession & { end(): void }; ciGeneration: string }>;
+    waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
+    monitoring: Set<string>;
+    wakeRetryBackoff: Backoff;
+    wakeBackoffs: Map<string, NodeJS.Timeout>;
+    wakeRetries: Map<string, NodeJS.Timeout>;
+    queue: string[];
+    deferredMessages: Map<string, Array<{ content: Array<{ type: 'text'; text: string }>; messageId?: string }>>;
+    flushDeferred(id: string): void;
+  };
+}
 // The delivery bound, not the backoff, is what these cells pin: retries start at once.
 const retryAtOnce = () => { engine().wakeRetryBackoff = { fastMs: 0, fastCount: MAX_WAKE_DELIVERY_ATTEMPTS, capMs: 0 }; };
 const stepStatus = (id: string, stepId: string) => store.getRun(id)?.steps.find(step => step.id === stepId)?.status;
@@ -314,7 +319,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U7q', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
 
@@ -672,18 +677,8 @@ function baseCells(runners: RunnerId[]): void {
       };
       const first = await open(60, 'u10 first'), second = await open(61, 'u10 second'), last = await open(62, 'u10 last');
       store.updateRun(run.id, { automaticWakes: 39, waitDeliveryFailures: 2 });
-      // What a crash at the charge would leave: the committed row, read as the charge's note is
-      // written, before any debounced save could land.
-      let committed: { automaticWakes?: number; waitDeliveryFailures?: number; delivered: string[] } | undefined;
-      const append = store.appendEvent.bind(store);
-      vi.spyOn(store, 'appendEvent').mockImplementation((id, event) => {
-        if (!committed && event.type === 'note' && String(event.message).startsWith('automatic timer wake-up (')) {
-          const row = readPersistedRuns(join(root, '.ai/cezar')).find(record => record.id === run.id);
-          committed = { automaticWakes: row?.automaticWakes, waitDeliveryFailures: row?.waitDeliveryFailures,
-            delivered: (row?.lastWaits ?? []).filter((wait: Wait) => wait.phase === 'delivered').map((wait: Wait) => wait.id).sort() };
-        }
-        return append(id, event);
-      });
+      // What a crash after any commit would leave (hearsay-tools/cezarion#1805): every committed row.
+      const commits = recordCommits(join(root, '.ai/cezar'));
       // Two timers resolve before one boundary: one admitted turn carries both and spends one wake.
       fireTimer(first.id); fireTimer(second.id);
       await until(() => store.getRun(run.id)?.waits?.filter(wait => wait.phase === 'resolved').length === 2);
@@ -694,8 +689,11 @@ function baseCells(runners: RunnerId[]): void {
       expect(store.getRun(run.id)?.automaticWakes).toBe(40);
       const charged = store.readEvents(run.id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic timer wake-up ('));
       expect(charged.map(event => event.message)).toEqual(['automatic timer wake-up (40/40)']);
-      // The delivery, its charge and the cleared failure count are one commit.
-      expect(committed).toEqual({ automaticWakes: 40, waitDeliveryFailures: undefined, delivered: [first.id, second.id].sort() });
+      // The delivery, its charge and the cleared failure count are one commit: no committed row
+      // holds a delivered timer without its charge.
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(wait => [first.id, second.id].includes(wait.id) && wait.phase === 'delivered') ||
+        (row.automaticWakes === 40 && row.waitDeliveryFailures === undefined && row.lastWaits.filter(wait => wait.phase === 'delivered').length === 2), 'a delivered timer and its charge');
+      expect(commits.rows(run.id).some(row => row?.lastWaits?.some(wait => wait.id === first.id && wait.phase === 'delivered'))).toBe(true);
       await until(() => parkedOn(run.id, store.getRun(run.id)?.waits?.find(wait => wait.id === last.id)));
       const turns = turnEnds(run.id);
       // The budget is spent: the next timer to come due is cancelled and wakes nothing.
@@ -906,9 +904,17 @@ function baseCells(runners: RunnerId[]): void {
       expect(deriveAttention(store.getRun(run.id)!).label).toBe('needs you');
       expect(manager.isActive(run.id)).toBe(false);
       const [budget] = humanOpen(run.id);
+      const commits = recordCommits(join(root, '.ai/cezar'));
       expect(manager.continueRun(run.id, { text: 'carry on' }).ok).toBe(true);
       await until(() => settled(run.id, budget!.id)?.phase === 'delivered');
       expect(store.getRun(run.id)?.automaticWakes ?? 0).toBe(0);
+      // hearsay-tools/cezarion#1805: the restarted budget and the answered wait are committed with
+      // the Continue they come from, never before it.
+      const step = store.getRun(run.id)!.steps.at(-1)!.id;
+      commits.expectEveryCommit(run.id, row => {
+        return (row.automaticWakes === MAX_AUTO_CONTINUES && !row.lastWaits?.some(wait => wait.id === budget!.id && wait.phase === 'delivered')) ||
+          row.continuationMessage?.text === 'carry on' || row.steps.some(entry => entry.id === step && entry.status !== 'pending');
+      }, 'a restarted budget and its Continue');
       await until(() => store.getRun(run.id)?.status === 'waiting' && manager.isActive(run.id));
       expect(manager.finish(run.id)).toBe(true);
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
@@ -1317,22 +1323,15 @@ function baseCells(runners: RunnerId[]): void {
       engine().active.get(run.id)!.session.end();
       await until(() => !manager.isActive(run.id));
       rmSync(answers, { force: true });
-      // What a crash right after the answer settles the wait would leave: the committed row.
-      let committed: { answer?: string; delivered: boolean } | undefined;
-      const settle = store.commitHumanWaitsAnswered.bind(store);
-      vi.spyOn(store, 'commitHumanWaitsAnswered').mockImplementation((id, only) => {
-        const ids = settle(id, only);
-        if (!committed && ids.includes(wait!.id)) {
-          const row = readPersistedRuns(join(root, '.ai/cezar')).find(record => record.id === run.id);
-          committed = { answer: row?.continuationMessage?.text,
-            delivered: (row?.lastWaits ?? []).some((entry: Wait) => entry.id === wait!.id && entry.phase === 'delivered') };
-        }
-        return ids;
-      });
+      // What a crash after any commit would leave (hearsay-tools/cezarion#1805): every committed row.
+      const commits = recordCommits(join(root, '.ai/cezar'));
       const answer = toolCall('cezar_done', { summary: 'answered and shipped' });
       expect(manager.continueRun(run.id, { text: answer }).ok).toBe(true);
-      // The wait is never delivered in a row that lost the answer it was delivered with.
-      expect(committed).toEqual({ answer: answer.trim(), delivered: true });
+      // The wait is never delivered in a row that lost the answer it was delivered with: until the
+      // Continue's step starts, a row with the wait delivered holds the answer.
+      commits.expectEveryCommit(run.id, row => !row.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') ||
+        row.continuationMessage?.text === answer.trim() || row.steps.some(step => step.id === 'continue-1' && step.status !== 'pending'), 'an answered wait and its answer');
+      expect(commits.rows(run.id).some(row => row?.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') && row.continuationMessage?.text === answer.trim())).toBe(true);
       // File creation precedes write completion in the mock child. Read its response only
       // after the native turn has finished, when the child has completed the write.
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? '') && !manager.isActive(run.id));
@@ -1363,6 +1362,29 @@ function baseCells(runners: RunnerId[]): void {
       await until(() => prompted(runner, NO_WAIT_NUDGE).length === 2 && gated(run.id));
       for (const nudge of prompted(runner, NO_WAIT_NUDGE)) expectNoWaitNudgeKinds(nudge);
       expect(store.getRun(run.id)?.automaticWakes).toBe(1);
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    // hearsay-tools/cezarion#1805: a message deferred while its session started up
+    // (open-mercato/cezar#472) is queued beside the waits. When it answers the question, the answered
+    // wait and the removed queue entry are one commit: a reopened store never replays an answer it
+    // shows delivered, nor shows the question open after dropping the answer.
+    it(`${runner} U7q a deferred message that answers the question removes its queue entry in the answer's commit`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
+      await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === 'waiting');
+      const [wait] = humanOpen(run.id);
+      const message = { id: randomUUID(), text: answerOf(run.id), createdAt: new Date().toISOString() };
+      store.commitHumanMessageBesideWaits(run.id, message);
+      engine().deferredMessages.set(run.id, [{ content: [{ type: 'text', text: message.text }], messageId: message.id }]);
+      const commits = recordCommits(join(root, '.ai/cezar'));
+      engine().flushDeferred(run.id);
+      await until(() => settled(run.id, wait!.id)?.phase === 'delivered' && answered(run.id, wait!.askSeq!));
+      expect(store.getRun(run.id)?.queuedMessages ?? []).toEqual([]);
+      expect(engine().deferredMessages.has(run.id)).toBe(false);
+      commits.expectEveryCommit(run.id, row => !!row.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') === !row.queuedMessages?.some(entry => entry.id === message.id),
+        'a deferred answer and its queue entry');
       expect(manager.finish(run.id)).toBe(true);
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
@@ -1751,10 +1773,14 @@ function workersCells(runners: RunnerId[]): void {
       await until(() => store.getRun(f.p.id)?.waitDeliveryFailures === 1 && engine().wakeBackoffs.has(f.p.id) && !manager.isActive(f.p.id));
       expect(store.getRun(f.p.id)?.status).toBe('waiting');
       f.failure.lift();
+      const commits = recordCommits(join(root, '.ai/cezar'));
       const backoff = engine().wakeBackoffs.get(f.p.id) as NodeJS.Timeout & { _onTimeout(): void };
       backoff._onTimeout(); clearTimeout(backoff);
       await until(() => delivered(f.p.id, id) && store.getRun(f.p.id)?.agentInputs?.find(input => input.id === id)?.awaitingRead !== true);
       expect(store.getRun(f.p.id)?.waitDeliveryFailures).toBeUndefined();
+      // hearsay-tools/cezarion#1805: the receipt or the read that ends the failures clears them in its commit.
+      commits.expectEveryCommit(f.p.id, row => { const message = row.agentInputs?.find(input => input.id === id); return !message?.deliveredAt || !!message.awaitingRead || row.waitDeliveryFailures === undefined; },
+        'a received message and its cleared failure count');
       await until(() => store.getRun(f.p.id)?.status === 'waiting');
       expect(store.getRun(f.p.id)?.waitDeliveryFailures).toBeUndefined();
     });
@@ -2116,9 +2142,13 @@ function workersCells(runners: RunnerId[]): void {
       process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
       const { p, w } = await parentWithWorker(runner);
       const wakes = store.getRun(p.id)?.automaticWakes ?? 0;
+      const commits = recordCommits(join(root, '.ai/cezar'));
       engine().active.get(p.id)!.session.end();
       const refusal = `Workers are still live: ${w.id}.`;
       await until(() => prompted(runner, refusal).length > 0 && workerWaits(p.id)[0]?.phase === 'open' && store.getRun(p.id)?.status === 'waiting');
+      // hearsay-tools/cezarion#1805: the refusal is queued with its charge, so no reopened store
+      // delivers it uncharged.
+      commits.expectEveryCommit(p.id, row => !row.agentInputs?.some(input => input.text.includes(refusal)) || row.automaticWakes === wakes + 1, 'a queued refusal and its charge');
       expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
       expect(prompted(runner, refusal)).toEqual([expect.stringContaining(COMPLETION_WILL_WAIT)]);
       const inputs = store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];
@@ -2414,11 +2444,49 @@ function workersCells(runners: RunnerId[]): void {
       await until(() => delivered(p.id, requestId) && prompted(runner, question).length > 0);
       const wakes = store.getRun(w.id)?.automaticWakes ?? 0;
       const parentCaller = callerFor(p.id);
-      await service.send(parentCaller, { id: randomUUID(), recipientRunId: w.id, kind: 'reply', requestId, text: `${WORKER_FALLBACK_HEADER}: cez-dev`, timeoutSeconds: 600 });
+      const fallback = humanOpen(w.id)[0]!.id;
+      const commits = recordCommits(join(root, '.ai/cezar'));
+      const replyId = randomUUID();
+      await service.send(parentCaller, { id: replyId, recipientRunId: w.id, kind: 'reply', requestId, text: `${WORKER_FALLBACK_HEADER}: cez-dev`, timeoutSeconds: 600 });
       await until(() => store.readEvents(w.id).some(event => event.type === 'human-input-delivered' && event.source === 'parent' && event.askSeq === asks(w.id)[0]!.seq));
       expect(store.readEvents(w.id).filter(event => event.type === 'note' && String(event.message).startsWith(WORKER_FALLBACK_REPLY_NOTE)))
         .toEqual([expect.objectContaining({ message: `${WORKER_FALLBACK_REPLY_NOTE} (${wakes + 1}/${MAX_AUTO_CONTINUES})` })]);
       await until(() => prompted(runner, `${WORKER_FALLBACK_HEADER}: cez-dev`).length > 0);
+      // hearsay-tools/cezarion#1805: whichever way the reply reaches the worker (its live session, or a
+      // continuation that opens with it), a reopened store never reads the charge or the answered
+      // question without the reply delivered or owed, nor the reply read with the question still open.
+      const reply = (row: RunRecord) => row.agentInputs?.find(input => input.id === replyId);
+      const owed = (row: RunRecord) => !!reply(row)?.deliveredAt || row.continuationMessage?.agentInputId === replyId;
+      commits.expectEveryCommit(w.id, row => row.automaticWakes !== wakes + 1 || owed(row), 'the reply\'s charge and its delivery');
+      commits.expectEveryCommit(w.id, row => !row.lastWaits?.some(wait => wait.id === fallback && wait.phase === 'delivered') || owed(row), 'the answered question and its reply');
+      commits.expectEveryCommit(w.id, row => !reply(row)?.consumedAt || !row.waits?.some(wait => wait.id === fallback), 'the read reply and its question');
+    });
+
+    // hearsay-tools/cezarion#1805: the reply opens a continuation, and the opening turn's
+    // acknowledgement reads the reply and answers the worker's question in one commit, so a reopened
+    // store never reads the reply consumed with the question still open.
+    it(`${runner} U24r a parent's reply to a worker question whose session closed opens a continuation that answers it in one commit`, async () => {
+      nativeWire(runner);
+      const { p, service, callerFor } = await delegatingParent({ task: HARNESS_ADAPTERS[runner].scenarios.baseline!, runner, permissions: ['spawn', 'wait', 'steer'] });
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+      const w = await worker(p.id, toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner);
+      manager.enqueueOwnedRun(w.id);
+      const routed = () => store.readEvents(w.id).find(event => event.type === 'worker-question-routed');
+      await until(() => routed() !== undefined && humanOpen(w.id)[0]?.askSeq !== undefined && store.getRun(w.id)?.status === 'waiting');
+      const [question] = humanOpen(w.id);
+      engine().active.get(w.id)!.session.end();
+      await until(() => !manager.isActive(w.id) && store.getRun(w.id)?.status === 'waiting');
+      expect(humanOpen(w.id).map(wait => wait.id)).toEqual([question!.id]);
+      const commits = recordCommits(join(root, '.ai/cezar'));
+      const replyId = randomUUID();
+      await service.send(callerFor(p.id), { id: replyId, recipientRunId: w.id, kind: 'reply', requestId: String(routed()!.messageId), text: 'Choice: Parser', timeoutSeconds: 600 });
+      await until(() => store.readEvents(w.id).some(event => event.type === 'human-input-delivered' && event.source === 'parent'));
+      await until(() => !!store.getRun(w.id)?.agentInputs?.find(input => input.id === replyId)?.consumedAt && humanOpen(w.id).every(wait => wait.id !== question!.id));
+      expect(settled(w.id, question!.id)?.phase).toBe('delivered');
+      const reply = (row: RunRecord) => row.agentInputs?.find(input => input.id === replyId);
+      commits.expectEveryCommit(w.id, row => !reply(row)?.consumedAt || !row.waits?.some(wait => wait.id === question!.id), 'the read reply and its question');
+      commits.expectEveryCommit(w.id, row => !row.lastWaits?.some(wait => wait.id === question!.id && wait.phase === 'delivered') || !!reply(row)?.deliveredAt ||
+        row.continuationMessage?.agentInputId === replyId, 'the answered question and its reply');
     });
 
     // hearsay-tools/cezarion#1301: an automatic message to a worker supersedes Cezar's pending fallback

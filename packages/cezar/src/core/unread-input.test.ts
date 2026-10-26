@@ -108,7 +108,11 @@ describe('unread agent input is resubmitted (#505)', () => {
     adapter.scenarios['steer-late'] = 'mock:steer-late mock:done-late';
     try {
       await withOwnedInputRun('codex', 'steer-late', async ({ store, manager, runId, parentRunId }) => {
-        vi.spyOn(store, 'requeueUnconsumedAgentInputs').mockImplementation(() => { throw new Error('disk full'); });
+        const commit = store.commitOutcome.bind(store);
+        vi.spyOn(store, 'commitOutcome').mockImplementation((id, outcomes, ...rest) => {
+          if ([outcomes].flat().some(outcome => outcome.kind === 'requeued')) throw new Error('disk full');
+          return commit(id, outcomes, ...rest);
+        });
         manager.enqueueOwnedRun(runId);
         await waitFor(() => store.readEvents(runId).some(e => e.type === 'text' && String(e.text).includes('late window')));
         manager.steerWorker(runId, late(parentRunId));

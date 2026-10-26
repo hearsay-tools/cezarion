@@ -57,6 +57,7 @@ import { extractTaskRefs, MAX_REF } from './task-refs.ts';
 // Type-only module (zod + nothing else), so this cannot cycle back into the store.
 import { workflowDefSchema } from '../workflows/types.ts';
 import { waitInputId } from '../workflows/waits.ts';
+import { applyOutcomes, type OutcomeDependencies, type RunOutcome } from './outcome-commit.ts';
 
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import {
@@ -432,32 +433,6 @@ export function parseRunRecords(raw: unknown) {
   return z.array(runRecordSchema).safeParse(raw);
 }
 
-/** A wait list as the record stores it: absent when empty. */
-function nonEmpty(waits: Wait[]): Wait[] | undefined {
-  return waits.length ? waits : undefined;
-}
-
-/** Append settled waits to the history, newest last, dropping the oldest past `LAST_WAITS_LIMIT`. */
-function settleWaits(previous: readonly Wait[] | undefined, settled: readonly Wait[]): Wait[] | undefined {
-  return nonEmpty([...(previous ?? []), ...settled].slice(-LAST_WAITS_LIMIT));
-}
-
-/** `run` with the named open or resolved waits cancelled and their undelivered wake inputs dropped,
- *  or undefined when none of them is open or resolved. */
-function withWaitsCancelled(run: RunRecord, waitIds: readonly string[]): RunRecord | undefined {
-  const ids = new Set(waitIds);
-  const cancelled = (run.waits ?? []).filter((wait) => ids.has(wait.id) && (wait.phase === 'open' || wait.phase === 'resolved'));
-  if (!cancelled.length) return undefined;
-  const cancelledAt = new Date().toISOString();
-  const retired = new Set(cancelled.map((wait) => wait.id));
-  const inputs = new Set(cancelled.map(waitInputId));
-  return { ...run,
-    waits: nonEmpty((run.waits ?? []).filter((wait) => !retired.has(wait.id))),
-    lastWaits: settleWaits(run.lastWaits, cancelled.map((wait) => ({ ...wait, phase: 'cancelled' as const, cancelledAt }))),
-    ...(run.agentInputs ? { agentInputs: run.agentInputs.filter((input) => !inputs.has(input.id) || input.deliveredAt) } : {}),
-  };
-}
-
 /** One stored record and what its JSON holds beyond the runtime schema (raw-record.ts), which
  *  the next write of its row puts back. */
 export interface DecodedRun {
@@ -518,9 +493,6 @@ export { LEGACY_INDEX_BACKUP_FILE, LEGACY_INDEX_FILE } from './legacy-index.ts';
 export type StepState = z.infer<typeof stepStateSchema>;
 export type QueuedMessage = z.infer<typeof queuedMessageSchema>;
 export type RunRecord = z.infer<typeof runRecordSchema>;
-/** The automatic-wake budget and the failed wake-delivery count (hearsay-tools/cezarion#1234). A
- *  key present as `undefined` clears that counter. */
-export type WakeCounters = Partial<Pick<RunRecord, 'automaticWakes' | 'waitDeliveryFailures'>>;
 
 /** One persisted event line; `type` mirrors AgentEvent plus engine lifecycle. */
 export type RunEvent = import('@open-mercato/cezar-contract').RunEvent;
@@ -2433,28 +2405,12 @@ export class RunStore extends EventEmitter {
     this.commitIndex(staged);
   }
 
-  /** Observable atomic input checkpoint: a failed write publishes nothing. */
-  /** Accepted input the harness will never read returns to the queue (#505): only its
-   * delivery and consumption receipts are cleared; order and identity are kept. */
-  requeueUnconsumedAgentInputs(id: string, ids: readonly string[]): void {
-    const run = this.peek(id);
-    if (!run?.agentInputs || !ids.length) return;
-    this.commitAgentInputs(id, run.agentInputs.map(input => {
-      if (!ids.includes(input.id)) return input;
-      const { deliveredAt: _delivered, consumedAt: _consumed, awaitingRead: _awaiting, ...queued } = input;
-      return queued;
-    }));
-  }
-
-  /** Model consumption observed by the current session (#505). Never un-sets deliveredAt. */
-  commitAgentInputsConsumed(id: string, ids: readonly string[], at: string): void {
-    const run = this.peek(id);
-    if (!run?.agentInputs || !ids.length) return;
-    this.commitAgentInputs(id, run.agentInputs.map(input => {
-      if (!ids.includes(input.id) || !input.deliveredAt || input.consumedAt) return input;
-      const { awaitingRead: _awaiting, ...read } = input;
-      return { ...read, consumedAt: at };
-    }));
+  /** Crash recovery (#505): input a harness accepted but was never seen reading goes
+   * back to the queue. Returns the requeued IDs. */
+  requeueAwaitingReadInputs(id: string): string[] {
+    const ids = (this.peek(id)?.agentInputs ?? []).filter(input => input.awaitingRead && input.deliveredAt && !input.consumedAt).map(input => input.id);
+    if (ids.length) this.commitOutcome(id, { kind: 'requeued', inputIds: ids });
+    return ids;
   }
 
   /** Delivered, but the harness never confirmed reading it (#505): stop awaiting a read. */
@@ -2468,18 +2424,17 @@ export class RunStore extends EventEmitter {
     }));
   }
 
-  /** Crash recovery (#505): input a harness accepted but was never seen reading goes
-   * back to the queue. Returns the requeued IDs. */
-  requeueAwaitingReadInputs(id: string): string[] {
-    const ids = (this.peek(id)?.agentInputs ?? []).filter(input => input.awaitingRead && input.deliveredAt && !input.consumedAt).map(input => input.id);
-    this.requeueUnconsumedAgentInputs(id, ids);
-    return ids;
-  }
-
-  commitAgentInputs(id: string, inputs: readonly AgentInput[], openingContinuationInputId?: string): void {
+  /** Observable atomic input checkpoint for the queue itself: enqueue, retire, reorder. Delivery
+   *  and reads are outcomes (`commitOutcome`). */
+  commitAgentInputs(id: string, inputs: readonly AgentInput[]): void {
     const run = this.peek(id);
     if (!run) throw new Error('missing agent input target');
     const agentInputs = inputs.map(input => agentInputSchema.parse(input));
+    // Receipts are outcomes (hearsay-tools/cezarion#1805): only `commitOutcome` writes them.
+    const stored = new Map((run.agentInputs ?? []).map(input => [input.id, input]));
+    if (agentInputs.some(input => input.deliveredAt !== stored.get(input.id)?.deliveredAt || input.consumedAt !== stored.get(input.id)?.consumedAt)) {
+      throw new Error('agent input receipts change only through commitOutcome');
+    }
     const now = new Date().toISOString();
     for (const input of run.agentInputs ?? []) {
       const claim = input.inboxClaim;
@@ -2489,9 +2444,7 @@ export class RunStore extends EventEmitter {
         throw new Error('live inbox receipt changed');
       }
     }
-    if (openingContinuationInputId && (run.continuationMessage?.agentInputId !== openingContinuationInputId ||
-      !agentInputs.some(input => input.id === openingContinuationInputId && input.deliveredAt))) throw new Error('opening agent input checkpoint changed');
-    this.commitIndex(new Map([[id, { ...run, agentInputs, ...(openingContinuationInputId ? { continuationMessage: undefined } : {}) }]]));
+    this.commitIndex(new Map([[id, { ...run, agentInputs }]]));
   }
 
   /** Reserve only unread conversation inputs in one durable index replacement. */
@@ -2536,8 +2489,7 @@ export class RunStore extends EventEmitter {
     if (matching.some(input => input.deliveredAt || input.inboxClaim?.acknowledgedAt || input.inboxClaim!.expiresAt <= at)) {
       throw new Error('inbox receipt expired or displaced');
     }
-    this.commitIndex(new Map([[runId, { ...run, agentInputs: run.agentInputs!.map(input => input.inboxClaim?.receiptId === receiptId
-      ? agentInputSchema.parse({ ...input, deliveredAt: at, inboxClaim: { ...input.inboxClaim, acknowledgedAt: at } }) : input) }]]));
+    this.commitOutcome(runId, { kind: 'inbox-acknowledged', receiptId, at });
     return 'acknowledged';
   }
 
@@ -2573,7 +2525,7 @@ export class RunStore extends EventEmitter {
    * A wait and its wake input share one atomic index replacement (spec 2026-10-17-unified-waits).
    * Upserts `wait` by id into `waits` and clears `lastWaitsError`; `input` is appended once (an
    * input whose id is already queued stays as it is). Only an open or resolved wait is committed
-   * here: settling goes through `commitWaitDelivery` or `commitWaitCancellation`. A new open wait
+   * here: settling is an outcome (`commitOutcome`). A new open wait
    * past `WAIT_LIMIT` open ones is refused, so the list stays bounded whatever the caller checked.
    */
   commitWait(id: string, wait: Wait, input?: AgentInput): void {
@@ -2590,38 +2542,6 @@ export class RunStore extends EventEmitter {
     this.commitIndex(new Map([[id, { ...run, waits: known ? waits.map((row) => row.id === entry.id ? entry : row) : [...waits, entry], lastWaitsError: undefined,
       ...(agentInput ? { agentInputs: run.agentInputs?.some((row) => row.id === agentInput.id)
         ? run.agentInputs : [...(run.agentInputs ?? []), agentInput] } : {}) }]]));
-  }
-
-  /** Cancel by the agent or by Cezar: each named open or resolved wait moves to `lastWaits` as
-   *  `cancelled`, and its undelivered wake input (the input whose id is the wait's) goes with it. */
-  commitWaitCancellation(id: string, waitIds: readonly string[]): void {
-    const run = this.peek(id);
-    const next = run && withWaitsCancelled(run, waitIds);
-    if (next) this.commitIndex(new Map([[id, next]]));
-  }
-
-  /** One delivery checkpoint for a wake batch: every named agent input is marked delivered (one
-   *  already delivered keeps its time), and each resolved wait among them (input id = wait id)
-   *  moves to `lastWaits` as `delivered`. Open waits a batch names stay open. `counters` are the
-   *  wake counters the delivery spends or clears, in the same commit, so a crash keeps both or
-   *  neither; nothing is written when nothing is delivered. `resumed` writes the run `running` in
-   *  the same commit (hearsay-tools/cezarion#1235): a crash after the provider's acknowledgement
-   *  then recovers a run that resumed, never a parked one that owes nothing. `stepId` names the
-   *  step that resumes with it: a `waiting` step reads `running` in that commit too. */
-  commitWaitDelivery(id: string, inputIds: readonly string[], counters: WakeCounters = {}, resumed = false, stepId?: string): void {
-    const run = this.peek(id);
-    if (!run) return;
-    const ids = new Set(inputIds);
-    const delivered = (run.waits ?? []).filter((wait) => wait.phase === 'resolved' && ids.has(waitInputId(wait)));
-    if (!delivered.length && !run.agentInputs?.some((input) => ids.has(input.id) && !input.deliveredAt)) return;
-    const deliveredAt = new Date().toISOString();
-    const retired = new Set(delivered.map((wait) => wait.id));
-    this.commitIndex(new Map([[id, { ...run, ...counters, ...(resumed ? { status: 'running' as const, activity: undefined } : {}),
-      ...(resumed && stepId ? { steps: run.steps.map((step) => step.id === stepId && step.status === 'waiting' ? { ...step, status: 'running' as const } : step) } : {}),
-      waits: nonEmpty((run.waits ?? []).filter((wait) => !retired.has(wait.id))),
-      lastWaits: settleWaits(run.lastWaits, delivered.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt }))),
-      ...(run.agentInputs ? { agentInputs: run.agentInputs.map((input) => ids.has(input.id) && !input.deliveredAt ? { ...input, deliveredAt } : input) } : {}),
-    }]]));
   }
 
   /** A park that gives up its slot (hearsay-tools/cezarion#1235): the run and its step read
@@ -2645,38 +2565,9 @@ export class RunStore extends EventEmitter {
       ...(held ? { status: 'failed' as const, finishedAt: new Date().toISOString() } : {}) }]]));
   }
 
-  /** The wake counters alone, committed at once instead of on the debounced save: a crash after
-   *  an autonomous nudge or a failed delivery keeps what it spent or counted. */
-  commitWakeCounters(id: string, counters: WakeCounters): void {
-    const run = this.peek(id);
-    if (run) this.commitIndex(new Map([[id, { ...run, ...counters }]]));
-  }
-
-  /** The user answered: every open human wait moves to `lastWaits` as `delivered` in one commit
-   *  (hearsay-tools/cezarion#1234). Returns their ids, empty when none was open. */
-  commitHumanWaitsAnswered(id: string, only?: readonly string[]): string[] {
-    const run = this.peek(id);
-    const answered = (run?.waits ?? []).filter((wait) => wait.kind === 'human' && wait.phase === 'open' && (!only || only.includes(wait.id)));
-    if (!run || !answered.length) return [];
-    const deliveredAt = new Date().toISOString();
-    const ids = new Set(answered.map((wait) => wait.id));
-    this.commitIndex(new Map([[id, { ...run,
-      waits: nonEmpty((run.waits ?? []).filter((wait) => !ids.has(wait.id))),
-      lastWaits: settleWaits(run.lastWaits, answered.map((wait) => ({ ...wait, phase: 'delivered' as const, deliveredAt }))),
-    }]]));
-    return [...ids];
-  }
-
   /** Legacy CI checkpoint over `commitWait`, kept until its callers move (unified waits, Task 4). */
   commitCiWait(id: string, wait: CiWait, input?: AgentInput): void {
     this.commitWait(id, ciWaitEntry(ciWaitSchema.parse(wait)), input);
-  }
-
-  /** Legacy CI delivery over `commitWaitDelivery`: only a resolved CI wait's own input. Kept until
-   *  its callers move (unified waits, Task 4). */
-  commitCiWaitDelivery(id: string, inputId: string): void {
-    if (!this.peek(id)?.waits?.some((wait) => wait.kind === 'pr' && wait.phase === 'resolved' && wait.id === inputId)) return;
-    this.commitWaitDelivery(id, [inputId]);
   }
 
   /** A human message beside a run's waits (hearsay-tools/cezarion#1235): accepted durably, and
@@ -2691,12 +2582,33 @@ export class RunStore extends EventEmitter {
     }]]));
   }
 
-  /** Successful deferred human delivery consumes only its persisted queue ID.
-   * A crash before this checkpoint may replay that same message on recovery. */
-  commitQueuedMessageDelivery(id: string, messageId: string): void {
+  /**
+   * The one write of a run outcome (hearsay-tools/cezarion#1805): an input or wait delivered, a wake
+   * charged, a wait settled, a question answered, staged by `applyOutcomes` with what it depends on
+   * (`deps`) and committed in one transaction, with every pending row. A crash keeps all of it or
+   * none. Nothing changes: nothing is written. Needs no live session: it reads the stored record.
+   *
+   * A refused write throws with nothing changed. `bestEffort` is for a cleanup path, which must
+   * never stop on it: it warns and applies the change in memory for the debounced save to retry.
+   * A conversation request outcome is the other sanctioned write: `commitConversation`.
+   */
+  commitOutcome(id: string, outcomes: RunOutcome | readonly RunOutcome[], deps: OutcomeDependencies = {}, opts: { bestEffort?: boolean } = {}): { committed: boolean; answered: string[] } {
     const run = this.peek(id);
-    if (!run) throw new Error('missing queued message target');
-    this.commitIndex(new Map([[id, { ...run, queuedMessages: (run.queuedMessages ?? []).filter(message => message.id !== messageId) }]]));
+    if (!run) return { committed: false, answered: [] };
+    const staged = applyOutcomes(run, Array.isArray(outcomes) ? outcomes : [outcomes as RunOutcome], deps);
+    if (!staged.changed) return { committed: false, answered: [] };
+    try { this.commitIndex(new Map([[id, staged.next]])); }
+    catch (error) {
+      if (!opts.bestEffort) throw error;
+      console.warn(`[cez] outcome checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
+      const live = this.record(id);
+      if (!live) return { committed: false, answered: staged.answered };
+      for (const key of Object.keys(live) as Array<keyof RunRecord>) if (!(key in staged.next)) delete live[key];
+      Object.assign(live, staged.next);
+      this.touch(live);
+      return { committed: false, answered: staged.answered };
+    }
+    return { committed: true, answered: staged.answered };
   }
 
   /** An acknowledged inactive-root Finish must survive the async diff and restart. */

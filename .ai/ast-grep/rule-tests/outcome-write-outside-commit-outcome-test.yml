@@ -1,0 +1,28 @@
+id: outcome-write-outside-commit-outcome
+valid:
+  # The call itself, and a RunOutcome built for it.
+  - "this.store.commitOutcome(runId, { kind: 'charged', automaticWakes: 3 }, {}, { bestEffort: true })"
+  - "const outcomes = [{ kind: 'counted' as const, waitDeliveryFailures: undefined }]"
+  # Schemas.
+  - 'const schema = z.object({ deliveredAt: z.string().optional() })'
+  - 'const row = base.extend({ automaticWakes: contractRunRecordSchema.shape.automaticWakes.catch(undefined) })'
+  # Reads, comparisons, destructuring and type members.
+  - 'const at = input.deliveredAt'
+  - 'if (run.automaticWakes) charge()'
+  - "const done = wait.phase === 'delivered'"
+  - 'const { deliveredAt: _delivered, ...queued } = input'
+  - 'const { lastWaits } = run'
+  - 'interface Receipt { consumedAt?: string; phase: "delivered" }'
+  - "const open = { ...wait, phase: 'open' }"
+  # Rows an older build stored.
+  - 'export function upgradeLegacyWaits(row) { row.lastWaits = [] }'
+  - "export function ciWaitEntry(wait) { return { phase: 'delivered', ...(deliveredAt ? { deliveredAt } : {}) } }"
+invalid:
+  - 'this.store.updateRun(id, { automaticWakes: 0 })'
+  - 'const input = { ...queued, deliveredAt: now }'
+  - 'const next = { ...run, lastWaits }'
+  - 'run.waitDeliveryFailures = 2'
+  - "return { ...wait, phase: 'cancelled', cancelledAt }"
+  - 'entry.consumedAt = at'
+  - 'const settled = { phase: "delivered" }'
+  - "const outcome = { kind: 'answered', automaticWakes: 1 }"

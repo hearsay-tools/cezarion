@@ -1,0 +1,29 @@
+{
+  "$comment": "Matches the rule found when it landed (hearsay-tools/cezarion#1802), keyed by file and the first line of the match so a moved line does not churn it. This list only shrinks: fix a match, then run AST_GREP_RULES_UPDATE=1 npm test -- packages/cezar/src/ast-grep-rules.test.ts. Rules: .ai/ast-grep/README.md. Both files build a read view from stored receipts, never a stored row: delegation/conversations.ts an NDJSON event payload, workflows/run.ts the legacy `cez worker wait` answer after its cancellation committed. They stay baseline entries rather than ignores, so a write added to either file still fails.",
+  "sites": [
+    {
+      "file": "packages/cezar/src/delegation/conversations.ts",
+      "rule": "outcome-write-outside-commit-outcome",
+      "site": "consumedAt: input.consumedAt",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/delegation/conversations.ts",
+      "rule": "outcome-write-outside-commit-outcome",
+      "site": "deliveredAt: input.deliveredAt",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.ts",
+      "rule": "outcome-write-outside-commit-outcome",
+      "site": "cancelledAt: new Date().toISOString()",
+      "count": 1
+    },
+    {
+      "file": "packages/cezar/src/workflows/run.ts",
+      "rule": "outcome-write-outside-commit-outcome",
+      "site": "phase: 'cancelled'",
+      "count": 1
+    }
+  ]
+}

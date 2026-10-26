@@ -147,7 +147,7 @@ describe('durable conversations', () => {
     const w = await worker();
     const message = await f.service.send(f.caller, { id: randomUUID(), recipientRunId: w.id, kind: 'progress', text: 'Result', timeoutSeconds: 600 });
     const deliveredAt = '2026-09-22T14:32:54.554Z';
-    f.store.commitAgentInputs(w.id, f.store.getRun(w.id)!.agentInputs!.map(input => ({ ...input, deliveredAt })));
+    f.store.commitOutcome(w.id, { kind: 'delivered', inputIds: f.store.getRun(w.id)!.agentInputs!.map(input => input.id), at: deliveredAt });
     vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-09-22T15:00:00.000Z'));
     try {
       projectConversationEvents(f.store, f.store.getRun(f.parent.id)!);
@@ -250,12 +250,13 @@ describe('durable conversations', () => {
     const request = { id: randomUUID(), recipientRunId: w.id, kind: 'progress' as const, text: 'New instruction', timeoutSeconds: 600, resume: true };
     await f.service.send(f.caller, request);
     const before = structuredClone(f.store.getRun(w.id));
-    const inputs = before!.agentInputs!.map(input => ({ ...input, deliveredAt: new Date().toISOString() }));
+    const at = new Date().toISOString();
+    const inputs = before!.agentInputs!.map(input => input.id === request.id ? { ...input, deliveredAt: at, consumedAt: at } : input);
     const fault = vi.spyOn(f.store as unknown as { commitIndex(): void }, 'commitIndex').mockImplementationOnce(() => { throw Error('disk unavailable'); });
-    expect(() => f.store.commitAgentInputs(w.id, inputs, request.id)).toThrow('disk unavailable');
+    expect(() => f.store.commitOutcome(w.id, { kind: 'opening-handled', inputId: request.id, at })).toThrow('disk unavailable');
     expect(f.store.getRun(w.id)).toEqual(before);
     fault.mockRestore();
-    f.store.commitAgentInputs(w.id, inputs, request.id);
+    f.store.commitOutcome(w.id, { kind: 'opening-handled', inputId: request.id, at });
     expect(f.store.getRun(w.id)?.continuationMessage).toBeUndefined();
     expect(f.store.getRun(w.id)?.agentInputs).toEqual(inputs);
     const reopened = RunStore.open(join(f.root, '.ai/cezar'), { keepLive: true });

@@ -165,10 +165,11 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
         expect(store.getRun(p.id)?.queuedMessages?.at(-1)?.text).toBe('startup human update');
         store.flush(); checkpoint = readPersistedRuns(join(root, '.ai/cezar'));
         if (crash === 'checkpoint-failure') {
-          const commit = store.commitQueuedMessageDelivery.bind(store);
-          store.commitQueuedMessageDelivery = (...args) => {
+          const commit = store.commitOutcome.bind(store);
+          store.commitOutcome = (...args) => {
+            if (![args[1]].flat().some(outcome => outcome.kind === 'message-delivered')) return commit(...args);
             const unblock = blockRunWrites(join(root, '.ai/cezar'));
-            try { commit(...args); } finally { unblock(); }
+            try { return commit(...args); } finally { unblock(); }
           };
         }
       } finally { release(); }
@@ -389,14 +390,16 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent(); const w = await worker(p.id);
     fixtureUpdateRun(w.id, { status: 'done' });
     // hearsay-tools/cezarion#1235: a worker entry retires through the wait list's delivery checkpoint.
-    const commit = store.commitWaitDelivery.bind(store);
+    const commit = store.commitOutcome.bind(store);
     let retiredStatus: string | undefined;
-    store.commitWaitDelivery = (...args) => {
-      commit(...args);
-      if (args[0] === p.id && store.getRun(p.id)?.lastWaits?.some(wait => wait.kind === 'worker' && wait.phase === 'delivered')) {
+    store.commitOutcome = (...args) => {
+      const committed = commit(...args);
+      if (args[0] === p.id && retiredStatus === undefined && [args[1]].flat().some(outcome => outcome.kind === 'delivered') &&
+        store.getRun(p.id)?.lastWaits?.some(wait => wait.kind === 'worker' && wait.phase === 'delivered')) {
         const records = readPersistedRuns(join(root, '.ai/cezar')) as RunRecord[];
         retiredStatus = records.find(run => run.id === p.id)?.status;
       }
+      return committed;
     };
     register(p.id, [w.id]);
     await until(() => retiredStatus !== undefined);
@@ -495,11 +498,13 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     await until(() => waitOf(store.getRun(p.id))?.phase === 'parked');
     // hearsay-tools/cezarion#1235: the delivery and the resume are one commit. The disk as that
     // commit left it is the crash image.
-    const commit = store.commitWaitDelivery.bind(store);
+    const commit = store.commitOutcome.bind(store);
     let image: unknown[] | undefined;
-    store.commitWaitDelivery = (...args) => {
-      commit(...args);
-      if (args[0] === p.id && !image) image = readPersistedRuns(join(root, '.ai/cezar'));
+    store.commitOutcome = (...args) => {
+      const committed = commit(...args);
+      if (args[0] === p.id && !image && [args[1]].flat().some(outcome => outcome.kind === 'delivered') &&
+        store.getRun(p.id)?.lastWaits?.some(wait => wait.phase === 'delivered')) image = readPersistedRuns(join(root, '.ai/cezar'));
+      return committed;
     };
     fixtureUpdateRun(w.id, { status: 'done' });
     await until(() => image !== undefined);

@@ -265,9 +265,9 @@ describe('RunStore durable delegation', () => {
     expect(() => store.claimInboxInputs(run.id, [first.id, second.id], { ...claim, receiptId: randomUUID() })).toThrow();
     expect(store.getRun(run.id)?.agentInputs?.[1]).toEqual(second);
     store.releaseInboxInputs(run.id, claim.receiptId, claim.generation);
-    store.commitAgentInputs(run.id, [first, { ...second, deliveredAt: now }]);
+    store.commitOutcome(run.id, { kind: 'delivered', inputIds: [second.id], at: now });
     expect(() => store.claimInboxInputs(run.id, [second.id], claim)).toThrow();
-    store.commitAgentInputs(run.id, [{ ...first, conversation: undefined }, second]);
+    store.commitAgentInputs(run.id, [{ ...first, conversation: undefined }, store.getRun(run.id)!.agentInputs![1]!]);
     expect(() => store.claimInboxInputs(run.id, [first.id], claim)).toThrow();
   });
 
@@ -279,7 +279,7 @@ describe('RunStore durable delegation', () => {
     expect(() => store.ackInboxInputs(run.id, claim.receiptId, randomUUID(), ackTime)).toThrow();
     expect(() => store.ackInboxInputs(run.id, claim.receiptId, claim.generation, claimExpiry)).toThrow();
     expect(store.getRun(run.id)).toEqual(claimed);
-    store.commitAgentInputs(run.id, [claimed!.agentInputs![0]!, { ...claimed!.agentInputs![1]!, deliveredAt: now }]);
+    store.commitOutcome(run.id, { kind: 'delivered', inputIds: [claimed!.agentInputs![1]!.id], at: now });
     expect(() => store.ackInboxInputs(run.id, claim.receiptId, claim.generation, ackTime)).toThrow();
     expect(store.getRun(run.id)?.agentInputs?.[0]?.deliveredAt).toBeUndefined();
   });
@@ -316,7 +316,7 @@ describe('RunStore durable delegation', () => {
     const replacement = { ...claim, receiptId: randomUUID() };
     store.claimInboxInputs(run.id, [first.id], replacement);
     expect(store.getRun(run.id)?.agentInputs?.[0]?.inboxClaim?.receiptId).not.toBe(claim.receiptId);
-    store.commitAgentInputs(run.id, [{ ...first, inboxClaim: store.getRun(run.id)?.agentInputs?.[0]?.inboxClaim, deliveredAt: now }, second]);
+    store.commitOutcome(run.id, { kind: 'delivered', inputIds: [first.id], at: now });
     store.clearExpiredInboxClaims(run.id, replacement.expiresAt);
     expect(store.getRun(run.id)?.agentInputs?.[0]).toEqual({ ...first, deliveredAt: now });
   });
