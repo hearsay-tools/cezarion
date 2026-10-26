@@ -9,6 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { processStartToken } from '../delegation/process-liveness.ts';
 import { DevServer, probePort, sweepPreviewLeftovers, trimLog } from './dev-server.ts';
+import { fixtureProcessGuard } from './preview.testkit.ts';
 
 vi.mock('../delegation/process-liveness.ts', async importOriginal => {
   const actual = await importOriginal<typeof import('../delegation/process-liveness.ts')>();
@@ -16,6 +17,8 @@ vi.mock('../delegation/process-liveness.ts', async importOriginal => {
 });
 
 const FIXTURE = fileURLToPath(new URL('./__fixtures__/fake-dev-server.mjs', import.meta.url));
+// Tags every fixture launch below, so afterEach can fail the test that leaves one running (hearsay-tools/cezarion#1880).
+const guard = fixtureProcessGuard();
 
 let root: string;
 let supervisors: DevServer[];
@@ -30,8 +33,12 @@ beforeEach(() => {
 afterEach(async () => {
   vi.useRealTimers();
   await Promise.all(supervisors.map(supervisor => supervisor.stop('release')));
-  for (const stray of strays) { try { process.kill(-stray.pid!, 'SIGKILL'); } catch { /* gone */ } }
+  for (const stray of strays) {
+    try { process.kill(-stray.pid!, 'SIGKILL'); } catch { /* not a group leader, or gone */ }
+    stray.kill('SIGKILL');
+  }
   rmSync(root, { recursive: true, force: true });
+  await guard.assertNoneLeft();
 });
 
 async function freePort(): Promise<number> {
@@ -43,7 +50,7 @@ async function freePort(): Promise<number> {
 }
 
 function fixtureCommand(args: string[]): string {
-  return [process.execPath, FIXTURE, ...args].map(part => JSON.stringify(part)).join(' ');
+  return [process.execPath, FIXTURE, ...args, ...guard.args].map(part => JSON.stringify(part)).join(' ');
 }
 
 function supervise(port: number, fixtureArgs: string[], opts: { probeMs?: number; waitMs?: number } = {}): DevServer {
@@ -279,7 +286,7 @@ describe('trimLog', () => {
 
 describe('sweepPreviewLeftovers', () => {
   function strayFixture(): ChildProcess {
-    const child = spawn(process.execPath, [FIXTURE, '--port', '0', '--delay', '600000'], { detached: true, stdio: 'ignore' });
+    const child = spawn(process.execPath, [FIXTURE, '--port', '0', '--delay', '600000', ...guard.args], { detached: true, stdio: 'ignore' });
     strays.push(child);
     return child;
   }
@@ -367,7 +374,7 @@ describe('sweepPreviewLeftovers', () => {
   describe("a task's Chromium (chromium.pid.json)", () => {
     // Chromium is not detached: it shares cezar's process group, so only its pid may be signalled.
     function strayBrowser(): ChildProcess {
-      const child = spawn(process.execPath, [FIXTURE, '--port', '0', '--delay', '600000'], { stdio: 'ignore' });
+      const child = spawn(process.execPath, [FIXTURE, '--port', '0', '--delay', '600000', ...guard.args], { stdio: 'ignore' });
       strays.push(child);
       return child;
     }
