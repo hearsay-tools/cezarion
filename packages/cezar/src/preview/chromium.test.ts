@@ -588,7 +588,11 @@ if (fs.readFileSync(${JSON.stringify(runs)}, 'utf8').split('\\n').length > 2) {
 }
 setInterval(()=>{},1000);`,
     );
-    const { proc, port } = await launchChromium(bin, join(dir, 'profile'), {}, { timeoutMs: 400 });
+    // The budget covers both attempts, and only the first is meant to stall: the second must start Node and
+    // write its port inside it, which 400 ms does not allow on a loaded host (hearsay-tools/cezarion#1203).
+    // Provenance: this case alone under `taskset -c 3` beside 8 busy loops pinned to CPU 3. At 400 ms it failed
+    // 2 of 2 runs ("did not open its DevTools port within 0.4 s, twice"); at 2_000 ms it passed 3 of 3.
+    const { proc, port } = await launchChromium(bin, join(dir, 'profile'), {}, { timeoutMs: 2_000 });
     try {
       expect(port).toBe(41236);
       expect(readFileSync(runs, 'utf8')).toBe('run\nrun\n');
