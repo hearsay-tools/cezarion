@@ -1,7 +1,7 @@
 import { defined } from '../../core/defined.ts';
 import { activeWorkflowRunsArgs, parseActiveWorkflowRuns } from '../../ci-wait/github.ts';
 import type { ArchivePullRequestIdentity, MergedPullRequest } from '@open-mercato/cezar-contract/runs';
-import { exactLineIndex } from '@open-mercato/cezar-contract/handoff';
+import { exactLineIndex, nextLineIndex } from '@open-mercato/cezar-contract/handoff';
 import { pullRequestKey } from '../../runs/pull-requests.ts';
 import { matchesGithubPullRequest, mergedPullRequestObservations } from '../../merge-observations.ts';
 import { randomUUID } from 'node:crypto';
@@ -2963,12 +2963,12 @@ export function buildPrBody(handoffText: string, task: string): string {
   return parts.join('\n');
 }
 
-/** Text of one `## Header` section, up to the next `## ` header. The header is a whole line
- *  (hearsay-tools/cezarion#1147), so a Goal that quotes one is never taken for it. */
+/** Text of one `## Header` section, up to the next `## ` header, with LF line endings. The header
+ *  is a whole line (hearsay-tools/cezarion#1147), so a Goal that quotes one is never taken for it. */
 function section(text: string, header: string): string {
   const start = exactLineIndex(text, header);
   if (start < 0) return '';
-  const rest = text.slice(start + header.length + 1);
+  const rest = text.slice(nextLineIndex(text, start)).replaceAll('\r\n', '\n');
   const next = rest.indexOf('\n## ');
   return (next >= 0 ? rest.slice(0, next) : rest).trim();
 }

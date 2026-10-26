@@ -37,6 +37,11 @@ describe('progressPreview', () => {
     expect(progressPreview(quoted)).toEqual(['10:00 — started'])
   })
 
+  it('reads a journal saved with CRLF endings (hearsay-tools/cezarion#1809)', () => {
+    const crlf = journal('- 10:01 — tests pass\n- 10:00 — started\n').replaceAll('\n', '\r\n')
+    expect(progressPreview(crlf)).toEqual(['10:01 — tests pass', '10:00 — started'])
+  })
+
   it('answers nothing for a journal without progress', () => {
     expect(progressPreview('')).toEqual([])
     expect(progressPreview(journal(''))).toEqual([])

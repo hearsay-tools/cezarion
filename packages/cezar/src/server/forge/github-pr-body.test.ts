@@ -23,6 +23,11 @@ describe('buildPrBody', () => {
       .toBe(`## Goal\n\n${goal}\n\n## Progress log\n\n- 10:00 — started${FOOTER}`);
   });
 
+  it('reads a journal saved with CRLF endings, and writes the body with LF', () => {
+    const crlf = journal('Ship it', '- 10:01 — tests pass\n- 10:00 — started\n').replaceAll('\n', '\r\n');
+    expect(buildPrBody(crlf, 'the task')).toBe(`## Goal\n\nShip it\n\n## Progress log\n\n- 10:01 — tests pass\n- 10:00 — started${FOOTER}`);
+  });
+
   it("leaves cezar's records block out of the body (hearsay-tools/cezarion#1809)", () => {
     const records = { autosave: [{ at: '2026-10-25T10:00:00.000Z', note: 'turn end: cezar autosave committed abc1234 on cez/x' }] };
     const text = renderHandoffRecords(journal('Ship it', '- 10:00 — started\n'), records);

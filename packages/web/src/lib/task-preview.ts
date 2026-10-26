@@ -1,4 +1,4 @@
-import { exactLineIndex } from '@open-mercato/cezar-api-client/contract/handoff'
+import { exactLineIndex, nextLineIndex } from '@open-mercato/cezar-api-client/contract/handoff'
 
 /** The lifecycle lines cezar wrote into the Progress log before hearsay-tools/cezarion#1809. A
  *  journal from an older run still holds them; the preview never shows one. */
@@ -15,7 +15,7 @@ export function progressPreview(handoff: string, maxLines = 3): string[] {
   const start = exactLineIndex(handoff, marker)
   if (start < 0) return []
   const own: string[] = []
-  for (const line of handoff.slice(start + marker.length).split('\n')) {
+  for (const line of handoff.slice(nextLineIndex(handoff, start)).split('\n')) {
     if (line.startsWith('## ')) break
     const trimmed = line.trim()
     if (!trimmed || LEGACY_LIFECYCLE_LINE.test(trimmed)) continue

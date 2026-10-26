@@ -1,6 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { exactLineIndex, HANDOFF_AUTOSAVE_RECORDS_MAX, type HandoffAutosaveRecord, type HandoffRecords } from '@open-mercato/cezar-contract/handoff';
+import { exactLineIndex, HANDOFF_AUTOSAVE_RECORDS_MAX, nextLineIndex, type HandoffAutosaveRecord, type HandoffRecords } from '@open-mercato/cezar-contract/handoff';
 import type { RunStore } from './runs/store.ts';
 
 /**
@@ -75,9 +75,9 @@ export function renderHandoffRecords(text: string, records: HandoffRecords | und
   const block = recordsBlock(records);
   const begin = exactLineIndex(text, RECORDS_BEGIN);
   if (begin >= 0) {
-    const body = Math.min(begin + RECORDS_BEGIN.length + 1, text.length);
+    const body = nextLineIndex(text, begin);
     const end = exactLineIndex(text.slice(body), RECORDS_END);
-    const after = end < 0 ? body : Math.min(body + end + RECORDS_END.length + 1, text.length);
+    const after = end < 0 ? body : nextLineIndex(text, body + end);
     return `${text.slice(0, begin)}${block}${text.slice(after)}`;
   }
   if (!block) return text;

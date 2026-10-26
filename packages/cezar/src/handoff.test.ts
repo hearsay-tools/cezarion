@@ -61,6 +61,20 @@ describe('renderHandoffRecords', () => {
     expect(renderHandoffRecords(text, records('second'))).toBe(renderHandoffRecords(quoted, records('second')));
   });
 
+  // An agent or an editor can save the file with CRLF endings (hearsay-tools/cezarion#1809).
+  it('finds the markers and the Goal in a file with CRLF endings, so a render adds no second block', () => {
+    const crlf = (text: string) => text.replaceAll('\n', '\r\n');
+    const seeded = crlf(SEEDED);
+    const first = renderHandoffRecords(seeded, records('first'));
+    expect(first).toBe(seeded.replace('## Goal\r\n', `${block('- 2026-10-16T10:00:00.000Z — first')}\n## Goal\r\n`));
+    expect(renderHandoffRecords(first, records('first'))).toBe(first);
+    // The agent saved the whole file, block included, with CRLF endings.
+    const saved = crlf(renderHandoffRecords(SEEDED, records('first')));
+    expect(renderHandoffRecords(saved, records('second'))).toBe(
+      seeded.replace('## Goal\r\n', `${block('- 2026-10-16T10:00:00.000Z — second')}\r\n## Goal\r\n`));
+    expect(renderHandoffRecords(saved, records())).toBe(seeded.replace('## Goal\r\n', '\r\n## Goal\r\n'));
+  });
+
   it('takes a begin marker without its end marker as one line', () => {
     const broken = SEEDED.replace('## Goal\n', `${BEGIN}\n## Goal\n`);
     expect(renderHandoffRecords(broken, records('first'))).toBe(
