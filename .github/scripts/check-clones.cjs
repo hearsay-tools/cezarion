@@ -8,6 +8,13 @@ const path = require('node:path');
 const git = (cwd, args, options = {}) => execFileSync('git', args, { cwd, encoding: 'utf8', ...options });
 const eligible = (name) => /^packages\/[^/]+\/src\//.test(name) || name.startsWith('packages/cezar/scripts/');
 
+/** All scan inputs are trusted paths materialized under packages/<workspace>/. */
+function packageOf(root, name) {
+  const relative = path.relative(root, name).split(path.sep);
+  if (relative[0] !== 'packages' || !relative[1]) throw new Error('Clone report contains a path outside the scanned packages');
+  return relative[1];
+}
+
 function check({ repo = process.cwd(), base = 'origin/main', head = 'HEAD' } = {}) {
   const mergeBase = git(repo, ['merge-base', base, head]).trim();
   const headSha = git(repo, ['rev-parse', '--verify', `${head}^{commit}`]).trim();
@@ -40,12 +47,22 @@ function check({ repo = process.cwd(), base = 'origin/main', head = 'HEAD' } = {
       ...Array.from(new Set(entries.map(({ name }) => name.split('/').slice(0, 3).join('/')))), '--config', config, '--no-gitignore', '--absolute', '--no-colors', '--no-tips',
       '--min-tokens', '50', '--min-lines', '5', '--format', 'typescript,tsx,javascript,jsx',
       '--ignore', '**/*.test.*,**/*.testkit.*,**/*.e2e.*,**/__fixtures__/**,**/fixtures/**',
-      '--baseline-from-ref', 'baseline', '--fail-on-new-clones', '--reporters', 'console',
+      '--baseline-from-ref', 'baseline', '--fail-on-new-clones', '--reporters', 'console,json', '--output', path.join(scratch, 'report'),
     ], { cwd: scratch, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 });
     if (result.error) throw result.error;
     process.stdout.write((result.stdout || '').replaceAll(scratch + path.sep, ''));
     process.stderr.write(result.stderr || '');
-    return result.status ?? 1;
+    // JSON retains baseline clones too. Only within-package copies may be grandfathered.
+    const reportFile = path.join(scratch, 'report/jscpd-report.json');
+    if (!fs.existsSync(reportFile)) throw new Error('jscpd did not produce its trusted clone report');
+    const report = JSON.parse(fs.readFileSync(reportFile, 'utf8'));
+    const crossPackage = report.duplicates.filter(({ firstFile, secondFile }) =>
+      packageOf(scratch, firstFile.name) !== packageOf(scratch, secondFile.name));
+    for (const { firstFile, secondFile } of crossPackage) {
+      const location = (file) => `${path.relative(scratch, file.name)}:${file.start}`;
+      process.stdout.write(`Cross-package clone: ${location(firstFile)} ↔ ${location(secondFile)}\n`);
+    }
+    return result.status === 0 ? (crossPackage.length ? 1 : 0) : (result.status ?? 1);
   } finally {
     fs.rmSync(scratch, { recursive: true, force: true });
   }

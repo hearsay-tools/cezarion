@@ -22,6 +22,8 @@ import {
 } from '@open-mercato/cezar-contract/delegation';
 import {
   automationIdOf,
+  stepStateSchema as contractStepStateSchema,
+  queuedMessageSchema,
   continuationMessageSchema,
   toRunSummary,
   runRecordSchema as contractRunRecordSchema,
@@ -78,8 +80,6 @@ export type StepStatus =
   | 'cancelled'
   | 'skipped';
 
-const usageCounterSchema = z.number().finite().nonnegative();
-
 /**
  * A runner id as it may appear in a PERSISTED record, normalized to the three
  * ids the rest of cezar speaks (#547).
@@ -104,314 +104,40 @@ const storedRunnerSchema = z
   .enum([...RUNNER_IDS, 'claude-cli'])
   .transform((id) => (id === 'claude-cli' ? ('claude' as const) : id));
 
-const stepStateSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  kind: z.enum(['agent', 'check']),
-  status: z.enum(['pending', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled', 'skipped']),
-  iterations: z.number(),
-  /** Durable count of onFail retry loops consumed by this check. */
-  retriesUsed: z.number().int().nonnegative().optional(),
-  tokensUsed: z.number(),
-  inputTokens: usageCounterSchema.optional(),
-  outputTokens: usageCounterSchema.optional(),
-  usageInvocationsStarted: usageCounterSchema.optional(),
-  usageInvocationsObserved: usageCounterSchema.optional(),
-  usageTurnsStarted: usageCounterSchema.optional(),
-  usageTurnsRecorded: usageCounterSchema.optional(),
-  usageInvocationEpoch: usageCounterSchema.optional(),
-  startedAt: z.string().optional(),
-  finishedAt: z.string().optional(),
-  error: z.string().optional(),
-  /** Latest backend-owned session id, used for same-backend Continue. */
-  sessionId: z.string().optional(),
-  sessionTransport: z.enum(['cursor-acp', 'cursor-print']).optional(),
-  /** Backend that owns `sessionId`. Optional so pre-affinity runs.json files still parse;
-   *  `storedRunnerSchema` so a legacy `claude-cli` folds to `claude` instead of failing (#547). */
-  backend: storedRunnerSchema.optional(),
-  /** Agent profile (account) this step actually spawned under — `default`, or a stored profile
-   *  id (spec 2026-07-29-agent-profiles). Recorded rather than re-derived because a session id
-   *  only means something inside the config dir that created it: `sessionId` and `profileId` are
-   *  a PAIR. Without it, changing the project's account would silently make Continue resume
-   *  against the wrong account's session store. Absent = the discovered default. */
-  profileId: z.string().optional(),
-  /** Dollar cost reported by the claude CLI for this step's turns. */
-  costUsd: z.number().optional(),
-  /** Explicit provenance for engine-generated continuation steps. */
-  synthetic: z.literal('continuation').optional(),
-});
-
-/** One prompt message stacked onto a run while it waits for a free agent slot
- *  (#472). Folded into `{{task}}` at dequeue by `hydrateQueuedInput`; never
- *  delivered as its own turn — a follow-up turn would reach only the first step
- *  of a chain and would race the opening turn. */
-const queuedMessageSchema = z.object({
-  id: z.string(),
-  text: z.string(),
-  /** `/api/v1/runs/:id/images/…` URLs — the base64 never enters `runs.json`. */
-  images: z.array(z.string()).optional(),
-  createdAt: z.string(),
-});
+const stepStateSchema = contractStepStateSchema.extend({ backend: storedRunnerSchema.optional() });
 
 /** Exported for `./run-index.ts`, the read-only reader of the same records. Nothing else should
  *  parse a stored run — see `reconcileLoadedRun` for why a second parser is a correctness risk. */
-export const runRecordSchema = z.object({
-  id: z.string(),
-  title: z.string(),
-  /** Display title (#389): the auto-derived summary of the first agent turn,
-   *  or the user's inline edit (`PATCH /api/runs/:id` sets it together with
-   *  `title` so edits always win). The UI shows `titleSummary ?? title`. */
-  titleSummary: z.string().optional(),
-  /** `git diff --shortstat` of the worktree vs its base, refreshed on every
-   *  turn-end (#389) — what the quick list / table shows without a git call.
-   *  `repointed` (#751) is optional and only ever written as `true`: it marks the
-   *  runs whose numbers were narrowed to uncommitted work because the agent had
-   *  checked another branch out into the worktree. Optional is load-bearing here —
-   *  `runs.json` is `safeParse`d as one array, so a required addition would
-   *  silently drop every pre-existing run. */
-  diffStat: z
-    .object({
-      adds: z.number(),
-      dels: z.number(),
-      files: z.number(),
-      repointed: z.boolean().optional(),
-    })
-    .optional(),
-  workflow: z.string(),
-  task: z.string(),
-  /** Prompt messages stacked onto this run while it was queued (#472). Optional:
-   *  `undefined` on every pre-#472 record reads as an empty stack. Like `task`,
-   *  `text` is the user's own prompt and is replayed into `{{task}}`, so it is
-   *  deliberately NOT in `redactPatch`'s field list — scrubbing it would corrupt
-   *  the run the same way scrubbing `task` would. */
-  queuedMessages: z.array(queuedMessageSchema).optional(),
-  /** Durable Continue opening message; id is its synthetic step id. No base64 in the index. */
-  continuationMessage: continuationMessageSchema.optional(),
-  workflowResumeStepId: contractRunRecordSchema.shape.workflowResumeStepId,
-  /** A malformed explicit ASK must never be collected as worker success. */
-  invalidAsk: z.boolean().optional(),
+export const runRecordSchema = contractRunRecordSchema.extend({
   delegation: storedDelegationStateSchema,
-  /** Non-human input must retain attribution through restart, separately from human answers. */
-  agentInputs: z.array(agentInputSchema).optional(),
-  /** Open and resolved waits (spec 2026-10-17-unified-waits): CI waits, timers and human waits.
-   *  Read from the legacy `ciWait` and monitoring fields by `upgradeLegacyWaits`, and salvaged per
-   *  entry, so one unreadable wait never evicts the run. */
-  waits: contractRunRecordSchema.shape.waits,
-  /** Settled waits, newest last, capped at `LAST_WAITS_LIMIT`. */
-  lastWaits: contractRunRecordSchema.shape.lastWaits,
-  /** Retained recovery observation when a saved wait could not be read. */
   lastWaitsError: contractRunRecordSchema.shape.lastWaitsError.catch(undefined),
-  /** The automatic-wake budget and the wake delivery failures (hearsay-tools/cezarion#1234). An
-   *  unreadable count reads as none, which restarts that bound rather than evicting the run. */
   automaticWakes: contractRunRecordSchema.shape.automaticWakes.catch(undefined),
   waitDeliveryFailures: contractRunRecordSchema.shape.waitDeliveryFailures.catch(undefined),
-  /** Dev servers the agent registered with `cezar_preview_serve` (#781). Optional so old files parse. */
-  previewServers: z.array(previewServerSchema).optional(),
-  /** URLs of images attached to the initial task prompt, for the thread's first bubble
-   *  (#image-display) — persisted like agent screenshots, served from `/images/`. */
-  taskImages: z.array(z.string()).optional(),
-  model: z.string().optional(),
-  /** Reasoning-effort pin (#45). Canonical `low`/`medium`/`high`/`xhigh`/`max`.
-   *  Absent = harness default. Additive: pre-#45 records omit it and still parse. */
-  effort: z.string().max(32).optional(),
-  /** Canonical provider/model identity (#405) — the normalised `provider/model`
-   *  (e.g. `anthropic/claude-opus-4-8`) the run actually used, resolved from the
-   *  free-text `model` against the chosen runner. Additive and optional: pre-#405
-   *  records carry only `model`, and it stays the human/hand-edit surface; this
-   *  is the parseable identity cost attribution and reproducible replay key off.
-   *
-   *  Read in production by the session header's agent badge (#546), which shows it
-   *  whenever it says something `model` does not — so this is no longer a
-   *  write-only field whose next reader has to guess whether it is load-bearing. */
-  modelIdentity: z.string().optional(),
-  /** Agent backend this run used — drives "open in CLI" resume command. `storedRunnerSchema`
-   *  so a legacy `claude-cli` record folds to `claude` instead of failing the whole index (#547). */
   runner: storedRunnerSchema.optional(),
-  /** Per-task agent-account override from the composer (spec 2026-07-29-agent-profiles), applying
-   *  to steps that run on `runner`. Steps on a DIFFERENT backend still resolve from the project's
-   *  own selection — an override for Claude says nothing about which Codex account a mixed
-   *  workflow's codex step should use. Absent = follow the project. */
-  agentProfile: z.string().optional(),
-  /** Echo of the extra system prompt this run actually used (R2): the
-   *  `POST /api/runs` override, or the `config.json` default it fell back to.
-   *  Deliberately NOT the full composed prompt — skill bodies and the handoff
-   *  contract are derivable from the persisted workflow and would bloat the
-   *  index. Resolved at execute time (a queued run picks up config edits). */
-  systemPrompt: z.string().optional(),
-  /** Legacy generated-inbox preference. Read for old records only; never enables generation. */
-  generateFollowups: z.boolean().optional(),
-  /** Effective autonomous mode (#489), set at creation from StartRunInput.autonomous.
-   *  This records the resolved launch mode, not whether a user clicked a checkbox:
-   *  the composer may select it through a skill or workspace default (#458).
-   *  Used by the autonomous nudge and terminal review policy. Continue/recovery
-   *  preserve it; absent on legacy records means non-autonomous. */
-  autonomous: z.boolean().optional(),
-  archiveWhenDone: contractRunRecordSchema.shape.archiveWhenDone,
-  autoMergePr: contractRunRecordSchema.shape.autoMergePr,
-  completionAction: contractRunRecordSchema.shape.completionAction,
-  archiveBlocker: contractRunRecordSchema.shape.archiveBlocker,
-  /** Task webhook opt-in (#589). Absent = off; `POST /runs/:id/notify` flips it at any time. */
   notify: z.boolean().optional().catch(undefined),
-  /** The last task-webhook delivery's outcome (#589), written by `runs/webhook.ts`. */
   webhook: contractRunRecordSchema.shape.webhook.catch(undefined),
-  /** Optional provenance for tasks launched by a project GitHub automation. */
-  automation: z
-    .object({
-      automationId: z.string(),
-      automationRevision: z.number().int().positive(),
-      receiptId: z.string(),
-      event: z.string(),
-      githubUrl: z.string().url(),
-    })
-    .optional(),
-  /** Provenance for a task a scheduled automation launched. Its own key so a pre-schedule cezar
-   *  strips it instead of failing the whole index on a missing `githubUrl`. */
-  automationTrigger: z
-    .object({
-      automationId: z.string(),
-      automationRevision: z.number().int().positive(),
-      receiptId: z.string(),
-      trigger: z.enum(['schedule', 'catch-up', 'manual']),
-      occurrenceAt: z.string(),
-    })
-    .optional(),
-  /** A pending worker destroy's automatic retry state (hearsay-tools/cezarion#879); a malformed one is dropped, never the run. */
   destroyRetry: contractRunRecordSchema.shape.destroyRetry.catch(undefined),
-  status: z.enum(['queued', 'running', 'waiting', 'review', 'done', 'failed', 'cancelled']),
   stopping: contractRunRecordSchema.shape.stopping.catch(undefined),
   hasPendingPermission: contractRunRecordSchema.shape.hasPendingPermission.catch(undefined),
-  /**
-   * Exact deadline at which a run stopped by a provider USAGE LIMIT resumes itself
-   * (spec 2026-08-03-auto-resume-after-usage-limit) — the reset instant the provider named plus a
-   * short grace. Present only while such a resume is pending: the run is `failed`, the timer is
-   * armed, and the cockpit says so. Deliberately survives a restart (`RunStore.open` keeps it) —
-   * it is what lets `recover()` re-arm a wait that may be hours long.
-   */
   autoResumeAt: z.string().datetime().optional().catch(undefined),
-  /** Consecutive automatic resumes since the last human turn — the safety cap's counter.
-   *  Persisted so a restart cannot reset a loop back to zero. */
   autoResumeAttempts: z.number().int().min(0).optional().catch(undefined),
-  createdAt: z.string(),
-  startedAt: z.string().optional(),
-  finishedAt: z.string().optional(),
-  tokensUsed: z.number(),
-  inputTokens: usageCounterSchema.optional(),
-  outputTokens: usageCounterSchema.optional(),
-  costUsd: z.number().optional(),
-  /** First GitHub PR URL spotted in the transcript (the janitor trick). */
-  pullRequestUrl: z.string().optional(),
   pullRequests: z.preprocess((value) => Array.isArray(value)
     ? value.flatMap((entry) => {
         const parsed = runPullRequestSchema.safeParse(entry);
         return parsed.success ? [parsed.data] : [];
       })
     : undefined, z.array(runPullRequestSchema).optional()),
-  /** The PR this task is ABOUT (#407, spec 2026-07-16-pr-autodiscovery):
-   *  auto-discovered from conversation references for tasks that work on an
-   *  existing PR (review/continue/merge). Display-only tier — `pullRequestUrl`
-   *  (the PR this task CREATED) always wins, and action gates ignore this. */
-  referencedPullRequestUrl: z.string().optional(),
-  /** The PR/issue number this task is ABOUT (spec 2026-07-17-task-auto-naming):
-   *  regex-extracted from the task prompt, upgradable by the namer's
-   *  cross-checked output. Display tier — never gates actions. */
-  prNumber: z.number().optional(),
-  issueNumber: z.number().optional(),
-  /** Provenance for an `issueNumber` seeded by referenced-issue discovery.
-   *  Persisted so ambiguity can revoke only the janitor's own value, including
-   *  after a restart. Any prompt, namer, or marker write clears this flag. */
-  referencedIssueNumberSeeded: z.boolean().optional(),
-  /** Who owns the display title: `user` (PATCH rename — never auto-overwritten),
-   *  `marker` (agent-declared via `CEZ:TITLE`, spec 2026-07-18-task-ref-markers —
-   *  beats the namer, silences live refresh) or `auto` (namer-owned — a later
-   *  namer result may replace it). Missing on old runs = legacy behavior (auto
-   *  fills only an unset titleSummary). Precedence: user > marker > auto. */
-  titleOrigin: z.enum(['user', 'auto', 'marker']).optional(),
-  /** References the agent itself declared via `CEZ:PR=` / `CEZ:ISSUE=` markers
-   *  (spec 2026-07-18-task-ref-markers). Presence of a kind makes it
-   *  authoritative: the namer may no longer write that kind, and a declared PR
-   *  owns the referenced tier's resolution. */
-  markerRefs: z.object({ pr: z.number().optional(), issue: z.number().optional() }).optional(),
-  /** Distinct PR URLs spotted so far — the referenced tier's working set,
-   *  persisted so a resumed run keeps disambiguating against the full history
-   *  instead of re-adopting the next URL as "the only one". Capped. */
-  referencedPrCandidates: z.array(z.string()).optional(),
-  /** The issue this task is ABOUT (spec 2026-07-21-report-ref-discovery):
-   *  auto-discovered from `github.com/…/issues/N` links in the conversation,
-   *  mirroring the referenced-PR tier. Display-only; never gates actions. */
-  referencedIssueUrl: z.string().optional(),
-  /** Distinct issue URLs spotted so far — the referenced-issue working set,
-   *  persisted like `referencedPrCandidates`. Capped. */
-  referencedIssueCandidates: z.array(z.string()).optional(),
-  /** Explicit execution policy. `false` means the run intentionally uses the repo root;
-   *  absent on older runs and for the default isolated-worktree mode. */
-  worktree: z.literal(false).optional(),
-  /** Task worktree (spec 006) — absent for in-place runs and after explicit cleanup. */
-  worktreePath: z.string().optional(),
-  /** The task's own branch (`cez/<id8>`), created off `baseBranch`. */
-  branch: z.string().optional(),
-  /** Stable baseline for session git views: a worktree's fork ref, or an in-place run's starting commit. */
-  baseBranch: z.string().optional(),
-  /** Set when count-based retention (#483) reclaimed this run's worktree
-   *  *directory* (the `cez/<id8>` branch is kept). Presence means "materialized
-   *  dir gone, recoverable via `git worktree add`"; it excludes the run from the
-   *  retention budget until the dir is re-materialized (resume clears it). */
-  worktreeReclaimedAt: z.string().optional(),
-  /** Worktree setup (#917). An unreadable value drops the field, never the run. */
   worktreeSetup: contractRunRecordSchema.shape.worktreeSetup.catch(undefined),
-  /** Historical parallel variants (retired): tasks sharing a groupId are one group. */
-  groupId: z.string().optional(),
-  /** Variant letter within the group — 'A' | 'B' | 'C' (kept as a string). */
-  variant: z.string().optional(),
-  /** Idempotent start (#504): the caller's request id and the hash of the start payload it
-   *  named (`src/runs/client-request.ts`). Absent on every run started without one. */
-  clientRequestId: z.string().optional(),
-  clientRequestHash: z.string().optional(),
-  /** Peak resident memory (bytes) / process count observed across the run's
-   *  agent process trees (#348) — written when a session's telemetry ends.
-   *  Optional: old runs.json files and `ps`-less platforms have neither. */
-  peakRssBytes: z.number().optional(),
-  peakProcCount: z.number().optional(),
   archived: z.boolean().default(false),
-  archivedAt: z.string().optional(),
-  autoArchive: contractRunRecordSchema.shape.autoArchive,
-  manualUnarchivedAt: contractRunRecordSchema.shape.manualUnarchivedAt,
-  /** Pinned to the top of this project's task list (#935): plain per-task state, the
-   *  same class as `archived` and `seenAt`. Optional with NO default, unlike `archived`:
-   *  absent is what every runs.json written before this carries and it already means
-   *  "not pinned", so nothing needs filling in on parse and an unpin can simply delete
-   *  the key rather than persist a `false` older cezars never wrote. */
-  pinned: z.boolean().optional(),
-  pinnedAt: z.string().optional(),
-  /** Read receipt (#unread-done-items): the ISO time the cockpit last opened this
-   *  run's thread. A finished run reads as "unread" until it has been seen since it
-   *  finished — see `isUnread()` in the cockpit's `lib/read-state.ts`. Absent on old
-   *  runs, on every run not yet opened, and on one `setUnread` put back to unread
-   *  (#775) — the unread rule treats all three alike. */
-  seenAt: z.string().optional(),
-  currentStepId: z.string().optional(),
-  error: z.string().optional(),
-  steps: z.array(stepStateSchema),
-  /** Full workflow definition, persisted so a `queued` run can be re-enqueued
-   *  after a restart (#367) — including ad-hoc "(planned)" chains that exist
-   *  nowhere else.
-   *
-   *  Typed, not `z.record(z.string(), z.unknown())`: this key goes out over the
-   *  wire on every run route, and `unknown` is wider than anything the server
-   *  can serialize — which made the route's own type (hono's `JSONValue`, whose
-   *  index signature admits `object | symbol | undefined`) impossible for the
-   *  contract to describe. `.catch(undefined)` keeps an older or hand-edited
-   *  entry from failing the whole index parse: a def that no longer fits simply
-   *  drops, and `reviveWorkflow` falls back to the catalog by name.
-   *
-   *  That drop is PERMANENT, not per-boot — the index is re-serialized from the
-   *  parsed records (`saveNow`), so the next save writes runs.json back without
-   *  it. Harmless for a catalog workflow, which re-resolves by name; fatal for
-   *  the ad-hoc "(planned)" chain this field exists to preserve, which has no
-   *  catalog entry to fall back to. Nothing written since #367 fails the schema
-   *  (`name`, `source` and `steps` have been on every persisted def), so tighten
-   *  `workflowStepSchema` only with that in mind: a narrowing here silently eats
-   *  queued runs rather than degrading them. */
   workflowDef: workflowDefSchema.optional().catch(undefined),
+  steps: z.array(stepStateSchema),
+  automation: contractRunRecordSchema.shape.automation.unwrap().extend({
+    automationRevision: z.number().int().positive(),
+    githubUrl: z.string().url(),
+  }).optional(),
+  automationTrigger: contractRunRecordSchema.shape.automationTrigger.unwrap().extend({
+    automationRevision: z.number().int().positive(),
+  }).optional(),
   /** The handoff file's autosave records (hearsay-tools/cezarion#1809); unreadable drops the field. */
   handoffRecords: contractRunRecordSchema.shape.handoffRecords.catch(undefined),
 });

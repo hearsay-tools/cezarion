@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { isNewerVersion } from './is-newer-version'
+import { isNewerVersion } from '@open-mercato/cezar-api-client/contract/version'
 
 describe('isNewerVersion', () => {
   it.each([

@@ -7,7 +7,7 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { isNewerVersion } from '@/lib/is-newer-version'
+import { isNewerVersion } from '@open-mercato/cezar-api-client/contract/version'
 
 export type ApplicationUpdateControlProps = {
   version: string | null

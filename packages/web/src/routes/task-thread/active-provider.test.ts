@@ -1,3 +1,4 @@
+import { providerForActiveRun } from '@open-mercato/cezar-api-client/contract/active-provider';
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
@@ -7,7 +8,6 @@ import type { ApiRun, ProviderStatusResponse } from '@open-mercato/cezar-api-cli
 import {
   activeProviderAvailability,
   existingProviderAvailability,
-  providerForActiveRun,
   providerForExistingRun,
 } from './active-provider'
 

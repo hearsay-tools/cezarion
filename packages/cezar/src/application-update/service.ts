@@ -6,7 +6,7 @@ import { join, dirname, resolve } from 'node:path';
 import { applicationUpdateStateSchema, type ApplicationUpdateState } from '@open-mercato/cezar-contract/application-update';
 import { z } from 'zod';
 import { assertCezarHomeWriteIsSandboxed } from '../paths.ts';
-import { isNewerVersion } from '../update-check.ts';
+import { isNewerVersion } from '@open-mercato/cezar-contract/version';
 import { discoverInstallation, type Installation } from './discovery.ts';
 import { LockBusyError, withDirectoryLock } from './lock.ts';
 import { runOwnedNpm } from './npm-process.ts';

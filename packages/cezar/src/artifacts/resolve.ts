@@ -1,9 +1,10 @@
+import { imageMimeType, isOsOpenableImage } from '@open-mercato/cezar-contract/image-path';
 import { constants } from 'node:fs';
 import { open, realpath, lstat } from 'node:fs/promises';
 import { isAbsolute, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { FileLinkResult, FilePreviewData, PublishedArtifact } from '@open-mercato/cezar-contract';
-import { FILE_CONTENT_CAP, imageMimeType, isOsOpenableImage } from '../server/git-changes.ts';
+import { FILE_CONTENT_CAP } from '../server/git-changes.ts';
 import { artifactDirectory, listArtifacts, readArtifact } from './store.ts';
 
 const IMAGE_CAP = 10 * 1024 * 1024;

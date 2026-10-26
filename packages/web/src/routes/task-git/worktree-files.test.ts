@@ -1,8 +1,9 @@
+import { isImagePath } from '@open-mercato/cezar-api-client/contract/image-path';
 // @vitest-environment node
 
 import { describe, expect, it } from 'vitest'
 
-import { formatFileSize, isImagePath, previewKind } from './worktree-files'
+import { formatFileSize, previewKind } from './worktree-files'
 
 describe('isImagePath', () => {
   it('matches the server allowlist, case-insensitively, by last extension', () => {
