@@ -251,6 +251,7 @@ describe('worktreeShortstat (real git)', () => {
     expect(r).not.toBe('');
     const indexSecond = Math.floor(statSync(join(r, '.git', 'index')).mtimeMs / 1000);
     // A copy made in a later second is what hid the edit; wait out the second rather than guess.
+    // bound: the wall clock leaves the second of the index write within 1 s.
     while (Math.floor(Date.now() / 1000) <= indexSecond) await new Promise((resolve) => setTimeout(resolve, 20));
     expect(await worktreeShortstat(r, 'main')).toEqual({ adds: 1, dels: 1, files: 1 });
   });

@@ -486,7 +486,6 @@ describe('rule poll-deadline', () => {
     expect(polls(
       'const deadline = Date.now() + HANG_CEILING_MS;',
       'while (Date.now() < deadline) await sleep(10);',
-      'while (Math.floor(Date.now() / 1000) <= second) await sleep(10);',
       'while (Date.now() < dueAt) await sleep(10);',
       'async function noDefault(check: () => boolean, ms: number) {',
       '  const deadline = Date.now() + ms;',
@@ -546,15 +545,11 @@ describe('rule poll-deadline', () => {
     expect(counted('if (rare()) await sleep(10);')).toEqual([]);
   });
 
-  it('leaves any other attempt-count form alone: it is a bound the scan cannot read', () => {
+  it('leaves a count whose limit or interval it cannot read alone: it is a bound of a size the scan cannot tell', () => {
     expect(polls(
       'for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) await sleep(100);',
       'for (let attempt = 0; attempt < 20; attempt += 1) await sleep(interval);',
       'for (let i = 0; i < items.length; i += 1) await sleep(100);',
-      'for (let i = 0; i !== 20; i += 1) await sleep(100);',
-      'let tries = 0;',
-      'while (!ready()) { if (tries++ > 20) throw new Error("late"); await sleep(100); }',
-      'while (!ready() && retries < 5) { retries += 1; await sleep(100); }',
     )).toEqual([]);
   });
 
@@ -590,10 +585,8 @@ describe('rule poll-deadline', () => {
     expect(lines(sites)).toEqual([1, 2, 3, 4, 5, 10]);
   });
 
-  it('leaves a counter it cannot step toward its limit alone', () => {
+  it('leaves a counter whose step it cannot read alone', () => {
     expect(polls(
-      'for (let i = 0; i < 20; i -= 1) await sleep(100);',
-      'for (let i = 20; i > 0; i += 1) await sleep(100);',
       'for (let i = 0; i < 20; i += step) await sleep(100);',
       'for (let i = start; i < 20; i++) await sleep(100);',
       'for (let i = 0, j = 5; i < 20; i++) await sleep(100);',
@@ -648,13 +641,11 @@ describe('rule poll-deadline', () => {
     expect(exits('if (Date.now() - a > 60_000) throw new Error("late");', 'if (Date.now() - b > 1_000) break;')).toEqual([1]);
     expect(exits('if (Date.now() - b > 1_000) break;', 'if (Date.now() - a > 60_000) throw new Error("late");')).toEqual([1]);
     expect(exits('if (Date.now() - b > 20_000) break;', 'if (Date.now() - a > 60_000) throw new Error("late");')).toEqual([]);
-    // An `else` that leaves ends the loop when the test is false.
-    expect(lines(polls('while (!ready()) {', '  if (Date.now() - a < 1_000) await sleep(10); else throw new Error("late");', '}'))).toEqual([1]);
     // A `break` in a loop of its own leaves that loop, not this one.
     expect(exits('for (const item of items) { if (Date.now() - b > 1_000) break; }', 'if (Date.now() - a > 60_000) throw new Error("late");')).toEqual([]);
     expect(exits('while (more()) { if (Date.now() - b > 1_000) break; }', 'if (Date.now() - a > 60_000) throw new Error("late");')).toEqual([]);
-    // A `return` or `throw` in a nested loop leaves this one too.
-    expect(exits('for (const item of items) { if (Date.now() - b > 1_000) throw new Error("late"); }', 'if (Date.now() - a > 60_000) throw new Error("late");')).toEqual([1]);
+    // A `throw` in a loop of its own may never run, so it is not an exit of this one.
+    expect(exits('for (const item of items) { if (Date.now() - b > 1_000) throw new Error("late"); }', 'if (Date.now() - a > 60_000) throw new Error("late");')).toEqual([]);
   });
 
   it('bounds an && chain by its smallest part and an || chain by its largest', () => {
@@ -672,10 +663,12 @@ describe('rule poll-deadline', () => {
     // The bound is read from the same forms as before.
     expect(wait('!ready() && Date.now() - start < 1_000 && Date.now() - start < 15_000')).toEqual([2]);
     expect(wait('!ready() && start + 1_000 > Date.now() && start + 15_000 > Date.now()')).toEqual([2]);
-    // A part that bounds nothing, beside one that does, leaves an || chain unreadable; an operator it cannot parse does too.
-    expect(wait('!ready() || Date.now() < start + 1_000')).toEqual([]);
-    expect(wait('(ready() ? Date.now() < start + 1_000 : false)')).toEqual([]);
-    expect(wait('(Date.now() < start + 1_000) ?? ready()')).toEqual([]);
+    // A part that bounds nothing, beside one that does, leaves an || chain with no bound: the loop may never end by the part that has one.
+    // An operator the scan does not read leaves none either.
+    expect(wait('!ready() || Date.now() < start + 1_000')).toEqual([2]);
+    expect(wait('!ready() || Date.now() < start + 15_000')).toEqual([2]);
+    expect(wait('(ready() ? Date.now() < start + 15_000 : false)')).toEqual([2]);
+    expect(wait('(Date.now() < start + 15_000) ?? ready()')).toEqual([2]);
     expect(wait('ready?.value !== true && Date.now() < start + 1_000')).toEqual([2]);
   });
 
@@ -689,20 +682,18 @@ describe('rule poll-deadline', () => {
     expect(polls('for (let i = 0; i < 300; i++) { if (Date.now() - t0 > 15_000) throw new Error("late"); await sleep(100); }')).toEqual([]);
   });
 
-  it('takes a counter the body writes for a count it cannot read', () => {
+  it('takes a counter the body writes for no bound: the header\'s count says nothing about how long the loop runs', () => {
     // The body rewinds the counter, so the header's count is a floor on the run, not its length.
-    expect(polls('for (let i = 0; i < 10; i++) { if (retry()) i = 0; await sleep(100); }')).toEqual([]);
-    expect(polls('for (let i = 0; i < 10; i++) { if (retry()) i -= 1; await sleep(100); }')).toEqual([]);
-    expect(polls('for (let i = 0; i < 10; i++) { if (retry()) i--; await sleep(100); }')).toEqual([]);
-    expect(polls('for (let i = 0; i < 10; i++) { if (retry()) --i; await sleep(100); }')).toEqual([]);
-    expect(polls('for (let i = 0; i < 10; i++) { if (retry()) [i] = [0]; await sleep(100); }')).toEqual([]);
-    expect(polls('for (let i = 0; i < 10; i++) { if (retry()) ({ i } = origin); await sleep(100); }')).toEqual([]);
-    expect(polls('for (let i = 0; i < 10; i++) { const rewind = () => { i = 0; }; if (retry()) rewind(); await sleep(100); }')).toEqual([]);
-    expect(polls('for (let i = 0; i < 10; i++) { i = 0; await sleep(1_000); }')).toEqual([]);
+    for (const write of ['if (retry()) i = 0;', 'if (retry()) i -= 1;', 'if (retry()) i--;', 'if (retry()) --i;', 'if (retry()) [i] = [0];', 'if (retry()) ({ i } = origin);', 'i = 0;']) {
+      expect(lines(polls(`for (let i = 0; i < 10; i++) { ${write} await sleep(1_000); }`))).toEqual([1]);
+    }
+    expect(lines(polls('for (let i = 0; i < 10; i++) { const rewind = () => { i = 0; }; if (retry()) rewind(); await sleep(1_000); }'))).toEqual([1]);
     // A name the body only reads or compares is still a counter, however similar its spelling.
     expect(lines(polls('for (let i = 0; i < 10; i++) { log(i); await sleep(100); }'))).toEqual([1]);
     expect(lines(polls('for (let i = 0; i < 10; i++) { if (i == 5 || i <= 2) log(i); await sleep(100); }'))).toEqual([1]);
     expect(lines(polls('for (let i = 0; i < 10; i++) { const idx = i; await sleep(100); }'))).toEqual([1]);
+    // A body that declares its own `i` leaves the header's counter alone.
+    expect(polls('for (let i = 0; i < 100; i++) { { let i = 5; use(i); } await sleep(200); }')).toEqual([]);
   });
 
   it('resolves a name at the place it is read: a block the use cannot see does not declare it', () => {
@@ -722,9 +713,9 @@ describe('rule poll-deadline', () => {
     expect(lines(polls('let end = Date.now() + 15_000;', 'end = Date.now() + 1_000;', 'while (Date.now() < end) await sleep(10);'))).toEqual([3]);
     expect(lines(polls('let end = Date.now() + 1_000;', 'end = Date.now() + 15_000;', 'while (Date.now() < end) await sleep(10);'))).toEqual([3]);
     expect(polls('let end = Date.now() + 15_000;', 'end = Date.now() + 20_000;', 'while (Date.now() < end) await sleep(10);')).toEqual([]);
-    // A write that is not a plain assignment leaves the value unknown.
-    expect(polls('let end = Date.now() + 1_000;', 'while (Date.now() < end) { end += 20_000; await sleep(10); }')).toEqual([]);
-    expect(polls('let end = Date.now() + 1_000;', 'const extend = () => { end++; };', 'while (Date.now() < end) { extend(); await sleep(10); }')).toEqual([]);
+    // A write that is not a plain assignment leaves the value unknown; one in the loop moves the deadline, so it bounds nothing.
+    expect(lines(polls('let end = Date.now() + 1_000;', 'while (Date.now() < end) { end += 20_000; await sleep(10); }'))).toEqual([2]);
+    expect(lines(polls('let end = Date.now() + 1_000;', 'const extend = () => { end++; };', 'while (Date.now() < end) { extend(); await sleep(10); }'))).toEqual([3]);
     // The same for a constant that names a bound.
     expect(polls('async function run() {', '  let limit = 800;', '  limit += 20_000;', '  const end = Date.now() + limit;', '  while (Date.now() < end) await sleep(10);', '}')).toEqual([]);
     expect(lines(polls('async function run() {', '  let limit = 20_000;', '  limit = 800;', '  const end = Date.now() + limit;', '  while (Date.now() < end) await sleep(10);', '}'))).toEqual([5]);
@@ -733,6 +724,98 @@ describe('rule poll-deadline', () => {
     expect(polls('while (!ready()) {', '  const late = Date.now() - t0 > 15_000;', '  if (late) break;', '  await sleep(10);', '}')).toEqual([]);
     // A name assigned from the clock and compared with a literal is read as that literal.
     expect(lines(polls('while (!ready()) { const elapsed = Date.now() - t0; if (elapsed > 1_000) throw new Error("late"); await sleep(10); }'))).toEqual([1]);
+  });
+
+  it('counts an exit only when it is a statement of the loop body that leaves on its own', () => {
+    const exits = (...body: string[]) => lines(polls('while (!ready()) {', ...body.map((line) => `  ${line}`), '  await sleep(10);', '}'));
+    const late = 'Date.now() - t0 > 15_000';
+    // Written as a statement of the body: a bare leave, or a block with the leave among its own statements.
+    expect(exits(`if (${late}) break;`)).toEqual([]);
+    expect(exits(`if (${late}) return;`)).toEqual([]);
+    expect(exits(`if (${late}) { log(); throw new Error("late"); }`)).toEqual([]);
+    expect(exits(`if (${late}) { break; }`)).toEqual([]);
+    expect(lines(polls('do {', `  if (${late}) break;`, '  await sleep(10);', '} while (!ready());'))).toEqual([]);
+    expect(polls('while (!ready()) if (Date.now() - t0 > 15_000) break; else await sleep(10);')).toEqual([]);
+    // Inside another `if`, an `else`, an `else if`, a `switch`, a `try`, a block or a loop it may never be reached.
+    expect(exits('if (rare()) {', `  if (${late}) break;`, '}')).toEqual([1]);
+    expect(exits('if (rare()) log(); else {', `  if (${late}) break;`, '}')).toEqual([1]);
+    expect(exits('if (rare()) log(); else', `  if (${late}) break;`)).toEqual([1]);
+    expect(exits(`if (rare()) log(); else if (${late}) break;`)).toEqual([1]);
+    expect(exits('switch (kind) { case 1:', `  if (${late}) return;`, '}')).toEqual([1]);
+    expect(exits('try {', `  if (${late}) throw new Error("late");`, '} catch { log(); }')).toEqual([1]);
+    expect(exits('{', `  if (${late}) break;`, '}')).toEqual([1]);
+    expect(exits('for (const item of items) {', `  if (${late}) return;`, '}')).toEqual([1]);
+    expect(exits('while (more()) {', `  if (${late}) return;`, '}')).toEqual([1]);
+    // A branch that leaves only inside another `if` may never leave, and an `else` that leaves is not an exit on the test.
+    expect(exits(`if (${late}) {`, '  if (strict) throw new Error("late");', '}')).toEqual([1]);
+    expect(exits(`if (${late}) { log(); } else break;`)).toEqual([1]);
+    expect(exits(`if (!(${late})) { log(); } else break;`)).toEqual([1]);
+    // Before a statement that can skip the rest of the pass.
+    expect(exits(`if (${late}) break;`, 'if (skip()) continue;')).toEqual([]);
+    expect(exits('if (skip()) continue;', `if (${late}) break;`)).toEqual([1]);
+    expect(exits('for (const item of items) { if (skip(item)) continue; }', `if (${late}) break;`)).toEqual([1]);
+    // The loop head still counts beside such exits, and a reason accepts a loop whose exit is one the scan does not read.
+    expect(polls('const t0 = Date.now();', 'while (!ready() && Date.now() - t0 < 15_000) {', '  if (rare()) { if (Date.now() - t0 > 1_000) break; }', '  await sleep(10);', '}')).toEqual([]);
+    expect(polls('// bound: ends when `rare` turns true, which the fixture below controls', 'while (!ready()) {', '  if (rare()) { if (Date.now() - t0 > 15_000) break; }', '  await sleep(10);', '}')).toEqual([]);
+  });
+
+  it('reads a clock comparison only with <, <=, > or >=: an equality can miss the value and never fire', () => {
+    for (const operator of ['!==', '===', '!=', '==']) {
+      expect(lines(polls('const end = Date.now() + 15_000;', `while (Date.now() ${operator} end) await sleep(10);`))).toEqual([2]);
+      expect(lines(polls('const t0 = Date.now();', `while (Date.now() - t0 ${operator} 15_000) await sleep(10);`))).toEqual([2]);
+      expect(lines(polls('const t0 = Date.now();', `while (!ready()) { if (Date.now() - t0 ${operator} 15_000) throw new Error("late"); await sleep(10); }`))).toEqual([2]);
+      expect(lines(polls('const t0 = Date.now();', `while (!ready()) { if (15_000 ${operator} Date.now() - t0) throw new Error("late"); await sleep(10); }`))).toEqual([2]);
+      expect(lines(polls(`for (let i = 0; i ${operator} 150; i += 1) await sleep(100);`))).toEqual([1]);
+    }
+    for (const operator of ['<', '<=', '>', '>=']) {
+      expect(polls('const t0 = Date.now();', `while (!ready()) { if (Date.now() - t0 ${operator} 15_000) throw new Error("late"); await sleep(10); }`)).toEqual([]);
+    }
+  });
+
+  it('reads a start or a deadline the loop sets again as no bound: it moves away as time passes', () => {
+    expect(lines(polls('let start = Date.now();', 'while (Date.now() - start < 15_000) { start = Date.now(); await sleep(10); }'))).toEqual([2]);
+    expect(lines(polls('let end = Date.now() + 15_000;', 'while (Date.now() < end) { end = Date.now() + 15_000; await sleep(10); }'))).toEqual([2]);
+    expect(lines(polls('let start = Date.now();', 'while (!ready()) { if (Date.now() - start > 15_000) throw new Error("late"); start = Date.now(); await sleep(10); }'))).toEqual([2]);
+    expect(lines(polls('const state = { t0: Date.now() };', 'while (Date.now() - state.t0 < 15_000) { state.t0 = Date.now(); await sleep(10); }'))).toEqual([2]);
+    expect(lines(polls('let start = Date.now();', 'const restart = () => { start = Date.now(); };', 'while (Date.now() - start < 15_000) { restart(); await sleep(10); }'))).toEqual([3]);
+    // Declared in the body, they are new on every pass; declared in a `for` header, they are set once.
+    expect(lines(polls('while (!ready()) {', '  const start = Date.now();', '  if (Date.now() - start > 15_000) throw new Error("late");', '  await sleep(10);', '}'))).toEqual([1]);
+    expect(lines(polls('while (!ready()) {', '  const end = Date.now() + 15_000;', '  if (Date.now() > end) throw new Error("late");', '  await sleep(10);', '}'))).toEqual([1]);
+    expect(polls('for (const end = Date.now() + 15_000; Date.now() < end;) await sleep(10);')).toEqual([]);
+    // A name set from the clock in the body is a fresh read of it; it is bounded by a start the loop leaves alone.
+    expect(polls('const t0 = Date.now();', 'while (!ready()) {', '  const elapsed = Date.now() - t0;', '  if (elapsed > 15_000) throw new Error("late");', '  await sleep(10);', '}')).toEqual([]);
+    expect(polls('const deadline = Date.now() + 15_000;', 'while (!ready()) {', '  const now = Date.now();', '  if (now > deadline) throw new Error("late");', '  await sleep(10);', '}')).toEqual([]);
+    expect(lines(polls('let t0 = Date.now();', 'while (!ready()) {', '  t0 = Date.now();', '  const elapsed = Date.now() - t0;', '  if (elapsed > 15_000) throw new Error("late");', '  await sleep(10);', '}'))).toEqual([2]);
+    expect(lines(polls('while (!ready()) {', '  const now = Date.now();', '  if (now > 15_000) throw new Error("late");', '  await sleep(10);', '}'))).toEqual([1]);
+  });
+
+  it('reads a clock comparison only in the forms it lists', () => {
+    expect(lines(polls('while (Math.floor(Date.now() / 1000) <= second) await sleep(10);'))).toEqual([1]);
+    expect(lines(polls('while (Date.now() * 2 < limit) await sleep(10);'))).toEqual([1]);
+    expect(lines(polls('while (!ready()) { if (Math.floor(Date.now() / 1000) > second) break; await sleep(10); }'))).toEqual([1]);
+    expect(lines(polls('const t0 = Date.now();', 'while (Date.now() - t0 - slack < 15_000) await sleep(10);'))).toEqual([2]);
+    // The listed forms, in both orientations.
+    expect(polls('const t0 = Date.now();', 'while (Date.now() - t0 < 15_000) await sleep(10);')).toEqual([]);
+    expect(polls('const t0 = Date.now();', 'while (15_000 > Date.now() - t0) await sleep(10);')).toEqual([]);
+    expect(polls('const t0 = Date.now();', 'while (Date.now() < t0 + 15_000) await sleep(10);')).toEqual([]);
+    expect(polls('const t0 = Date.now();', 'while (t0 + 15_000 > Date.now()) await sleep(10);')).toEqual([]);
+    expect(polls('const deadline = Date.now() + 15_000;', 'while (Date.now() < deadline) await sleep(10);')).toEqual([]);
+  });
+
+  it('counts only the counter of a for header: a step in the body may never run', () => {
+    expect(lines(polls('let tries = 0;', 'while (!ready()) { if (tries++ > 20) throw new Error("late"); await sleep(100); }'))).toEqual([2]);
+    expect(lines(polls('let n = 0;', 'while (n < 20) { if (rare()) n += 1; await sleep(100); }'))).toEqual([2]);
+    expect(lines(polls('let n = 0;', 'while (n < 20) { n += 1; await sleep(100); }'))).toEqual([2]);
+    expect(lines(polls('while (!ready() && retries < 5) { retries += 1; await sleep(100); }'))).toEqual([1]);
+    expect(lines(polls('while (retries-- > 0) await sleep(100);'))).toEqual([1]);
+    // A for header whose update never gets the counter to its limit runs for ever.
+    expect(lines(polls('for (let i = 0; i < 20; i -= 1) await sleep(100);'))).toEqual([1]);
+    expect(lines(polls('for (let i = 20; i > 0; i += 1) await sleep(100);'))).toEqual([1]);
+    expect(lines(polls('for (let i = 0; i < 20; i += 0) await sleep(100);'))).toEqual([1]);
+    expect(lines(polls('for (let i = 0; i < 20; j++) await sleep(100);'))).toEqual([1]);
+    expect(lines(polls('for (let i = 0; i < 20;) await sleep(100);'))).toEqual([1]);
+    // A count that ends the loop only beside a part with no bound is no bound.
+    expect(lines(polls('for (let i = 0; i < 20 || !done(); i++) await sleep(100);'))).toEqual([1]);
   });
 
   it('takes a zero-delay sleep in a loop for the poll interval of a spin, and one outside a loop for a yield', () => {
