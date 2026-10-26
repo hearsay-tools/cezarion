@@ -2,7 +2,7 @@ import { mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach } from 'vitest'
-import { strictRunExits, takeRunExitViolations } from './src/workflows/run-states.ts'
+import { strictRunExits, throwRunExitViolations } from './src/workflows/run-states.ts'
 
 // Test files start from shipped defaults, not the parent cockpit's flags or
 // task context (hearsay-tools/cezarion#1517). Scrub once before sandbox pins:
@@ -167,13 +167,6 @@ afterEach(() => {
   pinGitEnvironment()
   clearHostBinAndModeOverrides()
 })
-// A run status write the run state table does not declare throws, and fails the test it happens
-// in even when run.ts caught the throw (hearsay-tools/cezarion#1804). Production never checks.
-strictRunExits()
-afterEach(() => {
-  const violations = takeRunExitViolations()
-  if (violations.length) throw new Error(violations.join('\n'))
-})
 afterAll(() => {
   // bound: keep the existing temp cleanup's three retries / 50 ms backoff for
   // one-shot child-process writes during removal (hearsay-tools/cezarion#1432).
@@ -181,3 +174,7 @@ afterAll(() => {
   rmSync(sandboxUserHome, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
   rmSync(sandboxTemp, { recursive: true, force: true, maxRetries: 3, retryDelay: 50 })
 })
+// A run status write the run state table does not declare throws, and fails the test it happens
+// in even when run.ts caught the throw (hearsay-tools/cezarion#1804). Production never checks.
+strictRunExits()
+afterEach(throwRunExitViolations)

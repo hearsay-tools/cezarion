@@ -320,6 +320,12 @@ export function takeRunExitViolations(): string[] {
   return violations.splice(0);
 }
 
+/** Throws the violations recorded since the last call: the test setup runs it after each test. */
+export function throwRunExitViolations(): void {
+  const taken = takeRunExitViolations();
+  if (taken.length) throw new Error(taken.join('\n'));
+}
+
 function violate(message: string): never {
   violations.push(message);
   throw new Error(message);

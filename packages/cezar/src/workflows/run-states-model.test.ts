@@ -85,10 +85,12 @@ function target(id: string, from: RunState, pick?: RunState): RunState {
   return pick!;
 }
 
-const engine = () => manager as unknown as {
-  active: Map<string, { idleTimer?: NodeJS.Timeout & { _onTimeout(): void } }>;
-  waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
-};
+function engine() {
+  return manager as unknown as {
+    active: Map<string, { idleTimer?: NodeJS.Timeout & { _onTimeout(): void } }>;
+    waitTimers: Map<string, { timer: NodeJS.Timeout & { _onTimeout(): void } }>;
+  };
+}
 const turnEnds = (id: string) => store.readEvents(id).filter((event) => event.type === 'turn-end').length;
 const isPark = (state: RunState) => state.startsWith('waiting:');
 const final = (state: RunState) => state === 'done' || state === 'failed' || state === 'cancelled';
@@ -138,7 +140,9 @@ class HumanMessage implements Command {
 
 class Continue implements Command {
   constructor(readonly reply: Reply) {}
-  check = (m: Readonly<Model>) => (final(m.state) || (isPark(m.state) && !m.session)) && (this.reply === 'nothing' || this.reply === 'done' || this.reply === 'ask' || !m.open.has(this.reply));
+  check(m: Readonly<Model>) {
+    return (final(m.state) || (isPark(m.state) && !m.session)) && (this.reply === 'nothing' || this.reply === 'done' || this.reply === 'ask' || !m.open.has(this.reply));
+  }
   async run(m: Model, r: Real) {
     const before = turnEnds(r.id);
     expect(target('continue.now', m.state)).toBe('running');

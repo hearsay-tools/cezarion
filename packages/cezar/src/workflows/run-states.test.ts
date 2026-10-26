@@ -5,7 +5,7 @@ import { RUN_STATUS, WAIT_PHASE, makeHumanWait, makeTimerWait } from '@open-merc
 import { blank } from '../test-wait-discipline.testkit.ts';
 import {
   AUTOMATIC, RUN_EXITS, RUN_STATES, RUN_TRIGGERS, WAIT_KINDS, stateOf, statusOf, strictRunExits, takeRunExitViolations,
-  transition, transitionVia, type RunState, type RunStateSpec, type TriggerRow,
+  throwRunExitViolations, transition, transitionVia, type RunState, type RunStateSpec, type TriggerRow,
 } from './run-states.ts';
 
 const src = resolve(import.meta.dirname, '..');
@@ -123,7 +123,9 @@ describe('run states and their exits (hearsay-tools/cezarion#1804)', () => {
       strictRunExits(previous);
       takeRunExitViolations();
     });
-    const at = (status: string | undefined) => () => (status ? { status } : undefined) as never;
+    function at(status: string | undefined) {
+      return () => { return (status ? { status } : undefined) as never; };
+    }
 
     it('does nothing outside strict mode', () => {
       previous = strictRunExits(false);
@@ -148,7 +150,7 @@ describe('run states and their exits (hearsay-tools/cezarion#1804)', () => {
     it('checks a store commit against its exit after it runs, in strict mode', () => {
       previous = strictRunExits(true);
       let status = 'running';
-      const read = () => ({ status }) as never;
+      const read = () => { return { status } as never; };
       expect(() => transitionVia('cancel', read, () => { status = 'waiting'; })).toThrow('exit cancel wrote waiting, not cancelled');
       expect(status).toBe('waiting');
       status = 'done';
@@ -158,6 +160,15 @@ describe('run states and their exits (hearsay-tools/cezarion#1804)', () => {
       expect(transitionVia('park', read, () => 'refused')).toBe('refused');
       expect(transitionVia('withdraw-hold', read, () => { status = 'failed'; return true; })).toBe(true);
       expect(takeRunExitViolations()).toEqual([]);
+    });
+
+    it('throws every recorded violation once, for the test setup', () => {
+      previous = strictRunExits(true);
+      expect(() => throwRunExitViolations()).not.toThrow();
+      expect(() => transition('accept-review', at('running'))).toThrow();
+      expect(() => transition('accept-review', at('queued'))).toThrow();
+      expect(() => throwRunExitViolations()).toThrow('exit accept-review from running (declare it in workflows/run-states.ts)\nundeclared run transition: exit accept-review from queued');
+      expect(() => throwRunExitViolations()).not.toThrow();
     });
   });
 });
