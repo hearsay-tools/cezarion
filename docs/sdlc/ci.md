@@ -278,8 +278,8 @@ node .ai/skills/check-code-quality/scripts/complexity-gate.mjs --base origin/mai
 ```
 
 For an owner-approved increase, the owner adds the `baseline-growth` label, then re-runs the failed
-`complexity-gate` job. An agent never adds the label. Auto-merge has no complexity check. CRAP joins
-the gate once CI publishes coverage (hearsay-tools/cezarion#1780).
+`complexity-gate` job. An agent never adds the label. Auto-merge has no complexity check. CI now
+publishes Vitest coverage (§ Vitest coverage artifact); adding CRAP to the gate is a separate change.
 
 **File length.** `packages/cezar/src/file-length.test.ts` pins every non-test source file over
 1,000 lines in `file-length.baseline.json`, and Squeal re-runs it when any counted source file
@@ -296,6 +296,33 @@ or a new entry, and the same `baseline-growth` label approves one.
 A PR that edits `ci.yml` does not run its own definition (see § Proving a `ci.yml` change). A bare
 `workflow_dispatch` runs `complexity-gate` on the dispatched branch against `main`, so the
 dispatch proves the job too.
+
+### Vitest coverage artifact
+
+Every pull request run and every dispatch of `ci.yml` also runs `Vitest coverage shard N/3` (N=1..3)
+and `Merge Vitest coverage` (hearsay-tools/cezarion#1780). The three shard jobs run the same shards as
+the required Vitest shards, with `--coverage.enabled`. The merge job uploads one artifact for the head:
+`vitest-coverage-<head SHA>`, holding `coverage-final.json` (Istanbul, paths relative to the repository
+root, test files included) and `provenance.json` (tested ref, head and base SHA, run ID and attempt),
+kept 14 days. The pre-PR code-quality check downloads it instead of running the tests again; see
+`.ai/skills/check-code-quality/references/pre-pr.md` § Coverage from CI.
+
+These jobs add no required check. They are not in `verify.needs` or the merge-queue roster, and the
+`vitest` job is unchanged, so a slow, failed or missing coverage run cannot change a test verdict.
+Every step of both jobs sets `continue-on-error`, so a problem leaves the job green. A missing report
+shows as a `::warning::` annotation and a job-summary line that name the missing shard or the failed
+step. The merge queue, pushes to `main`, and docs-only, infra-only and bump-PR runs start none of them.
+`.github/scripts/ci-coverage.workflow.test.cjs` pins all of this, and
+`.github/scripts/vitest-coverage-tests.test.cjs` pins the settings in `vitest.config.ts`: coverage is
+opt-in with `--coverage`, a run without it resolves the same reporters as before, and a run with it
+keeps test files in the report (Vitest drops them otherwise, and `check.mjs` exits 2 for a changed
+test file the report lacks).
+
+The jobs run beside the required shards. They add runner minutes, about one more Vitest shard each,
+and do not lengthen the required checks unless the runner pool is short of capacity. Compare a
+dispatched run's per-job queue wait (`started_at` minus `created_at` in the jobs API) with a recent run
+before you add more jobs of this size. Like any `ci.yml` change, they run only from the target branch
+on a pull request; prove an edit with a dispatch (§ Proving a `ci.yml` change).
 
 ### Upstream scan PRs
 
