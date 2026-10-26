@@ -287,23 +287,103 @@ describe('rule poll-deadline', () => {
     expect(rules('for (let i = 0; !ready(); i++) await sleep(10)')).toEqual(['poll-deadline'])
   })
 
-  it('counts attempts from the start and by the step, up or down, and through an && chain', () => {
-    // Flagged under the 3 s floor: 2 s, 1 s, 1 s, 1 s, 2 s, 2 s and 1 s. Accepted: 12.5 s, 20 s and 12 s.
+  it('counts attempts from the start and by the step, up, and through an && chain', () => {
+    // Flagged under the 3 s floor: 2 s, 1 s, 2 s and 1 s. Accepted: 12.5 s and 12 s.
     expect(rules('for (let attempt = 100; attempt < 150; attempt += 1) await sleep(40)')).toEqual(['poll-deadline'])
     expect(rules('for (let i = 0; i < 100; i += 10) await sleep(100)')).toEqual(['poll-deadline'])
-    expect(rules('for (let i = 0; i < 100; i = i + 10) await sleep(100)')).toEqual(['poll-deadline'])
-    expect(rules('for (let i = 20; i > 0; i--) await sleep(50)')).toEqual(['poll-deadline'])
-    expect(rules('for (let left = 20; left >= 1; left -= 1) await sleep(100)')).toEqual(['poll-deadline'])
     expect(rules('for (let i = 0; i < 20 && !ready(); i++) await sleep(100)')).toEqual(['poll-deadline'])
     expect(rules('const STEP = 10', 'for (let i = 0; i < 100; i += STEP) await sleep(100)')).toEqual(['poll-deadline'])
     expect(rules('for (let i = 0; i < 100; i += 2) await sleep(250)')).toEqual([])
-    expect(rules('for (let left = 200; left > 0; --left) await sleep(100)')).toEqual([])
     expect(rules('for (let i = 5; i <= 124; i++) await sleep(100)')).toEqual([])
+    expect(rules('for (var i = 0; i < 200; ++i) await sleep(100)')).toEqual([])
   })
 
-  it('leaves a counter whose step it cannot read alone', () => {
+  it('leaves a counter whose limit or step is a name the caller sizes alone', () => {
     expect(rules('for (let i = 0; i < 20; i += step) await sleep(100)')).toEqual([])
-    expect(rules('for (let i = start; i < 20; i++) await sleep(100)')).toEqual([])
+    expect(rules('for (let i = 0; i < attempts; i++) await sleep(100)')).toEqual([])
+    expect(rules('for (let i = 0; i < options.attempts; i++) await sleep(100)')).toEqual([])
+  })
+
+  it('reads a counter loop only in one shape: a literal start, `<` or `<=` against a limit, and a step of ++ or += a positive literal', () => {
+    for (const header of [
+      'let i = start; i < 200; i++', 'let i = 0, j = 5; i < 200; i++', 'const i = 0; i < 200; i++',
+      'let i = 200; i > 0; i--', 'let i = 200; i >= 1; i -= 1', 'let i = 200; i > 0; --i', 'let i = 0; i < 200; i = i + 1',
+      'let i = 0; i < 200; i += 0', 'let i = 0; i < 200; i += -1', 'let i = 1; i < 200; i *= 2', 'let i = 0; i < 200; i++, j++',
+      'let i = 0; i++ < 200; i++', 'let i = 0; ++i < 200; i++', 'let i = 0; i-- < 200; i++', 'let i = 0; (i += 1) < 200; i++',
+      'let i = 0; i < f(); i++', 'let i = 0; i < n++; i++', 'let i = 0; i < Math.min(n, 200); i++', 'let i = 0; i < limit * 2; i++',
+      'let i = 0; 200 > i; i++',
+    ]) {
+      expect(rules(`for (${header}) await sleep(1_000)`), header).toEqual(['poll-deadline'])
+    }
+    // A limit or a step the loop changes is not the one the header names.
+    expect(rules('let n = 500', 'for (let i = 0; i < n; i++) { n = 1_000_000; await sleep(100) }')).toEqual(['poll-deadline'])
+    expect(rules('let step = 1', 'for (let i = 0; i < 500; i += step) { step = 0; await sleep(100) }')).toEqual(['poll-deadline'])
+  })
+
+  it('reads a clock comparison only as a pure read: a write or a call in it, or a second expression beside it, is no bound', () => {
+    const cases: Array<[string, string[]]> = [
+      ['assign inside the compared deadline', ['let end = 0', 'const start = Date.now()', 'while (Date.now() < (end = start + 15_000)) await sleep(10)']],
+      ['start stepped in the condition', ['const start = Date.now()', 'while (Date.now() - start++ < 15_000) await sleep(10)']],
+      ['start written in the condition', ['let start = Date.now()', 'while (Date.now() - (start = Math.min(start, 1)) < 15_000) await sleep(10)']],
+      ['call in an operand', ['const start = Date.now()', 'while (Date.now() - shift(start) < 15_000) await sleep(10)']],
+      ['write inside an exit limit', ['let cap = 0', 'const start = Date.now()', 'while (!ready()) {', '  if (Date.now() - start > (cap = 15_000)) break', '  await sleep(10)', '}']],
+      ['call as an exit limit', ['const start = Date.now()', 'while (!ready()) {', '  if (Date.now() - start > limit()) break', '  await sleep(10)', '}']],
+      ['comma after the comparison', ['const start = Date.now()', 'while (Date.now() - start < 15_000, true) await sleep(10)']],
+      ['comma before the comparison', ['const start = Date.now()', 'let n = 0', 'while ((n = 1, Date.now() - start < 15_000)) await sleep(10)']],
+      ['exit by assignment test', ['let n = 0', 'while (!ready()) {', '  if ((n = Date.now()) - start > 15_000) break', '  await sleep(10)', '}']],
+    ]
+    for (const [label, src] of cases) expect(rules(...src), label).toEqual(['poll-deadline'])
+  })
+
+  it('reads a limit, a start and a deadline only as a literal sum of products, one name or path, or a read of the clock', () => {
+    const cases: Array<[string, string[]]> = [
+      ['limit times a name', ['const start = Date.now()', 'while (Date.now() - start < 15_000 * scale) await sleep(10)']],
+      ['limit minus a name', ['const start = Date.now()', 'while (Date.now() - start < 15_000 - spent) await sleep(10)']],
+      ['sum with a product', ['const start = Date.now()', 'while (Date.now() < start + 15_000 * scale) await sleep(10)']],
+      ['sum with a third term', ['const start = Date.now()', 'while (Date.now() < start + 15_000 + extra) await sleep(10)']],
+      ['scaled start', ['const start = Date.now()', 'while (Date.now() - start * 2 < 15_000) await sleep(10)']],
+      ['sum with a scaled anchor', ['const start = Date.now()', 'while (Date.now() < start * 2 + 15_000) await sleep(10)']],
+      ['deadline with a product', ['const deadline = Date.now() + 15_000 * scale', 'while (Date.now() < deadline) await sleep(10)']],
+      ['deadline minus a name', ['const deadline = Date.now() + 15_000 - slack', 'while (Date.now() < deadline) await sleep(10)']],
+    ]
+    for (const [label, src] of cases) expect(rules(...src), label).toEqual(['poll-deadline'])
+  })
+
+  it('reads a name the loop sets from the clock only when it sets it on every pass, once, and reads it where it sets it', () => {
+    const cases: Array<[string, string[]]> = [
+      ['stale flag', ['const start = Date.now()', 'const stale = Date.now() - start > 15_000', 'while (!stale) await sleep(10)']],
+      ['alias with a scaled start', ['const start = Date.now()', 'let elapsed = 0', 'while (!ready()) {', '  elapsed = Date.now() - start * 2', '  if (elapsed > 15_000) break', '  await sleep(10)', '}']],
+      ['alias against a product', ['const start = Date.now()', 'let elapsed = 0', 'while (!ready()) {', '  elapsed = Date.now() - start', '  if (elapsed > 15_000 * scale) break', '  await sleep(10)', '}']],
+      ['flag set in a branch', ['const start = Date.now()', 'let late = false', 'while (!late) {', '  if (busy()) late = Date.now() - start > 15_000', '  await sleep(10)', '}']],
+      ['flag set after a continue', ['const start = Date.now()', 'let late = false', 'while (!late) {', '  if (busy()) continue', '  late = Date.now() - start > 15_000', '  await sleep(10)', '}']],
+      ['flag set twice', ['const start = Date.now()', 'let late = false', 'while (!late) {', '  late = Date.now() - start > 15_000', '  if (busy()) late = false', '  await sleep(10)', '}']],
+      ['sample set in a branch', ['const start = Date.now()', 'let elapsed = 0', 'while (elapsed < 15_000) {', '  if (busy()) elapsed = Date.now() - start', '  await sleep(10)', '}']],
+      ['start declared again each pass', ['let elapsed = 0', 'while (elapsed < 15_000) {', '  const start = Date.now()', '  elapsed = Date.now() - start', '  await sleep(10)', '}']],
+      ['flag set in a closure', ['const start = Date.now()', 'let late = false', 'const check = () => { late = Date.now() - start > 15_000; }', 'while (!late) {', '  check()', '  await sleep(10)', '}']],
+    ]
+    for (const [label, src] of cases) expect(rules(...src), label).toEqual(['poll-deadline'])
+  })
+
+  it('counts an exit block only when no `continue` can come before its leave', () => {
+    const cases: Array<[string, string[]]> = [
+      ['continue in the exit block', ['const start = Date.now()', 'while (!ready()) {', '  if (Date.now() - start > 15_000) { if (retry()) continue; break; }', '  await sleep(10)', '}']],
+    ]
+    for (const [label, src] of cases) expect(rules(...src), label).toEqual(['poll-deadline'])
+  })
+
+  it('still reads each listed shape in its exact form', () => {
+    const cases: Array<[string, string[]]> = [
+      ['plain elapsed', ['const start = Date.now()', 'while (Date.now() - start < 15_000) await sleep(10)']],
+      ['sum', ['const start = Date.now()', 'while (Date.now() < start + 15_000) await sleep(10)']],
+      ['deadline', ['const deadline = Date.now() + 15_000', 'while (Date.now() < deadline) await sleep(10)']],
+      ['refreshed flag', ['const start = Date.now()', 'let late = false', 'while (!late) {', '  late = Date.now() - start > 15_000', '  await sleep(10)', '}']],
+      ['exit', ['const start = Date.now()', 'while (!ready()) {', '  if (Date.now() - start > 15_000) break', '  await sleep(10)', '}']],
+      ['counter', ['for (let i = 0; i < 200; i++) await sleep(100)']],
+      ['caller-sized limit', ['const start = Date.now()', 'while (Date.now() - start < options.timeout) await sleep(10)']],
+      ['sample set every pass', ['const start = Date.now()', 'let elapsed = 0', 'while (elapsed < 15_000) {', '  elapsed = Date.now() - start', '  await sleep(10)', '}']],
+      ['sample declared every pass', ['const start = Date.now()', 'while (!ready()) {', '  const elapsed = Date.now() - start', '  if (elapsed > 15_000) break', '  await sleep(10)', '}']],
+    ]
+    for (const [label, src] of cases) expect(rules(...src), label).toEqual([])
   })
 
   it('does not take a bound from a function nested in the loop: it is the helper\'s, not the loop\'s', () => {

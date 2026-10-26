@@ -25,17 +25,22 @@ import { type BaselineEntry as Entry, waitBaseline } from './wait-baseline'
  *      or a block with the leave among its own statements), before any statement that holds a `continue`. An `if` inside
  *      another `if`, an `else`, a `switch`, a `try`, a block or an inner loop may never be reached, and the `else` of an
  *      `if` is not an exit on its test.
- * A condition is read from these parts, joined by `&&` (it ends once either part does), `||` (once both do) and `!`:
- *   - a clock comparison with `<`, `<=`, `>` or `>=`, never `==` or `!=`: `now - start` against a limit, `now` against
- *     `start + limit` or a deadline, or a name the loop sets from the clock (`const elapsed = Date.now() - start`). `now`
- *     is `Date.now()`, `performance.now()` or `process.hrtime()`. `start` and the deadline are names the loop never
- *     declares again, writes, or leaves to a closure that writes it.
- *   - the counter of a `for` header against a limit, when nothing in the body writes the counter: its iterations times the
- *     sleeps every pass reaches.
+ * A condition is read from these parts, joined by `&&` (it ends once either part does), `||` (once both do) and `!`. A counted
+ * condition is a pure read: no write (`=`, `+=`, `++`, `--`) and no call in it, but the clock, or the part is no bound.
+ *   - a clock comparison with `<`, `<=`, `>` or `>=`, never `==` or `!=`, and as the whole part: `now - start` against a limit,
+ *     `now` against `start + limit` or a deadline, or a name the loop sets from the clock (`const elapsed = Date.now() - start`).
+ *     `now` is `Date.now()`, `performance.now()` or `process.hrtime()`. A limit is a literal sum of products (`5 * 1_000`) or one
+ *     name or path. A start is a read of the clock, a deadline a read of the clock plus a limit, and a name or path the caller
+ *     sizes is left alone. A name set to any other expression is no start, deadline or limit. The loop never declares them again,
+ *     writes them or leaves them to a closure that writes. A name it sets from the clock is set once, as a statement of the body
+ *     itself before any `continue`: a write in a branch may keep an old value.
+ *   - the counter of a `for (let|var i = <literal>; i < limit; i++)` header: one declarator, `<` or `<=` against a limit the loop
+ *     never changes, and a step of `i++`, `++i` or `i += <positive literal>`. A count down, a step in the test (`i++ < 20`) or a
+ *     write in the body is no bound. It gives the iterations times the sleeps every pass reaches.
  * A part on the list whose limit the scan cannot evaluate (a caller-sized parameter, an imported constant, a count it cannot
  * read) is left alone. Any other shape has no bound: a ternary, `??`, a call, arithmetic on the clock, an equality, a
- * counter the body steps, a start the loop resets. A loop with no bound on the list is reported, unless `// bound: <reason>`
- * accepts it.
+ * counter the body steps, a start the loop resets, a flag set in a branch. A loop with no bound on the list is reported,
+ * unless `// bound: <reason>` accepts it.
  *
  * `// bound: <reason>` on the line of a site, or in the comment block directly above it, accepts it.
  * That is for a wait that asserts something does NOT happen within a window, which keeps a short
@@ -412,7 +417,7 @@ function valueOf(node: Node, cx: Probe, use: Use, depth = 0): number | undefined
   if (node.type === 'Identifier') return nameValue(node.name, cx, use, depth)
   const direct = numberOf(node, cx.consts)
   if (direct !== undefined) return direct
-  return node.type === 'BinaryExpression' && node.operator === '+' ? valueOf(node.left, cx, use, depth) ?? valueOf(node.right, cx, use, depth) : undefined
+  return node.type === 'BinaryExpression' && node.operator === '+' && isLimit(node, cx) ? valueOf(node.left, cx, use, depth) ?? valueOf(node.right, cx, use, depth) : undefined
 }
 
 function nameValue(name: string, cx: Probe, use: Use, depth: number): number | undefined {
@@ -423,16 +428,24 @@ function nameValue(name: string, cx: Probe, use: Use, depth: number): number | u
   return known.length > 0 ? Math.min(...known) : undefined
 }
 
-/** Whether a node reads the clock, directly or through a name declared or assigned from it (`elapsed = Date.now() - start`). */
-function readsClock(node: Node, cx: Probe, use: Use): boolean {
-  if (contains(node, clockCall)) return true
-  if (node.type !== 'Identifier') return false
-  const declared = definition(cx.where, use, node.name)
-  return declared !== undefined && valuesOf(cx.where, declared, node.name).some(value => contains(value, clockCall))
-}
-
 /** A bound on how long a loop runs, in milliseconds: `unreadable` when one exists the scan cannot evaluate, `undefined` when there is none. */
 type Bound = number | 'unreadable' | undefined
+
+/** A name or a dotted path of names: `deadline`, `state.t0`. */
+const isPath = (node: Node): boolean => node.type === 'Identifier' || (node.type === 'MemberExpression' && !node.computed && node.property.type === 'Identifier' && isPath(node.object))
+
+const impure = new Set(['AssignmentExpression', 'UpdateExpression', 'CallExpression', 'NewExpression', 'TaggedTemplateExpression', 'AwaitExpression', 'YieldExpression'])
+
+/** Whether a condition only reads: no write, no call but a read of the clock, no `delete`, `await` or `new`. */
+function isPure(root: Node): boolean {
+  let pure = true
+  walk(root, [], node => {
+    if (clockCall(node)) return false
+    if (impure.has(node.type) || (node.type === 'UnaryExpression' && node.operator === 'delete')) pure = false
+    return isFunction(node) ? false : undefined
+  })
+  return pure
+}
 
 /** The names a comparison reads: not what a clock read holds, a called function's name, or a property name. */
 function references(root: Node): Identifier[] {
@@ -472,36 +485,83 @@ function movesIn(cx: Probe, name: string, use: Use): boolean {
   return definition(cx.where, use, name)?.chain.includes(loop.body) === true || isWritten(loop, name) || closureWrites(scope, name)
 }
 
+/** What the loop sets a name to on every pass, and where that value is read from. */
+interface PerPass {
+  value: Node
+  use: Use
+}
+
 /**
- * Whether a comparison measures the clock against something fixed. -1 when it reads a name the loop changes that is not a fresh
- * read of the clock (a limit or a start that moves), 0 when it has no fixed anchor (a start, a deadline, a limit the caller
- * sized), 1 when it has one. A name the loop changes that holds a clock read is a sample of the clock: its own value is judged
- * the same way, so `elapsed = Date.now() - start` is anchored by `start`.
+ * What the loop sets a name to on every pass: its only write, a plain assignment or a declaration with a value, written as a
+ * statement of the loop body itself before any statement that holds a `continue`. A write in a branch, a closure, the header
+ * or after a `continue` may not run in a pass, so the name may keep an old value and the comparison against it ends nothing.
  */
-function anchored(root: Node, cx: Probe, use: Use, depth = 0): -1 | 0 | 1 {
+function perPass(cx: Probe, name: string): PerPass | undefined {
+  const { loop, above, scope } = cx.where
+  const block = loop.body.type === 'BlockStatement'
+  const written = writes(loop, name)
+  if (written.other || closureWrites(scope, name)) return undefined
+  for (const statement of block ? (loop.body as BlockStatement).body : [loop.body]) {
+    const use = { chain: [...above, loop, ...(block ? [loop.body] : [])], at: statement.start ?? 0 }
+    const assigned = statement.type === 'ExpressionStatement' && statement.expression.type === 'AssignmentExpression' && statement.expression.operator === '=' && isNamed(statement.expression.left, name) ? statement.expression.right : undefined
+    const declared = statement.type === 'VariableDeclaration' ? statement.declarations.find(declarator => isNamed(declarator.id, name))?.init ?? undefined : undefined
+    const value = assigned ?? declared
+    if (value && (assigned ? written.values.length === 1 : written.values.length === 0)) return { value, use }
+    if (contains(statement, node => node.type === 'ContinueStatement')) return undefined
+  }
+  return undefined
+}
+
+/** A clock read, or one minus a start: the values a name holds that the loop samples the clock into (`const now = Date.now()`, `elapsed = Date.now() - start`). */
+const isMeasure = (node: Node): boolean => clockCall(node) || (node.type === 'BinaryExpression' && node.operator === '-' && clockCall(node.left) && isPath(node.right))
+
+/**
+ * The values a name a comparison reads may hold: a literal, a name or path, or a read of the clock. A deadline may also be a read
+ * of the clock plus a limit. A name set to any other expression (`Date.now() + 1e9` as a start, `Date.now() + 15_000 * scale` as a
+ * deadline, a call) is not a start, a limit or a deadline the scan reads.
+ */
+function isListed(value: Node, cx: Probe, deadline: boolean): boolean {
+  const limit = (side: Node): boolean => numberOf(side, cx.consts) !== undefined || isPath(side)
+  return limit(value) || clockCall(value) || (deadline && value.type === 'BinaryExpression' && value.operator === '+' && clockCall(value.left) && limit(value.right))
+}
+
+/**
+ * Whether a comparison measures the clock against something fixed. -1 when it reads a name the loop changes that is not a sample
+ * of the clock, or a name whose value is not one the scan reads (a limit or a start that moves or is an expression of its own),
+ * 0 when it has no fixed anchor (a start, a deadline, a limit the caller sized), 1 when it has one. A name the loop sets from the
+ * clock on every pass is a sample: its own value is judged the same way, so `elapsed = Date.now() - start` is anchored by `start`.
+ */
+function anchored(root: Node, cx: Probe, use: Use, deadlines: readonly Node[], depth = 0): -1 | 0 | 1 {
   let found: -1 | 0 | 1 = 0
   for (const ref of references(root)) {
-    const sampled = readsClock(ref, cx, use)
     if (!movesIn(cx, ref.name, use)) {
-      if (sampled || valueOf(ref, cx, use) === undefined) found = 1
+      const declared = definition(cx.where, use, ref.name)
+      const values = declared ? valuesOf(cx.where, declared, ref.name) : []
+      if (!values.every(value => isListed(value, cx, deadlines.some(each => each.type === 'Identifier' && each.name === ref.name)))) return -1
+      if (values.some(value => contains(value, clockCall)) || valueOf(ref, cx, use) === undefined) found = 1
       continue
     }
-    const declared = definition(cx.where, use, ref.name)
-    if (!sampled || !declared || depth >= 3) return -1
-    const inner = valuesOf(cx.where, declared, ref.name).map(value => anchored(value, cx, { chain: declared.chain, at: declared.start }, depth + 1))
-    if (inner.includes(-1)) return -1
-    if (inner.includes(1)) found = 1
+    const pass = depth < 3 ? perPass(cx, ref.name) : undefined
+    if (!pass || !isMeasure(pass.value)) return -1
+    const inner = anchored(pass.value, cx, pass.use, [], depth + 1)
+    if (inner === -1) return -1
+    if (inner === 1) found = 1
   }
   return found
 }
 
+/** What a clock comparison measures against: a literal sum of products, a name or path, or `start + limit` of those. Any other expression is a shape the scan does not read. */
+function isLimit(node: Node, cx: Probe): boolean {
+  const operand = (inner: Node): boolean => isPath(inner) || clockCall(inner) || numberOf(inner, cx.consts) !== undefined
+  return numberOf(node, cx.consts) !== undefined || isPath(node) || (node.type === 'BinaryExpression' && node.operator === '+' && operand(node.left) && operand(node.right))
+}
+
 /** A read of the clock: the call itself, or a name the loop sets from one on every pass (`const now = Date.now()`). */
-const sampled = (node: Node, cx: Probe, use: Use): boolean =>
-  clockCall(node) || (node.type === 'Identifier' && readsClock(node, cx, use) && movesIn(cx, node.name, use))
+const sampled = (node: Node, cx: Probe): boolean => clockCall(node) || (node.type === 'Identifier' && isMeasure(perPass(cx, node.name)?.value ?? node))
 
 /** The side of a clock comparison that measures time: a read of the clock, or one minus a start (`Date.now() - start`). */
-const measures = (node: Node, cx: Probe, use: Use): boolean =>
-  sampled(node, cx, use) || (node.type === 'BinaryExpression' && node.operator === '-' && sampled(node.left, cx, use) && (node.right.type === 'Identifier' || node.right.type === 'MemberExpression'))
+const measures = (node: Node, cx: Probe): boolean =>
+  sampled(node, cx) || (node.type === 'BinaryExpression' && node.operator === '-' && sampled(node.left, cx) && isPath(node.right))
 
 /**
  * What a comparison says about the clock: the smallest literal it measures against, `unreadable` when the limit is one the caller
@@ -509,8 +569,8 @@ const measures = (node: Node, cx: Probe, use: Use): boolean =>
  * and the other a limit, a deadline, or a start plus a limit, with a start or deadline the loop never changes.
  */
 function clockBound(comparison: BinaryExpression, cx: Probe, use: Use): Bound {
-  const measuring = ([[comparison.left, comparison.right], [comparison.right, comparison.left]] as const).filter(([measured]) => measures(measured, cx, use))
-  if (measuring.length === 0 || anchored(comparison, cx, use) !== 1) return undefined
+  const measuring = ([[comparison.left, comparison.right], [comparison.right, comparison.left]] as const).filter(([measured, limit]) => measures(measured, cx) && isLimit(limit, cx))
+  if (measuring.length === 0 || anchored(comparison, cx, use, measuring.map(([, limit]) => limit)) !== 1) return undefined
   const values = measuring.map(([, limit]) => valueOf(limit, cx, use)).filter(isNumber)
   return values.length > 0 ? Math.min(...values) : 'unreadable'
 }
@@ -521,65 +581,61 @@ const isCompare = (node: Node): node is BinaryExpression => node.type === 'Binar
 
 const isNamed = (node: Node, name: string): boolean => node.type === 'Identifier' && node.name === name
 
-/** The signed literal an operator and its operand add: `+= 5` adds 5, `- 5` adds -5. */
-function signed(operator: string, operand: Node, consts: Consts): number | undefined {
-  const size = numberOf(operand, consts)
-  if (size === undefined) return undefined
-  return operator === '+' || operator === '+=' ? size : operator === '-' || operator === '-=' ? -size : undefined
-}
-
-/** What an update adds to the counter `name`, signed: `name++`, `--name`, `name += 5`, `name = name - 5`. */
-function stepOf(update: Node, name: string, consts: Consts): number | undefined {
-  if (update.type === 'UpdateExpression') return isNamed(update.argument, name) ? (update.operator === '++' ? 1 : -1) : undefined
-  if (update.type !== 'AssignmentExpression' || !isNamed(update.left, name)) return undefined
-  const sum = update.operator === '=' && update.right.type === 'BinaryExpression' && isNamed(update.right.left, name) ? update.right : undefined
-  return sum ? signed(sum.operator, sum.right, consts) : signed(update.operator, update.right, consts)
+/** What an update adds to the counter `name`: `name++`, `++name` or `name += <positive literal>`. `unreadable` when the amount is a name; any other update is `undefined`. */
+function stepOf(update: Node, name: string, consts: Consts): number | 'unreadable' | undefined {
+  if (update.type === 'UpdateExpression') return isNamed(update.argument, name) && update.operator === '++' ? 1 : undefined
+  if (update.type !== 'AssignmentExpression' || update.operator !== '+=' || !isNamed(update.left, name)) return undefined
+  const size = numberOf(update.right, consts)
+  if (size === undefined) return isPath(update.right) ? 'unreadable' : undefined
+  return size > 0 ? size : undefined
 }
 
 /**
- * How many times `for (let i = a; i < b; i += c)` runs up to `test`: a count when `a`, `b` and `c` are literals and `c` moves `i`
- * toward `b`, `unreadable` when one of them is not a literal, `undefined` when the update never gets `i` there (no step, a step of
- * 0, the wrong direction).
+ * How many times `for (let i = a; i < b; i++)` runs, or `<=`, or `i += c`: a count when `a`, `b` and `c` are literals,
+ * `unreadable` when `b` or `c` is a name the caller sizes (`a` is a literal or no bound), `undefined` for any other header.
  */
 function iterations(loop: ForStatement, test: BinaryExpression, consts: Consts): Bound {
-  if (test.left.type !== 'Identifier' || !loop.update) return undefined
+  if (test.left.type !== 'Identifier' || !loop.update || !['<', '<='].includes(test.operator)) return undefined
   const name = test.left.name
-  const steps = contains(loop.update, node => namesWritten(node).includes(name))
-  const declarations = loop.init?.type === 'VariableDeclaration' ? loop.init.declarations : []
-  const start = numberOf(declarations.find(declaration => isNamed(declaration.id, name))?.init, consts)
-  const limit = numberOf(test.right, consts)
+  const init = loop.init?.type === 'VariableDeclaration' && loop.init.kind !== 'const' && loop.init.declarations.length === 1 ? loop.init.declarations[0] : undefined
+  const declared = init && isNamed(init.id, name) ? init : undefined
+  const start = numberOf(declared?.init, consts)
   const step = stepOf(loop.update, name, consts)
-  if (!steps) return undefined
-  if (start === undefined || limit === undefined || step === undefined) return 'unreadable'
-  const up = test.operator.startsWith('<')
-  if (step === 0 || up !== step > 0) return undefined
-  const span = up ? limit - start : start - limit
-  return Math.max(0, test.operator.endsWith('=') ? Math.floor(span / Math.abs(step)) + 1 : Math.ceil(span / Math.abs(step)))
+  if (start === undefined || step === undefined) return undefined
+  const limit = numberOf(test.right, consts)
+  if (limit === undefined) return isPath(test.right) ? 'unreadable' : undefined
+  if (step === 'unreadable') return 'unreadable'
+  const span = limit - start
+  return Math.max(0, test.operator === '<=' ? Math.floor(span / step) + 1 : Math.ceil(span / step))
 }
 
-/** The counter a comparison names: `i` in `i < 20`, `retries` in `retries-- > 0`. */
-const counterOf = (side: Node): string =>
-  side.type === 'Identifier' ? side.name : side.type === 'UpdateExpression' && side.argument.type === 'Identifier' ? side.argument.name : ''
+/** The counter a comparison names: `i` in `i < 20`. A side that steps it (`i++ < 20`) changes the count the header's update gives, so it names none. */
+const counterOf = (side: Node): string => (side.type === 'Identifier' ? side.name : '')
+
+/** Whether evaluating the expression writes a name: `i++ < 20`, `(n += 1) < 20`. */
+const hasSideEffects = (root: Node): boolean => contains(root, node => namesWritten(node).length > 0)
 
 /**
  * What a comparison with a counter says about how long the loop runs. Only the counter of a `for` header counts: its update runs
  * every pass. It gives its iteration count times the time one pass sleeps, when nothing in the body writes the counter.
  * `unreadable` is a count or an interval the scan cannot read. A counter the loop steps in its body (`tries++`), one the body
- * writes, one that is only named, and a comparison with `==` or `!=` bound nothing: a step in a branch may never run.
+ * writes or the test steps (`i++ < 20`), a limit or step the loop changes, one that is only named, and a comparison with `==` or
+ * `!=` bound nothing: a step in a branch may never run.
  */
-function counterBound(test: BinaryExpression, name: string, cx: Probe): Bound {
+function counterBound(test: BinaryExpression, name: string, cx: Probe, use: Use): Bound {
   const { loop } = cx.where
   const counts = loop.type === 'ForStatement' && loop.init?.type === 'VariableDeclaration' && loop.init.declarations.some(declaration => isNamed(declaration.id, name))
-  if (loop.type !== 'ForStatement' || !counts) return undefined
-  const written = writes(loop.body, name)
-  if (written.values.length > 0 || written.other) return undefined
+  if (loop.type !== 'ForStatement' || !counts || isWritten(loop.body, name) || hasSideEffects(test)) return undefined
+  // A limit or a step the loop changes is not the one the header names.
+  const limits = [test.left, test.right, ...(loop.update ? [loop.update] : [])].flatMap(references).filter(ref => ref.name !== name)
+  if (limits.some(ref => movesIn(cx, ref.name, use))) return undefined
   const count = iterations(loop, test, cx.consts)
   return isNumber(count) ? (cx.interval > 0 ? count * cx.interval : 'unreadable') : count
 }
 
 /** A clock or counter comparison's bound; a comparison of anything else bounds nothing. */
 function comparisonBound(test: BinaryExpression, cx: Probe, use: Use): Bound {
-  return clockBound(test, cx, use) ?? earliest([test.left, test.right].map(counterOf).filter(Boolean).map(name => counterBound(test, name, cx)))
+  return clockBound(test, cx, use) ?? earliest([test.left, test.right].map(counterOf).filter(Boolean).map(name => counterBound(test, name, cx, use)))
 }
 
 /** A loop ends at the first of its exits that fires: the smallest bound, or `unreadable` when only unreadable ones exist. */
@@ -598,12 +654,11 @@ function latest(bounds: readonly Bound[]): Bound {
   return bounds.every(isNumber) ? Math.max(...bounds) : 'unreadable'
 }
 
-/** The bound a name gives a condition that is true or false by the value it holds (`const timedOut = Date.now() - t0 > 5_000`). */
-function aliasBound(name: Identifier, want: boolean, cx: Probe, use: Use, depth: number): Bound {
-  const declared = depth < 3 ? definition(cx.where, use, name.name) : undefined
-  if (!declared) return undefined
-  const inner = { chain: declared.chain, at: declared.start }
-  return earliest(valuesOf(cx.where, declared, name.name).map(value => ends(value, want, cx, inner, depth + 1)))
+/** The bound a name gives a condition that is true or false by the value the loop sets it to on every pass (`const timedOut = Date.now() - t0 > 5_000`). */
+function aliasBound(name: Identifier, want: boolean, cx: Probe, depth: number): Bound {
+  // A flag the loop does not set on every pass keeps an old value, so it ends nothing.
+  const pass = depth < 3 ? perPass(cx, name.name) : undefined
+  return pass ? ends(pass.value, want, cx, pass.use, depth + 1) : undefined
 }
 
 /**
@@ -618,15 +673,21 @@ function ends(test: Node, want: boolean, cx: Probe, use: Use, depth = 0): Bound 
     return (test.operator === '&&') === want ? latest(parts) : earliest(parts)
   }
   if (test.type === 'UnaryExpression' && test.operator === '!') return ends(test.argument, !want, cx, use, depth)
-  if (isCompare(test)) return comparisonBound(test, cx, use)
-  return test.type === 'Identifier' ? aliasBound(test, want, cx, use, depth) : undefined
+  if (isCompare(test)) return isPure(test) ? comparisonBound(test, cx, use) : undefined
+  return test.type === 'Identifier' ? aliasBound(test, want, cx, depth) : undefined
 }
 
 const exits = new Set(['BreakStatement', 'ReturnStatement', 'ThrowStatement'])
 
-/** Whether a statement ends the loop by itself: a `break`, `return` or `throw`, or a block with one among its own statements. */
-const leavesDirectly = (statement: Node): boolean =>
-  exits.has(statement.type) || (statement.type === 'BlockStatement' && statement.body.some(inner => exits.has(inner.type)))
+/** Whether a statement ends the loop by itself: a `break`, `return` or `throw`, or a block with one among its own statements that no `continue` comes before. */
+function leavesDirectly(statement: Node): boolean {
+  if (statement.type !== 'BlockStatement') return exits.has(statement.type)
+  for (const inner of statement.body) {
+    if (exits.has(inner.type)) return true
+    if (contains(inner, node => node.type === 'ContinueStatement')) return false
+  }
+  return false
+}
 
 /**
  * The bounds of the exits in the loop's own body: `if (<condition>) break`, `return` or `throw`, written as a statement of the body
