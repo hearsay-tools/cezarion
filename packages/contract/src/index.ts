@@ -4,6 +4,7 @@
  */
 export * from './events.ts';
 export * from './ask.ts';
+export * from './pending-ask.ts';
 export * from './delegation.ts';
 export * from './effort.ts';
 export * from './health.ts';

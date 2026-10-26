@@ -1,5 +1,6 @@
 import { defineConfig } from 'vitest/config'
 import CiTestSequencer from './.github/scripts/ci-test-sequencer.mjs'
+import KeepTestFilesInCoverage, { coverageRequested } from './.github/scripts/vitest-coverage-tests.mjs'
 
 // Four unit packages, one `npm test`. Each owns its own vitest config — this file only names
 // them, so `npm test -w <pkg>` and the whole-repo run execute the identical setup:
@@ -19,11 +20,23 @@ export default defineConfig({
     // Pin reporters so Actions gets exactly one `github-actions` job summary for the whole
     // multi-project run (#62). Leaving this unset lets Vitest auto-append the reporter when
     // GITHUB_ACTIONS=true; an explicit list replaces the defaults and documents the
-    // single-summary contract. Local runs keep `default` only.
-    reporters:
-      process.env.GITHUB_ACTIONS === 'true'
-        ? ['default', ['github-actions', { jobSummary: { title: 'Vitest Test Report' } }]]
-        : ['default'],
+    // single-summary contract. Local runs keep `default` only. A run that asks for coverage also
+    // gets the reporter that keeps test files in the report; any other run resolves the same
+    // list as before, and a `--reporter` on the command line replaces the list as it always did.
+    reporters: [
+      'default',
+      ...(process.env.GITHUB_ACTIONS === 'true' ? [['github-actions', { jobSummary: { title: 'Vitest Test Report' } }] as const] : []),
+      ...(coverageRequested() ? [new KeepTestFilesInCoverage()] : []),
+    ],
+    // Opt in with `--coverage` (CI's coverage jobs do). V8 coverage of the code the tests load,
+    // test files included, written where the ignored `.ai/qa/` directory keeps it. The default
+    // `exclude` list holds test-file patterns, so it is replaced rather than extended.
+    coverage: {
+      provider: 'v8',
+      reporter: ['json'],
+      reportsDirectory: '.ai/qa/coverage',
+      exclude: ['**/node_modules/**', '**/dist/**', '**/*.d.ts'],
+    },
     projects: [
       './packages/cezar/vitest.config.ts',
       './packages/contract/vitest.config.ts',

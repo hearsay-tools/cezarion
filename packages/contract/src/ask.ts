@@ -23,8 +23,3 @@ export function advancePendingHumanAsk<T extends RunEvent>(pending: T | undefine
   return pending;
 }
 
-export function pendingHumanAsk<T extends RunEvent>(events: Iterable<T>): T | undefined {
-  let pending: T | undefined;
-  for (const event of events) pending = advancePendingHumanAsk(pending, event);
-  return pending;
-}

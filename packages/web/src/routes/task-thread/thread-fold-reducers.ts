@@ -5,6 +5,7 @@ import {
   conversationMessageEventSchema,
   requestOutcomeEventSchema,
 } from '@open-mercato/cezar-api-client/contract/events'
+import { askCardOf, askOf } from '@open-mercato/cezar-api-client/contract/pending-ask'
 import { previewServerSchema, previewServerStateSchema } from '@open-mercato/cezar-api-client/contract/preview'
 
 import {
@@ -465,23 +466,16 @@ function reducePermissionResolved(fold: FoldState, event: RunEvent): void {
 
 // ---- asks (#473) and worker routing (#505) ------------------------------------------------
 
-function askQuestions(value: unknown): UiAskQuestion[] {
-  // A question without options is open (hearsay-tools/cezarion#1234): the user types its answer.
-  return Array.isArray(value)
-    ? value.filter((q): q is UiAskQuestion => isRecord(q) && typeof q.header === 'string' && (q.options === undefined || Array.isArray(q.options)))
-    : []
-}
-
 function reduceAskRequested(fold: FoldState, event: RunEvent): void {
-  // A structured question — render it as an ask card in the current turn. Guard the payload
-  // (a bad line costs one event, never a throw).
-  const requestId = str(event.requestId)
-  const questions = askQuestions(event.questions)
-  if (requestId === undefined || questions.length === 0) return
-  const context = typeof event.context === 'string' && event.context !== '' ? event.context : undefined
-  const ask: ThreadAsk = { kind: 'ask', id: requestId, questions, ...(context ? { context } : {}), resolved: false, askSeq: event.seq }
-  pushMeta(fold, ask)
-  fold.pendingAsk = ask
+  // A structured question — render it as an ask card in the current turn. The card is the ask
+  // projection's (hearsay-tools/cezarion#1808); an event it cannot show costs one event, never a throw.
+  const ask = askOf(event)
+  const card = ask && askCardOf(ask)
+  if (!card) return
+  // The contract's `AskQuestion` and the protocol's `UiAskQuestion` differ only in `| undefined` on optional keys.
+  const entry: ThreadAsk = { kind: 'ask', ...card, questions: card.questions as UiAskQuestion[], resolved: false }
+  pushMeta(fold, entry)
+  fold.pendingAsk = entry
 }
 
 /** The pending ask the event names by `askSeq`, while it is still open. */
