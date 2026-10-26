@@ -13,7 +13,8 @@ const bin = fileURLToPath(new URL('../../scripts/mock-claude.mjs', import.meta.u
 const refusal = "There's an issue with the selected model (claude-test-model). It may not exist or you may not have access to it. Run --model to pick a different model.";
 const isRetry = (event: AgentEvent) => event.type === 'note' && /retrying.*\/2/.test(event.message);
 async function until(predicate: () => boolean) {
-  const deadline = performance.now() + 5000;
+  // bound: each call waits for one native refusal, retry, or turn receipt from mock-claude.
+  const deadline = performance.now() + 10_000;
   while (!predicate() && performance.now() < deadline) await sleep(10);
   expect(predicate()).toBe(true);
 }

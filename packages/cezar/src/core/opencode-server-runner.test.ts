@@ -391,7 +391,20 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     }
   }
 
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let barrierId = 0;
+  // One SSE stream handles frames in order: this receipt follows every frame sent before it.
+  async function flushFrames(mock: Harness['mock'], events: AgentEvent[]): Promise<void> {
+    const id = `wait-barrier-${++barrierId}`;
+    const before = events.length;
+    mock.send({ type: 'message.updated', properties: { info: {
+      id, sessionID: 'ses_test', role: 'assistant', cost: 1,
+    } } });
+    // bound: the native cost receipt proves the runner handled this stream's preceding frames.
+    await vi.waitFor(() => expect(events.slice(before).some(event => event.type === 'cost')).toBe(true), { timeout: 10_000 });
+    const index = events.findIndex((event, i) => i >= before && event.type === 'cost');
+    expect(events[index]).toEqual({ type: 'cost', usd: 1 });
+    events.splice(index, 1);
+  }
   const count = (events: AgentEvent[], type: string) => events.filter((e) => e.type === type).length;
   /** An answer can only be routed once the runner holds the pending question, and `ask.requested`
    *  is emitted at exactly that point — it is what a user answers. `mock.questionGets` only says
@@ -472,6 +485,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     try {
       await run({ child, events, uiEvents, mock, session, questionReplyReads: replyReads.reads });
     } finally {
+      vi.useRealTimers();
       spawnHook.override = null;
       session.end();
       await session.result.catch(() => undefined);
@@ -527,7 +541,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       expect(mock.promptPosts[0]).toBe('/session/ses_test/prompt_async');
 
       // The POST has resolved; the turn must still be open.
-      await sleep(60);
+      await flushFrames(mock, events);
       expect(count(events, 'turn-end')).toBe(0);
 
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
@@ -582,13 +596,13 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       await waitFor(() => mock.promptPosts.length === 1);
 
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_other' } });
-      await sleep(60);
+      await flushFrames(mock, events);
       expect(count(events, 'turn-end')).toBe(0);
 
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       await waitFor(() => count(events, 'turn-end') >= 1);
-      await sleep(60);
+      await flushFrames(mock, events);
       expect(count(events, 'turn-end')).toBe(1);
     });
   });
@@ -603,7 +617,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
 
       // A stray idle afterwards must not end the already-ended turn again.
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
-      await sleep(60);
+      await session.result;
       expect(count(events, 'turn-end')).toBe(1);
 
       // A first prompt that never posted is a failed session, not an empty
@@ -831,7 +845,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       // and its own turn-end instead of the first idle closing the second.
       session.sendMessage([{ type: 'text', text: 'follow-up-a' }]);
       session.sendMessage([{ type: 'text', text: 'follow-up-b' }]);
-      await sleep(80);
+      await flushFrames(mock, events);
       expect(mock.promptPosts).toHaveLength(1);
       expect(session.heldHumanInputCount?.()).toBe(2);
       expect(session.holdsHumanInput()).toBe(true);
@@ -841,7 +855,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       expect(session.heldHumanInputCount?.()).toBe(0);
 
       session.sendMessage([{ type: 'text', text: 'follow-up' }]);
-      await sleep(80);
+      await flushFrames(mock, events);
       expect(mock.promptPosts).toHaveLength(1);
       expect(session.heldHumanInputCount?.()).toBe(1);
       expect(session.holdsHumanInput()).toBe(true);
@@ -896,7 +910,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       await waitFor(() => mock.promptPosts.length === 1);
 
       session.sendMessage([{ type: 'text', text: 'follow-up' }]);
-      await sleep(80);
+      await flushFrames(mock, events);
       expect(mock.promptPosts).toHaveLength(1);
       expect(session.holdsHumanInput()).toBe(true);
       expect(session.heldHumanInputCount?.()).toBe(1);
@@ -907,7 +921,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       expect(session.heldHumanInputCount?.()).toBe(0);
 
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
-      await sleep(80);
+      await flushFrames(mock, events);
       expect(mock.promptPosts).toHaveLength(1);
       expect(count(events, 'turn-end')).toBe(1);
 
@@ -1136,7 +1150,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   });
 
   it('does not recapture or prompt while a native question reply is in flight', async () => {
-    await withSession({ holdQuestionReplies: true }, async ({ uiEvents, mock, session }) => {
+    await withSession({ holdQuestionReplies: true }, async ({ events, uiEvents, mock, session }) => {
       await waitFor(() => mock.promptPosts.length === 1);
       mock.pendingQuestions.push({ id: 'q_delayed', sessionID: 'ses_test' });
       const input = {
@@ -1155,7 +1169,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       await waitFor(() => mock.questionReplies.length === 1);
       sendQuestion(mock, input);
       session.sendMessage([{ type: 'text', text: 'must not become a prompt' }]);
-      await sleep(80);
+      await flushFrames(mock, events);
 
       expect(uiEvents.filter((event) => event.type === 'ask.requested')).toHaveLength(1);
       expect(mock.questionGets).toHaveLength(1);
@@ -1165,7 +1179,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   });
 
   it('never recaptures a handled question part but captures a different part in a later turn', async () => {
-    await withSession({}, async ({ events, uiEvents, mock, session }) => {
+    await withSession({}, async ({ questionReplyReads, events, uiEvents, mock, session }) => {
       await waitFor(() => mock.promptPosts.length === 1);
       mock.pendingQuestions.push({ id: 'q_once', sessionID: 'ses_test' });
       const input = {
@@ -1182,9 +1196,10 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
 
       session.sendMessage([{ type: 'text', text: 'Choice: One' }]);
       await waitFor(() => mock.questionReplies.length === 1);
-      await sleep(40);
+      // bound: the reply body receipt precedes clearing the pending question.
+      await waitFor(() => questionReplyReads() === 1);
       sendQuestion(mock, input, 'part_once', 'completed');
-      await sleep(80);
+      await flushFrames(mock, events);
 
       expect(uiEvents.filter((event) => event.type === 'ask.requested')).toHaveLength(1);
       expect(mock.questionGets).toHaveLength(1);
@@ -1204,7 +1219,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
   });
 
   it('waits for a valid later snapshot of the same pending question part', async () => {
-    await withSession({}, async ({ uiEvents, mock, session }) => {
+    await withSession({}, async ({ events, uiEvents, mock, session }) => {
       await waitFor(() => mock.promptPosts.length === 1);
       mock.pendingQuestions.push({ id: 'q_parsed_later', sessionID: 'ses_test' });
       const input = {
@@ -1218,7 +1233,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       };
 
       sendQuestion(mock, {}, 'part_parsed_later', 'pending');
-      await sleep(80);
+      await flushFrames(mock, events);
       expect(mock.questionGets).toEqual([]);
       expect(mock.questionRejects).toEqual([]);
       expect(uiEvents.filter((event) => event.type === 'ask.requested')).toEqual([]);
@@ -1432,7 +1447,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       await waitFor(() => count(events, 'turn-end') === 1);
       session.sendMessage([{ type: 'text', text: 'queued B' }]);
-      await sleep(100);
+      await flushFrames(mock, events);
       expect(mock.promptPosts).toHaveLength(1);
 
       mock.releaseQuestionReplies();
@@ -1473,7 +1488,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
         mock.setQuestionReplyStatus(200);
         session.sendMessage([{ type: 'text', text: 'Choice: Two' }]);
         await waitFor(() => mock.questionReplies.length === 2);
-        await sleep(80);
+        await flushFrames(mock, events);
         expect(mock.promptPosts).toHaveLength(1);
         expect(mock.questionReplies.map((reply) => reply.body)).toEqual([
           { answers: [['One']] },
@@ -1511,9 +1526,12 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
         session.sendMessage([{ type: 'text', text: 'Choice: One' }]);
         await waitFor(() => mock.questionReplies.length === 1);
         session.sendMessage([{ type: 'text', text: 'queued after idle' }]);
+        vi.useFakeTimers();
         mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
-        await waitFor(() => count(events, 'turn-end') === 1);
-        await sleep(AUTO_END_DELAY_MS + 60);
+        // bound: wait for the idle frame to close this turn before crossing auto-end.
+        await vi.waitFor(() => expect(count(events, 'turn-end')).toBe(1), { timeout: 10_000 });
+        await vi.advanceTimersByTimeAsync(AUTO_END_DELAY_MS + 60);
+        vi.useRealTimers();
 
         expect(session.open).toBe(true);
         expect(mock.promptPosts).toHaveLength(1);
@@ -1718,7 +1736,10 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
       mock.send({ type: 'session.idle', properties: { sessionID: 'ses_test' } });
       await waitFor(() => count(events, 'turn-end') === 1);
       mock.pendingQuestions.push({ id: 'q_too_late', sessionID: 'ses_test' });
-      await sleep(250);
+      await flushFrames(mock, events);
+      vi.useFakeTimers();
+      await vi.advanceTimersByTimeAsync(250);
+      vi.useRealTimers();
       expect(uiEvents.filter((event) => event.type === 'ask.requested')).toEqual([]);
 
       session.sendMessage([{ type: 'text', text: 'a later prompt' }]);

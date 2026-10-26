@@ -183,6 +183,7 @@ describe('mid-turn human follow-up parity — #486', () => {
                 // Provenance: hearsay-tools/cezarion#1112 (cursor parked 250 ms after turn-end,
                 // then ran the follow-up as `waiting`; reproduced with this token, red without the fix).
                 const parkedAt = store.readEvents(runId).length;
+                // bound: observe past the real mock's 800 ms deferred native turn-start timer plus its 250 ms settle drain (1,500 ms total).
                 await new Promise(resolve => setTimeout(resolve, DEFERRED_TURN_START_MS + 700));
                 expect(store.readEvents(runId).slice(parkedAt).filter(e => e.type === 'turn.started')).toEqual([]);
               }
@@ -331,6 +332,7 @@ describe('mid-turn human follow-up parity — #486', () => {
             await waitFor(() => store.getRun(runId)?.status === 'waiting'
               || ['done', 'review', 'failed'].includes(store.getRun(runId)?.status ?? ''));
             const until = Date.now() + 1_500;
+            // bound: observe the real reverse-steer Codex child's reordered result boundary for 1,500 ms, past the 250 ms runner settle timer.
             while (Date.now() < until) await new Promise(r => setTimeout(r, 20));
           },
         });
@@ -359,7 +361,8 @@ describe('mid-turn human follow-up parity — #486', () => {
             // Sample from send time: a park-then-restart can start the follow-up
             // turn before waitFor(waiting) resolves, which hid the H3 violation.
             let turnsAtFirstWaiting: number | undefined;
-            const until = Date.now() + 6_000;
+            const until = Date.now() + 10_000;
+            // bound: each released native follow-up gets its own 10 s deadline while sampling park ordering.
             while (Date.now() < until) {
               const status = store.getRun(runId)?.status ?? '';
               const turns = store.readEvents(runId).filter(e => e.type === 'turn.started').length;
@@ -371,6 +374,7 @@ describe('mid-turn human follow-up parity — #486', () => {
               }
               if ((status === 'waiting' && keepStarted) || ['done', 'review', 'failed'].includes(status)) {
                 const rest = Date.now() + 400;
+                // bound: observe past the real Codex runner's 250 ms settle timer for a late turn while parked (400 ms).
                 while (Date.now() < rest) {
                   if (store.getRun(runId)?.status === 'waiting') {
                     const later = store.readEvents(runId).filter(e => e.type === 'turn.started').length;
@@ -440,7 +444,8 @@ describe('mid-turn human follow-up parity — #486', () => {
             await waitForHumanSteer(files);
             release();
             let turnsAtFirstWaiting: number | undefined;
-            const until = Date.now() + 8_000;
+            const until = Date.now() + 10_000;
+            // bound: each released native follow-up gets its own 10 s deadline while sampling park ordering.
             while (Date.now() < until) {
               const status = store.getRun(runId)?.status ?? '';
               const events = store.readEvents(runId);
@@ -453,6 +458,7 @@ describe('mid-turn human follow-up parity — #486', () => {
               }
               if (followUpStarted || ['done', 'review', 'failed'].includes(status)) {
                 const rest = Date.now() + 400;
+                // bound: observe past the real Codex runner's 250 ms settle timer for a late turn while parked (400 ms).
                 while (Date.now() < rest) {
                   if (store.getRun(runId)?.status === 'waiting') {
                     const later = store.readEvents(runId).filter(e => e.type === 'turn.started').length;

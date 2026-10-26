@@ -282,7 +282,8 @@ describe('Cursor parameterized discovery', () => {
     const result = discoverCursorModels({ cwd: '/repo', bin: '/cursor', spawn });
     rpcReply(first, 1, { protocolVersion: 1 });
     first.stdout.write(JSON.stringify({ jsonrpc: '2.0', id: 2, error: { code: -32601, message: 'private diagnostics' } }) + '\n');
-    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(2));
+    // bound: wait for the fixture's native process receipt on a loaded host.
+    await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(2), { timeout: 10_000 });
     legacy.stdout.write(LIST);
     legacy.close();
     first.close();

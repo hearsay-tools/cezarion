@@ -28,6 +28,7 @@ vi.mock('node:child_process', async (importOriginal) => {
 const mockBin = fileURLToPath(new URL('../../scripts/mock-opencode-serve.mjs', import.meta.url));
 const dirs: string[] = [];
 afterEach(() => {
+  vi.useRealTimers();
   spawnHook.override = null;
   spawnHook.calls = 0;
   for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
@@ -40,7 +41,6 @@ const waitFor = async (cond: () => boolean, ms = 10_000): Promise<void> => {
     await new Promise(r => setTimeout(r, 10));
   }
 };
-const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const RETRY_NOTE = /^opencode serve exited before listening \(code 1\); retrying once — Error: Unexpected error \(start 1\)$/;
 
 /** Drive the real runner against the bundled mock, whose first `failStarts` starts exit before listening. */
@@ -154,6 +154,8 @@ describe('opencode serve start retry (#872)', { timeout: 20_000 }, () => {
   });
 
   it('does not retry a server that never prints its URL; the start timeout keeps its port fallback', async () => {
+    // Advance automatically while the real child or fallback HTTP request settles.
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
     spawnHook.override = () => silentChild();
     const events: AgentEvent[] = [];
     const pids: number[] = [];
@@ -164,7 +166,7 @@ describe('opencode serve start retry (#872)', { timeout: 20_000 }, () => {
     );
     await session.result.catch(() => undefined);
     // Past the point a retry would have spawned.
-    await sleep(SERVE_START_RETRY_DELAY_MS + 200);
+    await vi.advanceTimersByTimeAsync(SERVE_START_RETRY_DELAY_MS + 200);
 
     expect(spawnHook.calls).toBe(1);
     expect(pids).toEqual([]);
@@ -218,11 +220,13 @@ describe('opencode serve start retry (#872)', { timeout: 20_000 }, () => {
   });
 
   it('spawns no second server when the session is interrupted during the retry pause', async () => {
+    // Advance automatically while the real child or fallback HTTP request settles.
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
     const { session, events, pids, starts } = startAgainstMock(1);
     await waitFor(() => events.some(e => e.type === 'note' && /retrying once/.test(e.message)));
     session.interrupt();
     await session.result;
-    await sleep(SERVE_START_RETRY_DELAY_MS + 300);
+    await vi.advanceTimersByTimeAsync(SERVE_START_RETRY_DELAY_MS + 300);
 
     expect(starts()).toBe(1);
     expect(pids).toEqual([]);
@@ -234,11 +238,13 @@ describe('opencode serve start retry (#872)', { timeout: 20_000 }, () => {
   });
 
   it('spawns no second server when the session is ended during the retry pause', async () => {
+    // Advance automatically while the real child or fallback HTTP request settles.
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
     const { session, events, pids, starts } = startAgainstMock(1);
     await waitFor(() => events.some(e => e.type === 'note' && /retrying once/.test(e.message)));
     session.end();
     await session.result;
-    await sleep(SERVE_START_RETRY_DELAY_MS + 300);
+    await vi.advanceTimersByTimeAsync(SERVE_START_RETRY_DELAY_MS + 300);
 
     expect(starts()).toBe(1);
     expect(pids).toEqual([]);
@@ -246,12 +252,14 @@ describe('opencode serve start retry (#872)', { timeout: 20_000 }, () => {
   });
 
   it('spawns no second server once the run deadline fired, and reports only the timeout', async () => {
+    // Advance automatically while the real child or fallback HTTP request settles.
+    vi.useFakeTimers({ shouldAdvanceTime: true, toFake: ['setTimeout', 'clearTimeout'] });
     // Lands inside the pause on a normal machine; on a loaded one the deadline's
     // interrupt stops the first start instead, possibly before it counted itself.
     // Either way nothing may spawn after it.
     const { session, events, pids, starts } = startAgainstMock(1, 700);
     await session.result;
-    await sleep(SERVE_START_RETRY_DELAY_MS + 300);
+    await vi.advanceTimersByTimeAsync(SERVE_START_RETRY_DELAY_MS + 300);
 
     expect(spawnHook.calls).toBe(1);
     expect(starts()).toBeLessThanOrEqual(1);

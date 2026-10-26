@@ -61,6 +61,9 @@ describe('opencode agent input steering (#505)', () => {
     await session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo next 0' }], ['n0']);
     await session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo next 1' }], ['n1']);
     await waitUntil(() => consumed.flat().includes('n1'));
+    // bound: wait for the native idle that closes the last consumed input turn.
+    await waitUntil(() => events.filter(event => event.type === 'turn-end').length === 3);
+    // bound: observe past OpenCode's 2,000 ms lost-wake grace after the child consumed n1.
     await new Promise(resolve => setTimeout(resolve, 2_500));
     expect(events.some(e => e.type === 'input-unconsumed')).toBe(false);
     // Opening turn, n0's turn, and the server run that answered n1 each end once.

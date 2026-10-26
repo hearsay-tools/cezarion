@@ -117,6 +117,7 @@ describe('no-wait nudge parity — #544, hearsay-tools/cezarion#1234', () => {
             await waitFor(() => nudgeNotes(store.readEvents(runId).slice(startSeq)).length === 1);
             expect(store.getRun(runId)?.status).toBe('running');
             expect(manager['busySlots']()).toBe(1);
+            // bound: observe the real silent-tail-no-reply child for 150 ms before the 300 ms reply deadline; no early park may release its slot.
             await new Promise(resolve => setTimeout(resolve, 150));
             expect(store.getRun(runId)?.status).toBe('running');
             expect(manager['busySlots']()).toBe(1);
