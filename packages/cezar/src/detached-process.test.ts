@@ -1,5 +1,6 @@
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { connect } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -188,6 +189,38 @@ require('node:fs').writeFileSync(out('sleeper.pid'), sh.pid + '\\n'); ${IDLE}`);
     expect(leaderRunning(unrecorded)).toBe(false);
     expect(await stopGroup(unrecorded, { graceMs: 200 })).toBe(false);
     expect(alive(leader.pid)).toBe(true);
+  });
+});
+
+/** A leader whose main thread exits while another thread keeps a listening port: `/proc` reads it Z. */
+const THREAD_HOLDS_PORT = [
+  'import ctypes, os, signal, socket, sys, threading, time',
+  'signal.signal(signal.SIGTERM, signal.SIG_IGN)',
+  "s = socket.socket(); s.bind(('127.0.0.1', 0)); s.listen()",
+  'threading.Thread(target=lambda: time.sleep(60)).start()',
+  "open(os.path.join(sys.argv[1], 'thread.port'), 'w').write('%d\\n' % s.getsockname()[1])",
+  'ctypes.CDLL(None).pthread_exit(None)',
+].join('\n');
+const python = linux && spawnSync('python3', ['-I', '-c', 'import ctypes'], { stdio: 'ignore' }).status === 0;
+
+/** Whether anything accepts a connection on `port` at 127.0.0.1. */
+function answers(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect(port, '127.0.0.1');
+    socket.once('connect', () => { socket.destroy(); resolve(true); });
+    socket.once('error', () => resolve(false));
+  });
+}
+
+describe.runIf(python)('stopGroup and a leader whose main thread exited', () => {
+  it('counts it running while another thread holds its port, and stops it only once the port is free', async () => {
+    const started = await startOwnedGroup('python3', ['-I', '-c', THREAD_HOLDS_PORT, dir], { stdio: 'ignore' });
+    strays.push(started.leader.pid);
+    const port = await pidFrom('thread.port');
+    await until(() => readFileSync(`/proc/${started.leader.pid}/stat`, 'utf8').split(')').at(-1)!.trim().startsWith('Z'), 'the main thread to exit');
+    expect(groupRunning(started.leader)).toBe(true);
+    expect(await stopGroup(started.leader, { graceMs: 200, killWaitMs: 20_000 })).toBe(true);
+    expect(await answers(port)).toBe(false);
   });
 });
 

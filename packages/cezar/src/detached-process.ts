@@ -38,6 +38,13 @@ function statFields(stat: string): string[] {
   return stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
 }
 
+/** Whether the `/proc/<pid>/stat` fields are of an exited process. A leader whose main thread
+ *  exited reads Z while its other threads run and keep its files open, a listening port among them,
+ *  so it is exited only once `num_threads` (field 20) counts no thread but its own. */
+function exitedStat(fields: readonly string[]): boolean {
+  return /^[ZX]$/.test(fields[0] ?? '') && Number(fields[17]) <= 1;
+}
+
 /** `/proc/<pid>/stat` field 3 (`state`) and field 22 (`starttime`). */
 export function parseProcStat(stat: string): { state: string; startToken: string } | undefined {
   const fields = statFields(stat);
@@ -128,7 +135,7 @@ type ProcessState = 'gone' | 'zombie' | 'live';
 function processState(pid: number): ProcessState {
   try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return 'gone'; }
   if (process.platform === 'linux') {
-    try { return /^[ZX]$/.test(statFields(readFileSync(`/proc/${pid}/stat`, 'utf8'))[0] ?? '') ? 'zombie' : 'live'; }
+    try { return exitedStat(statFields(readFileSync(`/proc/${pid}/stat`, 'utf8'))) ? 'zombie' : 'live'; }
     catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'gone' : 'live'; }
   }
   if (process.platform === 'darwin') {
@@ -214,7 +221,7 @@ function liveMember(pgid: number): boolean {
     if (!/^\d+$/.test(name)) continue;
     try {
       const fields = statFields(readFileSync(`/proc/${name}/stat`, 'utf8'));
-      if (Number(fields[2]) === pgid && fields[0] !== 'Z' && fields[0] !== 'X') return true;
+      if (Number(fields[2]) === pgid && !exitedStat(fields)) return true;
     } catch (error) {
       // A process that exited after the listing is no member; one it cannot read may be.
       const code = (error as NodeJS.ErrnoException).code;
