@@ -227,7 +227,7 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
     const p = await parent();
     await until(() => store.getRun(p.id)?.status === 'waiting');
     const w = await worker(p.id);
-    store.commitWakeCounters(p.id, { automaticWakes: MAX_AUTO_CONTINUES });
+    store.commitOutcome(p.id, { kind: 'charged', automaticWakes: MAX_AUTO_CONTINUES });
     const sent = recordAgentInput(p.id);
     const boundaries = store.readEvents(p.id).filter(event => event.type === 'turn-end').length;
     // Straight to the session: a human message would restart the budget.

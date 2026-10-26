@@ -130,7 +130,7 @@ describe('reading a finished run', () => {
     const store = open({ keepLive: true });
     const heldRecord = store.getRun(running.id)!;
     expect(store.getRun(running.id)).toBe(heldRecord);
-    store.commitQueuedMessageDelivery(running.id, 'none');
+    store.commitAgentInputs(running.id, store.getRun(running.id)?.agentInputs ?? []);
     store.updateRun(running.id, { title: 'renamed' });
     expect(heldRecord.title).toBe('renamed');
   });

@@ -1,412 +1,100 @@
 {
-  "$comment": "Bare sleeps and short wait bounds the server unit tests carried when the ratchet landed (hearsay-tools/cezarion#1155). Keyed by file, rule and the line text so a moved line does not churn it. This list only shrinks: fix a site, then run TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts. Rules: AGENTS.md \u00a7 Validation.",
+  "$comment": "Bare sleeps and short wait bounds the server unit tests carried when the ratchet landed (hearsay-tools/cezarion#1155). Keyed by file, rule and the line text so a moved line does not churn it. This list only shrinks: fix a site, then run TEST_WAIT_DISCIPLINE_UPDATE=1 npm test -- packages/cezar/src/test-wait-discipline.test.ts. Rules: AGENTS.md § Validation.",
   "sites": [
     {
-      "file": "core/claude-cli-runner.test.ts",
+      "file": "application-update/service.test.ts",
       "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(consumed).toEqual([['late']]));",
+      "site": "await vi.waitFor(() => expect(armRestart).toHaveBeenCalledTimes(1));",
       "count": 1
     },
     {
-      "file": "core/claude-cli-runner.test.ts",
+      "file": "application-update/service.test.ts",
       "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1));",
-      "count": 5
-    },
-    {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(2));",
-      "count": 1
-    },
-    {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(fixture.stdinEnded()).toBe(true), { timeout: 2_000 });",
+      "site": "await vi.waitFor(() => expect(service.snapshot().status).toBe('preparing'));",
       "count": 2
     },
     {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(session.holdsHumanInput()).toBe(false));",
+      "file": "artifacts/store.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise(resolve => setTimeout(resolve, 75));",
       "count": 2
     },
     {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(turnEnds()).toBe(1), { timeout: 5_000 });",
-      "count": 1
-    },
-    {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(turnEnds()).toBe(1));",
-      "count": 4
-    },
-    {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(turnEnds()).toBe(2), { timeout: 5_000 });",
-      "count": 1
-    },
-    {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(turnEnds()).toBe(2));",
-      "count": 2
-    },
-    {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(written).toHaveLength(1));",
-      "count": 4
-    },
-    {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(written).toHaveLength(2));",
-      "count": 4
-    },
-    {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "short-bound",
-      "site": "if (outcome === 'acknowledged') await vi.waitFor(() => expect(session.open).toBe(false));",
-      "count": 1
-    },
-    {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise(r => setTimeout(r, 200));",
-      "count": 2
-    },
-    {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 100));",
-      "count": 1
-    },
-    {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 400));",
-      "count": 1
-    },
-    {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(300);",
-      "count": 1
-    },
-    {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(400);",
-      "count": 3
-    },
-    {
-      "file": "core/claude-cli-runner.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(75);",
-      "count": 2
-    },
-    {
-      "file": "core/codex-approvals.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(ui.some(e => e.type === 'permission.requested')).toBe(true), { timeout: 2000 });",
-      "count": 1
-    },
-    {
-      "file": "core/codex-approvals.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(ui.some(e => e.type === 'turn.completed')).toBe(true), { timeout: 2000 });",
-      "count": 1
-    },
-    {
-      "file": "core/conversation-answer-delivery.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 300));",
-      "count": 1
-    },
-    {
-      "file": "core/cursor-acp-runner.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise(r => setTimeout(r, 40));",
-      "count": 2
-    },
-    {
-      "file": "core/cursor-model-catalog.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(spawn).toHaveBeenCalledTimes(2));",
-      "count": 1
-    },
-    {
-      "file": "core/cursor-print-model-retry.test.ts",
-      "rule": "short-bound",
-      "site": "await expect.poll(() => { try { return attempts(log).length; } catch { return 0; } }, { timeout: 5000 }).toBe(1);",
-      "count": 1
-    },
-    {
-      "file": "core/cursor-print-model-retry.test.ts",
-      "rule": "short-bound",
-      "site": "await expect.poll(() => events.filter(event => event.type === 'turn-end').length, { timeout: 5000 }).toBe(1);",
-      "count": 1
-    },
-    {
-      "file": "core/cursor-print-model-retry.test.ts",
-      "rule": "short-bound",
-      "site": "await expect.poll(() => events.filter(event => event.type === 'turn-end').length, { timeout: 5000 }).toBe(2);",
-      "count": 1
-    },
-    {
-      "file": "core/cursor-print-process.test.ts",
-      "rule": "short-bound",
-      "site": "await expect.poll(() => {",
-      "count": 1
-    },
-    {
-      "file": "core/cursor-print-runner.test.ts",
-      "rule": "short-bound",
-      "site": "await expect.poll(() => events.some(event => event.type === 'done'), { timeout: 2_000 }).toBe(true);",
-      "count": 1
-    },
-    {
-      "file": "core/cursor-print-runner.test.ts",
-      "rule": "short-bound",
-      "site": "await expect.poll(() => logs(log).length, { timeout: 3_000 }).toBe(2);",
-      "count": 1
-    },
-    {
-      "file": "core/cursor-print-runner.test.ts",
-      "rule": "short-bound",
-      "site": "await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(1);",
-      "count": 8
-    },
-    {
-      "file": "core/cursor-print-runner.test.ts",
-      "rule": "short-bound",
-      "site": "await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(2);",
-      "count": 5
-    },
-    {
-      "file": "core/cursor-print-runner.test.ts",
-      "rule": "short-bound",
-      "site": "await expect.poll(() => ui.includes('turn.completed'), { timeout: 3_000 }).toBe(true);",
-      "count": 1
-    },
-    {
-      "file": "core/cursor-print-runner.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 300));",
-      "count": 1
-    },
-    {
-      "file": "core/dry-run-backends.test.ts",
-      "rule": "short-bound",
-      "site": "await expect.poll(() => ui.some(event => event.type === 'turn.completed'), { timeout: 3_000 }).toBe(true);",
-      "count": 1
-    },
-    {
-      "file": "core/harness-parity-cells.testkit.ts",
-      "rule": "short-bound",
-      "site": "await waitFor(() => consumed.includes(id) || reported(), 6_000).catch(() => undefined);",
-      "count": 1
-    },
-    {
-      "file": "core/harness-parity-cells.testkit.ts",
-      "rule": "sleep",
-      "site": "await new Promise((resolve) => setTimeout(resolve, 300));",
-      "count": 2
-    },
-    {
-      "file": "core/harness-parity-cells.testkit.ts",
-      "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 150));",
-      "count": 2
-    },
-    {
-      "file": "core/harness-parity-cells.testkit.ts",
-      "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 400));",
-      "count": 1
-    },
-    {
-      "file": "core/omp-input-pipe.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(existsSync(join(cwd, 'input-closed.pid'))).toBe(true), { timeout: 5000 });",
-      "count": 2
-    },
-    {
-      "file": "core/omp-input-pipe.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(session.holdsHumanInput?.()).toBe(false), { timeout: 5000 });",
-      "count": 1
-    },
-    {
-      "file": "core/opencode-serve-retry.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(SERVE_START_RETRY_DELAY_MS + 200);",
-      "count": 1
-    },
-    {
-      "file": "core/opencode-serve-retry.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(SERVE_START_RETRY_DELAY_MS + 300);",
-      "count": 3
-    },
-    {
-      "file": "core/opencode-server-runner.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(100);",
-      "count": 1
-    },
-    {
-      "file": "core/opencode-server-runner.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(250);",
-      "count": 1
-    },
-    {
-      "file": "core/opencode-server-runner.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(40);",
-      "count": 1
-    },
-    {
-      "file": "core/opencode-server-runner.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(60);",
-      "count": 4
-    },
-    {
-      "file": "core/opencode-server-runner.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(80);",
-      "count": 8
-    },
-    {
-      "file": "core/opencode-server-runner.test.ts",
-      "rule": "sleep",
-      "site": "await sleep(AUTO_END_DELAY_MS + 60);",
-      "count": 1
-    },
-    {
-      "file": "core/opencode-steering.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 2_500));",
-      "count": 1
-    },
-    {
-      "file": "core/owned-input-delivery.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 400));",
-      "count": 1
-    },
-    {
-      "file": "core/provider-auth.test.ts",
+      "file": "automations/schedule-runner.test.ts",
       "rule": "short-bound",
       "site": "await vi.waitFor(() => {",
-      "count": 2
-    },
-    {
-      "file": "core/provider-auth.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(calls).toHaveLength(6));",
       "count": 1
     },
     {
-      "file": "core/provider-auth.test.ts",
+      "file": "automations/task-template.test.ts",
       "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(claudeCalls).toBe(1));",
+      "site": "await vi.waitFor(() => {",
       "count": 1
     },
     {
-      "file": "core/provider-auth.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(claudeCalls).toBe(2));",
-      "count": 1
-    },
-    {
-      "file": "core/provider-auth.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(1));",
-      "count": 3
-    },
-    {
-      "file": "core/provider-auth.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(12));",
-      "count": 1
-    },
-    {
-      "file": "core/provider-auth.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(13));",
-      "count": 1
-    },
-    {
-      "file": "core/provider-auth.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(2));",
-      "count": 2
-    },
-    {
-      "file": "core/provider-auth.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6));",
-      "count": 4
-    },
-    {
-      "file": "core/provider-auth.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(7));",
-      "count": 1
-    },
-    {
-      "file": "core/runner-shutdown-parity.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 6000 });",
-      "count": 2
-    },
-    {
-      "file": "core/runner-shutdown-parity.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(child.signalCode).toBe('SIGKILL'), { timeout: 6000 });",
-      "count": 4
-    },
-    {
-      "file": "core/runner-shutdown-parity.test.ts",
-      "rule": "short-bound",
-      "site": "const child = await vi.waitFor(() => {",
-      "count": 1
-    },
-    {
-      "file": "core/runner-shutdown-parity.test.ts",
-      "rule": "short-bound",
-      "site": "return vi.waitFor(() => {",
-      "count": 1
-    },
-    {
-      "file": "core/session-process.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(() => process.kill(member, 0)).toThrow(), { timeout: 2000 });",
-      "count": 1
-    },
-    {
-      "file": "core/session-process.test.ts",
-      "rule": "short-bound",
-      "site": "await vi.waitFor(() => expect(alive(member)).toBe(false), { timeout: 2000 });",
-      "count": 2
-    },
-    {
-      "file": "core/session-process.test.ts",
-      "rule": "short-bound",
-      "site": "const member = await vi.waitFor(() => requirePid(join(cwd, 'member.pid')), { timeout: 5000 });",
-      "count": 1
-    },
-    {
-      "file": "core/session-process.test.ts",
+      "file": "automations/task-template.test.ts",
       "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 400));",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 20));",
+      "count": 1
+    },
+    {
+      "file": "autosave-windows.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(commands.some(script => script.includes('.Kill()'))).toBe(true));",
+      "count": 1
+    },
+    {
+      "file": "autosave-windows.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(warning).toHaveBeenCalledWith(expect.stringContaining('termination not confirmed')));",
+      "count": 1
+    },
+    {
+      "file": "ci-wait/controller.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(child.exitCode).toBe(0), { timeout: 1000 });",
+      "count": 1
+    },
+    {
+      "file": "ci-wait/controller.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(complete).toBeDefined());",
+      "count": 1
+    },
+    {
+      "file": "ci-wait/process.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(async()=>{",
+      "count": 1
+    },
+    {
+      "file": "ci-wait/process.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(async()=>expect((await calls(log)).length).toBe(1));const pid=(await calls(log))[0]!.pid;parent.kill('SIGKILL');",
+      "count": 1
+    },
+    {
+      "file": "ci-wait/process.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(async()=>expect((await readFile(log,'utf8')).trim().split('\\n')).toHaveLength(4));",
+      "count": 1
+    },
+    {
+      "file": "ci-wait/scheduling.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(()=>expect(github.active).toBe(4));cs[0]!.abort();await pending[0];await vi.waitFor(()=>expect(github.watchers).toBe(5));expect(github.peak).toBe(4);s.close();expect((await Promise.all(pending)).every(r=>r.outcome==='cancelled')).toBe(true);",
+      "count": 2
+    },
+    {
+      "file": "ci-wait/scheduling.test.ts",
+      "rule": "short-bound",
+      "site": "const c=new AbortController();controllers.push(c);const first=Array.from({length:4},()=>s.watch(wait(),c.signal));await vi.waitFor(()=>expect(github.active).toBe(4));",
+      "count": 1
+    },
+    {
+      "file": "ci-wait/scheduling.test.ts",
+      "rule": "short-bound",
+      "site": "const github=new ScriptedGithub();github.rows=[{name:'build',state:'PENDING',bucket:'pending',link:''}];const s=new CiWatcherSupervisor({github});services.push(s);const c=new AbortController();const w=wait();const a=s.watch(w,c.signal),b=s.watch(w,c.signal);expect(a).toBe(b);await vi.waitFor(()=>expect(github.active).toBe(1));c.abort();await a;",
       "count": 1
     },
     {
@@ -422,33 +110,555 @@
       "count": 1
     },
     {
-      "file": "core/workflow-ask-parity.test.ts",
-      "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 350));",
+      "file": "delegation/destruction-results.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(attempts.length).toBeGreaterThan(0), { timeout: 3_000 });",
       "count": 1
     },
     {
-      "file": "core/workflow-autonomous-parity.test.ts",
+      "file": "delegation/process-scope.testkit.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(recordedProcessLive(holder!)).toBe(false), { timeout: 5_000 });",
+      "count": 1
+    },
+    {
+      "file": "delegation/process-scope.testkit.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(recordedProcessLive(holder!)).toBe(false));",
+      "count": 1
+    },
+    {
+      "file": "delegation/process-scope.testkit.test.ts",
+      "rule": "short-bound",
+      "site": "if (holder) await vi.waitFor(() => expect(recordedProcessLive(holder!)).toBe(false), { timeout: 5_000 });",
+      "count": 1
+    },
+    {
+      "file": "delegation/process-scope.testkit.test.ts",
+      "rule": "short-bound",
+      "site": "if (holder) await vi.waitFor(() => expect(recordedProcessLive(holder!)).toBe(false));",
+      "count": 1
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => { for (const { workerId } of [a, b]) expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(3); }, { timeout: 5_000 });",
+      "count": 1
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(destroyOf(workerId)?.phase).toBe('terminating'), { timeout: 3_000 });",
+      "count": 1
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBe(1), { timeout: 3_000, interval: 20 });",
+      "count": 1
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 5_000 });",
+      "count": 1
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(4), { timeout: 5_000 });",
+      "count": 1
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.needsAttention).toBe(true), { timeout: 5_000 });",
+      "count": 1
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 5_000 });",
+      "count": 1
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(existsSync(blocked)).toBe(true), { timeout: 5_000 });",
+      "count": 1
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } }), { timeout: 3_000 });",
+      "count": 2
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(f.store.getRun(workerId)?.destroyRetry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 5_000 });",
+      "count": 1
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(full.length).toBeGreaterThan(0), { timeout: 5_000 });",
+      "count": 1
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(termination).toHaveBeenCalled(), { timeout: 3_000 });",
+      "count": 1
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(termination).toHaveBeenCalledOnce(), { timeout: 3_000 });",
+      "count": 1
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise(resolve => setTimeout(resolve, 120));",
+      "count": 2
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "sleep",
+      "site": "await sleep(300);",
+      "count": 2
+    },
+    {
+      "file": "delegation/service.test.ts",
+      "rule": "sleep",
+      "site": "try { await sleep(150); return await termination(...args); } finally { inFlight--; }",
+      "count": 1
+    },
+    {
+      "file": "git-worktree-race.test.ts",
+      "rule": "sleep",
+      "site": "await pause(100);",
+      "count": 1
+    },
+    {
+      "file": "git-worktree-race.test.ts",
+      "rule": "sleep",
+      "site": "await pause(1000);",
+      "count": 2
+    },
+    {
+      "file": "preview/cdp.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise(resolve => setTimeout(resolve, 20));",
+      "count": 1
+    },
+    {
+      "file": "preview/cdp.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise(resolve => setTimeout(resolve, 50));",
+      "count": 2
+    },
+    {
+      "file": "preview/dev-server.test.ts",
+      "rule": "short-bound",
+      "site": "async function until(check: () => boolean, timeoutMs = 5_000): Promise<void> {",
+      "count": 1
+    },
+    {
+      "file": "preview/host-teardown.test.ts",
+      "rule": "short-bound",
+      "site": "await expect.poll(() => dev.state, { timeout: 3000 }).toBe('stopped');",
+      "count": 1
+    },
+    {
+      "file": "preview/host-teardown.test.ts",
+      "rule": "short-bound",
+      "site": "await expect.poll(() => dev.state, { timeout: 3000 }).toBe('up');",
+      "count": 1
+    },
+    {
+      "file": "preview/host-teardown.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise(resolve => setTimeout(resolve, 25));",
+      "count": 1
+    },
+    {
+      "file": "runs/history-compressor.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(started).toEqual([a]));",
+      "count": 1
+    },
+    {
+      "file": "runs/history-compressor.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 10));",
+      "count": 1
+    },
+    {
+      "file": "runs/history-compressor.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 25));",
+      "count": 1
+    },
+    {
+      "file": "runs/store-history-compression.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => {",
+      "count": 1
+    },
+    {
+      "file": "runs/store-history-compression.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(spy).toHaveBeenCalled());",
+      "count": 1
+    },
+    {
+      "file": "runs/store-history-compression.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(started.length).toBeGreaterThanOrEqual(1));",
+      "count": 1
+    },
+    {
+      "file": "runs/store-import.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 200));",
+      "count": 1
+    },
+    {
+      "file": "runs/webhook.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise((done) => setTimeout(done, 20));",
+      "count": 1
+    },
+    {
+      "file": "server/agent-profiles-api.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(async () => {",
+      "count": 1
+    },
+    {
+      "file": "server/archive-on-merge-boot.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(coordinator).toBeDefined());",
+      "count": 1
+    },
+    {
+      "file": "server/archive-on-merge-boot.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(async () => {",
+      "count": 2
+    },
+    {
+      "file": "server/automations-api.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => {",
+      "count": 1
+    },
+    {
+      "file": "server/automations-api.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(fired).toHaveBeenCalled(), { timeout: 5_000, interval: 20 });",
+      "count": 1
+    },
+    {
+      "file": "server/automations-api.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 100));",
+      "count": 1
+    },
+    {
+      "file": "server/automations-api.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 300));",
+      "count": 2
+    },
+    {
+      "file": "server/forge/github-filters.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(finish).toBeTypeOf('function'));",
+      "count": 2
+    },
+    {
+      "file": "server/forge/github.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(delivered).toBe(true), { timeout: 100 });",
+      "count": 1
+    },
+    {
+      "file": "server/forge/github.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(finishMembership).toBeTypeOf('function'));",
+      "count": 1
+    },
+    {
+      "file": "server/forge/github.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(async () => {",
+      "count": 1
+    },
+    {
+      "file": "server/nonblocking-discovery.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(published).toHaveBeenCalledWith('health', expect.objectContaining({ checks })));",
+      "count": 1
+    },
+    {
+      "file": "server/preview-boot-sweep.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise(resolve => setTimeout(resolve, 20));",
+      "count": 1
+    },
+    {
+      "file": "server/preview-socket.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(calls.at(-1)).toEqual({ kind: 'detach', runId: 'run-1' }));",
+      "count": 1
+    },
+    {
+      "file": "server/preview-socket.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(calls).toContainEqual({ kind: 'detach', runId: 'run-1' }), { timeout: 2_000 });",
+      "count": 1
+    },
+    {
+      "file": "server/preview-socket.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(calls).toHaveLength(1));",
+      "count": 1
+    },
+    {
+      "file": "server/preview-socket.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(messages).toContain(JSON.stringify({ t: 'pong', ts: 7 })));",
+      "count": 1
+    },
+    {
+      "file": "server/preview-socket.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(messages).toEqual([JSON.stringify({ t: 'state', stage: 'worktree-removed' })]));",
+      "count": 1
+    },
+    {
+      "file": "server/preview-socket.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(messages).toHaveLength(1));",
+      "count": 1
+    },
+    {
+      "file": "server/preview-socket.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(pane.messages).toContain(JSON.stringify({ t: 'pong', ts: 1 })));",
+      "count": 1
+    },
+    {
+      "file": "server/preview-socket.test.ts",
       "rule": "sleep",
       "site": "await new Promise(resolve => setTimeout(resolve, 50));",
       "count": 1
     },
     {
-      "file": "core/workflow-autonomous-parity.test.ts",
-      "rule": "sleep",
-      "site": "if (row.id === 'A9') await new Promise(resolve => setTimeout(resolve, 150));",
+      "file": "server/project-context-warm.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(recover).toHaveBeenCalled());",
       "count": 1
     },
     {
-      "file": "core/workflow-final-message-parity.test.ts",
+      "file": "server/project-context.test.ts",
       "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, 150));",
+      "site": "await new Promise(resolve => setTimeout(resolve, 300));",
       "count": 1
     },
     {
-      "file": "core/workflow-followup-parity.test.ts",
+      "file": "server/provider-auth-runtime.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(gatingResolver).toHaveBeenCalled());",
+      "count": 1
+    },
+    {
+      "file": "server/provider-auth-runtime.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(verifying).toHaveBeenCalled());",
+      "count": 2
+    },
+    {
+      "file": "server/provider-auth-runtime.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(workAccountResolver).toHaveBeenCalled());",
+      "count": 1
+    },
+    {
+      "file": "server/providers-api.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6));",
+      "count": 1
+    },
+    {
+      "file": "server/repo-pull.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(existsSync(started)).toBe(true));",
+      "count": 2
+    },
+    {
+      "file": "server/task-webhook-api.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => {",
+      "count": 1
+    },
+    {
+      "file": "server/task-webhook-api.test.ts",
       "rule": "sleep",
-      "site": "await new Promise(resolve => setTimeout(resolve, DEFERRED_TURN_START_MS + 700));",
+      "site": "await new Promise((done) => setTimeout(done, 50));",
+      "count": 2
+    },
+    {
+      "file": "server/ws.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(state.started).toBe(1)); // subscription registered",
+      "count": 1
+    },
+    {
+      "file": "server/ws.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(state.stopped).toBe(1), { timeout: 2_000 }); // …then reaped, releasing it",
+      "count": 1
+    },
+    {
+      "file": "server/ws.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(state.stopped).toBe(1));",
+      "count": 2
+    },
+    {
+      "file": "session-signal-cli.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(alive(agent)).toBe(false), { timeout: 5_000 });",
+      "count": 5
+    },
+    {
+      "file": "session-signal-cli.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise(resolve => setTimeout(resolve, 1_000));",
+      "count": 1
+    },
+    {
+      "file": "task-cli/watch.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => {",
+      "count": 1
+    },
+    {
+      "file": "workflows/agent-tmpdir.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(store.getRun(run.id)?.status).toBe('done'));",
+      "count": 1
+    },
+    {
+      "file": "workflows/auto-resume.test.ts",
+      "rule": "short-bound",
+      "site": "await expect",
+      "count": 1
+    },
+    {
+      "file": "workflows/auto-resume.test.ts",
+      "rule": "short-bound",
+      "site": "await expect.poll(() => store.getRun(record.id)?.autoResumeAt, { timeout: 5_000 }).toBeUndefined();",
+      "count": 1
+    },
+    {
+      "file": "workflows/auto-resume.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 1_000));",
+      "count": 2
+    },
+    {
+      "file": "workflows/auto-resume.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 1_500));",
+      "count": 1
+    },
+    {
+      "file": "workflows/auto-resume.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 500));",
+      "count": 2
+    },
+    {
+      "file": "workflows/cursor-transport.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise(resolve => setTimeout(resolve, 100));",
+      "count": 1
+    },
+    {
+      "file": "workflows/pi-teardown.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(manager.isActive(id)).toBe(false));",
+      "count": 2
+    },
+    {
+      "file": "workflows/recover-session-failure.test.ts",
+      "rule": "short-bound",
+      "site": "await expect",
+      "count": 1
+    },
+    {
+      "file": "workflows/run.test.ts",
+      "rule": "short-bound",
+      "site": "await waitFor(record.id, () => {",
+      "count": 1
+    },
+    {
+      "file": "workflows/skill-resume-continuation.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(launches.length).toBeGreaterThan(0), { timeout: 8_000 });",
+      "count": 3
+    },
+    {
+      "file": "workflows/worker-destroy.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(store.getRun(w.id)?.status).toBe('failed'), { timeout: 500 });",
+      "count": 2
+    },
+    {
+      "file": "workflows/worker-location-evidence.test.ts",
+      "rule": "short-bound",
+      "site": "await vi.waitFor(() => expect(existsSync(scratch)).toBe(false));",
+      "count": 1
+    },
+    {
+      "file": "workflows/worker-questions.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise(resolve => setTimeout(resolve, 300));",
+      "count": 1
+    },
+    {
+      "file": "workflows/worker-wait-capacity.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise(resolve => setTimeout(resolve, 400));",
+      "count": 1
+    },
+    {
+      "file": "workflows/worker-wait-capacity.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise(resolve => setTimeout(resolve, 400)); // Observe past the real 250ms runner auto-end timer.",
+      "count": 1
+    },
+    {
+      "file": "workflows/workspace-semaphore.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 200));",
+      "count": 2
+    },
+    {
+      "file": "workflows/workspace-semaphore.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 300));",
+      "count": 4
+    },
+    {
+      "file": "workflows/workspace-semaphore.test.ts",
+      "rule": "sleep",
+      "site": "await new Promise((resolve) => setTimeout(resolve, 50));",
       "count": 1
     }
   ]

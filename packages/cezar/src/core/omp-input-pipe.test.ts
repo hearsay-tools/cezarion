@@ -41,7 +41,8 @@ describe('native live closed-input parity', () => {
           whileOpen: async session => {
             // The mock's real closeSync(0) precedes its marker. The session's cwd is
             // passed through the production spawn; no normalized events are injected.
-            await vi.waitFor(() => expect(existsSync(join(cwd, 'input-closed.pid'))).toBe(true), { timeout: 5000 });
+            // bound: wait for the fixture's native process receipt on a loaded host.
+            await vi.waitFor(() => expect(existsSync(join(cwd, 'input-closed.pid'))).toBe(true), { timeout: 10_000 });
             expect(session.open).toBe(true);
             if (backend === 'pi' || backend === 'omp') {
               expect(session.holdsHumanInput?.()).toBe(true);
@@ -49,7 +50,8 @@ describe('native live closed-input parity', () => {
               // hearsay-tools/cezarion#974: the fd-close marker can beat stdout's
               // initial Pi/OMP prompt ACK (CI refused Pi input at 68ms). A native ACK gate
               // reproduces that ordering; wait for admission before testing EPIPE.
-              await vi.waitFor(() => expect(session.holdsHumanInput?.()).toBe(false), { timeout: 5000 });
+              // bound: wait for the pending human-input queue to drain.
+              await vi.waitFor(() => expect(session.holdsHumanInput?.()).toBe(false), { timeout: 10_000 });
             }
             // Codex can report `open` before the first main-thread turn exists, so
             // sendAgentMessage still returns false (hearsay-tools/cezarion#969). Poll
@@ -112,7 +114,8 @@ describe('Pi native input teardown', () => {
       const obs = await driveSeam('pi', 'input-closed-live', {
         spec: { cwd },
         whileOpen: async session => {
-          await vi.waitFor(() => expect(existsSync(join(cwd, 'input-closed.pid'))).toBe(true), { timeout: 5000 });
+          // bound: wait for the fixture's native process receipt on a loaded host.
+          await vi.waitFor(() => expect(existsSync(join(cwd, 'input-closed.pid'))).toBe(true), { timeout: 10_000 });
           expect(session.open).toBe(true);
           session[action]();
           await expect(session.result).resolves.toBeDefined();

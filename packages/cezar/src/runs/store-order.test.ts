@@ -103,7 +103,7 @@ describe('runs with the same createdAt', () => {
     let store = open();
     const created = Array.from({ length: 3 }, (_, index) => store.createRun({ title: `t${index}`, workflow: 'w', task: 'task', steps: [] }).id);
     // Stages the newest, and the same transaction writes the two a debounced save still owes.
-    store.commitQueuedMessageDelivery(created[2]!, 'no-such-message');
+    store.commitAgentInputs(created[2]!, []);
     expect(store.listRuns().map((run) => run.id)).toEqual(created);
 
     store.close();

@@ -51,7 +51,7 @@ describe('atomic CI wait checkpoints', () => {
 
   it('checkpointing delivery retires current intent atomically and preserves the stable receipt', () => {
     store.commitCiWait(id, { ...wait, phase: 'wake-pending', wakeId: wait.id }, input(id, wait.id));
-    store.commitCiWaitDelivery(id, wait.id);
+    store.commitOutcome(id, { kind: 'delivered', inputIds: [wait.id], at: new Date().toISOString() });
     const record = RunStore.open(directory, { keepLive: true }).getRun(id);
     expect(store.getRun(id)?.waits).toBeUndefined();
     expect(record?.waits).toBeUndefined();

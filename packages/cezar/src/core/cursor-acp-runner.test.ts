@@ -29,8 +29,9 @@ async function withSession(prompt: string, body: (session: AgentSession, v1: Age
   try { await body(session, v1, v2); } finally { session.interrupt(); await session.result.catch(() => {}); vi.unstubAllEnvs(); }
 }
 it('holdsHumanInput is true while a follow-up is queued behind a busy turn (#486)', async () => {
-  await withSession('mock:hold', async (session, v1) => {
-    await new Promise(r => setTimeout(r, 40));
+  await withSession('mock:hold', async (session, v1, v2) => {
+    // bound: the ACP turn-start event marks the opening turn as busy.
+    await waitFor(() => v2.some(event => event.type === 'turn.started'), 10_000);
     expect(session.sendMessage([{ type: 'text', text: 'queued-486-a' }])).toBe(true);
     expect(session.sendMessage([{ type: 'text', text: 'queued-486-b' }])).toBe(true);
     expect(session.heldHumanInputCount?.()).toBe(2);
@@ -44,8 +45,9 @@ it('holdsHumanInput is true while a follow-up is queued behind a busy turn (#486
   });
 });
 it('holdsHumanInput is false after the queued turn starts (#486)', async () => {
-  await withSession('mock:hold', async (session, v1) => {
-    await new Promise(r => setTimeout(r, 40));
+  await withSession('mock:hold', async (session, v1, v2) => {
+    // bound: the ACP turn-start event marks the opening turn as busy.
+    await waitFor(() => v2.some(event => event.type === 'turn.started'), 10_000);
     expect(session.sendMessage([{ type: 'text', text: 'queued-then-run-a' }])).toBe(true);
     expect(session.sendMessage([{ type: 'text', text: 'queued-then-run-b' }])).toBe(true);
     expect(session.heldHumanInputCount?.()).toBe(2);

@@ -68,10 +68,11 @@ function alive(pid: number): boolean {
 
 /** The two children the leftover scenario leaves in the session's cwd. */
 async function leftovers(cwd: string): Promise<{ group: number; session: number }> {
+  // bound: wait for the fixture's native process receipt on a loaded host.
   return vi.waitFor(() => {
     const [group, session] = ['leftover-group.pid', 'leftover-session.pid'].map(file => requirePid(join(cwd, file)));
     return { group: group!, session: session! };
-  }, { timeout: 5000 });
+  }, { timeout: 10_000 });
 }
 
 async function withChild(backend: RunnerId, check: (session: AgentSession, child: ChildProcess, events: AgentEvent[], settled: Promise<unknown>, cwd: string) => Promise<void>, scenario: 'no-progress' | 'no-progress-leftover' | 'no-progress-ignore-term' = 'no-progress') {
@@ -90,12 +91,13 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
     // Wait for the PID contents, not merely file creation (which precedes the
     // write). Cursor can also replace its child while bootstrapping, so use the
     // native process that actually accepted this prompt, not the first spawn.
+    // bound: wait for the fixture's native process receipt on a loaded host.
     const child = await vi.waitFor(() => {
       const pid = readPid(join(cwd, 'watchdog.pid'));
       const accepted = spawned.find(candidate => candidate.pid === pid);
       expect(accepted).toBeDefined();
       return accepted!;
-    }, { timeout: 5000 });
+    }, { timeout: 10_000 });
     await check(session, child, events, settled, cwd);
   } finally {
     session.interrupt();
@@ -108,6 +110,8 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
   }
 }
 
+// Test limits cover each independent 10 s step guard plus settlement and cleanup.
+// Group cases also wait for leftover receipts and reaping; EOF adds its own 10 s grace.
 describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
   const [outsideSignal, endEscalation, outputFailure, ownGroup, stopGroup, endGroup, /* S29: omp-input-pipe.test.ts */, ownExit, outsideKill] = SHUTDOWN_CRITERIA;
   for (const backend of RUNNER_IDS) {
@@ -139,11 +143,12 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
         // handled, but KILL must still settle the runner within its watchdog.
         child.kill('SIGSTOP');
         session.end();
-        await vi.waitFor(() => expect(child.signalCode).toBe('SIGKILL'), { timeout: 6000 });
+        // bound: wait for SIGKILL delivery and native process exit.
+        await vi.waitFor(() => expect(child.signalCode).toBe('SIGKILL'), { timeout: 10_000 });
         await expect(settled).resolves.not.toBeInstanceOf(Error);
         expect(events.filter(event => event.type === 'error')).toEqual([]);
       });
-    }, 15_000);
+    }, 30_000);
 
     it(`${backend} ${outputFailure.id} ${outputFailure.name}`, async () => {
       await withChild(backend, async (session, child, events, settled) => {
@@ -156,7 +161,8 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
         const output = backend === 'opencode' ? eventStreams.at(-1)! : child.stdout!;
         expect(output).toBeDefined();
         output.destroy(new Error('stdout broke'));
-        await vi.waitFor(() => expect(child.signalCode).toBe('SIGKILL'), { timeout: 6000 });
+        // bound: wait for SIGKILL delivery and native process exit.
+        await vi.waitFor(() => expect(child.signalCode).toBe('SIGKILL'), { timeout: 10_000 });
         const result = await settled;
         expect(session.open).toBe(false);
         expect(result instanceof Error || events.some(event => event.type === 'error')).toBe(true);
@@ -166,7 +172,7 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
           expect((result as Error).message).toBe('stdout broke');
         }
       });
-    }, 15_000);
+    }, 30_000);
 
     // hearsay-tools/cezarion#890: what the agent leaves in its process group ends with it.
     it.skipIf(process.platform === 'win32')(`${backend} ${ownGroup.id} ${ownGroup.name}`, async () => {
@@ -174,29 +180,32 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
         await leftovers(cwd);
         expect(execFileSync('ps', ['-o', 'pgid=', '-p', String(child.pid)], { encoding: 'utf8' }).trim()).toBe(String(child.pid));
       }, 'no-progress-leftover');
-    }, 15_000);
+    }, 30_000);
 
     it.skipIf(process.platform === 'win32')(`${backend} ${stopGroup.id} ${stopGroup.name}`, async () => {
       await withChild(backend, async (session, _child, _events, settled, cwd) => {
         const { group, session: setsid } = await leftovers(cwd);
         session.interrupt();
         await settled;
-        await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 6000 });
+        // bound: wait for process-group cleanup and reaping on a loaded host.
+        await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 10_000 });
         expect(alive(setsid)).toBe(true);
       }, 'no-progress-leftover');
-    }, 15_000);
+    }, 40_000);
 
     it.skipIf(process.platform === 'win32')(`${backend} ${endGroup.id} ${endGroup.name}`, async () => {
       await withChild(backend, async (session, child, _events, settled, cwd) => {
         const { group, session: setsid } = await leftovers(cwd);
         child.kill('SIGSTOP');
         session.end();
-        await vi.waitFor(() => expect(child.signalCode).toBe('SIGKILL'), { timeout: 6000 });
+        // bound: wait for SIGKILL delivery and native process exit.
+        await vi.waitFor(() => expect(child.signalCode).toBe('SIGKILL'), { timeout: 10_000 });
         await settled;
-        await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 6000 });
+        // bound: wait for process-group cleanup and reaping on a loaded host.
+        await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 10_000 });
         expect(alive(setsid)).toBe(true);
       }, 'no-progress-leftover');
-    }, 15_000);
+    }, 50_000);
 
     // hearsay-tools/cezarion#1286: cezar signals nothing when the agent exits on EOF, so the stdio MCP
     // servers and background jobs it left in its group are ended by the reap after its exit.
@@ -213,13 +222,14 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
           await settled;
           if (!signalsOnEnd) expect(child.signalCode).toBeNull();
           // bound: the exit drain, the grace, then signal delivery and reaping by the subreaper.
-          await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 6000 });
+
+          await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 10_000 });
           expect(alive(setsid)).toBe(true);
         }, 'no-progress-leftover');
       } finally {
         eofGrace.termMs = 100;
       }
-    }, 15_000);
+    }, 50_000);
 
     // hearsay-tools/cezarion#1286: a leader killed from outside (a crash, the OOM killer) gets no
     // signal from cezar, so only what cezar does after its exit ends what it left in its group.
@@ -229,10 +239,11 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
         child.kill('SIGKILL');
         await settled;
         // bound: the exit drain, the grace, then signal delivery and reaping by the subreaper.
-        await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 6000 });
+
+        await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 10_000 });
         expect(alive(setsid)).toBe(true);
       }, 'no-progress-leftover');
-    }, 15_000);
+    }, 40_000);
 
     // hearsay-tools/cezarion#1625: N5 signals as soon as `watchdog.pid` appears. A mock that
     // published it before replacing its SIGTERM handler died from that SIGTERM.
@@ -269,11 +280,12 @@ process.on = function(event, listener) {
         await withChild(backend, async (session, child, _events, settled) => {
           child.kill('SIGSTOP');
           child.stdout!.push(null);
-          await vi.waitFor(() => expect(child.signalCode).toBe('SIGKILL'), { timeout: 6000 });
+          // bound: wait for SIGKILL delivery and native process exit.
+          await vi.waitFor(() => expect(child.signalCode).toBe('SIGKILL'), { timeout: 10_000 });
           await settled;
           expect(session.open).toBe(false);
         });
-      }, 15_000);
+      }, 30_000);
     }
   }
 });

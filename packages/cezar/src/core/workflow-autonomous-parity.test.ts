@@ -88,6 +88,7 @@ describe('autonomous turn-end parity — #426', () => {
                 // The mock delays SIGTERM exit: neither end() nor late readiness
                 // may release the slot or resurrect the timed-out boundary.
                 manager['handleAgentInputReady'](runId, state, session);
+                // bound: observe the real mock's delayed SIGTERM-exit boundary for 50 ms; the active session must retain its busy slot until native exit.
                 await new Promise(resolve => setTimeout(resolve, 50));
                 expect(manager.isActive(runId)).toBe(true);
                 expect(manager['busySlots']()).toBe(1);
@@ -155,6 +156,7 @@ describe('autonomous turn-end parity — #426', () => {
           );
           // A native ask parks mid-turn. Let that wire advance if it incorrectly
           // receives a synthetic answer; no manager-injected normalized event.
+          // bound: observe the real runner's native mid-turn ask boundary for 150 ms; an incorrect synthetic answer would start another native turn.
           if (row.id === 'A9') await new Promise(resolve => setTimeout(resolve, 150));
           const events = store.readEvents(runId).slice(startSeq);
           const notes = nudges(events);

@@ -6,6 +6,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LAST_WAITS_LIMIT, WAIT_LIMIT, type Wait } from '@open-mercato/cezar-contract/waits';
 import type { AgentInput, CiWaitResult } from '@open-mercato/cezar-contract';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 import { RunDatabase, RunDatabaseUnsupportedSchemaError, RUN_DATABASE_SCHEMA_VERSION, RUNS_DB_FILE } from './run-database.ts';
 import { readRunIndexFromDisk } from './run-index.ts';
@@ -243,7 +244,7 @@ describe('wait checkpoints', () => {
     expect(events).not.toHaveBeenCalled();
   });
 
-  it('commitWaitCancellation moves open and resolved waits to lastWaits as cancelled and drops their undelivered input', () => {
+  it('a cancelled outcome moves open and resolved waits to lastWaits as cancelled and drops their undelivered input', () => {
     const open = ciEntry();
     const resolved = timerEntry({ phase: 'resolved', resolvedAt: iso(0) });
     const kept = timerEntry();
@@ -252,7 +253,7 @@ describe('wait checkpoints', () => {
     store.commitWait(id, kept);
     const other: AgentInput = { ...input(randomUUID(), 'unrelated') };
     store.commitAgentInputs(id, [...store.getRun(id)!.agentInputs!, other]);
-    store.commitWaitCancellation(id, [open.id, resolved.id, randomUUID()]);
+    store.commitOutcome(id, { kind: 'cancelled', waitIds: [open.id, resolved.id, randomUUID()] });
     for (const run of [store.getRun(id)!, reopen()]) {
       expect(run.waits).toEqual([kept]);
       expect(run.lastWaits?.map((wait) => [wait.id, wait.phase])).toEqual([[open.id, 'cancelled'], [resolved.id, 'cancelled']]);
@@ -261,14 +262,14 @@ describe('wait checkpoints', () => {
     }
   });
 
-  it('commitWaitCancellation keeps an input that was already delivered', () => {
+  it('a cancelled outcome keeps an input that was already delivered', () => {
     const resolved = timerEntry({ phase: 'resolved', resolvedAt: iso(0) });
     store.commitWait(id, resolved, { ...input(resolved.id), deliveredAt: iso(0) });
-    store.commitWaitCancellation(id, [resolved.id]);
+    store.commitOutcome(id, { kind: 'cancelled', waitIds: [resolved.id] });
     expect(store.getRun(id)?.agentInputs?.map((entry) => entry.id)).toEqual([resolved.id]);
   });
 
-  it('commitWaitDelivery retires exactly the delivered waits and their inputs in one commit', () => {
+  it('a delivered outcome retires exactly the delivered waits and their inputs in one commit', () => {
     const first = ciEntry({ phase: 'resolved', resolvedAt: iso(0), result });
     const second = timerEntry({ phase: 'resolved', resolvedAt: iso(0) });
     const open = ciEntry();
@@ -276,7 +277,7 @@ describe('wait checkpoints', () => {
     store.commitWait(id, second, input(second.id));
     store.commitWait(id, open);
     const commits = vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex');
-    store.commitWaitDelivery(id, [first.id, open.id]);
+    store.commitOutcome(id, { kind: 'delivered', inputIds: [first.id, open.id], at: iso(1_000) });
     expect(commits).toHaveBeenCalledTimes(1);
     for (const run of [store.getRun(id)!, reopen()]) {
       // The open wait named in the batch is not resolved, so it stays open.
@@ -289,12 +290,12 @@ describe('wait checkpoints', () => {
   });
 
   // hearsay-tools/cezarion#1234: a wake's charge and its cleared failure count commit with it.
-  it('commitWaitDelivery commits the wake counters in the same commit', () => {
+  it('a delivered outcome commits the wake counters in the same commit', () => {
     const resolved = timerEntry({ phase: 'resolved', resolvedAt: iso(0) });
     store.commitWait(id, resolved, input(resolved.id));
     store.updateRun(id, { automaticWakes: 6, waitDeliveryFailures: 2 });
     const commits = vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex');
-    store.commitWaitDelivery(id, [resolved.id], { automaticWakes: 7, waitDeliveryFailures: undefined });
+    store.commitOutcome(id, [{ kind: 'delivered', inputIds: [resolved.id], at: iso(1_000) }, { kind: 'charged', automaticWakes: 7 }, { kind: 'counted', waitDeliveryFailures: undefined }]);
     expect(commits).toHaveBeenCalledTimes(1);
     for (const run of [store.getRun(id)!, reopen()]) {
       expect(run.lastWaits).toEqual([{ ...resolved, phase: 'delivered', deliveredAt: expect.any(String) }]);
@@ -305,14 +306,14 @@ describe('wait checkpoints', () => {
 
   // hearsay-tools/cezarion#1235 (PR #1291 review): a resumed delivery moves the run and its
   // waiting step together, so a resumed task never reads active with a waiting step.
-  it('commitWaitDelivery resumes the run and its waiting step in the same commit', () => {
+  it('a delivered outcome resumes the run and its waiting step in the same commit', () => {
     const stepId = 'main';
     const runId = store.createRun({ title: 'Waits', workflow: 'quick-task', task: 'wait', steps: [{ id: stepId, name: 'main', kind: 'agent' }] }).id;
     const resolved = timerEntry({ phase: 'resolved', resolvedAt: iso(0) });
     store.commitWait(runId, resolved, { ...input(resolved.id), parentRunId: runId });
     store.commitParked(runId, stepId);
     const commits = vi.spyOn(store as unknown as { commitIndex(): void }, 'commitIndex');
-    store.commitWaitDelivery(runId, [resolved.id], {}, true, stepId);
+    store.commitOutcome(runId, { kind: 'delivered', inputIds: [resolved.id], at: iso(1_000) }, { patch: { status: RUN_STATUS.running }, resumeStepId: stepId });
     expect(commits).toHaveBeenCalledTimes(1);
     const before = store.getRun(runId)!;
     reopen();
@@ -322,28 +323,28 @@ describe('wait checkpoints', () => {
     }
   });
 
-  it('commitWakeCounters writes the counters durably, not on the debounced save', () => {
-    store.commitWakeCounters(id, { automaticWakes: 3 });
+  it('a counter outcome is written durably, not on the debounced save', () => {
+    store.commitOutcome(id, { kind: 'charged', automaticWakes: 3 });
     expect(readPersistedRuns(directory).find((record) => record.id === id)?.automaticWakes).toBe(3);
-    store.commitWakeCounters(id, { waitDeliveryFailures: 4 });
-    store.commitWakeCounters(id, { waitDeliveryFailures: undefined });
+    store.commitOutcome(id, { kind: 'counted', waitDeliveryFailures: 4 });
+    store.commitOutcome(id, { kind: 'counted', waitDeliveryFailures: undefined });
     const row = readPersistedRuns(directory).find((record) => record.id === id);
     expect(row).toMatchObject({ automaticWakes: 3 });
     expect(row).not.toHaveProperty('waitDeliveryFailures');
   });
 
   // hearsay-tools/cezarion#1234: the user's answer ends every open human wait at once.
-  it('commitHumanWaitsAnswered settles every open human wait as delivered and leaves ci open', () => {
+  it('an answered outcome settles every open human wait as delivered and leaves ci open', () => {
     const human = humanEntry({ questions: [{ header: 'Pick', question: 'Which one?', options: [{ label: 'A' }, { label: 'B' }] }], askSeq: 3 });
     const ci = ciEntry();
     store.commitWait(id, human);
     store.commitWait(id, ci);
-    expect(store.commitHumanWaitsAnswered(id)).toEqual([human.id]);
+    expect(store.commitOutcome(id, { kind: 'answered' }).answered).toEqual([human.id]);
     for (const run of [store.getRun(id)!, reopen()]) {
       expect(run.waits).toEqual([ci]);
       expect(run.lastWaits).toEqual([{ ...human, phase: 'delivered', deliveredAt: expect.any(String) }]);
     }
-    expect(store.commitHumanWaitsAnswered(id)).toEqual([]);
+    expect(store.commitOutcome(id, { kind: 'answered' })).toEqual({ committed: false, answered: [] });
   });
 
   it('a human wait round-trips through close and reopen with its askSeq', () => {
@@ -374,7 +375,7 @@ describe('wait checkpoints', () => {
       const wait = timerEntry();
       ids.push(wait.id);
       store.commitWait(id, wait);
-      store.commitWaitCancellation(id, [wait.id]);
+      store.commitOutcome(id, { kind: 'cancelled', waitIds: [wait.id] });
     }
     for (const run of [store.getRun(id)!, reopen()]) {
       expect(run.lastWaits?.map((wait) => wait.id)).toEqual(ids.slice(-LAST_WAITS_LIMIT));

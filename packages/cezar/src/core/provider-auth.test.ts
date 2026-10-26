@@ -628,7 +628,8 @@ describe('ProviderAuthService', () => {
     const service = new ProviderAuthService({ runCommand });
     const pending = service.status();
 
-    await vi.waitFor(() => expect(calls).toHaveLength(6));
+    // bound: the provider command callback must publish this step before the next action.
+    await vi.waitFor(() => expect(calls).toHaveLength(6), { timeout: 10_000 });
     expect(calls).toEqual([
       { executable: 'claude', args: ['auth', 'status', '--json'], timeoutMs: 10_000 },
       { executable: 'codex', args: ['login', 'status'], timeoutMs: 10_000 },
@@ -970,7 +971,8 @@ describe('ProviderAuthService', () => {
       // answer — no human in the loop.
       now += 500;
       retries[0]!.fn();
-      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(2));
+      // bound: the provider command callback must publish this step before the next action.
+      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(2), { timeout: 10_000 });
       await expect(service.status()).resolves.toMatchObject({
         providers: expect.arrayContaining([
           expect.objectContaining({ provider: 'claude', status: 'connected' }),
@@ -1073,7 +1075,8 @@ describe('ProviderAuthService', () => {
       // The rebinding retry answers B's incident with B's own connected answer.
       now += 59_500;
       retries[0]!();
-      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(2));
+      // bound: the provider command callback must publish this step before the next action.
+      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(2), { timeout: 10_000 });
       expect(runCommand).toHaveBeenCalledWith('claude', ['auth', 'status', '--json'], 10_000, {
         CLAUDE_CONFIG_DIR: '/b',
       });
@@ -1130,7 +1133,8 @@ describe('ProviderAuthService', () => {
       service.reportRuntimeAuthFailure('claude');
 
       const verifying = service.verifyRuntimeAuthFailure('claude');
-      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(1));
+      // bound: the provider command callback must publish this step before the next action.
+      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(1), { timeout: 10_000 });
       // Recovery began, then the user acknowledged incident-1 and the runner rejected them again.
       expect(service.clearRuntimeAuthFailure('claude', 'incident-1')).toBe(true);
       service.reportRuntimeAuthFailure('claude');
@@ -1155,7 +1159,8 @@ describe('ProviderAuthService', () => {
       service.reportRuntimeAuthFailure('claude');
 
       const verifying = service.verifyRuntimeAuthFailure('claude');
-      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(1));
+      // bound: the provider command callback must publish this step before the next action.
+      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(1), { timeout: 10_000 });
       // A second run — possibly on a DIFFERENT account of the same provider — fails while the
       // self-check is in flight. The latch does not transition (same incident id), so the watcher
       // will never re-check what this answer would wrongly clear; the answer must not clear it.
@@ -1181,7 +1186,8 @@ describe('ProviderAuthService', () => {
       service.reportRuntimeAuthFailure('claude');
 
       const first = service.verifyRuntimeAuthFailure('claude');
-      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(1));
+      // bound: the provider command callback must publish this step before the next action.
+      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(1), { timeout: 10_000 });
       await expect(service.verifyRuntimeAuthFailure('claude')).resolves.toBeNull();
       release();
 
@@ -1272,23 +1278,26 @@ describe('ProviderAuthService', () => {
       const service = new ProviderAuthService({ runCommand, createAuthFailureId: () => 'incident-1' });
 
       const background = service.status();
-      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6));
+      // bound: the provider command callback must publish this step before the next action.
+      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6), { timeout: 10_000 });
       service.reportRuntimeAuthFailure('claude');
       const verifying = service.verifyRuntimeAuthFailure('claude');
-      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(7));
+      // bound: the provider command callback must publish this step before the next action.
+      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(7), { timeout: 10_000 });
       release();
 
       await expect(verifying).resolves.toEqual({ provider: 'claude', status: 'connected' });
       await background;
       // The full probe landed last with `unknown` for Claude; the correction must survive it —
       // a latch that clears and then reads `unknown` again trades the red banner for a grey one.
+      // bound: the provider command callback must publish this step before the next action.
       await vi.waitFor(() => {
         expect(service.peekStatus()).toMatchObject({
           providers: expect.arrayContaining([
             expect.objectContaining({ provider: 'claude', status: 'connected' }),
           ]),
         });
-      });
+      }, { timeout: 10_000 });
     });
 
     it('does not let an older in-flight probe overwrite the verified row', async () => {
@@ -1313,21 +1322,24 @@ describe('ProviderAuthService', () => {
       await expect(statuses(service)).resolves.toMatchObject({ claude: { status: 'unknown' } });
       gate = true;
       const refresh = service.status({ refresh: true });
-      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(12));
+      // bound: the provider command callback must publish this step before the next action.
+      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(12), { timeout: 10_000 });
       service.reportRuntimeAuthFailure('claude');
       const verifying = service.verifyRuntimeAuthFailure('claude');
-      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(13));
+      // bound: the provider command callback must publish this step before the next action.
+      await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(13), { timeout: 10_000 });
       release();
 
       await expect(verifying).resolves.toEqual({ provider: 'claude', status: 'connected' });
       await refresh;
+      // bound: the provider command callback must publish this step before the next action.
       await vi.waitFor(() => {
         expect(service.peekStatus()).toMatchObject({
           providers: expect.arrayContaining([
             expect.objectContaining({ provider: 'claude', status: 'connected' }),
           ]),
         });
-      });
+      }, { timeout: 10_000 });
     });
 
     it('fences a verified account row against an older profile probe landing late', async () => {
@@ -1353,10 +1365,12 @@ describe('ProviderAuthService', () => {
       const service = new ProviderAuthService({ runCommand, createAuthFailureId: () => 'incident-1' });
 
       const profileProbe = service.profileStatus('claude', { id: 'work', configDir: '/work' });
-      await vi.waitFor(() => expect(claudeCalls).toBe(1));
+      // bound: the provider command callback must publish this step before the next action.
+      await vi.waitFor(() => expect(claudeCalls).toBe(1), { timeout: 10_000 });
       service.reportRuntimeAuthFailure('claude');
       const verifying = service.verifyRuntimeAuthFailure('claude', { id: 'work', configDir: '/work' });
-      await vi.waitFor(() => expect(claudeCalls).toBe(2));
+      // bound: the provider command callback must publish this step before the next action.
+      await vi.waitFor(() => expect(claudeCalls).toBe(2), { timeout: 10_000 });
 
       releaseVerification();
       await expect(verifying)
@@ -1399,7 +1413,8 @@ describe('ProviderAuthService', () => {
     const service = new ProviderAuthService({ runCommand });
 
     const pending = service.status();
-    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6));
+    // bound: the provider command callback must publish this step before the next action.
+    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6), { timeout: 10_000 });
     service.reportRuntimeAuthFailure('claude');
     release();
 
@@ -1486,7 +1501,8 @@ describe('ProviderAuthService', () => {
     const ordinary = service.status();
     const refresh = service.status({ refresh: true });
     expect(refresh).toBe(ordinary);
-    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6));
+    // bound: the provider command callback must publish this step before the next action.
+    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6), { timeout: 10_000 });
     release();
     await expect(Promise.all([ordinary, refresh])).resolves.toHaveLength(2);
     expect(runCommand).toHaveBeenCalledTimes(6);
@@ -1506,7 +1522,8 @@ describe('ProviderAuthService', () => {
     const ordinary = service.status();
 
     expect(refresh).toBe(ordinary);
-    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6));
+    // bound: the provider command callback must publish this step before the next action.
+    await vi.waitFor(() => expect(runCommand).toHaveBeenCalledTimes(6), { timeout: 10_000 });
     release();
     await expect(ordinary.then(({ providers }) => providers[0])).resolves.toMatchObject({
       provider: 'claude',

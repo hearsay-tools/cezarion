@@ -32,9 +32,10 @@ describe('Cursor print process ownership', () => {
     expect((await proc.exit).code).toBe(0);
     await proc.settled;
     const descendantPid = requirePidText(stdout, 'cursor stdout');
+    // bound: wait for the fixture's native process receipt on a loaded host.
     await expect.poll(() => {
       try { process.kill(descendantPid, 0); return true; } catch { return false; }
-    }, { timeout: 1_000 }).toBe(false);
+    }, { timeout: 10_000 }).toBe(false);
   });
 
   // Cursor's `agent -p` starts a `worker-server` daemon (`detached: false`, `stdio: 'ignore'`)

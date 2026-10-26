@@ -104,6 +104,7 @@ for (const backend of ['codex', 'opencode', 'pi', 'omp'] as const) {
           if (!ack) throw new Error('expected reserved submission');
           void ack.then(() => { accepted = true; }, () => {});
           await waitFor(() => v1.filter(event => event.type === 'turn-end').length === 2);
+          // bound: observe past the real runner's 250 ms auto-end timer while its native ACK is held by the fixture.
           await new Promise(resolve => setTimeout(resolve, 400));
           expect(accepted).toBe(false); expect(session.open).toBe(true);
           expect(session.sendAgentMessage([{ type: 'text', text: 'duplicate' }])).toBe(false);

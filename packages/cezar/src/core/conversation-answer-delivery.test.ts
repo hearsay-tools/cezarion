@@ -115,6 +115,7 @@ for (const backend of RUNNER_IDS) {
           expect(firstAfter(store, runId, 'turn-end', start)).toBeUndefined();
         } else {
           // A boundary wire refuses busy input: nothing reaches it until the answer ends.
+          // bound: observe the real runner's busy answer boundary while CEZ_MOCK_STEER_MS holds content for 1,500 ms; a boundary wire must not deliver input.
           await new Promise(resolve => setTimeout(resolve, 300));
           expect(input(store, runId, id)?.deliveredAt).toBeUndefined();
         }
