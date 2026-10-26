@@ -282,7 +282,8 @@ rules (`CODE_REVIEW.md`) send it back.
 
 ## Reproducing one test locally
 
-The whole suite takes about 14 minutes; one test takes seconds.
+Run serially, the whole suite takes about 30 minutes of spec time: the per-spec durations in
+`.github/cockpit-test-durations.json` add up to that. One test takes seconds.
 
 ```bash
 npm run test:e2e -- <spec>.e2e.ts -t '<test name>'
