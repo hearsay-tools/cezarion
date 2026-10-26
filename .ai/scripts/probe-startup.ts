@@ -248,7 +248,7 @@ const trustPath = join(agentDir, 'trust.json');
 const before = snapshot(project);
 const spec: AgentRunSpec = {
   userPrompt: USER_PROMPT, cwd: project, model: 'spy/spy-model',
-  allowedTools: allowedToolsForStep(undefined, name), systemPrompt: PROBE_SYSTEM_PROMPT,
+  toolGrant: { kind: 'step-default', tools: allowedToolsForStep(undefined, name) }, systemPrompt: PROBE_SYSTEM_PROMPT,
 };
 const argv = [...runner.argv(spec), ...extra];
 rec('scratch', scratch);

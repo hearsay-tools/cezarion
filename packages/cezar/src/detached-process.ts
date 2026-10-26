@@ -25,6 +25,10 @@ export type ReadStart = (pid: number) => string | undefined;
 export interface GroupLeader {
   readonly pid: number;
   readonly start?: string | undefined;
+  /** The handle of a leader this process spawned and keeps. It proves the incarnation without
+   *  `start`: until Node reaps the leader, its pid names no other process, and once Node has, a
+   *  process at that pid is another one. A leader that carries it is never written to a file. */
+  readonly child?: ChildProcess | undefined;
 }
 
 const POLL_MS = 100;
@@ -32,6 +36,13 @@ const POLL_MS = 100;
 /** The fields after `comm` in a `/proc/<pid>/stat` line; `comm` may hold spaces and `)`, so the split is after the LAST `)`. */
 function statFields(stat: string): string[] {
   return stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
+}
+
+/** Whether the `/proc/<pid>/stat` fields are of an exited process. A leader whose main thread
+ *  exited reads Z while its other threads run and keep its files open, a listening port among them,
+ *  so it is exited only once `num_threads` (field 20) counts no thread but its own. */
+function exitedStat(fields: readonly string[]): boolean {
+  return /^[ZX]$/.test(fields[0] ?? '') && Number(fields[17]) <= 1;
 }
 
 /** `/proc/<pid>/stat` field 3 (`state`) and field 22 (`starttime`). */
@@ -68,6 +79,20 @@ export function processStartToken(pid: number, platform: NodeJS.Platform = proce
  *  reaches every member it forks; on Windows it gets a console of its own. */
 export function spawnDetached(file: string, args: readonly string[], options: Omit<SpawnOptions, 'detached'> = {}): ChildProcess {
   return spawn(file, args, { ...options, detached: true });
+}
+
+/** Starts a process cezar never stops, such as an editor or a browser: detached, so it outlives
+ *  cezar, with no stdio and nothing recorded. True when no spawn error arrives within `settleMs`.
+ *  Neither the child nor the wait keeps the event loop alive, so a caller may drop the promise. */
+export function startAndForget(file: string, args: readonly string[], { settleMs = 250 }: { settleMs?: number } = {}): Promise<boolean> {
+  return new Promise((resolve) => {
+    let child: ChildProcess;
+    try { child = spawnDetached(file, args, { stdio: 'ignore' }); } catch { resolve(false); return; }
+    // A missing binary arrives as an 'error' event, not a throw. With no listener, Node would crash the process.
+    child.once('error', () => resolve(false));
+    child.unref();
+    setTimeout(() => resolve(true), settleMs).unref();
+  });
 }
 
 export interface OwnedStartOptions extends Omit<SpawnOptions, 'detached'> {
@@ -110,7 +135,7 @@ type ProcessState = 'gone' | 'zombie' | 'live';
 function processState(pid: number): ProcessState {
   try { process.kill(pid, 0); } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return 'gone'; }
   if (process.platform === 'linux') {
-    try { return /^[ZX]$/.test(statFields(readFileSync(`/proc/${pid}/stat`, 'utf8'))[0] ?? '') ? 'zombie' : 'live'; }
+    try { return exitedStat(statFields(readFileSync(`/proc/${pid}/stat`, 'utf8'))) ? 'zombie' : 'live'; }
     catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'gone' : 'live'; }
   }
   if (process.platform === 'darwin') {
@@ -120,10 +145,21 @@ function processState(pid: number): ProcessState {
   return 'live';
 }
 
+/** What the leader's own handle proves: `held` while Node has not reaped it, so its pid is still its
+ *  own; `reaped` once Node has. Node reaps a child and sets its exit fields in one callback, so no
+ *  JavaScript runs between the two. Undefined for a leader without a handle. */
+function handleProof(leader: GroupLeader): 'held' | 'reaped' | undefined {
+  const { child } = leader;
+  if (!child) return undefined;
+  return child.exitCode === null && child.signalCode === null ? 'held' : 'reaped';
+}
+
 /** `running`: the recorded incarnation runs. `gone`: it exited, or its pid now names another
  *  process. `unknown`: it runs but its start identity cannot be read, which proves nothing. */
 function leaderStatus(leader: GroupLeader, readStart: ReadStart): 'running' | 'gone' | 'unknown' {
   if (processState(leader.pid) !== 'live') return 'gone';
+  const proof = handleProof(leader);
+  if (proof) return proof === 'held' ? 'running' : 'gone';
   if (leader.start === undefined) return 'unknown';
   const current = readStart(leader.pid);
   if (current === undefined) return 'unknown';
@@ -149,6 +185,10 @@ function groupStatus(leader: GroupLeader, readStart: ReadStart): 'exists' | 'gon
     try { process.kill(-leader.pid, 0); return true; }
     catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
   };
+  // A held leader is a member of its own group. Once reaped, it leaves the group's id reserved
+  // while any member lives, so a process at its pid means the group ended first.
+  const proof = handleProof(leader);
+  if (proof) return (proof === 'held' || processState(leader.pid) === 'gone') && answers() ? 'exists' : 'gone';
   if (leader.start === undefined) return answers() ? 'unknown' : 'gone';
   if (processState(leader.pid) !== 'gone') {
     const current = readStart(leader.pid);
@@ -181,7 +221,7 @@ function liveMember(pgid: number): boolean {
     if (!/^\d+$/.test(name)) continue;
     try {
       const fields = statFields(readFileSync(`/proc/${name}/stat`, 'utf8'));
-      if (Number(fields[2]) === pgid && fields[0] !== 'Z' && fields[0] !== 'X') return true;
+      if (Number(fields[2]) === pgid && !exitedStat(fields)) return true;
     } catch (error) {
       // A process that exited after the listing is no member; one it cannot read may be.
       const code = (error as NodeJS.ErrnoException).code;
@@ -212,8 +252,8 @@ export interface StopOptions {
  *  grace, the leader or any other member. True once no member runs. SIGKILL goes to every group
  *  that still exists, zombies only included, so it also reaches a member a scan missed. On
  *  Windows it ends the recorded leader's process tree at once, then waits `killWaitMs`. A live
- *  leader whose start is not recorded, or cannot be read now, is never signalled; the stop reports
- *  it stopped only once no member runs. */
+ *  leader with no handle whose start is not recorded, or cannot be read now, is never signalled;
+ *  the stop reports it stopped only once no member runs. */
 export async function stopGroup(leader: GroupLeader, options: StopOptions = {}): Promise<boolean> {
   const { graceMs = 10_000, killWaitMs = 1_000, readStart = processStartToken } = options;
   if (process.platform === 'win32') {

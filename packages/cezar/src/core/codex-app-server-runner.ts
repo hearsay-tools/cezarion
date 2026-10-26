@@ -16,6 +16,7 @@ import type {
   InputDelivery,
 } from './agent-runner.ts';
 import { isSignalTerminationExit, prependSystemPrompt, trackChildExit } from './agent-runner.ts';
+import { codexToolGrantFields } from './runner-tool-grants.ts';
 import { signalSession } from './session-process.ts';
 import {
   afterExitDrain,
@@ -76,16 +77,15 @@ export interface CodexRunnerOptions {
  * agent inherits managed permissions; confirmed unmanaged sessions keep cezar's
  * full-access default. Approval policy always belongs to the app-server.
  * Codex has no per-tool allowlist, so
- * `spec.allowedTools` is ignored. `CEZ_CODEX_NETWORK=0` requires a confirmed
+ * `spec.toolGrant` is ignored. `CEZ_CODEX_NETWORK=0` requires a confirmed
  * network restriction without replacing managed filesystem rules.
  */
 /**
  * What the codex app-server receives from each `AgentRunSpec` field (#284).
  * Tool access does not cross this wire: managed permissions belong to Codex;
  * unmanaged sessions use cezar's sandbox choice. The app-server has no per-tool
- * allowlist, so `allowedTools`/`bashAllowlist` are declared dropped
- * rather than mapped (spec 2026-07-17-permission-modes). Held against the
- * recorded JSON-RPC by the harness parity matrix.
+ * allowlist, so `toolGrant` is declared dropped rather than mapped (spec
+ * 2026-07-17-permission-modes). Held against the recorded JSON-RPC by the harness parity matrix.
  */
 export const CODEX_SPEC_SUPPORT: AgentRunSpecSupport = {
   cezarTools: { honored: true, via: 'thread/start and thread/resume dotted mcp_servers config with env_vars and default_tools_approval_mode approve' },
@@ -93,9 +93,8 @@ export const CODEX_SPEC_SUPPORT: AgentRunSpecSupport = {
   userPrompt: { honored: true, via: 'turn/start input text' },
   images: { honored: false, reason: 'the adapter sends text input items only; image blocks are dropped' },
   cwd: { honored: true, via: 'spawn cwd, and the thread/start / thread/resume cwd' },
-  allowedTools: { honored: false, reason: 'no per-tool allowlist on the app-server; managed permissions and approval policy belong to Codex' },
+  toolGrant: { honored: false, reason: 'no per-tool allowlist on the app-server, so no command-prefix restriction either; managed permissions and approval policy belong to Codex' },
   restrictNativeDelegation: { honored: true, via: 'thread/start and thread/resume config features.multi_agent=false, features.multi_agent_v2=false (D1)' },
-  bashAllowlist: { honored: false, reason: 'no per-tool allowlist, so no command-prefix restriction either' },
   additionalDirectories: { honored: false, reason: 'no extra-root mapping; managed filesystem permissions belong to Codex' },
   env: { honored: true, via: 'merged over the child env through buildCodexAppServerEnv' },
   model: { honored: true, via: 'thread/start and thread/resume model' },
@@ -688,6 +687,7 @@ class CodexSession implements AgentSession {
     const overrides = {
       model: this.spec.model,
       cwd: this.spec.cwd,
+      ...codexToolGrantFields(this.spec.toolGrant),
       ...codexPermissionOverrides(requirements, restrictNetwork),
       // ThreadStartParams AND ThreadResumeParams accept dotted config overrides.
       // Both feature generations exist in Codex 0.153.4; no global config write.

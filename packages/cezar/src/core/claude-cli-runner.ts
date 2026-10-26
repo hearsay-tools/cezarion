@@ -24,11 +24,12 @@ import type {
   SessionOptions,
   AgentRunSpecSupport,
   InputDelivery,
+  ToolGrant,
 } from './agent-runner.ts';
 
 // Re-exported for backends and the run manager that still import them from here.
 export type { AgentSession, SessionOptions } from './agent-runner.ts';
-import { isSignalTerminationExit, trackChildExit } from './agent-runner.ts';
+import { isSignalTerminationExit, trackChildExit, unknownToolGrant } from './agent-runner.ts';
 import { signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { cezarToolEnvNames, cezarToolNames } from '../ci-wait/tools.ts';
@@ -61,8 +62,8 @@ export function resolveClaudeExecutable(override?: string): string {
  * `AgentRunner` over the Claude Code CLI in headless stream-json mode. Auth =
  * the host's logged-in Pro/Max subscription (no API key needed). Sandboxing is
  * `--allowedTools` (default-deny for anything not listed) + running inside the
- * repo `cwd`; `Bash` is narrowed to `Bash(<prefix>:*)` patterns only when
- * `bashAllowlist` is set — the zero-config default has no allowlist, so `Bash`
+ * repo `cwd`; `Bash` is narrowed to `Bash(<prefix>:*)` patterns only when the
+ * grant carries a `bashAllowlist` — the zero-config default has none, so `Bash`
  * is unrestricted shell access (#430).
  *
  * Session mechanics (multi-turn stdin, EOF watchdog, reopen window) follow
@@ -81,9 +82,8 @@ export const CLAUDE_SPEC_SUPPORT: AgentRunSpecSupport = {
   userPrompt: { honored: true, via: 'text block of the first stream-json user message on stdin' },
   images: { honored: true, via: 'image blocks ahead of the text in the first stdin message' },
   cwd: { honored: true, via: 'spawn cwd' },
-  allowedTools: { honored: true, via: '--allowedTools, through buildAllowedTools' },
+  toolGrant: { honored: true, via: '--allowedTools, through buildAllowedTools, with a bashAllowlist as Bash(<prefix>:*) entries, one per prefix; unset and an empty list send none' },
   restrictNativeDelegation: { honored: true, via: '--disallowedTools Agent,Task,Workflow (D1); context: fork skills are not blocked' },
-  bashAllowlist: { honored: true, via: 'Bash(<prefix>:*) entries in --allowedTools, one per prefix' },
   additionalDirectories: { honored: true, via: '--add-dir, once per directory' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
   model: { honored: true, via: '--model' },
@@ -716,7 +716,7 @@ export function buildClaudeArgs(
   // (AGENT_PROTOCOL.md D1 forked-skill gap, hearsay-tools/cezarion#1284).
   // Never widen grants.
   if (spec.restrictNativeDelegation) args.push('--disallowedTools', 'Agent,Task,Workflow');
-  const allowed = buildAllowedTools(spec.allowedTools ?? [], spec.bashAllowlist);
+  const allowed = claudeAllowedTools(spec.toolGrant);
   if (spec.cezarTools) {
     const { name, command, args: toolArgs } = spec.cezarTools;
     args.push('--mcp-config', JSON.stringify({ mcpServers: { [name]: {
@@ -740,11 +740,26 @@ export function buildClaudeArgs(
 }
 
 /**
+ * The `--allowedTools` entries for each grant kind. No entries sends no flag, so
+ * Claude's permission mode and the user's settings decide; an empty list does
+ * the same (hearsay-tools/cezarion#1849).
+ */
+function claudeAllowedTools(grant: ToolGrant): string[] {
+  switch (grant.kind) {
+    case 'unset': return [];
+    case 'step-default':
+    case 'inherited':
+    case 'explicit': return buildAllowedTools(grant.tools, grant.bashAllowlist);
+    default: return unknownToolGrant(grant);
+  }
+}
+
+/**
  * Map `allowedTools` onto claude's `--allowedTools` syntax. `Bash` with a
  * `bashAllowlist` becomes one `Bash(<prefix>:*)` entry per allowed prefix;
  * `Bash` with no allowlist stays plain `Bash`.
  */
-export function buildAllowedTools(allowedTools: string[], bashAllowlist?: string[]): string[] {
+export function buildAllowedTools(allowedTools: readonly string[], bashAllowlist?: readonly string[] | undefined): string[] {
   const out: string[] = [];
   for (const tool of allowedTools) {
     if (tool === 'Bash' && bashAllowlist && bashAllowlist.length > 0) {

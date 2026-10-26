@@ -330,7 +330,7 @@ async function finish(why: string, failed: boolean): Promise<void> {
 }
 
 session = new CodexAppServerRunner({ bin: shim }).startSession({
-  userPrompt: PROMPT, cwd: project, ...(model ? { model } : {}), effort: 'low', timeoutMs: HANG_GUARD_MS + END_GRACE_MS,
+  userPrompt: PROMPT, cwd: project, toolGrant: { kind: 'unset' }, ...(model ? { model } : {}), effort: 'low', timeoutMs: HANG_GUARD_MS + END_GRACE_MS,
   cezarTools: tools.descriptor, env: { CODEX_HOME: codexHome, ...tools.env },
 }, onEvent, { autoEndAfterFirstTurn: true, onUiEvent });
 session.result.then(

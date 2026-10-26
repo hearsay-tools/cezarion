@@ -1,0 +1,28 @@
+{
+  "$comment": "Non-test source files over 1,000 lines, pinned at their length when the ratchet landed (hearsay-tools/cezarion#1800). A pin only shrinks: cut a file, then run FILE_LENGTH_UPDATE=1 npm test -- packages/cezar/src/file-length.test.ts. A new file over the limit is a failure, not an entry. Rules: docs/sdlc/ci.md.",
+  "limit": 1000,
+  "files": {
+    "packages/cezar/scripts/mock-claude.mjs": 1065,
+    "packages/cezar/scripts/mock-opencode-serve.mjs": 1230,
+    "packages/cezar/src/core/codex-app-server-runner.ts": 1278,
+    "packages/cezar/src/core/omp-runner.ts": 1030,
+    "packages/cezar/src/core/omp-ui-mapper.ts": 1023,
+    "packages/cezar/src/core/opencode-server-runner.ts": 1743,
+    "packages/cezar/src/runs/run-database.ts": 1205,
+    "packages/cezar/src/runs/store.ts": 4931,
+    "packages/cezar/src/server-install/platforms/ubuntu-vps.ts": 1146,
+    "packages/cezar/src/server/forge/github.ts": 3564,
+    "packages/cezar/src/server/server.ts": 6394,
+    "packages/cezar/src/workflows/run.ts": 10938,
+    "packages/contract/src/runs.ts": 1014,
+    "packages/web/e2e/agent-browser.ts": 1288,
+    "packages/web/src/api/client.ts": 2366,
+    "packages/web/src/api/queries.ts": 2470,
+    "packages/web/src/components/composer/composer.tsx": 1095,
+    "packages/web/src/routes/github/github.tsx": 1244,
+    "packages/web/src/routes/global-tasks.tsx": 1139,
+    "packages/web/src/routes/task-thread/thread-items.tsx": 1248,
+    "packages/web/src/routes/tasks-overview.tsx": 1651,
+    "packages/web/src/routes/workflows/workflows.tsx": 1175
+  }
+}

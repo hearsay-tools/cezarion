@@ -18,6 +18,7 @@ import type { AgentEvent } from './agent-runner.ts';
 import type { UiEvent, UiItem } from './ui-events.ts';
 import { codexSessionStarted, createCodexUiState, mapCodexNotification } from './codex-ui-mapper.ts';
 import { CodexAppServerRunner } from './codex-app-server-runner.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(HERE, '__fixtures__', 'codex');
@@ -832,7 +833,7 @@ describe('CodexAppServerRunner v2 wiring (against the bundled mock app-server)',
     const v1: AgentEvent[] = [];
     const v2: UiEvent[] = [];
     const session = runner.startSession(
-      { userPrompt: 'check the working tree', cwd: process.cwd() },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'check the working tree', cwd: process.cwd() },
       (e) => v1.push(e),
       { autoEndAfterFirstTurn: true, onUiEvent: (e) => v2.push(e) },
     );
@@ -879,7 +880,7 @@ describe('CodexAppServerRunner v2 wiring (against the bundled mock app-server)',
     const v1: AgentEvent[] = [];
     const v2: UiEvent[] = [];
     const session = runner.startSession(
-      { userPrompt: 'mock:subagent-activity', cwd: process.cwd() },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'mock:subagent-activity', cwd: process.cwd() },
       (event) => v1.push(event),
       { autoEndAfterFirstTurn: true, onUiEvent: (event) => v2.push(event) },
     );
@@ -895,7 +896,7 @@ describe('CodexAppServerRunner v2 wiring (against the bundled mock app-server)',
     const v1: AgentEvent[] = [];
     const v2: UiEvent[] = [];
     const session = runner.startSession(
-      { userPrompt: 'mock:child-turn', cwd: process.cwd() },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'mock:child-turn', cwd: process.cwd() },
       (event) => v1.push(event),
       { autoEndAfterFirstTurn: true, onUiEvent: (event) => v2.push(event) },
     );
@@ -921,7 +922,7 @@ describe('CodexAppServerRunner v2 wiring (against the bundled mock app-server)',
   it('keeps autonomous full-access permissions when resuming a thread', async () => {
     const runner = new CodexAppServerRunner({ bin: mockBin, timeoutMs: 60_000 });
     const session = runner.startSession(
-      { userPrompt: 'continue', cwd: process.cwd(), resume: true, sessionId: 'th_mock_1' },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'continue', cwd: process.cwd(), resume: true, sessionId: 'th_mock_1' },
       undefined,
       { autoEndAfterFirstTurn: true },
     );
@@ -934,7 +935,7 @@ describe('CodexAppServerRunner v2 wiring (against the bundled mock app-server)',
     try {
       const runner = new CodexAppServerRunner({ bin: mockBin, timeoutMs: 60_000 });
       const session = runner.startSession(
-        { userPrompt: 'check without network', cwd: process.cwd() },
+        { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'check without network', cwd: process.cwd() },
         undefined,
         { autoEndAfterFirstTurn: true },
       );
@@ -951,7 +952,7 @@ describe('CodexAppServerRunner v2 wiring (against the bundled mock app-server)',
     let resolveAsk!: () => void;
     const asked = new Promise<void>((resolve) => { resolveAsk = resolve; });
     const session = runner.startSession(
-      { userPrompt: 'ask me', cwd: process.cwd(), env: { MOCK_CODEX_ASK: '1' } },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'ask me', cwd: process.cwd(), env: { MOCK_CODEX_ASK: '1' } },
       undefined,
       { autoEndAfterFirstTurn: true, onUiEvent: (event) => {
         v2.push(event);
@@ -975,7 +976,7 @@ describe('CodexAppServerRunner v2 wiring (against the bundled mock app-server)',
     let resolveAsk!: () => void;
     const asked = new Promise<void>((resolve) => { resolveAsk = resolve; });
     const session = runner.startSession(
-      { userPrompt: 'mock:native-codex-ask multi free text', cwd: process.cwd() },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'mock:native-codex-ask multi free text', cwd: process.cwd() },
       undefined,
       { autoEndAfterFirstTurn: true, onUiEvent: (event) => {
         if (event.type === 'ask.requested') resolveAsk();
@@ -992,7 +993,7 @@ describe('CodexAppServerRunner v2 wiring (against the bundled mock app-server)',
     const onUnhandled = (reason: unknown) => unhandled.push(reason);
     process.on('unhandledRejection', onUnhandled);
     try {
-      const session = runner.startSession({
+      const session = runner.startSession({ toolGrant: UNSET_TOOL_GRANT,
         userPrompt: 'continue',
         cwd: process.cwd(),
         sessionId: 'foreign-session',
@@ -1202,7 +1203,7 @@ describe('codex reasoning text survives replay (#528)', () => {
 it('recovers from recorded retry errors through the real app-server transport (#550)', async () => {
   const runner = new CodexAppServerRunner({ bin: join(HERE, '../../scripts/mock-codex-app-server.mjs'), timeoutMs: 0 });
   const v1: AgentEvent[] = []; const v2: UiEvent[] = [];
-  const session = runner.startSession({ userPrompt: 'mock:stream-retry recover', cwd: process.cwd() },
+  const session = runner.startSession({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'mock:stream-retry recover', cwd: process.cwd() },
     event => v1.push(event), { autoEndAfterFirstTurn: true, onUiEvent: event => v2.push(event) });
   const result = await session.result;
   expect(result.text).toBe('Recovered after reconnect.');

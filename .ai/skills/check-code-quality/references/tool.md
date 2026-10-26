@@ -107,6 +107,7 @@ project's default Vitest projects unless `--project` selects specific ones.
 ```sh
 node <skill>/scripts/metrics.mjs src/example.ts --function choose --json
 node <skill>/scripts/metrics.mjs src/example.ts --line 42 --json
+node <skill>/scripts/metrics.mjs src/example.ts --line 42 --column 7 --json
 node <skill>/scripts/metrics.mjs src/example.ts --coverage coverage/coverage-final.json --json
 node <skill>/scripts/metrics.mjs src/example.ts --test src/example.test.ts --project unit --json
 ```

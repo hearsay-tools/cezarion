@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentEvent, SessionOptions } from './agent-runner.ts';
 import { CodexAppServerRunner } from './codex-app-server-runner.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const mockBin = fileURLToPath(new URL('../../scripts/mock-codex-app-server.mjs', import.meta.url));
 const waitUntil = async (cond: () => boolean) => {
@@ -18,7 +19,7 @@ const start = (prompt: string, opts: SessionOptions = {}, env: Record<string, st
   const rpcLog = join(dir, 'rpc.ndjson');
   const events: AgentEvent[] = [];
   const session = new CodexAppServerRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
-    { userPrompt: prompt, cwd: dir, env: { CEZ_MOCK_ARGS_FILE: rpcLog, ...env } }, event => events.push(event), opts);
+    { toolGrant: UNSET_TOOL_GRANT, userPrompt: prompt, cwd: dir, env: { CEZ_MOCK_ARGS_FILE: rpcLog, ...env } }, event => events.push(event), opts);
   const requests = () => readFileSync(rpcLog, 'utf8').trim().split('\n').map(line => JSON.parse(line) as { method?: string; params?: Record<string, unknown> });
   return { session, events, requests };
 };

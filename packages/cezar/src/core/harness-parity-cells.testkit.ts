@@ -49,8 +49,11 @@ import {
   type AgentRunSpecField,
   type ContentBlock,
   type RunnerId,
+  type ToolGrant,
 } from './agent-runner.ts';
 import { createRunner } from './runner-factory.ts';
+import { explicitToolGrant } from './tool-grant.testkit.ts';
+import { describeToolGrantParity } from './tool-grant-parity-cells.testkit.ts';
 import { inputDeliveryOf } from './agent-runner.ts';
 import { agentTmpDir, resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { appendTurnText } from '../workflows/run.ts';
@@ -875,7 +878,7 @@ const agentInput = (parentRunId: string, text = '/owned-skill mock:agent-echo pa
 // the runner's real boundary — the same argv / JSON-RPC / HTTP recordings D1
 // reads, plus the first user message where a mock records its stdin — so a
 // runner cannot say it maps a field it drops, and cannot quietly start mapping
-// one it declared dropped. Codex and OpenCode ignoring `allowedTools` stays
+// one it declared dropped. Codex and OpenCode ignoring `toolGrant` stays
 // pinned exactly as long as they declare it (the product decision the
 // `AgentRunSpec` caveat in AGENT_PROTOCOL.md records).
 
@@ -905,14 +908,9 @@ const SPEC_FIELD_PROBES: Readonly<Record<AgentRunSpecField, SpecFieldProbe>> = {
   userPrompt: { kind: 'boundary', without: {}, with: { userPrompt: 'inspect the working tree, then report' } },
   images: { kind: 'boundary', without: {}, with: { images: [PROBE_IMAGE] } },
   cwd: { kind: 'process' },
-  allowedTools: { kind: 'boundary', without: {}, with: { allowedTools: ['Read', 'Grep'] } },
+  // `without` is the drive's unset grant; the tool-grant cells pin every kind, bashAllowlist included.
+  toolGrant: { kind: 'boundary', without: {}, with: { toolGrant: explicitToolGrant(['Read', 'Grep']) } },
   restrictNativeDelegation: { kind: 'boundary', without: {}, with: { restrictNativeDelegation: true } },
-  // Only meaningful next to an allowed `Bash`, so both sides carry it.
-  bashAllowlist: {
-    kind: 'boundary',
-    without: { allowedTools: ['Bash'] },
-    with: { allowedTools: ['Bash'], bashAllowlist: ['git status'] },
-  },
   additionalDirectories: { kind: 'boundary', without: {}, with: { additionalDirectories: ['/tmp/parity-probe-extra'] } },
   env: { kind: 'process' },
   model: { kind: 'boundary', without: {}, with: { model: 'parity-probe/model-sentinel' } },
@@ -1019,6 +1017,9 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
       }
     }
   });
+
+  // hearsay-tools/cezarion#1810: the Tool-list kinds case table, one cell per case and runner.
+  describeToolGrantParity(scope);
 
   describeRunners('harness parity — input delivery (#505)', () => {
     for (const backend of runners) {
@@ -2212,7 +2213,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
               const path = join(dir, `${restricted}.ndjson`);
               if (backend === 'opencode' && resume) seedOpencodeMockSession(path);
               const obs = await driveSeam(backend, 'baseline', { spec: {
-                cwd: dir, resume, allowedTools: ['Read', 'Bash'], bashAllowlist: ['git status'],
+                cwd: dir, resume, toolGrant: explicitToolGrant(['Read', 'Bash'], ['git status']),
                 systemPrompt: 'Use cezar workers. Native workers are not tracked by cezar.',
                 ...(restricted ? { restrictNativeDelegation: true } : {}),
                 env: { CEZ_MOCK_ARGS_FILE: path, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' },
@@ -2447,7 +2448,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             }
             // Both directions: an honored field must leave a footprint, and a
             // declared-dropped field must leave none — that inversion is what
-            // keeps codex/opencode `allowedTools` pinned as ignored (AC #3).
+            // keeps codex/opencode `toolGrant` pinned as ignored (AC #3).
             expect({ backend, field, honored: observed }).toEqual({ backend, field, honored: declared });
           });
         }
@@ -2466,10 +2467,10 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
     const wait = { id: '11111111-1111-4111-8111-111111111111', generation: 'gen', turnId: 'turn', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true, prUrl: 'https://github.com/owner/repo/pull/1', repository: 'owner/repo', prNumber: 1, headSha: 'a'.repeat(40), registeredAt: '2026-09-22T00:00:00.000Z', deadline: '2026-09-22T00:30:00.000Z', phase: 'registered' as const };
     // hearsay-tools/cezarion#1305: pi also runs the default list, which admits the tools through no allowlist.
     const lists = (backend: RunnerId) => [
-      { label: '', allowedTools: ['Read'] },
-      ...(backend === 'pi' ? [{ label: ' on the default tool list', allowedTools: allowedToolsForStep(undefined, 'pi') }] : []),
+      { label: '', toolGrant: explicitToolGrant(['Read']) },
+      ...(backend === 'pi' ? [{ label: ' on the default tool list', toolGrant: { kind: 'step-default', tools: allowedToolsForStep(undefined, 'pi') } as ToolGrant }] : []),
     ];
-    for (const backend of runners) for (const enabled of [true, false]) for (const { label, allowedTools } of lists(backend)) {
+    for (const backend of runners) for (const enabled of [true, false]) for (const { label, toolGrant } of lists(backend)) {
       it(`${backend} R35 ${enabled ? 'exposes' : 'hides'} preview serve and stop with CEZ_PREVIEW ${enabled ? 'on' : 'off'} and the schedule tools with CEZ_AUTOMATIONS ${enabled ? 'on' : 'off'}${label}`, async () => {
         vi.stubEnv('CEZ_PREVIEW', enabled ? '1' : '');
         vi.stubEnv('CEZ_AUTOMATIONS', enabled ? '1' : '');
@@ -2478,7 +2479,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         const dir = mkdtempSync(join(tmpdir(), 'cez-tools-list-'));
         try {
           const session = controller.provision({ registerWait: async () => ({ answer: { ok: true, wait_id: wait.id, kind: 'pr', deadline: wait.deadline, open_waits: [] }, wait: { ...wait, kind: 'pr', source: 'agent', via: 'cezar_wait', phase: 'open' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: [] }) });
-          const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, allowedTools, env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
+          const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, toolGrant, env: { ...session.env, CEZ_MOCK_ARGS_FILE: join(dir, 'wire'), CEZ_MOCK_CI_PR: wait.prUrl, CEZ_MOCK_CI_RESULT: join(dir, 'result'), CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
           expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
           const waits = ['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done'];
           const expected = enabled ? [...waits, 'cezar_preview_serve', 'cezar_preview_stop', 'cezar_schedule_task', 'cezar_scheduled_tasks'] : waits;

@@ -32,7 +32,7 @@ function evaluate(expression, ctx) {
 }
 function shell(command, env = {}) {
   return spawnSync('bash', ['-eu', '-c', command], { encoding: 'utf8', env: { PATH: process.env.PATH,
-    EVENT_NAME: 'merge_group', CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success',
+    EVENT_NAME: 'merge_group', CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success',
     BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success',
     COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'false',
     VERIFIED_SHA: 'a'.repeat(40), PROOF_RESULT: 'success', PROOF_VERIFIED: 'false', PROOF_SOURCE: '', GITHUB_STEP_SUMMARY: '/dev/null', ...env } });
@@ -40,7 +40,7 @@ function shell(command, env = {}) {
 test('proof roster expands every verification matrix and queue admission', () => {
   const { REQUIRED_QUEUE_JOBS } = require('./queue-ci-proof.cjs');
   const ci = workflow();
-  const names = ['change-surface', 'classify-pr', 'build-and-package', 'vitest', 'cockpit-browser', 'verify', 'queue-admission']
+  const names = ['change-surface', 'classify-pr', 'complexity-gate', 'build-and-package', 'vitest', 'cockpit-browser', 'verify', 'queue-admission']
     .flatMap(id => {
       const j = ci.jobs[id];
       return j.strategy ? j.strategy.matrix.shard.map(n => j.name.replace('${{ matrix.shard }}', String(n))) : [j.name];

@@ -63,7 +63,7 @@ describe('stopped composer engine', { timeout: 15_000 }, () => {
     const next = createFixtureManager(reopened, root); managers.push(next);
     await next.recover();
     await vi.waitFor(() => expect(captured.specs).toHaveLength(1), SETTLE);
-    expect(captured.specs[0]).toMatchObject({ model: 'sonnet', effort: 'high', allowedTools: ['Read'], env: { CLAUDE_CONFIG_DIR: accountDir } });
+    expect(captured.specs[0]).toMatchObject({ model: 'sonnet', effort: 'high', toolGrant: { kind: 'explicit', tools: ['Read'] }, env: { CLAUDE_CONFIG_DIR: accountDir } });
     expect(JSON.stringify(captured.specs[0])).toContain('original task');
     expect(JSON.stringify(captured.specs[0])).toContain('new request');
     expect(JSON.stringify(captured.specs[0])).toContain('private instruction');

@@ -164,7 +164,7 @@ export async function generateRunName(repoRoot: string, ctx: NamerContext): Prom
         systemPrompt: NAMER_SYSTEM_PROMPT,
         userPrompt: buildNamerPrompt(ctx),
         cwd: repoRoot,
-        allowedTools: [],
+        toolGrant: { kind: 'explicit', tools: [] },
         model,
         timeoutMs: NAMER_TIMEOUT_MS,
         // Shadow the argv-capture hook: dry-run tests capture the AGENT's argv

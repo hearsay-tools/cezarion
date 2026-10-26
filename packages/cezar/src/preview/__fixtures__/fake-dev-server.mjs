@@ -2,6 +2,8 @@
 // optionally forks a child that holds the port (npm -> node -> vite), optionally prints N lines.
 //   --port N [--delay MS] [--host H] [--fork] [--lines N] [--exit-code C] [--stdin-eof]
 //   [--leader-exits] (with --fork: the leader exits once the holder listens) [--ignore-term] (the holder ignores SIGTERM)
+//   [--lifetime MS] (the process ends itself after MS, default 5 min: a test run killed before its teardown strands it otherwise)
+//   [--owner TOKEN] (ignored; it tags argv, so a test can find what it left behind: see fixtureProcessGuard, hearsay-tools/cezarion#1880)
 import { spawn } from 'node:child_process';
 import { createServer } from 'node:net';
 import { fileURLToPath } from 'node:url';
@@ -13,6 +15,9 @@ const value = (name, fallback) => (args.includes(`--${name}`) ? args[args.indexO
 const port = Number(value('port', 0));
 const delay = Number(value('delay', 0));
 const host = value('host', '127.0.0.1');
+const lifetime = Number(value('lifetime', 300_000));
+// Unref'd, so a fixture that ends by itself (--exit-code, --stdin-eof) is not held up; it still fires while a timer or socket keeps the process alive.
+setTimeout(() => process.exit(0), lifetime).unref();
 
 for (let line = 1; line <= Number(value('lines', 0)); line += 1) console.log(`fake-dev-server line ${line}`);
 
@@ -23,7 +28,7 @@ if (flag('stdin-eof')) {
   process.stdin.on('end', () => { console.log('stdin-eof'); process.exit(0); });
 } else if (flag('fork') && !flag('holder')) {
   // Same process group as this process: a supervisor that kills only our pid leaves the holder up.
-  const holder = spawn(process.execPath, [fileURLToPath(import.meta.url), '--holder', '--port', String(port), '--delay', String(delay), '--host', host, ...(flag('ignore-term') ? ['--ignore-term'] : [])], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const holder = spawn(process.execPath, [fileURLToPath(import.meta.url), '--holder', '--port', String(port), '--delay', String(delay), '--host', host, '--lifetime', String(lifetime), ...(flag('owner') ? ['--owner', value('owner')] : []), ...(flag('ignore-term') ? ['--ignore-term'] : [])], { stdio: ['ignore', 'pipe', 'ignore'] });
   if (flag('leader-exits')) holder.stdout.once('data', () => process.exit(3));
   setInterval(() => {}, 1 << 30);
 } else {

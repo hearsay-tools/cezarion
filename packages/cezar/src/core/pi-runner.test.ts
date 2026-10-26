@@ -13,6 +13,7 @@ import { buildPiArgs, PiRunner } from './pi-runner.js';
 import { cezarToolNames } from '../ci-wait/tools.js';
 import { appendTurnText } from '../workflows/run.js';
 import { allowedToolsForStep } from '../workflows/types.js';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 /**
  * The `pi` runner (#387): a new AgentBackend slotted into the runner seam as
@@ -73,7 +74,7 @@ describe('a dry-run pi session emits normalized AgentEvents', () => {
 
     const events: AgentEvent[] = [];
     const result = await runner.run(
-      { userPrompt: 'investigate the login redirect bug', cwd, timeoutMs: 20_000 },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'investigate the login redirect bug', cwd, timeoutMs: 20_000 },
       (event) => events.push(event),
     );
 
@@ -142,7 +143,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
 
     const runner = new PiRunner({ bin: mockPath });
     const events: AgentEvent[] = [];
-    await runner.run({ userPrompt: 'ask me', cwd, timeoutMs: 10_000 }, (event) => events.push(event));
+    await runner.run({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'ask me', cwd, timeoutMs: 10_000 }, (event) => events.push(event));
 
     expect(events.filter((event) => event.type === 'cost')).toEqual([{ type: 'cost', usd: 0 }]);
 
@@ -201,7 +202,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
 
     const runner = new PiRunner({ bin: mockPath });
     const events: AgentEvent[] = [];
-    await runner.run({ userPrompt: 'use a tool', cwd, timeoutMs: 10_000 }, (event) => events.push(event));
+    await runner.run({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'use a tool', cwd, timeoutMs: 10_000 }, (event) => events.push(event));
 
     const textEvents = events.filter((e): e is Extract<AgentEvent, { type: 'text' }> => e.type === 'text');
     expect(textEvents.map((e) => e.text)).toEqual(['before tool', 'after tool']);
@@ -247,7 +248,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
 
     const runner = new PiRunner({ bin: mockPath });
     const events: AgentEvent[] = [];
-    await runner.run({ userPrompt: 'interrupt me', cwd, timeoutMs: 10_000 }, (event) => events.push(event));
+    await runner.run({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'interrupt me', cwd, timeoutMs: 10_000 }, (event) => events.push(event));
 
     const textEvents = events.filter((e): e is Extract<AgentEvent, { type: 'text' }> => e.type === 'text');
     expect(textEvents.map((e) => e.text)).toEqual(['partial only', 'after interrupt']);
@@ -292,7 +293,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
 
     const runner = new PiRunner({ bin: mockPath });
     const events: AgentEvent[] = [];
-    await runner.run({ userPrompt: 'steer me', cwd, timeoutMs: 10_000 }, (event) => events.push(event));
+    await runner.run({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'steer me', cwd, timeoutMs: 10_000 }, (event) => events.push(event));
 
     const textEvents = events.filter((e): e is Extract<AgentEvent, { type: 'text' }> => e.type === 'text');
     expect(textEvents.map((e) => e.text)).toEqual([full]);
@@ -338,7 +339,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     let activeFollowUpSent = false;
     let freshFollowUpScheduled = false;
     session = new PiRunner({ bin: mockPath }).startSession(
-      { userPrompt: 'start', cwd, timeoutMs: 2_000 },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'start', cwd, timeoutMs: 2_000 },
       (event) => events.push(event),
       {
         autoEndAfterFirstTurn: true,
@@ -404,7 +405,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     let session: AgentSession | undefined;
     let followUpSent = false;
     session = new PiRunner({ bin: mockPath }).startSession(
-      { userPrompt: 'start', cwd, timeoutMs: 10_000 },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'start', cwd, timeoutMs: 10_000 },
       undefined,
       {
         autoEndAfterFirstTurn: true,
@@ -466,7 +467,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     let session: AgentSession | undefined;
     let followUpSent = false;
     session = new PiRunner({ bin: mockPath }).startSession(
-      { userPrompt: 'start', cwd, timeoutMs: 10_000 },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'start', cwd, timeoutMs: 10_000 },
       undefined,
       {
         autoEndAfterFirstTurn: true,
@@ -515,7 +516,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
 
     const events: AgentEvent[] = [];
     await new PiRunner({ bin: mockPath }).startSession(
-      { userPrompt: 'start', cwd, timeoutMs: 10_000 },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'start', cwd, timeoutMs: 10_000 },
       (event) => events.push(event),
     ).result;
 
@@ -559,7 +560,7 @@ async function runPiMock(
   const events: AgentEvent[] = [];
   const uiEvents: UiEvent[] = [];
   await new PiRunner({ bin: mockPath }).startSession(
-    { userPrompt: 'go', cwd, timeoutMs: 10_000 },
+    { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'go', cwd, timeoutMs: 10_000 },
     (event) => events.push(event),
     { onUiEvent: (event) => uiEvents.push(event), autoEndAfterFirstTurn: true },
   ).result;
@@ -754,8 +755,8 @@ describe('pi RPC argv', () => {
 
   it('always loads the project-skills extension from a shipped script, before the CI extension (hearsay-tools/cezarion#1295)', () => {
     for (const spec of [
-      { cwd: '/repo', userPrompt: 'task' },
-      { cwd: '/repo', userPrompt: 'task', cezarTools: { name: 'cezar_ci_test', command: 'node', args: ['/x.mjs'] } },
+      { cwd: '/repo', userPrompt: 'task', toolGrant: UNSET_TOOL_GRANT },
+      { cwd: '/repo', userPrompt: 'task', toolGrant: UNSET_TOOL_GRANT, cezarTools: { name: 'cezar_ci_test', command: 'node', args: ['/x.mjs'] } },
     ]) {
       const args = buildPiArgs(spec);
       const extensions = args.flatMap((arg, index) => (arg === '--extension' ? [args[index + 1]!] : []));
@@ -777,7 +778,7 @@ describe('pi RPC argv', () => {
         resume: true,
         model: 'openai/gpt-5.1',
         systemPrompt: 'Keep changes focused.',
-        allowedTools: ['Read', 'Bash', 'Edit', 'Write', 'Grep', 'Glob'],
+        toolGrant: { kind: 'explicit', tools: ['Read', 'Bash', 'Edit', 'Write', 'Grep', 'Glob'] },
       }),
     ).toEqual([
       '--mode',
@@ -794,7 +795,7 @@ describe('pi RPC argv', () => {
   });
 
   it('creates a new exact session id instead of invoking the interactive resume picker', () => {
-    expect(buildPiArgs({ cwd: '/repo', userPrompt: 'task', sessionId: 'session-1' })).toEqual([
+    expect(buildPiArgs({ toolGrant: UNSET_TOOL_GRANT, cwd: '/repo', userPrompt: 'task', sessionId: 'session-1' })).toEqual([
       '--mode',
       'rpc',
       ...cezarExtensionArgs,
@@ -808,8 +809,7 @@ describe('pi RPC argv', () => {
       buildPiArgs({
         cwd: '/repo',
         userPrompt: 'task',
-        allowedTools: ['Read', 'Bash'],
-        bashAllowlist: ['npm test'],
+        toolGrant: { kind: 'explicit', tools: ['Read', 'Bash'], bashAllowlist: ['npm test'] },
       }),
     ).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read']);
   });
@@ -819,7 +819,7 @@ describe('pi RPC argv', () => {
       buildPiArgs({
         cwd: '/repo',
         userPrompt: 'task',
-        allowedTools: ['Read', 'Edit', 'Write', 'Grep', 'Glob', 'Bash', 'Subagent', 'SubagentSupervisor', 'SubagentWait'],
+        toolGrant: { kind: 'explicit', tools: ['Read', 'Edit', 'Write', 'Grep', 'Glob', 'Bash', 'Subagent', 'SubagentSupervisor', 'SubagentWait'] },
       }),
     ).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, ...defaultToolArgs('read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait')]);
   });
@@ -829,18 +829,18 @@ describe('pi RPC argv', () => {
       buildPiArgs({
         cwd: '/repo',
         userPrompt: 'task',
-        allowedTools: ['Read', 'Bash'],
+        toolGrant: { kind: 'explicit', tools: ['Read', 'Bash'] },
       }),
     ).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read,bash']);
   });
 
   it('maps a canonical effort pin onto --thinking and omits it when unset', () => {
     expect(
-      buildPiArgs({ cwd: '/repo', userPrompt: 'task', effort: 'high' }),
+      buildPiArgs({ toolGrant: UNSET_TOOL_GRANT, cwd: '/repo', userPrompt: 'task', effort: 'high' }),
     ).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--thinking', 'high']);
-    expect(buildPiArgs({ cwd: '/repo', userPrompt: 'task' })).not.toContain('--thinking');
+    expect(buildPiArgs({ toolGrant: UNSET_TOOL_GRANT, cwd: '/repo', userPrompt: 'task' })).not.toContain('--thinking');
     expect(
-      buildPiArgs({ cwd: '/repo', userPrompt: 'task', effort: 'auto' }),
+      buildPiArgs({ toolGrant: UNSET_TOOL_GRANT, cwd: '/repo', userPrompt: 'task', effort: 'auto' }),
     ).not.toContain('--thinking');
   });
 });
@@ -851,47 +851,47 @@ describe('pi RPC argv', () => {
 // nothing fails closed instead of falling back to pi's own default.
 describe('pi tool selection (hearsay-tools/cezarion#1305)', () => {
   const ci = { name: 'cezar_ci_test', command: 'node', args: ['/x.mjs'] };
-  const base = { cwd: '/repo', userPrompt: 'task' };
+  const base = { cwd: '/repo', userPrompt: 'task', toolGrant: UNSET_TOOL_GRANT };
   const stepDefault = allowedToolsForStep(undefined, 'pi');
   const toolFlags = (args: string[]) => args.filter((arg) => ['--tools', '--no-tools', '--no-builtin-tools', '--cezar-builtin-tools'].includes(arg));
   const extensions = (args: string[]) => args.flatMap((arg, index) => (arg === '--extension' ? [args[index + 1]!] : []));
 
   it('sends no allowlist for the step default, and names its built-ins to the default-tools extension', () => {
-    const args = buildPiArgs({ ...base, allowedTools: stepDefault });
+    const args = buildPiArgs({ ...base, toolGrant: { kind: 'step-default', tools: stepDefault } });
     expect(args).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, ...defaultToolArgs('read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait')]);
     expect(args).not.toContain('--tools');
     expect(existsSync(extensions(args).at(-1)!)).toBe(true);
   });
 
   it('keeps the default path for the six base tools alone, the list a worker inherits from a Claude parent', () => {
-    expect(buildPiArgs({ ...base, allowedTools: allowedToolsForStep(undefined, 'claude') })).toEqual([
+    expect(buildPiArgs({ ...base, toolGrant: { kind: 'inherited', tools: allowedToolsForStep(undefined, 'claude') } })).toEqual([
       '--mode', 'rpc', ...cezarExtensionArgs, ...defaultToolArgs('read,edit,write,grep,find,bash'),
     ]);
   });
 
   it('narrows to the --tools allowlist when the list names a tool outside the pi default, so the grant stays limited to it', () => {
     const named = 'read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait,ls,webfetch';
-    expect(buildPiArgs({ ...base, allowedTools: [...stepDefault, 'ls', 'WebFetch'] })).toEqual([
+    expect(buildPiArgs({ ...base, toolGrant: { kind: 'explicit', tools: [...stepDefault, 'ls', 'WebFetch'] } })).toEqual([
       '--mode', 'rpc', ...cezarExtensionArgs, '--tools', named,
     ]);
-    expect(buildPiArgs({ ...base, allowedTools: [...allowedToolsForStep(undefined, 'claude'), 'review_tool'] })).toEqual([
+    expect(buildPiArgs({ ...base, toolGrant: { kind: 'inherited', tools: [...allowedToolsForStep(undefined, 'claude'), 'review_tool'] } })).toEqual([
       '--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read,edit,write,grep,find,bash,review_tool',
     ]);
   });
 
   it('narrows to the --tools allowlist when the list names an mcp__ tool, so the grant stays limited to it', () => {
     const named = 'read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait,mcp__plug__word';
-    expect(buildPiArgs({ ...base, allowedTools: [...stepDefault, 'mcp__plug__word'] })).toEqual([
+    expect(buildPiArgs({ ...base, toolGrant: { kind: 'explicit', tools: [...stepDefault, 'mcp__plug__word'] } })).toEqual([
       '--mode', 'rpc', ...cezarExtensionArgs, '--tools', named,
     ]);
-    expect(buildPiArgs({ ...base, allowedTools: [...stepDefault, 'mcp__plug__word'], cezarTools: ci })).toEqual([
+    expect(buildPiArgs({ ...base, toolGrant: { kind: 'explicit', tools: [...stepDefault, 'mcp__plug__word'] }, cezarTools: ci })).toEqual([
       '--mode', 'rpc', ...cezarExtensionArgs, '--extension', expect.stringMatching(/scripts\/pi-ci-wait\.mjs$/),
       '--tools', [named, ...cezarToolNames({})].join(','),
     ]);
   });
 
   it('admits the cezar tools through the CI extension on the default path, not through a list', () => {
-    const args = buildPiArgs({ ...base, allowedTools: stepDefault, cezarTools: ci });
+    const args = buildPiArgs({ ...base, toolGrant: { kind: 'step-default', tools: stepDefault }, cezarTools: ci });
     expect(extensions(args)).toEqual([
       expect.stringMatching(/scripts\/pi-retry-degraded-service\.mjs$/),
       expect.stringMatching(/scripts\/pi-project-skills\.mjs$/),
@@ -903,14 +903,14 @@ describe('pi tool selection (hearsay-tools/cezarion#1305)', () => {
   });
 
   it('keeps --exclude-tools subagent on the default path under restrictNativeDelegation', () => {
-    const args = buildPiArgs({ ...base, allowedTools: stepDefault, restrictNativeDelegation: true });
+    const args = buildPiArgs({ ...base, toolGrant: { kind: 'step-default', tools: stepDefault }, restrictNativeDelegation: true });
     expect(args).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--exclude-tools', 'subagent', ...defaultToolArgs('read,edit,write,grep,find,bash,subagent,subagent_supervisor,subagent_wait')]);
   });
 
   it('keeps the --tools allowlist for a narrowed list', () => {
-    expect(toolFlags(buildPiArgs({ ...base, allowedTools: ['Read'] }))).toEqual(['--tools']);
-    expect(buildPiArgs({ ...base, allowedTools: ['Read'] })).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read']);
-    expect(buildPiArgs({ ...base, allowedTools: ['Read'], cezarTools: ci })).toEqual([
+    expect(toolFlags(buildPiArgs({ ...base, toolGrant: { kind: 'explicit', tools: ['Read'] } }))).toEqual(['--tools']);
+    expect(buildPiArgs({ ...base, toolGrant: { kind: 'explicit', tools: ['Read'] } })).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read']);
+    expect(buildPiArgs({ ...base, toolGrant: { kind: 'explicit', tools: ['Read'] }, cezarTools: ci })).toEqual([
       '--mode', 'rpc', ...cezarExtensionArgs, '--extension', expect.stringMatching(/scripts\/pi-ci-wait\.mjs$/),
       '--tools', ['read', ...cezarToolNames({})].join(','),
     ]);
@@ -918,30 +918,30 @@ describe('pi tool selection (hearsay-tools/cezarion#1305)', () => {
 
   // hearsay-tools/cezarion#1465: a narrowed list admits the schedule tools only under the opt-in.
   it('admits the schedule tools in a narrowed list only with CEZ_AUTOMATIONS=1', () => {
-    const on = buildPiArgs({ ...base, allowedTools: ['Read'], cezarTools: ci, env: { CEZ_AUTOMATIONS: '1' } });
+    const on = buildPiArgs({ ...base, toolGrant: { kind: 'explicit', tools: ['Read'] }, cezarTools: ci, env: { CEZ_AUTOMATIONS: '1' } });
     expect(on[on.indexOf('--tools') + 1]!.split(',')).toEqual(expect.arrayContaining(['cezar_schedule_task', 'cezar_scheduled_tasks']));
-    const off = buildPiArgs({ ...base, allowedTools: ['Read'], cezarTools: ci });
+    const off = buildPiArgs({ ...base, toolGrant: { kind: 'explicit', tools: ['Read'] }, cezarTools: ci });
     expect(off[off.indexOf('--tools') + 1]!.split(',')).not.toContain('cezar_schedule_task');
   });
 
   it('treats a bashAllowlist on the default list as narrowed: --tools without bash', () => {
-    expect(buildPiArgs({ ...base, allowedTools: stepDefault, bashAllowlist: ['npm test'] })).toEqual([
+    expect(buildPiArgs({ ...base, toolGrant: { kind: 'step-default', tools: stepDefault, bashAllowlist: ['npm test'] } })).toEqual([
       '--mode', 'rpc', ...cezarExtensionArgs, '--tools', 'read,edit,write,grep,find,subagent,subagent_supervisor,subagent_wait',
     ]);
   });
 
   it('fails closed with --no-tools when a given list maps to nothing', () => {
-    expect(buildPiArgs({ ...base, allowedTools: [] })).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--no-tools']);
-    expect(buildPiArgs({ ...base, allowedTools: ['Bash'], bashAllowlist: ['git status'] })).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--no-tools']);
+    expect(buildPiArgs({ ...base, toolGrant: { kind: 'explicit', tools: [] } })).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--no-tools']);
+    expect(buildPiArgs({ ...base, toolGrant: { kind: 'explicit', tools: ['Bash'], bashAllowlist: ['git status'] } })).toEqual(['--mode', 'rpc', ...cezarExtensionArgs, '--no-tools']);
   });
 
   it('admits only the cezar tools when an empty list carries cezarTools', () => {
-    const args = buildPiArgs({ ...base, allowedTools: [], cezarTools: ci });
+    const args = buildPiArgs({ ...base, toolGrant: { kind: 'explicit', tools: [] }, cezarTools: ci });
     expect(toolFlags(args)).toEqual(['--tools']);
     expect(args[args.indexOf('--tools') + 1]).toBe(cezarToolNames({}).join(','));
   });
 
-  it('sends no tool flag when allowedTools is undefined, leaving pi its own default', () => {
+  it('sends no tool flag for an unset grant, leaving pi its own default', () => {
     expect(toolFlags(buildPiArgs(base))).toEqual([]);
     expect(toolFlags(buildPiArgs({ ...base, cezarTools: ci }))).toEqual([]);
   });
@@ -1014,7 +1014,7 @@ describe('Pi signal teardown (#73)', () => {
     const ui: UiEvent[] = [];
     let session: AgentSession;
     session = new PiRunner({ bin }).startSession(
-      { userPrompt: 'ready', cwd: tmpdir(), timeoutMs: 20_000 },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'ready', cwd: tmpdir(), timeoutMs: 20_000 },
       (event) => {
         events.push(event);
         if (event.type === 'turn-end') session[action]();
@@ -1031,7 +1031,7 @@ describe('Pi signal teardown (#73)', () => {
 
   it('still rejects exit 143 when Cezar did not send the signal', async () => {
     await expect(new PiRunner({ bin }).startSession(
-      { userPrompt: 'self-exit', cwd: tmpdir(), timeoutMs: 5000 },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'self-exit', cwd: tmpdir(), timeoutMs: 5000 },
     ).result).rejects.toThrow('pi CLI exited with code 143');
   });
 });

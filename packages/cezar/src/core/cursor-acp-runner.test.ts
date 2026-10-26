@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { createRunner } from './runner-factory.ts';
 import type { RunnerId } from './agent-runner.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 describe('Cursor ACP runner', () => {
   it('constructs the Cursor backend instead of silently falling back to Claude', () => {
@@ -24,7 +25,7 @@ const fastRetry = () => new CursorAcpRunner({ providerRetry: { backoffMs: 10 } }
 async function withSession(prompt: string, body: (session: AgentSession, v1: AgentEvent[], v2: UiEvent[]) => Promise<void>, runner: AgentRunner = new CursorAcpRunner()) {
   vi.stubEnv('CEZ_CURSOR_BIN', mock);
   const v1: AgentEvent[] = []; const v2: UiEvent[] = [];
-  const session = runner.startSession({ cwd: process.cwd(), userPrompt: prompt, timeoutMs: 5000 }, e => v1.push(e), { onUiEvent: e => v2.push(e) });
+  const session = runner.startSession({ toolGrant: UNSET_TOOL_GRANT, cwd: process.cwd(), userPrompt: prompt, timeoutMs: 5000 }, e => v1.push(e), { onUiEvent: e => v2.push(e) });
   try { await body(session, v1, v2); } finally { session.interrupt(); await session.result.catch(() => {}); vi.unstubAllEnvs(); }
 }
 it('holdsHumanInput is true while a follow-up is queued behind a busy turn (#486)', async () => {
@@ -239,7 +240,7 @@ it('retries with the answer continuation after a transient failure post-answer',
   try {
     vi.stubEnv('CEZ_CURSOR_BIN', mock);
     const v1: AgentEvent[] = []; const v2: UiEvent[] = [];
-    const session = fastRetry().startSession({ cwd: process.cwd(), userPrompt: 'mock:ask-error', timeoutMs: 15000, env: { CEZ_MOCK_STDIN_FILE: file } }, e => v1.push(e), { onUiEvent: e => v2.push(e) });
+    const session = fastRetry().startSession({ toolGrant: UNSET_TOOL_GRANT, cwd: process.cwd(), userPrompt: 'mock:ask-error', timeoutMs: 15000, env: { CEZ_MOCK_STDIN_FILE: file } }, e => v1.push(e), { onUiEvent: e => v2.push(e) });
     try {
       await waitFor(() => v2.some(e => e.type === 'ask.requested'));
       expect(session.sendMessage([{ type: 'text', text: 'Vitest' }])).toBe(true);
@@ -264,7 +265,7 @@ it('retries the queued free-text answer before the continuation prompt', async (
   try {
     vi.stubEnv('CEZ_CURSOR_BIN', mock);
     const v1: AgentEvent[] = []; const v2: UiEvent[] = [];
-    const session = fastRetry().startSession({ cwd: process.cwd(), userPrompt: 'mock:ask-error', timeoutMs: 15000, env: { CEZ_MOCK_STDIN_FILE: file } }, e => v1.push(e), { onUiEvent: e => v2.push(e) });
+    const session = fastRetry().startSession({ toolGrant: UNSET_TOOL_GRANT, cwd: process.cwd(), userPrompt: 'mock:ask-error', timeoutMs: 15000, env: { CEZ_MOCK_STDIN_FILE: file } }, e => v1.push(e), { onUiEvent: e => v2.push(e) });
     try {
       await waitFor(() => v2.some(e => e.type === 'ask.requested'));
       expect(session.sendMessage([{ type: 'text', text: 'Use playwright, not vitest' }])).toBe(true);
@@ -454,7 +455,7 @@ it('keeps queued human input ahead of reentrant worker input at turn end', async
   let session: AgentSession;
   let admitted: false | Promise<void> | undefined;
   let turns = 0;
-  session = new CursorAcpRunner().startSession({ cwd: process.cwd(), userPrompt: 'mock:hold' }, e => {
+  session = new CursorAcpRunner().startSession({ toolGrant: UNSET_TOOL_GRANT, cwd: process.cwd(), userPrompt: 'mock:hold' }, e => {
     if (e.type === 'turn-end' && ++turns === 1) admitted = session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo WORKER' }]);
   });
   try {
@@ -473,7 +474,7 @@ it.each([['sonnet-test', 'effort'], ['gpt-test', 'reasoning']])('applies adverti
   const dir = mkdtempSync(join(tmpdir(), 'cursor-config-'));
   const file = join(dir, 'wire.ndjson');
   try {
-    const result = await new CursorAcpRunner({ bin: mock }).run({ cwd: dir, userPrompt: 'mock:done', model, effort: 'high', env: { CEZ_MOCK_STDIN_FILE: file }, timeoutMs: 5000 });
+    const result = await new CursorAcpRunner({ bin: mock }).run({ toolGrant: UNSET_TOOL_GRANT, cwd: dir, userPrompt: 'mock:done', model, effort: 'high', env: { CEZ_MOCK_STDIN_FILE: file }, timeoutMs: 5000 });
     expect(result.text).toContain('Done.');
     const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     expect(rows.find(row => row.method === 'initialize').params.clientCapabilities._meta.parameterizedModelPicker).toBe(true);
@@ -484,7 +485,7 @@ it.each([['sonnet-test', 'effort'], ['gpt-test', 'reasoning']])('applies adverti
 });
 it('fails before inference when the selected model does not advertise the requested effort', async () => {
   const errors: AgentEvent[] = [];
-  const result = await new CursorAcpRunner({ bin: mock }).run({ cwd: process.cwd(), userPrompt: 'mock:done', effort: 'impossible', timeoutMs: 5000 }, event => errors.push(event));
+  const result = await new CursorAcpRunner({ bin: mock }).run({ toolGrant: UNSET_TOOL_GRANT, cwd: process.cwd(), userPrompt: 'mock:done', effort: 'impossible', timeoutMs: 5000 }, event => errors.push(event));
   expect(result.text).toBe('');
   expect(errors.some(event => event.type === 'error' && event.message.includes('does not advertise'))).toBe(true);
 });
@@ -493,7 +494,7 @@ it('refreshes model-dependent effort options after setting the advertised model'
   const dir = mkdtempSync(join(tmpdir(), 'cursor-config-model-'));
   const file = join(dir, 'wire.ndjson');
   try {
-    const result = await new CursorAcpRunner({ bin: mock }).run({ cwd: dir, userPrompt: 'mock:done', model: 'sonnet-test', effort: 'high', env: { CEZ_MOCK_STDIN_FILE: file, CEZ_MOCK_CURSOR_INITIAL_MODEL: 'gpt-test' }, timeoutMs: 5000 });
+    const result = await new CursorAcpRunner({ bin: mock }).run({ toolGrant: UNSET_TOOL_GRANT, cwd: dir, userPrompt: 'mock:done', model: 'sonnet-test', effort: 'high', env: { CEZ_MOCK_STDIN_FILE: file, CEZ_MOCK_CURSOR_INITIAL_MODEL: 'gpt-test' }, timeoutMs: 5000 });
     expect(result.text).toContain('Done.');
     const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     const settings = rows.filter(row => row.method === 'session/set_config_option').map(row => [row.params.configId, row.params.value]);
@@ -505,7 +506,7 @@ it('keeps legacy model control when config options are absent', async () => {
   const file = join(dir, 'wire.ndjson');
   try {
     const model = 'model[effort=high]';
-    const result = await new CursorAcpRunner({ bin: mock }).run({ cwd: dir, userPrompt: 'mock:done', model, env: { CEZ_MOCK_STDIN_FILE: file, CEZ_MOCK_CURSOR_LEGACY: '1' }, timeoutMs: 5000 });
+    const result = await new CursorAcpRunner({ bin: mock }).run({ toolGrant: UNSET_TOOL_GRANT, cwd: dir, userPrompt: 'mock:done', model, env: { CEZ_MOCK_STDIN_FILE: file, CEZ_MOCK_CURSOR_LEGACY: '1' }, timeoutMs: 5000 });
     expect(result.text).toContain('Done.');
     const rows = readFileSync(file, 'utf8').trim().split('\n').map(line => JSON.parse(line));
     expect(rows.find(row => row.method === 'session/set_model')?.params.modelId).toBe(model);
@@ -514,7 +515,7 @@ it('keeps legacy model control when config options are absent', async () => {
 });
 it('refuses a config acknowledgement that does not confirm the requested value', async () => {
   const errors: AgentEvent[] = [];
-  const result = await new CursorAcpRunner({ bin: mock }).run({ cwd: process.cwd(), userPrompt: 'mock:done', effort: 'high', env: { CEZ_MOCK_CURSOR_STALE_CONFIG: '1' }, timeoutMs: 5000 }, event => errors.push(event));
+  const result = await new CursorAcpRunner({ bin: mock }).run({ toolGrant: UNSET_TOOL_GRANT, cwd: process.cwd(), userPrompt: 'mock:done', effort: 'high', env: { CEZ_MOCK_CURSOR_STALE_CONFIG: '1' }, timeoutMs: 5000 }, event => errors.push(event));
   expect(result.text).toBe('');
   expect(errors.some(event => event.type === 'error' && event.message.includes('did not confirm'))).toBe(true);
 });
@@ -541,7 +542,7 @@ describe('Cursor ACP spawn retry (#529)', () => {
     writeFileSync(crash, String(opts.remaining));
     const v1: AgentEvent[] = [];
     const v2: UiEvent[] = [];
-    const session = crashRunner().startSession({
+    const session = crashRunner().startSession({ toolGrant: UNSET_TOOL_GRANT,
       cwd: dir,
       userPrompt: opts.prompt ?? 'mock:done',
       timeoutMs: 8000,
@@ -607,7 +608,7 @@ describe('Cursor ACP spawn retry (#529)', () => {
     const started = Date.now();
     // Session timeout stays well above the wait so a slow shard cannot pass via
     // timeoutMs instead of stdin-death detection.
-    const session = new CursorAcpRunner({ bin: hang }).startSession({ cwd: process.cwd(), userPrompt: 'hang', timeoutMs: 30_000 }, e => v1.push(e));
+    const session = new CursorAcpRunner({ bin: hang }).startSession({ toolGrant: UNSET_TOOL_GRANT, cwd: process.cwd(), userPrompt: 'hang', timeoutMs: 30_000 }, e => v1.push(e));
     try {
       await waitFor(() => v1.some(e => e.type === 'error'), 10_000);
       expect(v1.some(e => e.type === 'error')).toBe(true);
@@ -627,7 +628,7 @@ describe('Cursor ACP spawn retry (#529)', () => {
     // session/new is written while the pipe's read end is still open, so no data
     // write can fail; only the bootstrap stdin probe surfaces the death before the
     // 15s request timeout (session timeoutMs stays well above the wait).
-    const session = new CursorAcpRunner({ bin: hang }).startSession({ cwd: process.cwd(), userPrompt: 'hang', timeoutMs: 30_000 }, e => v1.push(e));
+    const session = new CursorAcpRunner({ bin: hang }).startSession({ toolGrant: UNSET_TOOL_GRANT, cwd: process.cwd(), userPrompt: 'hang', timeoutMs: 30_000 }, e => v1.push(e));
     try {
       await waitFor(() => v1.some(e => e.type === 'error'), 10_000);
       expect(v1.some(e => e.type === 'error')).toBe(true);
@@ -642,7 +643,7 @@ describe('Cursor ACP spawn retry (#529)', () => {
     const wire = join(dir, 'wire.ndjson');
     try {
       const v1: AgentEvent[] = [];
-      const result = await crashRunner().run({
+      const result = await crashRunner().run({ toolGrant: UNSET_TOOL_GRANT,
         cwd: dir, userPrompt: 'mock:done', timeoutMs: 5000, env: { CEZ_MOCK_STDIN_FILE: wire },
       }, e => v1.push(e));
       expect(v1.some(e => e.type === 'error')).toBe(false);

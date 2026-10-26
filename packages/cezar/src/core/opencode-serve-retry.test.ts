@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from './agent-runner.ts';
 import { OpencodeServerRunner, SERVE_START_RETRY_DELAY_MS } from './opencode-server-runner.ts';
 import { sessionGroupOf } from './session-process.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 /** `override` sees the 1-based spawn count; returning undefined spawns for real. */
 const spawnHook = vi.hoisted(() => ({ calls: 0, override: null as null | ((call: number) => unknown) }));
@@ -50,7 +51,7 @@ function startAgainstMock(failStarts: number, timeoutMs = 0) {
   const events: AgentEvent[] = [];
   const pids: number[] = [];
   const session = new OpencodeServerRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
-    {
+    { toolGrant: UNSET_TOOL_GRANT,
       userPrompt: 'inspect the working tree',
       cwd: dir,
       timeoutMs,
@@ -157,7 +158,7 @@ describe('opencode serve start retry (#872)', { timeout: 20_000 }, () => {
     const events: AgentEvent[] = [];
     const pids: number[] = [];
     const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs: 0, serverStartTimeoutMs: 50 }).startSession(
-      { userPrompt: 'go', cwd: process.cwd() },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'go', cwd: process.cwd() },
       event => events.push(event),
       { onPidChange: pid => pids.push(pid) },
     );
@@ -178,7 +179,7 @@ describe('opencode serve start retry (#872)', { timeout: 20_000 }, () => {
     const events: AgentEvent[] = [];
     const pids: number[] = [];
     const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs: 0, serverStartTimeoutMs: 50 }).startSession(
-      { userPrompt: 'go', cwd: process.cwd() },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'go', cwd: process.cwd() },
       event => events.push(event),
       { onPidChange: pid => pids.push(pid) },
     );
@@ -202,7 +203,7 @@ describe('opencode serve start retry (#872)', { timeout: 20_000 }, () => {
     const events: AgentEvent[] = [];
     const pids: number[] = [];
     const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs: 0 }).startSession(
-      { userPrompt: 'go', cwd: process.cwd() },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'go', cwd: process.cwd() },
       event => events.push(event),
       { onPidChange: pid => pids.push(pid) },
     );
