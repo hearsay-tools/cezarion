@@ -3,10 +3,14 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expect, it } from 'vitest';
+import { afterEach, expect, it } from 'vitest';
 import { DevServer, probePort } from './dev-server.ts';
 import { ChromiumMissingError, PreviewHost, type RunContext } from './host.ts';
-import { fakeViewer } from './preview.testkit.ts';
+import { fakeViewer, fixtureProcessGuard } from './preview.testkit.ts';
+
+// Tags the fixture launch below, so a process left after the test fails it (hearsay-tools/cezarion#1880).
+const guard = fixtureProcessGuard();
+afterEach(() => guard.assertNoneLeft());
 
 it.each(['release', 'replacement'] as const)('reopening during real process teardown keeps %s waiting for the owned group', async action => {
   const listener = createServer();
@@ -15,7 +19,7 @@ it.each(['release', 'replacement'] as const)('reopening during real process tear
   await new Promise<void>(resolve => listener.close(() => resolve()));
   const root = mkdtempSync(join(tmpdir(), 'cez-host-teardown-'));
   const fixture = fileURLToPath(new URL('./__fixtures__/fake-dev-server.mjs', import.meta.url));
-  const command = [process.execPath, fixture, '--port', String(port), '--fork', '--ignore-term'].map(part => JSON.stringify(part)).join(' ');
+  const command = [process.execPath, fixture, '--port', String(port), '--fork', '--ignore-term', ...guard.args].map(part => JSON.stringify(part)).join(' ');
   const registration = { port, command, label: 'fixture', registeredAt: new Date().toISOString(), answeredAtRegistration: false };
   const run = { id: 'run-1', previewServers: [registration] };
   const ctx: RunContext = { runId: run.id, title: 'teardown', worktreePath: root, dataDir: root, store: { getRun: () => run, appendEvent: () => undefined } as unknown as RunContext['store'] };
