@@ -22,6 +22,7 @@ import {
   store, terminal, timeline, track, until, useWorkerWaitFixture, waitOf, lastWaitOf, workerEntryOf, worker,
 } from './worker-wait.testkit.ts';
 import { blockRunWrites, readPersistedRuns, readPersistedText } from '../runs/run-store.testkit.ts';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 // Real Git, durable fsync checkpoints and process shutdown share this outer budget.
 // Keep the separate 15s state/termination assertions and actual runner timers intact.
@@ -548,6 +549,9 @@ describe('worker waits through RunManager', { timeout: 30_000 }, () => {
       await until(() => store.getRun(w.id)?.status === 'cancelled');
       expect(waitOf(store.getRun(p.id))).toBeUndefined(); expect(store.getRun(done.id)?.status).toBe('review');
       expect(store.getRun(w.id)?.delegation?.role).toBe('worker');
+      // Its session is still live, which a settled parent never has: back to running before
+      // teardown stops it (hearsay-tools/cezarion#1804).
+      store.updateRun(p.id, { status: RUN_STATUS.running });
     });
   }
   it('persists lifecycle continuation origin through a queued restart', async () => {

@@ -29,6 +29,7 @@ import { appendTurnText, trackTurnTail, RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { asksQuestion } from '@open-mercato/cezar-contract/waits';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { readPersistedRuns, crashStore } from '../runs/run-store.testkit.ts';
 import { monitoringTimerOf, monitoringWakeOf } from './waits.testkit.ts';
 
@@ -912,7 +913,8 @@ describe('RunManager.settleSuccess — optional review gate', () => {
   async function changedRun(autonomous?: boolean): Promise<RunRecord> {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'task', autonomous, steps: [] });
     const wt = await createWorktree(repoRoot, record.id, 'main');
-    store.updateRun(record.id, { worktreePath: wt.path, branch: wt.branch, baseBranch: wt.baseBranch });
+    // settleSuccess runs at a live turn's end, never on a queued run (hearsay-tools/cezarion#1804).
+    store.updateRun(record.id, { status: RUN_STATUS.running, worktreePath: wt.path, branch: wt.branch, baseBranch: wt.baseBranch });
     writeFileSync(join(wt.path, 'a.txt'), 'one\nTWO\nthree\n');
     writeFileSync(join(wt.path, 'new.txt'), 'x\n');
     return store.getRun(record.id) as RunRecord;
@@ -922,7 +924,7 @@ describe('RunManager.settleSuccess — optional review gate', () => {
   async function cleanRun(): Promise<RunRecord> {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     const wt = await createWorktree(repoRoot, record.id, 'main');
-    store.updateRun(record.id, { worktreePath: wt.path, branch: wt.branch, baseBranch: wt.baseBranch });
+    store.updateRun(record.id, { status: RUN_STATUS.running, worktreePath: wt.path, branch: wt.branch, baseBranch: wt.baseBranch });
     return store.getRun(record.id) as RunRecord;
   }
 

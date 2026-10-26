@@ -6,6 +6,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node
 import { join } from 'node:path';
 import { onTestFinished, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fixture, scheduledDestroyAttempts } from './service.testkit.ts';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { ensureOwnedWorkspace, planOwnedWorkspace } from './workspace.ts';
 import { RunStore } from '../runs/store.ts';
 
@@ -253,6 +254,8 @@ describe('verified destruction retains results through explicit history deletion
     f.store.commitWait(parent.id, { kind: 'worker', id: waitId, source: 'agent', via: 'cez-worker-wait', registeredAt: new Date().toISOString(),
       deadline: new Date(Date.now() + 600_000).toISOString(), timeoutSeconds: 600, phase: 'open', turnId: 'turn-1', mode: 'all',
       workerIds: [workerId, other.workerId], revisions: [{ workerId, revision: 1 }, { workerId: other.workerId, revision: 0 }], outcomes: [] });
+    // Parked on the wait with no session, as the product holds it: a running run always has one.
+    f.store.updateRun(parent.id, { status: RUN_STATUS.waiting });
     const entry = () => f.store.getRun(parent.id)?.waits?.find(wait => wait.id === waitId);
     await f.service.destroy(f.caller, { workerId }); expect(f.store.deleteRun(workerId)).toBe(true);
     f.manager.reconcileWorkerWaits();

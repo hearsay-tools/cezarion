@@ -4,6 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { workerCancelWaitResultSchema, workerWaitResultSchema } from '@open-mercato/cezar-contract/delegation';
 import type { Wait } from '@open-mercato/cezar-contract/waits';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
 import { RunStore } from '../runs/store.ts';
@@ -191,6 +192,9 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
       expect(entryOf(p.id, entry.id)).toBeUndefined();
       expect(settledOf(p.id, entry.id)?.phase).toBe('cancelled');
       expect(inputOf(p.id, entry.id)).toBeUndefined();
+      // Its session is still live, which a done root never has (finishDecision): back to running
+      // before teardown stops it (hearsay-tools/cezarion#1804).
+      store.updateRun(p.id, { status: RUN_STATUS.running });
     } finally { release(); }
   });
 
