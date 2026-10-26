@@ -6009,17 +6009,21 @@ export class RunManager {
 
   /** Bundled messages rode the answer's own write: delivered now, read when that turn ends. The
    *  answer's own outcomes (`with`: the human waits it answers, its charge) commit with them. A
-   *  refused write still keeps a charge or a counter in memory, as their best-effort write does. */
-  private commitBundledDelivery(runId: string, state: ActiveRun, ids: readonly string[], also: readonly RunOutcome[] = []): void {
+   *  refused write still keeps a charge or a counter in memory, as their best-effort write does,
+   *  and returns why it was refused. */
+  private commitBundledDelivery(runId: string, state: ActiveRun, ids: readonly string[], also: readonly RunOutcome[] = []): string | undefined {
     const deliveredAt = new Date().toISOString();
     const awaiting = state.inputDelivery?.consumption === 'observable' ? { awaitingRead: true as const } : {};
     try {
       this.store.commitOutcome(runId, [...also, ...(ids.length ? [{ kind: 'delivered' as const, inputIds: ids, at: deliveredAt, ...awaiting }] : [])]);
-      state.bundledInputIds = [...(state.bundledInputIds ?? []), ...ids];
+      if (ids.length) state.bundledInputIds = [...(state.bundledInputIds ?? []), ...ids];
+      return undefined;
     } catch (error) {
-      console.warn(`[cez] bundled delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
+      const refused = error instanceof Error ? error.message : String(error);
+      console.warn(`[cez] bundled delivery checkpoint failed: ${refused}`);
       const counters = also.filter(outcome => outcome.kind === 'charged' || outcome.kind === 'counted');
       if (counters.length) this.store.commitOutcome(runId, counters, {}, { bestEffort: true });
+      return refused;
     }
   }
 
@@ -6450,19 +6454,9 @@ export class RunManager {
     const unsent = [];
     for (const entry of pending) {
       const state = this.active.get(runId);
-      if (state?.agentInputError || !this.sendMessage(runId, entry.content)) { unsent.push(entry); continue; }
-      if (entry.messageId) {
-        try { this.store.commitOutcome(runId, { kind: 'message-delivered', messageId: entry.messageId }); }
-        catch (error) {
-          // As with agent input, stdin and disk cannot transact. Retain the
-          // same queue ID for conservative recovery, and stop this invocation.
-          if (state) {
-            state.agentInputError = `human input delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`;
-            state.session?.interrupt();
-          }
-          unsent.push(entry);
-        }
-      }
+      // A queue entry the delivery's checkpoint left in place stays buffered (`deliverMessage`).
+      if (state?.agentInputError || !this.sendMessage(runId, entry.content, entry.messageId) ||
+        (entry.messageId && this.store.getRun(runId)?.queuedMessages?.some(message => message.id === entry.messageId))) unsent.push(entry);
     }
     if (unsent.length) this.deferredMessages.set(runId, unsent);
     else this.deferredMessages.delete(runId);
@@ -6473,8 +6467,8 @@ export class RunManager {
    * while `waiting`). Returns false when there is no open session — the GUI
    * then offers "Continue" instead.
    */
-  sendMessage(runId: string, content: PastedContent[]): boolean {
-    const delivered = this.deliverMessage(runId, content, true);
+  sendMessage(runId: string, content: PastedContent[], messageId?: string): boolean {
+    const delivered = this.deliverMessage(runId, content, true, messageId);
     if (delivered) {
       const state = this.active.get(runId);
       // A human message, a question's answer included, restarts the budget; a timer batch still
@@ -6520,7 +6514,7 @@ export class RunManager {
 
   /** Shared live-session delivery. Synthetic scheduler prompts reuse lifecycle
    * bookkeeping without masquerading as user-authored transcript messages. */
-  private deliverMessage(runId: string, content: PastedContent[], userAuthored: boolean): boolean {
+  private deliverMessage(runId: string, content: PastedContent[], userAuthored: boolean, messageId?: string): boolean {
     const state = this.active.get(runId);
     if (!state?.session?.open || state.cancelled || state.pendingPermissions?.size) return false;
     const run = this.store.getRun(runId);
@@ -6585,9 +6579,17 @@ export class RunManager {
         if (answeringAskSeq !== undefined) {
           this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: answeringAskSeq });
         }
-        this.settleHumanWaits(runId);
+        // One commit (hearsay-tools/cezarion#1805): the human waits it answers, the messages bundled
+        // with it and a deferred message's queue entry. The budget restarts after the rest steer.
+        const refused = this.commitBundledDelivery(runId, state, bundle?.inputs.map(input => input.id) ?? [],
+          [{ kind: 'answered' }, ...(messageId ? [{ kind: 'message-delivered' as const, messageId }] : [])]);
+        if (refused && messageId) {
+          // As with agent input, stdin and disk cannot transact: the deferred message keeps its queue
+          // ID for conservative recovery, and this invocation stops.
+          state.agentInputError = `human input delivery checkpoint failed: ${refused}`;
+          state.session.interrupt();
+        }
         state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
-        if (bundle) this.commitBundledDelivery(runId, state, bundle.inputs.map(input => input.id));
         // A native answer continues the turn, and a bundle can leave messages that did not
         // fit its batch: either way the rest steer right behind the answer.
         if (answeringAskSeq !== undefined && !state.pendingHumanAsk) this.flushAgentInputs(runId);
@@ -9248,12 +9250,6 @@ export class RunManager {
    *  session, even when the store refused their cancellation (`withdrawCezarHumanWaits`). */
   private holdsAgentWaits(runId: string): boolean {
     return (this.store.getRun(runId)?.waits ?? []).some(wait => !isCezarHumanWait(wait));
-  }
-
-  /** A human message answers every open human wait, and nothing else (hearsay-tools/cezarion#1234). */
-  private settleHumanWaits(runId: string, only?: readonly string[]): void {
-    try { this.store.commitOutcome(runId, { kind: 'answered', ...(only ? { waitIds: only } : {}) }); }
-    catch (error) { console.warn(`[cez] human wait settlement failed: ${error instanceof Error ? error.message : String(error)}`); }
   }
 
   /** A valid ask line replaces the card of the human wait its turn registered. It is saved

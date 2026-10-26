@@ -89,6 +89,8 @@ const engine = () => manager as unknown as {
   wakeBackoffs: Map<string, NodeJS.Timeout>;
   wakeRetries: Map<string, NodeJS.Timeout>;
   queue: string[];
+  deferredMessages: Map<string, Array<{ content: Array<{ type: 'text'; text: string }>; messageId?: string }>>;
+  flushDeferred(id: string): void;
 };
 // The delivery bound, not the backoff, is what these cells pin: retries start at once.
 const retryAtOnce = () => { engine().wakeRetryBackoff = { fastMs: 0, fastCount: MAX_WAKE_DELIVERY_ATTEMPTS, capMs: 0 }; };
@@ -315,7 +317,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U7q', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
 
@@ -1356,6 +1358,29 @@ function baseCells(runners: RunnerId[]): void {
       await until(() => prompted(runner, NO_WAIT_NUDGE).length === 2 && gated(run.id));
       for (const nudge of prompted(runner, NO_WAIT_NUDGE)) expectNoWaitNudgeKinds(nudge);
       expect(store.getRun(run.id)?.automaticWakes).toBe(1);
+      expect(manager.finish(run.id)).toBe(true);
+      await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
+    });
+
+    // hearsay-tools/cezarion#1805: a message deferred while its session started up (#472) is queued
+    // beside the waits. When it answers the question, the answered wait and the removed queue entry
+    // are one commit: a reopened store never replays an answer it shows delivered, nor shows the
+    // question open after dropping the answer.
+    it(`${runner} U7q a deferred message that answers the question removes its queue entry in the answer's commit`, async () => {
+      nativeWire(runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { task: toolCall('cezar_ask', { context: ASK_CONTEXT, questions }), runner });
+      await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === 'waiting');
+      const [wait] = humanOpen(run.id);
+      const message = { id: randomUUID(), text: answerOf(run.id), createdAt: new Date().toISOString() };
+      store.commitHumanMessageBesideWaits(run.id, message);
+      engine().deferredMessages.set(run.id, [{ content: [{ type: 'text', text: message.text }], messageId: message.id }]);
+      const commits = recordCommits(join(root, '.ai/cezar'));
+      engine().flushDeferred(run.id);
+      await until(() => settled(run.id, wait!.id)?.phase === 'delivered' && answered(run.id, wait!.askSeq!));
+      expect(store.getRun(run.id)?.queuedMessages ?? []).toEqual([]);
+      expect(engine().deferredMessages.has(run.id)).toBe(false);
+      commits.expectEveryCommit(run.id, row => !!row.lastWaits?.some(entry => entry.id === wait!.id && entry.phase === 'delivered') === !row.queuedMessages?.some(entry => entry.id === message.id),
+        'a deferred answer and its queue entry');
       expect(manager.finish(run.id)).toBe(true);
       await until(() => terminal.includes(store.getRun(run.id)?.status ?? ''));
     });
