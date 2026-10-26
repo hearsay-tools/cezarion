@@ -57,3 +57,4 @@ export * from './query-requests.ts';
 export * from './github-requests.ts';
 export * from './repo-requests.ts';
 export * from './config-requests.ts';
+export * from './workflow-file.ts';
