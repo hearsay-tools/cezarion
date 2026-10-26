@@ -5,7 +5,7 @@ import type { PreviewStopRequest, PreviewStopResult, PreviewClientMessage, Previ
 import { z } from 'zod';
 import type { RunStore } from '../runs/store.ts';
 import type { Cdp, CdpConnection } from './cdp.ts';
-import { clearAgentMarker, markAgentConnected } from './agent-marker.ts';
+import { recordAgentBrowser } from './agent-marker.ts';
 import { AgentCdpLink, type AgentClient } from './cdp-proxy.ts';
 import { ChromiumError, downloadChromium, downloadTarget, installCommand, launchChromium, resolveChromium } from './chromium.ts';
 import { DevServer, probePort, type DevServerState } from './dev-server.ts';
@@ -449,7 +449,7 @@ export class PreviewHost implements PreviewHostLike {
     entry.agents.add(link);
     // The last agent may have left during this handshake and started the idle timers.
     this.clearIdle(entry);
-    if (entry.agents.size === 1) this.recordAgent(entry, 'connected');
+    if (entry.agents.size === 1) recordAgentBrowser(entry.ctx, 'connected');
     return link;
   }
 
@@ -509,7 +509,8 @@ export class PreviewHost implements PreviewHostLike {
     grant.links.delete(link);
     if (!entry.agents.delete(link)) return;
     if (entry.agents.size > 0) return;
-    this.recordAgent(entry, 'disconnected');
+    // `preview.agent-browser`, on the first connection and the last close only.
+    recordAgentBrowser(entry.ctx, 'disconnected');
     this.armIdleWithoutDemand(entry);
   }
 
@@ -527,14 +528,6 @@ export class PreviewHost implements PreviewHostLike {
     for (const link of [...entry.agents]) link.close(code, reason);
   }
 
-  /** `preview.agent-browser`, on the first connection and the last close only. */
-  private recordAgent(entry: RunEntry, state: 'connected' | 'disconnected'): void {
-    const { runId, store, dataDir } = entry.ctx;
-    if (!store.getRun(runId)) return;
-    if (state === 'connected') markAgentConnected(dataDir, runId);
-    store.appendEvent(runId, { type: 'preview.agent-browser', state });
-    if (state === 'disconnected') clearAgentMarker(dataDir, runId);
-  }
 
   /** The pane asked for the agent's page: shown as it is, never navigated. */
   private async showAgentPage(entry: RunEntry): Promise<void> {

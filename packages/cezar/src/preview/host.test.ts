@@ -835,6 +835,18 @@ describe('PreviewHost', () => {
       expect(host.hasAgents(ctx.runId)).toBe(false);
     });
 
+    it('a disconnected the store cannot write keeps the marker for the next boot and still starts the idle timers', async () => {
+      const { host, ctx, store, browsers } = make();
+      const marker = join(ctx.dataDir, 'preview', ctx.runId, 'agent-connected');
+      const grant = host.grantAgent(ctx.runId, () => ctx);
+      const { link } = await connect(host, grant.token);
+      store.appendEvent = () => { throw new Error('disk full'); };
+      expect(() => (link as { close(): void }).close()).not.toThrow();
+      expect(existsSync(marker)).toBe(true);
+      await vi.advanceTimersByTimeAsync(PREVIEW_BROWSER_IDLE_MS);
+      expect(browsers[0]!.close).toHaveBeenCalled();
+    });
+
     it('records disconnected when the last agent leaves, then closes the idle browser after the browser idle time', async () => {
       const { host, ctx, store, browsers } = make();
       const grant = host.grantAgent(ctx.runId, () => ctx);

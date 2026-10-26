@@ -25,7 +25,27 @@ export function markAgentConnected(dataDir: string, runId: string): void {
 
 /** After `disconnected` is appended. */
 export function clearAgentMarker(dataDir: string, runId: string): void {
-  rmSync(markerPath(dataDir, runId), { force: true });
+  try {
+    rmSync(markerPath(dataDir, runId), { force: true });
+  } catch { /* the next boot finds the marker and appends `disconnected` again */ }
+}
+
+/**
+ * Appends `preview.agent-browser` for a run that exists, with its marker around it. Best effort: it
+ * runs inside a socket's close, so a failed write never stops that cleanup, and a `disconnected` it
+ * could not write keeps the marker for the next boot. Answers whether the event is written.
+ */
+export function recordAgentBrowser(ctx: Pick<RunContext, 'runId' | 'store' | 'dataDir'>, state: 'connected' | 'disconnected'): boolean {
+  const { runId, store, dataDir } = ctx;
+  try {
+    const run = store.getRun(runId);
+    if (run && state === 'connected') markAgentConnected(dataDir, runId);
+    if (run) store.appendEvent(runId, { type: 'preview.agent-browser', state });
+  } catch {
+    return false;
+  }
+  if (state === 'disconnected') clearAgentMarker(dataDir, runId);
+  return true;
 }
 
 /**
@@ -43,9 +63,7 @@ export function reconcileAgentMarkers(dataDir: string, store: RunContext['store'
   let reconciled = 0;
   for (const runId of runIds) {
     if (!existsSync(markerPath(dataDir, runId)) || live(runId)) continue;
-    if (store.getRun(runId)) store.appendEvent(runId, { type: 'preview.agent-browser', state: 'disconnected' });
-    clearAgentMarker(dataDir, runId);
-    reconciled += 1;
+    if (recordAgentBrowser({ runId, store, dataDir }, 'disconnected')) reconciled += 1;
   }
   return reconciled;
 }

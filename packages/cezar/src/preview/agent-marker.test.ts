@@ -51,6 +51,22 @@ describe('agent crash markers (hearsay-tools/cezarion#784)', () => {
     expect(existsSync(marker(dir, 'deleted'))).toBe(false);
   });
 
+  it('a disconnected the store cannot write keeps its marker for the next boot, and boot goes on', () => {
+    const dir = dataDir();
+    markAgentConnected(dir, 'run-1');
+    markAgentConnected(dir, 'run-2');
+    const runs = store(['run-1', 'run-2']);
+    const append = runs.appendEvent;
+    runs.appendEvent = (runId, event) => {
+      if (runId === 'run-1') throw new Error('disk full');
+      return append(runId, event);
+    };
+    expect(reconcileAgentMarkers(dir, runs, () => false)).toBe(1);
+    expect(existsSync(marker(dir, 'run-1'))).toBe(true);
+    expect(existsSync(marker(dir, 'run-2'))).toBe(false);
+    expect(runs.events.map(e => e.runId)).toEqual(['run-2']);
+  });
+
   it('reconciles nothing without a preview directory, and clearing a missing marker is quiet', () => {
     const dir = dataDir();
     expect(reconcileAgentMarkers(dir, store([]), () => false)).toBe(0);
