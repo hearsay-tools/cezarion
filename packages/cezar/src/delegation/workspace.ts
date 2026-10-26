@@ -1,11 +1,12 @@
 import { inspectGeneration } from './process-liveness.ts';
 import { waitForTestAppWatcher, withIdleTestApp } from './idle-test-app.ts';
+import { windowsIdentityDirectory, windowsReadIdentity, windowsWriteIdentity } from './windows-workspace-identity.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, mkdir, mkdtemp, open, readdir, realpath, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { dirname, join } from 'node:path';
+import { dirname, join, normalize } from 'node:path';
 import { z } from 'zod';
 import { copyGitIndex } from '../git-index-copy.ts';
 import { delegationStateSchema, workerWorkspaceSchema } from '@open-mercato/cezar-contract/delegation';
@@ -18,6 +19,8 @@ import type { RunRecord } from '../runs/store.ts';
 import { DelegationPolicyError } from './policy.ts';
 
 const RECEIPT_CAP = 16_384;
+// Filesystem primitives belong to the host that loaded this module.
+const windowsIdentities = process.platform === 'win32';
 // Identify owned branches by tip and reflog contents, not inode identity.
 // Keep file/logFile fields for older strict checkpoint readers.
 const fileIdentitySchema = z.object({ dev: z.number(), ino: z.number(), birthtimeMs: z.number() }).strict();
@@ -29,6 +32,11 @@ type Cleanup = z.infer<typeof cleanupSchema>;
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const hash = (content: Buffer) => createHash('sha256').update(content).digest('hex');
 const checkUnheld = (assertUnheld?: () => void) => assertUnheld?.();
+
+// Git for Windows emits forward slashes even for native absolute paths.
+function worktreeEntries(listed: string): string[] {
+  return listed.split('\0').map(entry => entry.startsWith('worktree ') ? `worktree ${normalize(entry.slice(9))}` : entry);
+}
 
 async function branchLog(repoRoot: string, workspace: WorkerWorkspace) {
   const common = await gitCommonDir(repoRoot);
@@ -53,6 +61,7 @@ async function verifyBranch(repoRoot: string, workspace: WorkerWorkspace, receip
 }
 async function writeCleanup(path: string, value: Cleanup, assertCurrent?: () => void): Promise<void> {
   assertCurrent?.();
+  if (windowsIdentities) { windowsWriteIdentity(path, JSON.stringify(value), true); return; }
   if (await exists(path)) await readIdentityFile(path, RECEIPT_CAP);
   assertCurrent?.();
   const temporary = `${path}.${randomUUID()}.tmp`;
@@ -138,6 +147,10 @@ function workerWorkspace(run: RunRecord): WorkerWorkspace {
 
 async function receiptLocation(repoRoot: string, workspace: WorkerWorkspace, create = false): Promise<string> {
   const dir = join(await gitCommonDir(repoRoot), 'cezar-owned-workspaces');
+  if (windowsIdentities) {
+    windowsIdentityDirectory(dir, create);
+    return join(dir, `${workspace.resourceId}.json`);
+  }
   if (create) await mkdir(dir, { mode: 0o700 }).catch((error: NodeJS.ErrnoException) => {
     if (error.code !== 'EEXIST') throw error;
   });
@@ -149,7 +162,8 @@ async function receiptLocation(repoRoot: string, workspace: WorkerWorkspace, cre
   }
   return join(dir, `${workspace.resourceId}.json`);
 }
-async function readIdentityFile(path: string, cap: number): Promise<string> {
+async function readIdentityFile(path: string, cap: number, privateParent = true): Promise<string> {
+  if (windowsIdentities) return windowsReadIdentity(path, cap, privateParent);
   const info = await lstat(path);
   if (!info.isFile() || info.isSymbolicLink()) throw new Error('Unsafe owned workspace identity file');
   const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
@@ -162,7 +176,8 @@ async function readIdentityFile(path: string, cap: number): Promise<string> {
     return buffer.subarray(0, bytesRead).toString('utf8');
   } finally { await file.close(); }
 }
-async function writeIdentityFile(path: string, content: string): Promise<void> {
+async function writeIdentityFile(path: string, content: string, privateParent = true): Promise<void> {
+  if (windowsIdentities) { windowsWriteIdentity(path, content, false, privateParent); return; }
   const file = await open(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
   try { await file.writeFile(content); await file.sync(); } finally { await file.close(); }
 }
@@ -177,7 +192,7 @@ async function markerRemains(repoRoot: string, workspace: WorkerWorkspace): Prom
   if (!await exists(admin)) return false;
   for (const entry of await readdir(admin)) {
     const marker = join(admin, entry, 'cezar-owned-resource');
-    if (await exists(marker) && await readIdentityFile(marker, 36) === workspace.resourceId) return true;
+    if (await exists(marker) && await readIdentityFile(marker, 36, false) === workspace.resourceId) return true;
   }
   return false;
 }
@@ -188,7 +203,7 @@ async function liveGitDir(repoRoot: string, workspace: WorkerWorkspace): Promise
   const top = await realpath(await checkedGit(workspace.path, ['rev-parse', '--show-toplevel']));
   if (top !== workspace.path) throw new Error('Owned workspace is no longer a Git worktree');
   const listed = await checkedGit(repoRoot, ['worktree', 'list', '--porcelain', '-z']);
-  if (!listed.split('\0').includes(`worktree ${workspace.path}`)) throw new Error('Owned workspace registration missing');
+  if (!worktreeEntries(listed).includes(`worktree ${workspace.path}`)) throw new Error('Owned workspace registration missing');
   const gitDir = await realpath(await checkedGit(workspace.path, ['rev-parse', '--absolute-git-dir']));
   // Linked worktrees have a distinct administrative directory, never the main index.
   if (gitDir === rootCommon) throw new Error('Owned workspace points at the main repository');
@@ -210,7 +225,7 @@ export async function createOwnedWorkspace(repoRoot: string, workerId: string, b
     branchIdentity: { file: log.file, prefixBytes: prefix.length, prefixHash: hash(prefix) } };
   // Git may reuse the same administrative path after remove/add. The marker dies
   // with that directory, preventing a stale common receipt from claiming its replacement.
-  await writeIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), workspace.resourceId);
+  await writeIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), workspace.resourceId, false);
   const checkedPath = await receiptLocation(repoRoot, workspace);
   await writeIdentityFile(checkedPath, JSON.stringify(receipt));
   return workspace;
@@ -222,7 +237,7 @@ export async function verifyOwnedWorkspace(repoRoot: string, run: RunRecord): Pr
   const receipt = await readReceipt(await receiptLocation(repoRoot, workspace));
   if (!receipt || JSON.stringify(receipt.workspace) !== JSON.stringify(workspace)) throw new Error('Owned workspace provisioning receipt missing or mismatched');
   if (await liveGitDir(repoRoot, workspace) !== receipt.gitDir ||
-      await readIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), 36) !== workspace.resourceId) {
+      await readIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), 36, false) !== workspace.resourceId) {
     throw new Error('Owned workspace Git identity changed');
   }
   return workspace;
@@ -298,7 +313,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
       const workspace = await validateIntent(repoRoot, value);
       const path = await receiptLocation(repoRoot, workspace);
       const receipt = await readReceipt(path);
-      const registered = async () => (await checkedGit(repoRoot, ['worktree', 'list', '--porcelain', '-z'])).split('\0');
+      const registered = async () => worktreeEntries(await checkedGit(repoRoot, ['worktree', 'list', '--porcelain', '-z']));
       const branchExists = async () => {
         const refs = await checkedGit(repoRoot, ['for-each-ref', '--format=%(refname)', `refs/heads/${workspace.branch}`]);
         return refs.split('\n').includes(`refs/heads/${workspace.branch}`);
@@ -334,7 +349,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
       if (await exists(workspace.path)) {
         if (checkpoint?.phase === 'worktree-removed') return result();
         if (await liveGitDir(repoRoot, workspace) !== receipt.gitDir ||
-            await readIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), 36) !== workspace.resourceId) return result();
+            await readIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), 36, false) !== workspace.resourceId) return result();
         // HEAD files (this worktree's, another's) are not in a retrying caller's observation: these
         // refusals report unexplained, so a retry never skips them (hearsay-tools/cezarion#879).
         if (await checkedGit(workspace.path, ['symbolic-ref', '-q', 'HEAD']) !== `refs/heads/${workspace.branch}`) { report?.unexplained?.(); return result(); }
