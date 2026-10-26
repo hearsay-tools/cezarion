@@ -68,21 +68,18 @@ test('reaps only the sandboxes whose owner process on this host has exited', (t)
   assert.ok(lstatSync(join(root, 'cez-x-link')).isSymbolicLink())
 })
 
-test('without a uid (Windows), reaps only the sandboxes that name this account', (t) => {
+test('without a uid (Windows), reaps nothing: no marker proves the account there', (t) => {
   const root = scratch(t)
-  const sandbox = (name, user) => {
-    const dir = join(root, name)
+  // Two Windows accounts can share one name, so a marker that names this account proves nothing.
+  const dirs = [{ user: 'me' }, {}].map((marker, i) => {
+    const dir = join(root, `cez-w-${i}`)
     mkdirSync(dir)
-    writeFileSync(join(dir, OWNER_FILE), JSON.stringify({ pid: 101, host: hostname(), user }))
+    writeFileSync(join(dir, OWNER_FILE), JSON.stringify({ pid: 101, host: hostname(), ...marker }))
     return dir
-  }
-  const mine = sandbox('cez-w-mine', 'me')
-  const kept = [sandbox('cez-w-other', 'someone-else'), sandbox('cez-w-unnamed')]
-  const reap = (account) => reapTestSandboxes('cez-w-', root, { alive: () => false, account })
+  })
 
-  assert.deepEqual(reap({ user: undefined }), [], 'an unknown account reaps nothing')
-  assert.deepEqual(reap({ user: 'me' }), [mine])
-  for (const dir of kept) assert.ok(existsSync(dir), dir)
+  assert.deepEqual(reapTestSandboxes('cez-w-', root, { alive: () => false, account: { user: 'me' } }), [])
+  for (const dir of dirs) assert.ok(existsSync(dir), dir)
 })
 
 test('createTestSandbox marks the sandbox with this process and reaps the dead ones first', (t) => {
@@ -97,7 +94,7 @@ test('createTestSandbox marks the sandbox with this process and reaps the dead o
   t.after(() => removeTestSandboxes([dir]))
   assert.equal(existsSync(stale), false)
   assert.ok(dir.startsWith(join(root, 'cez-x-')))
-  assert.deepEqual(JSON.parse(readFileSync(join(dir, OWNER_FILE), 'utf8')), { pid: process.pid, host: hostname(), user: userInfo().username })
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, OWNER_FILE), 'utf8')), { pid: process.pid, host: hostname() })
 })
 
 test('removeTestSandboxes tries every path, then throws the first failure (hearsay-tools/cezarion#1395)', () => {

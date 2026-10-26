@@ -7,7 +7,7 @@ export declare function reapTestSandboxes(
   options?: {
     alive?: (pid: number) => boolean;
     host?: string;
-    account?: { uid?: number; user?: string };
+    account?: { uid?: number };
   },
 ): string[];
 export declare function createTestSandbox(prefix: string, root?: string): string;
