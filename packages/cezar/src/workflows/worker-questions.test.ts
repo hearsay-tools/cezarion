@@ -42,6 +42,8 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expect(routed).toMatchObject({ askSeq: ask.seq, parentRunId: p.id });
     const message = conversationOf(p.id)?.messages.find(m => m.id === routed.messageId);
     expect(message).toMatchObject({ kind: 'request', senderRunId: w.id, recipientRunId: p.id, question: { questions: expect.any(Array) } });
+    // hearsay-tools/cezarion#1808: the request carries the ask as the worker's event stored it, field for field.
+    expect(message?.question).toStrictEqual({ questions: ask.questions, ...(ask.context === undefined ? {} : { context: ask.context }) });
     expect(message?.deadline).toBeUndefined();
     expect(store.getRun(p.id)?.agentInputs?.some(input => input.id === message!.id)).toBe(true);
     await until(() => store.getRun(w.id)?.status === 'waiting');

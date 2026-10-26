@@ -82,7 +82,7 @@ import {
   isImageAttachmentName,
   isImageMediaType,
 } from '@open-mercato/cezar-contract/attachments';
-import { askRequestSchema } from '@open-mercato/cezar-contract/ask-schema';
+import { askPayloadOf, askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
 import type { AgentEvent, ContentBlock, ToolGrant } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
 import { readProjectUiState, readProjectUiStateSync } from '../ui-state.ts';
@@ -5352,12 +5352,12 @@ export class RunManager {
     const ask = this.store.transcriptFacts(workerId).pendingAsk;
     if (!ask || ask.routedMessageId !== undefined || ask.fallback) return;
     const fallback = (reason: string) => { this.store.appendEvent(workerId, { type: 'worker-question-fallback', askSeq: ask.seq, reason }); };
-    const request = askRequestSchema.safeParse({ questions: ask.questions, ...(ask.context !== undefined ? { context: ask.context } : {}) });
-    if (!request.success) { fallback('the question cannot be carried to the parent'); return; }
+    const request = askRequestOf(ask);
+    if (!request) { fallback('the question cannot be carried to the parent'); return; }
     const parentId = worker.delegation.parentRunId;
     const root = this.store.getRun(parentId);
     const now = new Date().toISOString();
-    const message = questionMessage({ workerRunId: workerId, parentRunId: parentId, askSeq: ask.seq, request: request.data, now });
+    const message = questionMessage({ workerRunId: workerId, parentRunId: parentId, askSeq: ask.seq, request, now });
     // Already committed (a crash before the routing event): the question did reach the parent,
     // whatever its capacity or state is now. Record the routing; fallback sweeps follow.
     const committed = root?.delegation?.role === 'root' && !!root.delegation.conversation?.messages.some(m => m.id === message.id);
@@ -9319,11 +9319,11 @@ export class RunManager {
       }
       return;
     }
-    if (event.type === 'ask.requested') {
+    const ask = askPayloadOf(event);
+    if (ask) {
       this.prepareHumanAsk(state);
       // A native ask is a human wait the user already sees (hearsay-tools/cezarion#1234).
-      const card = askRequestSchema.safeParse({ questions: event.questions });
-      const questions = card.success ? card.data.questions : undefined;
+      const questions = askRequestOf({ questions: ask.questions })?.questions;
       const wait = this.openHumanAlias(runId, state, 'native-ask', questions ? { questions } : undefined);
       if (wait) this.markHumanWaitSurfaced(runId, wait, questions ? { questions } : undefined);
       this.clearIdleTimer(state);
@@ -10355,7 +10355,7 @@ export class RunManager {
   /** The worker's pending question is the one `askParentForWorker` raised. */
   private isWorkerFallbackAsk(runId: string, askSeq: number): boolean {
     const ask = this.store.transcriptFacts(runId).pendingAsk;
-    const questions = ask?.seq === askSeq ? askRequestSchema.safeParse({ questions: ask.questions }).data?.questions : undefined;
+    const questions = ask?.seq === askSeq ? askRequestOf({ questions: ask.questions })?.questions : undefined;
     return questions?.length === 1 && questions[0]!.header === WORKER_FALLBACK_HEADER && questions[0]!.question === WORKER_FALLBACK_QUESTION(runId);
   }
 
