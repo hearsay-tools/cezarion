@@ -1,5 +1,5 @@
 import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, matchesGlob } from 'node:path';
 import { parse } from 'yaml';
 import { describe, expect, it } from 'vitest';
 import { runStatusSchema, stepStateSchema, stepStatusSchema } from '@open-mercato/cezar-contract/runs';
@@ -74,9 +74,25 @@ describe('the test-enum-literal rules', () => {
     expect(globsOf('test-enum-literal')).toEqual([
       'packages/*/src/**/*.test.ts',
       'packages/*/src/**/*.testkit.ts',
-      'packages/cezar/test/**/*.test.ts',
-      'packages/web/e2e/**/*.e2e.ts',
+      'packages/web/src/test/**/*.ts',
+      'packages/cezar/test/**/*.ts',
+      'packages/web/e2e/**/*.ts',
     ]);
-    expect(globsOf('test-enum-literal-tsx')).toEqual(['packages/*/src/**/*.test.tsx']);
+    expect(globsOf('test-enum-literal-tsx')).toEqual([
+      'packages/*/src/**/*.test.tsx',
+      'packages/web/src/test/**/*.tsx',
+      'packages/web/e2e/**/*.tsx',
+    ]);
+  });
+
+  it('reach the test-support files that build waits and runs but are not named like a test', () => {
+    const globs = globsOf('test-enum-literal');
+    for (const file of [
+      'packages/web/src/test/wait-fixtures.ts',
+      'packages/web/src/test/run-summary-fixture.ts',
+      'packages/web/e2e/fixtures/make-large-thread.ts',
+    ]) {
+      expect(globs.some((glob) => matchesGlob(file, glob)), `${file} matches no glob of the rule`).toBe(true);
+    }
   });
 });

@@ -5024,6 +5024,18 @@
       "count": 1
     },
     {
+      "file": "packages/web/e2e/fixtures/make-large-thread.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/e2e/fixtures/make-large-thread.ts",
+      "rule": "test-enum-literal",
+      "site": "status: 'done'",
+      "count": 1
+    },
+    {
       "file": "packages/web/e2e/git-sidebar.e2e.ts",
       "rule": "test-enum-literal",
       "site": "status: 'done'",
@@ -6263,6 +6275,66 @@
       "file": "packages/web/src/test/poll.test.ts",
       "rule": "test-enum-literal",
       "site": "status: 'waiting'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/test/run-summary-fixture.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'human'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/test/run-summary-fixture.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/test/run-summary-fixture.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/test/run-summary-fixture.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cezar_ask'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/test/wait-fixtures.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'timer'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/test/wait-fixtures.ts",
+      "rule": "test-enum-literal",
+      "site": "kind: 'worker'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/test/wait-fixtures.ts",
+      "rule": "test-enum-literal",
+      "site": "phase: 'open'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/test/wait-fixtures.ts",
+      "rule": "test-enum-literal",
+      "site": "source: 'agent'",
+      "count": 2
+    },
+    {
+      "file": "packages/web/src/test/wait-fixtures.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'cez-worker-wait'",
+      "count": 1
+    },
+    {
+      "file": "packages/web/src/test/wait-fixtures.ts",
+      "rule": "test-enum-literal",
+      "site": "via: 'monitoring-line'",
       "count": 1
     }
   ]

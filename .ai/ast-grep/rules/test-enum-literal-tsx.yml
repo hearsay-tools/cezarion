@@ -12,6 +12,8 @@ message: >-
   GitHub status, takes `// ast-grep-ignore: <this rule's id>` on the line above, with the reason.
 files:
   - packages/*/src/**/*.test.tsx
+  - packages/web/src/test/**/*.tsx
+  - packages/web/e2e/**/*.tsx
 # Keep this file and test-enum-literal.yml the same below `files`: ast-grep parses .ts and .tsx
 # files with different grammars, so one rule cannot cover both. test-enum-literal-rule.test.ts
 # compares them, and checks each key's values against the contract's schemas.
