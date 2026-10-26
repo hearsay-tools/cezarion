@@ -52,10 +52,10 @@ describe('rule short-bound: Vitest waits', () => {
     expect(rules('const SHORT = 1_000 * 2', 'await vi.waitFor(() => ok(), SHORT)')).toEqual(['short-bound'])
   })
 
-  it('takes the last timeout of an option object, as the language does, and no bound from a constant that is assigned again', () => {
+  it('takes the last timeout of an option object, as the language does, and reports a constant that is assigned again', () => {
     expect(rules('await vi.waitFor(() => ok(), { timeout: 10_000, timeout: 500 })')).toEqual(['short-bound'])
     expect(rules('await vi.waitFor(() => ok(), { timeout: 500, timeout: 10_000 })')).toEqual([])
-    expect(rules('let SHORT = 500', 'SHORT = 5_000', 'await vi.waitFor(() => ok(), { timeout: SHORT })')).toEqual([])
+    expect(rules('let SHORT = 500', 'SHORT = 5_000', 'await vi.waitFor(() => ok(), { timeout: SHORT })')).toEqual(['short-bound'])
     expect(rules('let SHORT = 500', 'await vi.waitFor(() => ok(), { timeout: SHORT })')).toEqual(['short-bound'])
   })
 
@@ -466,8 +466,8 @@ describe('rule poll-deadline', () => {
     // A write that is not a plain assignment leaves the value unknown; one in the loop, or in a closure, moves the deadline, so it bounds nothing.
     expect(rules('let end = Date.now() + 1_000', 'while (Date.now() < end) { end += 20_000; await sleep(10) }')).toEqual(['poll-deadline'])
     expect(rules('let end = Date.now() + 1_000', 'const extend = () => { end++ }', 'while (Date.now() < end) { extend(); await sleep(10) }')).toEqual(['poll-deadline'])
-    // A constant of the file that is assigned again is no constant.
-    expect(rules('let LIMIT = 800', 'LIMIT = 20_000', 'async function run() {', '  const end = Date.now() + LIMIT', '  while (Date.now() < end) await sleep(10)', '}')).toEqual([])
+    // A constant of the file that is assigned again is no constant: the scan cannot say which value is in force, and the file declares it.
+    expect(rules('let LIMIT = 800', 'LIMIT = 20_000', 'async function run() {', '  const end = Date.now() + LIMIT', '  while (Date.now() < end) await sleep(10)', '}')).toEqual(['poll-deadline'])
     expect(rules('const LIMIT = 800', 'async function run() {', '  const end = Date.now() + LIMIT', '  while (Date.now() < end) await sleep(10)', '}')).toEqual(['poll-deadline'])
     // In the loop\'s own scope the plain assignments are values it can hold, and the smallest counts.
     expect(rules('let LIMIT = 800', 'LIMIT = 20_000', 'const end = Date.now() + LIMIT', 'while (Date.now() < end) await sleep(10)')).toEqual(['poll-deadline'])
@@ -573,6 +573,141 @@ describe('rule poll-deadline', () => {
 
   it('reports a polling loop as a poll, not also as a sleep', () => {
     expect(scan('while (!ready()) { await sleep(10) }', 'await sleep(10)').map(site => [site.rule, site.line])).toEqual([['poll-deadline', 1], ['sleep', 2]])
+  })
+})
+
+describe('a bound the scan computes, and one it leaves to the caller', () => {
+  const wait = (timeout: string) => `await vi.waitFor(() => ok(), { timeout: ${timeout} })`
+  const lines = (...src: string[]) => scan(...src).map(site => site.line)
+
+  it('computes a wait bound from literals with signs, parentheses, wrappers, arithmetic and Math, and reports one below the floor', () => {
+    const short = [
+      '-1', '0', '+500', '500 as number', '(500)', '500 satisfies number', '2 ** 9', '5000 % 1000', '0x1F4', '5e2', '-(-500)',
+      'NaN', 'Infinity', '-Infinity', 'Number.POSITIVE_INFINITY', '2 ** 31', 'Math.min(500, 20_000)', 'Math.floor(2_999.9)', 'Math.max(100, 200) * 2',
+    ]
+    expect(lines(...short.map(wait))).toEqual(short.map((_, index) => index + 1))
+    const long = ['20_000 as number', '(20_000)', '+20_000', '-(-20_000)', '2 ** 14', 'Math.max(500, 20_000)', 'Math.ceil(2_999.1)', '5e4', '0x4E20', '3_000 + 1']
+    expect(scan(...long.map(wait))).toEqual([])
+    expect(lines('await vi.waitFor(() => ok(), -1)', 'await vi.waitFor(() => ok(), NaN)', 'await vi.waitFor(() => ok(), 0)', 'await vi.waitFor(() => ok(), +20_000)')).toEqual([1, 2, 3])
+  })
+
+  it('reads a name through every scope around its use, up to the module', () => {
+    // A constant of the module, of a describe block, of the test itself; the nearest declaration wins.
+    expect(lines('const POLL_MS = 2_000', 'it("x", async () => {', `  ${wait('POLL_MS')}`, '})')).toEqual([3])
+    expect(scan('const GUARD = 20_000', 'it("x", async () => {', `  ${wait('GUARD')}`, '})')).toEqual([])
+    expect(lines('describe("d", () => {', '  const POLL_MS = 2_000', '  it("x", async () => {', `    ${wait('POLL_MS')}`, '  })', '})')).toEqual([4])
+    expect(lines('const GUARD = 20_000', 'describe("d", () => {', '  const GUARD = 500', '  it("x", async () => {', `    ${wait('GUARD')}`, '  })', '})')).toEqual([5])
+    expect(scan('const GUARD = 500', 'describe("d", () => {', '  const GUARD = 20_000', '  it("x", async () => {', `    ${wait('GUARD')}`, '  })', '})')).toEqual([])
+    // A module constant counts wherever it sits: the test runs after the module has loaded.
+    expect(lines('it("x", async () => {', `  ${wait('LATE')}`, '})', 'const LATE = 2_000')).toEqual([2])
+    // A parameter hides the constant of the same name, and is the caller's.
+    expect(scan('const T = 500', `async function w(T: number) { ${wait('T')} }`)).toEqual([])
+    // A name made of other names.
+    expect(lines('const A = 1_500', 'const B = A * 1.5', 'it("x", async () => {', `  ${wait('B')}`, '})')).toEqual([4])
+    expect(lines('const A = 1_000', 'it("x", async () => {', `  ${wait('Math.max(A, 2_000)')}`, '})')).toEqual([3])
+  })
+
+  it('reads a `let` of an outer scope only when nothing writes it after its declaration', () => {
+    expect(lines('let T = 500', 'it("x", async () => {', `  ${wait('T')}`, '})')).toEqual([3])
+    expect(scan('let T = 20_000', 'it("x", async () => {', `  ${wait('T')}`, '})')).toEqual([])
+    // Written afterwards, it holds a value the scan cannot say: the file declares it, so it is below the floor.
+    expect(lines('let T = 20_000', 'beforeEach(() => { T = 500 })', 'it("x", async () => {', `  ${wait('T')}`, '})')).toEqual([4])
+    expect(lines('let T = 500', 'T += 20_000', 'it("x", async () => {', `  ${wait('T')}`, '})')).toEqual([4])
+  })
+
+  it('leaves a bound alone only when it comes from outside the file: a parameter, an import, a global or a property of one', () => {
+    expect(scan(
+      `async function a(ms: number) { ${wait('ms')} }`,
+      `async function b(ms: number) { ${wait('ms * 2')} }`,
+      `async function c(opts: { ms: number }) { ${wait('opts.ms')} }`,
+      `async function d(opts = {}) { ${wait('opts.ms')} }`,
+      `async function e(opts: { ms: number }) { await vi.waitFor(() => ok(), { ...opts }) }`,
+      `async function f(ms: number) { ${wait('Math.max(ms, 100)')} }`,
+      `async function g() { ${wait('Number(process.env.WAIT_MS)')} }`,
+      `async function h() { ${wait('LIMIT')} }`,
+      `async function i(cond: boolean) { ${wait('cond ? 100 : 20_000')} }`,
+    )).toEqual([])
+    expect(scan("import { LIMIT } from './limits'", 'it("x", async () => {', `  ${wait('LIMIT')}`, '})')).toEqual([])
+    // A name that only passes on a parameter is the caller's too.
+    expect(scan('async function w(ms: number) {', '  const t = ms', `  ${wait('t')}`, '}')).toEqual([])
+  })
+
+  it('counts a bound made only of what the file declares, and cannot evaluate, as below the floor', () => {
+    expect(lines(
+      'const a = pick()', wait('a'),
+      'const { b } = cfg', wait('b'),
+      'function limit() { return 20_000 }', wait('limit()'),
+      'const c = cond ? 100 : 20_000', wait('c'),
+      wait('Math.random() * 50'),
+      'const d = { ms: 500 }', wait('d.ms'),
+    )).toEqual([2, 4, 6, 8, 9, 11])
+  })
+
+  it('reads an options object held in a name, and a spread or computed key by what it reads', () => {
+    expect(lines('const options = { timeout: 2_000, interval: 10 }', 'await vi.waitFor(() => ok(), options)')).toEqual([2])
+    expect(scan('const options = { timeout: 20_000, interval: 10 }', 'await vi.waitFor(() => ok(), options)')).toEqual([])
+    expect(lines('const options = { interval: 10 }', 'await vi.waitFor(() => ok(), options)')).toEqual([2])
+    expect(lines('describe("d", () => {', '  const SETTLE = { timeout: 2_000 }', '  it("x", async () => {', '    await vi.waitFor(() => ok(), SETTLE)', '  })', '})')).toEqual([4])
+    // The same object spread into a literal: the file declares it, so the spread may set any bound.
+    expect(lines('const base = { timeout: 20_000 }', 'await vi.waitFor(() => ok(), { ...base })')).toEqual([2])
+    expect(scan('const base = { timeout: 20_000 }', 'await vi.waitFor(() => ok(), { ...base, timeout: 20_000 })')).toEqual([])
+    expect(lines('await vi.waitFor(() => ok(), { timeout: 20_000, ...base })')).toEqual([])
+    expect(lines('const base = { timeout: 500 }', 'await vi.waitFor(() => ok(), { timeout: 20_000, ...base })')).toEqual([2])
+    expect(lines('const key = "timeout"', 'await vi.waitFor(() => ok(), { [key]: 20_000 })')).toEqual([2])
+    expect(scan('async function w(o: object) { await vi.waitFor(() => ok(), { ...o }) }')).toEqual([])
+  })
+
+  it('reads a Testing Library timeout held in an options object, and computes it like any other', () => {
+    expect(lines(tlImport, 'const opts = { timeout: 500 }', 'await waitFor(() => ok(), opts)')).toEqual([3])
+    expect(scan(tlImport, 'const opts = { timeout: 20_000 }', 'await waitFor(() => ok(), opts)')).toEqual([])
+    expect(lines(tlImport, 'await waitFor(() => ok(), { timeout: -1 })')).toEqual([2])
+    expect(lines(tlImport, 'const T = 500', 'await screen.findByText("x", {}, { timeout: T })')).toEqual([3])
+    expect(scan(tlImport, 'async function w(ms: number) { await waitFor(() => ok(), { timeout: ms }) }')).toEqual([])
+    expect(scan(tlImport, 'const render = pick()', 'await waitFor(render)')).toEqual([])
+  })
+
+  it('computes a poll limit, deadline and interval from the scopes around the loop', () => {
+    expect(lines('const POLL_MS = 2_000', 'async function poll() {', '  const deadline = Date.now() + POLL_MS', '  while (Date.now() < deadline) await sleep(10)', '}')).toEqual([4])
+    expect(scan('const POLL_MS = 20_000', 'async function poll() {', '  const deadline = Date.now() + POLL_MS', '  while (Date.now() < deadline) await sleep(10)', '}')).toEqual([])
+    expect(lines('describe("d", () => {', '  const LIMIT = 2_000', '  it("x", async () => {', '    const start = Date.now()', '    while (Date.now() - start < LIMIT) await sleep(10)', '  })', '})')).toEqual([5])
+    expect(lines('const TRIES = 20', 'for (let i = 0; i < TRIES; i++) await sleep(100)')).toEqual([2])
+    expect(lines('const EVERY = 100', 'for (let i = 0; i < 20; i++) await sleep(EVERY)')).toEqual([2])
+    expect(scan('const EVERY = 1_000', 'for (let i = 0; i < 20; i++) await sleep(EVERY)')).toEqual([])
+    // The nearest declaration wins, and a module constant counts wherever it sits.
+    expect(lines('const LIMIT = 20_000', 'async function run() {', '  const LIMIT = 500', '  const start = Date.now()', '  while (Date.now() - start < LIMIT) await sleep(10)', '}')).toEqual([5])
+    expect(scan('const LIMIT = 500', 'async function run() {', '  const LIMIT = 20_000', '  const start = Date.now()', '  while (Date.now() - start < LIMIT) await sleep(10)', '}')).toEqual([])
+    expect(lines('async function run() {', '  const start = Date.now()', '  while (Date.now() - start < LIMIT) await sleep(10)', '}', 'const LIMIT = 500')).toEqual([3])
+  })
+
+  it('leaves a poll limit, step or delay alone only when it comes from outside the file', () => {
+    expect(scan(
+      'async function a(limit: number) { const start = Date.now(); while (Date.now() - start < limit) await sleep(10) }',
+      'async function b(opts: { limit: number }) { const start = Date.now(); while (Date.now() - start < opts.limit) await sleep(10) }',
+      'async function c(n: number) { for (let i = 0; i < n; i++) await sleep(100) }',
+      'async function d(step: number) { for (let i = 0; i < 20; i += step) await sleep(100) }',
+      'async function e(ms: number) { for (let i = 0; i < 20; i++) await sleep(ms) }',
+      'async function f(limit: number) { const t = limit; const start = Date.now(); while (Date.now() - start < t) await sleep(10) }',
+    )).toEqual([])
+    // What the file declares and the scan cannot read bounds nothing: a call, a ternary, a path into an object of the file, a `let`
+    // written afterwards, a delay or a step that is a call.
+    expect(lines(
+      'const LIMIT = pick()',
+      'const start = Date.now()',
+      'while (Date.now() - start < LIMIT) await sleep(10)',
+      'const CAP = cond ? 100 : 20_000',
+      'while (Date.now() - start < CAP) await sleep(10)',
+      'const cfg = { limit: 500 }',
+      'while (Date.now() - start < cfg.limit) await sleep(10)',
+      'let GROWN = 800',
+      'GROWN += 20_000',
+      'while (Date.now() - start < GROWN) await sleep(10)',
+      'function backoff(n: number) { return n * 100 }',
+      'for (let i = 0; i < 20; i++) await sleep(backoff(i))',
+      'const STEP = pick()',
+      'for (let i = 0; i < 20; i += STEP) await sleep(100)',
+      'const N = pick()',
+      'for (let i = 0; i < N; i++) await sleep(100)',
+    )).toEqual([3, 5, 7, 10, 12, 14, 16])
   })
 })
 

@@ -28,17 +28,26 @@ import { join, resolve } from 'node:path';
  *   - a clock comparison with `<`, `<=`, `>` or `>=`, never `==` or `!=`, and as the whole part: `now - start` against a limit,
  *     `now` against `start + limit` or a deadline, or a name the loop sets from the clock (`const elapsed = Date.now() - start`).
  *     `now` is `Date.now()`, `performance.now()` or `process.hrtime()`. A limit is a literal sum of products (`5 * 1_000`) or one
- *     name or path. A start is a read of the clock, a deadline a read of the clock plus a limit, and a name or path the caller
- *     sizes is left alone. A name set to any other expression is no start, deadline or limit. The loop never declares them again,
+ *     name or path. A start is a read of the clock, a deadline a read of the clock plus a limit. A name set to any other
+ *     expression is no start, deadline or limit. The loop never declares them again,
  *     writes them or leaves them to a closure that writes. A name it sets from the clock is set once, as a statement of the body
  *     itself before any `continue`: a write in a branch may keep an old value.
  *   - the counter of a `for (let|var i = <literal>; i < limit; i++)` header: one declarator, `<` or `<=` against a limit the loop
  *     never changes, and a step of `i++`, `++i` or `i += <positive literal>`. A count down, a step in the test (`i++ < 20`) or a
  *     write in the body is no bound. It gives the iterations times the sleeps every pass reaches.
- * A part on the list whose limit the scan cannot evaluate (a caller-sized parameter, an imported constant, a count it cannot
- * read) is left alone. Any other shape has no bound: a ternary, `??`, a call, arithmetic on the clock, an equality, a
- * counter the body steps, a start the loop resets, a flag set in a branch. A loop with no bound on the list is reported,
- * unless `// bound: <reason>` accepts it. A loop over a collection or a stream ends with it.
+ * Numbers are evaluated, not matched: literals with separators and other bases, unary `+` and `-`, parentheses, `as`, `satisfies`
+ * and non-null wrappers, `+ - * / % **`, and, for a wait bound or a delay, `Math.max`, `min`, `abs`, `floor`, `ceil`, `round` and
+ * `trunc` of those. A name is looked up in the function around its use and in every function around that one, up to the module,
+ * at the use: the nearest declaration hides the ones further out, and a `const` of an outer scope counts wherever it sits, since a
+ * function runs after the module has loaded. A `let` or `var` of an outer scope is read only when nothing writes it after its declaration. A wait bound
+ * that is negative, zero, `NaN`, infinite or past a timer's limit is below the floor.
+ * A part on the list is left alone only for a value that comes from outside the file or from the function's parameters (a
+ * parameter, an import, a global, a property of an argument): the caller sizes it. A value the file declares and the scan cannot
+ * evaluate (a call, a ternary, a destructured binding, a `let` written after its declaration, a name set to one of those) is never
+ * left alone: as a limit, start, deadline or delay it bounds nothing, and as a wait bound it is below the floor. Any other shape
+ * has no bound: a ternary, `??`, a call, arithmetic on the clock, an equality, a counter the body steps, a start the loop
+ * resets, a flag set in a branch. A loop with no bound on the list is reported, unless `// bound: <reason>` accepts it. A loop
+ * over a collection or a stream ends with it, and a count of passes that sleep nothing says nothing in milliseconds.
  *
  * `test-wait-discipline.test.ts` runs it against every `*.test.ts` and `*.testkit.ts` under
  * `packages/cezar/src` and compares the tally with two checked-in baselines that can only shrink,
@@ -354,32 +363,131 @@ const numericLiteral =
 
 const numeric = (text: string | undefined): number | undefined => (text !== undefined && numericLiteral.test(text.trim()) ? Number(text.trim().replace(/_/g, '')) : undefined);
 
-/** `a * b / c` of literals. */
-function product(term: string): number | undefined {
-  const [first, ...rest] = term.split(/([*/])/);
-  let value = numeric(first);
-  for (let i = 0; i < rest.length; i += 2) {
-    const next = numeric(rest[i + 1]);
-    value = value === undefined || next === undefined ? undefined : rest[i] === '*' ? value * next : value / next;
-  }
-  return value;
-}
+/** The names of JavaScript's own numbers that the evaluator reads. */
+const namedNumbers = new Map<string, number>([
+  ['NaN', NaN], ['Infinity', Infinity], ['Number.NaN', NaN], ['Number.POSITIVE_INFINITY', Infinity], ['Number.NEGATIVE_INFINITY', -Infinity],
+  ['Number.MAX_SAFE_INTEGER', Number.MAX_SAFE_INTEGER], ['Number.MIN_SAFE_INTEGER', Number.MIN_SAFE_INTEGER], ['Number.MAX_VALUE', Number.MAX_VALUE],
+]);
+
+const numberToken = /\s*(0[xXoObB][\da-fA-F_]+|(?:\d[\d_]*\.?[\d_]*|\.\d[\d_]*)(?:[eE][+-]?\d[\d_]*)?)/y;
+const wordToken = /\s*([A-Za-z_$][\w$]*(?:\.[A-Za-z_$][\w$]*)*)/y;
+const operatorToken = /\s*(\*\*|[-+*/%()!,])/y;
+
+/** The functions of `Math` that the evaluator reads, on numbers it can read. */
+const mathFunctions = new Map<string, (...values: number[]) => number>([
+  ['Math.max', Math.max], ['Math.min', Math.min], ['Math.abs', Math.abs], ['Math.floor', Math.floor], ['Math.ceil', Math.ceil], ['Math.round', Math.round], ['Math.trunc', Math.trunc],
+]);
+const angleAssertion = /\s*<[\w$.[\]| ]+>/y;
 
 /**
- * The value of a numeric literal, or of a sum of products of them (`5 * 1000`, `2 * 60 * 1000`), or undefined for
- * anything else. Every rule reads bounds through this, so a bound written as arithmetic is judged like its result.
+ * The value of a numeric expression: number literals (`_` separators, exponents, hex), `NaN`, `Infinity`, unary `+` and `-`,
+ * parentheses, `as` / `satisfies` / non-null wrappers, `+ - * / % **` of those, and `Math.max`, `min`, `abs`, `floor`, `ceil`,
+ * `round` and `trunc` of those. `undefined` for anything else, which is an expression the scan cannot read. A name is read through
+ * `names`, when given. Every rule reads bounds through this, so a bound written as arithmetic is judged like its result.
  */
-function literalMs(text: string | undefined): number | undefined {
-  const whole = numeric(text);
-  if (whole !== undefined || text === undefined) return whole;
-  const terms = text.split('+').map(product);
-  return terms.every((term) => term !== undefined) ? terms.reduce<number>((sum, term) => sum + (term ?? 0), 0) : undefined;
+function literalMs(text: string | undefined, names?: (name: string) => number | undefined): number | undefined {
+  if (text === undefined) return undefined;
+  let at = 0;
+  const next = (pattern: RegExp): string | undefined => {
+    pattern.lastIndex = at;
+    const found = pattern.exec(text);
+    if (!found) return undefined;
+    at = pattern.lastIndex;
+    return found[1];
+  };
+  const peek = (): string | undefined => {
+    const saved = at;
+    const token = next(operatorToken) ?? next(wordToken);
+    at = saved;
+    return token;
+  };
+  // `500 as number`, `500 as const`, `500 satisfies number` and `500!`: a wrapper changes the type, not the value.
+  const wrapped = (value: number | undefined): number | undefined => {
+    for (;;) {
+      const token = peek();
+      if (token === 'as' || token === 'satisfies') {
+        next(wordToken);
+        if (next(wordToken) === undefined) return undefined;
+      } else if (token === '!' && text[text.indexOf('!', at) + 1] !== '=') next(operatorToken);
+      else return value;
+    }
+  };
+  const primary = (): number | undefined => {
+    if (peek() === '(') {
+      next(operatorToken);
+      const inner = sum();
+      return next(operatorToken) === ')' ? wrapped(inner) : undefined;
+    }
+    const literal = next(numberToken);
+    if (literal !== undefined) return wrapped(numeric(literal));
+    const word = next(wordToken);
+    if (word === undefined) return undefined;
+    const fn = mathFunctions.get(word);
+    if (fn !== undefined && peek() === '(') return wrapped(call(fn));
+    return wrapped(namedNumbers.has(word) ? namedNumbers.get(word) : names?.(word));
+  };
+  const call = (fn: (...values: number[]) => number): number | undefined => {
+    next(operatorToken);
+    const args: number[] = [];
+    let token: string | undefined;
+    do {
+      const arg = sum();
+      if (arg === undefined) return undefined;
+      args.push(arg);
+      token = next(operatorToken);
+    } while (token === ',');
+    return token === ')' ? fn(...args) : undefined;
+  };
+  const unary = (): number | undefined => {
+    // `<number>500`: a type assertion changes the type, not the value.
+    angleAssertion.lastIndex = at;
+    if (angleAssertion.test(text)) at = angleAssertion.lastIndex;
+    const sign = peek();
+    if (sign !== '-' && sign !== '+') return primary();
+    next(operatorToken);
+    const value = unary();
+    return value === undefined ? undefined : sign === '-' ? -value : value;
+  };
+  const power = (): number | undefined => {
+    const base = unary();
+    if (peek() !== '**') return base;
+    next(operatorToken);
+    const exponent = power();
+    return base === undefined || exponent === undefined ? undefined : base ** exponent;
+  };
+  const product = (): number | undefined => {
+    let value = power();
+    for (let operator = peek(); value !== undefined && (operator === '*' || operator === '/' || operator === '%'); operator = peek()) {
+      next(operatorToken);
+      const right = power();
+      value = right === undefined ? undefined : operator === '*' ? value * right : operator === '/' ? value / right : value % right;
+    }
+    return value;
+  };
+  function sum(): number | undefined {
+    let value = product();
+    for (let operator = peek(); value !== undefined && (operator === '+' || operator === '-'); operator = peek()) {
+      next(operatorToken);
+      const right = product();
+      value = right === undefined ? undefined : operator === '+' ? value + right : value - right;
+    }
+    return value;
+  }
+  const value = sum();
+  return value !== undefined && /^\s*$/.test(text.slice(at)) ? value : undefined;
 }
 
 /** What Vitest's `vi.waitFor`, `vi.waitUntil` and `expect.poll` wait when given no `timeout`. */
 const VITEST_DEFAULT_MS = 1_000;
 
-const isShort = (ms: number | undefined): boolean => ms !== undefined && ms < SHORT_BOUND_MS;
+/** The longest delay a timer keeps: a larger one fires after 1 ms. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
+
+/** A wait bound is short unless it is a finite number of 10 s or more that a timer keeps: a negative, zero, `NaN`, infinite or overflowing one fires at once. */
+const isShort = (ms: number | undefined): boolean => ms !== undefined && !(ms >= SHORT_BOUND_MS && ms <= MAX_TIMER_MS);
+
+/** A poll loop's deadline is short unless it is a finite number of 10 s or more. */
+const isShortDeadline = (ms: number): boolean => !(ms >= SHORT_BOUND_MS && Number.isFinite(ms));
 
 type Frame = 'loop' | 'function' | 'block';
 
@@ -413,6 +521,8 @@ interface PollLoop {
   body: [number, number];
   /** Where the nearest enclosing function's parameter list starts, or 0: how far back a deadline may be defined. */
   scope: number;
+  /** A stand-in for a wait: a parameter's default is not its bound, since the helper that declares the parameter is judged on its own. */
+  wait?: true;
 }
 
 function startOfWord(code: string, end: number): number {
@@ -575,8 +685,35 @@ function closureText(code: string, from: number, to: number, free = 0): string {
   return text;
 }
 
-/** The text of a loop's function up to `upto`, without the functions nested in it. */
-const scopeBefore = (code: string, loop: PollLoop, upto: number): string => ownText(code, loop.scope, upto, loop.scope === 0 ? 0 : 1);
+/** The starts of the functions around the one that starts at `scope`, outermost first, then `scope` itself: where each lexical scope begins. */
+function scopeChain(code: string, scope: number): number[] {
+  const stack: Entry[] = [];
+  for (let i = 0; i < scope; i += 1) track(code, stack, i);
+  const around = stack.filter((entry) => entry.kind === 'function' || entry.kind === 'arrow').map((entry) => paramsStart(code, entry.open));
+  return scope === 0 ? [] : [...around, scope];
+}
+
+let outerCache: { code: string; scope: number; text: string; bounds: number[] } | undefined;
+
+/**
+ * The text before a loop's function, as each scope around it sees it: the module, and every function around the loop, with the
+ * functions that sit beside the loop's own blanked. A name used in the loop is looked up in it after the loop's own function.
+ * `bounds` are where each scope starts, outermost first, ending with the loop's own function.
+ */
+function outerOf(code: string, scope: number): { text: string; bounds: number[] } {
+  if (outerCache?.code === code && outerCache.scope === scope) return outerCache;
+  const bounds = [0, ...scopeChain(code, scope)];
+  let text = '';
+  for (let i = 0; i + 1 < bounds.length; i += 1) text += ownText(code, bounds[i] ?? 0, bounds[i + 1] ?? 0, i === 0 ? 0 : 1);
+  outerCache = { code, scope, text, bounds };
+  return outerCache;
+}
+
+/**
+ * The text up to `upto` that the code at `upto` reads names from, at the same offsets as `code`: the module and the functions
+ * around the loop's, then the loop's own function, each without the functions nested in it.
+ */
+const scopeBefore = (code: string, loop: PollLoop, upto: number): string => outerOf(code, loop.scope).text + ownText(code, loop.scope, upto, loop.scope === 0 ? 0 : 1);
 
 const compare = String.raw`(?<!=)(?:<=?|>=?)`;
 const escapeName = (name: string): string => name.replace(/\$/g, '\\$');
@@ -585,7 +722,7 @@ const escapeName = (name: string): string => name.replace(/\$/g, '\\$');
 type Bound = number | 'unreadable' | undefined;
 
 /** Where a counter starts, from `let name = 0` or `var name = 0`: the only declaration of the header, with a literal. */
-function counterStart(init: string, name: string, read: (text: string) => number | undefined): number | undefined {
+function counterStart(init: string, name: string, { read }: Reader): number | undefined {
   const started = new RegExp(String.raw`^\s*(?:let|var)\s+${escapeName(name)}\s*(?::[^=,]*)?=\s*([^,;]+?)\s*$`).exec(init);
   return read(started?.[1] ?? '');
 }
@@ -594,23 +731,23 @@ function counterStart(init: string, name: string, read: (text: string) => number
  * What an update adds to a counter: `name++`, `++name` or `name += <positive literal>`. `unreadable` when the amount is a name;
  * any other update is `undefined`.
  */
-function counterStep(update: string, name: string, read: (text: string) => number | undefined): number | 'unreadable' | undefined {
+function counterStep(update: string, name: string, { read, outside }: Reader): number | 'unreadable' | undefined {
   const n = escapeName(name);
   const stepped = new RegExp(String.raw`^\s*(?:${n}\s*\+\+|\+\+\s*${n}|${n}\s*\+=\s*([^,;]+?))\s*$`).exec(update);
   if (!stepped) return undefined;
   if (stepped[1] === undefined) return 1;
   const size = read(stepped[1]);
-  if (size === undefined) return /^[A-Za-z_$][\w$.]*$/.test(stepped[1].trim()) ? 'unreadable' : undefined;
+  if (size === undefined) return outside(stepped[1].trim()) ? 'unreadable' : undefined;
   return size > 0 ? size : undefined;
 }
 
 /**
  * How many times `for (let|var name = a; name < limit; name++)` runs, or `<=`, or `name += c`: a count when `a`, `limit` and `c` are
- * literals, `unreadable` when `limit` or `c` is a name the caller sizes, `undefined` for any other header.
+ * literals, `unreadable` when `limit` or `c` is a name or path from outside the file, `undefined` for any other header.
  */
-function iterations(init: string, update: string, name: string, operator: string, limit: number | 'name' | undefined, read: (text: string) => number | undefined): Bound {
-  const start = counterStart(init, name, read);
-  const step = counterStep(update, name, read);
+function iterations(init: string, update: string, name: string, operator: string, limit: number | 'name' | undefined, reader: Reader): Bound {
+  const start = counterStart(init, name, reader);
+  const step = counterStep(update, name, reader);
   if (start === undefined || step === undefined || limit === undefined) return undefined;
   if (limit === 'name' || step === 'unreadable') return 'unreadable';
   const span = limit - start;
@@ -680,39 +817,157 @@ function writtenOtherwise(code: string, loop: PollLoop, name: string): boolean {
 const valueEnd = String.raw`(?=\s*(?:[;,)\n]|$))`;
 const pathOnly = new RegExp(String.raw`^[A-Za-z_$][\w$.]*${valueEnd}`);
 
-/** The values the code at `at` can see assigned to, declared with or defaulted for `name` in the loop's function, as the text that follows each `=`. */
-function valuesBefore(code: string, loop: PollLoop, name: string, at: number): string[] {
-  const assigned = new RegExp(String.raw`(?<![\w$.])${escapeName(name)}\s*(?::[^=;,()]*)?=(?![=>])\s*`, 'g');
-  const text = scopeBefore(code, loop, at);
-  return visibleMatches(code, loop, at, assigned).map((match) => text.slice((match.index ?? 0) + match[0].length));
+/** A value the scan cannot read: a name of an outer scope that is written after its declaration. */
+const UNREAD = '\u0000';
+
+/** One value a name can hold, as the text that follows its `=`, where that text starts in the code, and whether it is a parameter's default. */
+interface Held {
+  value: string;
+  at: number;
+  param: boolean;
+}
+
+let moduleCache: { code: string; text: string } | undefined;
+
+/** The module's own text: everything outside a function, at the same offsets as `code`. */
+function moduleText(code: string): string {
+  if (moduleCache?.code !== code) moduleCache = { code, text: ownText(code, 0, code.length, 0) };
+  return moduleCache.text;
+}
+
+/** The depths of the scopes whose parameter list binds `name`, with or without a default: a parameter hides the same name of the scopes around it. */
+function paramDepths(code: string, bounds: number[], name: string): number[] {
+  const bound = new RegExp(String.raw`(?<![\w$.])${escapeName(name)}(?![\w$])`);
+  const binds = (param: string): boolean => (/^(?:\.\.\.)?\s*[A-Za-z_$]/.test(param) ? /^(?:\.\.\.)?\s*([A-Za-z_$][\w$]*)/.exec(param)?.[1] === name : bound.test(param));
+  return bounds.flatMap((start, depth) => (depth > 0 && code[start] === '(' && argsOf(code, start, closeOf(code, start)).some((param) => binds(param.text)) ? [depth] : []));
 }
 
 /**
- * The loop's bound `text` in milliseconds as the code at `at` reads it: a literal, or a name for one. A name that can hold
- * several values (a parameter's default, a declaration, a plain reassignment the code at `at` can see) gives the smallest it can
- * read; one written some other way (`name += 1`) is `unreadable`, and so is a path. Any other expression, and a name that is set
- * to one, is a shape the scan does not read: no bound.
+ * The values the code at `at` can see assigned to, declared with or defaulted for `name`, as the text that follows each `=`. A
+ * declaration in a scope hides the name in the scopes around it. The loop's own function gives every value the name can hold
+ * there. A name of an outer scope holds one value: a `const`, or a parameter's default; a `let` or `var` is read only when nothing
+ * in the file writes it after its declaration, else it is `UNREAD`. A `const` at the top of the module counts wherever it sits,
+ * since a function runs after the module has loaded, unless a nearer scope declares the name.
+ */
+function heldValues(code: string, loop: PollLoop, name: string, at: number): Held[] {
+  const { bounds } = outerOf(code, loop.scope);
+  const assigned = new RegExp(String.raw`(?<![\w$.])${escapeName(name)}\s*(?::[^=;,()]*)?=(?![=>])\s*`, 'g');
+  const text = scopeBefore(code, loop, at);
+  const found = visibleMatches(code, loop, at, assigned).map((match) => {
+    const index = match.index ?? 0;
+    const before = text.slice(0, index).trimEnd();
+    const param = !/\bconst$/.test(before) && /[(,]$/.test(before);
+    const constant = param || /\bconst$/.test(before);
+    return {
+      depth: bounds.filter((start) => start <= index).length - 1,
+      declares: constant || /\b(?:let|var)$/.test(before),
+      constant,
+      param,
+      at: index + match[0].length,
+    };
+  });
+  const innermost = Math.max(-1, ...found.filter((each) => each.declares).map((each) => each.depth), ...paramDepths(code, bounds, name));
+  const values = found.filter((each) => each.depth >= innermost && !(loop.wait && each.param)).map((each) => {
+    const readable = each.constant || (each.depth === bounds.length - 1 && !loop.wait) || (each.declares && !writesName(code, name, true));
+    return { value: readable ? text.slice(each.at) : UNREAD, at: each.at, param: each.param };
+  });
+  if (innermost !== -1 || loop.scope === 0) return values;
+  const module = moduleText(code);
+  const late = [...module.matchAll(new RegExp(String.raw`\bconst\s+${escapeName(name)}\s*(?::[^=;,()]*)?=(?![=>])\s*`, 'g'))]
+    .filter((match) => (match.index ?? 0) >= at)
+    .map((match) => ({ value: module.slice((match.index ?? 0) + match[0].length), at: (match.index ?? 0) + match[0].length, param: false }));
+  return [...values, ...late];
+}
+
+const valuesBefore = (code: string, loop: PollLoop, name: string, at: number): string[] => heldValues(code, loop, name, at).map((each) => each.value);
+
+/** Whether the file declares `name` itself: a `const`, `let`, `var`, function or class, a destructured binding or a loop variable. A parameter and an import are the caller's. */
+function declaredHere(code: string, loop: PollLoop, name: string, at: number): boolean {
+  return heldValues(code, loop, name, at).some((each) => !each.param) || declaredApart(code, name);
+}
+
+/** Whether `text` is a name or path that the file does not declare: a parameter, an import or a global, so a value the caller sizes. */
+function isOutside(code: string, loop: PollLoop, text: string, at: number): boolean {
+  const root = /^([A-Za-z_$][\w$]*)(?:\.[A-Za-z_$][\w$]*)*$/.exec(text.trim())?.[1];
+  return root !== undefined && !declaredHere(code, loop, root, at);
+}
+
+/** The text of the value that starts the string: up to the first `;`, `,` or newline outside a bracket, or the bracket that closes the list it sits in. */
+function valueText(text: string): string {
+  let depth = 0;
+  for (let i = 0; i < text.length; i += 1) {
+    const ch = text[i];
+    if (ch === '(' || ch === '[' || ch === '{') depth += 1;
+    else if (ch === ')' || ch === ']' || ch === '}') {
+      if (depth === 0) return text.slice(0, i);
+      depth -= 1;
+    } else if (depth === 0 && (ch === ';' || ch === ',' || ch === '\n')) return text.slice(0, i);
+  }
+  return text;
+}
+
+/** Whether the file declares `name` where a plain `name = value` cannot be read: a function or class, destructuring, or the variable of a `for … of` or `for … in`. */
+function declaredApart(code: string, name: string): boolean {
+  const n = escapeName(name);
+  return new RegExp(String.raw`\b(?:function\s*\*?|class)\s+${n}(?![\w$])|\b(?:let|const|var)\s*[\[{][^;=]*(?<![\w$.])${n}(?![\w$])[^;=]*[\]}]\s*=|\bfor\s*(?:await\s*)?\(\s*(?:let|const|var)\s+${n}(?![\w$])`).test(code);
+}
+
+/** What a name the scan cannot follow stands for: a value the caller sizes when the file does not declare it, else a shape the scan does not read: no bound. */
+function unfollowed(code: string, loop: PollLoop, name: string, at: number): Bound {
+  return declaredHere(code, loop, name, at) ? undefined : 'unreadable';
+}
+
+/**
+ * What a name stands for where the code at `at` reads it: the smallest number it can hold. `unreadable` for a value that comes from
+ * outside the file (a parameter without a default, an import, a global, a property of either). `undefined` for a name the file
+ * declares and the scan cannot evaluate: one set to an expression it does not read (a call, a ternary, a destructured binding), one
+ * written some other way (`name += 1`, an outer `let` written after its declaration) and one that leads to such a name.
+ */
+function nameBound(code: string, loop: PollLoop, name: string, at: number, depth = 0): Bound {
+  const values = valuesBefore(code, loop, name, at);
+  if (depth > 3 || values.includes(UNREAD) || writtenOtherwise(code, loop, name)) return unfollowed(code, loop, name, at);
+  const resolve = (inner: string): number | undefined => {
+    const bound = /^[A-Za-z_$][\w$]*$/.test(inner) ? nameBound(code, loop, inner, at, depth + 1) : undefined;
+    return isNumber(bound) ? bound : undefined;
+  };
+  const read = values.map((value) => literalMs(valueText(value), resolve));
+  if (values.some((value, index) => read[index] === undefined && !pathOnly.test(value))) return undefined;
+  if (values.length === 0 && declaredApart(code, name)) return undefined;
+  // A value that is another name or path is the caller's only when the file does not declare it.
+  if (values.some((value, index) => read[index] === undefined && !aliasOutside(code, loop, valueText(value).trim(), at, depth))) return undefined;
+  const known = read.filter(isNumber);
+  return known.length > 0 ? Math.min(...known) : 'unreadable';
+}
+
+/** Whether the name or path `target`, the value of another name, comes from outside the file. */
+function aliasOutside(code: string, loop: PollLoop, target: string, at: number, depth: number): boolean {
+  if (!/^[A-Za-z_$][\w$]*$/.test(target)) return isOutside(code, loop, target, at);
+  return nameBound(code, loop, target, at, depth + 1) !== undefined;
+}
+
+/**
+ * The loop's bound `text` in milliseconds as the code at `at` reads it: a number written out, or an expression of numbers and names
+ * for them (`POLL_MS * 2`). A name is read through every scope around the use. A name or path from outside the file is `unreadable`.
+ * Any other expression, and a name the file sets to one, is a shape the scan does not read: no bound.
  */
 function literalBound(code: string, loop: PollLoop, text: string, at: number): Bound {
-  const direct = literalMs(text);
+  const trimmed = text.trim();
+  if (/^[A-Za-z_$][\w$]*$/.test(trimmed) && !namedNumbers.has(trimmed)) return nameBound(code, loop, trimmed, at);
+  const direct = literalMs(trimmed, (name) => {
+    const bound = nameBound(code, loop, name, at, 1);
+    return isNumber(bound) ? bound : undefined;
+  });
   if (direct !== undefined) return direct;
-  if (/^[A-Za-z_$][\w$]*(?:\.[\w$]+)+$/.test(text)) return 'unreadable';
-  if (!/^[A-Za-z_$][\w$]*$/.test(text)) return undefined;
-  if (writtenOtherwise(code, loop, text)) return 'unreadable';
-  const values = valuesBefore(code, loop, text, at);
-  const literal = new RegExp(String.raw`^(${limitToken})${valueEnd}`);
-  if (!values.every((value) => pathOnly.test(value) || literalMs(literal.exec(value)?.[1]) !== undefined)) return undefined;
-  const known = values.map((value) => literalMs(literal.exec(value)?.[1])).filter(isNumber);
-  return known.length > 0 ? Math.min(...known) : 'unreadable';
+  return /^[A-Za-z_$][\w$]*(?:\.[\w$]+)+$/.test(trimmed) && isOutside(code, loop, trimmed, at) ? 'unreadable' : undefined;
 }
 
 /** A deadline held in a name: the smallest `name = Date.now() + <bound>` that the code at `at` can see in the loop's function. Any other value it holds is a shape the scan does not read. */
 function definedBound(code: string, loop: PollLoop, name: string, at: number): Bound {
-  if (writtenOtherwise(code, loop, name)) return 'unreadable';
+  if (writtenOtherwise(code, loop, name)) return unfollowed(code, loop, name, at);
   const sum = new RegExp(String.raw`^${clockCall}\s*\+\s*(${limitToken})${valueEnd}`);
   const bounds = valuesBefore(code, loop, name, at).map((value) => {
     const limit = sum.exec(value)?.[1];
-    return limit !== undefined ? literalBound(code, loop, limit.trim(), at) : pathOnly.test(value) ? 'unreadable' : undefined;
+    return limit !== undefined ? literalBound(code, loop, limit.trim(), at) : pathOnly.test(value) && aliasOutside(code, loop, valueText(value).trim(), at, 0) ? 'unreadable' : undefined;
   });
   return bounds.includes(undefined) ? undefined : earliest(bounds) ?? 'unreadable';
 }
@@ -733,11 +988,16 @@ interface Probe {
   again: string;
   /** The three clauses of a `for` header, or none. */
   clauses: string[];
-  /** The time one pass of the loop's sleeps takes, 0 when a delay is not a literal. */
-  interval: number;
+  /** The time one pass of the loop's sleeps takes, 0 when it has none: `unreadable` when a delay comes from outside the file, `undefined` when a delay is one the scan does not read. */
+  interval: Bound;
   /** A literal (a bound in milliseconds, or a count), read where the loop starts. */
   read: (text: string) => number | undefined;
+  /** Whether a name or path comes from outside the file, so the caller sizes it. */
+  outside: (text: string) => boolean;
 }
+
+/** What a counter header reads its numbers with. */
+type Reader = Pick<Probe, 'read' | 'outside'>;
 
 /**
  * Whether a pass of the loop changes the name the code at `at` reads: the declaration in view sits in the loop body (it runs again
@@ -750,7 +1010,7 @@ function movesIn(cx: Probe, name: string, at: number): boolean {
   const nearest = visibleMatches(cx.code, cx.loop, at, declaration).at(-1);
   const closures = closureText(cx.code, cx.loop.scope, Math.max(cx.loop.body[1], cx.loop.head?.[1] ?? 0) + 1, cx.loop.scope === 0 ? 0 : 1);
   const written = (text: string): boolean => writesName(text, name, true) || writesName(text, root, true);
-  return (nearest?.index !== undefined && cx.loop.scope + nearest.index >= cx.loop.body[0]) || written(cx.again) || written(closures);
+  return (nearest?.index !== undefined && nearest.index >= cx.loop.body[0]) || written(cx.again) || written(closures);
 }
 
 /** Whether the loop changes any name or path the text reads. */
@@ -832,12 +1092,19 @@ function clockLeaf(text: string, cx: Probe, at: number): Bound {
   return found.length > 0 ? earliest(found) : aliasLeaf(text, cx, at);
 }
 
+/** How long `count` passes take when one pass sleeps `interval`. Passes that sleep nothing take no time to count, so the count says nothing in milliseconds: `unreadable`. */
+function timeOf(count: number, interval: Bound): Bound {
+  if (interval === undefined) return undefined;
+  return isNumber(interval) && interval > 0 ? count * interval : 'unreadable';
+}
+
 /**
  * What a comparison with a counter says about how long the loop runs. Only the counter of a `for (let|var i = <literal>; i < limit;
  * i++)` header counts, since its update runs every pass: it gives its iteration count times the time one pass sleeps, when nothing
- * in the body writes the counter. `<=` and `i += <positive literal>` read the same way. `unreadable` is a limit or a step that is a
- * name or an interval the scan cannot read. A counter the body steps or writes or the test steps (`i++ < 20`), a limit or a step the
- * loop changes, a count down, and a comparison with `==` or `!=` bound nothing.
+ * in the body writes the counter. `<=` and `i += <positive literal>` read the same way. `unreadable` is a limit, a step or a delay
+ * that is a name or path from outside the file, and a count of passes that sleep nothing, which says nothing in milliseconds. A
+ * limit, step or delay the file declares and the scan cannot read, a counter the body steps or writes or the test steps
+ * (`i++ < 20`), a limit or a step the loop changes, a count down, and a comparison with `==` or `!=` bound nothing.
  */
 function counterLeaf(text: string, cx: Probe, at: number): Bound {
   const compared = /^\s*([A-Za-z_$][\w$]*)\s*(<=?)\s*(\S[^&|]*?)\s*$/.exec(text);
@@ -847,9 +1114,9 @@ function counterLeaf(text: string, cx: Probe, at: number): Bound {
   // A limit or a step the loop changes is not the one the header names.
   if (movesAny(cx, `${limit} ${cx.clauses[2] ?? ''}`.replace(new RegExp(String.raw`(?<![\w$.])${escapeName(name)}(?![\w$])`, 'g'), ''), at)) return undefined;
   const value = cx.read(limit);
-  const sized = value ?? (/^[A-Za-z_$][\w$.]*$/.test(limit.trim()) ? 'name' : undefined);
-  const count = iterations(cx.clauses[0] ?? '', cx.clauses[2] ?? '', name, operator, sized, cx.read);
-  return isNumber(count) ? (cx.interval > 0 ? count * cx.interval : 'unreadable') : count;
+  const sized = value ?? (cx.outside(limit) ? 'name' : undefined);
+  const count = iterations(cx.clauses[0] ?? '', cx.clauses[2] ?? '', name, operator, sized, cx);
+  return isNumber(count) ? timeOf(count, cx.interval) : count;
 }
 
 /** The bound a name gives a condition that is true or false by the value the loop sets it to on every pass (`const timedOut = Date.now() - t0 > 5_000`). */
@@ -985,11 +1252,16 @@ function pollDeadline(code: string, loop: PollLoop, sleeps: LoopSleep[]): Deadli
     return typeof bound === 'number' ? bound : undefined;
   };
   // One pass takes the sum of the delays it cannot skip. A loop whose sleeps a pass may skip has no interval to count by.
-  const intervals = sleeps.filter((sleep) => sleep.always).map((sleep) => read(sleep.delay ?? ''));
+  const delays = sleeps.filter((sleep) => sleep.always).map((sleep): Bound => {
+    const delay = (sleep.delay ?? '').trim();
+    const bound = literalBound(code, loop, delay, loop.keyword);
+    return bound === undefined && delay !== '' && sizedOutside(code, loop, delay, loop.keyword) ? 'unreadable' : bound;
+  });
   const clauses = header.split(';');
-  const interval = intervals.length > 0 && intervals.every(isNumber) ? intervals.reduce((sum, each) => sum + each, 0) : 0;
+  const interval: Bound = delays.includes(undefined) ? undefined : delays.every(isNumber) ? delays.reduce((sum, each) => sum + each, 0) : 'unreadable';
   const again = code.slice(loop.body[0], loop.body[1] + 1) + (clauses.length === 3 ? `;${clauses[1]};${clauses[2]}` : `;${header}`);
-  const cx: Probe = { code, loop, region, again, clauses: clauses.length === 3 ? clauses : [], interval, read };
+  const outside = (text: string): boolean => isOutside(code, loop, text, loop.keyword);
+  const cx: Probe = { code, loop, region, again, clauses: clauses.length === 3 ? clauses : [], interval, read, outside };
   const head = loop.head ? endsText(clauses.length === 3 ? clauses[1] ?? '' : header, false, cx, loop.head[1]) : undefined;
   return earliest([head, ...exitBounds(cx)]) ?? 'none';
 }
@@ -1093,9 +1365,48 @@ function sleepSites(code: string): Found[] {
   }
   for (const { loop, sleeps: inLoop } of sleepsOf.values()) {
     const deadline = pollDeadline(code, loop, inLoop);
-    if (deadline === 'none' || (typeof deadline === 'number' && isShort(deadline))) found.push({ rule: 'poll-deadline', offset: loop.keyword });
+    if (deadline === 'none' || (typeof deadline === 'number' && isShortDeadline(deadline))) found.push({ rule: 'poll-deadline', offset: loop.keyword });
   }
   return found;
+}
+
+/** The function the code at `at` sits in, as a place to look names up from: a stand-in for a loop that starts and ends there. */
+function placeAt(code: string, at: number): PollLoop {
+  const stack: Entry[] = [];
+  for (let i = 0; i < at; i += 1) track(code, stack, i);
+  const frame = stack.reverse().find((entry) => entry.kind === 'function' || entry.kind === 'arrow');
+  return { keyword: at, body: [at, at], scope: frame ? paramsStart(code, frame.open) : 0, wait: true };
+}
+
+/** Names that stand for the same value in every file: JavaScript's own, which a bound may use without declaring. */
+const ownNames = new Set(['Math', 'Number', 'Date', 'Infinity', 'NaN', 'undefined', 'null', 'true', 'false']);
+
+/** Whether the expression reads a name or path from outside the file: a parameter, an import or a global, so a value the caller sizes. */
+function sizedOutside(code: string, place: PollLoop, text: string, at: number): boolean {
+  const names = text.replace(/\b(?:as|satisfies)\s+[\w$.]+|<[\w$.[\]| ]+>/g, ' ').match(/(?<![\w$.])[A-Za-z_$][\w$]*/g) ?? [];
+  return names.some((name) => !ownNames.has(name) && !declaredHere(code, place, name, at));
+}
+
+/**
+ * What a wait bound written at `at` stands for: a number, with a name read through the scopes around it. `undefined` is Vitest's
+ * default and `null` is none. `undefined` for a value that comes from outside the file, which the caller sizes. Given the file's
+ * `source`, the position is a Vitest timeout: a name held an options object is read as one, and an expression made only of what
+ * the file declares, which the scan cannot evaluate, is `NaN`: it may be any bound, so it counts as below the floor. A helper's
+ * argument is not a bound by its position, so it is read without the source.
+ */
+function waitMs(code: string, at: number, text: string | undefined, source?: string, depth = 0): number | undefined {
+  const trimmed = (text ?? '').trim();
+  if (trimmed === 'undefined') return VITEST_DEFAULT_MS;
+  if (trimmed === 'null') return 0;
+  const place = placeAt(code, at);
+  if (source !== undefined && depth < 3 && /^[A-Za-z_$][\w$]*$/.test(trimmed)) {
+    const objects = heldValues(code, place, trimmed, at).filter((each) => each.value.startsWith('{'));
+    const held = objects.map((each) => optionsBound(code, source, { start: each.at, text: code.slice(each.at, closeOf(code, each.at) + 1) }, depth + 1));
+    if (held.length > 0) return held.includes(undefined) ? undefined : Math.min(...held.filter(isNumber));
+  }
+  const bound = literalBound(code, place, trimmed, at);
+  if (bound !== undefined) return isNumber(bound) ? bound : undefined;
+  return source !== undefined && !sizedOutside(code, place, trimmed, at) ? NaN : undefined;
 }
 
 /** Rule `short-bound`: a Vitest wait with no bound (1 s), or with a literal one under 10 s, and the local helpers alike. */
@@ -1104,14 +1415,14 @@ function boundSites(code: string, source: string): Found[] {
   for (const match of code.matchAll(vitestWait)) {
     const open = match.index + match[0].length - 1;
     const bound = argsOf(code, open, closeOf(code, open))[1];
-    const ms = bound === undefined ? VITEST_DEFAULT_MS : bound.text.startsWith('{') ? optionsBound(code, source, bound) : literalMs(bound.text);
+    const ms = bound === undefined ? VITEST_DEFAULT_MS : bound.text.startsWith('{') ? optionsBound(code, source, bound) : waitMs(code, bound.start, bound.text, source);
     if (isShort(ms)) found.push({ rule: 'short-bound', offset: match.index });
   }
   // A local wait helper called with a short literal anywhere after its condition.
   for (const match of code.matchAll(helperCall)) {
     if (/\bfunction\s*\*?\s*$/.test(code.slice(Math.max(0, match.index - 12), match.index))) continue;
     const open = match.index + match[0].length - 1;
-    if (argsOf(code, open, closeOf(code, open)).slice(1).some((arg) => isShort(literalMs(arg.text)))) {
+    if (argsOf(code, open, closeOf(code, open)).slice(1).some((arg) => isShort(waitMs(code, arg.start, arg.text)))) {
       found.push({ rule: 'short-bound', offset: match.index });
     }
   }
@@ -1121,7 +1432,7 @@ function boundSites(code: string, source: string): Found[] {
       const open = match.index + match[0].length - 1;
       const close = closeOf(code, open);
       if (pattern === helperArrow && !/^\s*(?::[^;{]*?)?=>/.test(code.slice(close + 1))) continue;
-      if (argsOf(code, open, close).some(shortDefault)) found.push({ rule: 'short-bound', offset: match.index });
+      if (argsOf(code, open, close).some((param) => shortDefault(code, param))) found.push({ rule: 'short-bound', offset: match.index });
     }
   }
   return found;
@@ -1157,25 +1468,42 @@ function boundAccepted(
 /**
  * The bound an options object literal gives a Vitest wait, read from its own top-level properties
  * in order: Vitest's 1 s default until a `timeout` names one, then that literal. A spread or a
- * computed key may carry any bound, so after one the bound is unreadable until a later explicit
- * `timeout`. `undefined` is unreadable, and so is anything but a plain object literal.
+ * computed key may carry any bound, so after one the bound is the caller's (`undefined`) when it reads a name from
+ * outside the file and below the floor when the file declares everything it reads, until a later explicit `timeout`.
+ * `undefined` is also anything but a plain object literal.
  */
-function optionsBound(code: string, source: string, arg: Item): number | undefined {
+function optionsBound(code: string, source: string, arg: Item, depth = 0): number | undefined {
   const close = arg.start + arg.text.length - 1;
   if (closeOf(code, arg.start) !== close) return undefined;
   let bound: number | undefined = VITEST_DEFAULT_MS;
   for (const property of argsOf(code, arg.start, close)) {
     const key = propertyKey(source, property);
-    if (key === undefined) bound = undefined;
-    else if (key.name === 'timeout') bound = literalMs(key.value);
+    if (key === undefined) bound = entryBound(code, property);
+    else if (key.name === 'timeout') bound = waitMs(code, property.start, key.value ?? key.name, source, depth);
   }
   return bound;
+}
+
+/** What an entry that may set any key (a spread, a computed key, a quoted key with an escape) leaves of the bound: the caller's, or `NaN` when it reads only what the file declares. */
+function entryBound(code: string, property: Item): number | undefined {
+  const text = property.text.trim();
+  const expression = text.startsWith('...') ? text.slice(3) : /^\[([^\]]*)\]/.exec(text)?.[1] ?? text;
+  return sizedOutside(code, placeAt(code, property.start), expression, property.start) ? undefined : NaN;
+}
+
+/** A quoted key with its `\uXXXX`, `\u{X}` and `\xXX` escapes decoded: `"\u0074imeout"` is `timeout`. `undefined` when another escape is left. */
+function unescaped(key: string): string | undefined {
+  const decoded = key.replace(/\\u\{([\da-fA-F]+)\}|\\u([\da-fA-F]{4})|\\x([\da-fA-F]{2})/g, (_, braced?: string, four?: string, two?: string) => {
+    const code = Number.parseInt(braced ?? four ?? two ?? '0', 16);
+    return code <= 0x10ffff ? String.fromCodePoint(code) : '\\';
+  });
+  return decoded.includes('\\') ? undefined : decoded;
 }
 
 /**
  * A property's key and value text. A quoted key is blanked in the code, so its name is read from
  * the original source at the same offsets: `{ "timeout": 100 }` names `timeout`. A spread, a
- * computed key or a quoted key with an escape is `undefined`; a method or a numeric key gets an
+ * computed key or a quoted key with an escape other than `\u` and `\x` is `undefined`; a method or a numeric key gets an
  * empty name.
  */
 function propertyKey(source: string, property: Item): { name: string; value?: string } | undefined {
@@ -1183,9 +1511,9 @@ function propertyKey(source: string, property: Item): { name: string; value?: st
   if (text.startsWith('...') || text.startsWith('[')) return undefined;
   const quoted = /^(['"])( *)\1\s*:/.exec(text);
   if (quoted) {
-    const name = source.slice(start + 1, start + 1 + (quoted[2] ?? '').length);
-    // An escape is not decoded: `"\u0074imeout"` may name anything, so it reads like a computed key.
-    if (name.includes('\\')) return undefined;
+    const name = unescaped(source.slice(start + 1, start + 1 + (quoted[2] ?? '').length));
+    // Any other escape may name anything, so it reads like a computed key.
+    if (name === undefined) return undefined;
     return { name, value: text.slice(quoted[0].length).trim() };
   }
   const named = /^([A-Za-z_$][\w$]*)\s*(:|$)/.exec(text);
@@ -1194,9 +1522,9 @@ function propertyKey(source: string, property: Item): { name: string; value?: st
 }
 
 /** A parameter like `timeoutMs = 5_000`. A poll interval is not a bound, so `intervalMs = 25` is not one. */
-function shortDefault(param: Item): boolean {
+function shortDefault(code: string, param: Item): boolean {
   const parsed = /^(?:\.\.\.)?([\w$]+)\s*\??\s*(?::[^=]*)?=([\s\S]*)$/.exec(param.text);
-  return parsed !== null && !/interval/i.test(parsed[1] ?? '') && isShort(literalMs(parsed[2]?.trim()));
+  return parsed !== null && !/interval/i.test(parsed[1] ?? '') && isShort(waitMs(code, param.start, parsed[2]));
 }
 
 /** Every `*.test.ts` and `*.testkit.ts` under `dir`, relative to it, sorted, the scan's own excluded. */
