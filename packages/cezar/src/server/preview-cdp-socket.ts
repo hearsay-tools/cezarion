@@ -5,7 +5,8 @@ import { previewToolEnabled } from '../ci-wait/tools.ts';
 import type { AgentCdpLink } from '../preview/cdp-proxy.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { isLoopbackHostHeader } from './capabilities.ts';
-import { matchPath, type UpgradeRoute } from './upgrade-router.ts';
+import { keepAlive, reject, type PreviewSocket } from './preview-socket.ts';
+import { matchPath } from './upgrade-router.ts';
 
 /**
  * The agent's CDP proxy socket (hearsay-tools/cezarion#784, spec 2026-10-26-preview-agent-cdp):
@@ -36,23 +37,12 @@ export interface PreviewCdpSocketDeps {
   heartbeatMs?: number;
 }
 
-export interface PreviewCdpSocket {
-  route: UpgradeRoute;
-  /** Terminates every open agent socket. Idempotent. */
-  close(): void;
-}
-
-function reject(socket: Duplex, status: 403 | 404): void {
-  socket.write(`HTTP/1.1 ${status} ${status === 403 ? 'Forbidden' : 'Not Found'}\r\nconnection: close\r\n\r\n`);
-  socket.destroy();
-}
-
 function reasonOf(text: string): string {
   const bytes = Buffer.from(text, 'utf8');
   return bytes.length <= MAX_REASON_BYTES ? text : bytes.subarray(0, MAX_REASON_BYTES).toString('utf8').replace(/�+$/, '');
 }
 
-export function createPreviewCdpSocket(deps: PreviewCdpSocketDeps): PreviewCdpSocket {
+export function createPreviewCdpSocket(deps: PreviewCdpSocketDeps): PreviewSocket {
   const heartbeatMs = deps.heartbeatMs ?? HEARTBEAT_MS;
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES, perMessageDeflate: false });
   const open = new Set<WebSocket>();
@@ -60,20 +50,11 @@ export function createPreviewCdpSocket(deps: PreviewCdpSocketDeps): PreviewCdpSo
 
   const connected = (ws: WebSocket, host: PreviewCdpHost, token: string): void => {
     open.add(ws);
-    let alive = true;
     let link: AgentCdpLink | undefined;
     let gone = false;
     // Commands sent before the browser is ready wait here, in order.
     const early: string[] = [];
-    const beat = setInterval(() => {
-      if (!alive) return ws.terminate();
-      alive = false;
-      ws.ping();
-    }, heartbeatMs);
-    beat.unref?.();
-    ws.on('pong', () => {
-      alive = true;
-    });
+    const stopBeat = keepAlive(ws, heartbeatMs);
     ws.on('message', (raw, isBinary) => {
       if (isBinary) return;
       const text = String(raw);
@@ -82,7 +63,7 @@ export function createPreviewCdpSocket(deps: PreviewCdpSocketDeps): PreviewCdpSo
     });
     ws.on('close', () => {
       gone = true;
-      clearInterval(beat);
+      stopBeat();
       open.delete(ws);
       link?.close();
     });
