@@ -9,6 +9,7 @@ import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contr
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
+import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
 import { nextLineEntry } from './line-order.ts';
 import { executionAccount } from './execution-account.ts';
 import { chargesBudget, ciWatchRequest, hasPrWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
@@ -1104,7 +1105,7 @@ export class RunManager {
 
   private persistWorkerCompletion(runId: string, generation: string): void {
     try {
-      if (this.stoppedWorkers.has(runId)) this.store.commitWorkerCancellation(runId);
+      if (this.stoppedWorkers.has(runId)) transitionVia('stop-worker', () => this.store.getRun(runId), () => this.store.commitWorkerCancellation(runId));
       if (this.store.commitWorkerExecutionComplete(runId, generation)) {
         this.finalizedWorkers.delete(runId);
         this.reapTerminalScratch(runId);
@@ -2760,7 +2761,7 @@ export class RunManager {
   private spendWakeAdmission(runId: string, state: ActiveRun, owed: boolean): void {
     if (!owed) { const retry = this.wakeRetries.get(runId); if (retry) clearTimeout(retry); this.wakeRetries.delete(runId); }
     this.waiting.delete(runId); this.clearIdleTimer(state);
-    this.store.updateRun(runId, { status: 'running' });
+    this.move(runId, 'resume');
   }
 
   /** `outcomes`, clearing the failure count when they deliver a wait result (`cleared`) or leave one
@@ -2843,9 +2844,9 @@ export class RunManager {
     const keepsSlot = top === 'pr' || top === 'process' || top === 'timer' || (top === undefined && resolvedWaits(run).length > 0);
     // A park that frees its slot publishes the intent first: a refused write throws and keeps it.
     if (keepsSlot) {
-      this.store.updateRun(runId, { status: 'waiting' });
+      this.move(runId, 'park');
       if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
-    } else this.store.commitParked(runId, state.currentStepId);
+    } else transitionVia('park', () => this.store.getRun(runId), () => this.store.commitParked(runId, state.currentStepId));
     this.waiting.add(runId);
     if (keepsSlot) this.monitoring.add(runId); else this.leaveMonitoringPool(runId);
     if (top === 'workers') this.armIdleTimer(runId, state);
@@ -2907,7 +2908,7 @@ export class RunManager {
       if (!this.queue.includes(runId)) this.queue.push(runId);
     } else if (!this.isActive(runId)) {
       // No live session: create a scheduler-owned continuation, never a direct provider call.
-      this.store.updateRun(runId, { status: 'waiting' });
+      this.move(runId, 'park-for-wake');
       const text = resolved.some(wait => wait.kind === 'pr')
         ? 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.'
         : resolved.some(wait => wait.kind === 'worker')
@@ -3428,7 +3429,7 @@ export class RunManager {
             try { this.beginWorkerExecution(candidate); }
             catch (error) {
               this.queue.splice(next, 1); this.pendingJobs.delete(candidate); this.pendingContinuations.delete(candidate);
-              this.store.updateRun(candidate, { status: 'failed', error: admissionError(error, 'worker execution checkpoint unavailable'), finishedAt: new Date().toISOString() });
+              this.move(candidate, 'fail-start', { error: admissionError(error, 'worker execution checkpoint unavailable'), finishedAt: new Date().toISOString() });
               continue;
             }
           }
@@ -3477,16 +3478,8 @@ export class RunManager {
                 hydrated.persistedImages,
                 hydrated.persistedAttachments,
               );
-            })().catch((err: unknown) => {
-              const message = err instanceof Error ? err.message : String(err);
-              this.store.updateRun(runId, {
-                status: 'failed',
-                error: `continue crashed: ${message}`,
-                finishedAt: new Date().toISOString(),
-              });
-              this.starting.delete(runId);
-              this.dropActive(runId);
-            }).finally(() => this.finishWorkerExecution(runId));
+            })().catch((err: unknown) => this.failCrashedContinuation(runId, err))
+              .finally(() => this.finishWorkerExecution(runId));
             continue;
           }
           if (!job) continue;
@@ -3499,8 +3492,7 @@ export class RunManager {
             await this.execute(runId, job.workflow, input, job.startAt);
           })().catch((err: unknown) => {
             const message = err instanceof Error ? err.message : String(err);
-            this.store.updateRun(runId, {
-              status: 'failed',
+            this.move(runId, 'fail-crash', {
               error: `engine crashed: ${message}`,
               finishedAt: new Date().toISOString(),
             });
@@ -3566,7 +3558,7 @@ export class RunManager {
         const error = 'Cursor print session identity lacks a matching recorded session event';
         const finishedAt = new Date().toISOString();
         this.store.updateStep(run.id, queuedContinuation.id, { status: 'failed', error, finishedAt });
-        this.store.updateRun(run.id, { status: 'failed', error, finishedAt, currentStepId: undefined });
+        this.move(run.id, 'fail-start', { error, finishedAt, currentStepId: undefined });
         return;
       }
       this.pendingContinuations.set(run.id, {
@@ -3594,14 +3586,13 @@ export class RunManager {
         this.queue.push(run.id);
         this.store.appendEvent(run.id, { type: 'lifecycle', message: `${reason} — owned task re-queued` });
       } catch (error) {
-        this.store.updateRun(run.id, { status: 'failed', error: String(error), finishedAt: new Date().toISOString() });
+        this.move(run.id, 'fail-start', { error: String(error), finishedAt: new Date().toISOString() });
       }
       return;
     }
     const workflow = await this.reviveWorkflow(run);
     if (!workflow) {
-      this.store.updateRun(run.id, {
-        status: 'failed',
+      this.move(run.id, 'fail-start', {
         error: 'interrupted — workflow definition not recoverable after a restart',
         finishedAt: new Date().toISOString(),
       });
@@ -3752,7 +3743,7 @@ export class RunManager {
         // A permission wait interrupted an unfinished native turn. Route it
         // through interrupted-turn recovery, never the settled-worker fallback.
         this.store.updateRun(run.id, { hasPendingPermission: false,
-          ...(run.status === 'waiting' && !run.stopping && !this.workerExecutionStopped(run.id) ? { status: 'running' as const } : {}) });
+          ...(run.status === 'waiting' && !run.stopping && !this.workerExecutionStopped(run.id) ? { status: transition('resume', () => this.store.getRun(run.id)) } : {}) });
       }
       this.store.clearExpiredInboxClaims(run.id, new Date().toISOString());
       this.armInboxClaimExpiry(run.id);
@@ -3870,7 +3861,7 @@ export class RunManager {
 
   /** Parks a recovered run: `waiting`, with each of its open waits re-armed. */
   private parkOnOpenWaits(run: RunRecord): void {
-    this.store.updateRun(run.id, { status: 'waiting' });
+    this.move(run.id, 'park');
     for (const wait of openWaits(run)) this.armWait(run.id, wait);
   }
 
@@ -3916,7 +3907,7 @@ export class RunManager {
     for (const step of run.steps) if (step.status === 'waiting' || step.status === 'running') {
       this.store.updateStep(run.id, step.id, { status: 'failed', error: 'invalid structured question', finishedAt });
     }
-    this.store.updateRun(run.id, { status: 'failed', error: 'invalid structured question', finishedAt, currentStepId: undefined });
+    this.move(run.id, 'fail', { error: 'invalid structured question', finishedAt, currentStepId: undefined });
   }
 
   /** A `running` run whose process died mid-turn. */
@@ -3935,8 +3926,7 @@ export class RunManager {
         });
       }
     }
-    this.store.updateRun(run.id, {
-      status: 'failed',
+    this.move(run.id, 'fail-interrupted', {
       error: 'interrupted — cezar process exited during the run',
       finishedAt,
       currentStepId: undefined,
@@ -3967,7 +3957,7 @@ export class RunManager {
     // Worktree setup (#917) interrupted before any agent session: there is no session to
     // continue, so start the workflow over. `execute` sees setup still `running` and reruns it.
     if (run.workflowDef && run.worktreeSetup?.status === 'running' && !run.steps.some(step => step.sessionId)) {
-      this.store.updateRun(run.id, { status: 'queued', error: undefined, finishedAt: undefined, currentStepId: undefined });
+      this.move(run.id, 'requeue', { error: undefined, finishedAt: undefined, currentStepId: undefined });
       this.store.flush();
       this.pendingJobs.set(run.id, { workflow: run.workflowDef, startAt: 0, input: requeueInput() });
       this.queue.push(run.id);
@@ -3975,7 +3965,7 @@ export class RunManager {
     }
     if (run.workflowDef && interruptedDef && stepKind(interruptedDef) === 'check') {
       this.store.updateStep(run.id, interruptedDef.id, { status: 'pending', error: undefined, finishedAt: undefined });
-      this.store.updateRun(run.id, { status: 'queued', error: undefined, finishedAt: undefined, currentStepId: undefined });
+      this.move(run.id, 'requeue', { error: undefined, finishedAt: undefined, currentStepId: undefined });
       this.store.flush();
       this.pendingJobs.set(run.id, {
         workflow: run.workflowDef,
@@ -4196,7 +4186,7 @@ export class RunManager {
   /** Publish the deadline on the record (the cockpit's only source) and arm the timer for it. The
    *  run waits for it (hearsay-tools/cezarion#1236): `waiting`, its error kept for a withdrawal. */
   private armAutoResume(runId: string, deadline: number): void {
-    this.store.updateRun(runId, { status: 'waiting', finishedAt: undefined, autoResumeAt: new Date(deadline).toISOString() });
+    this.move(runId, 'hold', { finishedAt: undefined, autoResumeAt: new Date(deadline).toISOString() });
     const timer = setTimeout(() => this.fireAutoResume(runId), Math.max(0, deadline - Date.now()));
     timer.unref?.();
     this.autoResumeTimers.set(runId, timer);
@@ -4324,8 +4314,7 @@ export class RunManager {
     if (state) { state.releaseRepoRoot = undefined; this.clearAutosaveTimer(state); }
     this.pendingJobs.set(runId, { workflow, input, startAt });
     this.queue.push(runId);
-    this.store.updateRun(runId, {
-      status: 'queued',
+    this.move(runId, 'requeue', {
       ...(startAt !== undefined && startAt > 0 ? {} : { startedAt: undefined }),
       currentStepId: undefined,
     });
@@ -4452,7 +4441,7 @@ export class RunManager {
   private withdrawAutoResume(runId: string, note?: string): void {
     // Committed first: a store that cannot write throws here with the timer still armed, and the
     // note is written only once the withdrawal is on disk (hearsay-tools/cezarion#1236).
-    if (this.store.getRun(runId)) this.store.commitAutoResumeWithdrawal(runId);
+    if (this.store.getRun(runId)) transitionVia('withdraw-hold', () => this.store.getRun(runId), () => this.store.commitAutoResumeWithdrawal(runId));
     const timer = this.autoResumeTimers.get(runId);
     if (timer) clearTimeout(timer);
     this.autoResumeTimers.delete(runId);
@@ -4521,7 +4510,7 @@ export class RunManager {
     if (this.store.writeRefusal(runId)) return false;
     if (this.store.getRun(runId)?.delegation?.role === 'worker') {
       const proof = this.store.readWorkerExecution(runId);
-      this.store.commitWorkerCancellation(runId);
+      transitionVia('stop-worker', () => this.store.getRun(runId), () => this.store.commitWorkerCancellation(runId));
       this.stoppedWorkers.add(runId);
       if (!this.executions.has(runId) && !this.active.has(runId) && !this.starting.has(runId) && proof?.phase === 'queued') {
         this.store.commitWorkerExecutionComplete(runId, proof.generation);
@@ -4530,14 +4519,14 @@ export class RunManager {
     const hadWaits = !!this.store.getRun(runId)?.waits?.length;
     this.cancelOpenWaits(runId);
     const retiredRefusal = this.retireCompletionRefusal(runId);
-    const cancelledFinish = this.store.commitRootFinishCancellation(runId);
+    const cancelledFinish = transitionVia('cancel', () => this.store.getRun(runId), () => this.store.commitRootFinishCancellation(runId));
     // Still waiting in the queue: just drop it there.
     const queuedAt = this.queue.indexOf(runId);
     if (queuedAt >= 0) {
       this.queue.splice(queuedAt, 1);
       this.pendingJobs.delete(runId);
       this.pendingContinuations.delete(runId);
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+      this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'cancelled while queued' });
       this.store.flush();
       if (this.executions.get(runId)?.admitted === false) void this.finishWorkerExecution(runId);
@@ -4562,7 +4551,7 @@ export class RunManager {
         return true;
       }
       if (run && (run.delegation || hadWaits) && ['queued', 'running', 'waiting'].includes(run.status)) {
-        this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+        this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
         return true;
       }
       return false;
@@ -5029,7 +5018,7 @@ export class RunManager {
     if (refusal) { this.queueCompletionRefusal(runId, refusal); return 'held'; }
     // Every blocker but the pending human question is a refusal: the question parks for the user.
     this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: 'Completion blocked: answer the pending human question.' });
-    this.store.updateRun(runId, { status: 'waiting', finishedAt: undefined });
+    this.move(runId, 'park', { finishedAt: undefined });
     this.store.flush();
     if (state) {
       this.clearIdleTimer(state);
@@ -5061,7 +5050,7 @@ export class RunManager {
   private queueCompletionRefusal(runId: string, refusal: NonNullable<ReturnType<RunManager['completionRefusal']>>): boolean {
     const state = this.active.get(runId);
     this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: `Completion blocked: ${refusal.message}` });
-    this.store.updateRun(runId, { status: 'waiting', finishedAt: undefined });
+    this.move(runId, 'park', { finishedAt: undefined });
     this.store.flush();
     if (this.holdsAgentWaits(runId)) return true;
     // One refusal owed at a time: the copy already queued reopens the run (hearsay-tools/cezarion#1301).
@@ -5638,7 +5627,7 @@ export class RunManager {
     this.pendingContinuations.set(runId, continuation);
     if (!this.queue.includes(runId)) this.queue.push(runId);
     this.store.updateStep(runId, continuation.stepId, { status: 'pending' });
-    this.store.updateRun(runId, { status: 'queued', currentStepId: undefined });
+    this.move(runId, 'requeue', { currentStepId: undefined });
     if (state) this.clearAutosaveTimer(state);
     this.starting.delete(runId); this.dropActive(runId);
     return true;
@@ -5759,7 +5748,7 @@ export class RunManager {
       for (const parent of family) {
         if (!parent.delegation || parent.delegation.role === 'invalid' || this.historyDeletionPending(parent.id)) continue;
         if (parent.status === 'cancelled' && parent.delegation.role === 'root' && parent.delegation.finishRequestedAt) {
-          this.store.commitRootFinishCancellation(parent.id);
+          transitionVia('cancel', () => this.store.getRun(parent.id), () => this.store.commitRootFinishCancellation(parent.id));
         }
         if (!['queued', 'running', 'waiting'].includes(parent.status)) {
           if (!this.recoveringRun(parent)) {
@@ -6311,7 +6300,7 @@ export class RunManager {
           // count and the resume (hearsay-tools/cezarion#1235).
           const resumes = resolvedIds.length > 0 || messageWake;
           this.store.commitOutcome(runId, this.withFailuresCleared(runId, acknowledgedBatch({ accepted, resolvedIds, early, spent, observable, at }), accepted, resolvedIds.length > 0),
-            resumes ? { patch: { status: 'running' }, resumeStepId: resolvedIds.length ? state.currentStepId : undefined } : {});
+            resumes ? { patch: { status: transition('resume', () => this.store.getRun(runId)) }, resumeStepId: resolvedIds.length ? state.currentStepId : undefined } : {});
           if (spent !== undefined) {
             flight.wakeReserved = false;
             this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : timers.some(wait => wait.kind === 'timer') ? 'timer' : 'process'} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
@@ -6507,7 +6496,7 @@ export class RunManager {
     // Its waits stay open and a pool member keeps its slot: only a turn end or a terminal path
     // changes either (hearsay-tools/cezarion#1233).
     this.waiting.delete(runId);
-    this.store.updateRun(runId, { status: 'running' });
+    this.move(runId, 'resume');
     if (state.currentStepId) {
       this.store.updateStep(runId, state.currentStepId, { status: 'running' });
     }
@@ -6633,7 +6622,7 @@ export class RunManager {
     }
     if (decision.action === 'review') {
       this.closeQuestionOnFinish(runId);
-      this.store.updateRun(runId, { status: 'done' });
+      this.move(runId, 'accept-review');
       this.store.appendEvent(runId, { type: 'lifecycle', message: 'review accepted — finished without a PR' });
       return true;
     }
@@ -6946,6 +6935,8 @@ export class RunManager {
       let job: { workflow: WorkflowDef; input: StartRunInput };
       try {
         job = current.delegation?.role === 'worker'
+          // A projection of the job the line will start, not a status write.
+          // ast-grep-ignore: run-status-write-outside-transition
           ? this.ownedJob({ ...current, status: 'queued' })
           : { workflow: current.workflowDef!, input: {
             task: current.task, runner: current.runner, model: current.model, effort: current.effort,
@@ -6961,7 +6952,7 @@ export class RunManager {
       const message = content.length ? this.toQueuedMessage(runId, content) : undefined;
       this.clearAutoResume(runId);
       this.store.setArchived(runId, false);
-      this.store.updateRun(runId, { status: 'queued', stopping: undefined, error: undefined, finishedAt: undefined,
+      this.move(runId, 'continue-line', { stopping: undefined, error: undefined, finishedAt: undefined,
         currentStepId: undefined, ...(message ? { queuedMessages: [...(current.queuedMessages ?? []), message] } : {}) });
       this.store.flush();
       this.pendingJobs.set(runId, job);
@@ -7017,7 +7008,7 @@ export class RunManager {
         ...(conversation ? { agentInputId: conversation.input.id } : opts.answerInputId ? { agentInputId: opts.answerInputId } : {}),
         // A parent's answer (#505) answers the ask exactly like a human's.
         origin: recovered ? recovered.origin : deferForCapacity && !opts.answerInputId ? 'lifecycle' as const : 'human' as const },
-      status: toLine ? 'queued' as const : 'running' as const,
+      status: transition(toLine ? 'continue-line' : 'continue-now', () => this.store.getRun(runId)),
       error: undefined,
       finishedAt: undefined,
       currentStepId: toLine ? undefined : stepId,
@@ -7053,8 +7044,7 @@ export class RunManager {
         lineJoinedAt: Date.now(),
       });
       this.queue.push(runId);
-      this.store.updateRun(runId, {
-        status: 'queued',
+      this.move(runId, 'continue-line', {
         error: undefined,
         finishedAt: undefined,
         currentStepId: undefined,
@@ -7072,19 +7062,20 @@ export class RunManager {
       targetRunner,
       prompt,
       images,
-    ).catch(
-      (err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        this.store.updateRun(runId, {
-          status: 'failed',
-          error: `continue crashed: ${message}`,
-          finishedAt: new Date().toISOString(),
-        });
-        this.starting.delete(runId);
-        this.dropActive(runId);
-      },
-    ).finally(() => this.finishWorkerExecution(runId));
+    ).catch((err: unknown) => this.failCrashedContinuation(runId, err))
+      .finally(() => this.finishWorkerExecution(runId));
     return { ok: true };
+  }
+
+  /** A Continue whose engine threw: the run fails and leaves the active set (exit `fail-crash`). */
+  private failCrashedContinuation(runId: string, err: unknown): void {
+    const message = err instanceof Error ? err.message : String(err);
+    this.move(runId, 'fail-crash', {
+      error: `continue crashed: ${message}`,
+      finishedAt: new Date().toISOString(),
+    });
+    this.starting.delete(runId);
+    this.dropActive(runId);
   }
 
   private async runContinuation(
@@ -7277,7 +7268,7 @@ export class RunManager {
       const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
       const finishedAt = new Date().toISOString();
       this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt });
-      this.store.updateRun(runId, { status: 'failed', error: message, finishedAt, currentStepId: undefined });
+      this.move(runId, 'fail-start', { error: message, finishedAt, currentStepId: undefined });
       this.store.appendEvent(runId, { type: 'lifecycle', message });
       this.starting.delete(runId);
       this.dropActive(runId);
@@ -7289,7 +7280,7 @@ export class RunManager {
    *  becomes active. */
   private settleStoppedContinuation(runId: string): boolean {
     if (!this.store.getRun(runId)?.stopping) return false;
-    this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+    this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
     this.starting.delete(runId);
     this.dropActive(runId);
     return true;
@@ -7316,8 +7307,7 @@ export class RunManager {
   /** Wait for the repository-root lease; a Stop during the wait cancels the run. */
   private async acquireContinuationRepoRoot(runId: string, state: ActiveRun): Promise<boolean> {
     if (await this.acquireRepoRoot(runId, state)) return true;
-    this.store.updateRun(runId, {
-      status: 'cancelled',
+    this.move(runId, 'cancel', {
       finishedAt: new Date().toISOString(),
       currentStepId: undefined,
     });
@@ -7355,8 +7345,7 @@ export class RunManager {
     sessionId: string | undefined,
     backend: RunnerId,
   ): void {
-    this.store.updateRun(runId, {
-      status: 'running',
+    this.move(runId, 'start', {
       error: undefined,
       finishedAt: undefined,
       currentStepId: stepId,
@@ -7535,8 +7524,7 @@ export class RunManager {
       error: message,
       finishedAt: failedAt,
     });
-    this.store.updateRun(runId, {
-      status: 'failed',
+    this.move(runId, 'fail-start', {
       error: `continue failed: ${message}`,
       finishedAt: failedAt,
       currentStepId: undefined,
@@ -7716,7 +7704,7 @@ export class RunManager {
   /** A Stop before the Continue's session spawned: cancel the step and the run. */
   private settleContinuationPrelaunchCancel(runId: string, stepId: string, state: ActiveRun): void {
     this.store.updateStep(runId, stepId, { status: 'cancelled' });
-    this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentStepId: undefined });
+    this.move(runId, 'cancel', { finishedAt: new Date().toISOString(), currentStepId: undefined });
     this.clearAutosaveTimer(state); this.dropActive(runId);
   }
 
@@ -7888,12 +7876,12 @@ export class RunManager {
     if (delivery === 'park') {
       // No turn end will show a human wait this session registered (hearsay-tools/cezarion#1234).
       this.surfaceHumanWait(runId, state);
-      this.store.updateRun(runId, { status: 'waiting' });
+      this.move(runId, 'park');
       return;
     }
     this.store.updateStep(runId, stepId, { status: 'failed', error: WAKE_SESSION_CLOSED_ERROR, finishedAt: new Date().toISOString() });
     this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
-    this.store.updateRun(runId, { status: 'failed', error: `continue failed: ${WAKE_SESSION_CLOSED_ERROR}`, finishedAt: new Date().toISOString(), currentStepId: undefined });
+    this.move(runId, 'fail', { error: `continue failed: ${WAKE_SESSION_CLOSED_ERROR}`, finishedAt: new Date().toISOString(), currentStepId: undefined });
     this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${WAKE_SESSION_CLOSED_ERROR}` });
     this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
   }
@@ -7901,7 +7889,7 @@ export class RunManager {
   /** A Stop ended the Continue's session: cancel its step and the run. */
   private settleCancelledContinuation(runId: string, stepId: string): void {
     this.store.updateStep(runId, stepId, { status: 'cancelled', finishedAt: new Date().toISOString() });
-    this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentStepId: undefined });
+    this.move(runId, 'cancel', { finishedAt: new Date().toISOString(), currentStepId: undefined });
     this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
   }
 
@@ -7953,7 +7941,7 @@ export class RunManager {
           worktree: completed.worktree,
         },
       };
-      this.store.updateRun(runId, { status: 'queued', currentStepId: undefined, workflowResumeStepId: undefined });
+      this.move(runId, 'requeue', { currentStepId: undefined, workflowResumeStepId: undefined });
       // The workflow remainder is a crash boundary. Persist it before the
       // finally block awaits worktree autosave and installs its in-memory job.
       this.store.flush();
@@ -7989,11 +7977,10 @@ export class RunManager {
       // settleSuccess only completes running/waiting steps, so its failure is durable.
       this.surfaceHumanWait(runId, state);
       this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
-      this.store.updateRun(runId, { status: 'waiting', error: `continue failed: ${message}` });
+      this.move(runId, 'park', { error: `continue failed: ${message}` });
       return;
     }
-    this.store.updateRun(runId, {
-      status: 'failed',
+    this.move(runId, 'fail-continue', {
       error: `continue failed: ${message}`,
       finishedAt: new Date().toISOString(),
       currentStepId: undefined,
@@ -8024,8 +8011,8 @@ export class RunManager {
     if (state.cancelled) {
       close.resumeWorkflow = undefined;
       if (this.store.getRun(runId)?.status !== 'cancelled') {
-        this.store.updateRun(runId, {
-          status: 'cancelled', finishedAt: new Date().toISOString(), currentStepId: undefined,
+        this.move(runId, 'cancel-late', {
+          finishedAt: new Date().toISOString(), currentStepId: undefined,
         });
         this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
       }
@@ -8110,7 +8097,7 @@ export class RunManager {
     // the config default. Per-step `runner` can still override it at the step.
     const config = await loadConfig(this.repoRoot);
     if (state.cancelled || this.store.getRun(runId)?.stopping) {
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+      this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
       this.dropActive(runId);
       return undefined;
     }
@@ -8127,7 +8114,7 @@ export class RunManager {
       : resolveExtraSystemPrompt(input.systemPrompt, config.systemPrompt);
     const modelIdentity = await this.taskModelIdentity(taskBackend, input);
     if (state.cancelled) {
-      this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString() });
+      this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
       this.dropActive(runId);
       return undefined;
     }
@@ -8137,7 +8124,7 @@ export class RunManager {
       // A resumed workflow stays durably queued until its next step is actually
       // entered. If setup crashes, recovery can replay from `startAt` instead
       // of treating the previous continuation as the interrupted step.
-      status: startAt > 0 ? 'queued' : 'running',
+      status: transition(startAt > 0 ? 'start-held' : 'start', () => this.store.getRun(runId)),
       invalidAsk: undefined,
       startedAt: ownedRun?.startedAt ?? new Date().toISOString(),
       runner: taskBackend,
@@ -8266,8 +8253,7 @@ export class RunManager {
       const message = err instanceof Error ? err.message : String(err);
       const error = `worktree creation failed: ${message}`;
       emit({ type: 'note', message: `${error} — task stopped before workflow execution` });
-      this.store.updateRun(runId, {
-        status: 'failed',
+      this.move(runId, 'fail-start', {
         error,
         finishedAt: new Date().toISOString(),
         currentStepId: undefined,
@@ -8372,7 +8358,7 @@ export class RunManager {
       const record = this.store.getRun(runId)?.steps.find((s) => s.id === step.id);
       const iteration = (record?.iterations ?? 0) + 1;
 
-      this.store.updateRun(runId, { status: 'running', currentStepId: step.id });
+      this.move(runId, 'start', { currentStepId: step.id });
       this.store.updateStep(runId, step.id, {
         status: 'running',
         iterations: iteration,
@@ -8497,7 +8483,7 @@ export class RunManager {
     }
     if (delivery !== 'park') return false;
     this.surfaceHumanWait(runId, state);
-    this.store.updateRun(runId, { status: 'waiting',
+    this.move(runId, 'park', {
       ...(failure ? { error: loop.runError! } : {}) });
     this.store.flush(); // checkpoint the failed attempt and its recoverable workflow cursor before parking
     this.dropActive(runId);
@@ -8542,7 +8528,7 @@ export class RunManager {
         this.store.updateStep(runId, s.id, { status: 'pending' });
       }
       this.store.updateStep(runId, step.id, { retriesUsed: used + 1 });
-      this.store.updateRun(runId, { status: 'queued', currentStepId: undefined });
+      this.move(runId, 'requeue', { currentStepId: undefined });
       // The retry target and its consumed budget form one crash boundary: a
       // restart must observe the queued target, budget, and cursor together.
       this.store.flush();
@@ -8596,14 +8582,14 @@ export class RunManager {
         this.store.updateStep(runId, s.id, { status: 'cancelled' });
       }
     }
-    this.store.updateRun(runId, { status: 'cancelled', finishedAt, currentStepId: undefined });
+    this.move(runId, 'cancel', { finishedAt, currentStepId: undefined });
     this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
   }
 
   /** The failed settlement. A capped wake delivery adds the cap's note. */
   private settleFailedRun(runId: string, runError: string, deliveryCapped: boolean): void {
     const finishedAt = new Date().toISOString();
-    this.store.updateRun(runId, { status: 'failed', error: runError, finishedAt, currentStepId: undefined });
+    this.move(runId, 'fail', { error: runError, finishedAt, currentStepId: undefined });
     this.store.appendEvent(runId, { type: 'lifecycle', message: `run failed — ${runError}` });
     if (deliveryCapped) this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
   }
@@ -9291,7 +9277,7 @@ export class RunManager {
       this.clearHeldHumanInputTimer(state);
       this.monitoring.delete(runId); // released below; its waits stay open
       this.waiting.add(runId);
-      this.store.updateRun(runId, { status: 'waiting', hasPendingPermission: true });
+      this.move(runId, 'park', { hasPendingPermission: true });
       if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
       this.releaseSlot();
       // Authorization is the human's, even when this run is an owned worker.
@@ -9318,7 +9304,7 @@ export class RunManager {
       this.clearIdleTimer(state);
       this.monitoring.delete(runId); // released below; its waits stay open
       this.waiting.add(runId);
-      this.store.updateRun(runId, { status: 'waiting' });
+      this.move(runId, 'park');
       if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
       this.releaseSlot();
       this.routeWorkerQuestion(runId);
@@ -9656,7 +9642,8 @@ export class RunManager {
     if (durableRootFinish) {
       // A later explicit cancellation wins over a slow diff. Publication/cascade
       // follows the atomic terminal/step checkpoint, never the other way around.
-      if (!this.store.commitRootFinishSuccess(runId, review ? 'review' : 'done')) return;
+      const exit = review ? 'succeed-review' as const : 'succeed' as const;
+      if (!transitionVia(exit, () => this.store.getRun(runId), () => this.store.commitRootFinishSuccess(runId, RUN_EXITS[exit].to))) return;
     } else {
       this.commitOrdinarySuccess(runId, review, keepStepId);
     }
@@ -9711,7 +9698,7 @@ export class RunManager {
         this.store.updateStep(runId, step.id, { status: 'cancelled', finishedAt: step.finishedAt ?? finishedAt });
       }
     }
-    this.store.updateRun(runId, { status: 'cancelled', finishedAt, currentStepId: undefined });
+    this.move(runId, 'cancel', { finishedAt, currentStepId: undefined });
     this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
   }
 
@@ -9728,7 +9715,7 @@ export class RunManager {
       }
     }
     this.store.updateRun(runId, {
-      status: review ? 'review' : 'done',
+      status: transition(review ? 'succeed-review' : 'succeed', () => this.store.getRun(runId)),
       finishedAt,
       currentStepId: undefined,
       // A run that got all the way to a settled turn is not in a limit loop, so the resume
@@ -9751,7 +9738,7 @@ export class RunManager {
     for (const step of run.steps) {
       if (step.status === 'running') this.store.updateStep(runId, step.id, { status: 'waiting' });
     }
-    this.store.updateRun(runId, { status: 'waiting' });
+    this.move(runId, 'park');
     this.store.flush();
   }
 
@@ -9770,7 +9757,7 @@ export class RunManager {
       for (const step of run.steps) if (step.status === 'waiting' || step.status === 'running') {
         this.store.updateStep(runId, step.id, { status: 'failed', error: 'invalid structured question', finishedAt });
       }
-      this.store.updateRun(runId, { status: 'failed', error: 'invalid structured question', finishedAt, currentStepId: undefined });
+      this.move(runId, 'fail', { error: 'invalid structured question', finishedAt, currentStepId: undefined });
       return true;
     }
     for (const step of run.steps) {
@@ -9797,7 +9784,7 @@ export class RunManager {
     if (run.steps.find(step => step.id === stepId)?.status !== 'failed') this.store.updateStep(runId, stepId, { status: 'waiting' });
     this.store.appendEvent(runId, { type: 'lifecycle', stepId, message: `step "${stepId}" ended without done — Continue to resume it` });
     if (run.delegation?.role === 'worker' && await this.settleIdleClosedWorker(runId, stepId)) return;
-    this.store.updateRun(runId, { status: 'waiting' });
+    this.move(runId, 'park');
     this.store.flush();
   }
 
@@ -10457,6 +10444,11 @@ export class RunManager {
     }
   }
 
+  /** Every run status `run.ts` writes comes from the run state table (hearsay-tools/cezarion#1804). */
+  private move(runId: string, exit: RunExitId, patch: Omit<Parameters<RunStore['updateRun']>[1], 'status'> = {}): RunRecord | undefined {
+    return this.store.updateRun(runId, { ...patch, status: transition(exit, () => this.store.getRun(runId)) });
+  }
+
   private armIdleTimer(runId: string, state: ActiveRun): void {
     this.clearIdleTimer(state);
     state.idleClosed = false;
@@ -10485,7 +10477,7 @@ export class RunManager {
   /** The turn-end tail's park for the user: `waiting` with the idle timer, no slot. A result
    *  already in (a pending question beside a resolved wait) still queues its wake. */
   private parkForUser(runId: string, state: ActiveRun, stepId: string | undefined): void {
-    this.store.updateRun(runId, { status: 'waiting' });
+    this.move(runId, 'park');
     if (stepId) this.store.updateStep(runId, stepId, { status: 'waiting' });
     this.store.flush();
     this.waiting.add(runId);

@@ -29,6 +29,7 @@ import { appendTurnText, trackTurnTail, RunManager } from './run.ts';
 import type { WorkflowDef } from './types.ts';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { asksQuestion } from '@open-mercato/cezar-contract/waits';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { readPersistedRuns, crashStore } from '../runs/run-store.testkit.ts';
 import { monitoringTimerOf, monitoringWakeOf } from './waits.testkit.ts';
 
@@ -912,7 +913,8 @@ describe('RunManager.settleSuccess — optional review gate', () => {
   async function changedRun(autonomous?: boolean): Promise<RunRecord> {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'task', autonomous, steps: [] });
     const wt = await createWorktree(repoRoot, record.id, 'main');
-    store.updateRun(record.id, { worktreePath: wt.path, branch: wt.branch, baseBranch: wt.baseBranch });
+    // settleSuccess runs at a live turn's end, never on a queued run (hearsay-tools/cezarion#1804).
+    store.updateRun(record.id, { status: RUN_STATUS.running, worktreePath: wt.path, branch: wt.branch, baseBranch: wt.baseBranch });
     writeFileSync(join(wt.path, 'a.txt'), 'one\nTWO\nthree\n');
     writeFileSync(join(wt.path, 'new.txt'), 'x\n');
     return store.getRun(record.id) as RunRecord;
@@ -922,7 +924,7 @@ describe('RunManager.settleSuccess — optional review gate', () => {
   async function cleanRun(): Promise<RunRecord> {
     const record = store.createRun({ title: 't', workflow: 'w', task: 'task', steps: [] });
     const wt = await createWorktree(repoRoot, record.id, 'main');
-    store.updateRun(record.id, { worktreePath: wt.path, branch: wt.branch, baseBranch: wt.baseBranch });
+    store.updateRun(record.id, { status: RUN_STATUS.running, worktreePath: wt.path, branch: wt.branch, baseBranch: wt.baseBranch });
     return store.getRun(record.id) as RunRecord;
   }
 
@@ -2091,6 +2093,24 @@ describe('CEZ:MONITORING parks on a monitoring timer, not as a plain wait (#490)
     expect(store.getRun(record.id)?.steps).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: 'later', status: 'pending', iterations: 0 }),
     ]));
+  }, 30_000);
+
+  it('records a Stop accepted while a failed Continue saves its worktree as cancelled', async () => {
+    const record = manager.startRun(SINGLE_STEP, { task: 'mock:done', worktree: false });
+    currentId = record.id;
+    await waitFor(record.id, candidate => candidate?.status === 'done' || candidate?.status === 'review');
+    await waitFor(record.id, () => !manager.isActive(record.id));
+    let cancelled = false;
+    let cancelAttempted = false;
+    store.on('run', candidate => {
+      if (!cancelAttempted && candidate.id === record.id && candidate.status === 'failed') {
+        cancelAttempted = true;
+        cancelled = manager.cancel(record.id);
+      }
+    });
+    expect(manager.continueRun(record.id, { text: 'mock:auth-error answer' })).toEqual({ ok: true });
+    await waitFor(record.id, candidate => candidate?.status === 'cancelled');
+    expect(cancelled).toBe(true);
   }, 30_000);
 
   it('restart resumes a durably queued workflow after its completed waiting step', async () => {

@@ -3923,7 +3923,7 @@
       "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",
       "rule": "test-enum-literal",
       "site": "status: 'done'",
-      "count": 10
+      "count": 9
     },
     {
       "file": "packages/cezar/src/workflows/waits-parity-cells.testkit.ts",

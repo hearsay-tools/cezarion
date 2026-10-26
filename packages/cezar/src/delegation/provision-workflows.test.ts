@@ -14,6 +14,7 @@ import { planOwnedWorkspace } from './workspace.ts';
 import { fixture, waitForOwnedWork } from './service.testkit.ts';
 import { DelegationController } from './provision.ts';
 import { QUICK_TASK_WORKFLOW } from '../workflows/types.ts';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import type { RunManager } from '../workflows/run.ts';
 import { agentHomePaths, claudeStateFilePath } from '../paths.ts';
@@ -798,6 +799,9 @@ describe('manager session delegation lifecycle', { timeout: 15_000 }, () => {
     else f.store.updateRun(run.id, { status: transition });
     expect(sessions[0]!.session.open).toBe(true);
     expect(controller.credentials.authenticate(token)).toBeUndefined();
+    // The session stays open, which a settled run never has: back to running before teardown
+    // stops it (hearsay-tools/cezarion#1804).
+    if (transition !== 'cancel') f.store.updateRun(run.id, { status: RUN_STATUS.running });
   });
   it('root session wait returns immediately, then controller shutdown revokes without terminalizing persisted work', async () => {
     const run = f.manager.startRun(QUICK_TASK_WORKFLOW, { task: 'parent', runner: 'claude', worktree: false });

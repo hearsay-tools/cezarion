@@ -1,0 +1,84 @@
+id: run-status-write-outside-transition
+language: typescript
+severity: warning
+message: >-
+  Take a run status from the run state table (hearsay-tools/cezarion#1804): in RunManager write it
+  with this.move(runId, exit, patch), set a patch's status with transition(exit, read), and wrap a
+  store commit that writes its own status in transitionVia(exit, read, commit). Declare a new exit
+  or trigger in workflows/run-states.ts first.
+files:
+  - packages/cezar/src/**/*.ts
+ignores:
+  - packages/cezar/src/**/*.test.ts
+  - packages/cezar/src/**/*.testkit.ts
+utils:
+  run-status: { kind: string, regex: "^['\"](queued|running|waiting|review|done|failed|cancelled)['\"]$" }
+  # A literal, `'x' as const`, or a ternary of them.
+  run-status-value:
+    any:
+      - matches: run-status
+      - { kind: as_expression, has: { matches: run-status } }
+      - kind: ternary_expression
+        any:
+          - has: { field: consequence, any: [{ matches: run-status }, { kind: as_expression, has: { matches: run-status } }] }
+          - has: { field: alternative, any: [{ matches: run-status }, { kind: as_expression, has: { matches: run-status } }] }
+  status-pair:
+    all:
+      - kind: pair
+      - has: { field: key, regex: '^status$' }
+      - has: { field: value, matches: run-status-value }
+  commit-with-status: { regex: '^(commitParked|commitAutoResumeWithdrawal|commitRootFinishCancellation|commitRootFinishSuccess|commitWorkerCancellation)$' }
+rule:
+  any:
+    # `updateRun(id, { status: 'x' })`, and a continuation patch.
+    - all:
+        - matches: status-pair
+        - inside:
+            kind: object
+            inside: { kind: arguments, inside: { kind: call_expression, has: { field: function, regex: '\.(updateRun|commitWorkerContinuation)$' } } }
+    # `updateRun(id, { ...(resumed ? { status: 'x' } : {}) })`.
+    - all:
+        - matches: status-pair
+        - inside:
+            kind: object
+            inside:
+              stopBy: end
+              kind: spread_element
+              inside: { kind: object, inside: { kind: arguments, inside: { kind: call_expression, has: { field: function, regex: '\.(updateRun|commitWorkerContinuation)$' } } } }
+    # A patch built first: `const acceptedPatch = { status: 'x' }`.
+    - all:
+        - matches: status-pair
+        - inside: { kind: object, inside: { kind: variable_declarator, has: { field: name, regex: '[Pp]atch$' } } }
+    # `commitOutcome(id, outcomes, { patch: { status: 'x' } })`.
+    - all:
+        - matches: status-pair
+        - inside:
+            kind: object
+            inside:
+              kind: pair
+              has: { field: key, regex: '^patch$' }
+              inside: { stopBy: end, kind: call_expression, has: { field: function, regex: '\.commitOutcome$' } }
+    # A record written whole: `{ ...run, status: 'x' }`.
+    - all:
+        - matches: status-pair
+        - inside:
+            kind: object
+            has: { kind: spread_element, has: { kind: identifier, regex: '^(run|current|next|record|row)$' } }
+    # `run.status = 'x'`.
+    - all:
+        - kind: assignment_expression
+        - has: { field: left, kind: member_expression, all: [{ has: { field: object, regex: '^(run|current|next|record|row)$' } }, { has: { field: property, regex: '^status$' } }] }
+        - has: { field: right, matches: run-status-value }
+    # A store commit that writes a status it holds, called outside transitionVia.
+    - all:
+        - kind: call_expression
+        - has: { field: function, kind: member_expression, has: { field: property, matches: commit-with-status } }
+        - not: { inside: { stopBy: end, kind: call_expression, has: { field: function, regex: '^transitionVia$' } } }
+  # Left out: a step write (`updateStep`, `{ ...step, status }`); a status passed as a variable, or
+  # set on a patch whose name does not end in `patch`; and the five store commits' own bodies,
+  # which the calls wrap.
+  not:
+    inside:
+      stopBy: end
+      kind: method_definition
+      has: { field: name, matches: commit-with-status }

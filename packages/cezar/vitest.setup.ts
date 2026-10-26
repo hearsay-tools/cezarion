@@ -2,6 +2,7 @@ import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach } from 'vitest'
+import { strictRunExits, throwRunExitViolations } from './src/workflows/run-states.ts'
 
 import { createTestSandbox, linkSharedOmpNatives, removeTestSandboxes } from '../../scripts/test-sandbox.mjs'
 
@@ -175,3 +176,7 @@ afterEach(() => {
 // One failed removal no longer skips the next one (hearsay-tools/cezarion#1395);
 // the helper keeps the three retries for late child-process writes.
 afterAll(() => removeTestSandboxes([sandboxHome, sandboxUserHome, sandboxTemp]))
+// A run status write the run state table does not declare throws, and fails the test it happens
+// in even when run.ts caught the throw (hearsay-tools/cezarion#1804). Production never checks.
+strictRunExits()
+afterEach(throwRunExitViolations)
