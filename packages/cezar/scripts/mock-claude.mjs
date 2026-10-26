@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+if (process.env.CEZ_MOCK_ENV_RECORD !== undefined) await import('./mock-env-record.mjs');
 // Load only when configured: ordinary mock turns retain their event-loop ordering.
 const failureControl = process.env.CEZ_MOCK_FAILURE_CONTROL === undefined ? undefined
   : (await import('./mock-failure-control.mjs')).readFailureControl(['provider', 'usage-limit', 'unread']);

@@ -669,6 +669,8 @@ const CONTROL_CRITERIA = [
   { id: 'R34', scenario: 'baseline' },
   // R35 covers both preview serve (#781) and stop/restart (#803) discovery on every native wire.
   { id: 'R35', scenario: 'baseline' },
+  // hearsay-tools/cezarion#784: the session's preview CDP address reaches each native process.
+  { id: 'R125', scenario: 'baseline' },
   // core/ci-tools.test.ts (hearsay-tools/cezarion#1233): `cezar_wait` and `cezar_cancel_wait`
   // reach the session's handlers through each native wire, fresh and resumed.
   { id: 'U0', scenario: 'baseline' },
@@ -2507,6 +2509,49 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
         } finally {
           vi.unstubAllEnvs();
           await controller.close();
+          rmSync(dir, { recursive: true, force: true });
+        }
+      }, 30_000);
+    }
+  });
+
+  // hearsay-tools/cezarion#784: the agent drives the task's preview browser through
+  // `agent-browser --cdp "$CEZ_PREVIEW_CDP_URL"`, so the address must reach each runner's own native
+  // process, which the agent's Bash inherits. The session comes from the real tool controller and
+  // `previewCdpSession`, the gate RunManager uses; each mock records its own process env.
+  describeRunners('harness parity — preview CDP address in the agent env', () => {
+    for (const backend of runners) for (const enabled of [true, false]) {
+      it(`${backend} R125 ${enabled ? 'carries' : 'omits'} CEZ_PREVIEW_CDP_URL with CEZ_PREVIEW ${enabled ? 'on' : 'off'}`, async () => {
+        vi.stubEnv('CEZ_PREVIEW', enabled ? '1' : '');
+        const { CiToolController } = await import('../ci-wait/controller.ts');
+        const { PreviewHost } = await import('../preview/host.ts');
+        const { previewCdpSession } = await import('../preview/agent-address.ts');
+        const controller = await CiToolController.start();
+        const host = new PreviewHost({ launchBrowser: async () => { throw new Error('R125 starts no browser'); } });
+        const dir = mkdtempSync(join(tmpdir(), 'cez-preview-cdp-env-'));
+        try {
+          const provisioned = controller.provision({ registerWait: async () => ({ answer: { ok: false, code: 'unavailable', message: 'none' } }), ask: async () => ({ ok: false, code: 'unavailable', message: 'none' }), cancelWait: async () => ({ cancelled: false, code: 'not_found', message: 'none' }), finishTurn: async () => ({ ok: true, finishes: 'at_turn_end', completes: 'task', open_waits: [] }) });
+          const session = previewCdpSession(provisioned, { host, cockpitOrigin: 'http://127.0.0.1:4321', runId: 'run-r125', worktree: true, context: () => undefined });
+          const record = join(dir, 'env.json');
+          const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, env: { ...session.env, CEZ_MOCK_ENV_RECORD: record, CEZ_MOCK_ENV_RECORD_NAMES: 'CEZ_PREVIEW_CDP_URL', CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
+          expect(obs.v1.filter((event) => event.type === 'error')).toEqual([]);
+          const seen = JSON.parse(readFileSync(record, 'utf8')) as { CEZ_PREVIEW_CDP_URL: string | null };
+          if (!enabled) {
+            expect(seen.CEZ_PREVIEW_CDP_URL).toBeNull();
+            return;
+          }
+          const url = new URL(seen.CEZ_PREVIEW_CDP_URL!);
+          expect(`${url.protocol}//${url.host}`).toBe('ws://127.0.0.1:4321');
+          const token = url.pathname.replace('/api/v1/preview/cdp/', '');
+          expect(token).toMatch(/^[0-9a-f]{64}$/);
+          expect(host.hasAgentGrant(token)).toBe(true);
+          // The address ends with the session's tool capability.
+          session.revoke();
+          expect(host.hasAgentGrant(token)).toBe(false);
+        } finally {
+          vi.unstubAllEnvs();
+          await controller.close();
+          await host.close();
           rmSync(dir, { recursive: true, force: true });
         }
       }, 30_000);
