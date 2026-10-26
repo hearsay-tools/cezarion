@@ -224,8 +224,7 @@ async function syncIgnore(files: WorktreeFiles, agentDir: string, names: readonl
   if (state.owner === 'outside') return;
   if (state.owner === 'theirs' || state.owner === 'kept') {
     files.forget(rel);
-    for (const name of names) await excludeFromGit(files.worktree, `${agentDir}/skills/${name}`);
-    return;
+    return excludeEach(files, agentDir, names);
   }
   const sorted = [...new Set(names)].sort();
   if (sorted.length === 0) {
@@ -234,7 +233,12 @@ async function syncIgnore(files: WorktreeFiles, agentDir: string, names: readonl
   }
   const text = [PROVISION_IGNORE_MARK, '/.gitignore', ...sorted.map((name) => `/${name}`)].join('\n') + '\n';
   if (state.owner === 'ours' && state.entry?.kind === 'ignore-file' && state.current === fileIdentity(text)) return;
-  await files.put(rel, { type: 'file', text }, { kind: 'ignore-file' });
+  // The agent wrote the ignore file while cezar staged it: it stays theirs, as above.
+  if ((await files.put(rel, { type: 'file', text }, { kind: 'ignore-file' })) === null) await excludeEach(files, agentDir, names);
+}
+
+async function excludeEach(files: WorktreeFiles, agentDir: string, names: readonly string[]): Promise<void> {
+  for (const name of names) await excludeFromGit(files.worktree, `${agentDir}/skills/${name}`);
 }
 
 /** A local, global or built-in skill: a link, a generated `SKILL.md`, or a copy where links fail. */
@@ -260,34 +264,36 @@ async function placeLinkedSkill(pass: Pass, skill: Skill, plan: Exclude<Plan, { 
     const { entry } = state;
     if (state.owner === 'ours' && entry && entry.kind !== 'pending' && state.current === entry.identity
       && entry.source === (entry.kind === 'copy' ? await copySource() : plan.source)) continue;
-    await placeEntry(files, rel, skill.name, plan, copySource);
-    pass.installed.add(skill.name);
+    if (await placeEntry(files, rel, skill.name, plan, copySource)) pass.installed.add(skill.name);
   }
 }
 
-/** Write one entry as `plan` says; a link the platform refuses falls back to a copy. */
+/**
+ * Write one entry as `plan` says; a link the platform refuses falls back to a copy. False when the
+ * agent wrote at `rel` meanwhile, so nothing was placed.
+ */
 async function placeEntry(
   files: WorktreeFiles,
   rel: string,
   skill: string,
   plan: Exclude<Plan, { how: 'team' }>,
   copySource: () => Promise<string>,
-): Promise<void> {
+): Promise<boolean> {
   if (plan.how === 'write') {
-    await files.put(rel, { type: 'dir', files: [{ name: 'SKILL.md', text: plan.text }] }, { kind: 'generated', skill, source: plan.source });
-    return;
+    const generated: EntryContent = { type: 'dir', files: [{ name: 'SKILL.md', text: plan.text }] };
+    return (await files.put(rel, generated, { kind: 'generated', skill, source: plan.source })) !== null;
   }
   const linked: EntryContent = plan.how === 'link-dir'
     ? { type: 'link', target: plan.target, linkType: process.platform === 'win32' ? 'junction' : 'dir' }
     : { type: 'dir', files: [{ name: 'SKILL.md', linkTo: plan.target }] };
   try {
-    await files.put(rel, linked, { kind: plan.how === 'link-dir' ? 'link' : 'generated', skill, source: plan.source });
+    return (await files.put(rel, linked, { kind: plan.how === 'link-dir' ? 'link' : 'generated', skill, source: plan.source })) !== null;
   } catch (error) {
     if (!(error instanceof LinkRefused)) throw error;
     const copied: EntryContent = plan.how === 'link-dir'
       ? { type: 'copy', from: plan.target }
       : { type: 'dir', files: [{ name: 'SKILL.md', copyOf: plan.target }] };
-    await files.put(rel, copied, { kind: 'copy', skill, source: await copySource() });
+    return (await files.put(rel, copied, { kind: 'copy', skill, source: await copySource() })) !== null;
   }
 }
 
@@ -320,7 +326,7 @@ async function placeTeamCopies(pass: Pass, skill: Skill): Promise<string[]> {
     if (state.owner === 'ours' && state.current === identity) {
       if (state.entry?.kind !== 'team-copy') files.record(rel, meta, identity);
     } else {
-      await files.put(rel, { type: 'staged', path: staged }, meta);
+      if ((await files.put(rel, { type: 'staged', path: staged }, meta)) === null) continue;
       pass.installed.add(skill.name);
     }
     copies.push(resolve(files.worktree, rel));

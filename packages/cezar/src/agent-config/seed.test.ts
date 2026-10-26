@@ -1,5 +1,5 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -142,6 +142,21 @@ describe('seedAgentConfigLocalLayer', () => {
       await seedAgentConfigLocalLayer(repo, wt, env);
       expect(readFileSync(settings(wt), 'utf8')).toBe('{"agent":true}');
       expect(await uncoveredPaths(wt, ['.claude/settings.local.json'])).toEqual([]);
+    } finally {
+      git(repo, 'worktree', 'remove', '--force', wt);
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('leaves an unchanged executable seeded file as it is on the next pass', async () => {
+    seedSettings('{"v":1}');
+    chmodSync(settings(repo), 0o755);
+    const wt = makeWorktree();
+    try {
+      await seedAgentConfigLocalLayer(repo, wt, env);
+      const first = statSync(settings(wt));
+      expect(first.mode & 0o111).not.toBe(0);
+      expect(await seedAgentConfigLocalLayer(repo, wt, env)).toEqual(['.claude/settings.local.json']);
+      expect(statSync(settings(wt)).ino).toBe(first.ino);
     } finally {
       git(repo, 'worktree', 'remove', '--force', wt);
     }

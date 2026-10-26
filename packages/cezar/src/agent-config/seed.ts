@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import { relative, sep } from 'node:path';
 import { agentHomePaths } from '../paths.ts';
 import { excludeFromGit } from '../skills-remote.ts';
-import { fileIdentity, withWorktreeFiles, type WorktreeFilesOptions } from '../worktree-manifest.ts';
+import { copyIdentity, withWorktreeFiles, type WorktreeFilesOptions } from '../worktree-manifest.ts';
 import { CONFIG_FILES } from './catalog.ts';
 
 /**
@@ -80,11 +80,9 @@ export async function seedAgentConfigLocalLayer(
         // Ignore first: a seeded file git could see must never exist, not even for a crash's length.
         await excludeFromGit(worktreeCwd, path);
         const meta = { kind: 'file' as const, source: id };
-        if (state.owner === 'ours' && state.current === fileIdentity(await readFile(src))) {
+        if (state.owner === 'ours' && state.current === await copyIdentity(src)) {
           if (state.entry?.kind !== 'file') files.record(path, meta, state.current);
-        } else {
-          await files.put(path, { type: 'file', copyOf: src }, meta);
-        }
+        } else if ((await files.put(path, { type: 'file', copyOf: src }, meta)) === null) continue;
         seeded.push(rel);
       } catch {
         // best-effort: a seed failure must not fail the run

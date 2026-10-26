@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomBytes, type Hash } from 'node:crypto';
-import { copyFile, cp, lstat, mkdir, readdir, readFile, readlink, realpath, rename, rm, symlink, unlink, writeFile } from 'node:fs/promises';
+import { copyFile, cp, lstat, mkdir, readdir, readFile, readlink, realpath, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import { dirname, join, resolve, sep } from 'node:path';
 import { promisify } from 'node:util';
 import { z } from 'zod';
@@ -46,7 +46,8 @@ const entrySchema = z.object({
   source: z.string().optional(),
   /**
    * What cezar left at the path: `link:<target>`, or `tree2:<sha256>` over every name, link target
-   * and byte, each length-prefixed. A `tree:` identity is an imported one in the older encoding.
+   * and byte, each length-prefixed, and each file's executable bit. A `tree:` identity is an
+   * imported one in the older encoding.
    */
   identity: z.string(),
   /** A pending entry's other complete form that still counts as cezar's: the copy it replaces. */
@@ -136,17 +137,20 @@ interface TreeEncoding {
   link: (rel: string, target: string) => string;
   dir: (rel: string) => string;
   /** Written before the file's bytes; `fileEnd` after them. */
-  file: (rel: string, size: number) => string;
+  file: (rel: string, size: number, executable: boolean) => string;
   fileEnd: string;
   special: (rel: string, mode: number) => string;
 }
 
-/** Each name, link target and file is prefixed with its byte length, so no bytes pass for another record. */
+/**
+ * Each name, link target and file is prefixed with its byte length, so no bytes pass for another
+ * record. An executable file is an `X` record, so a `chmod +x` reads as a change.
+ */
 const sized = (value: string) => `${Buffer.byteLength(value)}:${value}`;
 const TREE2: TreeEncoding = {
   link: (rel, target) => `L${sized(rel)}${sized(target)}`,
   dir: (rel) => `D${sized(rel)}`,
-  file: (rel, size) => `F${sized(rel)}${size}:`,
+  file: (rel, size, executable) => `${executable ? 'X' : 'F'}${sized(rel)}${size}:`,
   fileEnd: '',
   special: (rel, mode) => `S${sized(rel)}${mode}:`,
 };
@@ -169,7 +173,7 @@ async function digestInto(hash: Hash, path: string, rel: string, encoding: TreeE
     for (const name of (await readdir(path)).sort()) await digestInto(hash, join(path, name), rel ? `${rel}/${name}` : name, encoding);
   } else if (stat.isFile()) {
     const bytes = await readFile(path);
-    hash.update(encoding.file(rel, bytes.length)).update(bytes).update(encoding.fileEnd);
+    hash.update(encoding.file(rel, bytes.length, (stat.mode & 0o111) !== 0)).update(bytes).update(encoding.fileEnd);
   } else hash.update(encoding.special(rel, stat.mode));
 }
 
@@ -188,9 +192,15 @@ export function identityOf(path: string): Promise<string | null> {
 }
 
 /** The identity `identityOf` reads from a regular file holding `content`. */
-export function fileIdentity(content: string | Buffer): string {
+export function fileIdentity(content: string | Buffer, executable = false): string {
   const bytes = typeof content === 'string' ? Buffer.from(content) : content;
-  return `tree2:${createHash('sha256').update(TREE2.file('', bytes.length)).update(bytes).digest('hex')}`;
+  return `tree2:${createHash('sha256').update(TREE2.file('', bytes.length, executable)).update(bytes).digest('hex')}`;
+}
+
+/** The identity a copy of the file at `source` reads as: its bytes and executable bit, through a link. */
+export async function copyIdentity(source: string): Promise<string> {
+  const [bytes, info] = await Promise.all([readFile(source), stat(source)]);
+  return fileIdentity(bytes, (info.mode & 0o111) !== 0);
 }
 
 /** Only these identities can prove a path unchanged; any other (a legacy `marker:`) cannot. */
@@ -393,9 +403,11 @@ export class WorktreeFiles {
 
   /**
    * Write `content` at `path`, which must be free or cezar's. Returns the identity it left. The
-   * pending entry is saved before the path changes; a file replaces a file in one rename.
+   * pending entry is saved before the path changes; a file replaces a file in one rename. Returns
+   * null when the agent wrote at the path while the entry was staged: the path stays the agent's,
+   * with no entry.
    */
-  async put(path: string, content: EntryContent, meta: EntryMeta): Promise<string> {
+  async put(path: string, content: EntryContent, meta: EntryMeta): Promise<string | null> {
     const before = await this.inspect(path);
     if (before.owner !== 'free' && before.owner !== 'ours') throw new Error(`${path} is not cezar's to write`);
     const dest = join(this.worktree, path);
@@ -412,7 +424,14 @@ export class WorktreeFiles {
     this.byPath.set(path, this.newEntry(path, { ...meta, kind: 'pending' }, identity, alternate));
     await this.save();
     await this.fault('pending', path);
-    if (before.current !== null && !(staged !== undefined && (await isFile(staged)) && (await isFile(dest)))) {
+    // Read again just before the path changes: staging takes time, and the agent may write meanwhile.
+    const now = await identityOf(dest);
+    if (now !== null && now !== before.current) {
+      this.byPath.delete(path);
+      await this.save();
+      return null;
+    }
+    if (now !== null && !(staged !== undefined && (await isFile(staged)) && (await isFile(dest)))) {
       await removePath(dest);
       await this.fault('cleared', path);
     }

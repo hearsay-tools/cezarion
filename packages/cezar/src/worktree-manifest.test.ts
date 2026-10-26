@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, existsSync, mkdirSync, mkdtempSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { promisify } from 'node:util';
@@ -288,6 +288,46 @@ describe('worktree manifest', { timeout: 30_000 }, () => {
     ['cleared', { kind: 'pending', onDisk: null, owner: 'free' }],
     ['placed', { kind: 'pending', onDisk: 'v2', owner: 'ours' }],
   ];
+
+  // The agent writes at the path while cezar stages its next entry there.
+  const editRows: Array<[string, { path: string; first: EntryContent; next: EntryContent; edit: string; at: WriteBoundary }]> = [
+    ['a dir, edited before the pending entry is saved', { path: 'skills/x', first: v1, next: v2, edit: 'skills/x/SKILL.md', at: 'staged' }],
+    ['a file, edited after the pending entry is saved', {
+      path: 'a.json', first: { type: 'file', text: '1' }, next: { type: 'file', text: '2' }, edit: 'a.json', at: 'pending',
+    }],
+  ];
+
+  it.each(editRows)('never replaces an edit the agent makes while cezar stages an entry: %s', async (_name, row) => {
+    await pass('skills', (files) => files.put(row.path, row.first, meta));
+    const edited = join(worktree, row.edit);
+    const faults = (at: WriteBoundary) => {
+      if (at === row.at) writeFileSync(edited, 'agent');
+    };
+    expect(await pass('skills', (files) => files.put(row.path, row.next, meta), { faults })).toBeNull();
+    expect(readFileSync(edited, 'utf8')).toBe('agent');
+    expect((await readManifest(worktree))?.entries ?? []).toEqual([]);
+  });
+
+  it('writes an entry whose path the agent deleted while cezar staged it', async () => {
+    await pass('skills', (files) => files.put('skills/x', v1, meta));
+    const faults = (at: WriteBoundary) => {
+      if (at === 'pending') rmSync(join(worktree, 'skills', 'x'), { recursive: true });
+    };
+    await pass('skills', (files) => files.put('skills/x', v2, meta), { faults });
+    expect(readFileSync(join(worktree, 'skills', 'x', 'SKILL.md'), 'utf8')).toBe('v2');
+    expect((await readManifest(worktree))?.entries).toEqual([expect.objectContaining({ kind: 'generated' })]);
+  });
+
+  it.skipIf(process.platform === 'win32')('reads a file the agent made executable as changed', async () => {
+    const tool: EntryContent = { type: 'dir', files: [{ name: 'run.sh', text: 'echo\n' }] };
+    await pass('skills', (files) => files.put('skills/x', tool, meta));
+    chmodSync(join(worktree, 'skills', 'x', 'run.sh'), 0o755);
+    const owner = await pass('skills', async (files) => {
+      const state = await files.inspect('skills/x');
+      return state.owner;
+    });
+    expect(owner).toBe('theirs');
+  });
 
   it.each(crashRows)('a rewrite that crashes at %s leaves a state the next pass repairs', async (boundary, row) => {
     const skillFile = join(worktree, 'skills', 'x', 'SKILL.md');
