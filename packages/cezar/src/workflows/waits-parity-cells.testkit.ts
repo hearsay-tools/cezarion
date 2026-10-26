@@ -2405,11 +2405,22 @@ function workersCells(runners: RunnerId[]): void {
       await until(() => delivered(p.id, requestId) && prompted(runner, question).length > 0);
       const wakes = store.getRun(w.id)?.automaticWakes ?? 0;
       const parentCaller = callerFor(p.id);
-      await service.send(parentCaller, { id: randomUUID(), recipientRunId: w.id, kind: 'reply', requestId, text: `${WORKER_FALLBACK_HEADER}: cez-dev`, timeoutSeconds: 600 });
+      const fallback = humanOpen(w.id)[0]!.id;
+      const commits = recordCommits(join(root, '.ai/cezar'));
+      const replyId = randomUUID();
+      await service.send(parentCaller, { id: replyId, recipientRunId: w.id, kind: 'reply', requestId, text: `${WORKER_FALLBACK_HEADER}: cez-dev`, timeoutSeconds: 600 });
       await until(() => store.readEvents(w.id).some(event => event.type === 'human-input-delivered' && event.source === 'parent' && event.askSeq === asks(w.id)[0]!.seq));
       expect(store.readEvents(w.id).filter(event => event.type === 'note' && String(event.message).startsWith(WORKER_FALLBACK_REPLY_NOTE)))
         .toEqual([expect.objectContaining({ message: `${WORKER_FALLBACK_REPLY_NOTE} (${wakes + 1}/${MAX_AUTO_CONTINUES})` })]);
       await until(() => prompted(runner, `${WORKER_FALLBACK_HEADER}: cez-dev`).length > 0);
+      // hearsay-tools/cezarion#1805: whichever way the reply reaches the worker (its live session, or a
+      // continuation that opens with it), a reopened store never reads the charge or the answered
+      // question without the reply delivered or owed, nor the reply read with the question still open.
+      const reply = (row: RunRecord) => row.agentInputs?.find(input => input.id === replyId);
+      const owed = (row: RunRecord) => !!reply(row)?.deliveredAt || row.continuationMessage?.agentInputId === replyId;
+      commits.expectEveryCommit(w.id, row => row.automaticWakes !== wakes + 1 || owed(row), 'the reply\'s charge and its delivery');
+      commits.expectEveryCommit(w.id, row => !row.lastWaits?.some(wait => wait.id === fallback && wait.phase === 'delivered') || owed(row), 'the answered question and its reply');
+      commits.expectEveryCommit(w.id, row => !reply(row)?.consumedAt || !row.waits?.some(wait => wait.id === fallback), 'the read reply and its question');
     });
 
     // hearsay-tools/cezarion#1301: an automatic message to a worker supersedes Cezar's pending fallback

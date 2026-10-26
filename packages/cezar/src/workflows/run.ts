@@ -123,6 +123,7 @@ import { answersQuestion, openQuestions, questionMessage } from '../delegation/q
 import { messagedParentSince, parkNoticeMessage, parkNoticeWait, parkingTurn } from '../delegation/park-notice.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
+import type { RunOutcome } from '../runs/outcome-commit.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
 import { isReclaimable, reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import {
@@ -5495,10 +5496,12 @@ export class RunManager {
     const bundle = state.atTurnBoundary === state.session ? this.pendingConversationBatch(runId, state, reply.id) : undefined;
     if (!state.session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])])) return;
     this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: routed.askSeq, source: 'parent' });
-    if (fallback) this.chargeWorkerFallbackReply(runId);
-    this.settleHumanWaits(runId);
+    // The fallback reply's charge, the question it answers and the reply it delivers are one commit
+    // (hearsay-tools/cezarion#1805): no restart reads the charge without the reply.
+    const spent = fallback ? (this.store.getRun(runId)?.automaticWakes ?? 0) + 1 : undefined;
     const delivered = [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])];
-    this.commitBundledDelivery(runId, state, delivered);
+    this.commitBundledDelivery(runId, state, delivered, [{ kind: 'answered' }, ...(spent === undefined ? [] : [{ kind: 'charged' as const, automaticWakes: spent }])]);
+    if (spent !== undefined) this.store.appendEvent(runId, { type: 'note', message: `${WORKER_FALLBACK_REPLY_NOTE} (${spent}/${MAX_AUTO_CONTINUES})` });
     // As in submitAgentInput: the wake that admitted this answer is spent, and a stale one
     // would hold back every later message until the answer's turn ends.
     if (this.waitWakeAdmitted.delete(runId)) state.waitWakeTurn = state.session;
@@ -5991,14 +5994,20 @@ export class RunManager {
     return batch?.inputs.every(input => input.conversation) ? batch : undefined;
   }
 
-  /** Bundled messages rode the answer's own write: delivered now, read when that turn ends. */
-  private commitBundledDelivery(runId: string, state: ActiveRun, ids: readonly string[]): void {
+  /** Bundled messages rode the answer's own write: delivered now, read when that turn ends. The
+   *  answer's own outcomes (`with`: the human waits it answers, its charge) commit with them. A
+   *  refused write still keeps a charge or a counter in memory, as their best-effort write does. */
+  private commitBundledDelivery(runId: string, state: ActiveRun, ids: readonly string[], also: readonly RunOutcome[] = []): void {
     const deliveredAt = new Date().toISOString();
     const awaiting = state.inputDelivery?.consumption === 'observable' ? { awaitingRead: true as const } : {};
     try {
-      this.store.commitOutcome(runId, { kind: 'delivered', inputIds: ids, at: deliveredAt, ...awaiting });
+      this.store.commitOutcome(runId, [...also, ...(ids.length ? [{ kind: 'delivered' as const, inputIds: ids, at: deliveredAt, ...awaiting }] : [])]);
       state.bundledInputIds = [...(state.bundledInputIds ?? []), ...ids];
-    } catch (error) { console.warn(`[cez] bundled delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
+    } catch (error) {
+      console.warn(`[cez] bundled delivery checkpoint failed: ${error instanceof Error ? error.message : String(error)}`);
+      const counters = also.filter(outcome => outcome.kind === 'charged' || outcome.kind === 'counted');
+      if (counters.length) this.store.commitOutcome(runId, counters, {}, { bestEffort: true });
+    }
   }
 
   /** The turn that carried bundled messages has ended: the model read them. */
