@@ -2,7 +2,7 @@ import type { Readable, Writable } from 'node:stream';
 import WebSocket from 'ws';
 
 /**
- * A minimal Chrome DevTools Protocol client (#781). Raw CDP never leaves the server process except
+ * A minimal Chrome DevTools Protocol client (hearsay-tools/cezarion#781). Raw CDP never leaves the server process except
  * through the agent's CDP proxy (`cdp-proxy.ts`, hearsay-tools/cezarion#784), which gives each agent
  * connection its own browser session on this same connection.
  */

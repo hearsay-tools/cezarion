@@ -5818,7 +5818,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     previewSockets.close();
     void deps.previewHost?.close().catch(() => undefined);
   });
-  // The one `upgrade` listener: the subscription bus and the preview's sockets (#781).
+  // The one `upgrade` listener: the subscription bus and the preview's sockets (hearsay-tools/cezarion#781).
   attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), ...previewSockets.routes]);
   const shutdownForRestart = async (): Promise<void> => {
     archiveOnMerge.stop(); completionActions.stop();

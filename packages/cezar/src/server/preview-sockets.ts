@@ -4,7 +4,7 @@ import { createPreviewSocket, type PreviewSocketDeps } from './preview-socket.ts
 import type { UpgradeRoute } from './upgrade-router.ts';
 
 /**
- * The preview's two upgrade routes, built and closed together: the owner's pane socket (#781) and the
+ * The preview's two upgrade routes, built and closed together: the owner's pane socket (hearsay-tools/cezarion#781) and the
  * agent's CDP proxy (hearsay-tools/cezarion#784), the only way to the task's Chromium.
  */
 export function createPreviewSockets(deps: Omit<PreviewSocketDeps, 'host'> & { host?: PreviewHost | undefined; cockpitOrigin: () => string | undefined }): { routes: UpgradeRoute[]; close(): void } {

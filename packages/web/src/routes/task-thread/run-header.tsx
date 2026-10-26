@@ -125,7 +125,7 @@ function ItemTabLabel({ tab }: { tab: TaskItemTab }) {
 }
 
 /**
- * The preview pane's header toggle (#781): `Preview`, `Preview :5173`, `Preview :5173 +1`. The
+ * The preview pane's header toggle (hearsay-tools/cezarion#781): `Preview`, `Preview :5173`, `Preview :5173 +1`. The
  * entries are the registered servers and, while an agent drives the task's browser, the agent's
  * page (hearsay-tools/cezarion#784): alone it reads `Preview · agent`, beside servers it counts in
  * the `+N`. It only opens the pane, on the one entry or on the empty state when there are none or
