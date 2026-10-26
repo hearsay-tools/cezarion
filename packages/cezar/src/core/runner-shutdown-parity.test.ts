@@ -110,6 +110,8 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
   }
 }
 
+// Test limits cover each independent 10 s step guard plus settlement and cleanup.
+// Group cases also wait for leftover receipts and reaping; EOF adds its own 10 s grace.
 describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
   const [outsideSignal, endEscalation, outputFailure, ownGroup, stopGroup, endGroup, /* S29: omp-input-pipe.test.ts */, ownExit, outsideKill] = SHUTDOWN_CRITERIA;
   for (const backend of RUNNER_IDS) {
@@ -146,7 +148,7 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
         await expect(settled).resolves.not.toBeInstanceOf(Error);
         expect(events.filter(event => event.type === 'error')).toEqual([]);
       });
-    }, 15_000);
+    }, 30_000);
 
     it(`${backend} ${outputFailure.id} ${outputFailure.name}`, async () => {
       await withChild(backend, async (session, child, events, settled) => {
@@ -170,7 +172,7 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
           expect((result as Error).message).toBe('stdout broke');
         }
       });
-    }, 15_000);
+    }, 30_000);
 
     // hearsay-tools/cezarion#890: what the agent leaves in its process group ends with it.
     it.skipIf(process.platform === 'win32')(`${backend} ${ownGroup.id} ${ownGroup.name}`, async () => {
@@ -178,7 +180,7 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
         await leftovers(cwd);
         expect(execFileSync('ps', ['-o', 'pgid=', '-p', String(child.pid)], { encoding: 'utf8' }).trim()).toBe(String(child.pid));
       }, 'no-progress-leftover');
-    }, 15_000);
+    }, 30_000);
 
     it.skipIf(process.platform === 'win32')(`${backend} ${stopGroup.id} ${stopGroup.name}`, async () => {
       await withChild(backend, async (session, _child, _events, settled, cwd) => {
@@ -189,7 +191,7 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
         await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 10_000 });
         expect(alive(setsid)).toBe(true);
       }, 'no-progress-leftover');
-    }, 15_000);
+    }, 40_000);
 
     it.skipIf(process.platform === 'win32')(`${backend} ${endGroup.id} ${endGroup.name}`, async () => {
       await withChild(backend, async (session, child, _events, settled, cwd) => {
@@ -203,7 +205,7 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
         await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 10_000 });
         expect(alive(setsid)).toBe(true);
       }, 'no-progress-leftover');
-    }, 15_000);
+    }, 50_000);
 
     // hearsay-tools/cezarion#1286: cezar signals nothing when the agent exits on EOF, so the stdio MCP
     // servers and background jobs it left in its group are ended by the reap after its exit.
@@ -227,7 +229,7 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
       } finally {
         eofGrace.termMs = 100;
       }
-    }, 15_000);
+    }, 50_000);
 
     // hearsay-tools/cezarion#1286: a leader killed from outside (a crash, the OOM killer) gets no
     // signal from cezar, so only what cezar does after its exit ends what it left in its group.
@@ -241,7 +243,7 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
         await vi.waitFor(() => expect(alive(group)).toBe(false), { timeout: 10_000 });
         expect(alive(setsid)).toBe(true);
       }, 'no-progress-leftover');
-    }, 15_000);
+    }, 40_000);
 
     // hearsay-tools/cezarion#1625: N5 signals as soon as `watchdog.pid` appears. A mock that
     // published it before replacing its SIGTERM handler died from that SIGTERM.
@@ -283,7 +285,7 @@ process.on = function(event, listener) {
           await settled;
           expect(session.open).toBe(false);
         });
-      }, 15_000);
+      }, 30_000);
     }
   }
 });
