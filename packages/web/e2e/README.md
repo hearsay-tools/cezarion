@@ -344,6 +344,57 @@ before boot; unset or empty values use the defaults. The watcher reads them once
 boots, so a run with different values does not reuse the running server: it boots a new one
 under the new values. The watcher logs why it stopped a server to `.ai/qa/test-env-watch.log`.
 
+## Choosing specs for a change
+
+`npm run test:e2e:affected` runs only the specs that a change reaches
+(hearsay-tools/cezarion#1816). `--plan` prints the choice and runs nothing. Other arguments go
+to `npm run test:e2e`.
+
+```bash
+npm run test:e2e:affected -- --plan
+npm run test:e2e:affected -- --force-rebuild
+npm run test:e2e:affected -- --plan --map=<file>   # a map you built or downloaded
+```
+
+The choice comes from the spec map. The `E2E spec map` workflow
+(`.github/workflows/e2e-spec-map.yml`) builds it on each push to `main` that changes cockpit,
+server or test-environment files. It runs the suite in two shards with Chrome's V8
+function-event log on (`spec-map/vitest.config.ts`), builds the cockpit again with source maps,
+and records which repository files each spec ran. `spec-map/build-map.ts partial` refuses source
+maps whose JavaScript differs from the served bundle. `merge` refuses a map when fewer than 90%
+of the specs left evidence, or when `markdown.tsx` does not reach `artifact-project-links.e2e.ts`.
+
+A spec reaches a source file when one of these holds:
+
+- a function of the file ran in the spec's browser;
+- the file has a top-level statement, and the spec loaded the file's chunk;
+- the file exports a value other than a function, such as a class-name constant, and the spec
+  reaches a file that imports it;
+- the spec loads the file in Node, through an import or a relative path literal.
+
+The selector downloads the newest map with `gh` into `.ai/qa/e2e-spec-map/`. It diffs the
+working tree, untracked files included, against the map's commit. Each changed file selects:
+
+| Change | Specs |
+| --- | --- |
+| A cockpit or api-client source, `packages/{web,api-client}/src/**/*.{ts,tsx}` | The specs the map links to it, plus every spec the map lists as incomplete: a spec that failed or left no log |
+| A spec | That spec |
+| An e2e helper or fixture | The specs that load it; every spec when the suite setup loads it or no spec names it |
+| Documentation, a unit test, `spec-map/`, `.github/` outside the suite setup | None |
+| Anything else: server code, the contract, styles, build configuration, the test environment, dependencies | Every spec |
+
+Without `gh`, a network or a successful refresh, the selector uses the newest cached map. With no
+cached map, it runs every spec. It prints the reason in both cases.
+
+Limits:
+
+- The map works per file. An edit to one function selects every spec that ran any function of
+  the file.
+- Styles and server code select every spec.
+- The map does not hold text assertions. When you change visible copy, also search the specs for
+  the old and the new string (AGENTS.md § Reader sweep).
+- A selected pass is not a full-suite pass. CI runs every spec.
+
 ## The project the shared env serves
 
 The shared server never serves this checkout. Each cold boot serves a fresh isolated clone at
