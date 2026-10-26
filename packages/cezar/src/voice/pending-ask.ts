@@ -1,4 +1,5 @@
-import { HUMAN_ASK_EVENT_TYPES, askRequestSchema, pendingHumanAsk, type AskQuestion } from '@open-mercato/cezar-contract/ask';
+import { HUMAN_ASK_EVENT_TYPES, askRequestSchema, type AskQuestion } from '@open-mercato/cezar-contract/ask';
+import { pendingAskOf } from '@open-mercato/cezar-contract/pending-ask';
 import type { RunEvent, RunRecord } from '@open-mercato/cezar-contract';
 import { readHistoryText } from '../runs/history-file.ts';
 
@@ -35,8 +36,8 @@ export function readPendingHumanAsk(
 ): { requestId: string; questions: AskQuestion[] } | undefined {
   try {
     const events = readHumanAskEvents(dataDir, run.id);
-    const pending = events === undefined ? undefined : pendingHumanAsk(events);
-    if (pending === undefined || typeof pending.requestId !== 'string') return undefined;
+    const pending = events === undefined ? undefined : pendingAskOf(events);
+    if (pending === undefined) return undefined;
     const elsewhere = run.waits?.some(wait =>
       wait.kind === 'human' && wait.phase === 'open' && wait.askSeq !== undefined && wait.askSeq !== pending.seq);
     if (elsewhere) return undefined;

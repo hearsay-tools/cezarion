@@ -15,6 +15,7 @@ import {
   type RunSummary,
 } from '@open-mercato/cezar-contract/runs';
 import { changesPayloadSchema } from '@open-mercato/cezar-contract/repo';
+import { pendingAskOf, type PendingAsk } from '@open-mercato/cezar-contract/pending-ask';
 import { asksQuestion } from '@open-mercato/cezar-contract/waits';
 import { runHistoryContextSchema } from '@open-mercato/cezar-contract/events';
 import { skillSchema } from '@open-mercato/cezar-contract/skills';
@@ -23,7 +24,7 @@ import { RUNNER_IDS } from '../core/agent-runner.ts';
 import { runnerFlag, skillFlagIssue, skillTaskSteps } from '../workflows/types.ts';
 import { discoverCockpit, type DiscoverOptions } from './discovery.ts';
 import { handoffUrl, invalidResponse, refuse, request, TaskCliError, threadUrl, type Cockpit } from './http.ts';
-import { projectListRow, projectStatus, type PendingQuestion } from './projections.ts';
+import { projectListRow, projectStatus } from './projections.ts';
 import { DEFAULT_WAIT_UNTIL, readLog, requestRunSummaries, waitForRuns, type WaitMode, type WaitUntil } from './watch.ts';
 
 /**
@@ -432,12 +433,10 @@ async function refuseWorkerNotify(cockpit: Cockpit, id: string): Promise<void> {
 }
 
 /** The latest valid unanswered question, from the same derivation the cockpit renders. */
-async function pendingQuestion(cockpit: Cockpit, id: string): Promise<PendingQuestion | undefined> {
+async function pendingQuestion(cockpit: Cockpit, id: string): Promise<PendingAsk | undefined> {
   const result = await request(cockpit, `/runs/${encodeURIComponent(id)}/history-context`);
   const context = runHistoryContextSchema.safeParse(result.data);
-  if (result.status !== 200 || !context.success) return undefined;
-  const ask = [...context.data.contextEvents].reverse().find((event) => event.type === 'ask.requested');
-  return ask ? { questions: ask.questions, context: ask.context } : undefined;
+  return result.status === 200 && context.success ? pendingAskOf(context.data.contextEvents) : undefined;
 }
 
 type Values = Record<string, string | boolean | undefined>;

@@ -3,7 +3,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { brotliCompressSync } from 'node:zlib';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { advancePendingHumanAsk, pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
+import { advancePendingHumanAsk } from '@open-mercato/cezar-contract/ask';
+import { pendingAskOf } from '@open-mercato/cezar-contract/pending-ask';
 import type { RunEvent } from '@open-mercato/cezar-contract';
 import { historyPaths } from './history-file.ts';
 import { emptyFacts, foldEvent, foldText, PROSE_HUMAN_GATE, TranscriptFactsIndex, workerOutcomeKey } from './transcript-facts.ts';
@@ -108,7 +109,7 @@ describe('transcript facts fold', () => {
     expect(foldEvent(facts, closed)).toBe(true);
     expect(facts.pendingAsk).toBeUndefined();
     expect(facts.pendingGateSeq).toBeUndefined();
-    expect(pendingHumanAsk([asked, closed])).toBeUndefined();
+    expect(pendingAskOf([asked, closed])).toBeUndefined();
     const gate = ev('note', { code: PROSE_HUMAN_GATE, message: 'need a human' });
     foldEvent(facts, gate);
     expect(foldEvent(facts, ev('human-ask-closed', { askSeq: gate.seq, reason: 'finish' }))).toBe(true);
@@ -152,7 +153,7 @@ describe('transcript facts fold', () => {
     expect(facts.lastSeq).toBe(events.at(-1)!.seq);
     expect(new Set(facts.projectionIds)).toEqual(new Set(events.map((event) => event.projectionId).filter((id) => id !== undefined)));
     // routedAsk's derivation
-    const pending = pendingHumanAsk(events);
+    const pending = pendingAskOf(events);
     expect(facts.pendingAsk?.seq).toBe(pending?.seq);
     const routed = events.find((event) => event.type === 'worker-question-routed' && event.askSeq === pending?.seq);
     expect(facts.pendingAsk?.routedMessageId).toBe(routed?.messageId);
