@@ -37,7 +37,7 @@ import type {
   UiTurnCompletedEvent,
   UiUsageUpdatedEvent,
 } from './ui-events.ts';
-import { toolDisplay } from './tool-display.ts';
+import { toolDisplay } from '@open-mercato/cezar-contract/tool-display';
 
 // ---- v2 state ---------------------------------------------------------------
 

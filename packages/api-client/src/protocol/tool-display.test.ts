@@ -1,15 +1,7 @@
 import { describe, expect, it } from 'vitest'
 
-import { toolDisplay, type ToolDisplay } from './tool-display.ts'
+import { toolDisplay, type ToolDisplay } from '@open-mercato/cezar-api-client/contract/tool-display'
 
-/**
- * The web half of the display-model guard. The heavy lifting lives on the server side —
- * `src/server/tool-display-mirror.test.ts` runs BOTH implementations over one table and pins
- * them to the same literals — but that suite runs under the server's NodeNext resolver. This
- * one exists to prove the mirror also loads and behaves under the WEB project's resolver (the
- * `.js` → `.ts` specifier mapping Vite applies is exactly what would break silently otherwise),
- * with a spot check per behavior family. The literals are the shared ones.
- */
 describe('protocol/tool-display — the mirror works under the bundle resolver', () => {
   it.each<{ name: string; input?: unknown; expected: ToolDisplay }>([
     {

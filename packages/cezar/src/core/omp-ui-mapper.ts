@@ -25,7 +25,7 @@ import type {
   UiReasoningItem,
   UiToolItem,
 } from './ui-events.js';
-import { toolDisplay } from './tool-display.js';
+import { toolDisplay } from '@open-mercato/cezar-contract/tool-display';
 
 /** One stream of text/reasoning blocks: the parent turn's, or one sub-agent's. */
 interface OmpTextLane {

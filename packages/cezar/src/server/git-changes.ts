@@ -1,3 +1,4 @@
+import { imageMimeType } from '@open-mercato/cezar-contract/image-path';
 import { execFile } from 'node:child_process';
 import { rmSync } from 'node:fs';
 import { lstat, open, readFile, readdir, realpath, stat } from 'node:fs/promises';
@@ -464,40 +465,6 @@ export type FilesResult =
  * "opened the URL directly" case. Keep in sync with IMAGE_EXTENSIONS in
  * web/app/src/routes/task-git/file-preview.tsx.
  */
-const IMAGE_MIME: Record<string, string> = {
-  png: 'image/png',
-  jpg: 'image/jpeg',
-  jpeg: 'image/jpeg',
-  gif: 'image/gif',
-  webp: 'image/webp',
-  svg: 'image/svg+xml',
-  bmp: 'image/bmp',
-  ico: 'image/x-icon',
-  avif: 'image/avif',
-};
-
-/** The image MIME type for a path, or null when it is not an image we serve raw. */
-export function imageMimeType(path: string): string | null {
-  const name = path.slice(path.lastIndexOf('/') + 1);
-  const dot = name.lastIndexOf('.');
-  if (dot <= 0) return null;
-  return IMAGE_MIME[name.slice(dot + 1).toLowerCase()] ?? null;
-}
-
-/**
- * Raster extensions allowed for OS default-app opening. Do not inherit SVG from the HTTP image
- * list: its browser response protections do not apply to an OS handoff.
- */
-const OS_OPENABLE_EXT = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'ico', 'avif']);
-
-/** True when `path` is an image safe to hand to the OS's default handler — see OS_OPENABLE_EXT. */
-export function isOsOpenableImage(path: string): boolean {
-  const name = path.slice(path.lastIndexOf('/') + 1);
-  const dot = name.lastIndexOf('.');
-  if (dot <= 0) return false;
-  return OS_OPENABLE_EXT.has(name.slice(dot + 1).toLowerCase());
-}
-
 /** True when the first 8 KB contain a NUL byte — good enough for a viewer flag. */
 async function sniffBinary(path: string, size: number): Promise<boolean> {
   const handle = await open(path, 'r');

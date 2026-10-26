@@ -130,7 +130,7 @@ function subpathOwners(): Map<string, { contract?: string; apiClient?: string }>
     }
   };
   for (const name of contractModules()) record(`packages/contract/src/${name}.ts`, 'contract', name);
-  for (const path of ['client', 'protocol/ui-events', 'protocol/tool-display', 'utils/project-scope']) {
+  for (const path of ['client', 'protocol/ui-events', 'utils/project-scope']) {
     record(`packages/api-client/src/${path}.ts`, 'apiClient', path);
   }
   return owners;

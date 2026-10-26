@@ -1,93 +1,11 @@
 import { z } from 'zod';
-import { RUNNER_IDS, type AgentBackend, type RunnerId, type ToolGrant } from '../core/agent-runner.ts';
+import { type AgentBackend, type RunnerId, type ToolGrant } from '../core/agent-runner.ts';
 
-/**
- * A workflow is an ordered list of steps. Two step kinds:
- *  - `agent` — one claude CLI run (prompt + optional skill + model + tools);
- *  - `check` — a shell command; exit 0 passes, non-zero can loop back to an
- *    earlier step via `onFail` (bounded by `max`).
- *
- * `{{task}}` in a prompt is replaced with the user's task text. When a check
- * loops back, the failing output is appended to the retried agent's prompt.
- */
-export const workflowStepSchema = z
-  .object({
-    id: z.string().min(1),
-    name: z.string().optional(),
-    // agent step
-    prompt: z.string().optional(),
-    skill: z.string().optional(),
-    model: z.string().optional(),
-    effort: z.string().max(32).optional(),
-    /** Authored agent-step wall-clock limit in ms. Omitted or 0 means no limit.
-     *  Bound to Node's timer range so a larger value cannot become a 1ms kill. */
-    timeoutMs: z.number().int().min(0).max(2_147_483_647).optional(),
-    /** Per-step agent backend override (falls back to the task / config default).
-     *
-     *  Deliberately NOT widened to the legacy `claude-cli` the way the run store's
-     *  `runner`/`backend` were (#547). This enum validates two things a user AUTHORS —
-     *  workflow YAML, and the inline chain on `POST /runs` — so the selectable set is the
-     *  right one, and rejecting `claude-cli` here is a loud load-time error rather than
-     *  data loss. It also gates the persisted `workflowDef` (`runs/store.ts`), but nothing
-     *  has ever been able to write the legacy id THERE either, because this same enum was
-     *  the only way in: there is no legacy shape to keep parseable. */
-    runner: z.enum(RUNNER_IDS).optional(),
-    /** Agent account id for this step (spec 2026-07-29-agent-profiles). An owned worker resolves
-     *  and pins it per step at spawn (#452); an id the registry does not know is refused there. */
-    agentProfile: z.string().min(1).max(64).optional(),
-    allowedTools: z.array(z.string()).optional(),
-    bashAllowlist: z.array(z.string()).optional(),
-    // check step
-    command: z.string().optional(),
-    onFail: z
-      .object({
-        retry: z.string().min(1),
-        max: z.number().int().positive().default(2),
-      })
-      .optional(),
-  })
-  .refine((s) => Boolean(s.command) !== Boolean(s.prompt ?? s.skill), {
-    message: 'a step is either an agent step (prompt/skill) or a check step (command), not both',
-  })
-  .refine((s) => !s.command || s.timeoutMs === undefined, {
-    message: 'timeoutMs applies only to agent steps',
-    path: ['timeoutMs'],
-  });
-
-/**
- * A workflow file names either full `steps` or the portable `skills` shorthand
- * (spec 012 — what the builder exports): an ordered list of skill names, each
- * becoming one agent step that applies that skill to `{{task}}`.
- */
-export const workflowFileSchema = z
-  .object({
-    name: z.string().min(1),
-    description: z.string().optional(),
-    steps: z.array(workflowStepSchema).min(1).optional(),
-    skills: z.array(z.string().trim().min(1)).min(1).optional(),
-  })
-  .refine((d) => Boolean(d.steps) !== Boolean(d.skills), {
-    message: 'a workflow lists either "steps" or "skills", not both',
-  });
-
+import { workflowStepDefSchema as workflowStepSchema, workflowDefSchema } from '@open-mercato/cezar-contract/workflows';
+import { workflowFileSchema } from '@open-mercato/cezar-contract/workflow-file';
+export { workflowStepSchema, workflowDefSchema, workflowFileSchema };
 export type WorkflowStepDef = z.infer<typeof workflowStepSchema>;
 export type WorkflowDoc = z.infer<typeof workflowFileSchema>;
-
-/**
- * A resolved workflow: a catalog entry, or the ad-hoc "(planned)" chain a task
- * was started with. A SCHEMA and not an interface because `RunStore` persists
- * one of these on the run record (`workflowDef`) and has to parse it back —
- * `src/server/contract-parity.workflows.test.ts` is what keeps this shape and
- * the contract's `workflowDefSchema` from drifting.
- */
-export const workflowDefSchema = z.object({
-  name: z.string(),
-  description: z.string().optional(),
-  steps: z.array(workflowStepSchema),
-  source: z.enum(['built-in', 'file']),
-  path: z.string().optional(),
-});
-
 export type WorkflowDef = z.infer<typeof workflowDefSchema>;
 
 /** `skills: [a, b]` → agent steps, one per skill, each running `{{task}}`. */

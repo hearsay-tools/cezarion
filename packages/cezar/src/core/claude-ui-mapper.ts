@@ -43,7 +43,7 @@ import type {
   UiUsageUpdatedEvent,
 } from './ui-events.ts';
 import { hookEventName, isVisibleHookItem } from './hook-items.ts';
-import { toolDisplay } from './tool-display.ts';
+import { toolDisplay } from '@open-mercato/cezar-contract/tool-display';
 
 export interface ClaudeUiMapperState {
   /** Used when `system/init` lacks `session_id` (the dry-run mock does). */
