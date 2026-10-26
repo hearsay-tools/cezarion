@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { promisify } from 'node:util';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createWorktree, type AutosaveReason } from '../git-worktree.ts';
-import { readHandoff, seedHandoffFile } from '../handoff.ts';
+import { handoffPath, readHandoff, seedHandoffFile } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
 
 const run = promisify(execFile);
@@ -22,9 +22,10 @@ interface SaveSeam {
 /**
  * hearsay-tools/cezarion#1004: a resumed session reads the handoff, not
  * `git log`. Each turn-end / run-finalize save that commits or leaves work
- * behind says so in its `## Autosave (cezar)` section, never the Progress log,
- * and the same text reaches the cockpit as a note. Periodic commits share one
- * coalesced handoff line and no note.
+ * behind says so in the handoff's records block, never the Progress log, and
+ * the same text reaches the cockpit as a note. Periodic commits share one
+ * merged record and no note. The run store holds the records
+ * (hearsay-tools/cezarion#1809), so an agent edit to the file cannot lose one.
  * The runner-wire matrix for the same rule is R78/R79
  * (core/harness-autosave-branch.test.ts).
  */
@@ -50,7 +51,8 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     const next = rest.indexOf('\n## ');
     return next >= 0 ? rest.slice(0, next) : rest;
   };
-  const autosave = (id = runId) => section('## Autosave (cezar)', id);
+  /** The records block's autosave lines (hearsay-tools/cezarion#1809). */
+  const autosave = (id = runId) => section('### Autosave', id).split('\n').filter(line => line.startsWith('- ')).join('\n');
   // The top of the Progress log is the agent's own summary: the variant compare
   // column and the draft-PR body both read it, so the report must stay out of it.
   const progress = (id = runId) => section('## Progress log', id);
@@ -150,6 +152,7 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     `periodic: ${count} cezar autosave commit(s) on ${branch}, first ${first}, latest ${latest}; ` +
     `to fold the latest into your own commits while it is HEAD, run \`git reset --soft ${latest}~1\``;
   const autosaveLines = (id = runId) => autosave(id).split('\n').filter(Boolean);
+  const editHandoff = (edit: (text: string) => string) => writeFileSync(handoffPath(dataDir, runId), edit(readHandoff(dataDir, runId)));
   const autosaveNotes = () => notes().filter(message => message.includes('autosave'));
 
   // The automated review on hearsay-tools/cezarion#1111: the timer committed the last
@@ -203,6 +206,35 @@ describe('autosave report in the handoff and cockpit (#1004)', () => {
     expect(lines[2]).toContain(periodicLine(1, one, one));
     // Only the turn-end flush reaches the cockpit.
     expect(autosaveNotes()).toEqual([expect.stringContaining(`turn end: cezar autosave committed ${two}`)]);
+  });
+
+  // The agent owns the file. Before hearsay-tools/cezarion#1809 it was the reports' only copy: a
+  // rewrite without the section lost them, and an edited periodic line restarted the count.
+  it('keeps a report when the agent rewrites the handoff without it', async () => {
+    writeFileSync(join(worktreePath, 'one.txt'), 'progress\n');
+    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+    const one = await out(['rev-parse', '--short', 'HEAD']);
+    editHandoff(() => '# My own handoff\n\n## Progress log\n\n- 10:00 — rewrote it\n');
+    writeFileSync(join(worktreePath, 'two.txt'), 'progress\n');
+    await manager.saveWorktree(runId, { cwd: worktreePath }, 'turn end');
+    const two = await out(['rev-parse', '--short', 'HEAD']);
+
+    const text = readHandoff(dataDir, runId);
+    expect(text).toContain(`turn end: cezar autosave committed ${two} on ${branch};`);
+    expect(text).toContain(`turn end: cezar autosave committed ${one} on ${branch};`);
+    expect(text).toContain('- 10:00 — rewrote it');
+  });
+
+  it('counts on after the agent edits the periodic line', async () => {
+    writeFileSync(join(worktreePath, 'one.txt'), 'progress\n');
+    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    const first = await out(['rev-parse', '--short', 'HEAD']);
+    editHandoff(text => text.replace(/^(- \S+ — periodic: .*)$/m, '$1 (seen)'));
+    writeFileSync(join(worktreePath, 'two.txt'), 'progress\n');
+    await manager.saveWorktree(runId, { cwd: worktreePath }, 'periodic');
+    const latest = await out(['rev-parse', '--short', 'HEAD']);
+
+    expect(readHandoff(dataDir, runId)).toContain(periodicLine(2, first, latest));
   });
 
   it('reports a periodic commit only in the handoff, and a periodic skip nowhere', async () => {

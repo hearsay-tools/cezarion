@@ -33,6 +33,7 @@ export * from './conversations.ts';
 export * from './ci-wait.ts';
 export * from './waits.ts';
 export * from './run-predicates.ts';
+export * from './handoff.ts';
 export * from './artifacts.ts';
 export * from './discovery.ts';
 

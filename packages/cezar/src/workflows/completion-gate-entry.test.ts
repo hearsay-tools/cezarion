@@ -7,6 +7,7 @@ import type { AgentSession } from '../core/agent-runner.ts';
 import { handoffPath, seedHandoffFile } from '../handoff.ts';
 import { RunStore } from '../runs/store.ts';
 import { RunManager } from './run.ts';
+import { watchTurnOutcomes } from './turn-outcomes.testkit.ts';
 
 // The completion gate's refusal of a live session's done outside a turn end (`settleTurn`'s `gate`
 // entry, hearsay-tools/cezarion#1525). Mid-turn, the live turn end decides the refusal; at the
@@ -97,40 +98,53 @@ describe('the completion gate outside a turn end', () => {
   });
 
   // The gate held the done itself (a stopped root, or a question that parked for the user): a turn
-  // end keeps the done at the boundary and writes the park line; an acknowledgement writes the line
-  // only.
+  // end keeps the done at the boundary and settles the park; an acknowledgement settles the park
+  // only. Neither writes to the handoff file (hearsay-tools/cezarion#1809).
   describe('a done the gate holds', () => {
-    const lines = () => readFileSync(handoffPath(join(root, '.ai/cezar'), id), 'utf8').match(/status=\S+/g) ?? [];
+    let seeded: string;
+    const handoff = () => readFileSync(handoffPath(join(root, '.ai/cezar'), id), 'utf8');
     const turnEnd = () => manager['settleTurn'](id, state, 'turn-end', { stepId: 'task', monitoring: false, humanGate: false,
       ask: null, askNudged: false, done: true, nudgedLastTurn: false });
+    const ack = () => manager['settleTurn'](id, state, 'ack', manager['boundaryTurn'](id, state, session, true));
     beforeEach(() => {
       vi.mocked(manager['completionGate']).mockReturnValue('held');
       seedHandoffFile(join(root, '.ai/cezar'), store.getRun(id)!);
+      seeded = handoff();
       state.atTurnBoundary = session;
       state.heldHumanInputSince = Date.now();
     });
+    afterEach(() => expect(handoff()).toBe(seeded));
 
-    it('a turn end keeps the done at the boundary, resets the held-input clock and writes the park line', () => {
+    it('a turn end and an acknowledgement write nothing to the handoff file', () => {
+      expect(turnEnd()).toBe(true);
+      expect(ack()).toBe(true);
+      expect(handoff()).toBe(seeded);
+    });
+
+    it('a turn end keeps the done at the boundary, resets the held-input clock and settles the park', () => {
+      const turns = watchTurnOutcomes();
       expect(turnEnd()).toBe(true);
       expect(state.doneAtBoundary).toBe(session);
       expect(state.doneClose).toEqual({ via: 'done-line' });
       expect(state.heldHumanInputSince).toBeUndefined();
-      expect(lines()).toEqual(['status=waiting']);
+      expect(turns.words(id)).toEqual(['waiting']);
     });
 
-    it('a turn end whose input checkpoint failed settles nothing and writes no line', () => {
+    it('a turn end whose input checkpoint failed settles nothing', () => {
+      const turns = watchTurnOutcomes();
       state.agentInputError = 'agent input delivery checkpoint failed';
       expect(turnEnd()).toBe(false);
       expect(state.doneAtBoundary).toBe(session);
-      expect(lines()).toEqual([]);
+      expect(turns.words(id)).toEqual([]);
     });
 
-    it('an acknowledgement writes the park line and leaves the boundary and the held-input clock as they were', () => {
+    it('an acknowledgement settles the park and leaves the boundary and the held-input clock as they were', () => {
+      const turns = watchTurnOutcomes();
       state.doneAtBoundary = session;
-      expect(manager['settleTurn'](id, state, 'ack', manager['boundaryTurn'](id, state, session, true))).toBe(true);
+      expect(ack()).toBe(true);
       expect(state.doneAtBoundary).toBe(session);
       expect(state.heldHumanInputSince).toBeDefined();
-      expect(lines()).toEqual(['status=waiting']);
+      expect(turns.words(id)).toEqual(['waiting']);
     });
   });
 });

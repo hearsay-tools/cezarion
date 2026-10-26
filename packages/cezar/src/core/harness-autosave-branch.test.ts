@@ -17,6 +17,8 @@ const section = (text: string, header: string) => {
   const next = rest.indexOf('\n## ');
   return next >= 0 ? rest.slice(0, next) : rest;
 };
+/** The autosave lines of cezar's records block, newest first (hearsay-tools/cezarion#1809). */
+const autosaveLines = (text: string) => section(text, '### Autosave').split('\n').filter(line => line.startsWith('- ')).join('\n');
 
 // hearsay-tools/cezarion#1004, on every HARNESS_ADAPTERS native wire: an agent
 // that checks another branch out in its task worktree must not find
@@ -34,8 +36,8 @@ describe('harness parity — autosave on an agent-checked-out branch (#1004)', (
           await withOwnedInputRun(backend, 'baseline', async ({ repoRoot, store, manager, runId }) => {
             const dataDir = join(repoRoot, '.ai/cezar');
             const notes = () => store.readEvents(runId).flatMap(event => event.type === 'note' ? [String(event.message)] : []);
-            // The report has its own section; the Progress log stays the agent's summary.
-            const autosave = () => section(readHandoff(dataDir, runId), '## Autosave (cezar)');
+            // The report is in cezar's records block; the Progress log stays the agent's summary.
+            const autosave = () => autosaveLines(readHandoff(dataDir, runId));
             const progress = () => section(readHandoff(dataDir, runId), '## Progress log');
             manager.enqueueOwnedRun(runId);
             await waitFor(() => store.getRun(runId)?.status === 'waiting');
@@ -86,7 +88,7 @@ describe('harness parity — autosave on an agent-checked-out branch (#1004)', (
         await withOwnedInputRun(backend, 'baseline', async ({ repoRoot, store, manager, runId }) => {
           const dataDir = join(repoRoot, '.ai/cezar');
           const notes = () => store.readEvents(runId).flatMap(event => event.type === 'note' ? [String(event.message)] : []);
-          const autosave = () => section(readHandoff(dataDir, runId), '## Autosave (cezar)');
+          const autosave = () => autosaveLines(readHandoff(dataDir, runId));
           const progress = () => section(readHandoff(dataDir, runId), '## Progress log');
           manager.enqueueOwnedRun(runId);
           await waitFor(() => store.getRun(runId)?.status === 'waiting');
@@ -114,6 +116,7 @@ describe('harness parity — autosave on an agent-checked-out branch (#1004)', (
           const periodic = `periodic: 1 cezar autosave commit(s) on ${taskBranch}, first ${sha}, latest ${sha}; ` +
             `to fold the latest into your own commits while it is HEAD, run \`git reset --soft ${sha}~1\``;
           expect(autosave().split('\n').filter(Boolean)[0]).toMatch(new RegExp(`^- \\S+ — ${escape(periodic)}$`));
+          expect(store.getRun(runId)?.handoffRecords?.autosave[0]).toMatchObject({ note: periodic, periodic: { count: 1, first: sha, latest: sha } });
           expect(progress()).not.toContain('periodic');
           expect(notes().filter(message => message.includes('periodic'))).toEqual([]);
         });

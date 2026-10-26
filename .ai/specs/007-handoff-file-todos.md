@@ -21,6 +21,14 @@ Status: ZAIMPLEMENTOWANE 2026-07-10 · Fala: 2 · Zależy od: 002 · Wzorzec: ja
 > (per-run `generateFollowups`), które ten issue zmienia z domyślnie-włączonego na globalnie
 > wyłączone.
 
+> **Update 2026-10-26 (hearsay-tools/cezarion#1809): cezar no longer writes lifecycle heartbeats.**
+> The owner dropped the guarantee in Scope 1 that "the handoff stays current when the agent writes
+> nothing" (the `turn complete — status=…` line after every turn). The run event log's lifecycle
+> events and the run status record each turn end now. cezar's own records, the autosave reports,
+> live in the run store (`RunRecord.handoffRecords`) and reach the file as one block that cezar
+> rewrites whole, so the rest of the file is the agent's. `docs/areas/handoff-journal.md` holds the
+> current rules.
+
 ## Cel
 
 Ciągłość między sesjami i taskami bez żadnej bazy: każdy task prowadzi

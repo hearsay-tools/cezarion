@@ -960,8 +960,8 @@ card, which stays answerable; beside a pending native question it waits for the 
 A root's done that the completion check refuses at a turn end (hearsay-tools/cezarion#1301, phase
 3b) opens no wait. The agent gets the refusal `cezar_done` would return (`worker_questions`,
 `workers_outstanding`, else `workers_uncollected`, one helper builds both) as one automatic turn,
-charged to the automatic-wake budget and bounded by the no-wait nudge's reply timer, with the
-heartbeat `running (completion nudge)`. When live workers block it, the nudge adds one sentence:
+charged to the automatic-wake budget and bounded by the no-wait nudge's reply timer; its settled
+outcome is a completion nudge. When live workers block it, the nudge adds one sentence:
 *If you end your turn with done again while these workers are live, Cezar will wait on them for
 you and wake you when they have all settled.* The mid-turn `cezar_done` answer never carries it.
 An open agent wait or owed input comes first: no nudge, the refusal is a note, and the run parks
@@ -1273,7 +1273,7 @@ the checks return and finish. Recovery covers the same wait without a live sessi
 wait list on every `RUNNER_IDS` backend through its `HARNESS_ADAPTERS` native wire, with no
 normalized-event injection. U0, in `core/ci-tools.test.ts`, calls `cezar_wait`, `cezar_ask`,
 `cezar_cancel_wait` and `cezar_done` through each native wire on fresh and resumed sessions. The rest are `WAIT_CRITERIA` in
-`workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from three files per runner: `waits-<runner>-parity.test.ts` for the base rows, `waits-<runner>-workers-parity.test.ts` for the worker rows (U2w onward) and `waits-<runner>-entries-parity.test.ts` for U27, the turn-end entry axis, with the criteria guard in `waits-parity.test.ts` (hearsay-tools/cezarion#1288, hearsay-tools/cezarion#1525). U27 settles U5, U6, U11, U20 and U20u from a fresh step, a Continue and an acknowledgement that lands after its turn ended, and checks each heartbeat word; the late-acknowledgement cells are exempt where no turn can end before its input is acknowledged. U1
+`workflows/waits-parity.testkit.ts`, defined in `workflows/waits-parity-cells.testkit.ts` and run from three files per runner: `waits-<runner>-parity.test.ts` for the base rows, `waits-<runner>-workers-parity.test.ts` for the worker rows (U2w onward) and `waits-<runner>-entries-parity.test.ts` for U27, the turn-end entry axis, with the criteria guard in `waits-parity.test.ts` (hearsay-tools/cezarion#1288, hearsay-tools/cezarion#1525). U27 settles U5, U6, U11, U20 and U20u from a fresh step, a Continue and an acknowledgement that lands after its turn ended, and checks each settled outcome's word; the late-acknowledgement cells are exempt where no turn can end before its input is acknowledged. U1
 registers a CI wait and a timer through `cezar_wait`, parks, and wakes with each result.
 U2 opens both: the timer wakes, the CI wait stays open and is in that turn's footer,
 the turn end re-parks without a new registration, and the later CI result is
@@ -1364,8 +1364,10 @@ Phase 2b (hearsay-tools/cezarion#1234) adds the turn-end rule. `decideTurnEnd`
 `RunManager` method, `settleTurn` (hearsay-tools/cezarion#1525): the fresh step's and the
 Continue's turn-end handlers, the boundary an acknowledgement settles late, and input readiness for
 a refused autonomous nudge. Since then it also decides a done the completion gate refused, so both
-nudge causes (no wait and completion) have one table test, and one function of the outcome gives
-the heartbeat word (`turnEndHeartbeat`). Input already owed defers the decision;
+nudge causes (no wait and completion) have one table test, and the parity cells read each settled
+`TurnEndOutcome` through the private seam `settledTurnOutcome` (`workflows/turn-outcomes.testkit.ts`;
+hearsay-tools/cezarion#1809 removed the handoff heartbeat line that recorded it). Input already
+owed defers the decision;
 then done finishes; any open wait or question parks; a workflow step that is not the last
 completes; a spent budget opens a `budget` human wait; an autonomous run gets the autonomous nudge;
 and any other turn end gets the no-wait nudge once, charged to the automatic-wake budget, before
@@ -1728,10 +1730,10 @@ waits, existing questions and lifecycle stops block it, and a wire that refuses 
 nudge registers the line after all.
 OpenCode's cap cell holds each nudge's HTTP ACK until after its SSE turn ends;
 deferred idle-boundary settlement applies the same policy after the ACK, including
-the cap note and the heartbeat for the state actually entered. A11/A12 start with
+the cap note and the settled outcome for the state actually entered. A11/A12 start with
 an unregistered ask line before markerless turns, covering the separate answer
 transport's delayed ACK on fresh and Continue sessions. A refused ordinary nudge
-retains its capacity slot and a running heartbeat until input readiness retries
+retains its capacity slot and a readiness outcome until input readiness retries
 that exact completed boundary, after durable input. New parent activity, accepted
 input or a real question invalidates the retry; cancellation, Finish, disposal and
 session replacement revoke it. Missing readiness reaches the existing idle close
@@ -1843,15 +1845,15 @@ No-wait nudge rows **F1–F11** live in
 `core/workflow-final-message-parity.test.ts` and the same parity guard. They were written for the
 final-message nudge (hearsay-tools/cezarion#544), which the no-wait nudge absorbed
 (hearsay-tools/cezarion#1234): a silent tail is a turn end with no wait, so it gets the same one
-nudge, reply bound and heartbeat. Every adapter covers a reasoning-or-tool tail with no later
+nudge, reply bound and settled outcome. Every adapter covers a reasoning-or-tool tail with no later
 assistant message, on fresh and Continue paths: one nudge that can complete with DONE, a
 still-silent nudge that opens Cezar's no-wait human wait (#119), reasoning that names `CEZ:DONE`
 never completing the run (#399), a markerless message-then-tool tail getting exactly one nudge, an
 explicit DONE with zero nudge notes, and an autonomous silent tail that stays `running` with a held
 slot and no idle timer at the first `continuing without pausing` note, with zero no-wait nudge
 notes. F7 covers the park-after-ACK site: a silent-tail turn that ends while its agent-input ACK is
-still pending produces exactly one `no wait or done — reminding the agent once` note and the
-`status=running (no-wait nudge)` heartbeat after the ACK.
+still pending produces exactly one `no wait or done — reminding the agent once` note and a
+no-wait nudge outcome after the ACK.
 Only OpenCode's HTTP ACK is independent of the SSE turn; the other adapters have named executable
 exemptions because turn frames and the transport ACK share one stream, so turn-end-before-ACK
 cannot be constructed.
@@ -2081,13 +2083,14 @@ R78–R79 (hearsay-tools/cezarion#1004, `core/harness-autosave-branch.test.ts`) 
 another branch out in an owned worker's worktree on every `HARNESS_ADAPTERS` native
 wire, leave a file, and settle the session: R78 on the initial run (`run finalize`),
 R79 on a Continue (`turn end`). The save commits nothing, the foreign branch tip does
-not move, and the handoff's `## Autosave (cezar)` section and a cockpit note both
+not move, and an autosave record (the handoff's records block, from
+`RunRecord.handoffRecords`, hearsay-tools/cezarion#1809) and a cockpit note both
 name the branch and the uncommitted path count, while the Progress log stays free
 of the report. R79's first settle, still on the task branch, pins the other half:
 the commit is reported with its short sha, the branch and the
 `git reset --soft <sha>~1` fold-back command. R79's periodic case fires the
 Continue's `CEZ_AUTOSAVE=1` timer by hand, so the closing `turn end` flush finds
-a clean tree and reports nothing: the timer's own coalesced `periodic:` line
+a clean tree and reports nothing: the timer's own merged `periodic:` record
 names the commit, the branch and the fold-back command, and no cockpit note is
 emitted for it.
 

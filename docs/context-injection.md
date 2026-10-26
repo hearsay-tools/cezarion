@@ -20,7 +20,8 @@ session does not add it again.
 ## The handoff block
 
 The first block is always the run's own handoff file (`CEZ_HANDOFF_FILE`), complete: Goal,
-Progress log, Resume notes and the Autosave section. It needs no configuration, and it cannot be
+Progress log, Resume notes and cezar's records block, which the launch first renders from the run
+store (hearsay-tools/cezarion#1809). It needs no configuration, and it cannot be
 turned off or replaced. A worker gets its own handoff, never its parent's.
 
 When the handoff is in the message, the system prompt tells the agent so, and asks it to read the
