@@ -9,6 +9,7 @@ import {
   LinkRefused,
   withWorktreeFiles,
   type EntryContent,
+  type PathState,
   type WorktreeFiles,
   type WorktreeFilesOptions,
 } from './worktree-manifest.ts';
@@ -241,6 +242,19 @@ async function excludeEach(files: WorktreeFiles, agentDir: string, names: readon
   for (const name of names) await excludeFromGit(files.worktree, `${agentDir}/skills/${name}`);
 }
 
+/** The state of `rel` when this pass may write it; null when it must stay as it is. */
+async function claimPath(pass: Pass, rel: string): Promise<PathState | null> {
+  const state = await pass.files.inspect(rel);
+  // Not cezar's (tracked, or the user's own), changed since, or out of the worktree: leave it.
+  if (state.owner === 'outside' || state.owner === 'theirs') {
+    pass.files.forget(rel);
+    return null;
+  }
+  pass.wanted.add(rel);
+  // An interrupted entry that no longer matches may be the user's now: left alone, kept out of git.
+  return state.owner === 'kept' ? null : state;
+}
+
 /** A local, global or built-in skill: a link, a generated `SKILL.md`, or a copy where links fail. */
 async function placeLinkedSkill(pass: Pass, skill: Skill, plan: Exclude<Plan, { how: 'team' }>): Promise<void> {
   const { files } = pass;
@@ -252,15 +266,8 @@ async function placeLinkedSkill(pass: Pass, skill: Skill, plan: Exclude<Plan, { 
   for (const agentDir of TEAM_SKILL_AGENT_DIRS) {
     pass.checkpoint();
     const rel = entryPath(agentDir, skill.name);
-    const state = await files.inspect(rel);
-    // Not cezar's (tracked, or the user's own), changed since, or out of the worktree: leave it.
-    if (state.owner === 'outside' || state.owner === 'theirs') {
-      files.forget(rel);
-      continue;
-    }
-    pass.wanted.add(rel);
-    // An interrupted entry that no longer matches may be the user's now: left alone, kept out of git.
-    if (state.owner === 'kept') continue;
+    const state = await claimPath(pass, rel);
+    if (!state) continue;
     const { entry } = state;
     if (state.owner === 'ours' && entry && entry.kind !== 'pending' && state.current === entry.identity
       && entry.source === (entry.kind === 'copy' ? await copySource() : plan.source)) continue;
@@ -312,13 +319,8 @@ async function placeTeamCopies(pass: Pass, skill: Skill): Promise<string[]> {
     const rel = entryPath(agentDir, skill.name);
     const staged = resolve(staging, agentDir, 'skills', skill.name);
     if (!written.has(staged)) continue;
-    const state = await files.inspect(rel);
-    if (state.owner === 'outside' || state.owner === 'theirs') {
-      files.forget(rel);
-      continue;
-    }
-    pass.wanted.add(rel);
-    if (state.owner === 'kept') continue;
+    const state = await claimPath(pass, rel);
+    if (!state) continue;
     const identity = await identityOf(staged);
     const marker = await readFile(join(staged, TEAM_MARKER), 'utf8').catch(() => null);
     if (identity === null || marker === null) continue;
