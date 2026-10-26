@@ -15,6 +15,8 @@ import { executionAccount } from './execution-account.ts';
 import { chargesBudget, ciWatchRequest, hasPrWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
+import type { RunContext } from '../preview/host.ts';
+import { previewCdpSession } from '../preview/agent-address.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
 import { artifactInstructions, provisionArtifactDirectory } from '../artifacts/lifecycle.ts';
 import type { CiWatcherSupervisor } from '../ci-wait/supervisor.ts';
@@ -2096,8 +2098,24 @@ export class RunManager {
     state.toolless = !controller;
     if (!controller || this.disposed || state.cancelled || this.active.get(runId) !== state) return;
     const provisioned = controller.provision(this.cezarToolHandlers(runId, generation));
-    state.revokeCiTools = provisioned.revoke;
-    return provisioned;
+    // hearsay-tools/cezarion#784: the session's CDP address lives and ends with its tool capability,
+    // so every site that revokes the tools also closes the agent's browser sockets.
+    const session = previewCdpSession(provisioned, {
+      host: this.preview,
+      cockpitOrigin: this.cockpit?.origin,
+      runId,
+      worktree: !!this.store.getRun(runId)?.worktreePath,
+      context: () => this.previewContext(runId),
+    });
+    state.revokeCiTools = session.revoke;
+    return session;
+  }
+
+  /** The preview host's view of a run with a live worktree, read when the agent connects. */
+  private previewContext(runId: string): RunContext | undefined {
+    const run = this.store.getRun(runId);
+    if (!run?.worktreePath || !existsSync(run.worktreePath)) return undefined;
+    return { runId, title: run.title, worktreePath: run.worktreePath, dataDir: this.dataDir, store: this.store };
   }
 
   /**

@@ -11,6 +11,8 @@ import { previewRefusal } from '../ci-wait/errors.ts';
 export const PREVIEW_MAX_SERVERS = 8;
 
 /** What the run manager needs from the workspace-wide preview host; `PreviewHost` implements it. */
+import type { AgentGrant, RunContext } from './host.ts';
+
 export interface PreviewHostLike {
   /** Stop/restart only a server started for this run under an unchanged owner approval. */
   stopPreview(runId: string, request: PreviewStopRequest, signal?: AbortSignal): Promise<PreviewStopResult>;
@@ -23,6 +25,9 @@ export interface PreviewHostLike {
   /** The agent re-registered `port` with a different command, cwd or path: the running copy
    *  belongs to the old registration, so it stops and the next run needs the owner's approval. */
   replaced(runId: string, port: number): Promise<void>;
+  /** hearsay-tools/cezarion#784: one agent session's right to drive the run's browser through the
+   *  CDP proxy. Optional so a host without a browser (a test fake) gives the agent no address. */
+  grantAgent?(runId: string, context: () => RunContext | undefined): AgentGrant;
 }
 
 export type PreviewRegistrationInput = {

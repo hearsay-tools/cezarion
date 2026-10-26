@@ -271,6 +271,7 @@ import { ApplicationUpdateConflictError, ApplicationUpdateFailureError, type App
 import { createSocketHub, socketHubRoute, type SocketHub, type WsUpgradeVerdict } from './ws.ts';
 import { attachUpgradeRouter } from './upgrade-router.ts';
 import { createPreviewSocket } from './preview-socket.ts';
+import { createPreviewCdpSocket } from './preview-cdp-socket.ts';
 import type { PreviewHost } from '../preview/host.ts';
 import { browseDirectory, isInsideBrowseRoot, isLexicallyInsideBrowseRoot, resolveBrowseRoot } from './fs-browse.ts';
 import { parseRemote, resolveForge, forgeWebRoot, type ForgeAvailability } from './forge/index.ts';
@@ -5812,14 +5813,18 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     verify: (req) => verifyWsUpgrade(req, deps.bindHost),
     resolveProject: async (projectId) => projectLookup.resolve?.(projectId),
   });
+  // hearsay-tools/cezarion#784: the agent's CDP proxy, the only way to the task's Chromium.
+  const previewCdpSocket = createPreviewCdpSocket({ host: deps.previewHost, cockpitOrigin: () => cockpitOrigin });
   server.once('close', () => {
     unsubscribe(); archiveOnMerge.stop(); completionActions.stop(); automationScheduler.stop(); sharedContexts.disposeAll(); void deps.delegation?.close();
     socketHub.close();
     previewSocket.close();
+    previewCdpSocket.close();
     void deps.previewHost?.close().catch(() => undefined);
   });
-  // The one `upgrade` listener: the subscription bus and the preview pane's socket (#781).
-  attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), previewSocket.route]);
+  // The one `upgrade` listener: the subscription bus, the preview pane's socket (#781) and the
+  // agent's CDP proxy (hearsay-tools/cezarion#784).
+  attachUpgradeRouter(server, [socketHubRoute(socketHub, (req) => verifyWsUpgrade(req, deps.bindHost)), previewSocket.route, previewCdpSocket.route]);
   const shutdownForRestart = async (): Promise<void> => {
     archiveOnMerge.stop(); completionActions.stop();
     sharedContexts.disposeAll(); // close every built secondary project before old process exits
@@ -5829,6 +5834,7 @@ export function startServer(deps: ServerDeps, port: number, listener?: Server): 
     // A failed release must not abort the restart halfway, with the store flushed and the port still bound.
     await deps.previewHost?.close().catch(() => undefined);
     previewSocket.close();
+    previewCdpSocket.close();
     await deps.delegation?.close();
     await new Promise<void>((resolve) => {
       server.close(() => resolve());
