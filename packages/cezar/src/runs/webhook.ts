@@ -3,8 +3,9 @@ import { realpath } from 'node:fs/promises';
 import { join } from 'node:path';
 import type { ApiRun, RunStatus, WebhookTrigger } from '@open-mercato/cezar-contract';
 import { DEFAULT_WEBHOOK_TRIGGERS, deriveWebhookState, type AttentionInput } from '@open-mercato/cezar-contract/attention';
+import { pendingAskOf, type PendingAsk } from '@open-mercato/cezar-contract/pending-ask';
 import { asksQuestion } from '@open-mercato/cezar-contract/waits';
-import { projectStatus, type PendingQuestion } from '../task-cli/projections.ts';
+import { projectStatus } from '../task-cli/projections.ts';
 import { loadWorkspaceConfig, type WorkspaceProject } from '../workspace/config.ts';
 import { taskWebhooks } from '../workspace/webhooks.ts';
 import { deriveRunContextEvents } from './event-history.ts';
@@ -343,11 +344,9 @@ function threadUrl(origin: string | undefined, projectId: string, runId: string)
   return `${origin ?? ''}/p/${encodeURIComponent(projectId)}/tasks/${encodeURIComponent(runId)}`;
 }
 
-async function pendingQuestion(dataDir: string, runId: string): Promise<PendingQuestion | undefined> {
+async function pendingQuestion(dataDir: string, runId: string): Promise<PendingAsk | undefined> {
   try {
-    const context = await deriveRunContextEvents(dataDir, runId);
-    const ask = [...context.contextEvents].reverse().find((event) => event.type === 'ask.requested');
-    return ask ? { questions: ask.questions, context: ask.context } : undefined;
+    return pendingAskOf((await deriveRunContextEvents(dataDir, runId)).contextEvents);
   } catch {
     return undefined;
   }

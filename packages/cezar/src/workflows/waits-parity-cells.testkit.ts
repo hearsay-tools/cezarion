@@ -14,7 +14,7 @@ import { parkNoticeId } from '../delegation/park-notice.ts';
 import { checkpoint, collect, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
-import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
+import { pendingAskOf } from '@open-mercato/cezar-contract/pending-ask';
 import { handoffPath } from '../handoff.ts';
 import { claudeScheduleWakeupDelay, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, REFUSAL_DISCARDED_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
 import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
@@ -1445,7 +1445,7 @@ function baseCells(runners: RunnerId[]): void {
         const events = store.readEvents(run.id);
         expect(events.filter(event => event.type === 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq, reason: 'finish' })]);
         expect(events.filter(event => event.type === 'human-input-delivered')).toEqual([]);
-        expect(pendingHumanAsk(events)).toBeUndefined();
+        expect(pendingAskOf(events)).toBeUndefined();
         expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
         expect(hasPendingAsk(store, run.id)).toBeFalsy();
       };

@@ -926,6 +926,26 @@ describe('reduceThread — AskUser cards (#473)', () => {
     expect(find({ context: 42 })).not.toHaveProperty('context')
   })
 
+  // hearsay-tools/cezarion#1808: the whole card model, so a field the projection adds or loses shows.
+  // The card is lenient where the pending-ask rule is strict: it renders an ask whose header is too
+  // long for the questions schema, and it keeps a question whose options are absent.
+  it('builds the card with exactly its fields, and nothing undefined', () => {
+    const find = (extra: object, seq = 2) => allItems([line(seq, 'ask.requested', { ...ASK, ...extra })]).find((i) => i.kind === 'ask')
+    expect(find({ context: '## Draft' })).toStrictEqual({ kind: 'ask', id: 'ask_1', questions: ASK.questions, context: '## Draft', resolved: false, askSeq: 2 })
+    expect(find({})).toStrictEqual({ kind: 'ask', id: 'ask_1', questions: ASK.questions, resolved: false, askSeq: 2 })
+    expect(find({ stepId: 'task', ts: 'x' }, 7)).toStrictEqual({ kind: 'ask', id: 'ask_1', questions: ASK.questions, resolved: false, askSeq: 7 })
+  })
+
+  it('renders an ask the strict questions schema rejects, and no ask without questions or a requestId', () => {
+    const long = { header: 'A header over twelve characters', question: 'Which?' }
+    expect(allItems([line(2, 'ask.requested', { requestId: 'ask_1', questions: [long] })]).find((i) => i.kind === 'ask'))
+      .toMatchObject({ kind: 'ask', questions: [long] })
+    expect(allItems([line(2, 'ask.requested', { requestId: 'ask_1', questions: [{ header: 'H', question: 'Q', options: 'x' }] })]).some((i) => i.kind === 'ask')).toBe(false)
+    expect(allItems([line(2, 'ask.requested', { requestId: 'ask_1', questions: 'nope' })]).some((i) => i.kind === 'ask')).toBe(false)
+    expect(allItems([line(2, 'ask.requested', { questions: ASK.questions })]).some((i) => i.kind === 'ask')).toBe(false)
+    expect(allItems([line(2, 'ask.requested', { requestId: 7, questions: ASK.questions })]).some((i) => i.kind === 'ask')).toBe(false)
+  })
+
   it('the next user-message resolves the ask and records the answer', () => {
     const ask = allItems([
       line(1, 'text', { text: 'options' }),
