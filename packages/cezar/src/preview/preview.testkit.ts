@@ -35,25 +35,52 @@ export function fakeCdp() {
 /**
  * A browser connection for the agent's CDP proxy (hearsay-tools/cezarion#784): it grants each
  * browser session at once and answers every other command with an empty result, recording all.
+ * `Target.createTarget` makes target `NEW`; `Target.attachToTarget` opens a page session `S<n>` (a `fakeCdp`, in `pages`);
+ * `Target.getTargetInfo` calls a target a page unless its id starts with `W` (a worker).
+ * `emit` sends a browser event to every `onEvent` listener.
  */
 export function fakeConnection() {
   const requests: Array<{ method: string; params: unknown; sessionId: string | undefined }> = [];
+  const pages = new Map<string, ReturnType<typeof fakeCdp>>();
+  const listeners = new Set<(msg: CdpMessage) => void>();
   let sessions = 0;
+  let attached = 0;
   let markClosed!: () => void;
   const closed = new Promise<void>(resolve => (markClosed = resolve));
+  const answer = (method: string, params: unknown): CdpMessage => {
+    const targetId = (params as { targetId?: unknown } | undefined)?.targetId;
+    if (method === 'Target.attachToBrowserTarget') return { result: { sessionId: `B${++sessions}` } };
+    if (method === 'Target.createTarget') return { result: { targetId: 'NEW' } };
+    if (method === 'Target.attachToTarget') return { result: { sessionId: `S${++attached}` } };
+    if (method === 'Target.getTargetInfo' && typeof targetId === 'string') {
+      return { result: { targetInfo: { targetId, type: targetId.startsWith('W') ? 'service_worker' : 'page', url: `http://localhost/${targetId}` } } };
+    }
+    return { result: {} };
+  };
   const request: CdpConnection['request'] = (method, params, sessionId, onReply) => {
     requests.push({ method, params, sessionId });
-    onReply(method === 'Target.attachToBrowserTarget' ? { result: { sessionId: `B${++sessions}` } } : { result: {} });
+    onReply(answer(method, params));
   };
   const connection: CdpConnection = {
     request,
     call: (method, params, sessionId) => new Promise<CdpMessage>(resolve => request(method, params, sessionId, resolve)),
-    onEvent: () => () => {},
-    session: () => { throw new Error('fakeConnection has no session clients'); },
+    onEvent: fn => {
+      listeners.add(fn);
+      return () => void listeners.delete(fn);
+    },
+    session: id => {
+      const key = id ?? 'root';
+      const page = pages.get(key) ?? fakeCdp();
+      pages.set(key, page);
+      return page.cdp;
+    },
     close: () => markClosed(),
     closed,
   };
-  return { connection, requests };
+  const emit = (msg: CdpMessage) => {
+    for (const fn of [...listeners]) fn(msg);
+  };
+  return { connection, requests, pages, emit };
 }
 
 /** An agent's proxy socket, as the route hands it to the host. */

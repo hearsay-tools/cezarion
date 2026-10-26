@@ -109,19 +109,36 @@ function createConnection(transport: Transport): CdpConnection {
     onEvent,
     close,
     closed,
-    session: sessionId => ({
-      send: async <T>(method: string, params: Record<string, unknown> = {}) => {
-        const reply = await call(method, params, sessionId);
-        if (reply.error) throw new Error(`${method}: ${reply.error.message ?? 'CDP error'}`);
-        return reply.result as T;
-      },
-      on: <T>(event: string, fn: (params: T) => void) =>
-        onEvent(msg => {
-          if (msg.method === event && msg.sessionId === sessionId) fn(msg.params as T);
-        }),
-      close,
-      closed,
-    }),
+    session: sessionId => {
+      // A named session's close detaches that session alone: the host streams from several pages
+      // on one pipe (hearsay-tools/cezarion#784). The root session's close ends the connection.
+      const offs = new Set<() => void>();
+      let detached = false;
+      return {
+        send: async <T>(method: string, params: Record<string, unknown> = {}) => {
+          if (detached) throw new Error(`${method}: CDP session detached`);
+          const reply = await call(method, params, sessionId);
+          if (reply.error) throw new Error(`${method}: ${reply.error.message ?? 'CDP error'}`);
+          return reply.result as T;
+        },
+        on: <T>(event: string, fn: (params: T) => void) => {
+          const off = onEvent(msg => {
+            if (msg.method === event && msg.sessionId === sessionId) fn(msg.params as T);
+          });
+          offs.add(off);
+          return () => { off(); offs.delete(off); };
+        },
+        close: () => {
+          if (sessionId === undefined) return close();
+          if (detached) return;
+          detached = true;
+          for (const off of offs) off();
+          offs.clear();
+          request('Target.detachFromTarget', { sessionId }, undefined, () => {});
+        },
+        closed,
+      };
+    },
   };
 }
 

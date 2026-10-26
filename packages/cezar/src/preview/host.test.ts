@@ -904,5 +904,63 @@ describe('PreviewHost', () => {
       expect(browsers[0]!.cdpFake.sent('Page.startScreencast').length).toBeGreaterThan(0);
       expect(stages(viewer)).not.toContain('agent-idle');
     });
+
+    describe("the pane follows the agent's page (agent-browser --pin-tab opens a tab of its own)", () => {
+      type Link = { fromClient(text: string): void };
+      const drive = async (link: unknown, id: number, method: string, params: Record<string, unknown>) => {
+        (link as Link).fromClient(JSON.stringify({ id, method, params }));
+        await flush();
+      };
+      const urls = (viewer: ReturnType<typeof fakeViewer>) => viewer.messages.flatMap(msg => (msg.t === 'url' ? [msg.url] : []));
+      const setup = async () => {
+        const made = make();
+        const grant = made.host.grantAgent(made.ctx.runId, () => made.ctx);
+        const { link } = await connect(made.host, grant.token);
+        const viewer = fakeViewer();
+        await made.host.handle(made.ctx, viewer, { t: 'open', target: { agent: true } });
+        await flush();
+        const browser = made.browsers[0]!;
+        return { ...made, link, viewer, browser, conn: browser.connectionFake };
+      };
+
+      it("streams the tab the agent creates, from a session of cezar's own on it", async () => {
+        const { link, viewer, conn } = await setup();
+        await drive(link, 1, 'Target.createTarget', { url: 'about:blank' });
+        const own = conn.requests.filter(r => r.method === 'Target.attachToTarget' && r.sessionId === undefined);
+        expect(own.map(r => r.params)).toEqual([{ targetId: 'NEW', flatten: true }]);
+        expect(conn.pages.get('S1')!.sent('Page.startScreencast').length).toBeGreaterThan(0);
+        expect(urls(viewer).at(-1)).toBe('http://localhost/NEW');
+      });
+
+      it('ignores a target that is not a page', async () => {
+        const { link, conn } = await setup();
+        await drive(link, 1, 'Target.attachToTarget', { targetId: 'W1', flatten: true });
+        expect(conn.pages.size).toBe(0);
+      });
+
+      it("a server open leaves the agent's tab alone and streams cezar's own page again", async () => {
+        const { host, ctx, link, viewer, browser, conn } = await setup();
+        await drive(link, 1, 'Target.createTarget', { url: 'about:blank' });
+        const before = browser.cdpFake.sent('Page.startScreencast').length;
+        await host.handle(ctx, viewer, { t: 'open', target: { url: 'http://localhost:5173/' } });
+        await flush();
+        expect(conn.pages.get('S1')!.cdp.close).toHaveBeenCalled();
+        expect(conn.requests.some(r => r.method === 'Target.closeTarget')).toBe(false);
+        expect(browser.cdpFake.sent('Page.startScreencast').length).toBeGreaterThan(before);
+        expect(navigations(browser)).toEqual(['http://localhost:5173/']);
+      });
+
+      it('falls back to the home page when the agent closes the tab the pane followed', async () => {
+        const { link, viewer, browser, conn } = await setup();
+        await drive(link, 1, 'Target.createTarget', { url: 'about:blank' });
+        const before = browser.cdpFake.sent('Page.startScreencast').length;
+        conn.emit({ method: 'Target.detachedFromTarget', params: { sessionId: 'S1', targetId: 'NEW' } });
+        await flush();
+        expect(conn.pages.get('S1')!.cdp.close).toHaveBeenCalled();
+        expect(browser.cdpFake.sent('Page.startScreencast').length).toBeGreaterThan(before);
+        // A later open of the agent's page shows the home page, not the closed tab.
+        expect(urls(viewer)).toContain('http://localhost/NEW');
+      });
+    });
   });
 });

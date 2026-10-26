@@ -11,6 +11,8 @@ import type { CdpConnection, CdpMessage } from './cdp.ts';
  * - Replies and events come back in the order the browser sent them, the browser session's without
  *   a `sessionId`, as a client of a root WebSocket expects.
  * - Commands that would end the owner's browser or the page the pane streams are refused.
+ * - Each target the agent creates, attaches to or activates is reported (`onTarget`): the pane's
+ *   "agent's page" follows it, because `agent-browser --pin-tab` drives a fresh tab of its own.
  */
 
 /** The agent's side of the link: an open WebSocket, as the proxy route hands it over. */
@@ -41,6 +43,7 @@ export class AgentCdpLink {
     private readonly browserSession: string,
     private readonly protectedTargetId: string | undefined,
     private readonly onClose: () => void,
+    private readonly onTarget: (targetId: string) => void,
   ) {
     this.offEvent = connection.onEvent(msg => this.fromBrowser(msg));
     void connection.closed.then(() => this.close(1011, 'The preview browser exited'));
@@ -50,11 +53,11 @@ export class AgentCdpLink {
    * Opens the agent's browser session. `protectedTargetId` is the page the owner's pane streams:
    * the agent may drive it but not close it. Rejects when the browser refuses the session.
    */
-  static async open(connection: CdpConnection, client: AgentClient, opts: { protectedTargetId?: string | undefined; onClose?: () => void } = {}): Promise<AgentCdpLink> {
+  static async open(connection: CdpConnection, client: AgentClient, opts: { protectedTargetId?: string | undefined; onClose?: () => void; onTarget?: (targetId: string) => void } = {}): Promise<AgentCdpLink> {
     const reply = await connection.call('Target.attachToBrowserTarget', {}, undefined);
     const sessionId = (reply.result as { sessionId?: unknown } | undefined)?.sessionId;
     if (reply.error || typeof sessionId !== 'string') throw new Error(`Target.attachToBrowserTarget: ${reply.error?.message ?? 'no session'}`);
-    return new AgentCdpLink(connection, client, sessionId, opts.protectedTargetId, opts.onClose ?? (() => {}));
+    return new AgentCdpLink(connection, client, sessionId, opts.protectedTargetId, opts.onClose ?? (() => {}), opts.onTarget ?? (() => {}));
   }
 
   /** One message from the agent's socket. */
@@ -77,6 +80,7 @@ export class AgentCdpLink {
       if (method === 'Target.attachToTarget' && !answer.error) this.adopt(answer.result as Attached | undefined, (msg.params as { targetId?: unknown } | undefined)?.targetId);
       if (method === 'Target.detachFromTarget' && !answer.error) this.forget((msg.params as { sessionId?: unknown } | undefined)?.sessionId);
       reply(answer.error ? { error: answer.error } : { result: answer.result ?? {} });
+      if (!answer.error) this.reportTarget(method, msg.params, answer.result);
     });
   }
 
@@ -118,6 +122,16 @@ export class AgentCdpLink {
     } else {
       this.deliver(msg);
     }
+  }
+
+  /** The target a successful command made the agent's: created, attached to, or brought to front. */
+  private reportTarget(method: string, params: unknown, result: unknown): void {
+    if (this.closed) return;
+    const fromParams = (params as { targetId?: unknown } | undefined)?.targetId;
+    const target = method === 'Target.createTarget'
+      ? (result as { targetId?: unknown } | undefined)?.targetId
+      : method === 'Target.attachToTarget' || method === 'Target.activateTarget' ? fromParams : undefined;
+    if (typeof target === 'string') this.onTarget(target);
   }
 
   private adopt(attached: Attached | undefined, targetId: unknown): void {

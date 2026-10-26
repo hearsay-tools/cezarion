@@ -176,6 +176,31 @@ describe('PreviewSession', () => {
       expect(viewer.frames).toEqual(['first', 'after navigation']);
     });
 
+    it('a start Chromium refused is retried at the next page activity (hearsay-tools/cezarion#784)', async () => {
+      vi.useFakeTimers();
+      const fake = fakeCdp();
+      const send = fake.cdp.send;
+      let refuse = true;
+      fake.cdp.send = (async (method: string, params?: Record<string, unknown>) => {
+        const reply = await send(method, params);
+        if (method === 'Page.startScreencast' && refuse) {
+          refuse = false;
+          throw new Error('Page.startScreencast: Not attached to an active page');
+        }
+        return reply;
+      }) as typeof send;
+      const session = await PreviewSession.create(fake.cdp);
+      const viewer = fakeViewer();
+      session.attach(viewer);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(fake.sent('Page.startScreencast')).toHaveLength(1);
+      fake.emit('Page.frameNavigated', { frame: { id: 'main', url: 'http://localhost:3825/' } });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fake.sent('Page.startScreencast')).toHaveLength(2);
+      fake.emit('Page.screencastFrame', frame('after commit', 1));
+      expect(viewer.frames).toEqual(['after commit']);
+    });
+
     it('an in-page navigation after idle restarts the stream for a new frame', async () => {
       const { sent, emit } = await idleSession();
       emit('Page.navigatedWithinDocument', { frameId: 'main', url: 'http://localhost:3825/en/events?chat=1' });
