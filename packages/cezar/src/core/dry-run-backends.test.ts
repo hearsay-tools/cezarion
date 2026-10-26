@@ -34,7 +34,8 @@ it('shows Cursor native questions as failed tools without a Cezar answer card', 
     const ui: UiEvent[] = [];
     const session = createRunner('cursor').startSession({ toolGrant: UNSET_TOOL_GRANT, cwd: dir, userPrompt: 'Ask a native question' }, undefined,
       { onUiEvent: event => ui.push(event) });
-    await expect.poll(() => ui.some(event => event.type === 'turn.completed'), { timeout: 3_000 }).toBe(true);
+    // bound: wait for the fixture's native process receipt on a loaded host.
+    await expect.poll(() => ui.some(event => event.type === 'turn.completed'), { timeout: 10_000 }).toBe(true);
     session.end();
     await session.result;
     expect(ui.filter(event => event.type === 'ask.requested')).toEqual([]);

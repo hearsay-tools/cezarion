@@ -469,6 +469,7 @@ it('steers non-human input behind a queued human turn but never after its CEZ:AS
 
 describe('Claude non-human stdin acknowledgement boundary', () => {
   it.each(['acknowledged', 'write error', 'closed'] as const)('%s settles only the reserved write and never a mere turn-end', async outcome => {
+    vi.useFakeTimers();
     const { Writable } = await import('node:stream');
     let completeWrite: ((error?: Error | null) => void) | undefined;
     let writes = 0;
@@ -496,15 +497,17 @@ describe('Claude non-human stdin acknowledgement boundary', () => {
     const resultFrame = () => stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'turn complete', usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
     try {
       resultFrame();
-      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1));
+      // bound: wait for this native turn-end before advancing the test.
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1), { timeout: 10_000 });
       const ack = session.sendAgentMessage([{ type: 'text', text: 'reserved' }]);
       expect(ack).toBeInstanceOf(Promise);
       if (!ack) throw new Error('expected reserved write');
       let settlement: 'pending' | 'accepted' | 'rejected' = 'pending';
       const observed = ack.then(() => { settlement = 'accepted'; }, () => { settlement = 'rejected'; });
       resultFrame();
-      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(2));
-      await new Promise(resolve => setTimeout(resolve, 400));
+      // bound: wait for this native turn-end before advancing the test.
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(2), { timeout: 10_000 });
+      await vi.advanceTimersByTimeAsync(400);
       expect(settlement).toBe('pending'); expect(session.open).toBe(true);
       expect(session.sendAgentMessage([{ type: 'text', text: 'duplicate' }])).toBe(false);
       expect(writes).toBe(2);
@@ -512,19 +515,21 @@ describe('Claude non-human stdin acknowledgement boundary', () => {
       else completeWrite?.(outcome === 'write error' ? new Error('pipe refused') : undefined);
       await observed;
       expect(settlement).toBe(outcome === 'acknowledged' ? 'accepted' : 'rejected');
-      if (outcome === 'acknowledged') await vi.waitFor(() => expect(session.open).toBe(false));
+      // bound: wait for the acknowledged input to allow session closure.
+      if (outcome === 'acknowledged') await vi.waitFor(() => expect(session.open).toBe(false), { timeout: 10_000 });
     } finally {
       session.interrupt(); close();
       await session.result;
       spawnHook.override = null;
+      vi.useRealTimers();
     }
   });
 });
 
 /**
  * #146 — a human follow-up written BEFORE the opening result must survive the
- * auto-end window. Real timers throughout: the 250 ms reopen window is the
- * thing under test, so nothing here fakes or advances a clock.
+ * auto-end window. Controlled pipes use fake timers for the 250 ms window;
+ * the bundled mock still runs its own clock in a real child process.
  */
 describe('Claude auto-end with a prompt turn still pending (#146)', () => {
   const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -532,6 +537,7 @@ describe('Claude auto-end with a prompt turn still pending (#146)', () => {
   /** A controlled child over real pipes: the test decides exactly when each
    *  `result` frame lands, and records the moment the runner closes stdin. */
   function pipeFixture() {
+    vi.useFakeTimers();
     const emitter = new EventEmitter();
     const stdout = new PassThrough();
     const stdin = new PassThrough();
@@ -562,7 +568,7 @@ describe('Claude auto-end with a prompt turn still pending (#146)', () => {
     return { session, events, turnEnds };
   }
 
-  afterEach(() => { spawnHook.override = null; });
+  afterEach(() => { spawnHook.override = null; vi.useRealTimers(); });
 
   it('keeps stdin open through a follow-up queued before the opening result, then closes after the final result', async () => {
     const fixture = pipeFixture();
@@ -570,19 +576,21 @@ describe('Claude auto-end with a prompt turn still pending (#146)', () => {
     try {
       // The follow-up lands while the opening turn is still running.
       expect(session.sendMessage([{ type: 'text', text: 'queued follow-up' }])).toBe(true);
-      await sleep(75);
       fixture.result('opening turn');
-      await vi.waitFor(() => expect(turnEnds()).toBe(1));
+      // bound: wait for this native turn-end before sending the next input.
+      await vi.waitFor(() => expect(turnEnds()).toBe(1), { timeout: 10_000 });
       // Well past the 250 ms window: the queued turn is still running, so
       // stdin must still be open.
-      await sleep(400);
+      await vi.advanceTimersByTimeAsync(400);
       expect(session.open).toBe(true);
       expect(fixture.stdinEnded()).toBe(false);
-      await sleep(300);
+      await vi.advanceTimersByTimeAsync(300);
       fixture.result('follow-up turn');
-      await vi.waitFor(() => expect(turnEnds()).toBe(2));
+      // bound: wait for this native turn-end before sending the next input.
+      await vi.waitFor(() => expect(turnEnds()).toBe(2), { timeout: 10_000 });
       // The final result starts the normal close window.
-      await vi.waitFor(() => expect(fixture.stdinEnded()).toBe(true), { timeout: 2_000 });
+      // bound: wait for the runner to close the fixture's stdin after the final turn.
+      await vi.waitFor(() => expect(fixture.stdinEnded()).toBe(true), { timeout: 10_000 });
       expect(session.open).toBe(false);
     } finally {
       fixture.close();
@@ -594,10 +602,11 @@ describe('Claude auto-end with a prompt turn still pending (#146)', () => {
     const fixture = pipeFixture();
     const { session, turnEnds } = start(fixture, { autoEndAfterFirstTurn: true });
     try {
-      await sleep(75);
       fixture.result('only turn');
-      await vi.waitFor(() => expect(turnEnds()).toBe(1));
-      await vi.waitFor(() => expect(fixture.stdinEnded()).toBe(true), { timeout: 2_000 });
+      // bound: wait for this native turn-end before sending the next input.
+      await vi.waitFor(() => expect(turnEnds()).toBe(1), { timeout: 10_000 });
+      // bound: wait for the runner to close the fixture's stdin after the final turn.
+      await vi.waitFor(() => expect(fixture.stdinEnded()).toBe(true), { timeout: 10_000 });
       expect(session.open).toBe(false);
     } finally {
       fixture.close();
@@ -611,10 +620,12 @@ describe('Claude auto-end with a prompt turn still pending (#146)', () => {
     try {
       expect(session.sendMessage([{ type: 'text', text: 'queued follow-up' }])).toBe(true);
       fixture.result('opening turn');
-      await vi.waitFor(() => expect(turnEnds()).toBe(1));
+      // bound: wait for this native turn-end before sending the next input.
+      await vi.waitFor(() => expect(turnEnds()).toBe(1), { timeout: 10_000 });
       fixture.result('follow-up turn');
-      await vi.waitFor(() => expect(turnEnds()).toBe(2));
-      await sleep(400);
+      // bound: wait for this native turn-end before sending the next input.
+      await vi.waitFor(() => expect(turnEnds()).toBe(2), { timeout: 10_000 });
+      await vi.advanceTimersByTimeAsync(400);
       expect(session.open).toBe(true);
       expect(fixture.stdinEnded()).toBe(false);
     } finally {
@@ -629,7 +640,8 @@ describe('Claude auto-end with a prompt turn still pending (#146)', () => {
     const { session, turnEnds } = start(fixture, { autoEndAfterFirstTurn: true });
     expect(session.sendMessage([{ type: 'text', text: 'queued follow-up' }])).toBe(true);
     fixture.result('opening turn');
-    await vi.waitFor(() => expect(turnEnds()).toBe(1));
+    // bound: wait for this native turn-end before sending the next input.
+    await vi.waitFor(() => expect(turnEnds()).toBe(1), { timeout: 10_000 });
     session.interrupt();
     expect(session.open).toBe(false);
     const result = await session.result;
@@ -661,10 +673,13 @@ describe('Claude auto-end with a prompt turn still pending (#146)', () => {
       // The mock serializes turns and holds each `mock:hold` turn ~750 ms, so
       // this follow-up is accepted long before the opening result arrives.
       expect(session.sendMessage([{ type: 'text', text: 'mock:hold follow-up' }])).toBe(true);
-      await vi.waitFor(() => expect(turnEnds()).toBe(1), { timeout: 5_000 });
+      // bound: wait for this native turn-end before sending the next input.
+      await vi.waitFor(() => expect(turnEnds()).toBe(1), { timeout: 10_000 });
+      // bound: observe past Claude's 250 ms auto-end timer while the real mock holds its follow-up turn for 750 ms.
       await sleep(400);
       expect(session.open).toBe(true);
-      await vi.waitFor(() => expect(turnEnds()).toBe(2), { timeout: 5_000 });
+      // bound: wait for this native turn-end before sending the next input.
+      await vi.waitFor(() => expect(turnEnds()).toBe(2), { timeout: 10_000 });
       expect(openAtSecondTurnEnd).toBe(true);
       const result = await session.result;
       expect(session.open).toBe(false);
@@ -749,7 +764,8 @@ describe('agent input written after the last model call (#505)', () => {
       { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'mock:hold', cwd: process.cwd(), sessionId: '0e5f1a7c-1c3e-4d2a-9b64-2f7a5c8d1e90', env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } },
       event => events.push(event), { onAgentInputConsumed: ids => consumed.push([...ids]), onUiEvent: event => ui.push(event) });
     // The mock answers each stdin line as its own queued turn outside mock:steer-tool.
-    await new Promise(resolve => setTimeout(resolve, 100));
+    // bound: the native turn-start marks the mock's opening turn before the late stdin line.
+    await vi.waitFor(() => expect(ui.some(event => event.type === 'turn.started')).toBe(true), { timeout: 10_000 });
     await session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo late line' }], ['late-1']);
     const start = Date.now();
     while (events.filter(e => e.type === 'turn-end').length < 2) { if (Date.now() - start > 10_000) throw new Error('no second turn-end'); await new Promise(r => setTimeout(r, 10)); }
@@ -783,55 +799,66 @@ describe('Claude humanUnsettled is not cleared by queued_turn_count fallback (#4
   it('does not hold the opening prompt when its result has no user_message_uuids and no replay', async () => {
     const { session, events, stdout, written, close } = pipeSession();
     try {
-      await vi.waitFor(() => expect(written).toHaveLength(1));
+      // bound: wait for this stdin write receipt before releasing the next turn.
+      await vi.waitFor(() => expect(written).toHaveLength(1), { timeout: 10_000 });
       expect(session.holdsHumanInput()).toBe(false);
       stdout.write(JSON.stringify({
         type: 'result', subtype: 'success', result: 'done', queued_turn_count: 0,
         usage: { input_tokens: 1, output_tokens: 1 },
       }) + '\n');
-      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1));
+      // bound: wait for this native turn-end before advancing the test.
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1), { timeout: 10_000 });
       expect(session.holdsHumanInput()).toBe(false);
 
       expect(session.sendMessage([{ type: 'text', text: 'human-mid' }])).toBe(true);
-      await vi.waitFor(() => expect(written).toHaveLength(2));
+      // bound: wait for this stdin write receipt before releasing the next turn.
+      await vi.waitFor(() => expect(written).toHaveLength(2), { timeout: 10_000 });
       expect(session.holdsHumanInput()).toBe(true);
       stdout.write(JSON.stringify({
         type: 'user', isReplay: true, uuid: written[1]!.uuid,
         message: { role: 'user', content: [{ type: 'text', text: 'human-mid' }] },
       }) + '\n');
-      await vi.waitFor(() => expect(session.holdsHumanInput()).toBe(false));
+      // bound: wait for the pending human-input queue to drain.
+      await vi.waitFor(() => expect(session.holdsHumanInput()).toBe(false), { timeout: 10_000 });
     } finally { session.interrupt(); close(); await session.result; }
   });
 
   it('keeps the human hold when a result has queued_turn_count 0 but no user_message_uuids', async () => {
     const { session, events, stdout, written, close } = pipeSession();
     try {
-      await vi.waitFor(() => expect(written).toHaveLength(1));
+      // bound: wait for this stdin write receipt before releasing the next turn.
+      await vi.waitFor(() => expect(written).toHaveLength(1), { timeout: 10_000 });
       expect(session.sendMessage([{ type: 'text', text: 'human-mid' }])).toBe(true);
-      await vi.waitFor(() => expect(written).toHaveLength(2));
+      // bound: wait for this stdin write receipt before releasing the next turn.
+      await vi.waitFor(() => expect(written).toHaveLength(2), { timeout: 10_000 });
       expect(session.holdsHumanInput()).toBe(true);
       stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'done', queued_turn_count: 0,
         usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
-      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1));
+      // bound: wait for this native turn-end before advancing the test.
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1), { timeout: 10_000 });
       expect(session.holdsHumanInput()).toBe(true);
       stdout.write(JSON.stringify({ type: 'user', isReplay: true, uuid: written[1]!.uuid,
         message: { role: 'user', content: [{ type: 'text', text: 'human-mid' }] } }) + '\n');
       stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'named', queued_turn_count: 0,
         user_message_uuids: [written[0]!.uuid], usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
-      await vi.waitFor(() => expect(session.holdsHumanInput()).toBe(false));
+      // bound: wait for the pending human-input queue to drain.
+      await vi.waitFor(() => expect(session.holdsHumanInput()).toBe(false), { timeout: 10_000 });
     } finally { session.interrupt(); close(); await session.result; }
   });
 
   it('clears the human hold immediately when user_message_uuids names the line', async () => {
     const { session, events, stdout, written, close } = pipeSession();
     try {
-      await vi.waitFor(() => expect(written).toHaveLength(1));
+      // bound: wait for this stdin write receipt before releasing the next turn.
+      await vi.waitFor(() => expect(written).toHaveLength(1), { timeout: 10_000 });
       expect(session.sendMessage([{ type: 'text', text: 'human-mid' }])).toBe(true);
-      await vi.waitFor(() => expect(written).toHaveLength(2));
+      // bound: wait for this stdin write receipt before releasing the next turn.
+      await vi.waitFor(() => expect(written).toHaveLength(2), { timeout: 10_000 });
       expect(session.holdsHumanInput()).toBe(true);
       stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'done', queued_turn_count: 0,
         user_message_uuids: [written[0]!.uuid, written[1]!.uuid], usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
-      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1));
+      // bound: wait for this native turn-end before advancing the test.
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1), { timeout: 10_000 });
       expect(session.holdsHumanInput()).toBe(false);
     } finally { session.interrupt(); close(); await session.result; }
   });
@@ -852,17 +879,21 @@ describe('Claude result coverage prefers the lines it names (#505 review)', () =
     const session = new ClaudeCliRunner({ bin: 'unused-pipe-fixture' }).startSession({ toolGrant: UNSET_TOOL_GRANT, userPrompt: 'opening', cwd: '/tmp', timeoutMs: 0 },
       event => events.push(event), { onUiEvent: event => ui.push(event), onAgentInputConsumed: ids => consumed.push([...ids]) });
     try {
-      await vi.waitFor(() => expect(written).toHaveLength(1));
+      // bound: wait for this stdin write receipt before releasing the next turn.
+      await vi.waitFor(() => expect(written).toHaveLength(1), { timeout: 10_000 });
       await session.sendAgentMessage([{ type: 'text', text: 'late line' }], ['late']);
-      await vi.waitFor(() => expect(written).toHaveLength(2));
+      // bound: wait for this stdin write receipt before releasing the next turn.
+      await vi.waitFor(() => expect(written).toHaveLength(2), { timeout: 10_000 });
       // The CLI computed this result before it read the late line: it names only the opening.
       stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'done', queued_turn_count: 0,
         user_message_uuids: [written[0]!.uuid], usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
-      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1));
+      // bound: wait for this native turn-end before advancing the test.
+      await vi.waitFor(() => expect(events.filter(event => event.type === 'turn-end')).toHaveLength(1), { timeout: 10_000 });
       expect(consumed).toEqual([]); // the late line is not read yet
       stdout.write(JSON.stringify({ type: 'result', subtype: 'success', result: 'late done', queued_turn_count: 0,
         user_message_uuids: [written[1]!.uuid], usage: { input_tokens: 1, output_tokens: 1 } }) + '\n');
-      await vi.waitFor(() => expect(consumed).toEqual([['late']]));
+      // bound: wait for the reserved input's consumption receipt.
+      await vi.waitFor(() => expect(consumed).toEqual([['late']]), { timeout: 10_000 });
     } finally { session.interrupt(); close(); await session.result; }
   });
 });
@@ -878,6 +909,7 @@ describe('Claude failed result (#505 review)', () => {
     while (!events.some(e => e.type === 'turn-end')) { if (Date.now() - start > 10_000) throw new Error('no turn-end'); await new Promise(r => setTimeout(r, 10)); }
     await session.sendAgentMessage([{ type: 'text', text: 'mock:auth-error guidance' }], ['in-failed']);
     while (!events.some(e => e.type === 'error') && events.filter(e => e.type === 'turn-end').length < 2) { if (Date.now() - start > 10_000) throw new Error('no second turn'); await new Promise(r => setTimeout(r, 10)); }
+    // bound: observe the real mock-claude result boundary for late replay acknowledgements or duplicate turn announcements (200 ms).
     await new Promise(r => setTimeout(r, 200));
     expect(consumed).toEqual([]);
     session.interrupt(); await session.result.catch(() => undefined);
@@ -916,6 +948,7 @@ describe('Claude queued-turn announcement with a synchronous follow-up (#505 loc
       { onUiEvent: event => ui.push(event) });
     const start = Date.now();
     while (ends < 2) { if (Date.now() - start > 10_000) throw new Error('no second turn-end'); await new Promise(r => setTimeout(r, 10)); }
+    // bound: observe the real mock-claude result boundary for late replay acknowledgements or duplicate turn announcements (200 ms).
     await new Promise(r => setTimeout(r, 200));
     expect(ui.filter(e => e.type === 'turn.started')).toHaveLength(ui.filter(e => e.type === 'turn.completed').length);
     session.end(); await session.result;

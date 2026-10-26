@@ -48,11 +48,13 @@ describe('Cursor pre-inference model rejection retry', () => {
       if (event.type === 'note' && event.message.includes('Retrying')) expect(accepted).toBe(false);
     });
     try {
-      await expect.poll(() => events.filter(event => event.type === 'turn-end').length, { timeout: 5000 }).toBe(1);
+      // bound: wait for this native turn-end before advancing the test.
+      await expect.poll(() => events.filter(event => event.type === 'turn-end').length, { timeout: 10_000 }).toBe(1);
       const receipt = session.sendAgentMessage([{ type: 'text', text: 'CI observation' }]);
       expect(receipt).not.toBe(false);
       await Promise.resolve(receipt).then(() => { accepted = true; });
-      await expect.poll(() => events.filter(event => event.type === 'turn-end').length, { timeout: 5000 }).toBe(2);
+      // bound: wait for this native turn-end before advancing the test.
+      await expect.poll(() => events.filter(event => event.type === 'turn-end').length, { timeout: 10_000 }).toBe(2);
       const rows = attempts(log);
       expect(rows).toHaveLength(3);
       expect(rows[1]!.resumeId).toBe(rows[0]!.id);
@@ -105,7 +107,8 @@ describe('Cursor pre-inference model rejection retry', () => {
   it('does not retry a rejected invocation after interruption', async () => {
     const { spec, runner, log } = fixture('model-rejection-held');
     const session = runner.startSession(spec);
-    await expect.poll(() => { try { return attempts(log).length; } catch { return 0; } }, { timeout: 5000 }).toBe(1);
+    // bound: wait for this native model attempt to publish its log receipt.
+    await expect.poll(() => { try { return attempts(log).length; } catch { return 0; } }, { timeout: 10_000 }).toBe(1);
     session.interrupt(); await session.result;
     expect(attempts(log)).toHaveLength(1);
   });

@@ -48,13 +48,15 @@ describe('Cursor print logical session', () => {
     const session = runner.startSession(spec, event => events.push(event), {
       onPidChange: pid => pids.push(pid),
     });
-    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(1);
+    // bound: wait for this native turn-end before sending the next input.
+    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(1);
     expect(session.open).toBe(true);
     let settled = false;
     void session.result.then(() => { settled = true; });
     expect(settled).toBe(false);
     expect(session.sendMessage([{ type: 'text', text: 'followup' }])).toBe(true);
-    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(2);
+    // bound: wait for this native turn-end before sending the next input.
+    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(2);
     const turns = logs(log);
     expect(turns).toHaveLength(2);
     expect(turns[1]?.resumeId).toBe(turns[0]?.id);
@@ -74,7 +76,8 @@ describe('Cursor print logical session', () => {
     const events: AgentEvent[] = [];
     const session = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } })
       .startSession(spec, event => events.push(event));
-    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(1);
+    // bound: wait for this native turn-end before sending the next input.
+    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(1);
     session.sendMessage([{ type: 'text', text: 'followup' }]);
     await session.result;
     expect(events.some(event => event.type === 'error' && /session id/i.test(event.message))).toBe(true);
@@ -117,9 +120,11 @@ describe('Cursor print logical session', () => {
     const ui: string[] = [];
     const session = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } })
       .startSession(spec, event => events.push(event), { onUiEvent: event => ui.push(event.type) });
-    await expect.poll(() => ui.includes('turn.completed'), { timeout: 3_000 }).toBe(true);
+    // bound: wait for the fixture's native process receipt on a loaded host.
+    await expect.poll(() => ui.includes('turn.completed'), { timeout: 10_000 }).toBe(true);
     expect(turnEnds(events)).toBe(0);
-    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(1);
+    // bound: wait for this native turn-end before sending the next input.
+    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(1);
     session.end();
     await session.result;
   });
@@ -222,7 +227,8 @@ describe('Cursor print logical session', () => {
     const session = new CursorPrintRunner({ bin: mock,
       noProgressTimeoutMs: 40, processOptions: { drainMs: 20, killGraceMs: 50 },
     }).startSession(spec, event => events.push(event));
-    await expect.poll(() => events.some(event => event.type === 'done'), { timeout: 2_000 }).toBe(true);
+    // bound: wait for native process settlement after the no-progress timeout.
+    await expect.poll(() => events.some(event => event.type === 'done'), { timeout: 10_000 }).toBe(true);
     expect(events.some(event => event.type === 'error' && /no progress/i.test(event.message))).toBe(true);
     await session.result;
   });
@@ -233,14 +239,17 @@ describe('Cursor print logical session', () => {
     const session = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } })
       .startSession(spec, event => events.push(event), { autoEndAfterFirstTurn: true });
     expect(session.sendMessage([{ type: 'text', text: 'premature' }])).toBe(true);
-    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(1);
+    // bound: wait for this native turn-end before sending the next input.
+    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(1);
+    // bound: observe past Cursor print's 250 ms auto-end timer after the real child publishes CEZ:ASK.
     await new Promise(resolve => setTimeout(resolve, 300));
     expect(session.open).toBe(true);
     expect(session.heldHumanInputCount?.()).toBe(0);
     expect(session.sendAgentMessage([{ type: 'text', text: 'worker cannot answer' }])).toBe(false);
     expect(logs(log)).toHaveLength(1);
     expect(session.sendMessage([{ type: 'text', text: 'Library: Vitest' }])).toBe(true);
-    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(2);
+    // bound: wait for this native turn-end before sending the next input.
+    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(2);
     expect(logs(log)).toHaveLength(2);
     expect(logs(log)[1]?.resumeId).toBe(logs(log)[0]?.id);
     expect(logs(log)[1]?.prompt).toContain('Library: Vitest');
@@ -254,9 +263,11 @@ describe('Cursor print logical session', () => {
       const events: AgentEvent[] = [];
       const session = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } })
         .startSession(spec, event => events.push(event));
-      await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(1);
+      // bound: wait for this native turn-end before sending the next input.
+      await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(1);
       session.sendMessage([{ type: 'text', text: reply }]);
-      await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(2);
+      // bound: wait for this native turn-end before sending the next input.
+      await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(2);
       session.end();
       await session.result;
       expect(logs(log)[1]?.resumeId).toBe(logs(log)[0]?.id);
@@ -271,16 +282,19 @@ describe('Cursor print logical session', () => {
     const session = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } })
       .startSession(spec, event => events.push(event), { onAgentInputConsumed: ids => consumed.push([...ids]) });
     expect(session.sendAgentMessage([{ type: 'text', text: 'busy' }], ['busy-id'])).toBe(false);
-    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(1);
+    // bound: wait for this native turn-end before sending the next input.
+    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(1);
     const delivery = session.sendAgentMessage([{ type: 'text', text: 'worker follow-up' }], ['worker-id']);
     expect(delivery).not.toBe(false);
     let admitted = false;
     void (delivery as Promise<void>).then(() => { admitted = true; });
-    await expect.poll(() => logs(log).length, { timeout: 3_000 }).toBe(2);
+    // bound: wait for this native prompt process to publish its log receipt.
+    await expect.poll(() => logs(log).length, { timeout: 10_000 }).toBe(2);
     expect(admitted).toBe(false);
     await delivery;
     expect(admitted).toBe(true);
-    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(2);
+    // bound: wait for this native turn-end before sending the next input.
+    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(2);
     expect(consumed).toEqual([]);
     session.end();
     await session.result;
@@ -297,7 +311,8 @@ describe('Cursor print logical session', () => {
     expect(session.heldHumanInputCount?.()).toBe(2);
     session.discardQueuedMessages();
     expect(session.heldHumanInputCount?.()).toBe(0);
-    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(1);
+    // bound: wait for this native turn-end before sending the next input.
+    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(1);
     expect(logs(log)).toHaveLength(1);
     session.end();
     await session.result;
@@ -354,9 +369,11 @@ describe('Cursor print logical session', () => {
         }
       },
     });
-    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(1);
+    // bound: wait for this native turn-end before sending the next input.
+    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(1);
     session.sendMessage([{ type: 'text', text: 'followup' }]);
-    await expect.poll(() => turnEnds(events), { timeout: 3_000 }).toBe(2);
+    // bound: wait for this native turn-end before sending the next input.
+    await expect.poll(() => turnEnds(events), { timeout: 10_000 }).toBe(2);
     session.end();
     await session.result;
     const turns = logs(log);

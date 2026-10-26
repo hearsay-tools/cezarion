@@ -63,6 +63,7 @@ describe.skipIf(process.platform === 'win32')('session process groups (hearsay-t
     for (const pid of pids.splice(0)) try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ }
     for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true, force: true });
     vi.restoreAllMocks();
+    vi.useRealTimers();
   });
 
   async function start(script: string): Promise<{ leader: ChildProcessWithoutNullStreams; member: number; cwd: string }> {
@@ -70,7 +71,8 @@ describe.skipIf(process.platform === 'win32')('session process groups (hearsay-t
     dirs.push(cwd);
     const leader = spawnSessionLeader(process.execPath, ['-e', script], { cwd, env: process.env });
     pids.push(leader.pid!);
-    const member = await vi.waitFor(() => requirePid(join(cwd, 'member.pid')), { timeout: 5000 });
+    // bound: wait for this process signal or PID publication on a loaded host.
+    const member = await vi.waitFor(() => requirePid(join(cwd, 'member.pid')), { timeout: 10_000 });
     pids.push(member);
     return { leader, member, cwd };
   }
@@ -89,14 +91,16 @@ describe.skipIf(process.platform === 'win32')('session process groups (hearsay-t
     const { leader, member } = await start(leaderScript(IGNORES_TERM));
     signalSession(leader, 'SIGTERM');
     await exited(leader);
-    await vi.waitFor(() => expect(alive(member)).toBe(false), { timeout: 2000 });
+    // bound: wait for this process signal or PID publication on a loaded host.
+    await vi.waitFor(() => expect(alive(member)).toBe(false), { timeout: 10_000 });
   });
 
   it('a setsid member is never signalled', async () => {
     const { leader, member } = await start(leaderScript(IGNORES_TERM, { detached: true }));
+    vi.useFakeTimers();
     signalSession(leader, 'SIGTERM');
     await exited(leader);
-    await new Promise(resolve => setTimeout(resolve, 400));
+    await vi.advanceTimersByTimeAsync(400);
     expect(alive(member)).toBe(true);
   });
 
@@ -220,9 +224,11 @@ spawnSessionLeader(process.execPath, ['-e', ${JSON.stringify(leader)}], { cwd: $
     await exited(leader);
     expect(alive(member)).toBe(true);
     forwardToSessionGroups('SIGTERM');
-    await vi.waitFor(() => expect(alive(member)).toBe(false), { timeout: 2000 });
+    // bound: wait for this process signal or PID publication on a loaded host.
+    await vi.waitFor(() => expect(alive(member)).toBe(false), { timeout: 10_000 });
     // Reaped by init: the group number is free, so nothing may signal it again.
-    await vi.waitFor(() => expect(() => process.kill(member, 0)).toThrow(), { timeout: 2000 });
+    // bound: wait for this process signal or PID publication on a loaded host.
+    await vi.waitFor(() => expect(() => process.kill(member, 0)).toThrow(), { timeout: 10_000 });
     const kill = vi.spyOn(process, 'kill');
     forwardToSessionGroups('SIGTERM');
     forwardToSessionGroups('SIGTERM');

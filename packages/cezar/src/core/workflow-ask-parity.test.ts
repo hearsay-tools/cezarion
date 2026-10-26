@@ -58,6 +58,7 @@ describe('intermediate workflow ASK parity — #427', () => {
           expect(checks()).toEqual([]);
           const session = manager['active'].get(runId)!.session!;
           // Cross the runners' 250ms one-shot-close window before answering.
+          // bound: observe past the real runner's 250 ms auto-end timer before answering its pending ask.
           await new Promise(resolve => setTimeout(resolve, 350));
           if (row.id !== 'Q8') expect(session.open).toBe(true);
           expect(manager['busySlots']()).toBe(0);

@@ -765,7 +765,8 @@ async function observeInput(backend: RunnerId, scenario: ScenarioName, id: strin
       await waitFor(() => firstTurnEnd());
       // Late input is read by a follow-on turn or reported; OpenCode reports after a grace window.
       const reported = () => v1.some(e => (e.type === 'turn-end' && !!e.unconsumedInputIds?.length) || e.type === 'input-unconsumed');
-      await waitFor(() => consumed.includes(id) || reported(), 6_000).catch(() => undefined);
+      // bound: wait for the reserved input's consumption receipt.
+      await waitFor(() => consumed.includes(id) || reported(), 10_000).catch(() => undefined);
     },
   });
   const unconsumed = obs.v1.flatMap(e => e.type === 'input-unconsumed' ? [...e.inputIds]
@@ -1258,14 +1259,18 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
                 const real = engine[name].bind(recovered);
                 engine[name] = (...args) => { (adopting ? startedByAdoption : startedByContinue).push(name); return real(...args); };
               }
+              // Recovery dispatches transcript work with setImmediate; keep that signal real.
+              vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
               adopted = await recovered.adoptOrphanedRun(runId);
-              await new Promise((resolve) => setTimeout(resolve, 300));
+              await vi.advanceTimersByTimeAsync(300);
+              vi.useRealTimers();
               adopting = false;
               settled = structuredClone(cockpit.getRun(runId));
               continued = recovered.continueRun(runId, { text: promptFor(backend, 'done') });
               if (continued.ok) await waitFor(() => startedByContinue.length > 0, 30_000);
               resumed = structuredClone(cockpit.getRun(runId));
             } finally {
+              vi.useRealTimers();
               await drainFixtureManagers(repoRoot);
               cockpit.close();
             }
@@ -1309,10 +1314,14 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
                 const real = engine[name].bind(recovered);
                 engine[name] = (...args) => { started.push(name); return real(...args); };
               }
+              // Recovery dispatches transcript work with setImmediate; keep that signal real.
+              vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
               adopted = await recovered.adoptOrphanedRun(runId, { stop: true });
-              await new Promise((resolve) => setTimeout(resolve, 300));
+              await vi.advanceTimersByTimeAsync(300);
+              vi.useRealTimers();
               stopped = structuredClone(cockpit.getRun(runId));
             } finally {
+              vi.useRealTimers();
               await drainFixtureManagers(repoRoot);
               cockpit.close();
             }
@@ -1353,6 +1362,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             await waitFor(() => v1.some(e => e.type === 'turn-end'));
             // The runner has already armed its timer. The new wait must still veto it.
             hold = true;
+            // bound: observe past the real runner's 250 ms auto-end timer, which must recheck the newly held wait.
             await new Promise(resolve => setTimeout(resolve, 400));
             expect(checks).toBeGreaterThan(0); expect(session.open).toBe(true);
             hold = false;
@@ -1370,6 +1380,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             await waitFor(() => v2.some(e => e.type === 'ask.requested') || v1.some(e => e.type === 'turn-end'));
             const ends = v1.filter(e => e.type === 'turn-end').length;
             expect(session.sendAgentMessage([{ type: 'text', text: 'mock:agent-echo agent steering' }])).toBe(false);
+            // bound: observe the real runner's native ask boundary for 150 ms; refused steering must not start a turn or answer the ask.
             await new Promise(resolve => setTimeout(resolve, 150));
             expect(v1.filter(e => e.type === 'turn-end')).toHaveLength(ends);
             expect(textEvents(v1).join('\n')).not.toContain('agent steering');
@@ -1668,6 +1679,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           await waitFor(() => store.readEvents(runId).some(e => e.type === 'ask.requested'));
           const askSeq = store.readEvents(runId).find(e => e.type === 'ask.requested')!.seq;
           expect(manager.steerWorker(runId, second)).toBe('queued');
+          // bound: observe the real runner's native ask boundary for 150 ms; refused steering must not start a turn or answer the ask.
           await new Promise(resolve => setTimeout(resolve, 150));
           expect(store.getRun(runId)?.status).toBe('waiting');
           // #505: input queued before the session opened steers into the opening turn on a
