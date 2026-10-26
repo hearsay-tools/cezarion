@@ -11,6 +11,8 @@ import { AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, type TurnEndDecision,
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
 import { nextLineEntry } from './line-order.ts';
+import { accountHeldFor, formatWakeInstant, resumeInFlight, runAccountKey, queuedRecoveryInput, queuedStartAt, sessionlessWakePrompt } from './run-scheduling.ts';
+export { runAccountKey } from './run-scheduling.ts';
 import { executionAccount } from './execution-account.ts';
 import { chargesBudget, ciWatchRequest, hasPrWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
@@ -618,54 +620,8 @@ export const QUEUE_WATCHDOG_MS = 60_000;
 /** Shared empty holds for the common "nothing is held" pump — avoids allocating per sweep. */
 const NO_HOLDS: AccountHolds = { deadline: new Set(), inFlight: new Set() };
 
-/**
- * A deadline hold blocks all work on its account. An in-flight resume holds fresh work only;
- * other resumes must remain eligible.
- */
-function accountHeldFor(
-  run: Pick<RunRecord, 'runner' | 'agentProfile' | 'status' | 'autoResumeAttempts'>,
-  holds: AccountHolds,
-  fallbackRunner: RunnerId,
-): boolean {
-  const key = runAccountKey(run, fallbackRunner);
-  if (holds.deadline.has(key)) return true;
-  return holds.inFlight.has(key) && !resumeInFlight(run);
-}
-
-/**
- * Key usage-limit holds by resolved runner and account. fallbackRunner applies before a run
- * records its runner.
- */
-export function runAccountKey(
-  run: Pick<RunRecord, 'runner' | 'agentProfile'>,
-  fallbackRunner: RunnerId,
-): string {
-  return `${run.runner ?? fallbackRunner}:${run.agentProfile ?? 'default'}`;
-}
-
-/**
- * Whether an automatic resume has not completed its first turn. Such resumes bypass in-flight
- * holds, but not a future deadline hold.
- */
-function resumeInFlight(run: Pick<RunRecord, 'status' | 'autoResumeAttempts'>): boolean {
-  return (
-    run.autoResumeAttempts !== undefined && (run.status === 'queued' || run.status === 'running')
-  );
-}
-
 const AUTO_RESUME_PROMPT =
   'The provider usage limit that interrupted this task has reset. Read the handoff file (CEZ_HANDOFF_FILE) to recover context, then continue the task from where you left off.';
-/**
- * The wake instant as a human reads it — local, to the SECOND, with the zone named. The
- * transcript line is what someone scanning a stalled task actually reads, and "18:41" is not
- * enough to tell a wait that is nearly over from one that just started; the machine-readable ISO
- * copy lives on `RunRecord.autoResumeAt`. Server-side formatting is honest here because cezar is
- * local-first: the process and the browser reading it are the same machine.
- */
-function formatWakeInstant(at: Date): string {
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' }).format(at);
-}
-
 /** How long a schedule tool call waits for the server to attach the service after recovery (#1465). */
 const AUTOMATION_TOOLS_READY_MS = 30_000;
 
@@ -2921,12 +2877,7 @@ export class RunManager {
   private queueSessionlessWaitWake(runId: string, resolved: ReturnType<typeof resolvedWaits>): boolean {
     // No live session: create a scheduler-owned continuation, never a direct provider call.
     this.move(runId, 'park-for-wake');
-    const text = resolved.some(wait => wait.kind === 'pr')
-      ? 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.'
-      : resolved.some(wait => wait.kind === 'worker')
-        ? 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.'
-        : resolved.length ? 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.'
-          : 'Resume to receive queued messages. End this opening turn so Cezar can deliver them.';
+    const text = sessionlessWakePrompt(resolved);
     const resumed = this.continueRun(runId, { text, waitWake: true }, true);
     if (!resumed.ok) {
       const message = `${resolved.length ? 'Wait result' : 'Messages'} retained; continuation unavailable: ${resumed.error ?? 'unknown'}`;
@@ -3518,7 +3469,7 @@ export class RunManager {
       return;
     }
     if (!job) return;
-    // Rebuild the prompt from the store at the last instant (#472), so an edit
+    // Rebuild the prompt from the store at the last instant (open-mercato/cezar#472), so an edit
     // or a stacked message that landed while the run waited is honored. Entered
     // in the same synchronous tick as the `pendingJobs.delete` above, so no
     // handler can observe a half-dequeued run.
@@ -3590,28 +3541,9 @@ export class RunManager {
     }
     this.pendingJobs.set(run.id, {
       workflow,
-      // A continuation can durably queue the untouched remainder before the
-      // process gets as far as rebuilding this in-memory job. Resume at the
-      // first persisted pending step instead of replaying completed agents.
-      startAt: Math.max(0, workflow.steps.findIndex(definition =>
-        run.steps.find(step => step.id === definition.id)?.status === 'pending')),
-      // Folded through the same helper `pump()` uses (#472) so a restart carries the stack.
-      // Idempotent: hydration always composes from `run.task` + the stack, never from an
-      // already-folded `input.task`, so re-hydrating at dequeue yields the same string.
-      input: this.hydrateQueuedInput(run.id, {
-        task: run.task,
-        agentProfile: run.agentProfile,
-        systemPrompt: run.systemPrompt,
-        model: run.model,
-        effort: run.effort,
-        runner: run.runner,
-        // Re-thread autonomy (#489): the rebuilt input feeds `execute`, whose mid-run auto-nudge
-        // reads `input.autonomous`. Without this a recovered autonomous run would run
-        // non-autonomously and later wrongly park at `review`.
-        autonomous: run.autonomous,
-        // Preserve an explicit worktree opt-out across a queued restart.
-        worktree: run.worktree,
-      }),
+      startAt: queuedStartAt(run, workflow),
+      // Rehydrate again at dequeue so edits and stacked messages keep their admission-time reads.
+      input: this.hydrateQueuedInput(run.id, queuedRecoveryInput(run)),
     });
     this.queue.push(run.id);
     this.store.appendEvent(run.id, { type: 'lifecycle', message: `${reason} — task re-queued` });
@@ -3645,9 +3577,9 @@ export class RunManager {
   /** Match the pinned execution account before considering a persisted session resumable. */
   private queuedResumeSession(run: RunRecord, sessionStep: RunRecord['steps'][number]) {
     // An accepted worker's continuation extends the step owning the resumed session, so its
-    // runner and account come from that step's pinned identity (#452), never the run-level
+    // runner and account come from that step's pinned identity, never the run-level
     // first-step fields — those would re-queue a claude review's Continue as a codex turn with
-    // no session to resume (#465). Broken identity evidence is left for the launch to report.
+    // no session to resume. Broken identity evidence is left for the launch to report.
     let resumeIdentity: WorkerStepIdentity | undefined;
     try { resumeIdentity = this.workerStep(run.id, this.continuationDefStep(run, sessionStep.sessionId)?.id); }
     catch (error) { if (!(error instanceof WorkerIdentityError)) throw error; }
@@ -3666,8 +3598,7 @@ export class RunManager {
       const job = this.ownedJob(run);
       // Use the privately bound workflow, and the same durable pending-step
       // cursor as root recovery. A queued tail must not replay a failed source.
-      this.pendingJobs.set(run.id, { ...job, startAt: Math.max(0, job.workflow.steps.findIndex(definition =>
-        run.steps.find(step => step.id === definition.id)?.status === 'pending')) });
+      this.pendingJobs.set(run.id, { ...job, startAt: queuedStartAt(run, job.workflow) });
       this.queue.push(run.id);
       this.store.appendEvent(run.id, { type: 'lifecycle', message: `${reason} — owned task re-queued` });
     } catch (error) {
