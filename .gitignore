@@ -59,3 +59,10 @@ WORKER-STATUS.md
 docs/superpowers/specs/
 
 docs/superpowers/plans/
+
+# StrykerJS output (.github/workflows/mutation-report.yml): in-place backup, JSON report, the
+# artifact folder, and the setup files its Vitest runner writes to the working directory
+.stryker-tmp/
+/reports/
+/mutation-evidence/
+/stryker-setup-*.js

@@ -13,10 +13,12 @@ import type { RunSummary } from '@open-mercato/cezar-api-client'
  */
 export {
   ATTENTION_RANK,
+  ATTENTION_RUNGS,
   deriveAttention,
   type Attention,
   type AttentionBucket,
   type AttentionInput,
+  type AttentionRung,
   type AttentionShape,
   type AttentionTone,
   workerWaitLabel,

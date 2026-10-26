@@ -40,6 +40,41 @@ not a symlink to another checkout's workspace packages. Do not start Squeal in
 this disposable tree. Run the fixed test in the task worktree too (through Squeal
 when it is validating) so the proof does not replace normal verification.
 
+## Mutant report instead of the scratch worktree
+
+The **Mutation report** comment on a pull request can stand in for the **source fix** recipe above,
+and for no other recipe. The job
+([`mutation-report.yml`](../../.github/workflows/mutation-report.yml)) makes small edits to the lines
+the pull request changes, called mutants, and runs the package's own unit tests against each one. A
+mutant that makes a test fail is **killed**. It is advisory: it never blocks a merge, and it posts one
+comment that each push updates.
+
+A mutant that restores the behavior from before the fix can only be killed by a test the pull request
+adds or changes, because every older test passed against the pre-fix code on `main`. A killed
+mutant of that kind is the red proof, found by the job and not by hand.
+
+The report stands in for the recipe when all of these hold:
+
+1. The comment names the commit you pushed, and the package that holds the fix shows no `Skipped`,
+   `Stopped` or `Failed` line. A package is skipped above the limits in
+   [`mutants-scope.cjs`](../../.github/scripts/mutants-scope.cjs), and when no test file of the
+   package imports the changed files.
+2. The fix and the regression test are in the same package. The job runs only that package's tests.
+3. No mutant on the lines of the fix survived or was left `Not covered`. Each one that remains is
+   named in the PR body with the reason it does not change behavior.
+4. The collapsed list of killed mutants holds one on a line of the fix that restores the old
+   behavior: a guard's condition replaced by its old value, the guarded block emptied, or the new
+   operator swapped back. A `Timed out` mutant does not count, because a hang is not a failing test.
+
+Cite the comment in the PR body: the commit, then the file, line and mutator of the killed mutant.
+
+The report does **not** stand in when the fix is outside `packages/*/src` (scripts, workflows,
+configuration, documents), when the change only deletes code or only edits a module-level constant
+(the job skips static mutants), when the change is test-only or removes a hidden dependency, when the
+test pins timing or load, or when no pull request exists yet. Use the matching recipe then. To run
+the job by hand, do it in a scratch worktree where Squeal does not run, because Stryker edits files in
+place: `STRYKER_PROJECT=<package> pnpm exec stryker run --mutate 'packages/<package>/src/<file>.ts:<from>-<to>'`.
+
 ## Test-only change that removes a hidden dependency
 
 A **test-only change that removes a hidden dependency** needs this proof even

@@ -1,0 +1,56 @@
+name: Mutation report comment
+
+# Posts the one pull request comment for the Mutation report workflow and keeps it current: it
+# creates the comment when a run has something to say and updates it on every later push, so it never
+# shows an earlier push's survivors. Advisory: it never blocks a merge and nothing requires it.
+# This is the only workflow here with a write token, so it runs no pull request code. It checks out the
+# default branch, reads the artifact as untrusted data, and finds the pull request through the API.
+on:
+  workflow_run:
+    workflows: [Mutation report]
+    types: [completed]
+
+permissions: {}
+
+# Serialises the runs of one pull request so two of them cannot both create the comment. The key is
+# the head repository and branch: a branch name alone is shared by unrelated forks, and GitHub keeps
+# only the newest pending run of a group, so a fork's run could replace another pull request's.
+concurrency:
+  group: mutation-report-comment-${{ github.event.workflow_run.head_repository.full_name }}-${{ github.event.workflow_run.head_branch }}
+  cancel-in-progress: false
+
+jobs:
+  comment:
+    name: Post the mutation report
+    # A run that a newer push cancelled has a successor that will post. A skipped run, an edit that
+    # changed no base, wrote no artifact and has nothing to say.
+    if: github.event.workflow_run.event == 'pull_request' && github.event.workflow_run.conclusion != 'cancelled' && github.event.workflow_run.conclusion != 'skipped'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    steps:
+      - name: Check out trusted comment code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      # A run that failed before it uploaded leaves no artifact. The script then says so in the comment.
+      - name: Download the mutation evidence
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: mutation-report
+          run-id: ${{ github.event.workflow_run.id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/mutation-report
+      - name: Post or update the comment
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        env:
+          ARTIFACT_DIR: ${{ runner.temp }}/mutation-report
+        with:
+          script: |
+            const { publish } = require('./.github/scripts/mutants-comment.cjs');
+            await publish({ github, context, core, dir: process.env.ARTIFACT_DIR });

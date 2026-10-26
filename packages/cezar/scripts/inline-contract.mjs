@@ -47,7 +47,8 @@ if (referrers.length === 0) {
 
 // `zod` stays external: it is a real dependency of this package, so npm resolves it normally and
 // the tarball does not carry a second copy.
-await build({
+const bundled = await build({
+  metafile: true,
   entryPoints: [entry],
   outfile: join(outdir, 'index.js'),
   bundle: true,
@@ -56,6 +57,26 @@ await build({
   target: 'es2022',
   external: ['zod'],
 });
+
+// A wildcard re-export has no named import for the linker below to validate. Check its
+// runtime export set before rewriting it: otherwise a missing module silently becomes the
+// root bundle's unrelated exports (hearsay-tools/cezarion#1813).
+const rootExports = new Set(Object.values(bundled.metafile.outputs).flatMap((output) => output.exports));
+for (const file of referrers.filter((name) => name.endsWith('.js'))) {
+  for (const match of readFileSync(file, 'utf8').matchAll(/export\s+\*\s+from\s+['"](@open-mercato\/cezar-contract\/([^'"]+))['"]/g)) {
+    const source = join(contractRoot, 'src', `${match[2]}.ts`);
+    const original = await build({
+      entryPoints: [source], bundle: true, write: false, metafile: true,
+      format: 'esm', platform: 'neutral', external: ['zod'],
+    });
+    const missing = Object.values(original.metafile.outputs).flatMap((output) => output.exports)
+      .filter((name) => !rootExports.has(name));
+    if (missing.length) {
+      console.error(`inline-contract: ${relative(dist, file)} wildcard re-export of "${match[1]}" loses root exports: ${missing.join(', ')}`);
+      process.exit(1);
+    }
+  }
+}
 
 // Link every emitted importer against the bundle, as Node does when the CLI starts, before
 // anything is repointed. Each specifier loads as a module of its own that re-exports the bundle,

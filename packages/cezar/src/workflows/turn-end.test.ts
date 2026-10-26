@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { expectNoWaitNudgeKinds } from './turn-end.testkit.ts';
-import { AUTONOMOUS_NUDGE, decideTurnEnd, NO_WAIT_NUDGE, NO_WAIT_NUDGE_MARKERS, STEP_NUDGE_SUFFIX, turnEndHeartbeat, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
+import { AUTONOMOUS_NUDGE, decideTurnEnd, NO_WAIT_NUDGE, NO_WAIT_NUDGE_MARKERS, STEP_NUDGE_SUFFIX, type TurnEndDecision, type TurnEndFacts } from './turn-end.ts';
 
 /** A quiet final turn end whose owed input was already tried: nothing taken, nothing owed. */
 const quiet: TurnEndFacts = {
@@ -87,21 +87,5 @@ describe('decideTurnEnd decides both nudge causes (hearsay-tools/cezarion#1234, 
     expect(NO_WAIT_NUDGE_MARKERS.startsWith('Your turn ended without a wait or done. ')).toBe(true);
     for (const marker of ['CEZ:ASK', 'CEZ:MONITORING', 'CEZ:DONE']) expect(NO_WAIT_NUDGE_MARKERS).toContain(marker);
     expect(NO_WAIT_NUDGE_MARKERS).not.toContain('cezar_');
-  });
-});
-
-describe('turnEndHeartbeat gives one word per outcome (hearsay-tools/cezarion#1525)', () => {
-  it.each<[TurnEndOutcome, string | undefined]>([
-    [{ kind: 'nudge', cause: 'completion', autonomous: false }, 'running (completion nudge)'],
-    [{ kind: 'nudge', cause: 'completion', autonomous: true }, 'running (completion nudge)'],
-    [{ kind: 'nudge', cause: 'no-wait', autonomous: true }, 'running (autonomous nudge)'],
-    [{ kind: 'nudge', cause: 'no-wait', autonomous: false }, 'running (no-wait nudge)'],
-    [{ kind: 'readiness' }, 'running (awaiting input readiness)'],
-    [{ kind: 'running' }, 'running'],
-    [{ kind: 'park', keepsSlot: true }, 'monitoring'],
-    [{ kind: 'park', keepsSlot: false }, 'waiting'],
-    [{ kind: 'done' }, undefined],
-  ])('%o writes %s', (outcome, word) => {
-    expect(turnEndHeartbeat(outcome)).toBe(word);
   });
 });

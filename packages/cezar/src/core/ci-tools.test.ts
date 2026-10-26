@@ -2,7 +2,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { RUNNER_IDS } from './agent-runner.ts';
+import { RUNNER_IDS, type ToolGrant } from './agent-runner.ts';
 import { driveSeam, seedOpencodeMockSession } from './harness-parity.testkit.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { buildClaudeArgs } from './claude-cli-runner.ts';
@@ -10,6 +10,7 @@ import { buildPiArgs } from './pi-runner.ts';
 import { ciOpenCodeEnv } from '../ci-wait/injection.ts';
 import { allowedToolsForStep } from '../workflows/types.ts';
 import { askAnswerHint, askToolDefinition, cancelWaitToolDefinition, cezarServerInstructions, cezarTools, waitToolDefinition } from '../ci-wait/tools.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const descriptor = { name: 'cezar_ci_test', command: process.execPath, args: ['/installed/dist/ci-wait/mcp.js'] };
 const spec = { cwd: '/tmp', userPrompt: 'task', cezarTools: descriptor };
@@ -74,12 +75,12 @@ describe('wait tool definitions', () => {
       expect(instructions).toContain('- cezar_ask: load for a user decision or missing input; provide the full draft or findings in its rendered context field.');
       expect(instructions).toContain('- cezar_cancel_wait: load when a wait you registered is no longer needed.');
     }
-    const claude = buildClaudeArgs({ ...spec, allowedTools: ['Read'] });
+    const claude = buildClaudeArgs({ ...spec, toolGrant: { kind: 'explicit', tools: ['Read'] } });
     expect(claude[claude.indexOf('--allowedTools') + 1]!.split(',')).not.toContain('mcp__cezar_ci_test__cezar_wait_for_ci');
-    const pi = buildPiArgs({ ...spec, allowedTools: ['Read'] });
+    const pi = buildPiArgs({ ...spec, toolGrant: { kind: 'explicit', tools: ['Read'] } });
     expect(pi[pi.indexOf('--tools') + 1]!.split(',')).not.toContain('cezar_wait_for_ci');
     // hearsay-tools/cezarion#1305: the default list sends no allowlist, so the CI extension's tools stay active.
-    const piDefault = buildPiArgs({ ...spec, allowedTools: allowedToolsForStep(undefined, 'pi') });
+    const piDefault = buildPiArgs({ ...spec, toolGrant: { kind: 'step-default', tools: allowedToolsForStep(undefined, 'pi') } });
     expect(piDefault).not.toContain('--tools');
     expect(piDefault.some(arg => arg.endsWith('/pi-ci-wait.mjs'))).toBe(true);
   });
@@ -96,19 +97,19 @@ describe('CI tool injection', () => {
     }
   });
   it('Claude admits only the generated tool and preserves user settings', () => {
-    const args = buildClaudeArgs({ ...spec, allowedTools: ['Read'] });
+    const args = buildClaudeArgs({ ...spec, toolGrant: { kind: 'explicit', tools: ['Read'] } });
     expect(JSON.parse(args[args.indexOf('--mcp-config') + 1]!)).toEqual({ mcpServers: { [descriptor.name]: { command: descriptor.command, args: descriptor.args, env: { CEZ_TOOL_TOKEN: '${CEZ_TOOL_TOKEN}', CEZ_TOOL_SOCKET: '${CEZ_TOOL_SOCKET}' } } } });
     expect(args[args.indexOf('--allowedTools') + 1]).toBe('Read,mcp__cezar_ci_test__cezar_wait,mcp__cezar_ci_test__cezar_ask,mcp__cezar_ci_test__cezar_cancel_wait,mcp__cezar_ci_test__cezar_done');
     expect(args).not.toContain('--strict-mcp-config');
   });
   it('Pi preserves discovered extensions, retry and project-skills extensions and selected tools', () => {
-    const args = buildPiArgs({ ...spec, allowedTools: ['Read'] });
+    const args = buildPiArgs({ ...spec, toolGrant: { kind: 'explicit', tools: ['Read'] } });
     expect(args.filter(value => value === '--extension')).toHaveLength(3);
     expect(args).not.toContain('--no-extensions');
     expect(args[args.indexOf('--tools') + 1]).toBe('read,cezar_wait,cezar_ask,cezar_cancel_wait,cezar_done');
   });
   it('Pi keeps the CI extension tools active on the default list by sending no allowlist (hearsay-tools/cezarion#1305)', () => {
-    const args = buildPiArgs({ ...spec, allowedTools: allowedToolsForStep(undefined, 'pi') });
+    const args = buildPiArgs({ ...spec, toolGrant: { kind: 'step-default', tools: allowedToolsForStep(undefined, 'pi') } });
     expect(args.filter(value => value === '--extension')).toHaveLength(4);
     expect(args).not.toContain('--no-extensions');
     expect(args).not.toContain('--tools');
@@ -117,21 +118,21 @@ describe('CI tool injection', () => {
     expect(args[args.indexOf('--cezar-builtin-tools') + 1]!.split(',').filter(name => name.startsWith('cezar_'))).toEqual([]);
   });
   it('Pi admits only the cezar tools when an empty list carries them (hearsay-tools/cezarion#1305)', () => {
-    const args = buildPiArgs({ ...spec, allowedTools: [] });
+    const args = buildPiArgs({ ...spec, toolGrant: { kind: 'explicit', tools: [] } });
     expect(args).not.toContain('--no-tools');
     expect(args[args.indexOf('--tools') + 1]).toBe('cezar_wait,cezar_ask,cezar_cancel_wait,cezar_done');
   });
   it('OpenCode merges runtime config without overwriting servers or permissions', () => {
     const supplied = { mcp: { existing: { type: 'remote', url: 'https://example.org/mcp' } }, permission: { '*': 'deny' } };
-    const env = ciOpenCodeEnv({ ...spec, env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(supplied) } });
+    const env = ciOpenCodeEnv({ toolGrant: UNSET_TOOL_GRANT, ...spec, env: { OPENCODE_CONFIG_CONTENT: JSON.stringify(supplied) } });
     const merged = JSON.parse(env!.OPENCODE_CONFIG_CONTENT!);
     expect(merged.permission).toEqual(supplied.permission);
     expect(merged.mcp.existing).toEqual(supplied.mcp.existing);
     expect(merged.mcp[descriptor.name]).toEqual({ type: 'local', command: [descriptor.command, ...descriptor.args], enabled: true });
-    expect(() => ciOpenCodeEnv({ ...spec, env: { OPENCODE_CONFIG_CONTENT: '{broken' } })).toThrow(/configuration/i);
+    expect(() => ciOpenCodeEnv({ toolGrant: UNSET_TOOL_GRANT, ...spec, env: { OPENCODE_CONFIG_CONTENT: '{broken' } })).toThrow(/configuration/i);
   });
   it('preserves valid OpenCode JSONC runtime settings with comments and trailing commas', () => {
-    const env = ciOpenCodeEnv({ ...spec, env: { OPENCODE_CONFIG_CONTENT: `{
+    const env = ciOpenCodeEnv({ toolGrant: UNSET_TOOL_GRANT, ...spec, env: { OPENCODE_CONFIG_CONTENT: `{
       // Existing team policy
       "permission": {"*": "deny",},
       "mcp": {"existing": {"type": "remote", "url": "https://example.org/mcp",},},
@@ -241,14 +242,14 @@ describe('U0 wait tools on every native wire', () => {
   // hearsay-tools/cezarion#1305: pi admits the cezar tools by name on a narrowed list, through no
   // allowlist on the default list, and as the only names on an empty one.
   const piLists = [
-    { label: 'the default tool list', allowedTools: allowedToolsForStep(undefined, 'pi') },
-    { label: 'an empty tool list', allowedTools: [] as string[] },
+    { label: 'the default tool list', toolGrant: { kind: 'step-default', tools: allowedToolsForStep(undefined, 'pi') } as ToolGrant },
+    { label: 'an empty tool list', toolGrant: { kind: 'explicit', tools: [] } as ToolGrant },
   ];
   const drives = [
-    ...RUNNER_IDS.flatMap(backend => cases.map(entry => ({ backend, ...entry, label: '', allowedTools: ['Read'] }))),
+    ...RUNNER_IDS.flatMap(backend => cases.map(entry => ({ backend, ...entry, label: '', toolGrant: { kind: 'explicit', tools: ['Read'] } as ToolGrant }))),
     ...piLists.flatMap(list => [false, true].map(resume => ({ backend: 'pi' as const, ...cases[0]!, resume, ...list, label: ` with ${list.label}` }))),
   ];
-  for (const { backend, tool, args, resume, label, allowedTools } of drives) {
+  for (const { backend, tool, args, resume, label, toolGrant } of drives) {
     it(`${backend} U0 calls ${tool} through its native wire on ${resume ? 'resume' : 'fresh'}${label}`, async () => {
       const { CiToolController } = await import('../ci-wait/controller.ts');
       const controller = await CiToolController.start();
@@ -267,7 +268,7 @@ describe('U0 wait tools on every native wire', () => {
         const resultFile = join(dir, 'result');
         const file = join(dir, 'wire');
         if (backend === 'opencode' && resume) seedOpencodeMockSession(file);
-        const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, resume, allowedTools, restrictNativeDelegation: true, userPrompt: call(tool, args), env: { ...session.env, CEZ_MOCK_ARGS_FILE: file, CEZ_MOCK_CI_RESULT: resultFile, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
+        const obs = await driveSeam(backend, 'baseline', { spec: { cezarTools: session.descriptor, resume, toolGrant, restrictNativeDelegation: true, userPrompt: call(tool, args), env: { ...session.env, CEZ_MOCK_ARGS_FILE: file, CEZ_MOCK_CI_RESULT: resultFile, CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '' } } });
         expect(obs.v1.filter(event => event.type === 'error')).toEqual([]);
         const result = JSON.parse(readFileSync(resultFile, 'utf8'));
         expect(result.names).toEqual(['cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);

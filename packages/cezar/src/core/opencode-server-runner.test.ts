@@ -8,6 +8,7 @@ import type { AgentEvent } from './agent-runner.ts';
 import { AUTO_END_DELAY_MS } from './runner-runtime.ts';
 import { KILL_GRACE_MS, OpencodeServerRunner } from './opencode-server-runner.ts';
 import type { UiEvent } from './ui-events.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const spawnHook = vi.hoisted(() => ({ override: null as null | (() => unknown) }));
 
@@ -71,7 +72,7 @@ describe('SIGTERM→SIGKILL escalation for an opencode server that survives SIGT
 
   /** No wall-clock deadline; the test drives the teardown itself. */
   function startSession(timeoutMs: number) {
-    const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs }).startSession({
+    const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs }).startSession({ toolGrant: UNSET_TOOL_GRANT,
       userPrompt: 'do it',
       cwd: process.cwd(),
     });
@@ -455,7 +456,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     const uiEvents: UiEvent[] = [];
     const replyReads = countQuestionReplyReads();
     const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs: 30_000 }).startSession(
-      { userPrompt: 'go', cwd: process.cwd(), effort: opts.effort, model: opts.model },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'go', cwd: process.cwd(), effort: opts.effort, model: opts.model },
       (e) => events.push(e),
       {
         autoEndAfterFirstTurn: opts.autoEndAfterFirstTurn,
@@ -802,7 +803,7 @@ describe('turn lifecycle over prompt_async + session.idle', { timeout: 15_000 },
     spawnHook.override = () => child;
     const events: AgentEvent[] = [];
     try {
-      const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs: 30_000 }).startSession({
+      const session = new OpencodeServerRunner({ bin: 'opencode', timeoutMs: 30_000 }).startSession({ toolGrant: UNSET_TOOL_GRANT,
         userPrompt: 'go',
         cwd: process.cwd(),
         model: 'openai/gpt-5.6-sol',

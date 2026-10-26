@@ -5,6 +5,7 @@ import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentEvent, AgentRunSpec } from './agent-runner.ts';
 import { CursorPrintRunner } from './cursor-print-runner.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const mock = fileURLToPath(new URL('../../scripts/mock-cursor-print.mjs', import.meta.url));
 const dirs: string[] = [];
@@ -12,7 +13,7 @@ afterEach(() => { for (const dir of dirs.splice(0)) rmSync(dir, { recursive: tru
 function fixture(mode: string) {
   const cwd = mkdtempSync(join(tmpdir(), 'cez-print-model-retry-')); dirs.push(cwd);
   const log = join(cwd, 'attempts.ndjson');
-  const spec: AgentRunSpec = { cwd, model: 'grok-4.6[effort=high,fast=true]', userPrompt: 'first',
+  const spec: AgentRunSpec = { cwd, toolGrant: UNSET_TOOL_GRANT, model: 'grok-4.6[effort=high,fast=true]', userPrompt: 'first',
     env: { CEZ_MOCK_CURSOR_PRINT_MODE: mode, CEZ_MOCK_CURSOR_PRINT_LOG: log } };
   const runner = new CursorPrintRunner({ bin: mock, processOptions: { drainMs: 20 } });
   return { spec, runner, log };

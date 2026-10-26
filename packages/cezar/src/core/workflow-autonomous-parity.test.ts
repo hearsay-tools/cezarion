@@ -1,12 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import { RUNNER_IDS } from './agent-runner.ts';
 import { AUTONOMOUS_CRITERIA, driveRun, driveSeam, exemptionFor, promptFor, waitFor, withOwnedInputRun } from './harness-parity.testkit.ts';
 import { handoffPath } from '../handoff.ts';
 import { AUTONOMOUS_ASK_NOTE, MAX_AUTO_CONTINUES } from '../workflows/run.ts';
 import { readPersistedRuns } from '../runs/run-store.testkit.ts';
+import { watchTurnOutcomes } from '../workflows/turn-outcomes.testkit.ts';
 
 // The settle budget for the row cells below. OpenCode's A5, A11 and A12 cells run
 // MAX_AUTO_CONTINUES turns and take 4.6-4.8 s alone and 5.4-5.9 s in an idle full
@@ -103,7 +103,8 @@ describe('autonomous turn-end parity — #426', () => {
                     expect.objectContaining({ id: stepId, status: 'waiting' }),
                   ]) }),
                 ]));
-                expect(readFileSync(handoffPath(manager['dataDir'], runId), 'utf8')).toContain('session idle-closed — status=waiting');
+                // The lifecycle event below is the idle close's record; the handoff gets no line (hearsay-tools/cezarion#1809).
+                expect(readFileSync(handoffPath(manager['dataDir'], runId), 'utf8')).not.toContain('idle-closed');
               }
               expect(store.readEvents(runId).some(e => e.type === 'lifecycle' && String(e.message).includes('of inactivity'))).toBe(true);
               expect(manager.continueRun(runId, { text: promptFor(backend, 'done') }).ok).toBe(true);
@@ -126,15 +127,15 @@ describe('autonomous turn-end parity — #426', () => {
       // Cap and non-autonomous controls exercise both constructors as well.
       const modes = row.id === 'A2' || row.id === 'A4' || row.id === 'A12' ? ['continuation'] : row.id === 'A5' || row.id === 'A6' ? ['fresh', 'continuation'] : ['fresh'];
       for (const mode of modes) it(`${backend} ${row.id} ${row.name} (${mode})`, async () => {
-        await withOwnedInputRun(backend, mode === 'continuation' ? 'autonomous' : row.scenario, async ({ store, manager, runId, repoRoot }) => {
-          const handoff = handoffPath(join(repoRoot, '.ai/cezar'), runId);
+        await withOwnedInputRun(backend, mode === 'continuation' ? 'autonomous' : row.scenario, async ({ store, manager, runId }) => {
           if (mode === 'continuation') {
             manager.enqueueOwnedRun(runId);
             await waitFor(() => store.getRun(runId)?.status === 'waiting', ROW_SETTLE_MS);
             manager.finish(runId);
             await waitFor(() => !manager.isActive(runId), ROW_SETTLE_MS);
-            writeFileSync(handoff, '# Continuation evidence\n\n## Progress log\n\n## Resume notes\n');
           }
+          // Only this row's turns: a continuation's first step settled before the spy.
+          const turns = watchTurnOutcomes();
           store.updateRun(runId, { autonomous: row.id !== 'A6' });
           if (row.id === 'A10') store.appendEvent(runId, {
             type: 'ask.requested', requestId: randomUUID(),
@@ -161,7 +162,7 @@ describe('autonomous turn-end parity — #426', () => {
             expect(store.getRun(runId)?.status).toBe('waiting');
             expect(notes).toHaveLength(MAX_AUTO_CONTINUES);
             expect(events.some(e => e.type === 'note' && String(e.message).includes(`autonomous — safety cap reached (${MAX_AUTO_CONTINUES})`))).toBe(true);
-            expect(readFileSync(handoff, 'utf8').match(/status=waiting/g)).toHaveLength(1);
+            expect(turns.words(runId).filter(word => word === 'waiting')).toHaveLength(1);
           } else if (row.id === 'A6' || row.id === 'A9' || row.id === 'A10') {
             expect(store.getRun(runId)?.status).toBe('waiting');
             expect(notes).toHaveLength(0);
@@ -174,9 +175,8 @@ describe('autonomous turn-end parity — #426', () => {
             expect(store.getRun(runId)?.status).toBe('done');
             expect(notes).toHaveLength(row.id === 'A8' ? 0 : 1);
             expect(updates.mock.calls.filter(([id]) => id === runId).map(([, patch]) => patch.status)).not.toContain('waiting');
-            const heartbeat = readFileSync(handoff, 'utf8');
-            expect(heartbeat).not.toContain('status=waiting');
-            if (row.id !== 'A8') expect(heartbeat).toContain('status=running (autonomous nudge)');
+            expect(turns.words(runId)).not.toContain('waiting');
+            if (row.id !== 'A8') expect(turns.words(runId)).toContain('running (autonomous nudge)');
             const stepId = store.getRun(runId)!.steps.at(-1)!.id;
             expect(notes.every(note => note.stepId === stepId)).toBe(true);
             if (row.id === 'A3' || row.id === 'A4') {
@@ -191,7 +191,7 @@ describe('autonomous turn-end parity — #426', () => {
             expect(events.filter(e => e.type === 'user-message' && String(e.text).startsWith('Continue working autonomously'))).toEqual([]);
             // Prove the native SSE boundary actually beat the portable answer's
             // HTTP ACK, rather than passing through the already-ready path.
-            if (backend === 'opencode') expect(readFileSync(handoff, 'utf8')).toContain('status=running (awaiting input readiness)');
+            if (backend === 'opencode') expect(turns.outcomes(runId)).toContainEqual({ kind: 'readiness' });
             expect(updates.mock.calls.filter(([id, patch]) => id === runId && patch.status === 'waiting')).toHaveLength(1);
           }
           updates.mockRestore();

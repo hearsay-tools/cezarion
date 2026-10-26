@@ -21,6 +21,7 @@ import type {
 import { InputSubmissions } from './input-submissions.ts';
 import type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { isSignalTerminationExit, prependSystemPrompt, trackChildExit } from './agent-runner.ts';
+import { opencodeToolGrantFields } from './runner-tool-grants.ts';
 import { signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { ciOpenCodeEnv } from '../ci-wait/injection.ts';
@@ -127,17 +128,16 @@ export const KILL_GRACE_MS = 4_000;
  * Auth = the host's opencode config/logins. OpenCode's own permission config
  * governs tools: cezar answers OpenCode's built-in default asks once and routes
  * asks the user configured to the cockpit (hearsay-tools/cezarion#1266); this
- * adapter does not map `spec.allowedTools`. Governed delegation adds only a
+ * adapter does not map `spec.toolGrant`. Governed delegation adds only a
  * supported session-level task deny rule.
  * `spec.model` is `provider/model`.
  */
 /**
  * What `opencode serve` receives from each `AgentRunSpec` field (#284).
  * OpenCode's own permission config governs tool access and this adapter maps no
- * per-tool allowlist, so `allowedTools`/`bashAllowlist` are declared dropped
- * rather than mapped (spec 2026-07-17-permission-modes). Resume GETs `/session/{id}` and
- * prompts it; a 404 opens one fresh session. Held against the recorded HTTP
- * requests by the harness parity matrix.
+ * per-tool allowlist, so `toolGrant` is declared dropped rather than mapped (spec
+ * 2026-07-17-permission-modes). Resume GETs `/session/{id}` and prompts it; a 404 opens one
+ * fresh session. Held against the recorded HTTP requests by the harness parity matrix.
  */
 export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
   cezarTools: { honored: true, via: 'merged OPENCODE_CONFIG_CONTENT local mcp entry' },
@@ -145,9 +145,8 @@ export const OPENCODE_SPEC_SUPPORT: AgentRunSpecSupport = {
   userPrompt: { honored: true, via: 'prompt_async text part' },
   images: { honored: false, reason: 'the adapter posts text parts only; image blocks are dropped' },
   cwd: { honored: true, via: 'opencode serve spawn cwd; the session is bound to it' },
-  allowedTools: { honored: false, reason: 'OpenCode permission config governs tool access; cezar answers its built-in default asks and routes configured asks to the cockpit, but maps no per-tool allowlist' },
+  toolGrant: { honored: false, reason: 'OpenCode permission config governs tool access and bash; cezar answers its built-in default asks and routes configured asks to the cockpit, but maps no per-tool allowlist, so no command-prefix restriction either' },
   restrictNativeDelegation: { honored: true, via: 'POST /session permission rule denying task (D1); PATCH /session/{id} permission on resume when the deny is absent — the deny persists on the session once added (a later unrestricted Continue cannot remove it; fails closed)' },
-  bashAllowlist: { honored: false, reason: 'OpenCode permission config governs bash; no per-tool allowlist is mapped, so no command-prefix restriction either' },
   additionalDirectories: { honored: false, reason: 'the server works from cwd; no extra-root mapping' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
   model: { honored: true, via: 'prompt_async model { providerID, modelID }, split from provider/model' },
@@ -771,6 +770,7 @@ class OpencodeSession implements AgentSession {
     if (!resumed) {
       const created = await this.http('POST', '/session', {
         title: 'cezar task',
+        ...opencodeToolGrantFields(this.spec.toolGrant),
         // OpenCode 1.18.33 /doc: session.create permission rules. The native task
         // tool checks this permission; other agent/project permissions stay intact.
         ...(this.spec.restrictNativeDelegation ? this.nativeDelegationPermission() : {}),

@@ -12,11 +12,40 @@ describe('progressPreview', () => {
       .toEqual(['10:03 — tests pass', '10:02 — fix written', '10:01 — cause found'])
   })
 
-  it('prefers the agent’s own lines over cezar’s heartbeats', () => {
-    const log = '- 2026-10-24T10:05:00Z — turn complete — 3 tools\n- 10:04 — opened the PR\n'
-    expect(progressPreview(journal(log))).toEqual(['10:04 — opened the PR'])
-    expect(progressPreview(journal('- 2026-10-24T10:05:00Z — turn complete — 3 tools\n')))
-      .toEqual(['2026-10-24T10:05:00Z — turn complete — 3 tools'])
+  // Older runs kept cezar's lifecycle lines in the Progress log; since hearsay-tools/cezarion#1809
+  // the preview shows only the agent's own lines, and nothing when the agent wrote none.
+  it.each([
+    '- 2026-10-24T10:05:00Z — turn complete — status=waiting',
+    '- 2026-10-24T10:05:00Z — turn complete — goal achieved, session closed',
+    '- 2026-10-24T10:05:00Z — step "implement" complete — status=done',
+    '- 2026-10-24T10:05:00Z — step "implement" ended without done — status=waiting; Continue to resume',
+    '- 2026-10-24T10:05:00Z — session idle-closed — status=waiting; Continue to resume',
+    '- 2026-10-24T10:05:00Z — worktree setup done in 41s',
+    '- 2026-10-24T10:05:00Z — worktree setup failed — `npm ci` exited 1 after 12s; starting the agent anyway',
+  ])('never shows the legacy lifecycle line %s', (legacy) => {
+    expect(progressPreview(journal(`${legacy}\n- 10:04 — opened the PR\n`))).toEqual(['10:04 — opened the PR'])
+    expect(progressPreview(journal(`${legacy}\n`))).toEqual([])
+  })
+
+  it('keeps an agent line that only mentions a lifecycle word', () => {
+    expect(progressPreview(journal('- 10:04 — turn complete for the parser rewrite\n- 10:03 — worktree setup notes added\n')))
+      .toEqual(['10:04 — turn complete for the parser rewrite', '10:03 — worktree setup notes added'])
+  })
+
+  it('reads the Progress log header only as a whole line (hearsay-tools/cezarion#1147)', () => {
+    const quoted = '# Handoff\n\n## Goal\n\nFix the "## Progress log" lookup\n\n## Progress log\n\n- 10:00 — started\n'
+    expect(progressPreview(quoted)).toEqual(['10:00 — started'])
+  })
+
+  it('reads a journal saved with CRLF endings (hearsay-tools/cezarion#1809)', () => {
+    const crlf = journal('- 10:01 — tests pass\n- 10:00 — started\n').replaceAll('\n', '\r\n')
+    expect(progressPreview(crlf)).toEqual(['10:01 — tests pass', '10:00 — started'])
+  })
+
+  it('takes no more lines than maxLines, and none for a limit of 0', () => {
+    const log = journal('- 10:02 — c\n- 10:01 — b\n- 10:00 — a\n')
+    expect(progressPreview(log, 2)).toEqual(['10:02 — c', '10:01 — b'])
+    expect(progressPreview(log, 0)).toEqual([])
   })
 
   it('answers nothing for a journal without progress', () => {

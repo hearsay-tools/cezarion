@@ -1,0 +1,25 @@
+id: handoff-written-outside-handoff-module
+language: typescript
+severity: warning
+message: >-
+  Write the handoff file only through packages/cezar/src/handoff.ts (hearsay-tools/cezarion#1809):
+  the file is the agent's, and cezar's own records live in RunRecord.handoffRecords. Record an
+  autosave through recordHandoffAutosave or recordHandoffPeriodicAutosave, render the block for a
+  reader through renderHandoffRecords, and write no line into the file from here.
+files:
+  - packages/cezar/src/**/*.ts
+ignores:
+  - packages/cezar/src/handoff.ts
+  - packages/cezar/src/**/*.test.ts
+  - packages/cezar/src/**/*.testkit.ts
+# A file write, copy or rename whose arguments name the handoff (`handoffPath(…)`,
+# `CEZ_HANDOFF_FILE`, a `handoffFile` local). A removal is not matched: the store removes the file
+# with its run, and a removal adds no line. A write to a path built elsewhere under another name is
+# not matched either: the rule sees text, not where a path points.
+rule:
+  kind: call_expression
+  all:
+    - has:
+        field: function
+        regex: '(^|\.)(writeFileSync|writeFile|appendFileSync|appendFile|createWriteStream|copyFileSync|copyFile|cpSync|cp|renameSync|rename)$'
+    - has: { field: arguments, regex: '(?i)handoff' }

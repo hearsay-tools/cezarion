@@ -6,6 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AgentEvent } from './agent-runner.js';
 import { KILL_GRACE_MS } from './runner-runtime.js';
 import { CodexAppServerRunner, codexTurnStartExtras } from './codex-app-server-runner.js';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 /** Only the escalation tests below swap the child out; every other test in this
  *  file keeps spawning the real mock app-server through the untouched `spawn`. */
@@ -41,7 +42,7 @@ describe('a teardown cezar initiated (codex app-server)', () => {
     const session = runner.startSession(
       // MOCK_CODEX_IGNORE_EOF makes the mock stay deaf to stdin EOF and exit
       // 143 on SIGTERM — the real shape reported in #703.
-      { userPrompt: 'check the working tree', cwd: process.cwd(), env: { MOCK_CODEX_IGNORE_EOF: '1' } },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'check the working tree', cwd: process.cwd(), env: { MOCK_CODEX_IGNORE_EOF: '1' } },
       (event) => {
         events.push(event);
         if (event.type === 'text') sawText();
@@ -68,7 +69,7 @@ describe('a teardown cezar initiated (codex app-server)', () => {
     const runner = new CodexAppServerRunner({ bin: mockBin, timeoutMs: 0 });
     const events: AgentEvent[] = [];
     const session = runner.startSession(
-      { userPrompt, cwd: process.cwd() },
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt, cwd: process.cwd() },
       (event) => events.push(event),
       { autoEndAfterFirstTurn: true },
     );
@@ -131,7 +132,7 @@ describe('SIGTERM→SIGKILL escalation for an app-server that survives SIGTERM',
 
   it('escalates on the wall-clock timeout even after Node flagged the child as killed', () => {
     withFakeChild((fake) => {
-      const session = new CodexAppServerRunner({ bin: 'codex', timeoutMs: 20 }).startSession({
+      const session = new CodexAppServerRunner({ bin: 'codex', timeoutMs: 20 }).startSession({ toolGrant: UNSET_TOOL_GRANT,
         userPrompt: 'do it',
         cwd: process.cwd(),
       });
@@ -150,7 +151,7 @@ describe('SIGTERM→SIGKILL escalation for an app-server that survives SIGTERM',
 
   it('stops escalating once the app-server really exits after SIGTERM', () => {
     withFakeChild((fake) => {
-      const session = new CodexAppServerRunner({ bin: 'codex', timeoutMs: 20 }).startSession({
+      const session = new CodexAppServerRunner({ bin: 'codex', timeoutMs: 20 }).startSession({ toolGrant: UNSET_TOOL_GRANT,
         userPrompt: 'do it',
         cwd: process.cwd(),
       });
@@ -167,7 +168,7 @@ describe('SIGTERM→SIGKILL escalation for an app-server that survives SIGTERM',
 
   it('does not signal a second time once interrupt() saw the child exit', () => {
     withFakeChild((fake) => {
-      const session = new CodexAppServerRunner({ bin: 'codex', timeoutMs: 0 }).startSession({
+      const session = new CodexAppServerRunner({ bin: 'codex', timeoutMs: 0 }).startSession({ toolGrant: UNSET_TOOL_GRANT,
         userPrompt: 'do it',
         cwd: process.cwd(),
       });

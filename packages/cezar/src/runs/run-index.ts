@@ -4,7 +4,7 @@ import { runSummarySchema, toRunSummary, type RunSummary } from '@open-mercato/c
 
 import { RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunDatabase, type RunSummaryRow } from './run-database.ts';
 import { decodeRunRecord, holdsWorkerWait, LEGACY_INDEX_FILE, reconcileLoadedRun, rescopeRun, parseRunRecords, type RepoHandle, type RunRecord } from './store.ts';
-import { matchesRunQuery, searchTokens, sqlPrefilterTokens } from './run-search.ts';
+import { matchesRunSearch, searchTokens, sqlPrefilterTokens } from '@open-mercato/cezar-contract/run-search';
 
 /** A cold project's runs as list rows, and whether older archived roots were left out. */
 export interface ColdRunIndex {
@@ -31,7 +31,7 @@ export function readRunIndexFromDisk(
 }
 
 /**
- * A cold project's ROOT runs, archived or not, that match `query` (`matchesRunQuery`), newest
+ * A cold project's ROOT runs, archived or not, that match `query` (`matchesRunSearch`), newest
  * first: at most `limit`, and whether more matched. The workspace search behind ⌘K (#864), with
  * the same side-effect-free contract as `readRunIndexFromDisk`.
  */
@@ -71,7 +71,7 @@ function readCold<T>(dataDir: string, empty: T, fromDatabase: (db: RunDatabase) 
 function firstMatches(runs: readonly RunSummary[], query: string, limit: number): ColdRunIndex {
   const matched: RunSummary[] = [];
   for (const run of runs) {
-    if (!matchesRunQuery(run, query)) continue;
+    if (!matchesRunSearch(run, query)) continue;
     if (matched.length === limit) return { runs: matched, truncated: true };
     matched.push(run);
   }
@@ -103,9 +103,9 @@ function searchDatabase(db: RunDatabase, dataDir: string, query: string, { handl
     /^#?\d+$/.test(token) || /(?:^|\/)issues\/\d+/i.test(token));
   db.visitRootSummaries(sqlPrefilterTokens(query), (row) => {
     const summary = parseSummary(row.summary);
-    if (summary !== undefined && (!repairIssueAttribution || summary.markerRefs?.issue === undefined) && !matchesRunQuery(summary, query)) return true;
+    if (summary !== undefined && (!repairIssueAttribution || summary.markerRefs?.issue === undefined) && !matchesRunSearch(summary, query)) return true;
     const [projected] = projectRows(db, [row], dataDir, handle);
-    if (projected && matchesRunQuery(projected, query)) matched.push(projected);
+    if (projected && matchesRunSearch(projected, query)) matched.push(projected);
     return matched.length <= limit;
   }, { includeIssueMarked: repairIssueAttribution });
   return matched.length > limit ? { runs: matched.slice(0, limit), truncated: true } : { runs: matched, truncated: false };
@@ -162,7 +162,8 @@ function needsRecord(summary: RunSummary, handle?: RepoHandle | null): boolean {
   // A live-looking run reads as interrupted (or cancelled, after an accepted Stop).
   if (summary.status === 'queued' || summary.status === 'running' || summary.status === 'waiting') return true;
   // Monitoring state, and a usage-limit resume on anything but a waiting run, are cleared; an old
-  // failed one is read as waiting (hearsay-tools/cezarion#1236).
+  // failed one is read as waiting (hearsay-tools/cezarion#1236). Any resume time, not
+  // `isUsageLimitHold`: a stale one on a finished summary is what the record must correct.
   if ((summary as { activity?: unknown }).activity !== undefined) return true;
   if (summary.autoResumeAt !== undefined) return true;
   // A referenced PR that an older cezar's created-PR declaration erased is restored.

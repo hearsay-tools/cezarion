@@ -1,3 +1,4 @@
+import { providerForActiveRun } from '@open-mercato/cezar-api-client/contract/active-provider'
 import type { ApiRun, ProviderStatusResponse, Runner } from '@open-mercato/cezar-api-client'
 import { useProviderStatus } from '@/api/queries'
 import { providerStatusFor } from '@/lib/provider-status'
@@ -9,20 +10,6 @@ const PROVIDER_LABEL: Record<Runner, string> = {
   pi: 'pi',
   cursor: 'Cursor',
   omp: 'OMP',
-}
-
-/** Mirrors the server's providerForActiveRun for POST /runs/:id/messages. */
-export function providerForActiveRun(run: ApiRun): Runner {
-  const current = run.currentStepId
-    ? run.steps.find((step) => step.id === run.currentStepId)
-    : undefined
-  if (current?.backend) return current.backend
-  if (run.runner) return run.runner
-  for (let index = run.steps.length - 1; index >= 0; index -= 1) {
-    const backend = run.steps[index]?.backend
-    if (backend) return backend
-  }
-  return 'claude'
 }
 
 /** Mirrors the server's providerForExistingRun for an override-free POST /continue. */

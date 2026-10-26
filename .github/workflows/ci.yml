@@ -342,6 +342,72 @@ jobs:
           fi
           node .ai/skills/check-code-quality/scripts/complexity-gate.mjs --base "$base" --head "$head" "${growth[@]}"
 
+  clone-gate:
+    name: Check new code clones
+    if: ${{ github.event_name == 'pull_request_target' || github.event_name == 'merge_group' || (github.event_name == 'workflow_dispatch' && inputs.pr_number == '') }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Check out the trusted workflow commit
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.merge_group.base_sha || github.sha }}
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Set up pnpm
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: '12.11.2'
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.21.0'
+          cache: pnpm
+          cache-dependency-path: pnpm-lock.yaml
+      - name: Install dependencies without lifecycle scripts
+        run: pnpm install --frozen-lockfile --ignore-scripts
+      - name: Reject new code clones
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EXPECTED_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          GROUP_BASE_SHA: ${{ github.event.merge_group.base_sha }}
+          GROUP_HEAD_SHA: ${{ github.event.merge_group.head_sha }}
+          GROUP_HEAD_REF: ${{ github.event.merge_group.head_ref }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = pull_request_target ]; then
+            pr="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER")"
+            if ! jq -e --arg head "$EXPECTED_HEAD_SHA" '.head.sha == $head' <<<"$pr" >/dev/null; then
+              echo "::error::The pull request changed after this run started. Re-run CI for the current head." >&2
+              exit 1
+            fi
+            git fetch --no-tags origin "refs/pull/${PR_NUMBER}/head"
+            head="$(git rev-parse FETCH_HEAD)"
+            if [ "$head" != "$EXPECTED_HEAD_SHA" ]; then
+              echo "::error::The pull request changed during the fetch. Re-run CI for the current head." >&2
+              exit 1
+            fi
+            base="$GITHUB_SHA"
+          elif [ "$EVENT_NAME" = merge_group ]; then
+            head="$GROUP_HEAD_SHA"
+            base="$GROUP_BASE_SHA"
+            git fetch --no-tags origin "$head"
+            if [ "$(git rev-parse FETCH_HEAD)" != "$head" ]; then
+              echo "::error::The merge group head could not be fetched." >&2
+              exit 1
+            fi
+          else
+            head="$GITHUB_SHA"
+            base=origin/main
+          fi
+          node .github/scripts/check-clones.cjs --base "$base" --head "$head"
+
   build-and-package:
     name: Typecheck, unit, build, and package
     needs: queue-proof
@@ -530,6 +596,199 @@ jobs:
       - name: Run server and cockpit unit suites
         run: npm test -- --shard=${{ matrix.shard }}/3 --maxWorkers=4
 
+  # Vitest coverage for the pre-PR code-quality check (hearsay-tools/cezarion#1780). These two jobs
+  # run the same three shards as `vitest` again, with V8 coverage, beside it. They are not in
+  # `verify.needs`, not in the merge-queue roster and not required checks, and `vitest` is
+  # unchanged: a slow, failed or missing coverage run cannot change a test verdict. Every step that
+  # can fail has `continue-on-error`, so a problem shows as a warning annotation and a job-summary
+  # line while the job stays green. They run on pull requests and dispatches only: the merge queue
+  # and `main` keep their jobs and their time.
+  vitest-coverage:
+    name: Vitest coverage shard ${{ matrix.shard }}/3
+    needs: [queue-proof, change-surface, classify-pr]
+    if: >-
+      !cancelled() &&
+      (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') &&
+      (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') &&
+      needs.change-surface.outputs.surface == 'full-matrix' &&
+      needs.classify-pr.outputs.bump_pr != 'true'
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3]
+    runs-on: ubuntu-24.04
+    # Hang bound only. The collect step has its own, shorter timeout, so a slow run ends as a
+    # failed step and leaves the job green.
+    timeout-minutes: 25
+
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - *resolve-dispatch
+      - name: Check out repository
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ (github.event.pull_request.number || steps['resolve-dispatch'].outputs.valid == 'true') && format('refs/pull/{0}/merge', github.event.pull_request.number || inputs.pr_number) || github.sha }}
+          allow-unsafe-pr-checkout: true
+          persist-credentials: false
+
+      - name: Set up pnpm
+        if: hashFiles('pnpm-lock.yaml') != ''
+        continue-on-error: true
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: '12.11.2'
+
+      - name: Set up Node.js
+        continue-on-error: true
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
+          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+
+      - name: Install dependencies
+        if: hashFiles('pnpm-lock.yaml') == ''
+        continue-on-error: true
+        run: npm ci
+
+      - name: Install pnpm dependencies
+        if: hashFiles('pnpm-lock.yaml') != ''
+        continue-on-error: true
+        run: pnpm install --frozen-lockfile
+
+      - name: Build server dependencies
+        continue-on-error: true
+        run: npm run build:server
+
+      # Same shard and worker count as `vitest`. The coverage settings live in vitest.config.ts.
+      - name: Collect Vitest coverage
+        id: collect
+        continue-on-error: true
+        timeout-minutes: 20
+        run: npm test -- --shard=${{ matrix.shard }}/3 --maxWorkers=4 --coverage.enabled
+
+      - name: Upload shard coverage
+        id: upload
+        if: steps.collect.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: vitest-coverage-shard-${{ matrix.shard }}
+          path: .ai/qa/coverage/coverage-final.json
+          if-no-files-found: error
+          retention-days: 3
+          overwrite: true
+
+      - name: Report a missing shard coverage report
+        if: always() && (steps.collect.outcome != 'success' || steps.upload.outcome != 'success')
+        continue-on-error: true
+        env:
+          SHARD: ${{ matrix.shard }}
+          COLLECT: ${{ steps.collect.outcome }}
+          UPLOAD: ${{ steps.upload.outcome }}
+        run: |
+          if [ "$COLLECT" != success ]; then
+            reason="the coverage run ended as $COLLECT (failed tests, a timeout, or a setup or coverage error)"
+          else
+            reason="the upload ended as $UPLOAD"
+          fi
+          echo "::warning title=Vitest coverage shard $SHARD/3 missing::No coverage report from shard $SHARD: $reason. The test verdict comes from the Vitest shard job."
+          echo "Vitest coverage shard $SHARD/3: no report, $reason." >> "$GITHUB_STEP_SUMMARY"
+
+  # Merges the three shard reports into one repo-relative Istanbul `coverage-final.json` and
+  # uploads it as `vitest-coverage-<head SHA>`. See docs/sdlc/ci.md § Vitest coverage artifact.
+  vitest-coverage-merge:
+    name: Merge Vitest coverage
+    needs: [vitest-coverage]
+    if: ${{ !cancelled() && needs.vitest-coverage.result != 'skipped' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+
+    steps:
+      - name: Check out the scripts
+        continue-on-error: true
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}
+          allow-unsafe-pr-checkout: true
+          persist-credentials: false
+          sparse-checkout: |
+            .github/scripts
+            .ai/skills/check-code-quality/scripts
+
+      - name: Set up Node.js
+        continue-on-error: true
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: lts/*
+
+      - name: Download shard coverage
+        id: download
+        continue-on-error: true
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: vitest-coverage-shard-*
+          path: shards
+
+      - name: Merge shard coverage
+        id: merge
+        continue-on-error: true
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          TESTED_REF: ${{ github.event.pull_request.number && format('refs/pull/{0}/merge', github.event.pull_request.number) || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          RUN_ID: ${{ github.run_id }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+        run: |
+          node .github/scripts/merge-vitest-coverage.mjs --input shards --output merged --shards 3 --root "$GITHUB_WORKSPACE" \
+            --meta "headSha=$HEAD_SHA" --meta "testedRef=$TESTED_REF" --meta "baseSha=$BASE_SHA" \
+            --meta "runId=$RUN_ID" --meta "runAttempt=$RUN_ATTEMPT" 2> merge.err || { cat merge.err >&2; exit 1; }
+
+      - name: Upload merged coverage
+        id: upload
+        if: steps.merge.outcome == 'success'
+        continue-on-error: true
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: vitest-coverage-${{ github.event.pull_request.head.sha || github.sha }}
+          path: merged/
+          if-no-files-found: error
+          retention-days: 14
+          overwrite: true
+
+      - name: Report the coverage artifact
+        if: always()
+        continue-on-error: true
+        env:
+          HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+          SHARDS_RESULT: ${{ needs.vitest-coverage.result }}
+          DOWNLOAD: ${{ steps.download.outcome }}
+          MERGE: ${{ steps.merge.outcome }}
+          UPLOAD: ${{ steps.upload.outcome }}
+        run: |
+          if [ "$UPLOAD" = success ]; then
+            echo "Vitest coverage uploaded as artifact vitest-coverage-$HEAD_SHA." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$MERGE" = failure ] && [ -s merge.err ]; then
+            reason="$(tr '\r\n' '  ' < merge.err | sed 's/ *$//')"
+          elif [ "$MERGE" = failure ]; then
+            reason="the merge step failed"
+          elif [ "$DOWNLOAD" != success ]; then
+            reason="the shard download ended as $DOWNLOAD"
+          else
+            reason="the upload ended as ${UPLOAD:-skipped} (merge ${MERGE:-skipped})"
+          fi
+          echo "::warning title=Vitest coverage artifact not uploaded::No vitest-coverage-$HEAD_SHA artifact: $reason (shard jobs: $SHARDS_RESULT). Test verdicts are not affected."
+          echo "Vitest coverage not uploaded: $reason (shard jobs: $SHARDS_RESULT)." >> "$GITHUB_STEP_SUMMARY"
+
   # Own GitHub check, separate from the packaged CLI E2E step in build-and-package.
   # Skip is a failure here: a machine that cannot drive the cockpit must not
   # green the required aggregate. Local `npm run test:e2e` keeps its skip-exit-0
@@ -618,7 +877,7 @@ jobs:
   # cockpit browser jobs.
   verify:
     name: Unit, build, E2E, and package
-    needs: [queue-proof, change-surface, classify-pr, complexity-gate, build-and-package, vitest, cockpit-browser]
+    needs: [queue-proof, change-surface, classify-pr, complexity-gate, clone-gate, build-and-package, vitest, cockpit-browser]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -633,6 +892,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           CLASSIFY_RESULT: ${{ needs.classify-pr.result }}
           SURFACE_RESULT: ${{ needs.change-surface.result }}
+          CLONE_GATE_RESULT: ${{ needs['clone-gate'].result }}
           COMPLEXITY_GATE_RESULT: ${{ needs['complexity-gate'].result }}
           BUILD_AND_PACKAGE_RESULT: ${{ needs['build-and-package'].result }}
           VITEST_RESULT: ${{ needs.vitest.result }}
@@ -649,8 +909,10 @@ jobs:
           # Other events skip it, and a pull request or a merge group may never skip it.
           if [ "$EVENT_NAME" = pull_request_target ] || [ "$EVENT_NAME" = merge_group ]; then
             test "$COMPLEXITY_GATE_RESULT" = success
+            test "$CLONE_GATE_RESULT" = success
           else
             test "$COMPLEXITY_GATE_RESULT" = success -o "$COMPLEXITY_GATE_RESULT" = skipped
+            test "$CLONE_GATE_RESULT" = success -o "$CLONE_GATE_RESULT" = skipped
           fi
           if [ "$EVENT_NAME" = push ] && [ "$PROOF_RESULT" = success ] && [ "$PROOF_VERIFIED" = true ]; then
             test "$BUILD_AND_PACKAGE_RESULT" = skipped

@@ -46,7 +46,7 @@ vi.mock('../core/runner-factory.ts', () => ({
  * moment a step's session came back through Continue, restart recovery or the usage-limit
  * auto-resume, every tool the workflow granted beyond the default set (MCP servers,
  * subagents) was silently revoked — and dropping the step's `bashAllowlist` simultaneously
- * WIDENED Bash from an allowlist to unrestricted (`AgentRunSpec.allowedTools`, #430).
+ * WIDENED Bash from an allowlist to unrestricted (`AgentRunSpec.toolGrant`, #430).
  * `ActiveRun` has two construction sites (#811's lesson): `execute` resolved per-step tools,
  * `runContinuation` did not.
  */
@@ -173,8 +173,7 @@ describe('a resumed session keeps its workflow step tools', () => {
     const spec = await specAt(0);
     expect(spec.resume).toBe(true);
     expect(spec.sessionId).toBe('sess-1');
-    expect(spec.allowedTools).toEqual(TOOLS);
-    expect(spec.bashAllowlist).toEqual(BASH);
+    expect(spec.toolGrant).toEqual({ kind: 'explicit', tools: TOOLS, bashAllowlist: BASH });
     await settled(id);
   });
 
@@ -262,8 +261,7 @@ describe('a resumed session keeps its workflow step tools', () => {
 
     expect(manager!.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     const spec = await specAt(0);
-    expect(spec.allowedTools).toEqual(DEFAULT_ALLOWED_TOOLS);
-    expect(spec.bashAllowlist).toBeUndefined();
+    expect(spec.toolGrant).toEqual({ kind: 'step-default', tools: DEFAULT_ALLOWED_TOOLS });
     await settled(id);
   });
 
@@ -280,8 +278,7 @@ describe('a resumed session keeps its workflow step tools', () => {
 
     expect(manager!.continueRun(id, { text: 'keep going' })).toEqual({ ok: true });
     const spec = await specAt(0);
-    expect(spec.allowedTools).toEqual([...DEFAULT_ALLOWED_TOOLS, 'Subagent', 'SubagentSupervisor', 'SubagentWait']);
-    expect(spec.bashAllowlist).toBeUndefined();
+    expect(spec.toolGrant).toEqual({ kind: 'step-default', tools: [...DEFAULT_ALLOWED_TOOLS, 'Subagent', 'SubagentSupervisor', 'SubagentWait'] });
     await settled(id);
   });
 
@@ -297,8 +294,7 @@ describe('a resumed session keeps its workflow step tools', () => {
     const spec = await specAt(0);
     expect(spec.resume).toBe(false);
     expect(spec.sessionId).toBeUndefined();
-    expect(spec.allowedTools).toEqual(TAIL_TOOLS);
-    expect(spec.bashAllowlist).toBeUndefined();
+    expect(spec.toolGrant).toEqual({ kind: 'explicit', tools: TAIL_TOOLS });
     await settled(id);
   });
 
@@ -316,8 +312,7 @@ describe('a resumed session keeps its workflow step tools', () => {
     expect(manager!.continueRun(id, { text: 'and again' })).toEqual({ ok: true });
     const spec = await specAt(0);
     expect(spec.sessionId).toBe('sess-2');
-    expect(spec.allowedTools).toEqual(TOOLS);
-    expect(spec.bashAllowlist).toEqual(BASH);
+    expect(spec.toolGrant).toEqual({ kind: 'explicit', tools: TOOLS, bashAllowlist: BASH });
     await settled(id);
   });
 
@@ -341,8 +336,7 @@ describe('a resumed session keeps its workflow step tools', () => {
     const spec = await specAt(0);
     expect(spec.resume).toBe(true);
     expect(spec.sessionId).toBe('sess-1');
-    expect(spec.allowedTools).toEqual(TOOLS);
-    expect(spec.bashAllowlist).toEqual(BASH);
+    expect(spec.toolGrant).toEqual({ kind: 'explicit', tools: TOOLS, bashAllowlist: BASH });
     await settled(id);
   });
 });

@@ -4,6 +4,7 @@
  */
 export * from './events.ts';
 export * from './ask.ts';
+export * from './pending-ask.ts';
 export * from './delegation.ts';
 export * from './effort.ts';
 export * from './health.ts';
@@ -32,6 +33,9 @@ export * from './voice.ts';
 export * from './conversations.ts';
 export * from './ci-wait.ts';
 export * from './waits.ts';
+export * from './run-predicates.ts';
+export * from './handoff.ts';
+export * from './run-search.ts';
 export * from './artifacts.ts';
 export * from './discovery.ts';
 
@@ -41,3 +45,18 @@ export * from './live-coordination.ts';
 
 export * from './permissions.ts';
 export * from './defined.ts';
+export * from './tool-display.ts';
+export * from './version.ts';
+export * from './active-provider.ts';
+export * from './image-path.ts';
+export * from './provider-requests.ts';
+export * from './automation-requests.ts';
+export * from './workflow-requests.ts';
+export * from './ui-state-requests.ts';
+export * from './run-requests.ts';
+export * from './query-requests.ts';
+export * from './github-requests.ts';
+export * from './repo-requests.ts';
+export * from './config-requests.ts';
+export * from './workflow-file.ts';
+export * from './automation-storage.ts';

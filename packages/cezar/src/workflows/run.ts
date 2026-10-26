@@ -4,10 +4,10 @@ import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } f
 import { workerEvidenceRunIds } from '../runs/worker-execution.ts';
 import { askErrorMessage, doneErrorMessage, scheduleRefusal, waitErrorMessage } from '../ci-wait/errors.ts';
 import type { ScheduleTaskAnswer, ScheduleTaskRequest, ScheduledTasksAnswer, ScheduledTasksRequest } from '@open-mercato/cezar-contract/scheduled-tasks';
-import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type CezarWaitRequestInput, type DoneErrorCode, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
+import { askErrorCodeSchema, cezarAskRequestSchema, cezarDoneRequestSchema, cezarWaitRequestSchema, type AskErrorCode, type CezarAskAnswer, type CezarAskRequest, type CezarCancelWaitAnswer, type CezarDoneAnswer, type CezarDoneRequest, type CezarWaitRequest, type CezarWaitRequestInput, type DoneErrorCode, type PrWaitEntry, type ProcessWaitEntry, type ProcessWaitResult, type HumanWaitEntry, type TimerWaitEntry, type Wait, type WaitErrorCode, type WaitVia, type WorkerWaitEntry, computeWaitingOn, hasWorkerDeadline, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry, isUsageLimitHold, waitErrorCodeSchema, TIMER_MAX_SECONDS, TIMER_MIN_SECONDS, WAIT_LIMIT, WAIT_MESSAGE_MAX } from '@open-mercato/cezar-contract/waits';
 import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contract/ci-wait';
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
-import { AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, turnEndHeartbeat, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
+import { AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 import { nextLineEntry } from './line-order.ts';
 import { executionAccount } from './execution-account.ts';
@@ -50,11 +50,11 @@ import {
   normalizeModelForBackend,
 } from '../core/model-identity.ts';
 import {
-  appendHandoffAutosaveReport,
-  appendHandoffHeartbeat,
   handoffInstructions,
   handoffPath,
+  recordHandoffAutosave,
   recordHandoffPeriodicAutosave,
+  refreshHandoffRecords,
   seedHandoffFile,
 } from '../handoff.ts';
 import { buildSessionContext, formatSessionContextReport, type SessionContext } from '../session-context.ts';
@@ -82,8 +82,8 @@ import {
   isImageAttachmentName,
   isImageMediaType,
 } from '@open-mercato/cezar-contract/attachments';
-import { askRequestSchema } from '@open-mercato/cezar-contract/ask-schema';
-import type { AgentEvent, ContentBlock } from '../core/agent-runner.ts';
+import { askPayloadOf, askRequestOf } from '@open-mercato/cezar-contract/pending-ask';
+import type { AgentEvent, ContentBlock, ToolGrant } from '../core/agent-runner.ts';
 import { inputDeliveryOf } from '../core/agent-runner.ts';
 import { readProjectUiState, readProjectUiStateSync } from '../ui-state.ts';
 import { discoverSkills, filterDisabledTeamSkills, readDisabledTeamSkills, type Skill } from '../skills.ts';
@@ -144,9 +144,10 @@ import { UiEventSink } from '../runs/ui-event-sink.ts';
 import type { UiEvent } from '../core/ui-events.ts';
 import {
   QUICK_TASK_WORKFLOW,
-  allowedToolsForStep,
   chainStepNote,
   stepKind,
+  stepToolGrant,
+  toolGrantLists,
   type WorkflowDef,
   type WorkflowStepDef,
 } from './types.ts';
@@ -436,9 +437,8 @@ export function periodicAutosaveEnabled(env: NodeJS.ProcessEnv = process.env): b
   return env.CEZ_AUTOSAVE === '1';
 }
 
-/** The handoff `## Autosave (cezar)` line and cockpit note for a save that committed or
- *  left work behind (hearsay-tools/cezarion#1004): a resumed session reads this, not
- *  `git log`. Never a Progress-log line: the top of that log is the agent's own summary. */
+/** The handoff block's autosave record and cockpit note for a save that committed or left work
+ *  behind (hearsay-tools/cezarion#1004): a resumed session reads this, not `git log`. */
 function autosaveReportLine(reason: AutosaveReason, outcome: AutosaveOutcome, taskBranch: string | undefined): string {
   const where = outcome.branch ?? 'detached HEAD';
   if (outcome.result === 'committed') {
@@ -648,17 +648,6 @@ function resumeInFlight(run: Pick<RunRecord, 'status' | 'autoResumeAttempts'>): 
   return (
     run.autoResumeAttempts !== undefined && (run.status === 'queued' || run.status === 'running')
   );
-}
-
-/**
- * Is this run parked on a usage limit, waiting for its resume (hearsay-tools/cezarion#1236)?
- *
- * Such a run is `waiting` with its appointment, not `failed`: it holds no slot and no session,
- * nothing but its resume wakes it, and every wait that resolves meanwhile is delivered with the
- * resume. A withdrawn appointment settles it `failed` with the error it kept.
- */
-function onUsageLimitHold(run: Partial<Pick<RunRecord, 'status' | 'autoResumeAt'>>): boolean {
-  return run.status === 'waiting' && run.autoResumeAt !== undefined;
 }
 
 const AUTO_RESUME_PROMPT =
@@ -947,7 +936,7 @@ type StepSessionLaunch = {
   opening: LaunchOpening;
   skillPrompt: string | undefined;
   extraSystemPrompt: string | undefined;
-  grants: WorkerStepIdentity['grants'];
+  toolGrant: ToolGrant;
   profile: StepProfile;
   model: StepModel;
   delegation: LaunchDelegation;
@@ -969,11 +958,11 @@ type ContinuationOpening = {
  *  when the opening turn ends. The turn end clears `askSeq`. */
 type OpeningAnswer = { askSeq: number | undefined; waits: string[]; parentAnswer: boolean };
 /** What a Continue resolved before its pre-spawn checks: the step that owns its session, the
- *  workflow step it extends, and its grants, model, effort and account. */
+ *  workflow step it extends, and its tool grant, model, effort and account. */
 type ContinuationSettings = {
   owningStep: RunRecord['steps'][number] | undefined;
   toolsStep: WorkflowStepDef | undefined;
-  grants: WorkerStepIdentity['grants'];
+  toolGrant: ToolGrant;
   backendModel: string | undefined;
   effort: string | undefined;
   profile: StepProfile;
@@ -1902,6 +1891,7 @@ export class RunManager {
     const run = this.store.getRun(runId);
     const role = run?.delegation?.role === 'worker' ? 'worker' : 'parent';
     const handoff = handoffPath(this.dataDir, runId);
+    refreshHandoffRecords(this.store, this.dataDir, runId);
     // A backend's own slash command only works at character zero (#676); a prefix would turn
     // it into plain text, so such a launch gets no context and keeps the read instruction.
     const context: SessionContext = leadingSlashSkillName(openingPrompt)
@@ -2267,7 +2257,6 @@ export class RunManager {
     state.completedStepId = state.currentStepId;
     if (close?.summary) this.store.appendEvent(runId, { type: 'note', message: close.summary });
     this.store.appendEvent(runId, { type: 'lifecycle', message: step ? 'step complete — session closed' : 'goal achieved — session closed', via: close?.via ?? 'done-line' });
-    appendHandoffHeartbeat(this.dataDir, runId, step ? 'turn complete — step done, session closed' : 'turn complete — goal achieved, session closed');
     this.cancelOpenWaits(runId);
     session?.end();
   }
@@ -2879,7 +2868,7 @@ export class RunManager {
     const resolved = run ? resolvedWaits(run) : [];
     // A run on a usage-limit hold is woken by its resume only, which delivers what resolved
     // meanwhile (hearsay-tools/cezarion#1236).
-    if (this.disposed || this.recoveringRun(run) || !run || onUsageLimitHold(run) || !this.owesWake(run) ||
+    if (this.disposed || this.recoveringRun(run) || !run || isUsageLimitHold(run) || !this.owesWake(run) ||
       !['running', 'waiting', 'queued'].includes(run.status) || run.stopping ||
       this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
     // A failed delivery waits out its backoff; the backoff's own timer queues this wake again.
@@ -3790,7 +3779,7 @@ export class RunManager {
     if (this.rootFinishRequested(found.id)) return this.settleRequestedRootFinish(found.id);
     // A usage-limit hold ran no process, so nothing was interrupted: its waits re-arm and resolve,
     // and `reconcileAutoResumes` re-arms the resume that delivers them (hearsay-tools/cezarion#1236).
-    if (onUsageLimitHold(found)) {
+    if (isUsageLimitHold(found)) {
       for (const wait of openWaits(found)) this.armWait(found.id, wait);
       return undefined;
     }
@@ -4208,7 +4197,7 @@ export class RunManager {
   private fireAutoResume(runId: string): void {
     this.autoResumeTimers.delete(runId);
     const run = this.store.getRun(runId);
-    if (!run || !onUsageLimitHold(run)) return;
+    if (!run || !isUsageLimitHold(run)) return;
     // Belt and braces against the one gap `reconcileAutoResumes` cannot close: the setting going
     // off in the window between the last pump and this tick.
     if (!this.semaphore.autoResumeOnUsageLimit()) {
@@ -4252,7 +4241,8 @@ export class RunManager {
       // a deadline hold — so nothing new starts on that account, `rescueStalledQueue` treats the
       // phantom appointment as a legitimate reason to sit still, and the cockpit shows a
       // `scheduled` row for a resume that will never come. `clearAutoResume` covers the armed
-      // ones too, so this one loop is the whole cancellation.
+      // ones too, so this one loop is the whole cancellation. It reads any resume time, not
+      // `isUsageLimitHold`, so a stale one is retired too.
       const pending = new Set([
         ...this.autoResumeTimers.keys(),
         ...this.store.listRuns().filter((run) => run.autoResumeAt !== undefined).map((run) => run.id),
@@ -4261,9 +4251,9 @@ export class RunManager {
       return;
     }
     for (const run of this.store.listRuns()) {
-      if (!onUsageLimitHold(run)) continue;
+      if (!isUsageLimitHold(run)) continue;
       if (this.autoResumeTimers.has(run.id)) continue;
-      const deadline = Date.parse(run.autoResumeAt!);
+      const deadline = Date.parse(run.autoResumeAt);
       // A deadline that is unreadable, belongs to a run that has spent its cap, or belongs to a
       // task the user has archived is retired rather than re-armed: it can only mislead. One
       // that has just passed arms at zero — the window is open, which is the point.
@@ -4357,8 +4347,8 @@ export class RunManager {
     if (this.semaphore.busy() > 0) return;
     // A future deadline is a real reason to sit still: that timer will fire and pump.
     for (const run of this.store.listRuns()) {
-      if (!onUsageLimitHold(run)) continue;
-      const deadline = Date.parse(run.autoResumeAt!);
+      if (!isUsageLimitHold(run)) continue;
+      const deadline = Date.parse(run.autoResumeAt);
       if (Number.isFinite(deadline) && deadline > now) return;
     }
     if (this.semaphore.accountHolds().inFlight.size === 0) {
@@ -4386,8 +4376,8 @@ export class RunManager {
       // A holding run always carries the runner it actually ran on, so the fallback is unused
       // here — it is spelled out rather than `!` so a future record shape degrades, not throws.
       const key = () => runAccountKey(this.withExecutionAccount(run), run.runner ?? 'claude');
-      if (onUsageLimitHold(run)) {
-        const at = Date.parse(run.autoResumeAt!);
+      if (isUsageLimitHold(run)) {
+        const at = Date.parse(run.autoResumeAt);
         if (Number.isFinite(at) && at > now) deadline.add(key());
       } else if (resumeInFlight(run)) {
         inFlight.add(key());
@@ -4407,6 +4397,7 @@ export class RunManager {
   cancelAutoResume(runId: string): boolean {
     const run = this.store.getRun(runId);
     if (!run) return false;
+    // Any resume time, not `isUsageLimitHold`: a withdrawal also retires one a record kept by mistake.
     const pending = run.autoResumeAt !== undefined || this.autoResumeTimers.has(runId);
     this.withdrawAutoResume(runId, pending ? 'automatic resume cancelled for this task' : undefined);
     if (pending) {
@@ -4428,10 +4419,11 @@ export class RunManager {
     // A continuation's own status write retires the appointment of a run on hold
     // (hearsay-tools/cezarion#1236): clearing it first would show a waiting run with no
     // appointment, which reads as Needs you, for the moment between the two writes.
-    if (onUsageLimitHold(run)) {
+    if (isUsageLimitHold(run)) {
       if (run.autoResumeAttempts !== undefined) this.store.updateRun(runId, { autoResumeAttempts: undefined });
       return;
     }
+    // Any resume time, not `isUsageLimitHold`: it retires a stale one too.
     if (run.autoResumeAt !== undefined || run.autoResumeAttempts !== undefined) {
       this.store.updateRun(runId, { autoResumeAt: undefined, autoResumeAttempts: undefined });
     }
@@ -4550,7 +4542,7 @@ export class RunManager {
       // Stop on a failed run that held wait results discards them, and the automatic resume that
       // would start a session on it later; the run stays failed. A usage-limit hold is that failed
       // run waiting for its resume (hearsay-tools/cezarion#1236), and settles failed the same way.
-      if ((hadWaits || retiredRefusal) && (run?.status === 'failed' || onUsageLimitHold(run ?? {}))) {
+      if ((hadWaits || retiredRefusal) && (run?.status === 'failed' || isUsageLimitHold(run ?? {}))) {
         this.store.appendEvent(runId, { type: 'note', message: hadWaits ? WAITS_DISCARDED_NOTE : REFUSAL_DISCARDED_NOTE });
         this.cancelAutoResume(runId);
         this.store.flush();
@@ -5359,12 +5351,12 @@ export class RunManager {
     const ask = this.store.transcriptFacts(workerId).pendingAsk;
     if (!ask || ask.routedMessageId !== undefined || ask.fallback) return;
     const fallback = (reason: string) => { this.store.appendEvent(workerId, { type: 'worker-question-fallback', askSeq: ask.seq, reason }); };
-    const request = askRequestSchema.safeParse({ questions: ask.questions, ...(ask.context !== undefined ? { context: ask.context } : {}) });
-    if (!request.success) { fallback('the question cannot be carried to the parent'); return; }
+    const request = askRequestOf(ask);
+    if (!request) { fallback('the question cannot be carried to the parent'); return; }
     const parentId = worker.delegation.parentRunId;
     const root = this.store.getRun(parentId);
     const now = new Date().toISOString();
-    const message = questionMessage({ workerRunId: workerId, parentRunId: parentId, askSeq: ask.seq, request: request.data, now });
+    const message = questionMessage({ workerRunId: workerId, parentRunId: parentId, askSeq: ask.seq, request, now });
     // Already committed (a crash before the routing event): the question did reach the parent,
     // whatever its capacity or state is now. Record the routing; fallback sweeps follow.
     const committed = root?.delegation?.role === 'root' && !!root.delegation.conversation?.messages.some(m => m.id === message.id);
@@ -6821,7 +6813,7 @@ export class RunManager {
       }
     } catch (error) { if (error instanceof WorkerIdentityError) return { ok: false, error: error.message }; throw error; }
     if (run.delegation?.role === 'root' && this.isActive(runId)) return { ok: false, error: 'run is still active' };
-    if (run.status === 'waiting' && !onUsageLimitHold(run) && !hasRegisteredRunProcess(runId) && (run.delegation === undefined || run.delegation.role === 'root') && !this.isActive(runId) &&
+    if (run.status === 'waiting' && !isUsageLimitHold(run) && !hasRegisteredRunProcess(runId) && (run.delegation === undefined || run.delegation.role === 'root') && !this.isActive(runId) &&
       this.waitingBeforeFinalWorkflowStep(run) && (!run.workflowDef || this.waitingWorkflowStepIndex(run) < 0)) {
       return { ok: false, error: 'cannot continue a waiting run before its final workflow step' };
     }
@@ -6844,7 +6836,7 @@ export class RunManager {
     const disconnectedCiWait = !!run.waits?.length && !this.isActive(runId) && !hasRegisteredRunProcess(runId);
     // `review` is continuable too — that's the "Send back" path (spec 009).
     // A run on a usage-limit hold continues as the failed run it was (hearsay-tools/cezarion#1236).
-    if (!disconnectedCiWait && !['done', 'failed', 'cancelled', 'review'].includes(run.status) && !onUsageLimitHold(run) && !(pendingHumanAsk && run.status === 'waiting') &&
+    if (!disconnectedCiWait && !['done', 'failed', 'cancelled', 'review'].includes(run.status) && !isUsageLimitHold(run) && !(pendingHumanAsk && run.status === 'waiting') &&
       !(run.status === 'waiting' && !this.isActive(runId) && ((!hasRegisteredRunProcess(runId) &&
         (run.delegation === undefined || run.delegation.role === 'root')) ||
         (deferForCapacity && run.delegation?.role === 'worker' && (!!run.waits?.length || this.ciWorkflowResumeStepIndex(run) >= 0))))) {
@@ -6972,7 +6964,7 @@ export class RunManager {
     // joins the line as a wake instead of starting at once: another run's known deadline on the
     // same account still holds it (hearsay-tools/cezarion#1236). It stays the human's own
     // continuation in every other way. `fireAutoResume` always defers, so this is never the resume.
-    const toLine = deferForCapacity || onUsageLimitHold(run);
+    const toLine = deferForCapacity || isUsageLimitHold(run);
     // A continuation bound for the line reserves its worker execution unadmitted, so the pump can
     // admit it when it leaves; an admitted one with no session is refused by `canLeaveLine`.
     try { this.beginWorkerExecution(runId, !toLine); }
@@ -7507,14 +7499,12 @@ export class RunManager {
     // Rebuilding with the bare DEFAULT_ALLOWED_TOOLS silently revoked every per-step grant
     // (MCP servers, subagents) on Continue, restart recovery and the usage-limit auto-resume
     // — and dropping `bashAllowlist` WIDENED Bash from an allowlist to unrestricted
-    // (`AgentRunSpec.allowedTools`, #430). Record steps share ids with `workflowDef.steps`;
+    // (`AgentRunSpec.toolGrant`, #430). Record steps share ids with `workflowDef.steps`;
     // a synthetic `continue-N` owner and a fresh-session continuation (backend switch — no
     // owning session) both extend the run's tail, so they resolve from the definition's last
     // agent step. A legacy record without `workflowDef` (#367), or a session no step owns,
     // keeps today's defaults.
-    const grants = stepIdentity?.grants ?? {
-      allowedTools: allowedToolsForStep(toolsStep, backend), bashAllowlist: toolsStep?.bashAllowlist,
-    };
+    const toolGrant = stepToolGrant(stepIdentity?.grants, toolsStep, backend);
     const model = await this.continuationModel(runId, state, record, toolsStep, stepIdentity, backend);
     if (typeof model === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, model); return undefined; }
     const effort = this.continuationEffort(record, toolsStep, stepIdentity);
@@ -7529,7 +7519,7 @@ export class RunManager {
     });
     if (typeof profile === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, profile); return undefined; }
     return {
-      owningStep, toolsStep, grants, backendModel: model.backendModel, effort: effort.effort, profile,
+      owningStep, toolsStep, toolGrant, backendModel: model.backendModel, effort: effort.effort, profile,
       extraSystemPrompt: record?.systemPrompt,
     };
   }
@@ -7628,7 +7618,7 @@ export class RunManager {
     this.store.updateStep(runId, stepId, { profileId: settings.profile.profileId });
     state.delegationSettings = { cwd: state.cwd, runner: backend, model: settings.backendModel,
       effort: settings.effort, agentProfile: settings.profile.profileId, accountBinding: settings.profile.accountBinding,
-      systemPrompt: settings.extraSystemPrompt, allowedTools: settings.grants.allowedTools, bashAllowlist: settings.grants.bashAllowlist };
+      systemPrompt: settings.extraSystemPrompt, ...toolGrantLists(settings.toolGrant) };
   }
 
   /** The Continue's runner, and whether it resumes into a thread that already holds the skill
@@ -7787,8 +7777,7 @@ export class RunManager {
             : resumed.userPrompt,
           ...(opening.openingImages.length ? { images: opening.openingImages } : {}),
           cwd: state.cwd,
-          allowedTools: settings.grants.allowedTools,
-          bashAllowlist: settings.grants.bashAllowlist,
+          toolGrant: settings.toolGrant,
           additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), settings.profile.env),
           env: { ...settings.profile.env, ...delegation?.env, ...ciTools?.env },
           ...(ciTools ? { cezarTools: ciTools.descriptor } : {}),
@@ -7903,7 +7892,6 @@ export class RunManager {
     }
     this.store.updateStep(runId, stepId, { status: 'failed', error: WAKE_SESSION_CLOSED_ERROR, finishedAt: new Date().toISOString() });
     this.store.appendEvent(runId, { type: 'step-end', stepId, status: 'failed' });
-    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
     this.store.updateRun(runId, { status: 'failed', error: `continue failed: ${WAKE_SESSION_CLOSED_ERROR}`, finishedAt: new Date().toISOString(), currentStepId: undefined });
     this.store.appendEvent(runId, { type: 'lifecycle', message: `continue failed — ${WAKE_SESSION_CLOSED_ERROR}` });
     this.store.appendEvent(runId, { type: 'note', message: WAKE_DELIVERY_CAP_NOTE });
@@ -7914,7 +7902,6 @@ export class RunManager {
     this.store.updateStep(runId, stepId, { status: 'cancelled', finishedAt: new Date().toISOString() });
     this.store.updateRun(runId, { status: 'cancelled', finishedAt: new Date().toISOString(), currentStepId: undefined });
     this.store.appendEvent(runId, { type: 'lifecycle', message: 'run cancelled' });
-    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=cancelled`);
   }
 
   /** The Continue's step is done: settle the run, or the workflow step it resumed. Returns the
@@ -7969,7 +7956,6 @@ export class RunManager {
       // The workflow remainder is a crash boundary. Persist it before the
       // finally block awaits worktree autosave and installs its in-memory job.
       this.store.flush();
-      appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — remaining workflow queued`);
       return undefined;
     }
     this.store.updateRun(runId, { workflowResumeStepId: undefined });
@@ -7979,7 +7965,6 @@ export class RunManager {
   /** Settle the run after a successful Continue. */
   private async succeedContinuation(runId: string, stepId: string): Promise<void> {
     await this.settleSuccess(runId);
-    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=done`);
   }
 
   /** The Continue's session failed, or its settlement threw: fail its step, then park the run
@@ -7996,7 +7981,6 @@ export class RunManager {
     const message = turn.sessionError ?? state.agentInputError ?? (err instanceof Error ? err.message : String(err));
     sink.sessionEnded('error', message);
     this.store.updateStep(runId, stepId, { status: 'failed', error: message, finishedAt: new Date().toISOString() });
-    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=failed`);
     this.withdrawCezarHumanWaits(runId);
     const delivery = this.holdsClosingWakes(runId) && !state.cancelled ? this.failedWakeDelivery(runId, message) : 'settle';
     if (delivery === 'park') {
@@ -8725,14 +8709,12 @@ export class RunManager {
     if (state.cancelled || (beforeSpawn && this.executionBlockedByRootFinish(beforeSpawn))) return null;
     this.store.updateStep(runId, step.id, { profileId: stepProfile.profileId });
 
-    const grants = stepIdentity?.grants ?? {
-      allowedTools: allowedToolsForStep(step, stepBackend), bashAllowlist: step.bashAllowlist,
-    };
+    const toolGrant = stepToolGrant(stepIdentity?.grants, step, stepBackend);
     // Workers inherit only the extra prompt, never the parent's selected skill (#778).
     state.delegationSettings = { cwd: state.cwd, runner: stepBackend, model: model.backendModel,
       effort: model.effectiveEffort,
       agentProfile: stepProfile.profileId, accountBinding: stepProfile.accountBinding, systemPrompt: extraSystemPrompt,
-      allowedTools: grants.allowedTools, bashAllowlist: grants.bashAllowlist };
+      ...toolGrantLists(toolGrant) };
     const runner = createRunner(stepBackend);
     state.agentSessionError = undefined;
     state.currentStepId = step.id;
@@ -8753,7 +8735,7 @@ export class RunManager {
     const launchOpening = this.launchOpening(runId, state, step.id, { body: opening.userPrompt, ciTools });
     const session = this.startStepSession(runId, state, runner, {
       step, sessionId, images, opening: launchOpening, skillPrompt: opening.skillPrompt, extraSystemPrompt,
-      grants, profile: stepProfile, model, delegation, webhooksPart, ciTools,
+      toolGrant, profile: stepProfile, model, delegation, webhooksPart, ciTools,
     }, onEvent, turn, sink);
     if (typeof session === 'string') return session;
     return this.awaitStepSession(runId, state, session, { stepId: step.id, nextStep, sink, turn, startTokens, delegation, ciTools });
@@ -8983,8 +8965,7 @@ export class RunManager {
           userPrompt: launch.opening.userPrompt,
           images: launch.images,
           cwd: state.cwd,
-          allowedTools: launch.grants.allowedTools,
-          bashAllowlist: launch.grants.bashAllowlist,
+          toolGrant: launch.toolGrant,
           // The handoff file lives outside the worktree — grant access.
           additionalDirectories: agentDirectories(join(this.dataDir, 'runs'), profile.env),
           env: { ...profile.env, ...delegation?.env, ...ciTools?.env },
@@ -9332,11 +9313,11 @@ export class RunManager {
       }
       return;
     }
-    if (event.type === 'ask.requested') {
+    const ask = askPayloadOf(event);
+    if (ask) {
       this.prepareHumanAsk(state);
       // A native ask is a human wait the user already sees (hearsay-tools/cezarion#1234).
-      const card = askRequestSchema.safeParse({ questions: event.questions });
-      const questions = card.success ? card.data.questions : undefined;
+      const questions = askRequestOf({ questions: ask.questions })?.questions;
       const wait = this.openHumanAlias(runId, state, 'native-ask', questions ? { questions } : undefined);
       if (wait) this.markHumanWaitSurfaced(runId, wait, questions ? { questions } : undefined);
       this.clearIdleTimer(state);
@@ -9776,7 +9757,6 @@ export class RunManager {
       if (step.status === 'running') this.store.updateStep(runId, step.id, { status: 'waiting' });
     }
     this.store.updateRun(runId, { status: 'waiting' });
-    appendHandoffHeartbeat(this.dataDir, runId, 'session idle-closed — status=waiting; Continue to resume');
     this.store.flush();
   }
 
@@ -9823,7 +9803,6 @@ export class RunManager {
     this.store.appendEvent(runId, { type: 'lifecycle', stepId, message: `step "${stepId}" ended without done — Continue to resume it` });
     if (run.delegation?.role === 'worker' && await this.settleIdleClosedWorker(runId, stepId)) return;
     this.store.updateRun(runId, { status: 'waiting' });
-    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" ended without done — status=waiting; Continue to resume`);
     this.store.flush();
   }
 
@@ -10058,9 +10037,9 @@ export class RunManager {
    * itself (`turn-end`, a fresh step or a Continue), an acknowledgement that lands after it
    * (`ack`), input readiness for a refused autonomous nudge (`ready`), and the completion gate's
    * refusal of a live session's done outside a turn end (`gate`). It takes a done to the completion
-   * gate, gathers the facts, lets the pure rule (`decideTurnEnd`) decide, carries out the decision
-   * and writes the heartbeat line. False when nothing was settled: the done closed the session, or
-   * the input checkpoint failed.
+   * gate, gathers the facts, lets the pure rule (`decideTurnEnd`) decide and carries out the
+   * decision. False when nothing was settled: the done closed the session, or the input checkpoint
+   * failed.
    */
   private settleTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn,
     refusal?: CompletionRefusal): boolean {
@@ -10084,7 +10063,7 @@ export class RunManager {
     if (entry !== 'turn-end' && decision.kind === 'park' && this.waiting.has(runId)) return true;
     const outcome = this.carryOutTurnEnd(runId, state, stepId, decision, refused, noteRefusal);
     if (outcome.kind === 'done') return false;
-    this.writeTurnHeartbeat(runId, entry, outcome);
+    this.settledTurnOutcome(runId, entry, outcome);
     return true;
   }
 
@@ -10096,7 +10075,7 @@ export class RunManager {
       this.clearHeldHumanInputTimer(state);
       if (state.agentInputError) return false;
     }
-    this.writeTurnHeartbeat(runId, entry, { kind: 'park', keepsSlot: this.monitoring.has(runId) });
+    this.settledTurnOutcome(runId, entry, { kind: 'park', keepsSlot: this.monitoring.has(runId) });
     return true;
   }
 
@@ -10106,7 +10085,7 @@ export class RunManager {
     this.recordDoneAtBoundary(state, false, turn.doneRequest);
     this.clearHeldHumanInputTimer(state);
     if (state.agentInputError) return false;
-    this.writeTurnHeartbeat(runId, entry, { kind: 'nudge', cause: 'no-wait', autonomous: true });
+    this.settledTurnOutcome(runId, entry, { kind: 'nudge', cause: 'no-wait', autonomous: true });
     return true;
   }
 
@@ -10303,13 +10282,12 @@ export class RunManager {
     return this.parkedOutcome(runId);
   }
 
-  /** `turn complete — status=<word>` (spec 007): the handoff stays current when the agent writes
-   *  nothing. The completion gate's refusal outside a turn end writes none, and input readiness
-   *  writes none while the nudge still waits for it. */
-  private writeTurnHeartbeat(runId: string, entry: 'turn-end' | 'ack' | 'ready' | 'gate', outcome: TurnEndOutcome): void {
-    const word = turnEndHeartbeat(outcome);
-    if (!word || entry === 'gate' || (entry === 'ready' && outcome.kind === 'readiness')) return;
-    appendHandoffHeartbeat(this.dataDir, runId, `turn complete — status=${word}`);
+  /** The outcome a settled turn reached, for the parity cells that prove which path ran
+   *  (hearsay-tools/cezarion#1809, which removed the handoff heartbeat line that recorded it). No
+   *  outcome for the completion gate's refusal outside a turn end, nor while input readiness waits. */
+  private settledTurnOutcome(runId: string, entry: 'turn-end' | 'ack' | 'ready' | 'gate' | 'reply-timer',
+    outcome: TurnEndOutcome): TurnEndOutcome | undefined {
+    return entry === 'gate' || (entry === 'ready' && outcome.kind === 'readiness') ? undefined : outcome;
   }
 
   /** The nudge a turn end with no wait or done gets: one automatic turn, charged to the
@@ -10368,7 +10346,7 @@ export class RunManager {
   /** The worker's pending question is the one `askParentForWorker` raised. */
   private isWorkerFallbackAsk(runId: string, askSeq: number): boolean {
     const ask = this.store.transcriptFacts(runId).pendingAsk;
-    const questions = ask?.seq === askSeq ? askRequestSchema.safeParse({ questions: ask.questions }).data?.questions : undefined;
+    const questions = ask?.seq === askSeq ? askRequestOf({ questions: ask.questions })?.questions : undefined;
     return questions?.length === 1 && questions[0]!.header === WORKER_FALLBACK_HEADER && questions[0]!.question === WORKER_FALLBACK_QUESTION(runId);
   }
 
@@ -10471,7 +10449,7 @@ export class RunManager {
       state.noWaitNudgeParked = session;
       // The note names the nudge left unanswered (hearsay-tools/cezarion#1301).
       this.openTurnEndHumanWait(runId, state, state.currentStepId, 'no-wait', state.completionNudged === session ? COMPLETION_NO_REPLY_NOTE : NO_WAIT_NO_REPLY_NOTE);
-      appendHandoffHeartbeat(this.dataDir, runId, 'turn complete — status=waiting');
+      this.settledTurnOutcome(runId, 'reply-timer', { kind: 'park', keepsSlot: false });
     }, this.noWaitNudgeReplyMs);
     timer.unref?.();
     state.noWaitNudgeReplyTimer = timer;
@@ -10584,8 +10562,8 @@ export class RunManager {
 
   /** Keep a separate maintenance hold until autosave proves all its processes exited.
    *  Commits only while HEAD is the run's recorded branch (hearsay-tools/cezarion#1004), and
-   *  reports a commit or a skip in the handoff's `## Autosave (cezar)` section and as a note;
-   *  a periodic save reports only a commit, in the handoff alone, coalesced with the
+   *  records a commit or a skip in the run store, shown in the handoff's records block, and as a
+   *  note; a periodic save records only a commit, with no note, merged with the
    *  periodic commits right before it. A run with no recorded branch keeps committing on
    *  whatever HEAD is. */
   private async saveWorktree(runId: string, state: ActiveRun, reason: AutosaveReason): Promise<void> {
@@ -10637,12 +10615,12 @@ export class RunManager {
         // periodic commits and no note, as a note every 90 s would flood the timeline. A
         // periodic skip stays silent; the closing flush reports one with the final count.
         if (outcome.result === 'committed') {
-          try { recordHandoffPeriodicAutosave(this.dataDir, runId, outcome); } catch { /* The handoff is a journal, never a reason to fail. */ }
+          recordHandoffPeriodicAutosave(this.store, this.dataDir, runId, outcome);
         }
       } else if (outcome) {
         const message = autosaveReportLine(reason, outcome, taskBranch);
         note(message);
-        try { appendHandoffAutosaveReport(this.dataDir, runId, message); } catch { /* The handoff is a journal, never a reason to fail. */ }
+        recordHandoffAutosave(this.store, this.dataDir, runId, message);
       }
     }, error => note(`${reason} autosave failed: ${String(error)}; working files remain in ${state.cwd}`)).finally(() => {
       if (this.autosaveTasks.get(runId) === entry) this.autosaveTasks.delete(runId);
@@ -10753,7 +10731,6 @@ export class RunManager {
     });
     const endNote = worktreeSetupEndNote(outcome);
     emit({ type: 'note', message: endNote });
-    appendHandoffHeartbeat(this.dataDir, runId, endNote);
     return worktreeSetupAgentNote(outcome);
   }
 
@@ -10791,7 +10768,6 @@ export class RunManager {
       finishedAt: new Date().toISOString(),
     });
     emit({ type: 'step-end', stepId, status, ...(error ? { error } : {}) });
-    appendHandoffHeartbeat(this.dataDir, runId, `step "${stepId}" complete — status=${status}`);
   }
 }
 

@@ -1,3 +1,4 @@
+import type { ToolKind } from '@open-mercato/cezar-contract/tool-display';
 /**
  * Additive normalized item-lifecycle vocabulary emitted alongside v1 AgentEvent. Keep old and
  * mixed recordings readable. Pure vocabulary with no runtime runner coupling; mirrored in the
@@ -26,18 +27,7 @@ export type ToolStatus = 'pending' | 'running' | 'completed' | 'failed' | 'decli
  * Icon/verb hint for a tool item — a superset of ACP's ToolKind.
  * `task` = subagent spawn (claude Task / opencode subtask / codex review).
  */
-export type ToolKind =
-  | 'read'
-  | 'edit'
-  | 'delete'
-  | 'move'
-  | 'search'
-  | 'execute'
-  | 'think'
-  | 'fetch'
-  | 'task'
-  | 'plan'
-  | 'other';
+export type { ToolKind } from '@open-mercato/cezar-contract/tool-display';
 
 /**
  * Why a turn (or the session) stopped.

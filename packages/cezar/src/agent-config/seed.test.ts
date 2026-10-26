@@ -1,8 +1,10 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, win32 } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { WriteBoundary } from '../worktree-manifest.ts';
+import { readManifest, uncoveredPaths } from '../worktree-manifest.testkit.ts';
 import { isPreserved, seedAgentConfigLocalLayer } from './seed.ts';
 
 let repo: string;
@@ -112,6 +114,119 @@ describe('seedAgentConfigLocalLayer', () => {
       const exclude = readFileSync(join(repo, '.git', 'info', 'exclude'), 'utf8');
       const hits = exclude.split('\n').filter((l) => l.trim() === '.claude/settings.local.json').length;
       expect(hits).toBe(1);
+    } finally {
+      git(repo, 'worktree', 'remove', '--force', wt);
+    }
+  });
+
+  // hearsay-tools/cezarion#1814: the seed writes only where nothing is, or cezar's unchanged copy.
+  const settings = (root: string) => join(root, '.claude', 'settings.local.json');
+  const seedSettings = (text: string) => {
+    mkdirSync(join(repo, '.claude'), { recursive: true });
+    writeFileSync(settings(repo), text);
+  };
+
+  it('keeps a seeded file the agent changed, and refreshes an unchanged one', async () => {
+    seedSettings('{"v":1}');
+    writeFileSync(join(repo, 'CLAUDE.local.md'), 'memory v1');
+    const wt = makeWorktree();
+    try {
+      await seedAgentConfigLocalLayer(repo, wt, env);
+      writeFileSync(settings(wt), '{"agent":true}');
+      seedSettings('{"v":2}');
+      writeFileSync(join(repo, 'CLAUDE.local.md'), 'memory v2');
+      const seeded = await seedAgentConfigLocalLayer(repo, wt, env);
+      expect(readFileSync(settings(wt), 'utf8')).toBe('{"agent":true}');
+      expect(readFileSync(join(wt, 'CLAUDE.local.md'), 'utf8')).toBe('memory v2');
+      expect(seeded).toEqual(['CLAUDE.local.md']);
+      await seedAgentConfigLocalLayer(repo, wt, env);
+      expect(readFileSync(settings(wt), 'utf8')).toBe('{"agent":true}');
+      expect(await uncoveredPaths(wt, ['.claude/settings.local.json'])).toEqual([]);
+    } finally {
+      git(repo, 'worktree', 'remove', '--force', wt);
+    }
+  });
+
+  it.skipIf(process.platform === 'win32')('leaves an unchanged executable seeded file as it is on the next pass', async () => {
+    seedSettings('{"v":1}');
+    chmodSync(settings(repo), 0o755);
+    const wt = makeWorktree();
+    try {
+      await seedAgentConfigLocalLayer(repo, wt, env);
+      const first = statSync(settings(wt));
+      expect(first.mode & 0o111).not.toBe(0);
+      expect(await seedAgentConfigLocalLayer(repo, wt, env)).toEqual(['.claude/settings.local.json']);
+      expect(statSync(settings(wt)).ino).toBe(first.ino);
+    } finally {
+      git(repo, 'worktree', 'remove', '--force', wt);
+    }
+  });
+
+  it('keeps a file already in the worktree that cezar has no record of', async () => {
+    seedSettings('{"main":true}');
+    const wt = makeWorktree();
+    try {
+      mkdirSync(join(wt, '.claude'), { recursive: true });
+      writeFileSync(settings(wt), '{"before":true}');
+      expect(await seedAgentConfigLocalLayer(repo, wt, env)).toEqual([]);
+      expect(readFileSync(settings(wt), 'utf8')).toBe('{"before":true}');
+      expect(await readManifest(wt)).toBeNull();
+    } finally {
+      git(repo, 'worktree', 'remove', '--force', wt);
+    }
+  });
+
+  it('writes nothing through an agent dir that leads out of the worktree', async () => {
+    seedSettings('{"main":true}');
+    const wt = makeWorktree();
+    const outside = mkdtempSync(join(tmpdir(), 'cez-seed-outside-'));
+    try {
+      symlinkSync(outside, join(wt, '.claude'));
+      expect(await seedAgentConfigLocalLayer(repo, wt, env)).toEqual([]);
+      expect(existsSync(join(outside, 'settings.local.json'))).toBe(false);
+    } finally {
+      git(repo, 'worktree', 'remove', '--force', wt);
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  /** Ends the seed at `boundary` of the write to the settings file, as a crash would. */
+  const crashAt = (boundary: WriteBoundary, inspect: () => Promise<void>) => ({
+    faults: async (at: WriteBoundary, path: string) => {
+      if (path !== '.claude/settings.local.json') return;
+      // A file replaces a file in one rename: there is no step between clearing and placing.
+      expect(at).not.toBe('cleared');
+      if (at !== boundary) return;
+      await inspect();
+      throw new Error(`crash at ${boundary}`);
+    },
+  });
+
+  it.each([
+    ['pending', '{"v":1}'],
+    ['placed', '{"v":2}'],
+  ] as const)('a refresh that crashes at %s is finished by the next seed', async (boundary, onDisk) => {
+    seedSettings('{"v":1}');
+    const wt = makeWorktree();
+    try {
+      await seedAgentConfigLocalLayer(repo, wt, env);
+      seedSettings('{"v":2}');
+      let checked = false;
+      await seedAgentConfigLocalLayer(repo, wt, env, new Set(), crashAt(boundary, async () => {
+        // What the crash leaves committed: a pending entry naming both copies, and one of them on disk.
+        const entry = (await readManifest(wt))?.entries.find((candidate) => candidate.path === '.claude/settings.local.json');
+        expect(entry).toMatchObject({ writer: 'seed', kind: 'pending' });
+        expect(entry?.alternate).toBeDefined();
+        expect(readFileSync(settings(wt), 'utf8')).toBe(onDisk);
+        checked = true;
+      }));
+      expect(checked).toBe(true);
+      expect(await seedAgentConfigLocalLayer(repo, wt, env)).toEqual(['.claude/settings.local.json']);
+      expect(readFileSync(settings(wt), 'utf8')).toBe('{"v":2}');
+      const entry = (await readManifest(wt))?.entries.find((candidate) => candidate.path === '.claude/settings.local.json');
+      expect(entry).toMatchObject({ writer: 'seed', kind: 'file', source: expect.any(String) });
+      expect(entry?.alternate).toBeUndefined();
+      expect(await uncoveredPaths(wt)).toEqual([]);
     } finally {
       git(repo, 'worktree', 'remove', '--force', wt);
     }

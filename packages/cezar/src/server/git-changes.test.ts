@@ -1,3 +1,4 @@
+import { imageMimeType, isOsOpenableImage } from '@open-mercato/cezar-contract/image-path';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -13,8 +14,6 @@ import {
   collectRunCommits,
   commitAll,
   createOrSwitchBranch,
-  imageMimeType,
-  isOsOpenableImage,
   patchByPath,
   pushCurrentBranch,
   readWorktreePath,

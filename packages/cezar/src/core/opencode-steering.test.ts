@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { AgentEvent, SessionOptions } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
 import { OpencodeServerRunner } from './opencode-server-runner.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const mockBin = fileURLToPath(new URL('../../scripts/mock-opencode-serve.mjs', import.meta.url));
 const waitUntil = async (cond: () => boolean) => {
@@ -18,7 +19,7 @@ const start = (prompt: string, opts: SessionOptions = {}, env: Record<string, st
   const dir = mkdtempSync(join(tmpdir(), 'cez-opencode-steer-')); dirs.push(dir);
   const events: AgentEvent[] = []; const ui: UiEvent[] = [];
   const session = new OpencodeServerRunner({ bin: mockBin, timeoutMs: 0 }).startSession(
-    { userPrompt: prompt, cwd: dir, env }, event => events.push(event), { ...opts, onUiEvent: event => { ui.push(event); opts.onUiEvent?.(event); } });
+    { toolGrant: UNSET_TOOL_GRANT, userPrompt: prompt, cwd: dir, env }, event => events.push(event), { ...opts, onUiEvent: event => { ui.push(event); opts.onUiEvent?.(event); } });
   return { session, events, ui };
 };
 

@@ -797,7 +797,8 @@ Calls made while building 2b (hearsay-tools/cezarion#1234), within "Left to the 
 - **The compare column keeps the agent's summary.** The nudge's extra turn writes another
   `turn complete — …` heartbeat at the top of the Progress log. The variants compare column reads
   the log's first lines, so `handoffProgressExcerpt` now shows the agent's own lines and falls back
-  to the lifecycle heartbeats only when the agent wrote none.
+  to the lifecycle heartbeats only when the agent wrote none. (Since hearsay-tools/cezarion#1809
+  cezar writes no heartbeat, and the Tasks-row preview shows only the agent's lines.)
 
 ### Transitions out (phase 2b)
 

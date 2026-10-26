@@ -7,6 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ClaudeCliRunner } from './claude-cli-runner.ts';
 import type { AgentEvent, AgentSession } from './agent-runner.ts';
 import type { UiEvent } from './ui-events.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const bin = fileURLToPath(new URL('../../scripts/mock-claude.mjs', import.meta.url));
 const refusal = "There's an issue with the selected model (claude-test-model). It may not exist or you may not have access to it. Run --model to pick a different model.";
@@ -27,7 +28,7 @@ async function fixture(check: (ctx: {
   const cwd = mkdtempSync(join(tmpdir(), 'cez-refusal-'));
   const events: AgentEvent[] = [], ui: UiEvent[] = [], consumed: string[] = [];
   const trace = join(cwd, 'stdin.jsonl');
-  const session = new ClaudeCliRunner({ bin }).startSession({
+  const session = new ClaudeCliRunner({ bin }).startSession({ toolGrant: UNSET_TOOL_GRANT,
     userPrompt: `mock:model-refusal:${seed ? 'seed' : 'always'}`, cwd, timeoutMs, sessionId: 'model-refusal-session', resume: !seed,
     env: { CEZ_HANDOFF_FILE: '', CEZ_TODOS_FILE: '', CEZ_MOCK_STDIN_FILE: trace },
   }, e => events.push(e), { autoEndAfterFirstTurn: autoEnd, onUiEvent: e => ui.push(e), onAgentInputConsumed: ids => consumed.push(...ids) });

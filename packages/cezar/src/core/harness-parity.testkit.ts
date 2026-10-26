@@ -40,6 +40,7 @@ import { planOwnedWorkspace } from '../delegation/workspace.ts';
 import { workerWorkflowHash, type WorkerExecutionIdentity } from '../delegation/execution-identity.ts';
 import { stepKind, type WorkflowDef } from '../workflows/types.ts';
 import { readPersistedRuns, seedRuns } from '../runs/run-store.testkit.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -1063,6 +1064,7 @@ export async function driveSeam(
       {
         userPrompt: promptFor(backend, scenario),
         cwd,
+        toolGrant: UNSET_TOOL_GRANT,
         timeoutMs: opts.timeoutMs ?? 30_000,
         // RunManager always pins one (`workflows/run.ts:2909`), and claude
         // resumes off exactly this value, so a row that omitted it would test

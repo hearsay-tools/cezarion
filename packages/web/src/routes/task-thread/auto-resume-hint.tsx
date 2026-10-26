@@ -4,6 +4,7 @@ import { Link as GlobalLink } from 'react-router'
 import { cancelAutoResume } from '@/api/client'
 import { queryKeys } from '@/api/queries'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
+import { isUsageLimitHold } from '@open-mercato/cezar-api-client/contract/waits'
 import { StatusDot } from '@/components/status-dot'
 import { toast } from '@/components/ui/toaster'
 
@@ -47,7 +48,7 @@ export function AutoResumeHint({ run }: { run: ApiRun }) {
     onError: (error: Error) => toast(error.message, { tone: 'danger' }),
   })
 
-  if (run.status !== 'waiting' || !run.autoResumeAt) return null
+  if (!isUsageLimitHold(run)) return null
   const at = new Date(run.autoResumeAt)
   if (!Number.isFinite(at.getTime())) return null
   const label = new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'long' }).format(at)

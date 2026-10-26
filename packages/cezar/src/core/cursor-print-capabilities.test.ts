@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { inspectCursorPrintCapabilities } from './cursor-print-capabilities.ts';
 import { cursorArgs, resetCursorAutoUpdateFlagCache } from './cursor-cli-flags.ts';
 import { CORE_CURSOR_PRINT_TOOLS, SAFE_CURSOR_PRINT_TOOLS, NATIVE_CURSOR_DELEGATION_TOOLS } from './cursor-print-tool-catalog.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -29,7 +30,7 @@ function bin(version: string, catalog?: string, fail = false, rejectFlag = false
 }
 const argv = (log: string): string[][] => readFileSync(log, 'utf8').trim().split('\n').map(line => JSON.parse(line) as string[]);
 
-const spec = { cwd: '/tmp', userPrompt: 'hello' };
+const spec = { cwd: '/tmp', userPrompt: 'hello', toolGrant: UNSET_TOOL_GRANT };
 describe('Cursor print capability preflight', () => {
   it('accepts the originally qualified build and allows its whole safe catalog', async () => {
     await expect(inspectCursorPrintCapabilities(bin('2026.10.01-e373342').path, spec))

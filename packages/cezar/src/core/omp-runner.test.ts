@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { parse as parseYaml } from 'yaml';
+import { explicitToolGrant, UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 // Pass-through: every test spawns the real child; a test that needs the child's own streams
 // (to fail one) reads it from here.
@@ -32,12 +33,12 @@ import { readPids } from '../pid-file.testkit.js';
 
 /** The OMP (Oh My Pi) runner (#595): argv, tool mapping, and the persistent RPC session. */
 
-const base: AgentRunSpec = { cwd: '/repo', userPrompt: 'task', allowedTools: DEFAULT_ALLOWED_TOOLS };
+const base: AgentRunSpec = { cwd: '/repo', userPrompt: 'task', toolGrant: explicitToolGrant(DEFAULT_ALLOWED_TOOLS) };
 const ciServer = { name: 'cezar', command: process.execPath, args: ['ci-wait.mjs'] };
 
 describe('ompTools', () => {
   it('zero-config step tools map to code tools', () => {
-    expect(ompTools(allowedToolsForStep(undefined, 'omp'), {}).tools).toEqual([
+    expect(ompTools({ kind: 'step-default', tools: allowedToolsForStep(undefined, 'omp') }, {}).tools).toEqual([
       'read', 'edit', 'write', 'grep', 'glob', 'bash', 'todo', 'lsp', 'ast_edit', 'task', 'wait',
     ]);
   });
@@ -53,96 +54,96 @@ describe('ompTools', () => {
     ['mcp__srv_tool', 'mcp__srv_tool'],
     ['mcp__srv__', 'mcp__srv__'],
   ])('translates the Claude MCP spelling %s to %s', (name, expected) => {
-    expect(ompTools([name], {}).tools).toEqual([expected]);
+    expect(ompTools(explicitToolGrant([name]), {}).tools).toEqual([expected]);
   });
 
   it('collapses a Claude and an OMP spelling of one MCP tool into one name', () => {
-    expect(ompTools(['mcp__github__create_issue', 'mcp__github_create_issue'], {}).tools).toEqual(['mcp__github_create_issue']);
+    expect(ompTools(explicitToolGrant(['mcp__github__create_issue', 'mcp__github_create_issue']), {}).tools).toEqual(['mcp__github_create_issue']);
   });
 
   it('maps cezar names, keeps OMP built-ins and mcp__ names, drops the rest', () => {
-    expect(ompTools(['Subagent', 'TodoWrite', 'WebFetch', 'lsp', 'mcp__srv_tool', 'NotebookEdit'], {})).toEqual({
+    expect(ompTools(explicitToolGrant(['Subagent', 'TodoWrite', 'WebFetch', 'lsp', 'mcp__srv_tool', 'NotebookEdit']), {})).toEqual({
       flag: 'tools',
       tools: ['task', 'todo', 'lsp', 'mcp__srv_tool'],
       dropped: ['WebFetch', 'NotebookEdit'],
     });
-    expect(ompTools(['Read', 'Edit', 'Write', 'Bash', 'Grep', 'Glob', 'Task', 'WebSearch'], {}).tools).toEqual([
+    expect(ompTools(explicitToolGrant(['Read', 'Edit', 'Write', 'Bash', 'Grep', 'Glob', 'Task', 'WebSearch']), {}).tools).toEqual([
       'read', 'edit', 'write', 'bash', 'grep', 'glob', 'task', 'web_search',
     ]);
   });
 
   it('WebFetch alone fails closed: OMP read would widen a web grant to local files', () => {
-    expect(ompTools(['WebFetch'], {})).toEqual({ flag: 'no-tools', tools: [], dropped: ['WebFetch'] });
+    expect(ompTools(explicitToolGrant(['WebFetch']), {})).toEqual({ flag: 'no-tools', tools: [], dropped: ['WebFetch'] });
   });
 
   it('a bashAllowlist with no allowedTools names the default set without bash', () => {
-    const selection = ompTools(undefined, { bashAllowlist: ['git status'] });
+    const selection = ompTools({ kind: 'unset', bashAllowlist: ['git status'] }, {});
     expect(selection.flag).toBe('tools');
     expect(selection.tools).not.toContain('bash');
     expect(selection.tools).toEqual(expect.arrayContaining(['read', 'edit', 'write', 'grep', 'glob']));
   });
 
   it('dedupes and never passes a name OMP would reject at startup', () => {
-    const selection = ompTools(['Read', 'read', 'WebFetch', 'Lsp', 'fetch', 'goal', 'SubagentWait'], {});
+    const selection = ompTools(explicitToolGrant(['Read', 'read', 'WebFetch', 'Lsp', 'fetch', 'goal', 'SubagentWait']), {});
     expect(selection).toEqual({ flag: 'tools', tools: ['read'], dropped: ['WebFetch', 'Lsp', 'fetch', 'goal', 'SubagentWait'] });
-    for (const tool of ompTools([...OMP_BUILTIN_TOOL_NAMES, 'Glob', 'TodoWrite'], {}).tools) {
+    for (const tool of ompTools(explicitToolGrant([...OMP_BUILTIN_TOOL_NAMES, 'Glob', 'TodoWrite']), {}).tools) {
       expect(OMP_BUILTIN_TOOL_NAMES).toContain(tool);
     }
   });
 
   it('never maps an inherited Object.prototype name', () => {
-    expect(ompTools(['constructor', 'toString', 'valueOf', 'Read'], {})).toEqual({
+    expect(ompTools(explicitToolGrant(['constructor', 'toString', 'valueOf', 'Read']), {})).toEqual({
       flag: 'tools',
       tools: ['read'],
       dropped: ['constructor', 'toString', 'valueOf'],
     });
-    expect(ompTools(['constructor'], {})).toEqual({ flag: 'no-tools', tools: [], dropped: ['constructor'] });
+    expect(ompTools(explicitToolGrant(['constructor']), {})).toEqual({ flag: 'no-tools', tools: [], dropped: ['constructor'] });
   });
 
   it('exclude only removes names, and an empty remainder is --no-tools (Ruling 13)', () => {
-    expect(ompTools(['Read', 'TodoWrite', 'lsp'], { exclude: ['todo', 'lsp'] })).toMatchObject({ flag: 'tools', tools: ['read'] });
-    expect(ompTools(['TodoWrite'], { exclude: ['todo'] })).toMatchObject({ flag: 'no-tools', tools: [] });
-    expect(ompTools(['Read'], { exclude: ['todo'] })).toMatchObject({ flag: 'tools', tools: ['read'] });
-    expect(ompTools(undefined, { exclude: ['todo'] })).toEqual({ flag: null, tools: [], dropped: [] });
+    expect(ompTools(explicitToolGrant(['Read', 'TodoWrite', 'lsp']), { exclude: ['todo', 'lsp'] })).toMatchObject({ flag: 'tools', tools: ['read'] });
+    expect(ompTools(explicitToolGrant(['TodoWrite']), { exclude: ['todo'] })).toMatchObject({ flag: 'no-tools', tools: [] });
+    expect(ompTools(explicitToolGrant(['Read']), { exclude: ['todo'] })).toMatchObject({ flag: 'tools', tools: ['read'] });
+    expect(ompTools(UNSET_TOOL_GRANT, { exclude: ['todo'] })).toEqual({ flag: null, tools: [], dropped: [] });
   });
 
   it('exclude narrows before the cezar tools are appended, so it never turns --no-tools into a CI-only list', () => {
-    expect(ompTools(['TodoWrite'], { cezarTools: true, exclude: ['todo'] })).toEqual({ flag: 'no-tools', tools: [], dropped: [] });
-    expect(ompTools(['Read', 'TodoWrite'], { cezarTools: true, exclude: ['todo'] }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+    expect(ompTools(explicitToolGrant(['TodoWrite']), { cezarTools: true, exclude: ['todo'] })).toEqual({ flag: 'no-tools', tools: [], dropped: [] });
+    expect(ompTools(explicitToolGrant(['Read', 'TodoWrite']), { cezarTools: true, exclude: ['todo'] }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
   });
 
   it('undefined passes no flag, [] passes --no-tools, all-dropped passes --no-tools', () => {
-    expect(ompTools(undefined, {}).flag).toBeNull();
-    expect(ompTools([], {}).flag).toBe('no-tools');
-    expect(ompTools(['NotebookEdit'], {})).toMatchObject({ flag: 'no-tools', dropped: ['NotebookEdit'] });
+    expect(ompTools(UNSET_TOOL_GRANT, {}).flag).toBeNull();
+    expect(ompTools(explicitToolGrant([]), {}).flag).toBe('no-tools');
+    expect(ompTools(explicitToolGrant(['NotebookEdit']), {})).toMatchObject({ flag: 'no-tools', dropped: ['NotebookEdit'] });
   });
 
   it('cezarTools admits the preview tools exactly when the extension registers it (CEZ_PREVIEW=1)', () => {
-    expect(ompTools(['Read'], { cezarTools: true, env: { CEZ_PREVIEW: '1' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_preview_serve', 'cezar_preview_stop']);
-    expect(ompTools(['Read'], { cezarTools: true, env: { CEZ_PREVIEW: '0' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
-    expect(ompTools(['Read'], { env: { CEZ_PREVIEW: '1' } }).tools).toEqual(['read']);
+    expect(ompTools(explicitToolGrant(['Read']), { cezarTools: true, env: { CEZ_PREVIEW: '1' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_preview_serve', 'cezar_preview_stop']);
+    expect(ompTools(explicitToolGrant(['Read']), { cezarTools: true, env: { CEZ_PREVIEW: '0' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+    expect(ompTools(explicitToolGrant(['Read']), { env: { CEZ_PREVIEW: '1' } }).tools).toEqual(['read']);
   });
 
   // hearsay-tools/cezarion#1465: the schedule tools ride the automations opt-in the same way.
   it('cezarTools admits the schedule tools exactly when the extension registers them (CEZ_AUTOMATIONS=1)', () => {
-    expect(ompTools(['Read'], { cezarTools: true, env: { CEZ_AUTOMATIONS: '1' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
-    expect(ompTools(['Read'], { cezarTools: true, env: { CEZ_AUTOMATIONS: '0' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+    expect(ompTools(explicitToolGrant(['Read']), { cezarTools: true, env: { CEZ_AUTOMATIONS: '1' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done', 'cezar_schedule_task', 'cezar_scheduled_tasks']);
+    expect(ompTools(explicitToolGrant(['Read']), { cezarTools: true, env: { CEZ_AUTOMATIONS: '0' } }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
   });
 
   it('bashAllowlist drops bash; D1 drops task, wait and eval; cezarTools appends the cezar tools', () => {
-    expect(ompTools(['Read', 'Bash'], { bashAllowlist: ['npm test'] }).tools).toEqual(['read']);
-    expect(ompTools(['Read', 'Bash'], { bashAllowlist: [] }).tools).toEqual(['read', 'bash']);
-    expect(ompTools(['Read', 'Subagent', 'wait', 'eval'], { restrictNativeDelegation: true }).tools).toEqual(['read']);
-    expect(ompTools(['Read'], { cezarTools: true }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
+    expect(ompTools(explicitToolGrant(['Read', 'Bash'], ['npm test']), {}).tools).toEqual(['read']);
+    expect(ompTools(explicitToolGrant(['Read', 'Bash'], []), {}).tools).toEqual(['read', 'bash']);
+    expect(ompTools(explicitToolGrant(['Read', 'Subagent', 'wait', 'eval']), { restrictNativeDelegation: true }).tools).toEqual(['read']);
+    expect(ompTools(explicitToolGrant(['Read']), { cezarTools: true }).tools).toEqual(['read', 'cezar_wait', 'cezar_ask', 'cezar_cancel_wait', 'cezar_done']);
   });
 
   it('fails closed when every granted tool is narrowed away, and adds no cezar tool to --no-tools', () => {
-    expect(ompTools(['Bash'], { bashAllowlist: ['npm test'], cezarTools: true })).toEqual({ flag: 'no-tools', tools: [], dropped: [] });
-    expect(ompTools(['Subagent'], { restrictNativeDelegation: true }).flag).toBe('no-tools');
+    expect(ompTools(explicitToolGrant(['Bash'], ['npm test']), { cezarTools: true })).toEqual({ flag: 'no-tools', tools: [], dropped: [] });
+    expect(ompTools(explicitToolGrant(['Subagent']), { restrictNativeDelegation: true }).flag).toBe('no-tools');
   });
 
   it('D1 without allowedTools names OMP’s default set minus the delegation tools', () => {
-    expect(ompTools(undefined, { restrictNativeDelegation: true })).toEqual({
+    expect(ompTools(UNSET_TOOL_GRANT, { restrictNativeDelegation: true })).toEqual({
       flag: 'tools',
       tools: ['read', 'bash', 'edit', 'glob', 'grep', 'todo', 'web_search', 'write'],
       dropped: [],
@@ -178,7 +179,7 @@ describe('buildOmpArgs', () => {
   });
 
   it('D1 adds --config omp-restrict-delegation.yml', () => {
-    const args = buildOmpArgs({ ...base, allowedTools: ['Read', 'Subagent'], restrictNativeDelegation: true });
+    const args = buildOmpArgs({ ...base, toolGrant: explicitToolGrant(['Read', 'Subagent']), restrictNativeDelegation: true });
     expect(args).toEqual(['--mode', 'rpc', '--config', expect.stringMatching(/scripts\/omp-restrict-delegation\.yml$/), '--tools', 'read']);
     const overlay = parseYaml(readFileSync(args[3]!, 'utf8')) as unknown;
     expect(overlay).toEqual({ tools: { approval: { task: 'deny' } } });
@@ -194,8 +195,8 @@ describe('buildOmpArgs', () => {
   });
 
   it('passes no tools flag without allowedTools, --no-tools for an empty grant, and no auto effort', () => {
-    expect(buildOmpArgs({ cwd: '/repo', userPrompt: 'task', effort: 'auto' })).toEqual(['--mode', 'rpc']);
-    expect(buildOmpArgs({ ...base, allowedTools: [] })).toEqual(['--mode', 'rpc', '--no-tools']);
+    expect(buildOmpArgs({ toolGrant: UNSET_TOOL_GRANT, cwd: '/repo', userPrompt: 'task', effort: 'auto' })).toEqual(['--mode', 'rpc']);
+    expect(buildOmpArgs({ ...base, toolGrant: explicitToolGrant([]) })).toEqual(['--mode', 'rpc', '--no-tools']);
   });
 });
 
@@ -214,7 +215,7 @@ describe('OMP_SPEC_SUPPORT', () => {
     });
     expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('eval') });
     // Ruling 14: D1 with no allowedTools names a list, so it never widens to OMP's defaults.
-    expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('allowedTools undefined') });
+    expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('with an unset grant') });
     expect(OMP_SPEC_SUPPORT.restrictNativeDelegation).toMatchObject({ via: expect.stringContaining('failing closed') });
   });
 });
@@ -262,7 +263,7 @@ describe('OmpRunner session over the mock', () => {
   const spec = (userPrompt: string, extra: Partial<AgentRunSpec> = {}): AgentRunSpec => ({
     cwd,
     userPrompt,
-    allowedTools: DEFAULT_ALLOWED_TOOLS,
+    toolGrant: explicitToolGrant(DEFAULT_ALLOWED_TOOLS),
     timeoutMs: 20_000,
     ...extra,
     env: {
@@ -722,7 +723,7 @@ process.exit(2);
   it('an unknown non-MCP --tools name stays fatal and surfaces OMP stderr in the thrown error', async () => {
     const events: AgentEvent[] = [];
     const bin = refusingBin('Error: Unknown tool in --tools: cezar_wait.\nBuilt-in tools: read.\n');
-    const failed = new OmpRunner({ bin }).run(spec('x', { allowedTools: ['Read'], cezarTools: { name: 'cezar', command: process.execPath, args: [] } }), event => events.push(event));
+    const failed = new OmpRunner({ bin }).run(spec('x', { toolGrant: explicitToolGrant(['Read']), cezarTools: { name: 'cezar', command: process.execPath, args: [] } }), event => events.push(event));
     await expect(failed).rejects.toThrow('omp CLI exited with code 2 — Error: Unknown tool in --tools: cezar_wait.');
     expect(events).toContainEqual({ type: 'note', message: expect.stringContaining('omp CLI stderr:\nError: Unknown tool in --tools: cezar_wait.') });
     expect(invocations()).toHaveLength(1);
@@ -735,7 +736,7 @@ process.exit(2);
     const bin = join(cwd, 'silent-omp.mjs');
     writeFileSync(bin, '#!/usr/bin/env node\nsetTimeout(() => undefined, 20_000);\n', { mode: 0o755 });
     spawned.length = 0;
-    const session = new OmpRunner({ bin }).startSession(spec('x', { allowedTools: ['Read'] }), undefined, { autoEndAfterFirstTurn: false });
+    const session = new OmpRunner({ bin }).startSession(spec('x', { toolGrant: explicitToolGrant(['Read']) }), undefined, { autoEndAfterFirstTurn: false });
     const child = spawned.at(-1)!;
     child.stdout!.destroy(new Error('stdout broke'));
     await expect(session.result).rejects.toThrow('stdout broke');
@@ -748,7 +749,7 @@ process.exit(2);
     const bin = join(cwd, 'stubborn-omp.mjs');
     writeFileSync(bin, "#!/usr/bin/env node\nprocess.on('SIGTERM', () => {});\nprocess.stderr.write('ready\\n');\nsetTimeout(() => undefined, 20_000);\n", { mode: 0o755 });
     spawned.length = 0;
-    const session = new OmpRunner({ bin, killGraceMs: 100 }).startSession(spec('x', { allowedTools: ['Read'] }), undefined, { autoEndAfterFirstTurn: false });
+    const session = new OmpRunner({ bin, killGraceMs: 100 }).startSession(spec('x', { toolGrant: explicitToolGrant(['Read']) }), undefined, { autoEndAfterFirstTurn: false });
     const child = spawned.at(-1)!;
     const exited = new Promise<NodeJS.Signals | null>((resolve) => child.once('exit', (_code, signal) => resolve(signal)));
     // Wait until the stub has installed its SIGTERM handler; a fixed 300 ms sleep lost to it under load.
@@ -779,7 +780,7 @@ process.exit(2);
 
     it('retries even when no --tools list was passed', async () => {
       const { events } = await runSession(spec('inspect the working tree', {
-        allowedTools: undefined,
+        toolGrant: UNSET_TOOL_GRANT,
         additionalDirectories: ['/srv/a'],
         env: { CEZ_MOCK_OMP_UNKNOWN_FLAGS: '--add-dir' },
       }));
@@ -789,7 +790,7 @@ process.exit(2);
 
     it('a flag refusal and a later tool refusal each get their one retry', async () => {
       const { events } = await runSession(spec('inspect the working tree', {
-        allowedTools: ['Read', 'TodoWrite'],
+        toolGrant: explicitToolGrant(['Read', 'TodoWrite']),
         additionalDirectories: ['/srv/a'],
         env: { CEZ_MOCK_OMP_UNKNOWN_FLAGS: '--add-dir', CEZ_MOCK_OMP_DISABLED_TOOLS: 'todo' },
       }));
@@ -812,7 +813,7 @@ process.exit(2);
   describe('MCP tools OMP has not registered (Ruling 20)', () => {
     it('respawns once without the passed MCP names OMP did not know, with one v1 note', async () => {
       const { events, ui, result } = await runSession(spec('inspect the working tree', {
-        allowedTools: ['Read', 'mcp__github__create_issue', 'mcp__slow_server__query'],
+        toolGrant: explicitToolGrant(['Read', 'mcp__github__create_issue', 'mcp__slow_server__query']),
         env: { CEZ_MOCK_OMP_MCP_TOOLS: 'mcp__github_create_issue' },
       }));
       const argvs = lines('args.ndjson') as unknown as string[][];
@@ -829,7 +830,7 @@ process.exit(2);
 
     it('drops settings-disabled built-ins and unregistered MCP names reported in one exit with one respawn', async () => {
       const { events } = await runSession(spec('inspect the working tree', {
-        allowedTools: ['Read', 'TodoWrite', 'mcp__slow__query'],
+        toolGrant: explicitToolGrant(['Read', 'TodoWrite', 'mcp__slow__query']),
         env: { CEZ_MOCK_OMP_DISABLED_TOOLS: 'todo' },
       }));
       const argvs = lines('args.ndjson') as unknown as string[][];
@@ -843,12 +844,12 @@ process.exit(2);
 
     it('never retries when an unknown name is not an MCP name it passed', async () => {
       await expect(new OmpRunner({ bin: refusingBin('Error: Unknown tools in --tools: mcp__x_y, goal.\n') })
-        .run(spec('x', { allowedTools: ['Read', 'mcp__x_y'] })))
+        .run(spec('x', { toolGrant: explicitToolGrant(['Read', 'mcp__x_y']) })))
         .rejects.toThrow('Error: Unknown tools in --tools: mcp__x_y, goal.');
       expect(invocations()).toHaveLength(1);
       rmSync(join(cwd, 'invocations.ndjson'));
       await expect(new OmpRunner({ bin: refusingBin('Error: Unknown tool in --tools: mcp__other_tool.\n') })
-        .run(spec('x', { allowedTools: ['Read', 'mcp__x_y'] })))
+        .run(spec('x', { toolGrant: explicitToolGrant(['Read', 'mcp__x_y']) })))
         .rejects.toThrow('Error: Unknown tool in --tools: mcp__other_tool.');
       expect(invocations()).toHaveLength(1);
     });
@@ -856,7 +857,7 @@ process.exit(2);
     it('a second refusal of a remaining MCP name is surfaced, never a third spawn', async () => {
       const events: AgentEvent[] = [];
       const failed = new OmpRunner({ bin: refusingBin('Error: Unknown tool in --tools: mcp__x_y.\n') })
-        .run(spec('x', { allowedTools: ['Read', 'mcp__x_y'] }), event => events.push(event));
+        .run(spec('x', { toolGrant: explicitToolGrant(['Read', 'mcp__x_y']) }), event => events.push(event));
       // The respawn drops mcp__x_y; the fake refuses again with a name it no longer passed.
       await expect(failed).rejects.toThrow('omp CLI exited with code 2 — Error: Unknown tool in --tools: mcp__x_y.');
       expect(invocations()).toHaveLength(2);
@@ -888,7 +889,7 @@ process.exit(2);
       ['every tool', ['TodoWrite'], 'todo', ['--tools', 'todo'], ['--no-tools'], 'todo'],
     ])('respawns once without the names OMP refused: %s', async (_label, allowedTools, disabled, first, second, named) => {
       const { events, ui, result } = await runSession(spec('inspect the working tree', {
-        allowedTools,
+        toolGrant: explicitToolGrant(allowedTools),
         env: { CEZ_MOCK_OMP_DISABLED_TOOLS: disabled },
       }));
       const argvs = lines('args.ndjson') as unknown as string[][];
@@ -930,7 +931,7 @@ await import(${JSON.stringify(MOCK)});
       let ready!: () => void;
       const retryReady = new Promise<void>(resolve => { ready = resolve; });
       const session = new OmpRunner({ bin }).startSession(
-        spec('mock:hold', { allowedTools: ['Read', 'TodoWrite'], timeoutMs: 700 }),
+        spec('mock:hold', { toolGrant: explicitToolGrant(['Read', 'TodoWrite']), timeoutMs: 700 }),
         event => { events.push(event); if (event.type === 'session') ready(); },
         { autoEndAfterFirstTurn: false },
       );
@@ -957,7 +958,7 @@ await import(${JSON.stringify(MOCK)});
     it('a second refusal is surfaced as today, never a third spawn', async () => {
       const events: AgentEvent[] = [];
       const failed = new OmpRunner({ bin: gatedBin(['todo', 'read']) })
-        .run(spec('x', { allowedTools: ['Read', 'TodoWrite'] }), event => events.push(event));
+        .run(spec('x', { toolGrant: explicitToolGrant(['Read', 'TodoWrite']) }), event => events.push(event));
       await expect(failed).rejects.toThrow('omp CLI exited with code 2 — Error: Built-in tool unavailable in this session: read.');
       expect(invocations()).toHaveLength(2);
       expect(invocations()[1]?.slice(-2)).toEqual(['--tools', 'read']);
@@ -965,11 +966,11 @@ await import(${JSON.stringify(MOCK)});
     });
 
     it('never retries for a name it did not pass, or when no tool list was passed', async () => {
-      await expect(new OmpRunner({ bin: gatedBin(['find']) }).run(spec('x', { allowedTools: ['Read'] })))
+      await expect(new OmpRunner({ bin: gatedBin(['find']) }).run(spec('x', { toolGrant: explicitToolGrant(['Read']) })))
         .rejects.toThrow('Error: Built-in tool unavailable in this session: find.');
       expect(invocations()).toHaveLength(1);
       rmSync(join(cwd, 'invocations.ndjson'));
-      await expect(new OmpRunner({ bin: gatedBin(['todo']) }).run(spec('x', { allowedTools: undefined })))
+      await expect(new OmpRunner({ bin: gatedBin(['todo']) }).run(spec('x', { toolGrant: UNSET_TOOL_GRANT })))
         .rejects.toThrow('Error: Built-in tool unavailable in this session: todo.');
       expect(invocations()).toHaveLength(1);
     });
@@ -1000,7 +1001,7 @@ await import(${JSON.stringify(MOCK)});
     };
     const pids = (): number[] => readPids(join(cwd, 'pids.txt'));
     const refused = (prompt: string, extra: Partial<AgentRunSpec> = {}): AgentRunSpec =>
-      spec(prompt, { allowedTools: ['Read', 'TodoWrite'], ...extra, env: { CEZ_MOCK_OMP_DISABLED_TOOLS: 'todo', ...extra.env } });
+      spec(prompt, { toolGrant: explicitToolGrant(['Read', 'TodoWrite']), ...extra, env: { CEZ_MOCK_OMP_DISABLED_TOOLS: 'todo', ...extra.env } });
     const prompts = () => lines('commands.ndjson').filter(command => command.type === 'prompt');
 
     it('a human message sent right after start survives the respawn and reaches the second child once, in order', async () => {
@@ -1044,7 +1045,7 @@ await import(${JSON.stringify(MOCK)});
     it('a human message accepted before the first frame is written only once the child speaks', async () => {
       await withOpenSession(
         new OmpRunner({ bin: pidBin() }).startSession(
-          spec('mock:hold', { allowedTools: ['Read'] }), undefined, { autoEndAfterFirstTurn: false },
+          spec('mock:hold', { toolGrant: explicitToolGrant(['Read']) }), undefined, { autoEndAfterFirstTurn: false },
         ),
         async session => {
           expect(session.sendMessage([{ type: 'text', text: 'early' }])).toBe(true);
@@ -1165,7 +1166,7 @@ await import(${JSON.stringify(MOCK)});
   });
 
   it('notes the tools with no OMP equivalent once, at start', async () => {
-    const { events } = await runSession(spec('inspect the working tree', { allowedTools: ['Read', 'NotebookEdit', 'SubagentWait'] }));
+    const { events } = await runSession(spec('inspect the working tree', { toolGrant: explicitToolGrant(['Read', 'NotebookEdit', 'SubagentWait']) }));
     expect(events[0]).toEqual({ type: 'note', message: 'omp: dropped tools with no OMP equivalent: NotebookEdit, SubagentWait' });
     expect(events.filter(event => event.type === 'note' && event.message.startsWith('omp: dropped'))).toHaveLength(1);
     expect(lines('args.ndjson')[0]).toEqual(expect.arrayContaining(['--tools', 'read']));
@@ -1175,7 +1176,7 @@ await import(${JSON.stringify(MOCK)});
     vi.stubEnv('CEZ_DRY_RUN', '1');
     vi.stubEnv('CEZ_OMP_BIN', undefined);
     const events: AgentEvent[] = [];
-    await new OmpRunner().run({ cwd, userPrompt: 'investigate the login redirect bug', timeoutMs: 20_000 }, event => events.push(event));
+    await new OmpRunner().run({ toolGrant: UNSET_TOOL_GRANT, cwd, userPrompt: 'investigate the login redirect bug', timeoutMs: 20_000 }, event => events.push(event));
     expect(events.map(event => event.type)).toEqual(expect.arrayContaining(['text', 'tool-call', 'tool-result', 'turn-end']));
     expect(events.at(-1)).toEqual({ type: 'done' });
   });

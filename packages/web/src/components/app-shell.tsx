@@ -17,7 +17,7 @@ import { ApplicationUpdateControl, ApplicationUpdateFeedback, type ApplicationUp
 import { API_PREFIX } from '@open-mercato/cezar-api-client/utils/project-scope'
 import type { ApplicationUpdateState } from '@open-mercato/cezar-api-client'
 import { ProjectScopeContext, useProjectScope } from '@/api/project-scope-context'
-import { isNewerVersion } from '@/lib/is-newer-version'
+import { isNewerVersion } from '@open-mercato/cezar-api-client/contract/version'
 import { Button } from '@/components/ui/button'
 import { Sheet, SheetContent, SheetTitle, SheetTrigger } from '@/components/ui/sheet'
 import { visibleNavItems, type NavItem } from '@/components/nav-items'

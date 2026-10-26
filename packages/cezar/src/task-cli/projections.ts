@@ -1,5 +1,6 @@
 import { deriveAttention, type AttentionBucket } from '@open-mercato/cezar-contract/attention';
 import type { ApiRun, RunStatus, RunSummary } from '@open-mercato/cezar-contract';
+import { askStatusFields, type AskContent } from '@open-mercato/cezar-contract/pending-ask';
 
 /**
  * The slim shapes `cez task` prints (#504). A bot polls these every few seconds, so each one
@@ -37,28 +38,22 @@ export interface AttentionFields {
  *  the label, and a CLI reader has only the label. */
 export function attentionFields(run: Parameters<typeof deriveAttention>[0]): AttentionFields {
   const attention = deriveAttention(run);
-  const label = attention.label === 'usage limit' && run.autoResumeAt
+  const label = attention.rung === 'usage-limit' && run.autoResumeAt
     ? `usage limit, resumes ${run.autoResumeAt}`
     : attention.label;
   return { attention: attention.bucket, attentionLabel: label };
 }
 
-/** The pending question as its `ask.requested` event holds it: the questions and, since
- *  hearsay-tools/cezarion#1458, the Markdown context shown above them. */
-export interface PendingQuestion {
-  questions: unknown;
-  context?: unknown;
-}
-
-export function projectStatus(run: ApiRun, url: string, pending?: PendingQuestion) {
+/** The pending ask names its fields `question` and `questionContext` here and in the task webhook
+ *  (`askStatusFields`, hearsay-tools/cezarion#1808), so a field it gains reaches both. */
+export function projectStatus(run: ApiRun, url: string, pending?: AskContent) {
   return defined({
     id: run.id,
     title: runTitle(run),
     status: run.status,
     ...attentionFields(run),
     currentStepId: run.currentStepId,
-    question: pending?.questions,
-    questionContext: pending?.context,
+    ...askStatusFields(pending),
     branch: run.branch,
     diffStat: run.diffStat,
     pullRequestUrl: run.pullRequestUrl,

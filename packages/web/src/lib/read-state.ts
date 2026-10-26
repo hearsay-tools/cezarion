@@ -1,4 +1,5 @@
 import type { RunSummary } from '@open-mercato/cezar-api-client'
+import { isUsageLimitHold } from '@open-mercato/cezar-api-client/contract/waits'
 import { isOwnedWorker } from './task-groups'
 
 /**
@@ -20,19 +21,6 @@ export type ReadStateInput = Pick<
   'status' | 'finishedAt' | 'seenAt' | 'archived' | 'autoResumeAt'
 > & { delegation?: { role?: string } | null | undefined }
 
-/**
- * A run stopped by a provider usage limit with a resume already scheduled (spec
- * 2026-08-03-auto-resume-after-usage-limit).
- *
- * It is `waiting` on the record (hearsay-tools/cezarion#1236), so it is not a *done item*: it
- * has an appointment to pick the work back up, so neither half of this grammar applies — there
- * is no outcome to have missed (no unread marker, no nav-badge count) and no history to dim (not
- * a read done item). The status dot says `usage limit` for the same reason (`lib/attention.ts`).
- */
-export function isScheduledResume(run: ReadStateInput): boolean {
-  return run.status === 'waiting' && run.autoResumeAt !== undefined
-}
-
 /** A finished run — done, failed, or cancelled. These are the rows the read/unread treatment
  *  applies to (the "Finished" bucket); everything else carries its live attention signal instead. */
 export function isDoneItem(status: RunSummary['status']): boolean {
@@ -43,9 +31,9 @@ export function isDoneItem(status: RunSummary['status']): boolean {
  * Whether a run is *eligible* to wear the unread marker at all — the receipt-independent half
  * of `isUnread`:
  *  - only `done`/`failed` runs qualify (cancelled is self-initiated, so never unread);
- *  - a usage-limit failure with a resume already scheduled is not a done item at all
- *    (`isScheduledResume`) — there is no outcome to have missed yet, so it can neither wear
- *    the marker nor be put back into it;
+ *  - a usage-limit hold (`isUsageLimitHold`, spec 2026-08-03-auto-resume-after-usage-limit) is
+ *    not a done item at all: it has an appointment to pick the work back up, so there is no
+ *    outcome to have missed yet, and it can neither wear the marker nor be put back into it;
  *  - it must actually have finished (`finishedAt`) — a record caught mid-transition is not yet
  *    a done item;
  *  - archived runs are never unread: archiving is a stronger "I'm done with this" than reading.
@@ -58,7 +46,7 @@ export function isDoneItem(status: RunSummary['status']): boolean {
  */
 export function canBeUnread(run: ReadStateInput): boolean {
   if (run.archived) return false
-  if (isScheduledResume(run)) return false
+  if (isUsageLimitHold(run)) return false
   if (!UNREAD_ELIGIBLE.includes(run.status)) return false
   return run.finishedAt !== undefined
 }
@@ -91,7 +79,8 @@ export function isUnread(run: ReadStateInput): boolean {
  * their live attention state, not a past outcome — so they are excluded here.
  */
 export function isReadDoneItem(run: ReadStateInput): boolean {
-  if (isScheduledResume(run)) return false
+  // A usage-limit hold has no history to dim: it is work with an appointment.
+  if (isUsageLimitHold(run)) return false
   return isDoneItem(run.status) && !isUnread(run)
 }
 

@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import type { AgentInput, CiWaitResult, ConversationMessage, HumanWaitEntry, ProcessWaitResult, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
@@ -14,11 +14,12 @@ import { parkNoticeId } from '../delegation/park-notice.ts';
 import { checkpoint, collect, delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, parent, restart, root, semaphore, spendWorkerBudget, store, terminal, timeline, until, useWorkerWaitFixture, waitOf, worker } from './worker-wait.testkit.ts';
 import { timed, type TimedWait } from './waits.testkit.ts';
 import { QUICK_TASK_WORKFLOW, workflowDefSchema } from './types.ts';
-import { pendingHumanAsk } from '@open-mercato/cezar-contract/ask';
+import { pendingAskOf } from '@open-mercato/cezar-contract/pending-ask';
 import { handoffPath } from '../handoff.ts';
 import { claudeScheduleWakeupDelay, COMPLETION_NO_REPLY_NOTE, COMPLETION_NUDGE_NOTE, COMPLETION_WILL_WAIT, MAX_AUTO_CONTINUES, MAX_WAKE_DELIVERY_ATTEMPTS, NO_WAIT_NOTE, NO_WAIT_NUDGE_NOTE, REFUSAL_DISCARDED_NOTE, WAITS_DISCARDED_NOTE, WAKE_DELIVERY_CAP_NOTE, WAKE_SESSION_CLOSED_ERROR, WORKER_FALLBACK_HEADER, WORKER_FALLBACK_QUESTION, WORKER_FALLBACK_REPLY_NOTE } from './run.ts';
 import { AUTONOMOUS_NUDGE, NO_WAIT_NUDGE } from './turn-end.ts';
 import { expectNoWaitNudgeKinds } from './turn-end.testkit.ts';
+import { watchTurnOutcomes, type TurnOutcomes } from './turn-outcomes.testkit.ts';
 import type { Backoff } from '../delegation/retry-backoff.ts';
 import { ASK_TEXT, messagesPrompt, MONITORING_TEXT } from './monitoring-turn.testkit.ts';
 import { blockRunWrites, muteLockedDatabaseLogs, readPersistedRuns, hasPendingAsk } from '../runs/run-store.testkit.ts';
@@ -31,6 +32,8 @@ import { ciNativeMessages, ciNativeSteers, gatedProviderFailure, MESSAGE_WAKE_OP
 // real; only GitHub (metadata and the watch) is controlled.
 
 const pr = 'https://github.com/acme/repo/pull/12';
+/** Each settled turn's outcome in the current cell (hearsay-tools/cezarion#1809). */
+let turns: TurnOutcomes;
 const identity = { prUrl: pr, repository: 'acme/repo', prNumber: 12, headSha: 'a'.repeat(40) };
 const passed = (): CiWaitResult => ({ outcome: 'passed', headSha: identity.headSha, observedAt: new Date().toISOString(), checks: [], totalChecks: 1, truncated: false });
 
@@ -300,6 +303,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
   const runnersFor = (part: WaitParityPart): RunnerId[] => scope !== 'once' && scope.part === part ? [scope.runner] : [];
   describe('wait list on every native runner wire (hearsay-tools/cezarion#1233)', { timeout: 45_000 }, () => {
     useWorkerWaitFixture();
+    beforeEach(() => { turns = watchTurnOutcomes(); });
     afterEach(() => vi.restoreAllMocks());
 
     if (scope === 'once') {
@@ -1441,7 +1445,7 @@ function baseCells(runners: RunnerId[]): void {
         const events = store.readEvents(run.id);
         expect(events.filter(event => event.type === 'human-ask-closed')).toEqual([expect.objectContaining({ askSeq, reason: 'finish' })]);
         expect(events.filter(event => event.type === 'human-input-delivered')).toEqual([]);
-        expect(pendingHumanAsk(events)).toBeUndefined();
+        expect(pendingAskOf(events)).toBeUndefined();
         expect(store.transcriptFacts(run.id).pendingGateSeq).toBeUndefined();
         expect(hasPendingAsk(store, run.id)).toBeFalsy();
       };
@@ -1863,7 +1867,9 @@ function workersCells(runners: RunnerId[]): void {
         expect(atNudge!.delegation).not.toHaveProperty('completion');
         expect(store.readEvents(p.id).filter(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE)))
           .toEqual([expect.objectContaining({ message: `${COMPLETION_NUDGE_NOTE} (${wakes + 1}/${MAX_AUTO_CONTINUES}): ${settledWorker ? 'workers_uncollected' : 'workers_outstanding'}` })]);
-        expect(readFileSync(handoffPath(join(root, '.ai/cezar'), p.id), 'utf8')).toContain('status=running (completion nudge)');
+        expect(turns.words(p.id)).toContain('running (completion nudge)');
+        // The turn end writes nothing to the handoff file (hearsay-tools/cezarion#1809).
+        expect(readFileSync(handoffPath(join(root, '.ai/cezar'), p.id), 'utf8')).not.toMatch(/turn complete|status=/);
         // The nudge turn's own end follows the ordinary rule; the run still finishes nothing.
         await until(() => store.getRun(p.id)?.status === 'waiting');
         expect(waitOf(store.getRun(p.id))).toBeUndefined();
@@ -2454,15 +2460,14 @@ function workersCells(runners: RunnerId[]): void {
 
 // hearsay-tools/cezarion#1525: every turn end settles through one method. Each of U5, U6, U11, U20
 // and U20u is settled from each entry: the fresh step's turn end, a Continue's, and an
-// acknowledgement that lands after its turn ended. Each cell checks the heartbeat word besides
-// the status and the waits.
+// acknowledgement that lands after its turn ended. Each cell checks the settled outcome's word
+// (`turn-outcomes.testkit.ts`) besides the status and the waits.
 function entriesCells(runners: RunnerId[]): void {
   for (const runner of runners) {
-    /** The heartbeat words, oldest first: the Progress log keeps the newest at the top. */
-    const words = (id: string) => [...readFileSync(handoffPath(join(root, '.ai/cezar'), id), 'utf8')
-      .matchAll(/turn complete — status=([^\n]+)/g)].map(match => match[1]!).reverse();
+    /** The settled outcomes' words, oldest first. */
+    const words = (id: string) => turns.words(id);
     /** The words that settle something. A nudged turn can end before its acknowledgement on its own
-     *  (OpenCode HTTP/SSE), which writes a plain `running` line before the acknowledgement settles it. */
+     *  (OpenCode HTTP/SSE), which settles a plain `running` before the acknowledgement settles it. */
     const settledWords = (id: string) => words(id).filter(word => word !== 'running');
     const idleClose = async (id: string) => {
       (engine().active.get(id) as unknown as { idleTimer: NodeJS.Timeout & { _onTimeout(): void } }).idleTimer._onTimeout();
@@ -2504,7 +2509,7 @@ function entriesCells(runners: RunnerId[]): void {
       expect(settledWords(run.id)).toEqual(['running (no-wait nudge)', 'waiting', 'running (no-wait nudge)', 'waiting']);
     });
 
-    it(`${runner} U27 U5 a no-wait turn end an acknowledgement settles late opens the no-wait human wait and writes its line`, async () => {
+    it(`${runner} U27 U5 a no-wait turn end an acknowledgement settles late opens the no-wait human wait and settles waiting`, async () => {
       // The nudge's acknowledgement is held, so the turn that answers it ends first.
       await lateAck(async release => {
         nativeWire(runner);
@@ -2520,7 +2525,7 @@ function entriesCells(runners: RunnerId[]): void {
     });
 
     // The turn that answers the refusal nudge ends on done again: the second step, a completion wait.
-    it(`${runner} U27 U6 a fresh step's second refused done with live workers parks on the completion wait and logs waiting`, async () => {
+    it(`${runner} U27 U6 a fresh step's second refused done with live workers parks on the completion wait and settles waiting`, async () => {
       process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
       const { p, w } = await parentWithWorker(runner);
       await ignoreRefusal(runner, p.id, `Workers are still live: ${w.id}.`, () => workerWaits(p.id)[0]?.phase === 'open');
@@ -2528,7 +2533,7 @@ function entriesCells(runners: RunnerId[]): void {
       expect(settledWords(p.id).slice(-2)).toEqual(['running (completion nudge)', 'waiting']);
     });
 
-    it(`${runner} U27 U6 a Continue's second refused done with live workers parks on the completion wait and logs waiting`, async () => {
+    it(`${runner} U27 U6 a Continue's second refused done with live workers parks on the completion wait and settles waiting`, async () => {
       process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
       const { p, w } = await parentWithWorker(runner);
       await idleClose(p.id);
@@ -2541,7 +2546,7 @@ function entriesCells(runners: RunnerId[]): void {
       expect(settledWords(p.id).slice(-2)).toEqual(['running (completion nudge)', 'waiting']);
     });
 
-    it(`${runner} U27 U6 a second refused done an acknowledgement settles late parks on the completion wait and logs waiting`, async () => {
+    it(`${runner} U27 U6 a second refused done an acknowledgement settles late parks on the completion wait and settles waiting`, async () => {
       // The refusal nudge's acknowledgement is held, so the turn that answers it ends on done first.
       await lateAck(async release => {
         process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
@@ -2575,7 +2580,7 @@ function entriesCells(runners: RunnerId[]): void {
       expect(words(id).slice(-1)).toEqual(['monitoring']);
     };
 
-    it(`${runner} U27 U11 a fresh step's refused done beside an open timer parks on it and logs monitoring`, async () => {
+    it(`${runner} U27 U11 a fresh step's refused done beside an open timer parks on it and settles monitoring`, async () => {
       const { p, w } = await parentWithWorker(runner);
       const timer = await timerPark(p.id);
       const refusal = `Workers are still live: ${w.id}.`;
@@ -2585,7 +2590,7 @@ function entriesCells(runners: RunnerId[]): void {
       expectTimerPark(p.id, timer, refusal);
     });
 
-    it(`${runner} U27 U11 a Continue's refused done beside an open timer parks on it and logs monitoring`, async () => {
+    it(`${runner} U27 U11 a Continue's refused done beside an open timer parks on it and settles monitoring`, async () => {
       const { p, w } = await parentWithWorker(runner);
       const timer = await timerPark(p.id);
       const refusal = `Workers are still live: ${w.id}.`;
@@ -2597,7 +2602,7 @@ function entriesCells(runners: RunnerId[]): void {
       expectTimerPark(p.id, timer, refusal);
     });
 
-    it(`${runner} U27 U11 a refused done beside an open timer that an acknowledgement settles late parks on it and logs monitoring`, async () => {
+    it(`${runner} U27 U11 a refused done beside an open timer that an acknowledgement settles late parks on it and settles monitoring`, async () => {
       await lateAck(async release => {
         const { p, w, progress } = await conversingParent(runner);
         const timer = await timerPark(p.id);
@@ -2631,7 +2636,7 @@ function entriesCells(runners: RunnerId[]): void {
         expect(words(id)).toContain('running (completion nudge)');
       };
 
-      it(`${runner} U27 ${row} a fresh step's refused done gets one refusal nudge and logs it`, async () => {
+      it(`${runner} U27 ${row} a fresh step's refused done gets one refusal nudge`, async () => {
         const { p, w } = await parentWithWorker(runner);
         const refusal = await blocked(w);
         expect(manager.sendMessage(p.id, [{ type: 'text', text: done }])).toBe(true);
@@ -2639,7 +2644,7 @@ function entriesCells(runners: RunnerId[]): void {
         expectOneNudge(p.id, refusal);
       });
 
-      it(`${runner} U27 ${row} a Continue's refused done gets one refusal nudge and logs it`, async () => {
+      it(`${runner} U27 ${row} a Continue's refused done gets one refusal nudge`, async () => {
         const { p, w } = await parentWithWorker(runner);
         const refusal = await blocked(w);
         await idleClose(p.id);
@@ -2653,7 +2658,7 @@ function entriesCells(runners: RunnerId[]): void {
       // (U20a), and a settled worker sends none. A wait's wake keeps its resolved wait open until its
       // acknowledgement, so the refusal beside it is a note, not a nudge.
       if (settledWorker) continue;
-      it(`${runner} U27 ${row} a refused done an acknowledgement settles late gets one refusal nudge and logs it`, async () => {
+      it(`${runner} U27 ${row} a refused done an acknowledgement settles late gets one refusal nudge`, async () => {
         await lateAck(async release => {
           const { p, w, progress } = await conversingParent(runner);
           const refusal = await blocked(w);

@@ -19,7 +19,7 @@ import {
   useSendMessage,
 } from '@/api/queries'
 import { useRunHistory, type RunHistoryState } from '@/api/run-history'
-import { pendingHumanAsk } from '@open-mercato/cezar-api-client/contract/ask'
+import { pendingAskOf } from '@open-mercato/cezar-api-client/contract/pending-ask'
 import { asksQuestion } from '@open-mercato/cezar-api-client/contract/waits'
 import type { ApiRun } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
@@ -38,7 +38,8 @@ import { useContinueAction } from './follow-up-engine'
 import { findSubagent, subagentChildren } from './subagent-dock'
 import { SubagentSheet } from './subagent-sheet'
 import { AcceptCelebration, ReviewPanel } from './review-panel'
-import { archiveInComposer, isSessionOpen, offersComposerFinish, queuePosition, runActionFlags } from './run-actions'
+import { isSessionOpen } from '@open-mercato/cezar-api-client/contract/run-predicates'
+import { archiveInComposer, offersComposerFinish, queuePosition, runActionFlags } from './run-actions'
 import { ArchiveButton } from './archive-action'
 import { useFinishRun } from './use-finish-run'
 import { useStopAction } from './stop-action'
@@ -449,7 +450,7 @@ export function ThreadView({
 
 /** Compact current-state context is authoritative while history pages may contain old asks. */
 function pendingThreadAsk(history: RunHistoryState | undefined, currentThread: ThreadState) {
-  const pendingAsk = history ? pendingHumanAsk(history.currentEvents) : undefined
+  const pendingAsk = history ? pendingAskOf(history.currentEvents) : undefined
   const transcriptAsk = history
     ? pendingAsk !== undefined
     : currentThread.turns.some(turn => turn.items.some(item => item.kind === 'ask' && !item.resolved))
@@ -457,7 +458,7 @@ function pendingThreadAsk(history: RunHistoryState | undefined, currentThread: T
   // open), so the thread says when the question itself settled or the user left the task. The
   // id comes from the transcript, the same source the ask card renders from.
   const pendingAskId = history
-    ? (typeof pendingAsk?.requestId === 'string' ? pendingAsk.requestId : undefined)
+    ? pendingAsk?.requestId
     : currentThread.turns.flatMap(turn => turn.items).reverse().find(item => item.kind === 'ask' && !item.resolved)?.id
   const historyLoading = history !== undefined && (history.isPending || history.contextPending)
   return { pendingAsk, transcriptAsk, pendingAskId, historyLoading }

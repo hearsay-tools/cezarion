@@ -10,6 +10,7 @@ import { ARCHIVED_RUNS_PAGE_MAX } from './run-limits.ts';
 // consumes them rather than redeclaring. One-way on purpose — see the header of `./workflows.ts`.
 import { workflowDefSchema, workflowStepDefSchema } from './workflows.ts';
 import { computeWaitingOn, hasResolvedWait, waitingOnSchema, waitSchema } from './waits.ts';
+import { handoffRecordsSchema } from './handoff.ts';
 
 /**
  * The RUNS family of `/api/v1` — a task's record, its lifecycle mutations, and the artifacts
@@ -413,6 +414,8 @@ export const runRecordSchema = z.object({
    * like every other key.
    */
   workflowDef: workflowDefSchema.optional(),
+  /** cezar's autosave records for the handoff file (hearsay-tools/cezarion#1809). */
+  handoffRecords: handoffRecordsSchema.optional(),
 });
 export type RunRecord = z.infer<typeof runRecordSchema>;
 
@@ -644,13 +647,10 @@ export function isAutomationTask(run: { automationId?: string | undefined }): bo
  * rather than re-deriving which one the cockpit will display (#407, #526 live client-side, and
  * duplicating that rule is how the two would drift).
  */
-export const referenceStatusesByProjectSchema = z.record(
-  z.string(),
-  z.object({
-    prs: z.record(z.number(), referenceStatusSchema),
-    issues: z.record(z.number(), referenceStatusSchema),
-  }),
-);
+export const referenceStatusesByProjectSchema = z.record(z.string(), z.object({
+  prs: z.record(z.number(), referenceStatusSchema),
+  issues: z.record(z.number(), referenceStatusSchema),
+}));
 
 /**
  * `GET /run-summaries?archived=` (#864). `all` (the default) is every run, as the route has always
@@ -667,7 +667,7 @@ export const archivedRunsQuerySchema = z.object({
   /** `nextCursor` from the previous page. Opaque: a malformed one answers 400. */
   before: z.string().optional(),
   limit: z.coerce.number().int().min(1).max(ARCHIVED_RUNS_PAGE_MAX).optional(),
-  /** Only runs that match (`matchesRunQuery`): title, id, branch, workflow, PR or issue. */
+  /** Only runs that match (`matchesRunSearch`): title, id, branch, workflow, PR or issue. */
   q: z.string().optional(),
 });
 export type ArchivedRunsQuery = z.infer<typeof archivedRunsQuerySchema>;
@@ -701,7 +701,7 @@ export const RUNS_SEARCH_PER_PROJECT_MAX = 50;
 
 /** `GET /workspace/runs-search` (#864): ⌘K's reach past each project's run-list window. */
 export const runsSearchQuerySchema = z.object({
-  /** Every whitespace-separated token must match (`matchesRunQuery`). At least two characters:
+  /** Every whitespace-separated token must match (`matchesRunSearch`). At least two characters:
    *  one matches nearly every run. */
   q: z.string().trim().min(2),
   limit: z.coerce.number().int().min(1).max(RUNS_SEARCH_PER_PROJECT_MAX).optional(),

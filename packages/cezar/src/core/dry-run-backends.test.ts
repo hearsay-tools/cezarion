@@ -10,6 +10,7 @@ import { OmpRunner } from './omp-runner.ts';
 import { createRunner } from './runner-factory.ts';
 import { CursorRunner } from './cursor-runner.ts';
 import type { UiEvent } from './ui-events.ts';
+import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 
 afterEach(() => vi.unstubAllEnvs());
 it('uses bundled Cursor print for a fresh dry run and ACP for a legacy session', async () => {
@@ -19,7 +20,7 @@ it('uses bundled Cursor print for a fresh dry run and ACP for a legacy session',
   try {
     expect(createRunner('cursor')).toBeInstanceOf(CursorRunner);
     const events: Array<{ type: string; sessionTransport?: string }> = [];
-    await createRunner('cursor').run({ cwd: dir, userPrompt: 'hello' }, event => events.push(event));
+    await createRunner('cursor').run({ toolGrant: UNSET_TOOL_GRANT, cwd: dir, userPrompt: 'hello' }, event => events.push(event));
     expect(events.find(event => event.type === 'session')?.sessionTransport).toBe('cursor-print');
     expect(createRunner('cursor', { sessionTransport: 'cursor-acp' })).toBeInstanceOf(CursorRunner);
   } finally { rmSync(dir, { recursive: true, force: true }); }
@@ -31,7 +32,7 @@ it('shows Cursor native questions as failed tools without a Cezar answer card', 
   const dir = mkdtempSync(join(tmpdir(), 'cez-dry-cursor-question-'));
   try {
     const ui: UiEvent[] = [];
-    const session = createRunner('cursor').startSession({ cwd: dir, userPrompt: 'Ask a native question' }, undefined,
+    const session = createRunner('cursor').startSession({ toolGrant: UNSET_TOOL_GRANT, cwd: dir, userPrompt: 'Ask a native question' }, undefined,
       { onUiEvent: event => ui.push(event) });
     await expect.poll(() => ui.some(event => event.type === 'turn.completed'), { timeout: 3_000 }).toBe(true);
     session.end();

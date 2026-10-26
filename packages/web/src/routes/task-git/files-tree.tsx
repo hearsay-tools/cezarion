@@ -1,3 +1,4 @@
+import { isImagePath } from '@open-mercato/cezar-api-client/contract/image-path';
 import { ImageIcon } from 'lucide-react'
 import { ChevronRightIcon, FileCodeIcon, FolderIcon } from '@/components/design-icons'
 import { useState } from 'react'
@@ -5,7 +6,7 @@ import { useState } from 'react'
 import { useRunFile } from '@/api/queries'
 import { cn } from '@/lib/utils'
 
-import { formatFileSize, isImagePath } from './worktree-files'
+import { formatFileSize } from './worktree-files'
 
 /**
  * The Files tab's worktree tree (R5 Step 1.6) — the lazy sibling of ChangesTree. The Changes

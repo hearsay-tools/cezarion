@@ -1,6 +1,8 @@
 import { runWorkflowLabel } from '@open-mercato/cezar-api-client/contract/run-labels'
 import type { ArchiveFinishedScope, ProcessUsage, RunRecord, RunSummary, RunStatus } from '@open-mercato/cezar-api-client'
-import { isScheduledResume } from '@/lib/read-state'
+import { isSweepable } from '@open-mercato/cezar-api-client/contract/run-predicates'
+import { matchesRunSearch } from '@open-mercato/cezar-api-client/contract/run-search'
+import { isUsageLimitHold } from '@open-mercato/cezar-api-client/contract/waits'
 import { isOwnedWorker, runTitle, type ListView } from '@/lib/task-groups'
 
 /**
@@ -19,10 +21,6 @@ const USAGE_LIVE_STATUSES: ReadonlySet<RunStatus> = new Set(['running', 'waiting
 /** Nothing left to observe: these runs can never report a live sample again. Legacy
  *  `TERMINAL_STATUSES` — `review` is terminal because the agent is done and a human is not. */
 export const TERMINAL_STATUSES: ReadonlySet<RunStatus> = new Set(['done', 'failed', 'review', 'cancelled'])
-
-/** What "Archive finished" archives (`POST /api/runs/archive-finished` server-side): outcomes,
- *  not gates — a `review` run still wants a human and must not be swept away. */
-const FINISHED_STATUSES: ReadonlySet<RunStatus> = new Set(['done', 'failed', 'cancelled'])
 
 /**
  * Humanized RSS — `612 MB`, `1.2 GB`. Ported from the legacy `fmtBytes` (ps gives KB, the store
@@ -59,7 +57,7 @@ export function scheduledResume(
   run: Pick<RunSummary, 'status' | 'autoResumeAt'>,
   now: Date = new Date(),
 ): { label: string; title: string } | undefined {
-  if (run.status !== 'waiting' || !run.autoResumeAt) return undefined
+  if (!isUsageLimitHold(run)) return undefined
   const at = new Date(run.autoResumeAt)
   if (!Number.isFinite(at.getTime())) return undefined
   const sameDay = at.toDateString() === now.toDateString()
@@ -89,7 +87,9 @@ export function workflowLabel(run: Pick<RunSummary, 'workflow'> & { workflowLabe
  * displayed title (`runTitle`: the auto-summary when one exists, per R2 #389), branch and
  * workflow (both the raw name and the label the column prints). Not the task prompt, and not a
  * raw `title` hidden behind a summary: matching on text the table never displays makes rows
- * appear for no visible reason.
+ * appear for no visible reason. `matchesRunSearch` decides, in its `shown` scope; this list reads
+ * the whole query as ONE phrase, which the other lists do not (`mode: 'phrase'`; kept as on `main`,
+ * hearsay-tools/cezarion#1884).
  */
 export function filterRuns(
   runs: readonly RunSummary[],
@@ -98,38 +98,23 @@ export function filterRuns(
   extraText: (run: RunSummary) => string = () => '',
 ): RunSummary[] {
   const listed = runs.filter((run) => !isOwnedWorker(run))
-  const needle = query.trim().toLowerCase()
-  if (!needle) return [...listed]
+  if (!query.trim()) return [...listed]
   return listed.filter((run) =>
-    matchesTaskReferenceNumber(run, needle) ||
-    [runTitle(run), run.branch ?? '', run.workflow, workflowLabel(run), extraText(run)].some((text) =>
-      text.toLowerCase().includes(needle),
-    ),
+    matchesRunSearch(run, query, {
+      scope: 'shown',
+      mode: 'phrase',
+      extras: { displayTitle: runTitle(run), automation: extraText(run), references: () => shownReferenceNumbers(run) },
+    }),
   )
 }
 
-/** References match whole numbers, with an optional #, never a substring of their digits. */
-export function matchesTaskReferenceNumber(run: TaskReferenceInput, token: string): boolean {
-  const match = /^#?(\d+)$/.exec(token)
-  return match !== null && taskReferences(run).some((reference) => reference.number === Number(match[1]))
+/** The reference numbers a row shows, which a search matches whole, never as digits inside text. */
+export function shownReferenceNumbers(run: TaskReferenceInput): number[] {
+  return taskReferences(run).map((reference) => reference.number)
 }
 
-/**
- * Whether the sweep (`POST /runs/archive-finished`, `isSweepable` in `runs/store.ts`) would take
- * this run, clause for clause: finished, not archived, not a scheduled resume, not an owned
- * worker (those leave with their parent), and `scope` picks pinned or unpinned (absent = both).
- */
-export function isSweepable(run: RunSummary, scope?: ArchiveFinishedScope): boolean {
-  if (run.archived || !FINISHED_STATUSES.has(run.status)) return false
-  if (isScheduledResume(run)) return false
-  if (isOwnedWorker(run)) return false
-  if (scope === 'unpinned') return !run.pinned
-  if (scope === 'pinned') return run.pinned === true
-  return true
-}
-
-/** How many runs the sweep would archive in `scope`. The sidebar's group buttons only exist when
- *  this is nonzero — a broom over an empty floor is noise. */
+/** How many runs the sweep (`isSweepable`, the server's own predicate) would archive in `scope`.
+ *  The sidebar's group buttons only exist when this is nonzero — a broom over an empty floor is noise. */
 export function sweepableRunCount(runs: readonly RunSummary[], scope?: ArchiveFinishedScope): number {
   return runs.filter((run) => isSweepable(run, scope)).length
 }
