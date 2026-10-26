@@ -113,7 +113,9 @@ const shellWord = text => `'${text.replaceAll("'", "'\\''")}'`;
 /** The commands that print each complexity: the head's, and the merge base's when a counterpart exists. */
 function reproduce({ fn, from }, { root, base }) {
   const metrics = relative(root, fileURLToPath(new URL('./metrics.mjs', import.meta.url)));
-  const select = (name, line) => `${isNamed(name) ? `--function ${shellWord(name)} ` : ''}--line ${line}`;
+  // An anonymous function is named by its position (anonymous@line:column), so the name picks it out where a
+  // line alone would pick the innermost function on that line.
+  const select = (name, line) => `--function ${shellWord(name)} --line ${line}`;
   const head = `node ${metrics} ${shellWord(fn.file)} ${select(fn.name, fn.line)} --breakdown`;
   if (!from) return [`head: ${head}`];
   const copy = `"\${TMPDIR:-/tmp}/complexity-base${extname(from.file)}"`;

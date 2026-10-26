@@ -192,6 +192,19 @@ test('the reproduce command quotes a file name with spaces and quotes', t => {
   assert.match(result.output, /head: node .*metrics\.mjs 'my dir\/it'\\''s \$\(x\)\.ts' --function 'big'/);
 });
 
+test('the reproduce command selects an anonymous function by its generated name, not by a line that a nested function shares', t => {
+  const f = repo(t, { 'a.ts': 'export const none = 1;\n' });
+  const source = `export const handlers = [(x) => { const id = () => x;\n${'  if (x) { x++; }\n'.repeat(21)}  return id();\n}];\n`;
+  const result = gate(f, f.commit({ 'a.ts': source }));
+  assert.equal(result.code, 1, result.output);
+  const command = result.output.split('\n').find(line => line.startsWith('  head: ')).slice('  head: '.length);
+  assert.match(command, /--function 'anonymous@1:\d+' --line 1 /);
+  const run = spawnSync('sh', ['-c', command], { cwd: f.cwd, encoding: 'utf8' });
+  assert.equal(run.status, 0, run.stderr);
+  assert.match(run.stdout, /anonymous@1:\d+ \(line 1\): complexity 22 = 1 \+ 21 decision points/);
+  assert.doesNotMatch(run.stdout, /\bid\b/, 'the nested function on the same line is not the one measured');
+});
+
 test('an unparseable changed file, a missing argument and an unknown revision stop the check', t => {
   const f = repo(t, { 'a.ts': complex('small', 1) });
   const broken = gate(f, f.commit({ 'broken.ts': 'function broken(' }));
