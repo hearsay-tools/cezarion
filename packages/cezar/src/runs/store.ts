@@ -2265,7 +2265,7 @@ export class RunStore extends EventEmitter {
   /**
    * One page of archived ROOT runs, newest first (#864): `GET /run-summaries/archived`, the
    * archived runs past the window. Held runs list by their record, as in `listRunSummaries`.
-   * `before` is the previous page's `nextCursor`; with `q`, only runs `matchesRunSearch` keeps, and
+   * `before` is the previous page's `nextCursor`; with `q`, only runs `matchesRunQuery` keeps, and
    * `total` counts those. `automationNames` lets `q` match a task by its automation's name, as the
    * list's origin line shows it (hearsay-tools/cezarion#1616). A cursor this store did not write
    * answers `{ error }`.
