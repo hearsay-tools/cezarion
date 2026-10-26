@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { automationKindSchema } from './automations.ts';
+import { automationKindSchema, automationHistoryScanSchema } from './automations.ts';
 import { automationScheduleSchema, type AutomationSchedule } from './automation-schedule.ts';
 import { runnerSchema } from './health.ts';
 const RUNNER_IDS = runnerSchema.options;
@@ -145,13 +145,7 @@ export const storedAutomationCursorSchema = z
   .passthrough();
 
 /** Durable position inside a bounded historical search, independent of the live overlap. */
-export const storedAutomationHistoryScanSchema = z.object({
-  since: z.string().datetime(),
-  until: z.string().datetime(),
-  source: z.number().int().min(0).max(2),
-  page: z.number().int().min(1).max(10),
-  item: z.number().int().min(0).max(100),
-  event: z.number().int().min(0).max(100),
+export const storedAutomationHistoryScanSchema = automationHistoryScanSchema.extend({
   cursor: storedAutomationCursorSchema.optional(),
 });
 
