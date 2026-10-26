@@ -2,7 +2,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import childProcess from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -48,7 +48,13 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
     const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
     git('init', '-q', '-b', 'main'); git('config', 'user.name', 'test'); git('config', 'user.email', 'test@local');
     await writeFile(join(root, 'tracked'), 'test'); git('add', 'tracked'); git('commit', '-qm', 'initial');
-    const workspace = await createOwnedWorkspace(root, randomUUID(), git('rev-parse', 'HEAD'));
+    let workspace;
+    try { workspace = await createOwnedWorkspace(root, randomUUID(), git('rev-parse', 'HEAD')); }
+    catch (error) {
+      const dir = join(root, '.git', 'cezar-owned-workspaces');
+      const info = await lstat(dir);
+      throw new Error(`workspace creation failed: mode=${(info.mode & 0o777).toString(8)} symlink=${info.isSymbolicLink()} realpath=${await realpath(dir)} expected=${dir}`, { cause: error });
+    }
     const launch = async (cwd: string) => {
       const script = join(cwd, '.ai/qa/build/cezar/dist/index.js');
       await mkdir(join(cwd, '.ai/qa/build/cezar/dist'), { recursive: true });
