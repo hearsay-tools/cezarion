@@ -80,17 +80,19 @@ function numericConsts(ast: File): Map<string, number | undefined> {
   return consts
 }
 
-/** The local names of Testing Library's `waitFor` and `waitForElementToBeRemoved`. */
-function testingLibraryWaits(ast: File): Set<string> {
-  const names = new Set<string>()
+/** The local names of Testing Library's `waitFor` and `waitForElementToBeRemoved`, and of a namespace import of the library (`rtl` in `rtl.waitFor`). */
+function testingLibrary(ast: File): { tlWaits: Set<string>; tlNamespaces: Set<string> } {
+  const tlWaits = new Set<string>()
+  const tlNamespaces = new Set<string>()
   for (const node of ast.program.body) {
     if (node.type !== 'ImportDeclaration' || !node.source.value.startsWith('@testing-library/')) continue
     for (const specifier of node.specifiers) {
+      if (specifier.type === 'ImportNamespaceSpecifier') tlNamespaces.add(specifier.local.name)
       const imported = specifier.type === 'ImportSpecifier' && specifier.imported.type === 'Identifier' ? specifier.imported.name : ''
-      if (imported === 'waitFor' || imported === 'waitForElementToBeRemoved') names.add(specifier.local.name)
+      if (imported === 'waitFor' || imported === 'waitForElementToBeRemoved') tlWaits.add(specifier.local.name)
     }
   }
-  return names
+  return { tlWaits, tlNamespaces }
 }
 
 interface Ctx {
@@ -98,6 +100,7 @@ interface Ctx {
   lines: string[]
   consts: ReadonlyMap<string, number | undefined>
   tlWaits: ReadonlySet<string>
+  tlNamespaces: ReadonlySet<string>
   accepted: (line: number) => boolean
   sites: Site[]
   /** Each poll loop with the delays of the sleeps inside it, and where it sits. */
@@ -110,7 +113,7 @@ function report(ctx: Ctx, rule: Rule, node: Node): void {
   ctx.sites.push({ file: ctx.file, rule, line, site: ctx.lines[line - 1]?.trim() ?? '' })
 }
 
-/** The value of a numeric expression the scan can read: a literal, a same-file constant, or `a * b`, `a + b`, `a - b` of those. */
+/** The value of a numeric expression the scan can read: a literal, a same-file constant, or `a * b`, `a / b`, `a + b`, `a - b` of those. */
 function numberOf(node: Node | null | undefined, consts: ReadonlyMap<string, number | undefined>): number | undefined {
   if (!node) return undefined
   if (node.type === 'NumericLiteral') return node.value
@@ -119,7 +122,7 @@ function numberOf(node: Node | null | undefined, consts: ReadonlyMap<string, num
   const left = numberOf(node.left, consts)
   const right = numberOf(node.right, consts)
   if (left === undefined || right === undefined) return undefined
-  return { '*': left * right, '+': left + right, '-': left - right }[node.operator as '*' | '+' | '-']
+  return { '*': left * right, '/': left / right, '+': left + right, '-': left - right }[node.operator as '*' | '/' | '+' | '-']
 }
 
 /** The `.name` of a callee, and the identifier it is called on (`vi` in `vi.waitFor`), when there is one. */
@@ -156,7 +159,7 @@ function testingLibraryBound(call: CallExpression, ctx: Ctx): number | undefined
   const callee = calleeOf(call.callee)
   if (!callee) return undefined
   const query = /^find(?:All)?By[A-Z]/.test(callee.name)
-  const wait = callee.object === undefined && ctx.tlWaits.has(callee.name)
+  const wait = callee.object === undefined ? ctx.tlWaits.has(callee.name) : ctx.tlNamespaces.has(callee.object) && /^waitFor(?:ElementToBeRemoved)?$/.test(callee.name)
   if (!query && !wait) return undefined
   for (const argument of call.arguments) {
     const timeout = timeoutOf(argument)
@@ -224,10 +227,11 @@ function loopAround(ancestors: readonly Node[]): Where | undefined {
 
 function visitAwait(node: AwaitExpression, ancestors: readonly Node[], ctx: Ctx): void {
   const sleep = awaitedSleep(node.argument)
-  if (!sleep || numberOf(sleep.delay, ctx.consts) === 0) return
+  if (!sleep) return
   const around = loopAround(ancestors)
   if (!around) {
-    report(ctx, 'sleep', node)
+    // A zero delay outside a loop only yields to the event loop. In a loop it is the poll interval of a spin.
+    if (numberOf(sleep.delay, ctx.consts) !== 0) report(ctx, 'sleep', node)
     return
   }
   const known = ctx.loops.get(around.loop)
@@ -242,9 +246,13 @@ const clockCall = (node: Node): boolean => {
     (callee?.object === 'process' && callee.name === 'hrtime')
 }
 
+/** Whether any node under `root` passes, leaving out the functions nested in it: what a helper does is not what the loop does. */
 function contains(root: Node, test: (node: Node) => boolean): boolean {
   let found = false
-  walk(root, [], node => { found ||= test(node) })
+  walk(root, [], node => {
+    found ||= test(node)
+    return node !== root && isFunction(node) ? false : undefined
+  })
   return found
 }
 
@@ -305,52 +313,115 @@ function readsClock(node: Node, where: Where): boolean {
   return init !== undefined && contains(init, clockCall)
 }
 
+type Consts = ReadonlyMap<string, number | undefined>
+
 /** The literal a clock comparison measures against: `Date.now() - start > N`, `Date.now() < start + N`, `Date.now() < deadline`. */
-function clockBound(comparison: BinaryExpression, where: Where, consts: ReadonlyMap<string, number | undefined>): number | undefined {
+function limitValue(limit: Node, where: Where, consts: Consts): number | undefined {
   const own = (name: string) => {
     const declared = definition(where, name)
     return declared ? numberOf(declared.init, consts) : consts.get(name)
   }
-  for (const [measured, limit] of [[comparison.left, comparison.right], [comparison.right, comparison.left]] as const) {
-    if (!readsClock(measured, where)) continue
-    const value = (node: Node): number | undefined => (node.type === 'Identifier' ? own(node.name) : numberOf(node, consts))
-    const direct = value(limit)
-    if (direct !== undefined) return direct
-    const sum = limit.type === 'BinaryExpression' && limit.operator === '+' ? limit : undefined
-    if (sum) return value(sum.left) ?? value(sum.right)
-    const declared = limit.type === 'Identifier' ? definition(where, limit.name)?.init : undefined
-    if (declared?.type === 'BinaryExpression' && declared.operator === '+') return value(declared.left) ?? value(declared.right)
+  const value = (node: Node): number | undefined => (node.type === 'Identifier' ? own(node.name) : numberOf(node, consts))
+  const direct = value(limit)
+  if (direct !== undefined) return direct
+  const sum = limit.type === 'BinaryExpression' && limit.operator === '+' ? limit : undefined
+  if (sum) return value(sum.left) ?? value(sum.right)
+  const declared = limit.type === 'Identifier' ? definition(where, limit.name)?.init : undefined
+  return declared?.type === 'BinaryExpression' && declared.operator === '+' ? value(declared.left) ?? value(declared.right) : undefined
+}
+
+/** What a comparison says about the clock: the literal it measures against, `unreadable` when it measures the clock against something else, `undefined` when it does not measure the clock. */
+function clockBound(comparison: BinaryExpression, where: Where, consts: Consts): number | 'unreadable' | undefined {
+  const measuring = ([[comparison.left, comparison.right], [comparison.right, comparison.left]] as const).filter(([measured]) => readsClock(measured, where))
+  for (const [, limit] of measuring) {
+    const value = limitValue(limit, where, consts)
+    if (value !== undefined) return value
+  }
+  return measuring.length > 0 ? 'unreadable' : undefined
+}
+
+const compares = new Set(['<', '<=', '>', '>='])
+const isCompare = (node: Node): node is BinaryExpression => node.type === 'BinaryExpression' && compares.has(node.operator)
+/** A comparison that can end a counted loop: an ordering, or `i !== 20`. */
+const limitOperators = new Set([...compares, '==', '===', '!=', '!=='])
+const isLimit = (node: Node): node is BinaryExpression => node.type === 'BinaryExpression' && limitOperators.has(node.operator)
+
+/**
+ * The deadline a loop's clock comparisons give it: the largest literal they measure against (the scan cannot tell a
+ * comparison that ends the loop from one that does not), `unreadable` when the clock is compared with nothing it reads,
+ * and `undefined` when the clock is never compared. A clock that is only read, logged or stored, bounds nothing.
+ */
+function clockDeadline(where: Where, consts: Consts): number | 'unreadable' | undefined {
+  const bounds: number[] = []
+  let compared = false
+  walk(where.loop, [], node => {
+    if (node !== where.loop && isFunction(node)) return false
+    if (!isCompare(node)) return
+    const bound = clockBound(node, where, consts)
+    compared ||= bound !== undefined
+    if (typeof bound === 'number') bounds.push(bound)
+  })
+  return bounds.length ? Math.max(...bounds) : compared ? 'unreadable' : undefined
+}
+
+/** The operands of an `&&` chain: `i < 20 && !ready()` bounds the loop by `i < 20`. */
+const conjuncts = (test: Node): Node[] => (test.type === 'LogicalExpression' && test.operator === '&&' ? [...conjuncts(test.left), ...conjuncts(test.right)] : [test])
+
+const isNamed = (node: Node, name: string): boolean => node.type === 'Identifier' && node.name === name
+
+/** The signed literal an operator and its operand add: `+= 5` adds 5, `- 5` adds -5. */
+function signed(operator: string, operand: Node, consts: Consts): number | undefined {
+  const size = numberOf(operand, consts)
+  if (size === undefined) return undefined
+  return operator === '+' || operator === '+=' ? size : operator === '-' || operator === '-=' ? -size : undefined
+}
+
+/** What an update adds to the counter `name`, signed: `name++`, `--name`, `name += 5`, `name = name - 5`. */
+function stepOf(update: Node, name: string, consts: Consts): number | undefined {
+  if (update.type === 'UpdateExpression') return isNamed(update.argument, name) ? (update.operator === '++' ? 1 : -1) : undefined
+  if (update.type !== 'AssignmentExpression' || !isNamed(update.left, name)) return undefined
+  const sum = update.operator === '=' && update.right.type === 'BinaryExpression' && isNamed(update.right.left, name) ? update.right : undefined
+  return sum ? signed(sum.operator, sum.right, consts) : signed(update.operator, update.right, consts)
+}
+
+/** How many times `for (let i = a; i < b; i += c)` runs, when `a`, `b` and `c` are readable and `c` moves `i` toward `b`. */
+function iterations(loop: Extract<Node, { type: 'ForStatement' }>, consts: Consts): number | undefined {
+  const declarations = loop.init?.type === 'VariableDeclaration' ? loop.init.declarations : []
+  for (const test of conjuncts(loop.test!)) {
+    if (!isCompare(test) || test.left.type !== 'Identifier') continue
+    const name = test.left.name
+    const start = numberOf(declarations.find(declaration => declaration.id.type === 'Identifier' && declaration.id.name === name)?.init, consts)
+    const limit = numberOf(test.right, consts)
+    const step = stepOf(loop.update!, name, consts)
+    const up = test.operator.startsWith('<')
+    if (start === undefined || limit === undefined || step === undefined || step === 0 || up !== step > 0) return undefined
+    const span = up ? limit - start : start - limit
+    return Math.max(0, test.operator.endsWith('=') ? Math.floor(span / Math.abs(step)) + 1 : Math.ceil(span / Math.abs(step)))
   }
   return undefined
 }
 
-const compares = new Set(['<', '<=', '>', '>='])
-
-function clockDeadline(where: Where, consts: ReadonlyMap<string, number | undefined>): number | 'unreadable' | undefined {
-  const { loop } = where
-  if (!contains(loop, node => clockCall(node)) && !contains(loop, node => node.type === 'Identifier' && readsClock(node, where))) return undefined
-  const bounds: number[] = []
+/** Whether a loop steps a counter and compares it with something (`tries++ > 20`, `retries < 5`): a limit the scan cannot turn into time. */
+function comparesCounter(loop: Node): boolean {
+  const stepped = new Set<string>()
+  const comparisons: BinaryExpression[] = []
   walk(loop, [], node => {
-    if (node.type !== 'BinaryExpression' || !compares.has(node.operator)) return
-    const bound = clockBound(node, where, consts)
-    if (bound !== undefined) bounds.push(bound)
+    if (node !== loop && isFunction(node)) return false
+    if (node.type === 'UpdateExpression' && node.argument.type === 'Identifier') stepped.add(node.argument.name)
+    if (node.type === 'AssignmentExpression' && node.operator !== '=' && node.left.type === 'Identifier') stepped.add(node.left.name)
+    if (isLimit(node)) comparisons.push(node)
   })
-  return bounds.length ? Math.max(...bounds) : 'unreadable'
+  const nameOf = (side: Node) => (side.type === 'Identifier' ? side.name : side.type === 'UpdateExpression' && side.argument.type === 'Identifier' ? side.argument.name : '')
+  return comparisons.some(comparison => stepped.has(nameOf(comparison.left)) || stepped.has(nameOf(comparison.right)))
 }
 
-/** An attempt count: a `for` loop with a test and an update. Readable only as `i < N` or `i <= N` from a literal start. */
-function attemptCount(loop: Node, consts: ReadonlyMap<string, number | undefined>): number | 'unreadable' | undefined {
-  if (loop.type === 'ForStatement') {
-    if (!loop.test || !loop.update) return undefined
-    const { test, init } = loop
-    const declared = init?.type === 'VariableDeclaration' ? init.declarations[0] : undefined
-    const start = declared?.id.type === 'Identifier' ? numberOf(declared.init, consts) : undefined
-    if (test.type !== 'BinaryExpression' || (test.operator !== '<' && test.operator !== '<=') || start === undefined) return 'unreadable'
-    const limit = numberOf(test.right, consts)
-    return limit === undefined ? 'unreadable' : limit - start + (test.operator === '<=' ? 1 : 0)
-  }
-  const counted = (node: Node) => node.type === 'UpdateExpression' || (node.type === 'AssignmentExpression' && node.operator !== '=')
-  return contains(loop, counted) ? 'unreadable' : undefined
+/**
+ * An attempt count: how many times a `for` loop with a readable counter runs, `unreadable` when a counter is compared with a
+ * limit the scan cannot evaluate, and `undefined` when nothing counts or a counter is only stepped.
+ */
+function attemptCount(loop: Node, consts: Consts): number | 'unreadable' | undefined {
+  if (loop.type === 'ForStatement' && loop.test && loop.update && conjuncts(loop.test).some(isLimit)) return iterations(loop, consts) ?? 'unreadable'
+  return comparesCounter(loop) ? 'unreadable' : undefined
 }
 
 type Deadline = 'none' | 'unreadable' | number
@@ -361,7 +432,8 @@ function pollDeadline(where: Where, delays: ReadonlyArray<Node | undefined>, con
   const attempts = attemptCount(where.loop, consts)
   if (typeof attempts === 'number') {
     const intervals = delays.map(delay => numberOf(delay, consts))
-    return intervals.every(interval => interval !== undefined) ? attempts * intervals.reduce<number>((sum, interval) => sum + interval!, 0) : 'unreadable'
+    const interval = intervals.every(each => each !== undefined) ? intervals.reduce<number>((sum, each) => sum + each!, 0) : 0
+    return interval > 0 ? attempts * interval : 'unreadable'
   }
   return clock === 'unreadable' || attempts === 'unreadable' ? 'unreadable' : 'none'
 }
@@ -388,7 +460,7 @@ export function scanSource(file: string, source: string): Site[] {
   const ast = parse(source, { sourceType: 'module', plugins: ['typescript', 'jsx'], attachComment: false })
   const lines = source.split('\n')
   const ctx: Ctx = {
-    file, lines, consts: numericConsts(ast), tlWaits: testingLibraryWaits(ast), accepted: acceptance(lines, ast.comments ?? []),
+    file, lines, consts: numericConsts(ast), ...testingLibrary(ast), accepted: acceptance(lines, ast.comments ?? []),
     sites: [], loops: new Map(),
   }
   walk(ast.program, [], (node, ancestors) => visit(node, ancestors, ctx))

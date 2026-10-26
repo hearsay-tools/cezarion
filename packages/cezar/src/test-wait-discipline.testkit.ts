@@ -328,9 +328,28 @@ function argsOf(code: string, open: number, close: number): Item[] {
 const numericLiteral =
   /^(?:0[xX][\da-fA-F](?:_?[\da-fA-F])*|0[oO][0-7](?:_?[0-7])*|0[bB][01](?:_?[01])*|(?:\d(?:_?\d)*(?:\.(?:\d(?:_?\d)*)?)?|\.\d(?:_?\d)*)(?:[eE][+-]?\d(?:_?\d)*)?)$/;
 
-/** The value of a numeric literal, or undefined for anything else. Every rule reads bounds through this. */
+const numeric = (text: string | undefined): number | undefined => (text !== undefined && numericLiteral.test(text.trim()) ? Number(text.trim().replace(/_/g, '')) : undefined);
+
+/** `a * b / c` of literals. */
+function product(term: string): number | undefined {
+  const [first, ...rest] = term.split(/([*/])/);
+  let value = numeric(first);
+  for (let i = 0; i < rest.length; i += 2) {
+    const next = numeric(rest[i + 1]);
+    value = value === undefined || next === undefined ? undefined : rest[i] === '*' ? value * next : value / next;
+  }
+  return value;
+}
+
+/**
+ * The value of a numeric literal, or of a sum of products of them (`5 * 1000`, `2 * 60 * 1000`), or undefined for
+ * anything else. Every rule reads bounds through this, so a bound written as arithmetic is judged like its result.
+ */
 function literalMs(text: string | undefined): number | undefined {
-  return text !== undefined && numericLiteral.test(text) ? Number(text.replace(/_/g, '')) : undefined;
+  const whole = numeric(text);
+  if (whole !== undefined || text === undefined) return whole;
+  const terms = text.split('+').map(product);
+  return terms.every((term) => term !== undefined) ? terms.reduce<number>((sum, term) => sum + (term ?? 0), 0) : undefined;
 }
 
 /** What Vitest's `vi.waitFor`, `vi.waitUntil` and `expect.poll` wait when given no `timeout`. */
@@ -495,13 +514,48 @@ const clockCall = String.raw`(?:Date\s*\.\s*now|performance\s*\.\s*now|process\s
 const clockRead = new RegExp(clockCall);
 const comparator = String.raw`(?:<=?|>=?)`;
 /** `Date.now() - start > 15_000`: the bound is the last group, up to the end of the expression. */
-const elapsedBound = new RegExp(String.raw`${clockCall}\s*-\s*[\w$.]+\s*${comparator}\s*([^;)&|{,]+)`);
+const elapsedBounds = new RegExp(String.raw`${clockCall}\s*-\s*[\w$.]+\s*${comparator}\s*([^;)&|{,]+)`, 'g');
 /** `Date.now() < deadline` or `deadline < Date.now()`: the deadline's name. */
-const deadlineName = new RegExp(String.raw`${clockCall}\s*${comparator}\s*([A-Za-z_$][\w$]*)|\b([A-Za-z_$][\w$]*)\s*${comparator}\s*${clockCall}`);
-/** An attempt counter by its name, compared or stepped: a count the scan cannot turn into time. */
-const counterName = /\b\w*(?:attempt|retry|retries|tries|count|iteration|remaining)\w*\s*(?:<=?|>=?|\+\+|--)|(?:\+\+|--)\s*\w*(?:attempt|retry|retries|tries|count|iteration|remaining)/i;
+const deadlineNames = new RegExp(String.raw`${clockCall}\s*${comparator}\s*([A-Za-z_$][\w$]*)|\b([A-Za-z_$][\w$]*)\s*${comparator}\s*${clockCall}`, 'g');
+/** An attempt counter by its name, compared with a limit (`tries++ > 20`, `retries < 5`): a count the scan cannot turn into time. A counter that is only stepped bounds nothing. */
+const counterName = /\b\w*(?:attempt|retry|retries|tries|count|iteration|remaining)\w*\s*(?:\+\+|--)?\s*(?<!=)(?:<=?|>=?)|(?<!=)(?:<=?|>=?)\s*(?:\+\+|--)?\s*\w*(?:attempt|retry|retries|tries|count|iteration|remaining)/i;
 
 type Deadline = 'none' | 'unreadable' | number;
+
+const inFunction = (stack: Entry[], free: number): boolean => stack.filter((entry) => entry.kind === 'function' || entry.kind === 'arrow').length > free;
+
+/**
+ * The code between two offsets with the functions nested in it blanked: what a helper compares, counts
+ * or declares is its own, and says nothing about the loop. `free` is the number of function frames
+ * that are the text's own surroundings, such as the body of the function a scope starts at.
+ */
+function ownText(code: string, from: number, to: number, free = 0): string {
+  const stack: Entry[] = [];
+  let text = '';
+  for (let i = from; i < to; i += 1) {
+    const before = inFunction(stack, free);
+    track(code, stack, i);
+    const blank = before || inFunction(stack, free);
+    text += blank && code[i] !== '\n' ? ' ' : (code[i] ?? '');
+  }
+  return text;
+}
+
+/** The text of a loop's function up to `upto`, without the functions nested in it. */
+const scopeBefore = (code: string, loop: PollLoop, upto: number): string => ownText(code, loop.scope, upto, loop.scope === 0 ? 0 : 1);
+
+const compare = String.raw`(?<!=)(?:<=?|>=?)`;
+const clockCompared = new RegExp(String.raw`${clockCall}[^;{}]*${compare}|${compare}[^;{}]*${clockCall}`);
+const clockAssigned = new RegExp(String.raw`\b([A-Za-z_$][\w$]*)\s*=\s*[^;=]*${clockCall}`, 'g');
+
+/** Whether a loop compares the clock with anything, directly or through a name assigned from it (`elapsed = Date.now() - t0`). */
+function comparesClock(region: string): boolean {
+  if (clockCompared.test(region)) return true;
+  return [...region.matchAll(clockAssigned)].some(([, name]) => {
+    const escaped = (name ?? '').replace(/\$/g, '\\$');
+    return new RegExp(String.raw`(?<![\w$.])${escaped}\s*${compare}|${compare}\s*${escaped}(?![\w$])`).test(region);
+  });
+}
 
 /**
  * The time a poll loop gives its sleeps before it gives up, in milliseconds. `none`: the loop reads
@@ -514,22 +568,27 @@ type Deadline = 'none' | 'unreadable' | number;
  * (`const deadline = Date.now() + 15_000`); and an attempt count where the count and each sleep's
  * delay are literals, whose product is the time (`attempt < 20` with `sleep(100)` is 2 s). A literal
  * may also stand behind a name: a parameter's default, or a constant of the same function.
- * A loop over a collection or a stream is bounded by it.
+ * A loop over a collection or a stream is bounded by it. A clock the loop reads but never compares
+ * bounds nothing, and the functions nested in the loop are not read at all.
  */
 function pollDeadline(code: string, loop: PollLoop, delays: Array<string | undefined>): Deadline {
   const header = loop.head ? code.slice(loop.head[0] + 1, loop.head[1]) : '';
   if (!header.includes(';') && /\s(?:of|in)\s/.test(header)) return 'unreadable';
-  const region = code.slice(loop.keyword, Math.max(loop.body[1], loop.head?.[1] ?? 0) + 1);
-  if (!clockRead.test(region)) return attemptDeadline(header, region, delays);
-  const elapsed = elapsedBound.exec(region);
-  if (elapsed) return literalBound(code, loop, (elapsed[1] ?? '').trim());
-  const name = deadlineName.exec(region);
-  const deadline = name?.[1] ?? name?.[2];
-  if (deadline === undefined) return 'unreadable';
-  // The last definition before the loop, or in its own header, wins.
+  const region = ownText(code, loop.keyword, Math.max(loop.body[1], loop.head?.[1] ?? 0) + 1);
+  if (!clockRead.test(region) || !comparesClock(region)) return attemptDeadline(code, loop, header, region, delays);
+  // The scan cannot tell a comparison that ends the loop from one that does not, so the loop has the largest bound it reads.
+  const bounds = [
+    ...[...region.matchAll(elapsedBounds)].map((match) => literalBound(code, loop, (match[1] ?? '').trim())),
+    ...[...region.matchAll(deadlineNames)].map((match) => definedBound(code, loop, match[1] ?? match[2] ?? '')),
+  ].filter((bound): bound is number => typeof bound === 'number');
+  return bounds.length > 0 ? Math.max(...bounds) : 'unreadable';
+}
+
+/** A deadline held in a name: the last `name = Date.now() + <bound>` before the loop, or in its own header. */
+function definedBound(code: string, loop: PollLoop, deadline: string): Deadline {
   const upto = loop.head ? Math.min(loop.head[1], loop.body[0]) : loop.keyword;
   const definition = new RegExp(String.raw`\b${deadline.replace(/\$/g, '\\$')}\s*=\s*${clockCall}\s*\+\s*([^;,)]+)`, 'g');
-  const defined = [...code.slice(loop.scope, upto).matchAll(definition)].at(-1);
+  const defined = [...scopeBefore(code, loop, upto).matchAll(definition)].at(-1);
   return defined ? literalBound(code, loop, (defined[1] ?? '').trim()) : 'unreadable';
 }
 
@@ -539,20 +598,59 @@ function literalBound(code: string, loop: PollLoop, text: string): Deadline {
   if (direct !== undefined) return direct;
   if (!/^[A-Za-z_$][\w$]*$/.test(text)) return 'unreadable';
   const name = text.replace(/\$/g, '\\$');
-  const scope = code.slice(loop.scope, loop.keyword);
+  const scope = scopeBefore(code, loop, loop.keyword);
   const parameter = new RegExp(String.raw`\b${name}\s*(?::[^=,);]*)?=\s*([^,);]+?)\s*[,)]`).exec(scope);
   const constant = [...scope.matchAll(new RegExp(String.raw`\b(?:const|let)\s+${name}\s*(?::[^=;]*)?=\s*([^;,\n]+)`, 'g'))].at(-1);
   return literalMs(parameter?.[1]?.trim()) ?? literalMs(constant?.[1]?.trim()) ?? 'unreadable';
 }
 
-/** A loop with no clock: an attempt count times the sleep's delay, when both are literals. */
-function attemptDeadline(header: string, region: string, delays: Array<string | undefined>): Deadline {
+const escapeName = (name: string): string => name.replace(/\$/g, '\\$');
+
+/** Where a counter starts, from `let name = 0`. */
+function counterStart(init: string, name: string, read: (text: string) => number | undefined): number | undefined {
+  const started = new RegExp(String.raw`^\s*(?:(?:let|var|const)\s+)?${escapeName(name)}\s*(?::[^=]*)?=\s*([^,;]+?)\s*$`).exec(init);
+  return read(started?.[1] ?? '');
+}
+
+/** What an update adds to a counter, signed: `name++`, `++name`, `name += 5`, `name = name + 5`, and the same with `-`. */
+function counterStep(update: string, name: string, read: (text: string) => number | undefined): number | undefined {
+  const n = escapeName(name);
+  const stepped = new RegExp(String.raw`^\s*(?:${n}\s*(\+\+|--)|(\+\+|--)\s*${n}|${n}\s*([+-])=\s*([^,;]+?)|${n}\s*=\s*${n}\s*([+-])\s*([^,;]+?))\s*$`).exec(update);
+  if (!stepped) return undefined;
+  const amount = stepped[4] ?? stepped[6];
+  const size = amount === undefined ? 1 : read(amount);
+  const down = (stepped[1] ?? stepped[2] ?? stepped[3] ?? stepped[5])?.startsWith('-');
+  return size === undefined ? undefined : down ? -size : size;
+}
+
+/**
+ * How many times `for (init; name <op> limit; update)` runs, when `init` starts the counter at a literal, `limit` is a
+ * literal and `update` moves it by a literal toward the limit (up for `<` and `<=`, down for `>` and `>=`).
+ */
+function iterations(init: string, update: string, name: string, operator: string, limit: number | undefined, read: (text: string) => number | undefined): number | undefined {
+  const start = counterStart(init, name, read);
+  const step = counterStep(update, name, read);
+  const up = operator.startsWith('<');
+  if (start === undefined || limit === undefined || step === undefined || step === 0 || up !== step > 0) return undefined;
+  const span = up ? limit - start : start - limit;
+  return Math.max(0, operator.endsWith('=') ? Math.floor(span / Math.abs(step)) + 1 : Math.ceil(span / Math.abs(step)));
+}
+
+/** A loop with no clock: an attempt count times the sleep's delay, when both are literals (or names for them). */
+function attemptDeadline(code: string, loop: PollLoop, header: string, region: string, delays: Array<string | undefined>): Deadline {
+  const read = (text: string): number | undefined => {
+    const bound = literalBound(code, loop, text.trim());
+    return typeof bound === 'number' ? bound : undefined;
+  };
   const clauses = header.split(';');
   if (clauses.length === 3) {
-    const test = /^\s*[A-Za-z_$][\w$]*\s*(<=?)\s*([^&|]+?)\s*(?:&&|\|\||$)/.exec(clauses[1] ?? '');
-    const count = literalMs(test?.[2]);
-    const delay = delays.reduce<number | undefined>((sum, d) => (sum === undefined || literalMs(d) === undefined ? undefined : sum + (literalMs(d) ?? 0)), 0);
-    if (test) return count === undefined || delay === undefined ? 'unreadable' : (count + (test[1] === '<=' ? 1 : 0)) * delay;
+    const test = /^\s*([A-Za-z_$][\w$]*)\s*(<=?|>=?)\s*([^&|]+?)\s*(?:&&|\|\||$)/.exec(clauses[1] ?? '');
+    const intervals = delays.map((delay) => read(delay ?? ''));
+    const delay = intervals.every((interval) => interval !== undefined) ? intervals.reduce<number>((sum, interval) => sum + (interval ?? 0), 0) : undefined;
+    if (test) {
+      const count = iterations(clauses[0] ?? '', clauses[2] ?? '', test[1] ?? '', test[2] ?? '', read(test[3] ?? ''), read);
+      return count === undefined || !delay ? 'unreadable' : count * delay;
+    }
     // `for (…; test; step)` counts something this scan does not read.
     if ((clauses[1] ?? '').trim() !== '' && (clauses[2] ?? '').trim() !== '') return 'unreadable';
   }
@@ -627,7 +725,7 @@ function awaitedSleeps(code: string): Array<{ offset: number; delay: string | un
     for (const match of code.matchAll(pattern)) {
       const open = match.index + match[0].length - 1;
       const delay = argsOf(code, open, closeOf(code, open))[0]?.text;
-      if (literalMs(delay) !== 0) sleeps.push({ offset: match.index, delay });
+      sleeps.push({ offset: match.index, delay });
     }
   }
   for (const match of code.matchAll(promiseSleep)) {
@@ -635,7 +733,7 @@ function awaitedSleeps(code: string): Array<{ offset: number; delay: string | un
     if (!/(?:setTimeout|SetTimeout)$/.test(match[3] ?? '')) continue;
     const open = match.index + match[0].length - 1;
     const [callback, delay] = argsOf(code, open, closeOf(code, open));
-    if (callback?.text === resolver && delay !== undefined && literalMs(delay.text) !== 0) sleeps.push({ offset: match.index, delay: delay.text });
+    if (callback?.text === resolver && delay !== undefined) sleeps.push({ offset: match.index, delay: delay.text });
   }
   return sleeps;
 }
@@ -651,8 +749,10 @@ function sleepSites(code: string): Found[] {
   const delaysOf = new Map<number, { loop: PollLoop; delays: Array<string | undefined> }>();
   for (const { offset, delay } of sleeps) {
     const loop = loops.get(offset);
-    if (!loop) found.push({ rule: 'sleep', offset });
-    else delaysOf.set(loop.keyword, { loop, delays: [...(delaysOf.get(loop.keyword)?.delays ?? []), delay] });
+    // A zero delay outside a loop only yields to the event loop. In a loop it is the poll interval of a spin.
+    if (!loop) {
+      if (literalMs(delay) !== 0) found.push({ rule: 'sleep', offset });
+    } else delaysOf.set(loop.keyword, { loop, delays: [...(delaysOf.get(loop.keyword)?.delays ?? []), delay] });
   }
   for (const { loop, delays } of delaysOf.values()) {
     const deadline = pollDeadline(code, loop, delays);

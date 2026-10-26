@@ -488,8 +488,6 @@ describe('rule poll-deadline', () => {
       'while (Date.now() < deadline) await sleep(10);',
       'while (Math.floor(Date.now() / 1000) <= second) await sleep(10);',
       'while (Date.now() < dueAt) await sleep(10);',
-      'const late = Date.now() + 5 * 1000;',
-      'while (Date.now() < late) await sleep(10);',
       'async function noDefault(check: () => boolean, ms: number) {',
       '  const deadline = Date.now() + ms;',
       '  while (Date.now() < deadline) { await sleep(10); }',
@@ -531,11 +529,105 @@ describe('rule poll-deadline', () => {
       'for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt += 1) await sleep(100);',
       'for (let attempt = 0; attempt < 20; attempt += 1) await sleep(interval);',
       'for (let i = 0; i < items.length; i += 1) await sleep(100);',
-      'for (let left = 20; left > 0; left -= 1) await sleep(100);',
+      'for (let i = 0; i !== 20; i += 1) await sleep(100);',
       'let tries = 0;',
       'while (!ready()) { if (tries++ > 20) throw new Error("late"); await sleep(100); }',
       'while (!ready() && retries < 5) { retries += 1; await sleep(100); }',
     )).toEqual([]);
+  });
+
+  it('reads arithmetic of literals as the literal it makes', () => {
+    expect(lines(polls(
+      'const late = Date.now() + 5 * 1000;',
+      'while (Date.now() < late) await sleep(10);',
+      'const soon = Date.now() + 2_000 + 500;',
+      'while (Date.now() < soon) await sleep(10);',
+    ))).toEqual([2, 4]);
+    expect(polls('const ok = Date.now() + 30 * 1000;', 'while (Date.now() < ok) await sleep(10);', 'for (let i = 0; i < 20; i++) await sleep(60000 / 40);')).toEqual([]);
+    expect(scanSource('x.test.ts', 'await vi.waitFor(() => ready(), { timeout: 2 * 1000 });').map((s) => s.rule)).toEqual(['short-bound']);
+    expect(scanSource('x.test.ts', 'await vi.waitFor(() => ready(), { timeout: 3 * 5_000 });')).toEqual([]);
+  });
+
+  it('counts attempts from the start and by the step, up or down, and reads names for the literals', () => {
+    const sites = polls(
+      'for (let attempt = 100; attempt < 150; attempt += 1) await sleep(100);',
+      'for (let i = 0; i < 100; i += 10) await sleep(100);',
+      'for (let i = 0; i < 100; i = i + 10) await sleep(100);',
+      'for (let left = 20; left > 0; left -= 1) await sleep(100);',
+      'for (let left = 20; left >= 1; left--) await sleep(100);',
+      'for (let i = 0; i < 100; i += 2) await sleep(250);',
+      'for (let left = 200; left > 0; --left) await sleep(100);',
+      'for (let i = 5; i <= 124; i++) await sleep(100);',
+      'const interval = 50;',
+      'for (let i = 0; i < 20; i++) await sleep(interval);',
+      'async function named(check: () => boolean, tries = 400) {',
+      '  for (let i = 0; i < tries; i++) { if (check()) return; await sleep(100); }',
+      '}',
+    );
+    // Flagged: 5 s, 1 s, 1 s, 2 s, 2 s, and 1 s. Accepted: 12.5 s, 20 s, 12 s and 40 s.
+    expect(lines(sites)).toEqual([1, 2, 3, 4, 5, 10]);
+  });
+
+  it('leaves a counter it cannot step toward its limit alone', () => {
+    expect(polls(
+      'for (let i = 0; i < 20; i -= 1) await sleep(100);',
+      'for (let i = 20; i > 0; i += 1) await sleep(100);',
+      'for (let i = 0; i < 20; i += step) await sleep(100);',
+      'for (let i = start; i < 20; i++) await sleep(100);',
+      'for (let i = 0, j = 5; i < 20; i++) await sleep(100);',
+    )).toEqual([]);
+  });
+
+  it('does not take a bound from a function nested in the loop: it is the helper\'s, not the loop\'s', () => {
+    const sites = polls(
+      'while (!ready()) {',
+      '  const unused = (since: number) => Date.now() - since > 15_000;',
+      '  await sleep(10);',
+      '}',
+      'while (!ready()) {',
+      '  const late = () => { for (let attempt = 0; attempt < 500; attempt += 1) { void attempt; } };',
+      '  await sleep(10);',
+      '}',
+      'async function a() {',
+      '  const deadline = Date.now() + 1_000;',
+      '  const helper = () => { const deadline = Date.now() + 60_000; return deadline; };',
+      '  while (Date.now() < deadline) await sleep(10);',
+      '}',
+    );
+    expect(lines(sites)).toEqual([1, 5, 12]);
+    // The loop's own bound is still read beside a helper.
+    expect(polls('while (!ready()) {', '  const unused = () => Date.now();', '  if (Date.now() - t0 > 15_000) throw new Error("late");', '  await sleep(10);', '}')).toEqual([]);
+  });
+
+  it('takes a clock read that is never compared, or a counter that is only stepped, for no deadline', () => {
+    const sites = polls(
+      'while (!ready()) { log(Date.now()); await sleep(10); }',
+      'while (!ready()) { stamps.push(performance.now()); await sleep(10); }',
+      'while (!ready()) { attempts++; await sleep(10); }',
+      'while (!ready()) { retries += 1; await sleep(10); }',
+    );
+    expect(lines(sites)).toEqual([1, 2, 3, 4]);
+  });
+
+  it('leaves a clock comparison it cannot evaluate alone, directly or through a name', () => {
+    expect(polls(
+      'while (!ready()) { const elapsed = Date.now() - t0; if (elapsed > MAX_MS) throw new Error("late"); await sleep(10); }',
+      'while (!ready()) { if (Date.now() - t0 > limits.wait) throw new Error("late"); await sleep(10); }',
+      'while (!ready() && Date.now() < dueAt) await sleep(10);',
+    )).toEqual([]);
+  });
+
+  it('gives a loop with several clock bounds the largest it reads, since a comparison may not end the loop', () => {
+    expect(polls('while (!ready()) {', '  if (Date.now() - a > 60_000) throw new Error("late");', '  if (Date.now() - b > 1_000) rotate();', '  await sleep(10);', '}')).toEqual([]);
+    expect(lines(polls('while (!ready()) {', '  if (Date.now() - a > 2_000) throw new Error("late");', '  if (Date.now() - b > 1_000) rotate();', '  await sleep(10);', '}'))).toEqual([1]);
+  });
+
+  it('takes a zero-delay sleep in a loop for the poll interval of a spin, and one outside a loop for a yield', () => {
+    expect(lines(polls('while (!ready()) await sleep(0);', 'do { await new Promise(r => setTimeout(r, 0)); } while (!ready());'))).toEqual([1, 2]);
+    expect(scan('while (!ready()) await sleep(0);', 'await sleep(0);')).toEqual([]);
+    // A counted spin is bounded by its count, which says nothing in milliseconds.
+    expect(polls('for (let i = 0; i < 50; i++) await sleep(0);')).toEqual([]);
+    expect(polls('const t0 = Date.now();', 'while (!ready()) { if (Date.now() - t0 > 15_000) throw new Error("late"); await sleep(0); }')).toEqual([]);
   });
 
   it('reports one site per loop, on the innermost loop', () => {
