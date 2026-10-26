@@ -43,14 +43,9 @@ export function workerOutcomeKey(waitId: string, workerId: string, revision: num
   return `${waitId}:${workerId}:${revision}`;
 }
 
-/** Fold one event. True when a fact other than `bytes`/`lastSeq` changed, i.e. worth persisting. */
-export function foldEvent(facts: TranscriptFacts, event: RunEvent): boolean {
-  if (typeof event.seq === 'number' && event.seq > facts.lastSeq) facts.lastSeq = event.seq;
+/** The pending ask: a newer valid one replaces it, a receipt retires it, and routing records for it. */
+function foldPendingAsk(facts: TranscriptFacts, event: RunEvent): boolean {
   let changed = false;
-  if (typeof event.projectionId === 'string' && !facts.projectionIds.includes(event.projectionId)) {
-    facts.projectionIds.push(event.projectionId);
-    changed = true;
-  }
   const next = advancePendingAsk(facts.pendingAsk, event);
   if (next !== undefined && next !== facts.pendingAsk) {
     facts.pendingAsk = next;
@@ -68,19 +63,36 @@ export function foldEvent(facts: TranscriptFacts, event: RunEvent): boolean {
       changed = true;
     }
   }
+  return changed;
+}
+
+/** A worker's outcome, keyed once by wait, worker and revision. */
+function foldWorkerOutcome(facts: TranscriptFacts, event: RunEvent): boolean {
+  if (event.type !== 'worker-outcome' || typeof event.waitId !== 'string') return false;
+  const outcome = event.outcome as { workerId?: unknown; revision?: unknown } | undefined;
+  if (typeof outcome?.workerId !== 'string') return false;
+  const key = workerOutcomeKey(event.waitId, outcome.workerId, typeof outcome.revision === 'number' ? outcome.revision : 0);
+  if (facts.workerOutcomeKeys.includes(key)) return false;
+  facts.workerOutcomeKeys.push(key);
+  return true;
+}
+
+/** Fold one event. True when a fact other than `bytes`/`lastSeq` changed, i.e. worth persisting. */
+export function foldEvent(facts: TranscriptFacts, event: RunEvent): boolean {
+  if (typeof event.seq === 'number' && event.seq > facts.lastSeq) facts.lastSeq = event.seq;
+  let changed = false;
+  if (typeof event.projectionId === 'string' && !facts.projectionIds.includes(event.projectionId)) {
+    facts.projectionIds.push(event.projectionId);
+    changed = true;
+  }
+  if (foldPendingAsk(facts, event)) changed = true;
   const gate = event.type === 'note' && event.code === PROSE_HUMAN_GATE ? event
     : advancePendingHumanAsk(facts.pendingGateSeq === undefined ? undefined : ({ type: 'note', seq: facts.pendingGateSeq, ts: '' } as RunEvent), event);
   if (gate?.seq !== facts.pendingGateSeq) {
     if (gate) facts.pendingGateSeq = gate.seq; else delete facts.pendingGateSeq;
     changed = true;
   }
-  if (event.type === 'worker-outcome' && typeof event.waitId === 'string') {
-    const outcome = event.outcome as { workerId?: unknown; revision?: unknown } | undefined;
-    if (typeof outcome?.workerId === 'string') {
-      const key = workerOutcomeKey(event.waitId, outcome.workerId, typeof outcome.revision === 'number' ? outcome.revision : 0);
-      if (!facts.workerOutcomeKeys.includes(key)) { facts.workerOutcomeKeys.push(key); changed = true; }
-    }
-  }
+  if (foldWorkerOutcome(facts, event)) changed = true;
   return changed;
 }
 
