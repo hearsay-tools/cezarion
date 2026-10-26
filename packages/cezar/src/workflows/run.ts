@@ -2880,13 +2880,7 @@ export class RunManager {
   private queueWaitWake(runId: string): void {
     const run = this.store.getRun(runId);
     const resolved = run ? resolvedWaits(run) : [];
-    // A run on a usage-limit hold is woken by its resume only, which delivers what resolved
-    // meanwhile (hearsay-tools/cezarion#1236).
-    if (this.disposed || this.recoveringRun(run) || !run || isUsageLimitHold(run) || !this.owesWake(run) ||
-      !['running', 'waiting', 'queued'].includes(run.status) || run.stopping ||
-      this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return;
-    // A failed delivery waits out its backoff; the backoff's own timer queues this wake again.
-    if (this.wakeBackoffs.has(runId)) return;
+    if (!this.canQueueWaitWake(runId, run)) return;
     const state = this.active.get(runId);
     this.restoreWorkerWaitInputs(runId);
     if (state && (!state.session?.open || !this.takesWake(runId, state))) return;
@@ -2907,27 +2901,44 @@ export class RunManager {
       this.waitWakeQueuedAt.set(runId, Date.now());
       if (!this.queue.includes(runId)) this.queue.push(runId);
     } else if (!this.isActive(runId)) {
-      // No live session: create a scheduler-owned continuation, never a direct provider call.
-      this.move(runId, 'park-for-wake');
-      const text = resolved.some(wait => wait.kind === 'pr')
-        ? 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.'
-        : resolved.some(wait => wait.kind === 'worker')
-          ? 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.'
-          : resolved.length ? 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.'
-            : 'Resume to receive queued messages. End this opening turn so Cezar can deliver them.';
-      const resumed = this.continueRun(runId, { text, waitWake: true }, true);
-      if (!resumed.ok) {
-        const message = `${resolved.length ? 'Wait result' : 'Messages'} retained; continuation unavailable: ${resumed.error ?? 'unknown'}`;
-        if (this.retainedNotes.get(runId) !== message) {
-          this.retainedNotes.set(runId, message);
-          this.store.appendEvent(runId, { type: 'note', message });
-        }
-        return;
-      }
-      this.retainedNotes.delete(runId);
-      this.waitWakeQueuedAt.set(runId, Date.now());
+      if (!this.queueSessionlessWaitWake(runId, resolved)) return;
     }
     this.releaseSlot();
+  }
+
+  /** Reject only the same durable and manager-level holds before restoring wake inputs. */
+  private canQueueWaitWake(runId: string, run: RunRecord | undefined): run is RunRecord {
+    // A run on a usage-limit hold is woken by its resume only, which delivers what resolved
+    // meanwhile (hearsay-tools/cezarion#1236).
+    if (this.disposed || this.recoveringRun(run) || !run || isUsageLimitHold(run) || !this.owesWake(run) ||
+      !['running', 'waiting', 'queued'].includes(run.status) || run.stopping ||
+      this.workerExecutionStopped(runId) || this.executionBlockedByRootFinish(run)) return false;
+    // A failed delivery waits out its backoff; the backoff's own timer queues this wake again.
+    if (this.wakeBackoffs.has(runId)) return false;
+    return true;
+  }
+
+  private queueSessionlessWaitWake(runId: string, resolved: ReturnType<typeof resolvedWaits>): boolean {
+    // No live session: create a scheduler-owned continuation, never a direct provider call.
+    this.move(runId, 'park-for-wake');
+    const text = resolved.some(wait => wait.kind === 'pr')
+      ? 'Resume to receive the queued CI observation. End this opening turn so Cezar can deliver it; do not poll CI.'
+      : resolved.some(wait => wait.kind === 'worker')
+        ? 'Resume to receive the queued worker wait result. End this opening turn so Cezar can deliver it.'
+        : resolved.length ? 'Resume to receive the queued timer result. End this opening turn so Cezar can deliver it.'
+          : 'Resume to receive queued messages. End this opening turn so Cezar can deliver them.';
+    const resumed = this.continueRun(runId, { text, waitWake: true }, true);
+    if (!resumed.ok) {
+      const message = `${resolved.length ? 'Wait result' : 'Messages'} retained; continuation unavailable: ${resumed.error ?? 'unknown'}`;
+      if (this.retainedNotes.get(runId) !== message) {
+        this.retainedNotes.set(runId, message);
+        this.store.appendEvent(runId, { type: 'note', message });
+      }
+      return false;
+    }
+    this.retainedNotes.delete(runId);
+    this.waitWakeQueuedAt.set(runId, Date.now());
+    return true;
   }
 
   /** Is this run's account on a usage-limit hold that keeps its wake in the line? */
@@ -3425,90 +3436,109 @@ export class RunManager {
           if (next === -1) break; // every queued run has a durable reason to remain held
           const candidate = this.queue[next]!;
           if (this.workerExecutionStopped(candidate)) { this.cancel(candidate); continue; }
-          if (!this.active.has(candidate) && (this.pendingJobs.has(candidate) || this.pendingContinuations.has(candidate))) {
-            try { this.beginWorkerExecution(candidate); }
-            catch (error) {
-              this.queue.splice(next, 1); this.pendingJobs.delete(candidate); this.pendingContinuations.delete(candidate);
-              this.move(candidate, 'fail-start', { error: admissionError(error, 'worker execution checkpoint unavailable'), finishedAt: new Date().toISOString() });
-              continue;
-            }
-          }
+          if (!this.checkpointQueuedWorker(candidate, next)) continue;
           const runId = this.queue.splice(next, 1)[0];
           if (!runId) break;
-          if (this.waitWakeQueuedAt.has(runId) && this.active.has(runId)) {
-            this.waitWakeQueuedAt.delete(runId);
-            const state = this.active.get(runId)!;
-            const queued = this.store.getRun(runId);
-            const owed = !!queued && this.owesWake(queued);
-            if (owed && this.takesWake(runId, state)) {
-              // The wake holds a regular slot from admission until its acknowledgement.
-              this.waiting.delete(runId);
-              this.waitWakeAdmitted.add(runId);
-              this.deliverAdmittedWake(runId);
-            } else if (owed) {
-              // The runner may lose its boundary between queueing and admission.
-              // Retain the wake, but do not spin on it in this pump pass.
-              this.waitWakeQueuedAt.set(runId, Date.now());
-              this.queue.push(runId);
-              this.retryWaitAdmission(runId);
-              break;
-            }
-            continue;
-          }
-          if (this.waitWakeQueuedAt.delete(runId)) this.waitWakeAdmitted.add(runId);
-          // A forced sweep has to reach the spawn: the gate inside `execute` asks the same
-          // question and would send this run straight back to the queue.
-          if (forced) this.forceStarted.add(runId);
-          const job = this.pendingJobs.get(runId);
-          const continuation = this.pendingContinuations.get(runId);
-          this.pendingJobs.delete(runId);
-          this.pendingContinuations.delete(runId);
-          if (!job && !continuation) continue;
-          this.starting.add(runId);
-          if (continuation) {
-            void (async () => {
-              const hydrated = this.hydrateQueuedContinuation(runId, continuation);
-              await this.runContinuation(
-                runId,
-                hydrated.stepId,
-                hydrated.sessionId,
-                hydrated.backend,
-                hydrated.prompt,
-                hydrated.images,
-                hydrated.persistedImages,
-                hydrated.persistedAttachments,
-              );
-            })().catch((err: unknown) => this.failCrashedContinuation(runId, err))
-              .finally(() => this.finishWorkerExecution(runId));
-            continue;
-          }
-          if (!job) continue;
-          // Rebuild the prompt from the store at the last instant (#472), so an edit
-          // or a stacked message that landed while the run waited is honored. Entered
-          // in the same synchronous tick as the `pendingJobs.delete` above, so no
-          // handler can observe a half-dequeued run.
-          void (async () => {
-            const input = this.hydrateQueuedInput(runId, job.input);
-            await this.execute(runId, job.workflow, input, job.startAt);
-          })().catch((err: unknown) => {
-            const message = err instanceof Error ? err.message : String(err);
-            this.move(runId, 'fail-crash', {
-              error: `engine crashed: ${message}`,
-              finishedAt: new Date().toISOString(),
-            });
-            const state = this.active.get(runId);
-            if (state) {
-              this.clearIdleTimer(state);
-              this.clearAutosaveTimer(state);
-            }
-            this.starting.delete(runId);
-            this.dropActive(runId);
-          }).finally(() => this.finishWorkerExecution(runId));
+          const wake = this.admitQueuedWaitWake(runId);
+          if (wake === 'deferred') break;
+          if (wake === 'handled') continue;
+          this.launchQueuedRun(runId, forced);
         }
       } while (this.pumpAgain);
     } finally {
       this.pumping = false;
     }
+  }
+
+  /** Checkpoint before dequeue, while worker cancellation can still find the queued entry. */
+  private checkpointQueuedWorker(candidate: string, next: number): boolean {
+    if (!this.active.has(candidate) && (this.pendingJobs.has(candidate) || this.pendingContinuations.has(candidate))) {
+      try { this.beginWorkerExecution(candidate); }
+      catch (error) {
+        this.queue.splice(next, 1); this.pendingJobs.delete(candidate); this.pendingContinuations.delete(candidate);
+        this.move(candidate, 'fail-start', { error: admissionError(error, 'worker execution checkpoint unavailable'), finishedAt: new Date().toISOString() });
+        return false;
+      }
+    }
+    return true;
+  }
+
+  /** A lost runner boundary requeues the wake and ends this pass instead of spinning. */
+  private admitQueuedWaitWake(runId: string): 'none' | 'handled' | 'deferred' {
+    if (this.waitWakeQueuedAt.has(runId) && this.active.has(runId)) {
+      this.waitWakeQueuedAt.delete(runId);
+      const state = this.active.get(runId)!;
+      const queued = this.store.getRun(runId);
+      const owed = !!queued && this.owesWake(queued);
+      if (owed && this.takesWake(runId, state)) {
+        // The wake holds a regular slot from admission until its acknowledgement.
+        this.waiting.delete(runId);
+        this.waitWakeAdmitted.add(runId);
+        this.deliverAdmittedWake(runId);
+      } else if (owed) {
+        // The runner may lose its boundary between queueing and admission.
+        // Retain the wake, but do not spin on it in this pump pass.
+        this.waitWakeQueuedAt.set(runId, Date.now());
+        this.queue.push(runId);
+        this.retryWaitAdmission(runId);
+        return 'deferred';
+      }
+      return 'handled';
+    }
+    return 'none';
+  }
+
+  /** Read and hydrate mutable queued input in the same synchronous tick as dequeue. */
+  private launchQueuedRun(runId: string, forced: boolean): void {
+    if (this.waitWakeQueuedAt.delete(runId)) this.waitWakeAdmitted.add(runId);
+    // A forced sweep has to reach the spawn: the gate inside `execute` asks the same
+    // question and would send this run straight back to the queue.
+    if (forced) this.forceStarted.add(runId);
+    const job = this.pendingJobs.get(runId);
+    const continuation = this.pendingContinuations.get(runId);
+    this.pendingJobs.delete(runId);
+    this.pendingContinuations.delete(runId);
+    if (!job && !continuation) return;
+    this.starting.add(runId);
+    if (continuation) {
+      void (async () => {
+        const hydrated = this.hydrateQueuedContinuation(runId, continuation);
+        await this.runContinuation(
+          runId,
+          hydrated.stepId,
+          hydrated.sessionId,
+          hydrated.backend,
+          hydrated.prompt,
+          hydrated.images,
+          hydrated.persistedImages,
+          hydrated.persistedAttachments,
+        );
+      })().catch((err: unknown) => this.failCrashedContinuation(runId, err))
+        .finally(() => this.finishWorkerExecution(runId));
+      return;
+    }
+    if (!job) return;
+    // Rebuild the prompt from the store at the last instant (#472), so an edit
+    // or a stacked message that landed while the run waited is honored. Entered
+    // in the same synchronous tick as the `pendingJobs.delete` above, so no
+    // handler can observe a half-dequeued run.
+    void (async () => {
+      const input = this.hydrateQueuedInput(runId, job.input);
+      await this.execute(runId, job.workflow, input, job.startAt);
+    })().catch((err: unknown) => {
+      const message = err instanceof Error ? err.message : String(err);
+      this.move(runId, 'fail-crash', {
+        error: `engine crashed: ${message}`,
+        finishedAt: new Date().toISOString(),
+      });
+      const state = this.active.get(runId);
+      if (state) {
+        this.clearIdleTimer(state);
+        this.clearAutosaveTimer(state);
+      }
+      this.starting.delete(runId);
+      this.dropActive(runId);
+    }).finally(() => this.finishWorkerExecution(runId));
   }
 
   /** Save restart evidence before queue admission or the next startup await. */
@@ -3539,55 +3569,11 @@ export class RunManager {
       ? [...run.steps].reverse().find((step) => step.id !== queuedContinuation.id && step.sessionId)
       : undefined;
     if (queuedContinuation && sessionStep?.sessionId) {
-      if (reason === 'cezar restarted') run = this.checkpointRestartContext(run, queuedContinuation.id);
-      // An accepted worker's continuation extends the step owning the resumed session, so its
-      // runner and account come from that step's pinned identity (#452), never the run-level
-      // first-step fields — those would re-queue a claude review's Continue as a codex turn with
-      // no session to resume (#465). Broken identity evidence is left for the launch to report.
-      let resumeIdentity: WorkerStepIdentity | undefined;
-      try { resumeIdentity = this.workerStep(run.id, this.continuationDefStep(run, sessionStep.sessionId)?.id); }
-      catch (error) { if (!(error instanceof WorkerIdentityError)) throw error; }
-      const backend = resumeIdentity?.account.provider ?? run.runner ?? 'claude';
-      const sessionBackend = sessionStep.backend ?? backend;
-      const sessionAccount = sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
-      const agentProfile = resumeIdentity?.account.profileId ?? run.agentProfile;
-      const sameAccount = agentProfile === undefined || agentProfile === sessionAccount;
-      const recoveredSessionId = sessionBackend === backend && sameAccount
-        ? this.resumableSessionId(run.id, sessionStep) : undefined;
-      if (sessionStep.sessionTransport === 'cursor-print' && sessionBackend === backend && sameAccount && !recoveredSessionId) {
-        const error = 'Cursor print session identity lacks a matching recorded session event';
-        const finishedAt = new Date().toISOString();
-        this.store.updateStep(run.id, queuedContinuation.id, { status: 'failed', error, finishedAt });
-        this.move(run.id, 'fail-start', { error, finishedAt, currentStepId: undefined });
-        return;
-      }
-      this.pendingContinuations.set(run.id, {
-        stepId: queuedContinuation.id,
-        sessionId: recoveredSessionId,
-        backend,
-        prompt: run.continuationMessage?.text ?? RESTART_CONTINUATION_PROMPT,
-        images: [],
-        lineJoinedAt: Date.now(),
-      });
-      this.queue.push(run.id);
-      this.store.appendEvent(run.id, {
-        type: 'lifecycle',
-        message: `${reason} — interrupted continuation re-queued`,
-      });
+      this.reviveQueuedContinuation(run, reason, queuedContinuation.id, sessionStep);
       return;
     }
     if (run.delegation?.role === 'worker') {
-      try {
-        const job = this.ownedJob(run);
-        // Use the privately bound workflow, and the same durable pending-step
-        // cursor as root recovery. A queued tail must not replay a failed source.
-        this.pendingJobs.set(run.id, { ...job, startAt: Math.max(0, job.workflow.steps.findIndex(definition =>
-          run.steps.find(step => step.id === definition.id)?.status === 'pending')) });
-        this.queue.push(run.id);
-        this.store.appendEvent(run.id, { type: 'lifecycle', message: `${reason} — owned task re-queued` });
-      } catch (error) {
-        this.move(run.id, 'fail-start', { error: String(error), finishedAt: new Date().toISOString() });
-      }
+      this.reviveQueuedWorker(run, reason);
       return;
     }
     const workflow = await this.reviveWorkflow(run);
@@ -3629,6 +3615,64 @@ export class RunManager {
     });
     this.queue.push(run.id);
     this.store.appendEvent(run.id, { type: 'lifecycle', message: `${reason} — task re-queued` });
+  }
+
+  private reviveQueuedContinuation(run: RunRecord, reason: string, queuedStepId: string, sessionStep: RunRecord['steps'][number]): void {
+    if (reason === 'cezar restarted') run = this.checkpointRestartContext(run, queuedStepId);
+    const { backend, sessionBackend, sameAccount, recoveredSessionId } = this.queuedResumeSession(run, sessionStep);
+    if (sessionStep.sessionTransport === 'cursor-print' && sessionBackend === backend && sameAccount && !recoveredSessionId) {
+      const error = 'Cursor print session identity lacks a matching recorded session event';
+      const finishedAt = new Date().toISOString();
+      this.store.updateStep(run.id, queuedStepId, { status: 'failed', error, finishedAt });
+      this.move(run.id, 'fail-start', { error, finishedAt, currentStepId: undefined });
+      return;
+    }
+    this.pendingContinuations.set(run.id, {
+      stepId: queuedStepId,
+      sessionId: recoveredSessionId,
+      backend,
+      prompt: run.continuationMessage?.text ?? RESTART_CONTINUATION_PROMPT,
+      images: [],
+      lineJoinedAt: Date.now(),
+    });
+    this.queue.push(run.id);
+    this.store.appendEvent(run.id, {
+      type: 'lifecycle',
+      message: `${reason} — interrupted continuation re-queued`,
+    });
+  }
+
+  /** Match the pinned execution account before considering a persisted session resumable. */
+  private queuedResumeSession(run: RunRecord, sessionStep: RunRecord['steps'][number]) {
+    // An accepted worker's continuation extends the step owning the resumed session, so its
+    // runner and account come from that step's pinned identity (#452), never the run-level
+    // first-step fields — those would re-queue a claude review's Continue as a codex turn with
+    // no session to resume (#465). Broken identity evidence is left for the launch to report.
+    let resumeIdentity: WorkerStepIdentity | undefined;
+    try { resumeIdentity = this.workerStep(run.id, this.continuationDefStep(run, sessionStep.sessionId)?.id); }
+    catch (error) { if (!(error instanceof WorkerIdentityError)) throw error; }
+    const backend = resumeIdentity?.account.provider ?? run.runner ?? 'claude';
+    const sessionBackend = sessionStep.backend ?? backend;
+    const sessionAccount = sessionStep.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
+    const agentProfile = resumeIdentity?.account.profileId ?? run.agentProfile;
+    const sameAccount = agentProfile === undefined || agentProfile === sessionAccount;
+    const recoveredSessionId = sessionBackend === backend && sameAccount
+      ? this.resumableSessionId(run.id, sessionStep) : undefined;
+    return { backend, sessionBackend, sameAccount, recoveredSessionId };
+  }
+
+  private reviveQueuedWorker(run: RunRecord, reason: string): void {
+    try {
+      const job = this.ownedJob(run);
+      // Use the privately bound workflow, and the same durable pending-step
+      // cursor as root recovery. A queued tail must not replay a failed source.
+      this.pendingJobs.set(run.id, { ...job, startAt: Math.max(0, job.workflow.steps.findIndex(definition =>
+        run.steps.find(step => step.id === definition.id)?.status === 'pending')) });
+      this.queue.push(run.id);
+      this.store.appendEvent(run.id, { type: 'lifecycle', message: `${reason} — owned task re-queued` });
+    } catch (error) {
+      this.move(run.id, 'fail-start', { error: String(error), finishedAt: new Date().toISOString() });
+    }
   }
 
   /**
@@ -4508,6 +4552,34 @@ export class RunManager {
   cancel(runId: string): boolean {
     // Another process's run (#779, plan step 3): only its owner can stop it.
     if (this.store.writeRefusal(runId)) return false;
+    this.cancelWorkerExecution(runId);
+    const hadWaits = !!this.store.getRun(runId)?.waits?.length;
+    this.cancelOpenWaits(runId);
+    const retiredRefusal = this.retireCompletionRefusal(runId);
+    const cancelledFinish = transitionVia('cancel', () => this.store.getRun(runId), () => this.store.commitRootFinishCancellation(runId));
+    // Still waiting in the queue: just drop it there.
+    const queuedAt = this.queue.indexOf(runId);
+    if (queuedAt >= 0) {
+      this.cancelQueuedRun(runId, queuedAt);
+      return true;
+    }
+    const state = this.active.get(runId);
+    if (!state) return this.cancelRunWithoutSession(runId, hadWaits, retiredRefusal, cancelledFinish);
+    this.cancelActiveRun(runId, state);
+    return true;
+  }
+
+  private cancelActiveRun(runId: string, state: ActiveRun): void {
+    state.cancelled = true;
+    this.store.updateRun(runId, { stopping: true });
+    this.store.flush();
+    state.revokeCiTools?.(); state.revokeCiTools = undefined;
+    state.revokeDelegation?.(); state.revokeDelegation = undefined;
+    this.clearIdleTimer(state);
+    state.interrupt();
+  }
+
+  private cancelWorkerExecution(runId: string): void {
     if (this.store.getRun(runId)?.delegation?.role === 'worker') {
       const proof = this.store.readWorkerExecution(runId);
       transitionVia('stop-worker', () => this.store.getRun(runId), () => this.store.commitWorkerCancellation(runId));
@@ -4516,54 +4588,40 @@ export class RunManager {
         this.store.commitWorkerExecutionComplete(runId, proof.generation);
       }
     }
-    const hadWaits = !!this.store.getRun(runId)?.waits?.length;
-    this.cancelOpenWaits(runId);
-    const retiredRefusal = this.retireCompletionRefusal(runId);
-    const cancelledFinish = transitionVia('cancel', () => this.store.getRun(runId), () => this.store.commitRootFinishCancellation(runId));
-    // Still waiting in the queue: just drop it there.
-    const queuedAt = this.queue.indexOf(runId);
-    if (queuedAt >= 0) {
-      this.queue.splice(queuedAt, 1);
-      this.pendingJobs.delete(runId);
-      this.pendingContinuations.delete(runId);
-      this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
-      this.store.appendEvent(runId, { type: 'lifecycle', message: 'cancelled while queued' });
+  }
+
+  private cancelQueuedRun(runId: string, queuedAt: number): void {
+    this.queue.splice(queuedAt, 1);
+    this.pendingJobs.delete(runId);
+    this.pendingContinuations.delete(runId);
+    this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
+    this.store.appendEvent(runId, { type: 'lifecycle', message: 'cancelled while queued' });
+    this.store.flush();
+    if (this.executions.get(runId)?.admitted === false) void this.finishWorkerExecution(runId);
+  }
+
+  private cancelRunWithoutSession(runId: string, hadWaits: boolean, retiredRefusal: boolean, cancelledFinish: boolean): boolean {
+    if (this.starting.has(runId)) {
+      this.store.updateRun(runId, { stopping: true });
       this.store.flush();
-      if (this.executions.get(runId)?.admitted === false) void this.finishWorkerExecution(runId);
       return true;
     }
-    const state = this.active.get(runId);
-    if (!state) {
-      if (this.starting.has(runId)) {
-        this.store.updateRun(runId, { stopping: true });
-        this.store.flush();
-        return true;
-      }
-      if (cancelledFinish) return true;
-      const run = this.store.getRun(runId);
-      // Stop on a failed run that held wait results discards them, and the automatic resume that
-      // would start a session on it later; the run stays failed. A usage-limit hold is that failed
-      // run waiting for its resume (hearsay-tools/cezarion#1236), and settles failed the same way.
-      if ((hadWaits || retiredRefusal) && (run?.status === 'failed' || isUsageLimitHold(run ?? {}))) {
-        this.store.appendEvent(runId, { type: 'note', message: hadWaits ? WAITS_DISCARDED_NOTE : REFUSAL_DISCARDED_NOTE });
-        this.cancelAutoResume(runId);
-        this.store.flush();
-        return true;
-      }
-      if (run && (run.delegation || hadWaits) && ['queued', 'running', 'waiting'].includes(run.status)) {
-        this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
-        return true;
-      }
-      return false;
+    if (cancelledFinish) return true;
+    const run = this.store.getRun(runId);
+    // Stop on a failed run that held wait results discards them, and the automatic resume that
+    // would start a session on it later; the run stays failed. A usage-limit hold is that failed
+    // run waiting for its resume (hearsay-tools/cezarion#1236), and settles failed the same way.
+    if ((hadWaits || retiredRefusal) && (run?.status === 'failed' || isUsageLimitHold(run ?? {}))) {
+      this.store.appendEvent(runId, { type: 'note', message: hadWaits ? WAITS_DISCARDED_NOTE : REFUSAL_DISCARDED_NOTE });
+      this.cancelAutoResume(runId);
+      this.store.flush();
+      return true;
     }
-    state.cancelled = true;
-    this.store.updateRun(runId, { stopping: true });
-    this.store.flush();
-    state.revokeCiTools?.(); state.revokeCiTools = undefined;
-    state.revokeDelegation?.(); state.revokeDelegation = undefined;
-    this.clearIdleTimer(state);
-    state.interrupt();
-    return true;
+    if (run && (run.delegation || hadWaits) && ['queued', 'running', 'waiting'].includes(run.status)) {
+      this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
+      return true;
+    }
+    return false;
   }
 
   isActive(runId: string): boolean {
