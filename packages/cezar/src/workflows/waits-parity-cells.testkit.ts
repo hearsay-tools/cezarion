@@ -2103,9 +2103,13 @@ function workersCells(runners: RunnerId[]): void {
       process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
       const { p, w } = await parentWithWorker(runner);
       const wakes = store.getRun(p.id)?.automaticWakes ?? 0;
+      const commits = recordCommits(join(root, '.ai/cezar'));
       engine().active.get(p.id)!.session.end();
       const refusal = `Workers are still live: ${w.id}.`;
       await until(() => prompted(runner, refusal).length > 0 && workerWaits(p.id)[0]?.phase === 'open' && store.getRun(p.id)?.status === 'waiting');
+      // hearsay-tools/cezarion#1805: the refusal is queued with its charge, so no reopened store
+      // delivers it uncharged.
+      commits.expectEveryCommit(p.id, row => !row.agentInputs?.some(input => input.text.includes(refusal)) || row.automaticWakes === wakes + 1, 'a queued refusal and its charge');
       expect(store.getRun(p.id)?.steps.some(step => step.id === 'continue-1')).toBe(true);
       expect(prompted(runner, refusal)).toEqual([expect.stringContaining(COMPLETION_WILL_WAIT)]);
       const inputs = store.getRun(p.id)?.agentInputs?.filter(input => input.text.includes(refusal)) ?? [];

@@ -5054,13 +5054,16 @@ export class RunManager {
     // Its purpose is on the persisted input, so a Continue after a failed run and a restart still
     // deliver it as the nudge (hearsay-tools/cezarion#1301).
     const input: AgentInput = { id: randomUUID(), parentRunId: runId, source: 'lifecycle', purpose: 'completion-refusal', text, createdAt: new Date().toISOString() };
-    try { this.store.commitAgentInputs(runId, enqueueAgentInput(this.store.getRun(runId)!, input)); }
-    catch (error) {
+    // The refusal is queued with its charge (hearsay-tools/cezarion#1805): no restart delivers it uncharged.
+    const spent = (this.store.getRun(runId)?.automaticWakes ?? 0) + 1;
+    try {
+      enqueueAgentInput(this.store.getRun(runId)!, input);
+      this.store.commitOutcome(runId, { kind: 'charged', automaticWakes: spent }, { enqueue: [input] });
+    } catch (error) {
       console.warn(`[cez] completion refusal not queued: ${error instanceof Error ? error.message : String(error)}`);
       return true;
     }
     this.store.appendEvent(runId, { type: 'agent-input', input });
-    const spent = this.chargeAutomaticWake(runId);
     this.store.appendEvent(runId, { type: 'note', message: `${COMPLETION_NUDGE_NOTE} (${spent}/${MAX_AUTO_CONTINUES}): ${refusal.code}` });
     try { this.queueWaitWake(runId); } catch { this.retryWaitAdmission(runId); }
     return true;
