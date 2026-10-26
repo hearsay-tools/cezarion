@@ -1,5 +1,4 @@
-import { mkdtempSync, realpathSync, writeFileSync } from 'node:fs'
-import { tmpdir } from 'node:os'
+import { mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach } from 'vitest'
 import { strictRunExits, throwRunExitViolations } from './src/workflows/run-states.ts'
@@ -46,7 +45,8 @@ process.env.TEMP = sandboxTemp
 // deletes the variable inside its own body (see `src/paths.test.ts`) — that still
 // works, because this hook runs after the test, not during it. The write guard in
 // `assertCezarHomeWriteIsSandboxed` catches whatever still slips through.
-const sandboxHome = mkdtempSync(join(realpathSync(tmpdir()), 'cez-vitest-home-'))
+// Both homes live inside `sandboxTemp`, so its exit, signal and dead-owner cleanup removes them too.
+const sandboxHome = mkdtempSync(join(sandboxTemp, 'cez-vitest-home-'))
 
 const pinSandboxHome = (): void => {
   if (!process.env.CEZ_HOME) process.env.CEZ_HOME = sandboxHome
@@ -59,7 +59,7 @@ const pinSandboxHome = (): void => {
 // variables that move an agent home are cleared, and both are restored around every test.
 // A test that needs a populated home sets its own in its `beforeEach` (see the omp block
 // in `src/server/agent-profiles-api.test.ts`): this hook runs before theirs.
-const sandboxUserHome = mkdtempSync(join(realpathSync(tmpdir()), 'cez-vitest-user-home-'))
+const sandboxUserHome = mkdtempSync(join(sandboxTemp, 'cez-vitest-user-home-'))
 // A test that starts the real omp would unpack its 373 MB native addon into this
 // home. Every sandbox home reads it from one shared cache instead
 // (hearsay-tools/cezarion#1911); without that cache omp unpacks here, as before.

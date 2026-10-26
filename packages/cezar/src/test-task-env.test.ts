@@ -49,6 +49,13 @@ describe('test runs never read the host home (hearsay-tools/cezarion#1361)', () 
     expect(homedir()).toBe(home);
   });
 
+  it('keeps both sandbox homes inside the owned temp sandbox, so its cleanup removes them (hearsay-tools/cezarion#1395)', () => {
+    const temp = process.env.TMPDIR!;
+    expect(basename(temp)).toMatch(/^cez-vitest-tmp-/);
+    expect(existsSync(join(temp, '.cez-test-owner'))).toBe(true);
+    for (const home of [process.env.HOME!, process.env.CEZ_HOME!]) expect(home.startsWith(temp + sep), home).toBe(true);
+  });
+
   it('vitest.setup.ts clears the host variables that move an agent home', () => {
     expect(agentHomeEnv()).toEqual(unset);
   });
