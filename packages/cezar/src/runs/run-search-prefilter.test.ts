@@ -75,12 +75,12 @@ const zeroPadded = (token: string) => {
   return /^\d+$/.test(bare) && String(Number(bare)) !== bare;
 };
 
-/** Pieces of the run itself (so most queries match) mixed with noise (so some do not). */
-function queryArb(run: RunSearchRun): fc.Arbitrary<string> {
+/** Pieces of the run itself and of its automation's name (so most queries match) mixed with noise (so some do not). */
+function queryArb(run: RunSearchRun, automationName: string | undefined): fc.Arbitrary<string> {
   const numbers = [run.prNumber, run.issueNumber, run.markerRefs?.pr, run.markerRefs?.issue, ...(run.pullRequests ?? []).map((pr) => pr.number)]
-    .flatMap((n) => (n === undefined ? [] : [String(n), `#${n}`]));
+    .flatMap((n) => (n === undefined ? [] : [String(n), `#${n}`, `00${n}`, `#00${n}`]));
   const fields = [run.id, run.title, run.titleSummary, run.branch, run.workflow, run.workflowLabel, run.automationId,
-    run.pullRequestUrl, run.referencedPullRequestUrl, run.referencedIssueUrl, ...numbers,
+    run.pullRequestUrl, run.referencedPullRequestUrl, run.referencedIssueUrl, automationName, ...numbers,
   ].filter((field): field is string => typeof field === 'string' && field !== '');
   const piece = fields.length === 0 ? text : fc.constantFrom(...fields).chain((field) =>
     fc.tuple(fc.nat({ max: field.length - 1 }), fc.integer({ min: 1, max: field.length })).map(([start, length]) => field.slice(start, start + length)));
@@ -94,7 +94,8 @@ describe('sqlPrefilterTokens never drops a run matchesRunSearch accepts', () => 
     let accepted = 0;
     fc.assert(
       fc.property(
-        runArb.chain((run) => fc.tuple(fc.constant(run), queryArb(run), fc.constantFrom('tokens', 'phrase'), optional(text))),
+        runArb.chain((run) => optional(text).chain((automationName) =>
+          fc.tuple(fc.constant(run), queryArb(run, automationName), fc.constantFrom('tokens', 'phrase'), fc.constant(automationName)))),
         ([run, query, mode, automationName]) => {
           const options: StoredRunSearch = {
             mode,
