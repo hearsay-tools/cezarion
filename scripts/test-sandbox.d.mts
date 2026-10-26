@@ -4,7 +4,11 @@ export declare function processAlive(pid: number): boolean;
 export declare function reapTestSandboxes(
   prefix: string,
   root?: string,
-  options?: { alive?: (pid: number) => boolean; host?: string },
+  options?: {
+    alive?: (pid: number) => boolean;
+    host?: string;
+    account?: { uid?: number; user?: string };
+  },
 ): string[];
 export declare function createTestSandbox(prefix: string, root?: string): string;
 export declare function removeTestSandboxes(paths: readonly string[], remove?: (path: string) => void): void;

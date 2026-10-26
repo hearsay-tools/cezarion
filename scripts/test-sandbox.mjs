@@ -11,7 +11,7 @@ import { isAbsolute, join } from 'node:path'
 // process, the next sandbox of the same kind removes those whose owner is gone, and a signal
 // removes the process's own sandboxes before the process ends.
 
-/** Inside every sandbox: `{ pid, host }` of the process that owns it. */
+/** Inside every sandbox: `{ pid, host, user }` of the process that owns it. */
 export const OWNER_FILE = '.cez-test-owner'
 
 /** The fixed OS temp root, not the inherited TMPDIR: a cezar task pins TMPDIR inside its
@@ -45,27 +45,46 @@ function readOwner(dir) {
   }
 }
 
-/** A directory of this user whose marker names an exited process on `host`. */
-function ownerGone(dir, alive, host) {
+/** The account name, or undefined when the account has none to read. */
+function accountName() {
   try {
-    const stat = lstatSync(dir)
-    const uid = process.getuid?.()
-    if (!stat.isDirectory() || (uid !== undefined && stat.uid !== uid)) return false
+    return userInfo().username
+  } catch {
+    return undefined
+  }
+}
+
+/** POSIX compares the directory's uid. Windows has no uid and a temp root that every account
+ *  shares, so the marker's account name decides there, and an unknown account matches nothing. */
+function sameAccount(stat, owner, { uid, user }) {
+  return uid !== undefined ? stat.uid === uid : user !== undefined && owner.user === user
+}
+
+/** A directory of this account whose marker names an exited process on `host`. */
+function ownerGone(dir, alive, host, account) {
+  let stat
+  try {
+    stat = lstatSync(dir)
   } catch {
     return false
   }
-  const owner = readOwner(dir)
-  return owner !== undefined && owner.host === host && owner.pid !== process.pid && !alive(owner.pid)
+  const owner = stat.isDirectory() ? readOwner(dir) : undefined
+  return owner !== undefined && sameAccount(stat, owner, account) && owner.host === host &&
+    owner.pid !== process.pid && !alive(owner.pid)
 }
 
 /**
  * Remove the `<root>/<prefix>*` sandboxes whose owner process on this host has exited, and
  * return their paths. Everything else stays: a live owner, an owner on another host (a
  * container sharing this temp root), a missing or unreadable marker (a sandbox still being
- * created, or one from before the marker existed), a symlink, and another user's directory.
+ * created, or one from before the marker existed), a symlink, and another account's directory.
  * A recycled process ID keeps a dead sandbox until that process exits too.
  */
-export function reapTestSandboxes(prefix, root = osTempRoot(), { alive = processAlive, host = hostname() } = {}) {
+export function reapTestSandboxes(prefix, root = osTempRoot(), {
+  alive = processAlive,
+  host = hostname(),
+  account = { uid: process.getuid?.(), user: accountName() },
+} = {}) {
   let names
   try {
     names = readdirSync(root)
@@ -75,7 +94,7 @@ export function reapTestSandboxes(prefix, root = osTempRoot(), { alive = process
   const reaped = []
   for (const name of names) {
     const dir = join(root, name)
-    if (!name.startsWith(prefix) || !ownerGone(dir, alive, host)) continue
+    if (!name.startsWith(prefix) || !ownerGone(dir, alive, host, account)) continue
     try {
       rmSync(dir, REMOVE_OPTIONS)
       reaped.push(dir)
@@ -122,7 +141,7 @@ export function createTestSandbox(prefix, root = osTempRoot()) {
   reapTestSandboxes(prefix, realRoot)
   const dir = mkdtempSync(join(realRoot, prefix))
   owned.add(dir)
-  writeFileSync(join(dir, OWNER_FILE), JSON.stringify({ pid: process.pid, host: hostname() }))
+  writeFileSync(join(dir, OWNER_FILE), JSON.stringify({ pid: process.pid, host: hostname(), user: accountName() }))
   return dir
 }
 
