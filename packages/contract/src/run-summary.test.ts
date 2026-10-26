@@ -1,5 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { isAutomationTask, runIndexEntrySchema, runSummarySchema, toRunSummary, type RunRecord } from './runs.ts';
+import {
+  RUN_STATUS,
+  STEP_KIND,
+  STEP_STATUS,
+  WAIT_KIND,
+  WAIT_PHASE,
+  WAIT_SOURCE,
+  WORKER_OUTCOME_STATUS,
+  makeHumanWait,
+  makePrWait,
+  makeRunRecord,
+  makeStepState,
+  makeTimerWait,
+} from './test-factories.testkit.ts';
 
 /**
  * The slim list row (#817). `toRunSummary` is the ONE projection the list route, the workspace
@@ -11,18 +25,16 @@ const PARENT = '11111111-1111-4111-8111-111111111111';
 const REQUEST = '22222222-2222-4222-8222-222222222222';
 
 function record(over: Partial<RunRecord> = {}): RunRecord {
-  return {
+  return makeRunRecord({
     id: 'run-1',
     title: 'Fix the thing',
-    workflow: 'quick-task',
     task: 'a very long prompt '.repeat(100),
-    status: 'running',
+    status: RUN_STATUS.running,
     createdAt: '2026-10-04T10:00:00.000Z',
     tokensUsed: 12,
-    archived: false,
-    steps: [{ id: 's1', name: 'Implement', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 12 }],
+    steps: [makeStepState({ id: 's1', name: 'Implement', status: STEP_STATUS.running, tokensUsed: 12 })],
     ...over,
-  };
+  });
 }
 
 describe('toRunSummary', () => {
@@ -88,7 +100,7 @@ describe('toRunSummary', () => {
     const delegation = {
       role: 'root', permissions: [], receipts: [],
       wait: { id: REQUEST, workerIds: [PARENT, worker], deadline: '2026-10-04T10:10:00.000Z', phase: 'parked',
-        outcomes: [{ workerId: worker, status: 'done', observedAt: '2026-10-04T10:05:00.000Z', summary: 'secret' }] },
+        outcomes: [{ workerId: worker, status: WORKER_OUTCOME_STATUS.done, observedAt: '2026-10-04T10:05:00.000Z', summary: 'secret' }] },
     } as unknown as RunRecord['delegation'];
     expect(toRunSummary(record({ delegation })).delegation).toEqual({
       role: 'root',
@@ -107,11 +119,10 @@ describe('toRunSummary', () => {
 
   it('derives workflowLabel from the first agent step of a planned chain', () => {
     const planned = (steps: RunRecord['steps']) => toRunSummary(record({ workflow: '(planned)', steps })).workflowLabel;
-    expect(planned([
-      { id: 'c', name: 'Lint', kind: 'check', status: 'pending', iterations: 0, tokensUsed: 0 },
-      { id: 'a', name: 'Fix bug', kind: 'agent', status: 'pending', iterations: 0, tokensUsed: 0 },
-    ])).toBe('Fix bug');
-    expect(planned([{ id: 'c', name: 'Lint', kind: 'check', status: 'pending', iterations: 0, tokensUsed: 0 }])).toBe('(planned)');
+    const lint = makeStepState({ id: 'c', name: 'Lint', kind: STEP_KIND.check, status: STEP_STATUS.pending, iterations: 0 });
+    const fix = makeStepState({ id: 'a', name: 'Fix bug', kind: STEP_KIND.agent, status: STEP_STATUS.pending, iterations: 0 });
+    expect(planned([lint, fix])).toBe('Fix bug');
+    expect(planned([lint])).toBe('(planned)');
     expect(toRunSummary(record()).workflowLabel).toBe('quick-task');
   });
 
@@ -119,7 +130,7 @@ describe('toRunSummary', () => {
     const summary = toRunSummary(record({
       currentStepId: 's1',
       worktreePath: '/repo/.ai/cezar/worktrees/run-1',
-      steps: [{ id: 's1', name: 'Implement', kind: 'agent', status: 'running', iterations: 1, tokensUsed: 0, backend: 'codex' }],
+      steps: [makeStepState({ id: 's1', name: 'Implement', status: STEP_STATUS.running, backend: 'codex' })],
     }));
     expect(summary.currentStepBackend).toBe('codex');
     expect(summary.worktreePath).toBe('/repo/.ai/cezar/worktrees/run-1');
@@ -133,15 +144,14 @@ describe('toRunSummary', () => {
   });
 
   it('names the top open wait as waitingOn and leaves the wait list on the record', () => {
-    const waits = [{
-      kind: 'pr', id: '33333333-3333-4333-8333-333333333333', source: 'agent', via: 'cezar_wait',
-      registeredAt: '2026-10-04T10:00:00.000Z', deadline: '2026-10-04T10:30:00.000Z', phase: 'open', turnId: 'turn-1',
-      prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, headSha: 'a'.repeat(40),
-      generation: 'gen-1', timeoutSeconds: 1800, until: 'checks' as const, wakeOnConflict: true,
-    }] as RunRecord['waits'];
-    const summary = toRunSummary(record({ status: 'waiting', waits, lastWaits: waits }));
+    const waits = [makePrWait({
+      id: '33333333-3333-4333-8333-333333333333',
+      registeredAt: '2026-10-04T10:00:00.000Z', deadline: '2026-10-04T10:30:00.000Z',
+      prUrl: 'https://github.com/o/r/pull/12', repository: 'o/r', prNumber: 12, generation: 'gen-1',
+    })];
+    const summary = toRunSummary(record({ status: RUN_STATUS.waiting, waits, lastWaits: waits }));
     expect(summary.waitingOn).toEqual({
-      kind: 'pr', until: 'checks', waitId: '33333333-3333-4333-8333-333333333333', prUrl: 'https://github.com/o/r/pull/12',
+      kind: WAIT_KIND.pr, until: 'checks', waitId: '33333333-3333-4333-8333-333333333333', prUrl: 'https://github.com/o/r/pull/12',
       repository: 'o/r', prNumber: 12, deadline: '2026-10-04T10:30:00.000Z',
     });
     expect(Object.keys(summary)).not.toContain('waits');
@@ -151,26 +161,23 @@ describe('toRunSummary', () => {
   });
 
   it('a summary of a run with an open human wait reads waitingOn human', () => {
-    const waits = [{
-      kind: 'human', id: '66666666-6666-4666-8666-666666666666', source: 'agent', via: 'cezar_ask',
-      registeredAt: '2026-10-04T10:00:00.000Z', phase: 'open', turnId: 'turn-1',
-    }] as RunRecord['waits'];
-    const summary = toRunSummary(record({ status: 'waiting', waits }));
-    expect(summary.waitingOn).toEqual({ kind: 'human' });
+    const waits = [makeHumanWait({ id: '66666666-6666-4666-8666-666666666666', registeredAt: '2026-10-04T10:00:00.000Z' })];
+    const summary = toRunSummary(record({ status: RUN_STATUS.waiting, waits }));
+    expect(summary.waitingOn).toEqual({ kind: WAIT_KIND.human });
     expect(runSummarySchema.parse(summary)).toEqual(summary);
   });
 
   it('flags a resolved wait as an owed wake, and only then', () => {
-    const resolved = [{
-      kind: 'timer', id: '44444444-4444-4444-8444-444444444444', source: 'cezar', via: 'monitoring-line',
-      registeredAt: '2026-10-04T10:00:00.000Z', deadline: '2026-10-04T10:05:00.000Z', phase: 'resolved',
-      resolvedAt: '2026-10-04T10:05:00.000Z', turnId: 'turn-1', seconds: 300,
-    }] as RunRecord['waits'];
-    const summary = toRunSummary(record({ status: 'waiting', waits: resolved }));
+    const resolved = [makeTimerWait({
+      id: '44444444-4444-4444-8444-444444444444', source: WAIT_SOURCE.cezar,
+      registeredAt: '2026-10-04T10:00:00.000Z', deadline: '2026-10-04T10:05:00.000Z', phase: WAIT_PHASE.resolved,
+      resolvedAt: '2026-10-04T10:05:00.000Z', seconds: 300,
+    })];
+    const summary = toRunSummary(record({ status: RUN_STATUS.waiting, waits: resolved }));
     expect(summary.waitWakePending).toBe(true);
     expect('waitingOn' in summary).toBe(false);
     expect(runSummarySchema.parse(summary)).toEqual(summary);
-    expect('waitWakePending' in toRunSummary(record({ status: 'waiting', waits: [{ ...resolved![0]!, phase: 'delivered' }] as RunRecord['waits'] }))).toBe(false);
+    expect('waitWakePending' in toRunSummary(record({ status: RUN_STATUS.waiting, waits: [{ ...resolved[0]!, phase: WAIT_PHASE.delivered }] }))).toBe(false);
     expect('waitWakePending' in toRunSummary(record())).toBe(false);
     expect(() => toRunSummary(record({ waits: [null] as unknown as RunRecord['waits'] }))).not.toThrow();
   });
@@ -179,7 +186,7 @@ describe('toRunSummary', () => {
     expect(() => toRunSummary(record({ waits: 'nope' as unknown as RunRecord['waits'] }))).not.toThrow();
     expect(() => toRunSummary(record({ waits: [null] as unknown as RunRecord['waits'] }))).not.toThrow();
     const delegation = { role: 'root', wait: { phase: 'parked', workerIds: [PARENT], outcomes: 5 } } as unknown as RunRecord['delegation'];
-    const summary = toRunSummary(record({ status: 'waiting', delegation }));
+    const summary = toRunSummary(record({ status: RUN_STATUS.waiting, delegation }));
     expect(summary.delegation).toEqual({ role: 'invalid' });
     expect('waitingOn' in summary).toBe(false);
   });

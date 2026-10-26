@@ -32,3 +32,8 @@ Three consumers, one definition:
    `packages/cezar/src/contract-import-boundaries.test.ts` refuses any other root import. A pure
    helper that has no schema to import goes in a module with no runtime import, as
    `run-labels.ts` and the `*-limits.ts` modules do, so its users load no schema.
+5. **Test data through `src/test-factories.testkit.ts`.** It builds run records, waits and events
+   typed from these schemas and exports a constant per enum value (`RUN_STATUS`, `WAIT_KIND`, …),
+   so a renamed field or value stops compiling in every test that uses it. It imports no Node
+   module, and both tsconfigs keep `*.testkit.ts` out of a build. The `test-enum-literal` rule in
+   `.ai/ast-grep/rules` refuses a new enum literal in a test (hearsay-tools/cezarion#1812).

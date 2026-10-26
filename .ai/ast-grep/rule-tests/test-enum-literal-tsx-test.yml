@@ -1,0 +1,15 @@
+id: test-enum-literal-tsx
+valid:
+  # The constant in a rendered tree, and a prop that is not an object property.
+  - 'const x = <Row run={makeRunRecord({ status: RUN_STATUS.done })} />'
+  - "const x = <Badge status='done' />"
+  - "const x = { state: 'done' }"
+  - |
+    // ast-grep-ignore: test-enum-literal-tsx
+    const pr = { status: 'open' }
+invalid:
+  # An object inside JSX props, and inside a hook's callback, where only the tsx grammar parses.
+  - "const x = <Row run={{ id: 'r', status: 'running' }} />"
+  - "const x = render(<Row run={{ steps: [{ kind: 'agent', status: 'done' }] }} />)"
+  - "const x = { waits: [{ kind: 'timer', phase: 'open' }] }"
+  - "const x = { status: 'done' as const }"
