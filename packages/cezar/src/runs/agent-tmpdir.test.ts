@@ -10,7 +10,8 @@ import {
   symlinkSync,
   writeFileSync,
 } from 'node:fs';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
+import { mkdir as mkdirAsync, readdir as readdirAsync } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { createServer } from 'node:net';
@@ -206,6 +207,22 @@ describe('reaping the per-run temp directories (#785)', () => {
     removeAgentTmpDir(dataDir, id);
     expect(existsSync(join(dataDir, 'runs.db'))).toBe(true);
     expect(existsSync(agentShortTmpDir(dataDir, 'live'))).toBe(true);
+  });
+
+  it('leaves an unregistered synthetic fallback outside this fixture alone', async () => {
+    const root = realpathSync(tmpdir());
+    const name = `cez-agent-${randomBytes(6).toString('hex')}`;
+    const outsider = join(root, name);
+    const gone = join(root, `missing-${randomBytes(8).toString('hex')}`);
+    await mkdirAsync(outsider);
+    try {
+      writeFileSync(join(outsider, '.synthetic-proof'), 'fixture');
+      writeFileSync(join(outsider, '.cez-owner-dir'), gone);
+      writeFileSync(join(outsider, '.cez-owner'), createHash('sha256').update(`cez-agent-owner:${gone}`).digest('hex').slice(0, 16));
+      expect(await readdirAsync(root)).toContain(name);
+      sweepAgentTmpDirs(dataDir, []);
+      expect(existsSync(outsider)).toBe(true);
+    } finally { rmSync(outsider, { recursive: true, force: true }); }
   });
 
   it('sweeps orphans left by a crash while keeping the live runs', () => {

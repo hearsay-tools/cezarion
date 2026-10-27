@@ -1,3 +1,4 @@
+import './scripts/test-fallback-sandbox.mjs'
 import { mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeEach } from 'vitest'
