@@ -4,6 +4,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
+import { WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import type { AgentInput, CiWaitResult, ConversationMessage, HumanWaitEntry, ProcessWaitResult, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
@@ -2039,58 +2040,71 @@ function workersCells(runners: RunnerId[]): void {
     // parked on its completion wait (U21m). The marker adds no redundant timer
     // (hearsay-tools/cezarion#1268), but an explicit cezar_wait still opens the agent's timer.
     it(`${runner} U21t an agent timer registered beside a completion-wait park keeps its deadline and wakes beside it`, async () => {
-      process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
-      checkpoint('u21t-conversing-parent');
-      const f = await conversingParent(runner);
-      const waitAt = async (phase: string, predicate: () => boolean) => {
-        checkpoint(`u21t-${phase}`);
-        await until(predicate, () => timeline(f.p.id));
-      };
-      checkpoint('u21t-completion-refusal');
-      const entry = await ignoreRefusal(runner, f.p.id, `Workers are still live: ${f.w.id}.`, () => workerWaits(f.p.id)[0]?.phase === 'open');
-      let turns = turnEnds(f.p.id);
       const marker = messagesPrompt(runner, ['Still checking.\nCEZ:MONITORING']);
-      checkpoint('u21t-marker-admission');
-      const markerId = await f.progress(marker);
-      await waitAt('marker-native-prompt', () => prompted(runner, marker).length > 0);
-      await waitAt('marker-delivery', () => delivered(f.p.id, markerId));
-      await waitAt('marker-turn-end', () => turnEnds(f.p.id) > turns);
-      await waitAt('marker-repark', () => parkedOn(f.p.id, workerWaits(f.p.id)[0]));
-      expect(store.getRun(f.p.id)?.waits).toEqual([expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' })]);
-      turns = turnEnds(f.p.id);
-      const timerPrompt = toolCall('cezar_wait', { kind: 'timer', seconds: 600, note: 'u21t explicit timer' });
-      checkpoint('u21t-timer-admission');
-      const id = await f.progress(timerPrompt);
-      await waitAt('timer-native-prompt', () => prompted(runner, timerPrompt).length > 0);
-      await waitAt('timer-delivery', () => delivered(f.p.id, id));
-      await waitAt('timer-turn-end', () => turnEnds(f.p.id) > turns);
-      await waitAt('timer-repark', () => parkedOn(f.p.id, waitOfKind(f.p.id, 'timer')));
-      const timer = timed(waitOfKind(f.p.id, 'timer')!);
-      expect(timer).toMatchObject({ via: 'cezar_wait', note: 'u21t explicit timer' });
-      expect(store.getRun(f.p.id)?.waits).toEqual([
-        expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' }),
-        expect.objectContaining({ id: timer.id, source: 'agent', phase: 'open', deadline: timer.deadline }),
-      ]);
-      expect(workerWaits(f.p.id)[0]).not.toHaveProperty('deadline');
-      // The timer wakes the parent once; the completion wait stays open, with no deadline.
-      turns = turnEnds(f.p.id);
-      fireTimer(timer.id);
-      await waitAt('timer-wake-delivery', () => settled(f.p.id, timer.id)?.phase === 'delivered');
-      await waitAt('timer-wake-native-prompt', () => prompted(runner, inputsFor(f.p.id, timer.id)[0]!.text).length > 0);
-      await waitAt('timer-wake-turn-end', () => turnEnds(f.p.id) > turns);
-      await waitAt('timer-wake-repark', () => parkedOn(f.p.id, workerWaits(f.p.id)[0]));
-      expect(inputsFor(f.p.id, timer.id)).toHaveLength(1);
-      expect(prompted(runner, inputsFor(f.p.id, timer.id)[0]!.text)).toEqual([expect.stringContaining(`Still open: worker wait ${entry.id} on 1 worker, no deadline.`)]);
-      expect(store.getRun(f.p.id)?.waits).toEqual([expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' })]);
-      expect(workerWaits(f.p.id)[0]).not.toHaveProperty('deadline');
-      expect(inputsFor(f.p.id, entry.id)).toEqual([]);
-      // The worker's settlement still resolves the completion wait, and it wakes the parent once.
-      expect(manager.finish(f.w.id)).toBe(true);
-      await waitAt('completion-wake-delivery', () => settled(f.p.id, entry.id)?.phase === 'delivered');
-      await waitAt('completion-wake-native-prompt', () => prompted(runner, workerWake(entry)).length > 0);
-      expect(inputsFor(f.p.id, entry.id)).toHaveLength(1);
-      expect(prompted(runner, workerWake(entry))).toHaveLength(1);
-      await waitAt('completion-wake-repark', () => store.getRun(f.p.id)?.status === 'waiting');
+      const exercise = async (releaseAck?: () => void) => {
+        process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+        checkpoint('u21t-conversing-parent');
+        const f = await conversingParent(runner);
+        const waitAt = async (phase: string, predicate: () => boolean) => {
+          checkpoint(`u21t-${phase}`);
+          await until(predicate, () => timeline(f.p.id));
+        };
+        checkpoint('u21t-completion-refusal');
+        const entry = await ignoreRefusal(runner, f.p.id, `Workers are still live: ${f.w.id}.`, () => workerWaits(f.p.id)[0]?.phase === 'open');
+        let turns = turnEnds(f.p.id);
+        checkpoint('u21t-marker-admission');
+        const markerId = await f.progress(marker);
+        await waitAt('marker-native-prompt', () => prompted(runner, marker).length > 0);
+        if (releaseAck) {
+          // hearsay-tools/cezarion#1298: the historical failure ended this native turn before
+          // its HTTP ACK. The marker must leave only the existing completion wait in either order.
+          await waitAt('marker-turn-end-before-ack', () => turnEnds(f.p.id) > turns);
+          expect(delivered(f.p.id, markerId)).toBe(false);
+          expect(store.getRun(f.p.id)?.waits).toEqual([expect.objectContaining({ id: entry.id, via: WAIT_VIA.completion, phase: WAIT_PHASE.open })]);
+          releaseAck();
+        }
+        await waitAt('marker-delivery', () => delivered(f.p.id, markerId));
+        await waitAt('marker-turn-end', () => turnEnds(f.p.id) > turns);
+        await waitAt('marker-repark', () => parkedOn(f.p.id, workerWaits(f.p.id)[0]));
+        expect(store.getRun(f.p.id)?.waits).toEqual([expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' })]);
+        turns = turnEnds(f.p.id);
+        const timerPrompt = toolCall('cezar_wait', { kind: 'timer', seconds: 600, note: 'u21t explicit timer' });
+        checkpoint('u21t-timer-admission');
+        const id = await f.progress(timerPrompt);
+        await waitAt('timer-native-prompt', () => prompted(runner, timerPrompt).length > 0);
+        await waitAt('timer-delivery', () => delivered(f.p.id, id));
+        await waitAt('timer-turn-end', () => turnEnds(f.p.id) > turns);
+        await waitAt('timer-repark', () => parkedOn(f.p.id, waitOfKind(f.p.id, 'timer')));
+        const timer = timed(waitOfKind(f.p.id, 'timer')!);
+        expect(timer).toMatchObject({ via: 'cezar_wait', note: 'u21t explicit timer' });
+        expect(store.getRun(f.p.id)?.waits).toEqual([
+          expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' }),
+          expect.objectContaining({ id: timer.id, source: 'agent', phase: 'open', deadline: timer.deadline }),
+        ]);
+        expect(workerWaits(f.p.id)[0]).not.toHaveProperty('deadline');
+        // The timer wakes the parent once; the completion wait stays open, with no deadline.
+        turns = turnEnds(f.p.id);
+        fireTimer(timer.id);
+        await waitAt('timer-wake-delivery', () => settled(f.p.id, timer.id)?.phase === 'delivered');
+        await waitAt('timer-wake-native-prompt', () => prompted(runner, inputsFor(f.p.id, timer.id)[0]!.text).length > 0);
+        await waitAt('timer-wake-turn-end', () => turnEnds(f.p.id) > turns);
+        await waitAt('timer-wake-repark', () => parkedOn(f.p.id, workerWaits(f.p.id)[0]));
+        expect(inputsFor(f.p.id, timer.id)).toHaveLength(1);
+        expect(prompted(runner, inputsFor(f.p.id, timer.id)[0]!.text)).toEqual([expect.stringContaining(`Still open: worker wait ${entry.id} on 1 worker, no deadline.`)]);
+        expect(store.getRun(f.p.id)?.waits).toEqual([expect.objectContaining({ id: entry.id, via: 'completion', phase: 'open' })]);
+        expect(workerWaits(f.p.id)[0]).not.toHaveProperty('deadline');
+        expect(inputsFor(f.p.id, entry.id)).toEqual([]);
+        // The worker's settlement still resolves the completion wait, and it wakes the parent once.
+        expect(manager.finish(f.w.id)).toBe(true);
+        await waitAt('completion-wake-delivery', () => settled(f.p.id, entry.id)?.phase === 'delivered');
+        await waitAt('completion-wake-native-prompt', () => prompted(runner, workerWake(entry)).length > 0);
+        expect(inputsFor(f.p.id, entry.id)).toHaveLength(1);
+        expect(prompted(runner, workerWake(entry))).toHaveLength(1);
+        await waitAt('completion-wake-repark', () => store.getRun(f.p.id)?.status === 'waiting');
+      };
+      // The control must be inherited by the native mock when conversingParent starts it.
+      if (runner === 'opencode') await withHeldAck(runner, exercise, marker);
+      else await exercise();
     });
 
     it(`${runner} U21h an ignored refusal with only uncollected results parks on Cezar's human wait`, async () => {
