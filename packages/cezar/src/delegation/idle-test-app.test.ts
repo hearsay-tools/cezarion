@@ -68,15 +68,17 @@ it.skipIf(process.platform !== 'linux')('removes the idle worker app but preserv
   expect(git('branch', '--list', workspace.branch)).toBe('');
 }, 60_000);
 
-it('clears a stale app descriptor after the recorded process exits', async () => {
+it.each([true, false])('clears a stale app descriptor after the recorded process exits (start identity: %s)', async hasStart => {
   const root = await mkdtemp(join(tmpdir(), 'cez-exited-app-')); roots.push(root);
   const qa = join(root, '.ai/qa'); await mkdir(qa, { recursive: true });
   const child = spawn(process.execPath, ['-e', 'console.log("ready"); setInterval(() => {}, 1000)'], { stdio: ['ignore', 'pipe', 'ignore'] });
   await once(child.stdout!, 'data');
   const start = processStartToken(child.pid!) ?? 'recorded-start';
-  await writeFile(join(qa, 'test-env.json'), JSON.stringify({ startedByThisRepo: true, app: { pid: child.pid, start } }));
-  const exited = once(child, 'exit'); child.kill(); await exited;
+  await writeFile(join(qa, 'test-env.json'), JSON.stringify({ startedByThisRepo: true, app: { pid: child.pid, ...(hasStart ? { start } : {}) } }));
   const db = new DatabaseSync(join(qa, 'test-env-lease.sqlite'));
   db.exec('CREATE TABLE holders (id TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, start TEXT, pgid INTEGER)'); db.close();
+  await withIdleTestApp(root, async (_stopped, busy) => { expect(busy).toBe(true); });
+  expect(child.exitCode).toBeNull();
+  const exited = once(child, 'exit'); child.kill(); await exited;
   await withIdleTestApp(root, async (_stopped, busy) => { expect(busy).toBe(false); });
 });

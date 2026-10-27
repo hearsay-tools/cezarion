@@ -130,4 +130,4 @@ jobs:
           }
           $global:LASTEXITCODE = 0
       - name: Verify worker cleanup on native Windows
-        run: npm test -- packages/cezar/src/delegation/windows-test-app.test.ts packages/cezar/src/delegation/idle-test-app-refusal.test.ts
+        run: npm test -- packages/cezar/src/delegation/windows-test-app.test.ts packages/cezar/src/delegation/idle-test-app-refusal.test.ts packages/cezar/src/delegation/idle-test-app.test.ts
