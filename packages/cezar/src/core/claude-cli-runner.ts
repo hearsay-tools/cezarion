@@ -30,7 +30,7 @@ import type {
 // Re-exported for backends and the run manager that still import them from here.
 export type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { isSignalTerminationExit, trackChildExit, unknownToolGrant } from './agent-runner.ts';
-import { signalSession, spawnSessionLeader } from './session-process.ts';
+import { confirmedLeaderExit, signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { cezarToolEnvNames, cezarToolNames } from '../ci-wait/tools.ts';
 import { costWeightedTokens, type RawUsage } from './usage.ts';
@@ -530,7 +530,7 @@ export class ClaudeCliRunner implements AgentRunner {
           child.once('exit', done);
           child.once('close', done);
         });
-        if (!hasExited()) interrupt();
+        if (!confirmedLeaderExit(child)) interrupt();
       }
 
       const exitCode = await waitForExit(child);

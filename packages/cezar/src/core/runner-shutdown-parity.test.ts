@@ -1,5 +1,6 @@
 import { execFileSync, type ChildProcess } from 'node:child_process';
 import type { IncomingMessage } from 'node:http';
+import * as fs from 'node:fs';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +13,7 @@ import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
 const spawned = vi.hoisted(() => [] as ChildProcess[]);
 const eventStreams = vi.hoisted(() => [] as IncomingMessage[]);
 const streamClosure = vi.hoisted(() => ({ gate: undefined as Promise<void> | undefined }));
+vi.mock('node:fs', async original => ({ ...await original<typeof import('node:fs')>() }));
 vi.mock('node:http', async (original) => {
   const actual = await original<typeof import('node:http')>();
   return { ...actual, request: ((...args: Parameters<typeof actual.request>) => {
@@ -54,7 +56,7 @@ import { createRunner } from './runner-factory.js';
 import { HARNESS_ADAPTERS, SHUTDOWN_CRITERIA, promptFor } from './harness-parity.testkit.js';
 import { killFromPidFile, readPid, requirePid } from '../pid-file.testkit.js';
 
-afterEach(() => vi.unstubAllEnvs());
+afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 /** A zombie has exited; only its reaper's wait remains. */
 function alive(pid: number): boolean {
@@ -113,7 +115,7 @@ async function withChild(backend: RunnerId, check: (session: AgentSession, child
 // Test limits cover each independent 10 s step guard plus settlement and cleanup.
 // Group cases also wait for leftover receipts and reaping; EOF adds its own 10 s grace.
 describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
-  const [outsideSignal, endEscalation, outputFailure, ownGroup, stopGroup, endGroup, /* S29: omp-input-pipe.test.ts */, ownExit, outsideKill] = SHUTDOWN_CRITERIA;
+  const [outsideSignal, endEscalation, outputFailure, ownGroup, stopGroup, endGroup, /* S29: omp-input-pipe.test.ts */, ownExit, outsideKill, lateOutsideSignal] = SHUTDOWN_CRITERIA;
   for (const backend of RUNNER_IDS) {
     it(`${backend} ${outsideSignal.id} ${outsideSignal.name}`, async () => {
       // Process exit must classify the failure even when HTTP stream closure
@@ -135,6 +137,25 @@ describe('runner shutdown parity (hearsay-tools/cezarion#843)', () => {
         releaseStream();
         streamClosure.gate = undefined;
       }
+    }, 15_000);
+
+    it(`${backend} ${lateOutsideSignal.id} ${lateOutsideSignal.name}`, async () => {
+      await withChild(backend, async (_session, child, events, settled) => {
+        const handle = (child as unknown as { _handle: { onexit: (...args: unknown[]) => void } })._handle;
+        const onexit = handle.onexit;
+        handle.onexit = function (...args) {
+          // Delay the real OS result beyond EOF cleanup; preserve its exact status.
+          setTimeout(() => onexit.apply(this, args), 250);
+        };
+        child.kill('SIGKILL');
+        const result = await settled;
+        expect(result instanceof Error || events.some(event => event.type === 'error')).toBe(true);
+        if (backend === 'pi' || backend === 'claude' || backend === 'codex') {
+          expect(result).toBeInstanceOf(Error);
+          expect((result as Error).message).toContain('SIGKILL');
+          expect(events.some(event => event.type === 'done')).toBe(false);
+        }
+      });
     }, 15_000);
 
     it(`${backend} ${endEscalation.id} ${endEscalation.name}`, async () => {
@@ -289,3 +310,23 @@ process.on = function(event, listener) {
     }
   }
 });
+
+// These adapters use clean output EOF to start bounded cleanup. Other native
+// transports keep their own S23/S24 guards; S33 above covers every runner.
+for (const backend of ['claude', 'codex', 'pi'] as const) {
+  it(`${backend} keeps live EOF cleanup bounded with unavailable process evidence`, async () => {
+    await withChild(backend, async (session, child, _events, settled) => {
+      const read = fs.readFileSync;
+      vi.spyOn(fs, 'readFileSync').mockImplementation(((...args: Parameters<typeof read>) => {
+        if (args[0] === `/proc/${child.pid}/stat`) throw Object.assign(new Error('unreadable proc'), { code: 'EACCES' });
+        return read(...args);
+      }) as typeof read);
+      child.kill('SIGSTOP');
+      child.stdout!.push(null);
+      // bound: a stopped child ignores TERM, so cleanup must still escalate.
+      await vi.waitFor(() => expect(child.signalCode).toBe('SIGKILL'), { timeout: 10_000 });
+      await expect(settled).resolves.not.toBeInstanceOf(Error);
+      expect(session.open).toBe(false);
+    });
+  }, 15_000);
+}

@@ -42,6 +42,23 @@ function leaderExited(child: ChildProcess): boolean {
   const ps = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8', timeout: 2_000 });
   return ps.status === 0 ? /^Z|E/.test(ps.stdout.trim()) : ps.status === 1;
 }
+/** Positive exit evidence before classifying a cleanup signal as our teardown.
+ * Unlike leaderExited's group-signal safety check, unknown evidence must keep
+ * bounded cleanup armed (hearsay-tools/cezarion#1899). Node's exit notification
+ * can lag EOF; signal 0 detects a reaped PID on every platform, and Linux also
+ * exposes a zombie or exit-in-progress. Other platforms retain cleanup until
+ * Node reports exit or the PID probe confirms absence. */
+export function confirmedLeaderExit(child: ChildProcess, platform: NodeJS.Platform = process.platform): boolean {
+  if (exited(child)) return true;
+  const pid = child.pid;
+  if (pid === undefined || !groupId(pid)) return false;
+  try { process.kill(pid, 0); }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
+  if (platform !== 'linux') return false;
+  try { return procStatExited(readFileSync(`/proc/${pid}/stat`, 'utf8')); }
+  catch { return false; }
+}
+
 // -1 and 0 address every process and our own group: never a session.
 const groupId = (pgid: number) => Number.isSafeInteger(pgid) && pgid > 1;
 

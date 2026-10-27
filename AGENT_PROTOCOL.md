@@ -1501,6 +1501,14 @@ output transport must terminate the live child. OpenCode uses its real HTTP/SSE
 stream for the transport failure, while the other backends use stdout.
 Requested teardown remains successful. The matrix has no wire exemptions.
 
+**S33** (hearsay-tools/cezarion#1899), in the same file, delays delivery of
+an actual native exit callback after an outside SIGKILL on every `RUNNER_IDS`
+wire. The exact OS status still fails the session when EOF cleanup runs first.
+Pi also pins self-exit 143 with the same scheduling fault. Claude, Codex and Pi
+retain bounded live-EOF cleanup and SIGKILL escalation when process evidence is
+unreadable. Confirmed exit may suppress a cleanup signal; unknown evidence may
+not. No wire exemptions or synthetic normalized events.
+
 **S29** (hearsay-tools/cezarion#906, hearsay-tools/cezarion#969), in `core/omp-input-pipe.test.ts`, closes each
 native input transport while the admitted turn's child is alive, then submits agent input.
 Codex waits until `sendAgentMessage` admits — `session.open` can be true before the first

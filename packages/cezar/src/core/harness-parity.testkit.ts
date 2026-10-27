@@ -166,6 +166,7 @@ export const SHUTDOWN_CRITERIA = [
   // hearsay-tools/cezarion#1286: a session that ends without a signal from cezar.
   { id: 'S30', scenario: 'no-progress-leftover', name: 'a leader that exits on its own leaves nothing in its process group' },
   { id: 'S31', scenario: 'no-progress-leftover', name: 'a leader killed from outside leaves nothing in its process group' },
+  { id: 'S33', scenario: 'no-progress', name: 'preserves outside-signal failure when native exit notification follows EOF cleanup' },
 ] as const;
 
 /** hearsay-tools/cezarion#1351: earlier success must not swallow a later native rejection. */

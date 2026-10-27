@@ -1,4 +1,5 @@
 import { execFile, execFileSync, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import * as fs from 'node:fs';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,12 +7,14 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('node:fs', async original => ({ ...await original<typeof import('node:fs')>() }));
+
 vi.mock('./runner-runtime.ts', async (original) => ({
   ...await original<typeof import('./runner-runtime.ts')>(),
   KILL_GRACE_MS: 100,
 }));
 
-import { forwardToSessionGroups, procStatExited, sessionGroupOf, signalSession, spawnSessionLeader } from './session-process.ts';
+import { confirmedLeaderExit, forwardToSessionGroups, procStatExited, sessionGroupOf, signalSession, spawnSessionLeader } from './session-process.ts';
 import { requirePid } from '../pid-file.testkit.ts';
 
 /** A zombie has exited; only its reaper's wait remains. */
@@ -53,6 +56,45 @@ describe('procStatExited (hearsay-tools/cezarion#890)', () => {
     expect(procStatExited(stat('S', 0x400100))).toBe(false);
     expect(procStatExited(stat('R', 0x400040))).toBe(false);
     expect(procStatExited('1234 (node) S')).toBe(false);
+  });
+});
+
+describe('confirmedLeaderExit (hearsay-tools/cezarion#1899)', () => {
+  const child = { pid: 123456, exitCode: null, signalCode: null } as ChildProcess;
+  afterEach(() => vi.restoreAllMocks());
+
+  it('accepts an observed exit or a missing process, including without proc support', () => {
+    expect(confirmedLeaderExit({ ...child, exitCode: 143 } as ChildProcess)).toBe(true);
+    vi.spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }); });
+    expect(confirmedLeaderExit(child, 'win32')).toBe(true);
+  });
+
+  it('does not infer exit from an unavailable PID or denied process probe', () => {
+    expect(confirmedLeaderExit({ ...child, pid: undefined } as unknown as ChildProcess)).toBe(false);
+    vi.spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('denied'), { code: 'EPERM' }); });
+    expect(confirmedLeaderExit(child)).toBe(false);
+  });
+
+  it.each(['EACCES', 'ENOENT'])('keeps cleanup when proc cannot be read (%s)', code => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    vi.spyOn(fs, 'readFileSync').mockImplementation(() => { throw Object.assign(new Error('unavailable'), { code }); });
+    expect(confirmedLeaderExit(child, 'linux')).toBe(false);
+  });
+
+  it.each([
+    ['123456 (node) Z 1 123456 123456 0 -1 0', true],
+    ['123456 (node) D 1 123456 123456 0 -1 4', true],
+    ['123456 (node) S 1 123456 123456 0 -1 0', false],
+    ['unparseable', false],
+  ] as const)('requires positive process-state evidence: %s', (stat, expected) => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(stat);
+    expect(confirmedLeaderExit(child, 'linux')).toBe(expected);
+  });
+
+  it('keeps cleanup on a live process without a supported state probe', () => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    expect(confirmedLeaderExit(child, 'win32')).toBe(false);
   });
 });
 

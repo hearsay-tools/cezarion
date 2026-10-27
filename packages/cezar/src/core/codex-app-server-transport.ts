@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { trackChildExit } from './agent-runner.ts';
-import { signalSession, spawnSessionLeader } from './session-process.ts';
+import { confirmedLeaderExit, signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS } from './runner-runtime.ts';
 
@@ -165,12 +165,12 @@ export function endCodexAppServer(
   const hasExited = trackChildExit(child);
   let killTimer: NodeJS.Timeout | undefined;
   const termTimer = setTimeout(() => {
-    if (!hasExited()) {
+    if (!hasExited() && !confirmedLeaderExit(child)) {
       onSignal?.();
       signalSession(child, 'SIGTERM');
     }
     killTimer = setTimeout(() => {
-      if (!hasExited()) {
+      if (!hasExited() && !confirmedLeaderExit(child)) {
         onSignal?.();
         signalSession(child, 'SIGKILL');
       }

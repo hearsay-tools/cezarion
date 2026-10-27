@@ -18,7 +18,7 @@ import type {
   ToolGrant,
 } from './agent-runner.js';
 import { isSignalTerminationExit, unknownToolGrant } from './agent-runner.js';
-import { signalSession, spawnSessionLeader } from './session-process.js';
+import { confirmedLeaderExit, signalSession, spawnSessionLeader } from './session-process.js';
 import { buildChildEnv } from './agent-env.js';
 import { cezarToolNames } from '../ci-wait/tools.js';
 import { readNdjson } from './ndjson.js';
@@ -531,7 +531,7 @@ export class PiRunner implements AgentRunner {
           child.once('exit', done);
           child.once('close', done);
         });
-        if (child.exitCode === null && child.signalCode === null) {
+        if (!confirmedLeaderExit(child)) {
           terminatedByCezar = true;
           signalSession(child, 'SIGTERM');
           const reap = setTimeout(() => {
