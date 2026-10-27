@@ -4,6 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { hasLinuxPython, singleThreadZombie, threadHoldingPort } from '../linux-zombie.testkit.ts';
 import { nonDumpableHolder, readableHolder } from './non-dumpable.testkit.ts';
 import { inspectExecutionGeneration, inspectGeneration, parseProcStat, probeGeneration, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, scanProcessCwds, sharedCwdScan, processCwdUnder } from './process-liveness.ts';
 
@@ -315,4 +316,18 @@ describe('recordedGroupSignalable (hearsay-tools/cezarion#890)', () => {
       expect(recordedGroupSignalable({ pid: dead.pid!, pgid: dead.pid! + 1 }, [dead.pid! + 1])).toBe(false);
     } finally { live.kill('SIGKILL'); }
   });
+});
+
+
+it.runIf(hasLinuxPython)('counts a zombie leader with a live thread as running', async () => {
+  const holder = await threadHoldingPort();
+  try { expect(recordedProcessLive({ pid: holder.pid, startToken: processStartToken(holder.pid) })).toBe(true); }
+  finally { await holder.stop(); }
+});
+
+
+it.runIf(linux)('counts a single-thread zombie as exited', async () => {
+  const zombie = await singleThreadZombie();
+  try { expect(recordedProcessLive({ pid: zombie.pid })).toBe(false); }
+  finally { await zombie.stop(); }
 });
