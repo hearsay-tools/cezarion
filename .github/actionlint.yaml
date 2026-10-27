@@ -5,8 +5,7 @@ self-hosted-runner:
   # the 8-vCPU one.
   labels:
     - blacksmith-*-ubuntu-2404
-    # Ubicloud trial: Vitest/coverage and browser CI shards, respectively.
-    - ubicloud-standard-4
+    # Ubicloud trial: Vitest, coverage and browser CI shards use the lowest tier.
     - ubicloud-standard-2
 
 paths:

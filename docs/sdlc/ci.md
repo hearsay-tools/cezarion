@@ -88,15 +88,15 @@ intentionally trading single-run latency for lower concurrency on a shared host.
 
 Verification runs in eight parallel jobs, and a ninth, `complexity-gate`, gates pull requests. Seven of the eight use the current Node LTS; the build/package job uses exactly the `engines.node` minimum (Node 24.21.0):
 
-- Three Vitest shards on `ubicloud-standard-4` (4 vCPU, 16 GB RAM, Ubuntu 24.04 x64) each install dependencies, build the server, and run `npm test -- --shard=N/3 --maxWorkers=4` for N=1..3.
+- Three Vitest shards on `ubicloud-standard-2` (2 vCPU, 8 GB RAM, Ubuntu 24.04 x64) each install dependencies, build the server, and run `npm test -- --shard=N/3 --maxWorkers=4` for N=1..3.
 - The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It runs the issue-citation check, typechecking, Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
 - Four cockpit browser E2E shards on `ubicloud-standard-2` (2 vCPU, 8 GB RAM, Ubuntu 24.04 x64) each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
 The Ubicloud trial changes only these frequently run CI jobs and the three Vitest
-coverage shards, which use `ubicloud-standard-4` too. Compare job times after the
-switch before changing shard counts or worker limits. Other jobs keep their
-existing runners; nightly verification stays on GitHub-hosted Ubuntu with the
-same Vitest shards, commands and timeouts as CI.
+coverage shards. All ten shards use the lowest x64 tier, `ubicloud-standard-2`.
+Compare job times after the switch before changing shard counts or worker limits.
+Other jobs keep their existing runners; nightly verification stays on
+GitHub-hosted Ubuntu with the same Vitest shards, commands and timeouts as CI.
 
 The full Vitest suite runs once across the three LTS shards. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
 
