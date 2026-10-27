@@ -9,7 +9,7 @@ import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
 import { CredentialRegistry } from '../delegation/credentials.ts';
 import { DelegationService } from '../delegation/service.ts';
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
-import { processStartToken } from '../delegation/process-liveness.ts';
+import { processStartToken, recordedProcessLive } from '../delegation/process-liveness.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
 import { isLiveRecord } from '../runs/run-row.ts';
 import { historyPaths } from '../runs/history-file.ts';
@@ -69,7 +69,7 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker s
     expect(new Set(events.map(e => e.seq)).size).toBe(events.length);
   });
   for (const ledgerKind of ['absent', 'incomplete'] as const) {
-    it.each(RUNNER_IDS)(`%s completes destroy once the readable holder exits, while an unreadable process runs (${ledgerKind} ledger)`, async runner => {
+    it.each(RUNNER_IDS)(`%s terminates the readable holder during destroy, while an unreadable process runs (${ledgerKind} ledger)`, async runner => {
       process.env.CEZ_DELEGATION = '1'; process.env.CEZ_DRY_RUN = '0';
       const adapter = HARNESS_ADAPTERS[runner]; process.env[adapter.binEnv] = adapter.mockBin;
       const p = store.createRun({ title: 'parent', task: 'parent', workflow: 'quick-task', steps: [] });
@@ -99,6 +99,8 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker s
       }
       const holder = spawn(process.execPath, ['-e', "process.stdin.resume(); process.stdin.on('end',()=>process.exit(0)); console.log('ready')"],
         { cwd: workspace.path, stdio: ['pipe', 'pipe', 'pipe'] });
+      const holderIdentity = { pid: holder.pid!, startToken: processStartToken(holder.pid!)! };
+      expect(holderIdentity.startToken).toBeTruthy();
       let holderClosed = false;
       const exited = once(holder, 'exit').then(() => { holderClosed = true; });
       await Promise.race([once(holder.stdout, 'data'), exited.then(() => { throw Error('readable holder exited before readiness'); })]);
@@ -106,13 +108,11 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker s
       const readdir = fs.readdirSync; const readlink = fs.readlinkSync;
       vi.spyOn(fs, 'readdirSync').mockImplementation(((...args: unknown[]) => String(args[0]) === '/proc'
         ? [holder.pid!, unreadable.pid].map(String) : Reflect.apply(readdir, fs, args)) as typeof fs.readdirSync);
-      let destroying = false; let observedHolder = false; let exitTimer: NodeJS.Timeout | undefined;
+      let destroying = false; let observedHolder = false;
       vi.spyOn(fs, 'readlinkSync').mockImplementation(((...args: unknown[]) => {
         const cwd = Reflect.apply(readlink, fs, args);
         if (destroying && String(args[0]) === `/proc/${holder.pid}/cwd` && cwd === workspace.path && !observedHolder) {
           observedHolder = true;
-          // Keep the real readable holder alive across a poll, then let it exit normally.
-          exitTimer = setTimeout(() => holder.stdin.end(), 750);
         }
         return cwd;
       }) as typeof fs.readlinkSync);
@@ -122,16 +122,18 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker s
       Object.assign(service, { terminationTimeoutMs: 4_000 });
       try {
         destroying = true;
-        // Destroy waits on the readable holder through its polls, then the unreadable process is no evidence.
+        // Destroy terminates the scoped holder; the unreadable process is no evidence.
         expect(await service.destroyForHuman('project', w.id)).toMatchObject({ state: 'complete', remaining: [] });
-        expect(observedHolder).toBe(true); expect(holderClosed).toBe(true); expect(holder.exitCode).toBe(0);
+        expect(observedHolder).toBe(true); expect(holderClosed).toBe(true); expect(holder.signalCode).toBe('SIGTERM');
+        expect(recordedProcessLive(holderIdentity)).toBe(false);
         expect(store.readWorkerExecution(w.id)).toMatchObject({ generation: proof.generation, phase: 'complete' });
         expect(store.readWorkerExecution(w.id)?.abandoned).toBeUndefined();
         expect(existsSync(workspace.path)).toBe(false);
+        expect(existsSync(scratch)).toBe(false);
         expect(execFileSync('git', ['branch', '--list', '--format=%(refname:short)', workspace.branch], { cwd: root, encoding: 'utf8' }).trim()).toBe('');
         expect(unreadable.running).toBe(true); // never signalled
       } finally {
-        clearTimeout(exitTimer); holder.stdin.end(); await exited; await unreadable.close(); detach();
+        holder.stdin.end(); await exited; await unreadable.close(); detach();
       }
     });
   }
@@ -198,10 +200,17 @@ describe.runIf(process.platform === 'linux')('R47 same-boot interrupted worker s
       await ready;
       const timer = setTimeout(() => release(), 5_000);
       const lockStart = performance.now();
+      const scratchBeforeLockAttempt = existsSync(scratch);
       try {
-        expect(await service.destroyForHuman('project', w.id)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'], error: expect.stringMatching(/lock.*busy|lock.*timed out/i) });
+        const signal = vi.spyOn(process, 'kill');
+        const result = await service.destroyForHuman('project', w.id);
+        expect(result).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'], error: expect.stringMatching(/lock.*busy|lock.*timed out/i) });
+        expect(store.getRun(w.id)?.delegation).toMatchObject({ destroy: { phase: 'incomplete', remaining: result.remaining, error: result.error } });
+        expect(signal.mock.calls.filter(([pid, sig]) => pid === ambient.pid && sig !== 0)).toHaveLength(0);
+        signal.mockRestore();
         expect(performance.now() - lockStart).toBeLessThan(4_000);
         expect(existsSync(workspace.path)).toBe(true);
+        expect(existsSync(scratch)).toBe(scratchBeforeLockAttempt); expect(ambient.running).toBe(true);
         expect(execFileSync('git', ['branch', '--list', '--format=%(refname:short)', workspace.branch], { cwd: root, encoding: 'utf8' }).trim()).toBe(workspace.branch);
       } finally { clearTimeout(timer); release(); await held; }
       // Timed-out cleanup must withdraw, so unlocking cannot run it later.

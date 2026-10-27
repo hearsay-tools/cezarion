@@ -79,8 +79,15 @@ describe.runIf(process.platform === 'linux')('R43 reboot orphan settlement (#738
       expect(manager.finish(p.id)).toBe(false);
       if (settleVia === 'destroy') {
         Object.assign(service, { terminationTimeoutMs: 100 });
-        // The damaged location receipt, not the holder, retains both resources.
-        expect(await service.destroyForHuman('project', orphan.id)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+        // Failed authentication happens before process termination can be proven.
+        const signal = vi.spyOn(process, 'kill');
+        const result = await service.destroyForHuman('project', orphan.id);
+        expect(result).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'], error: expect.stringMatching(/scratch ownership cannot be verified/i) });
+        expect(store.getRun(orphan.id)?.delegation).toMatchObject({ destroy: { phase: 'incomplete', remaining: result.remaining, error: result.error } });
+        expect(signal.mock.calls.filter(([pid, sig]) => pid === holder.pid && sig !== 0)).toHaveLength(0);
+        signal.mockRestore();
+        expect(holder.running).toBe(true); expect(existsSync(workspace.path)).toBe(true); expect(existsSync(scratch)).toBe(true);
+        expect(execFileSync('git', ['branch', '--list', '--format=%(refname:short)', workspace.branch], { cwd: root, encoding: 'utf8' }).trim()).toBe(workspace.branch);
       }
       const resourceProbe = vi.spyOn(fs, 'readlinkSync'); syncBuiltinESMExports();
       resourceProbe.mockClear();
