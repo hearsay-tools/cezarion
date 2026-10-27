@@ -23,6 +23,7 @@ export type ApplicationUpdateControlProps = {
 /** The same compact control is rendered in the desktop sidebar and mobile drawer. */
 export function ApplicationUpdateControl({ version, latestVersion, state, onApplyUpdate, onRestart, error, busy = false, offline = false }: ApplicationUpdateControlProps) {
   const [confirmOpen, setConfirmOpen] = React.useState(false)
+  const [tooltipOpen, setTooltipOpen] = React.useState(false)
   const restartTrigger = React.useRef<HTMLButtonElement>(null)
   const pending = React.useRef(false)
   const ready = state?.status === 'ready'
@@ -51,7 +52,11 @@ export function ApplicationUpdateControl({ version, latestVersion, state, onAppl
 
   return <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
     <div data-slot="application-update-action" className="flex size-11 shrink-0 items-center justify-center">
-      {action ? <TooltipProvider><Tooltip><TooltipTrigger asChild>
+      {action ? <TooltipProvider><Tooltip open={tooltipOpen} onOpenChange={setTooltipOpen}><TooltipTrigger asChild onKeyDown={(event) => {
+        // Close before the native Tab blur: removing tooltip content during blur can let the
+        // drawer's focus-scope mutation observer steal focus from the next control.
+        if (event.key === 'Tab') setTooltipOpen(false)
+      }}>
         {action === 'update' ? <Button variant="ghost" size="icon" className="size-11 motion-safe:transition-transform motion-safe:duration-[var(--app-duration-1)] motion-safe:active:scale-[0.97]" aria-label={preparing ? 'Preparing update' : 'Update application'} aria-busy={actionBusy} disabled={!canApply || actionBusy || offline} title={tooltip} onClick={apply}><DownloadIcon aria-hidden="true" className="size-[18px]" /></Button>
           : <Button ref={restartTrigger} variant="ghost" size="icon" className="size-11 motion-safe:transition-transform motion-safe:duration-[var(--app-duration-1)] motion-safe:active:scale-[0.97]" aria-label={restarting ? 'Reconnecting after restart' : 'Restart application'} aria-busy={actionBusy} disabled={!canRestart || actionBusy || offline} title={tooltip} onClick={() => setConfirmOpen(true)}><RefreshCwIcon aria-hidden="true" className="size-[18px]" /></Button>}
       </TooltipTrigger><TooltipContent side="bottom">{tooltip}</TooltipContent></Tooltip></TooltipProvider> : null}

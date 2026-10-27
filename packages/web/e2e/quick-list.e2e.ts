@@ -1596,7 +1596,14 @@ describe('archive from the sidebar (#780)', () => {
   it('folds sections with the keyboard, persists across canonical routes, and shares mobile state (#811)', () => {
     const desktop = '[data-slot="sidebar"]'
     const finished = `${desktop} [data-bucket="Finished"] [data-slot="section-toggle"]`
-    expect(browser.waitForValue(`Array.from(document.querySelectorAll('${desktop} [data-bucket]')).map(el => el.dataset.bucket)`)).toEqual(['Needs you', 'Finished', 'Working'])
+    // Reject the empty loading sample; keep the exact bucket order in the assertion. Evidence:
+    // .ai/qa/failures/quick-list/folds-sections-with-the-keyboard-persists-across-canonical-routes-and-shares-mob-1/
+    // (CI run 40553790857 attempt 1, job 122364489299, cockpit-failures-shard-4 artifact 12757296359).
+    // Cold /p/default/ navigation before this read reproduced the same [] failure in an ignored
+    // copy: `vitest run --config .ai/qa/repair1981-proof/quick.config.ts -t 'folds sections with the keyboard'`.
+    // 1 of 1 failed before; 1 of 1 passed after. Setup and result details:
+    // https://github.com/hearsay-tools/cezarion/issues/1981#issuecomment-6450213215
+    expect(browser.waitForValue<string[]>(`Array.from(document.querySelectorAll('${desktop} [data-bucket]')).map(el => el.dataset.bucket)`, value => value.length > 0)).toEqual(['Needs you', 'Finished', 'Working'])
     focusWithKeyboard(browser, finished)
     browser.press('Enter')
     expect(browser.waitForValue(`document.querySelector('${finished}').getAttribute('aria-expanded')`, value => value === 'false')).toBe('false')
