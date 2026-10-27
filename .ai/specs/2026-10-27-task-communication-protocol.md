@@ -125,8 +125,9 @@ The resolver has two levels:
   for a `peer` pair:
   - history: messages in an existing ledger where the caller is the sender or the recipient;
   - wait and cancel: a request the caller sent, held in its own family ledger;
-  - inbox reserve, acknowledge and release: inputs addressed to the caller, with a live
-    receipt in the caller's session generation.
+  - inbox reserve: inputs addressed to the caller that it can claim, in the caller's
+    authenticated session generation. Reserve creates the receipt;
+  - inbox acknowledge and release: the same, plus the live receipt that reserve returned.
 
   A deleted peer, or one whose family has a history deletion pending, does not block these.
   Inbox acknowledge and release check each member against the caller's own record, so a
@@ -148,15 +149,17 @@ get at its first session.
 For a family pair, both rules name the same ledger, so family behavior does not change. For
 a peer pair, a request and its reply stay together in the requester's ledger. That is where
 the requester waits on the outcome. A two-way peer exchange can therefore use two ledgers.
-`cez message conversation <peer>` reads both and merges them by `createdAt`.
+`cez message conversation <peer>` reads both and merges them in `(createdAt, id)` order.
 
 Two full ledgers can hold 2,048 messages for one pair, while the history response keeps its
 bound of 1,024 messages and 1,024 outcomes (`conversationStateSchema`,
 `packages/contract/src/conversations.ts`). The merged response therefore returns the newest
-1,024 messages and the outcomes of the requests among them. When older messages exist, it
-adds `nextBefore`, the `createdAt` of the oldest message returned, and
-`cez message conversation <peer> --before <time>` reads the page before it. Both fields are
-new and optional in the contract.
+1,024 messages and the outcomes of the requests among them. Two messages can share a
+`createdAt` millisecond, so the order is `(createdAt, id)`, a total order, and the cursor
+carries both. When older messages exist, the response adds `nextBefore`, an opaque cursor for
+the oldest message returned. `cez message conversation <peer> --before <cursor>` returns the
+messages strictly before it in that order, so no message is skipped or repeated at a page
+boundary. Both fields are new and optional in the contract.
 
 ### Message identity
 
@@ -485,7 +488,7 @@ the relationship. No request field carries it.
 | Give an update | `cez message progress <task-id> '<text>' --id <UUID>` | `…/send`, `kind: progress` |
 | Clarify your request | `cez message follow-up <task-id> '<text>' --id <UUID> --request-id <UUID>` | `…/follow-up` |
 | Answer a request | `cez message reply <task-id> '<text>' --id <UUID> --request-id <UUID>` | `…/reply` |
-| Read history | `cez message conversation <task-id> [--before <time>]` | `…/conversation` |
+| Read history | `cez message conversation <task-id> [--before <cursor>]` | `…/conversation` |
 | Read unread input mid-turn | `cez message inbox` | `…/inbox`, `…/inbox/ack`, `…/inbox/release` |
 | Cancel your request | `cez message cancel-request <UUID>` | `…/cancel-request` |
 | Wait on requests | `cez message wait --request <UUID> [--request …] [--mode one\|any\|all]`, or `cezar_wait` kind `request` | `…/wait` |
@@ -601,8 +604,8 @@ regression test fails without the fix).
 | R12 | `cez message request --resume`, and a removed `cez worker` message verb | Exit 64, naming the replacement command | F3 |
 | R13 | A root calls `cezar_done` with an open peer request; then again; then the peer replies. Separately: it cancels the request first; it sent only progress; a human presses Finish | First done: a refusal nudge naming the request. Second: Cezar's completion request wait, and the reply wakes the run. Cancel first, progress only, or Finish: done passes; Finish settles the request `sender-closed` | F8 |
 | R14 | Peers B and C send a message with the same ID to A, in both orders and concurrently | The second is refused with `invalid_input` and writes nothing; A gets the first once; projections on A stay intact; an exact retry of the first returns its receipt | F2 |
-| R15 | A peer is deleted after A's request to it was accepted; a sender is deleted between A's inbox reserve and acknowledge | A can still read its history, wait on and cancel its request; the request settles `deleted`; the inbox acknowledge succeeds for the whole batch; a reply to the deleted sender's request is refused | F2 |
-| R16 | A pair whose two ledgers are both full | The history returns the newest 1,024 messages with `nextBefore`; `--before` returns the rest; no response passes the schema bound | F2, F3 |
+| R15 | A peer is deleted after A's request to it was accepted; a sender is deleted before A's first inbox reserve, and another between reserve and acknowledge | A can still read its history, wait on and cancel its request; the request settles `deleted`; the reserve returns a receipt; the acknowledge succeeds for the whole batch; a reply to the deleted sender's request is refused | F2 |
+| R16 | A pair whose two ledgers are both full, with several messages sharing the `createdAt` at the page boundary | The history returns the newest 1,024 messages with `nextBefore`; `--before` returns the rest; every message appears exactly once across the pages; no response passes the schema bound | F2, F3 |
 
 ## 14. Follow-ups
 
