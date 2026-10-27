@@ -63,13 +63,10 @@ test('Markdown under packages/ is docs-only unless it sits in a fixture director
 });
 
 test('Markdown a test reads runs the full matrix', () => {
-  // bc-route-inventory.test.ts reads BACKWARD_COMPATIBILITY.md, and
-  // harness-parity.test.ts reads AGENT_PROTOCOL.md and the parity matrix spec,
-  // so none of them can skip Vitest.
+  // harness-parity.test.ts reads AGENT_PROTOCOL.md and the parity matrix spec.
   assert.deepEqual([...testReadDocuments].sort(), [
     '.ai/specs/2026-09-04-harness-parity-matrix.md',
     'AGENT_PROTOCOL.md',
-    'BACKWARD_COMPATIBILITY.md',
   ]);
   for (const document of testReadDocuments) {
     assert.equal(isDocsPath(document), false, document);

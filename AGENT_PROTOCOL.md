@@ -2508,7 +2508,7 @@ these events get persisted as NDJSON), and asserts `toStrictEqual` against the
   error text or credentials.
 - **SSE** — the server replays from NDJSON then streams live, deduped by `seq`.
   Event names: `run-event` (v1) and `ui-event` (v2 dotted types). These names are
-  a protected contract (see `BACKWARD_COMPATIBILITY.md` §2).
+  a protected contract (see `BACKWARD_COMPATIBILITY.md`).
 
 ---
 
@@ -2719,16 +2719,16 @@ values in §3).
 
 ## Compatibility
 
-The agent event protocol is a protected surface: see `BACKWARD_COMPATIBILITY.md`
-§7. In short — v1 `AgentEvent` `type` strings and v2 `UiEvent` dotted types are
+The agent event protocol is a protected surface: see `BACKWARD_COMPATIBILITY.md`.
+V1 `AgentEvent` `type` strings and v2 `UiEvent` dotted types are
 additive-only; removing/renaming one, or breaking the parity requirement, is a
-breaking change requiring the documented deprecation path.
+breaking change requiring an explanation and migration path.
 
 ## Related documents
 
 - `.ai/specs/2026-09-04-harness-parity-matrix.md` — the harness parity matrix's design record (§7).
 - `AGENTS.md` — repo working rules; the "Agent runners / backends" routing row.
-- `BACKWARD_COMPATIBILITY.md` — §7 (this protocol) and §2/§3 (SSE names, NDJSON).
+- `BACKWARD_COMPATIBILITY.md` — the compatibility policy.
 - `.ai/analysis/cockpit-ui-redesign/agent-event-protocols.md` — the deep design record (§7, §7.1).
 - `.ai/specs/2026-07-14-cockpit-ui-redesign.md` — the spec (protocol v2, parity requirement).
 

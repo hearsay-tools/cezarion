@@ -103,7 +103,7 @@ describe('importing runs.json', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]![0]).toMatch(/runs\.json could not be read; no run was imported/);
     expect(warn.mock.calls[0]![0]).toContain(join(dataDir, LEGACY_INDEX_BACKUP_FILE));
-    expect(warn.mock.calls[0]![0]).toContain('BACKWARD_COMPATIBILITY.md §3');
+    expect(warn.mock.calls[0]![0]).toContain('docs/run-history-recovery.md');
     expect(importMeta()).toMatchObject({ source: 'runs.json (unparseable)', records: 0 });
 
     const run = store.createRun({ title: 'new', workflow: 'w', task: 't', steps: [] });
@@ -125,7 +125,7 @@ describe('importing runs.json', () => {
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0]![0]).toMatch(/2 of 4 runs in runs\.json could not be read and were not imported/);
     expect(warn.mock.calls[0]![0]).toContain(join(dataDir, LEGACY_INDEX_BACKUP_FILE));
-    expect(warn.mock.calls[0]![0]).toContain('BACKWARD_COMPATIBILITY.md §3');
+    expect(warn.mock.calls[0]![0]).toContain('docs/run-history-recovery.md');
     expect(importMeta()).toMatchObject({ source: 'runs.json', records: 2, skipped: 2 });
 
     expect(runIds(open())).toEqual(['bb', 'a']);
