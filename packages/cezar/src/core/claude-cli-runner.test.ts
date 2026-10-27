@@ -981,3 +981,145 @@ describe('Claude queued-turn announcement with a synchronous follow-up (#505 loc
     session.end(); await session.result;
   });
 });
+
+/**
+ * hearsay-tools/cezarion#1954 — the output loop's side effects, in order. Each case scripts
+ * one fake child's stdout, stderr and exit, and records the v1 events, the UI event types and
+ * the session callbacks as one ordered log. These pin the order the loop refactor must keep.
+ */
+describe('Claude output loop side-effect order (hearsay-tools/cezarion#1954)', () => {
+  afterEach(() => { spawnHook.override = null; });
+
+  type Entry = AgentEvent | { ui: string } | { callback: 'activity' } | { callback: 'consumed'; ids: string[] } | { callback: 'ready' };
+
+  function scripted(): {
+    child: ChildProcessWithoutNullStreams;
+    stdinUuids: () => string[];
+    finish: (lines: readonly unknown[], exit: { code?: number | null; signal?: NodeJS.Signals | null; stderr?: string }) => void;
+  } {
+    const emitter = new EventEmitter();
+    const stdin = new PassThrough();
+    const stdout = new PassThrough();
+    const stderr = new PassThrough();
+    const written: string[] = [];
+    stdin.on('data', (chunk: Buffer) => written.push(...chunk.toString('utf8').split('\n').filter(Boolean)));
+    const child = Object.assign(emitter, {
+      stdin, stdout, stderr,
+      exitCode: null as number | null, signalCode: null as NodeJS.Signals | null,
+      killed: false, pid: undefined, kill: () => true,
+    }) as unknown as ChildProcessWithoutNullStreams;
+    const finish: ReturnType<typeof scripted>['finish'] = (lines, exit) => {
+      if (exit.stderr) stderr.write(exit.stderr);
+      for (const line of lines) stdout.write(`${typeof line === 'string' ? line : JSON.stringify(line)}\n`);
+      Object.assign(child, { exitCode: exit.code ?? null, signalCode: exit.signal ?? null });
+      emitter.emit('exit', exit.code ?? null, exit.signal ?? null);
+      stdout.end();
+      stderr.end();
+    };
+    const stdinUuids = (): string[] => {
+      const frames = written.map(line => JSON.parse(line) as { uuid: string });
+      return frames.map(frame => frame.uuid);
+    };
+    return { child, finish, stdinUuids };
+  }
+
+  function start(fake: ReturnType<typeof scripted>) {
+    spawnHook.override = () => fake.child;
+    const log: Entry[] = [];
+    const session = new ClaudeCliRunner({ bin: 'claude', timeoutMs: 0 }).startSession(
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'do it', cwd: process.cwd(), sessionId: 'order-session' },
+      event => log.push(event),
+      {
+        onUiEvent: event => log.push({ ui: event.type }),
+        onActivity: () => log.push({ callback: 'activity' }),
+        onAgentInputConsumed: ids => log.push({ callback: 'consumed', ids: [...ids] }),
+        onAgentInputReady: () => log.push({ callback: 'ready' }),
+      },
+    );
+    return { session, log };
+  }
+
+  it('keeps the order of notes, frame events, usage, cost and turn end on a clean exit', async () => {
+    const fake = scripted();
+    const { session, log } = start(fake);
+    fake.finish([
+      'not json',
+      { type: 'system', subtype: 'init', model: 'claude-test', session_id: 'order-session' },
+      { type: 'assistant', message: { content: 5 } },
+      { type: 'assistant', message: { content: [
+        { type: 'text', text: 'hello' },
+        { type: 'tool_use', id: 't1', name: 'Read', input: { path: 'a' } },
+      ], usage: { input_tokens: 3, output_tokens: 2 } } },
+      { type: 'user', message: { content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] } },
+      { type: 'result', subtype: 'success', is_error: false, result: 'hello', usage: { input_tokens: 10, output_tokens: 5 }, total_cost_usd: 0.01 },
+    ], { code: 0 });
+    const result = await session.result;
+    expect(result).toEqual({
+      text: 'hello', toolCalls: [{ id: 't1', name: 'Read', input: { path: 'a' } }], tokensUsed: 15, sessionId: 'order-session',
+    });
+    expect(log).toEqual([
+      { type: 'note', message: 'claude: skipped unparseable stream line: not json' },
+      { callback: 'activity' }, { ui: 'session.started' }, { ui: 'turn.started' },
+      { callback: 'activity' },
+      { type: 'note', message: 'claude: skipped malformed event (assistant): msg.message.content is not iterable' },
+      { callback: 'activity' }, { ui: 'item.started' }, { ui: 'item.completed' }, { ui: 'item.started' },
+      { type: 'text', text: 'hello' },
+      { type: 'tool-call', id: 't1', tool: 'Read', input: { path: 'a' } },
+      { callback: 'activity' }, { ui: 'item.completed' },
+      { type: 'tool-result', toolCallId: 't1', result: 'ok', isError: false },
+      { callback: 'activity' }, { ui: 'turn.completed' }, { ui: 'usage.updated' },
+      { type: 'token-usage', tokensUsed: 15 },
+      { type: 'cost', usd: 0.01 },
+      { type: 'turn-end' },
+      { type: 'done' },
+    ]);
+  });
+
+  it('consumes a replay echo without activity and notes missing usage', async () => {
+    const fake = scripted();
+    const { session, log } = start(fake);
+    await session.sendAgentMessage([{ type: 'text', text: 'wake' }], ['wake-1']);
+    const [seed, wake] = fake.stdinUuids();
+    fake.finish([
+      { type: 'user', isReplay: true, uuid: wake, message: { content: [{ type: 'text', text: 'wake' }] } },
+      { type: 'result', subtype: 'success', is_error: false, result: 'done', user_message_uuids: [seed, wake] },
+    ], { code: 0 });
+    await session.result;
+    expect(log).toEqual([
+      { callback: 'consumed', ids: ['wake-1'] },
+      { callback: 'activity' }, { ui: 'item.started' }, { ui: 'item.completed' }, { ui: 'turn.completed' },
+      { type: 'text', text: 'done' },
+      { type: 'turn-end' },
+      { type: 'note', message: 'token usage not reported by claude CLI' },
+      { type: 'done' },
+    ]);
+  });
+
+  it('reports stderr before the exit error on a non-zero exit', async () => {
+    const fake = scripted();
+    const { session, log } = start(fake);
+    fake.finish([], { code: 1, stderr: 'Error: bad credentials\n' });
+    await expect(session.result).rejects.toThrow('claude CLI exited with code 1');
+    expect(log).toEqual([
+      { type: 'note', message: 'claude CLI stderr:\nError: bad credentials\n' },
+      { type: 'error', message: 'claude CLI exited with code 1 — Error: bad credentials' },
+    ]);
+  });
+
+  it('fails an outside signal with its own error', async () => {
+    const fake = scripted();
+    const { session, log } = start(fake);
+    fake.finish([], { signal: 'SIGKILL' });
+    await expect(session.result).rejects.toThrow('claude CLI was killed by signal SIGKILL');
+    expect(log).toEqual([{ type: 'error', message: 'claude CLI was killed by signal SIGKILL' }]);
+  });
+
+  it('rejects with the wrapped spawn error and emits nothing after it', async () => {
+    const fake = scripted();
+    const { session, log } = start(fake);
+    fake.child.emit('error', Object.assign(new Error('spawn claude ENOENT'), { code: 'ENOENT' }));
+    fake.finish([], { code: -2 });
+    await expect(session.result).rejects.toThrow('`claude` not found on PATH');
+    expect(log).toEqual([]);
+  });
+});
