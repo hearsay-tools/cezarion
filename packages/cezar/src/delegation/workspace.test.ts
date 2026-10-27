@@ -478,6 +478,29 @@ exec "${realGit}" "$@"
     expect(existsSync(workspace.path)).toBe(false);
   });
 
+  it('binds a legacy checkpoint to its still-registered worktree before removal', async () => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    const interrupt = async () => { throw new Error('interrupt'); };
+    expect(await removeOwnedWorkspace(root, workspace, undefined, interrupt)).toMatchObject({ state: 'incomplete' });
+    const checkpointPath = receiptPath(root, workspace).replace(/\.json$/, '.cleanup.json');
+    const legacy = JSON.parse(await readFile(checkpointPath, 'utf8'));
+    delete legacy.rootIdentity;
+    await writeFile(checkpointPath, JSON.stringify(legacy));
+    const original = await lstat(workspace.path);
+    expect(await removeOwnedWorkspace(root, workspace, undefined, interrupt)).toMatchObject({ state: 'incomplete' });
+    expect(JSON.parse(await readFile(checkpointPath, 'utf8'))).toMatchObject({
+      phase: 'prepared', rootIdentity: { dev: original.dev, ino: original.ino },
+    });
+    const saved = join(root, 'saved-legacy-worktree');
+    await rename(workspace.path, saved);
+    git(root, 'worktree', 'prune', '--expire', 'now');
+    await mkdir(workspace.path, { recursive: true });
+    await writeFile(join(workspace.path, 'KEEP'), 'replacement');
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    expect(await readFile(join(workspace.path, 'KEEP'), 'utf8')).toBe('replacement');
+  });
+
   it('refuses an unregistered replacement of a prepared owned worktree', async () => {
     const { root, first } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);

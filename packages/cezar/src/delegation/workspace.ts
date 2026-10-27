@@ -34,6 +34,17 @@ const hash = (content: Buffer) => createHash('sha256').update(content).digest('h
 const checkUnheld = (assertUnheld?: () => void) => assertUnheld?.();
 const matchesRootIdentity = (identity: Cleanup['rootIdentity'], info: { dev: number; ino: number }) =>
   !identity || (identity.dev === info.dev && identity.ino === info.ino);
+async function verifiedRootIdentity(path: string) {
+  const info = await lstat(path);
+  if (!info.isDirectory() || info.isSymbolicLink() || await realpath(path) !== path) throw new Error('Unsafe owned workspace root');
+  return { dev: info.dev, ino: info.ino };
+}
+function bindRootIdentity(checkpoint: Cleanup, initial: { dev: number; ino: number }, current: { dev: number; ino: number }): boolean {
+  if (!matchesRootIdentity(checkpoint.rootIdentity, current) || !matchesRootIdentity(initial, current)) return false;
+  // Bind a legacy checkpoint only while the original registered worktree is verified.
+  checkpoint.rootIdentity ??= current;
+  return true;
+}
 
 // Git for Windows emits forward slashes even for native absolute paths.
 function worktreeEntries(listed: string): string[] {
@@ -395,6 +406,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
 
       async function preparePresentWorktree(receipt: Receipt): Promise<Cleanup | undefined> {
         if (checkpoint?.phase === 'worktree-removed') return undefined;
+        const initialRoot = await verifiedRootIdentity(workspace.path);
         if (await liveGitDir(repoRoot, workspace) !== receipt.gitDir ||
             await readIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), 36, false) !== workspace.resourceId) return undefined;
         // HEAD files (this worktree's, another's) are not in a retrying caller's observation: these
@@ -409,11 +421,9 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         }
         const current = await verifyBranch(repoRoot, workspace, receipt);
         if (checkpoint && (checkpoint.sha !== current.sha || checkpoint.logHash !== hash(current.log.content))) return undefined;
-        const rootInfo = await lstat(workspace.path);
-        if (!matchesRootIdentity(checkpoint?.rootIdentity, rootInfo)) return undefined;
-        checkpoint ??= { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content),
-          rootIdentity: { dev: rootInfo.dev, ino: rootInfo.ino }, phase: 'prepared' };
-        return checkpoint;
+        const rootInfo = await verifiedRootIdentity(workspace.path);
+        checkpoint ??= { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content), phase: 'prepared' };
+        return bindRootIdentity(checkpoint, initialRoot, rootInfo) ? checkpoint : undefined;
       }
 
       async function removePresentWorktree(receipt: Receipt): Promise<boolean> {
