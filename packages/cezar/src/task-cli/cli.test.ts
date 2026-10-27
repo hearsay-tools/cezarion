@@ -655,13 +655,19 @@ describe('cez task', () => {
         "cez task send <id> 'Use option A'",
         "cez task send <id> --resume '…'",
         'delivered', 'queued', 'resumed', 'attention: waiting', 'question',
-        'delivery: not-delivered', 'next', '--text-file <path|->', '--text-file -', 'cez task start --help',
+        'human input', 'delivery: not-delivered', 'next', '--text-file <path|->', '--text-file -', 'cez task start --help',
       ]) expect(help).toContain(text);
       expect(discoveries).toBe(0);
     });
   });
 
   describe('send', () => {
+    it.each([[[]], [['--resume']], [['--notify']]])('refuses agent input before discovery with %j', async (flags) => {
+      expect(await runTaskCommand(['send', 'target', 'hello', ...flags], { CEZ_TASK_ID: 'sender' }, io())).toBe(64);
+      expect(last()).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('human input'), next: expect.stringContaining('not available yet') });
+      expect(discoveries).toBe(0);
+    });
+
     it('stacks a message onto a queued run', async () => {
       const id = await start();
       expect(await run(['send', id, 'also this'])).toBe(0);

@@ -677,3 +677,5 @@ remain unchanged. A first explicit reply after deadline expiry changes the
 recorded `timed-out` outcome to `replied-late`; other settlements stay final.
 Transcript consumers accept a separate outcome amendment projection, replacing
 only `timed-out` with `replied-late`. Existing timeout projections remain valid.
+
+`cez task send` is human input. When `CEZ_TASK_ID` is set, it exits 64 before contacting the cockpit, including with `--resume` or `--notify`. Agent-to-task messaging is not available yet; `CEZ_DELEGATION=1` and the `cez message` family are the planned path.

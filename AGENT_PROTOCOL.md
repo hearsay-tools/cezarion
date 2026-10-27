@@ -2903,3 +2903,5 @@ observation must survive without reclassification. No timer or repair authority
 is introduced.
 R84 cancels an open wait while native gh checks are blocked, then attempts late
 resolution and proves there is no lifecycle input or native conflict prompt.
+
+`cez task send` is human input. When `CEZ_TASK_ID` is set, it exits 64 before contacting the cockpit, including with `--resume` or `--notify`. Agent-to-task messaging is not available yet; `CEZ_DELEGATION=1` and the `cez message` family are the planned path.
