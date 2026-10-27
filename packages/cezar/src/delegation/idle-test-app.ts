@@ -18,15 +18,46 @@ function present(path: string): boolean {
   catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return false; throw error; }
 }
 
-function claimIdle(db: DatabaseSync, start: string): string | undefined {
+type IdleClaim = { id: string; token: string };
+type PendingClaim = IdleClaim & { path: string; dev: number; ino: number };
+const pendingClaims = new Map<string, PendingClaim[]>();
+function sameDatabase(path: string, expected: { dev: number; ino: number }): boolean {
+  const info = lstatSync(path);
+  return info.isFile() && !info.isSymbolicLink() && samePath(realpathSync(path), path) &&
+    info.dev === expected.dev && info.ino === expected.ino;
+}
+
+function claimIdle(db: DatabaseSync, start: string): IdleClaim | undefined {
   db.exec('PRAGMA busy_timeout=1000'); db.exec('BEGIN IMMEDIATE');
   try {
     // Keep even stale or unreadable holders: only the lease owner may reclaim them.
     if (db.prepare('SELECT 1 FROM holders LIMIT 1').get()) { db.exec('COMMIT'); return undefined; }
-    const claim = `destroy-${randomUUID()}`;
-    db.prepare('INSERT INTO holders (id, token, pid, start, pgid) VALUES (?, ?, ?, ?, NULL)').run(claim, randomUUID(), process.pid, start);
+    const claim = { id: `destroy-${randomUUID()}`, token: randomUUID() };
+    db.prepare('INSERT INTO holders (id, token, pid, start, pgid) VALUES (?, ?, ?, ?, NULL)').run(claim.id, claim.token, process.pid, start);
     db.exec('COMMIT'); return claim;
   } catch (error) { db.exec('ROLLBACK'); throw error; }
+}
+
+/** Release only claims this controller made against the same database object. */
+function releasePending(path: string): boolean {
+  const claims = pendingClaims.get(path);
+  if (!claims?.length) return true;
+  try {
+    if (!present(path)) { pendingClaims.delete(path); return true; }
+    if (claims.some(claim => !sameDatabase(path, claim))) return false;
+    const db = new DatabaseSync(path);
+    try {
+      db.exec('PRAGMA busy_timeout=1000');
+      for (const claim of [...claims]) {
+        if (!sameDatabase(path, claim)) return false;
+        db.prepare('DELETE FROM holders WHERE id = ? AND token = ?').run(claim.id, claim.token);
+        if (db.prepare('SELECT 1 FROM holders WHERE id = ?').get(claim.id)) return false;
+        claims.splice(claims.indexOf(claim), 1);
+      }
+      pendingClaims.delete(path);
+      return true;
+    } finally { db.close(); }
+  } catch { return false; }
 }
 
 function readApp(root: string) {
@@ -68,19 +99,23 @@ async function stopOwnedApp(root: string, entry: NonNullable<ReturnType<typeof r
 
 /** Claim the checkout's test environment while removing it. Any uncertain state fails closed. */
 export async function withIdleTestApp<T>(root: string, remove: (stopped: boolean, busy: boolean) => Promise<T>): Promise<T> {
-  let db: DatabaseSync | undefined; let claim: string | undefined; let claimDb: string | undefined; let stopped = false;
+  let db: DatabaseSync | undefined; let claim: PendingClaim | undefined; let stopped = false;
   let busy = present(join(root, '.ai/qa/test-env.json')) || present(join(root, '.ai/qa/test-env-lease.sqlite'));
   try {
    try {
     const entry = readApp(root);
     const ownStart = entry && startToken(process.pid);
-    if (entry && ownStart) {
+    if (entry && ownStart && releasePending(entry.database)) {
+      const info = lstatSync(entry.database);
+      if (!sameDatabase(entry.database, info)) throw new Error('Test environment lease database changed');
       db = new DatabaseSync(entry.database);
-      claim = claimIdle(db, ownStart);
+      if (!sameDatabase(entry.database, info)) throw new Error('Test environment lease database changed');
+      const acquired = claimIdle(db, ownStart);
       // The durable row protects the environment after closing SQLite. Keeping the file
       // open here prevents Windows from removing the checkout that contains it.
-      if (claim) {
-        claimDb = entry.database; db.close(); db = undefined;
+      if (acquired) {
+        claim = { ...acquired, path: entry.database, dev: info.dev, ino: info.ino }; db.close(); db = undefined;
+        if (!sameDatabase(entry.database, info)) throw new Error('Test environment lease database changed');
         // A descriptor alone cannot authorize signalling a process outside this checkout.
         stopped = entry.pid !== null && await stopOwnedApp(root, entry);
         busy = entry.pid !== null && !stopped;
@@ -90,13 +125,10 @@ export async function withIdleTestApp<T>(root: string, remove: (stopped: boolean
    return await remove(stopped, busy);
   }
   finally {
-    if (claim && claimDb) {
-      try {
-        if (existsSync(claimDb) && samePath(realpathSync(claimDb), claimDb)) {
-          const cleanup = new DatabaseSync(claimDb);
-          try { cleanup.prepare('DELETE FROM holders WHERE id = ?').run(claim); } finally { cleanup.close(); }
-        }
-      } catch { /* checkout may already be gone */ }
+    if (claim) {
+      const pending = pendingClaims.get(claim.path) ?? [];
+      pending.push(claim); pendingClaims.set(claim.path, pending);
+      releasePending(claim.path);
     }
     db?.close();
   }
