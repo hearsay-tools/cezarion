@@ -44,6 +44,8 @@ The owner took these at the design gate.
 | Waiting for a peer | A new wait kind, `peer`. It always names its peers. A message from a named peer, or that peer settling, closes it. A human message or a family message does not. |
 | Waiting for a reply | Agents register the wait themselves (`cez message wait --request`, or `cezar_wait` kind `request`). Cezar opens no implicit wait at a turn end. |
 | Done with open requests | Open requests a root task sent block its completion, the way live workers do today. |
+| Done with unanswered incoming requests | A root task's first done is refused once, as a nudge. The second done passes, and the requests settle `completed-without-reply`. |
+| A peer recipient at `review` | Its open requests settle `completed-without-reply` at once, because no peer can resume it. |
 
 ## Terms
 
@@ -277,7 +279,7 @@ This table is for a peer recipient. A family recipient keeps its current behavio
 | `waiting` on a native question | Yes | Held until the answer's turn ends (`owesWake`, `run.ts`) | After the human answers | Pending | As above |
 | `waiting`, usage-limit hold | Yes | `queued` | When the hold's resume or a Continue reopens it | Pending | As above |
 | `waiting` on Cezar's `budget` human wait | Yes | `queued` | No: the wake budget is spent ([§ 8](#8-bounds)) | Pending | The human resets it |
-| `review`, `done`, `failed`, `cancelled`, or stopping | Not delivered: a durable `continuation-required` receipt with no input, deadline or obligation | `not-delivered` | No | A request accepted before this settles: `done` → `completed-without-reply`; `failed` → `failed`; `cancelled` → `cancelled`; `review` → pending until its deadline | The instruction says: "Not delivered: task is `<status>`. Only its human can continue it." A peer cannot resume it |
+| `review`, `done`, `failed`, `cancelled`, or stopping | Not delivered: a durable `continuation-required` receipt with no input, deadline or obligation | `not-delivered` | No | A request accepted before this settles: `done` → `completed-without-reply`; `failed` → `failed`; `cancelled` → `cancelled`; `review` → `completed-without-reply` (a peer recipient only; [§ 7](#done-with-unanswered-incoming-requests)) | The instruction says: "Not delivered: task is `<status>`. Only its human can continue it." A peer cannot resume it |
 | Archived | Same as its status | | | | `cez message tasks` hides it unless `--all` |
 | Deleted | `denied_scope`, indistinguishable from an unrelated ID | — | — | **New** outcome `deleted` | Pick another recipient. The sender can still read its history, wait on and cancel its request ([§ 2](#the-relationship-resolver)) |
 | History deletion pending on its family | `denied_scope`, as above | — | — | Pending | Retry later |
@@ -400,6 +402,35 @@ request to a live worker is already blocked by that worker, so nothing changes t
 - Workers are out of this rule. The gate does not apply to them today, and a worker's open
   request to its parent settles `sender-closed` when the worker finishes, as now.
 
+### Done with unanswered incoming requests
+
+The rule above covers requests a task sent. The other side is a task that received a
+request and calls done without replying. Today its done passes, and the requester learns
+of it only from the outcome. When the recipient rests at `review`, which is common after it
+changed files, the request even stays pending until its deadline: up to 30 minutes for
+nothing.
+
+- **The first `cezar_done`** of a root task with unanswered requests addressed to it is
+  refused, once in the completion cycle. The refusal names each request and its sender, and
+  says: reply (a short "I cannot answer this" counts), or call `cezar_done` again to finish
+  without replying.
+- **The second `cezar_done` passes.** The open requests settle `completed-without-reply`
+  when the task settles.
+- **Not a hard block.** A hard block would let one peer keep another alive by sending
+  requests, which gives a peer control over another task's lifecycle
+  ([§ 3](#3-endpoint-matrix): message permission never grants control). No wait fits
+  either: a task cannot wait on its own reply.
+- **Scope:** root tasks, where the gate runs. For family pairs nothing changes in practice:
+  an open request from a live worker already blocks the parent's done through that worker.
+  A worker's own done is unchanged, because its parent can resume it.
+- **A peer recipient at `review`** settles open requests `completed-without-reply` at once,
+  not at their deadline. For a worker, review stays "not completion" because its parent can
+  resume it. No peer can resume a task at review; only its human can. If the human continues
+  it and it replies later, the reply is recorded `late`, as today, and wakes no settled
+  sender.
+- A request accepted while the recipient already rests at `review` cannot happen: the send
+  returns `continuation-required` ([§ 5](#5-recipient-lifecycle)).
+
 ### Transitions out
 
 New park: `waiting:peer`. The new `FiredBy` value `peer` marks a trigger fired by another
@@ -424,6 +455,8 @@ root task. [F7](#14-follow-ups) and [F8](#14-follow-ups) declare these rows in
 | `running` | The refusal turn ends on a blocked done again, with open requests | runner | Cezar's completion request wait; `waiting:workers`, labelled "waiting on replies" (as `running.completion-wait`). With the wake budget spent, Cezar's `budget` human wait instead (`running.budget`) |
 | `waiting:workers` (completion request wait) | Every named request settles: reply, cancellation, recipient lifecycle, or its own deadline | peer / worker / timer | Resolves; the wake joins the line; `running`; the next `cezar_done` passes the gate |
 | `waiting:workers` (completion request wait) | A human message | human | Wakes; the wait stays open |
+| `running` | The turn ends on a done while requests addressed to it are unanswered, the first time in the cycle | runner | A refusal nudge that names each request and its sender; stays `running` |
+| `running` | The refusal turn ends on done again, with incoming requests still unanswered | runner | Done passes (or rests at `review`); the requests settle `completed-without-reply` |
 
 The `peer` wait's deadline is an automatic exit, so `run-states.test.ts` accepts the state. The
 completion request wait has no deadline of its own. Its automatic exit is the request
@@ -606,6 +639,7 @@ regression test fails without the fix).
 | R14 | Peers B and C send a message with the same ID to A, in both orders and concurrently | The second is refused with `invalid_input` and writes nothing; A gets the first once; projections on A stay intact; an exact retry of the first returns its receipt | F2 |
 | R15 | A peer is deleted after A's request to it was accepted; a sender is deleted before A's first inbox reserve, and another between reserve and acknowledge | A can still read its history, wait on and cancel its request; the request settles `deleted`; the reserve returns a receipt; the acknowledge succeeds for the whole batch; a reply to the deleted sender's request is refused | F2 |
 | R16 | A pair whose two ledgers are both full, with several messages sharing the `createdAt` at the page boundary | The history returns the newest 1,024 messages with `nextBefore`; `--before` returns the rest; every message appears exactly once across the pages; no response passes the schema bound | F2, F3 |
+| R17 | B has an unanswered request from peer A and calls `cezar_done`; then again. Separately: B replies first; B ends at `review` with A's request open; B's human continues B and B replies | First done: a refusal nudge naming A's request. Second: done passes; A's request settles `completed-without-reply` and A's wait wakes. A reply first: done passes on the first call. At `review`: the request settles at once, not at its deadline. The late reply is recorded `late` and wakes nothing | F2, F8 |
 
 ## 14. Follow-ups
 
@@ -615,13 +649,13 @@ the incident path. F2 comes before F3, F4, F7 and F8. F5 travels with the change
 | ID | Scope | Scenarios |
 | --- | --- | --- |
 | F1 | `cez task send` refuses with exit 64 when `CEZ_TASK_ID` is set, and names the remedy | R2, R3 |
-| F2 | The relationship resolver with its two levels; peer conversations in the service, ledger and outcomes (`relationship`, `deleted`); message identity across ledgers; merged, paged history (`nextBefore`, `before`); peer wakes charge the wake budget; parity cells | R1, R4–R8, R10, R11, R14–R16 |
+| F2 | The relationship resolver with its two levels; peer conversations in the service, ledger and outcomes (`relationship`, `deleted`, `review` settling a peer request); message identity across ledgers; merged, paged history (`nextBefore`, `before`); peer wakes charge the wake budget; parity cells | R1, R4–R8, R10, R11, R14–R17 |
 | F3 | The `cez message` CLI family (including `conversation --before`), `cez message tasks` discovery, `cez worker resume`; removal of the `cez worker` message verbs; new session instructions in `delegation/provision.ts` | R4, R12 |
 | F4 | Cockpit: peer message cards name and link the peer task; thread and relationship views; light and dark themes; 360 px width | R1 (thread) |
 | F5 | `AGENT_PROTOCOL.md`, `BACKWARD_COMPATIBILITY.md` (the delegation CLI is agent-facing and not a protected surface; the new optional fields and the `peer` wait), README | — |
 | F6 | Runner-native cross-session messaging at shipped defaults: decide, per runner, whether to restrict it, and update instructions | — |
 | F7 | The `peer` wait kind: contract, `run-states.ts` rows, `waitingOn` and attention (including "waiting on replies" for peer requests), `cezar_wait` kinds `peer` and `request`, `cez message wait --peer`, parity cells | R9, R11 |
-| F8 | Open requests block a root's done: `parentCompletionBlockers`, the refusal nudge text, Cezar's completion request wait, the no-wait nudge naming open requests, `run-states.ts` rows, parity cells | R13 |
+| F8 | The completion gate and requests: open requests a root sent block its done (`parentCompletionBlockers`, Cezar's completion request wait); unanswered incoming requests refuse its first done once; the refusal and no-wait nudge texts; `run-states.ts` rows; parity cells | R13, R17 |
 
 ## Migration
 
