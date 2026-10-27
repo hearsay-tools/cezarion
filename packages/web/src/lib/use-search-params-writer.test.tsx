@@ -1,5 +1,5 @@
 import { act, render } from '@testing-library/react'
-import { MemoryRouter, useLocation } from 'react-router'
+import { MemoryRouter, useLocation, useNavigate } from 'react-router'
 import { describe, expect, it } from 'vitest'
 
 import { useSearchParamsWriter, type SearchParamsUpdate } from '@/lib/use-search-params-writer'
@@ -13,10 +13,18 @@ function set(key: string, value: string | null): SearchParamsUpdate {
 }
 
 function renderWriter(initial = '/p/x/') {
-  const handle: { write?: (update: SearchParamsUpdate) => void; search?: string | undefined; params?: string; key?: string } = {}
+  const handle: {
+    write?: (update: SearchParamsUpdate) => void
+    externalNavigate?: (search: string) => void
+    search?: string | undefined
+    params?: string
+    key?: string
+  } = {}
   function Probe() {
     const [params, write] = useSearchParamsWriter()
+    const nav = useNavigate()
     handle.write = write
+    handle.externalNavigate = (search) => nav({ search }, { replace: true })
     handle.params = params.toString()
     const location = useLocation()
     handle.search = location.search
@@ -55,5 +63,32 @@ describe('useSearchParamsWriter (hearsay-tools/cezarion#1616)', () => {
     act(() => probe.write!(set('archived', null)))
     act(() => probe.write!(set('origin', 'automations')))
     expect(probe.search).toBe('?origin=automations')
+  })
+
+  // hearsay-tools/cezarion#1790: a debounce timer can fire from a stale `next` when an earlier
+  // write's render lands between two dispatches and the layout effect reset `next` too early.
+  // In the test environment React Router batches both navigate calls into one render, so the
+  // exact timing race only manifests in the browser's async concurrent-mode scheduler; the
+  // browser-driven regression is mobile-task-controls.e2e.ts:176. This test pins the intended
+  // composition guarantee that the inflight queue is designed to preserve.
+  it('a debounced clear after switching tabs preserves the tab switch (hearsay-tools/cezarion#1790)', () => {
+    const probe = renderWriter('/p/x/')
+    // Simulate: debounce timer for 'done' fires (A), tab click fires (B) before A renders.
+    act(() => {
+      probe.write!(set('q', 'done'))        // A: ?q=done
+      probe.write!(set('archived', '1'))    // B: ?q=done&archived=1 (composes on A's target)
+    })
+    // Debounce timer for the clear fires — must compose on B's target, not A's.
+    act(() => probe.write!(set('q', null))) // C: should give ?archived=1
+    expect(new URLSearchParams(probe.search)).toEqual(new URLSearchParams('archived=1'))
+  })
+
+  it('resets to an external URL so subsequent writes start from it', () => {
+    const probe = renderWriter('/p/x/?origin=direct')
+    act(() => probe.write!(set('archived', '1')))
+    // A URL change from outside the writer (sidebar link, pasted URL, etc.)
+    act(() => probe.externalNavigate!('?q=external'))
+    act(() => probe.write!(set('origin', 'direct')))
+    expect(new URLSearchParams(probe.search)).toEqual(new URLSearchParams('q=external&origin=direct'))
   })
 })
