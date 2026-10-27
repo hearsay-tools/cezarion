@@ -15,7 +15,7 @@ import { reclaimRunParamsSchema } from '@open-mercato/cezar-contract/repo-reques
 import { githubChecksQuerySchema } from '@open-mercato/cezar-contract/github-requests';
 import { githubRefsQuerySchema } from '@open-mercato/cezar-contract/github-requests';
 import { commitQuerySchema } from '@open-mercato/cezar-contract/query-requests';
-import { imageMimeType, isOsOpenableImage } from '@open-mercato/cezar-contract/image-path';
+import { imageMimeType } from '@open-mercato/cezar-contract/image-path';
 import { providerForActiveRun } from '@open-mercato/cezar-contract/active-provider';
 import { defined } from '../core/defined.ts';
 import { ArchiveOnMergeCoordinator } from './archive-on-merge.ts';
@@ -37,7 +37,6 @@ import { CheckoutProgressCache } from './checkout-progress.ts';
 import { checkoutProgressParamsSchema, createProjectInputSchema, type CreateProjectResponse, type GithubOwnersResponse } from '@open-mercato/cezar-contract/projects';
 import { createLiveRoutes } from './live-routes.ts';
 import { subscribeRunFeed } from './run-event-feed.ts';
-import { engineOwnsRun } from '@open-mercato/cezar-contract/run-predicates';
 import type { ApiRun, ArchivedRunsResponse, RunSummary, RunsSearchResponse } from '@open-mercato/cezar-contract';
 import { ARCHIVED_RUNS_PAGE_DEFAULT } from '@open-mercato/cezar-contract/run-limits';
 import { RUNS_SEARCH_PER_PROJECT_MAX, archivedRunsQuerySchema, runSummariesQuerySchema, runsSearchQuerySchema } from '@open-mercato/cezar-contract/runs';
@@ -231,13 +230,11 @@ import {
   type AgentAccountStore,
 } from '../workspace/agent-accounts.ts';
 import {
-  AgentAccountUnavailableError,
   defaultAgentProfile,
   listAgentProfiles,
   namedAccountUnavailable,
   ompProfileDirError,
   profileDirState,
-  resolveProfileEnvForRoot,
   resolveStoredProfile,
   sameProfileDir,
   type ResolvedAgentProfile,
@@ -278,6 +275,7 @@ import { fetchGithub, fetchGithubProjects, fetchGithubChecks, fetchGithubComment
 import { CockpitAlreadyRunningError, type CockpitOwnership } from './cockpit-ownership.ts';
 import { RunStoreOpenError } from '../runs/store-open-error.ts';
 import { openInTerminal } from './open-in-terminal.ts';
+import { openRunApp, openRunCli, openRunDefaultApp } from './open-in-targets.ts';
 import { agentCliRunner, detectOpenTargets, openFileInDefaultApp, openInApp } from './open-in-app.ts';
 import { createDraftPr } from './pr.ts';
 import { ProviderRuntimeAuthObserver } from './provider-auth-runtime.ts';
@@ -3874,106 +3872,16 @@ export function createApp(deps: ServerDeps) {
       const { target, path: relPath } = parsedBody.data;
       const dir = run.worktreePath && existsSync(run.worktreePath) ? run.worktreePath : repoRoot;
 
-      // Diff pane "open in OS default app" (#365): one worktree file, opened with the platform's
-      // default handler for its type — not a directory in the file manager (that's `finder`
-      // above) and not a session takeover (editors/CLIs above). `path` is re-validated against
-      // the worktree here regardless of what the schema allowed, so a stale/forged path can never
-      // escape it.
       if (target === 'default') {
-        if (!run.worktreePath || !existsSync(run.worktreePath)) {
-          return c.json({ error: NO_WORKTREE }, 409);
-        }
-        if (!relPath) return c.json({ error: 'path required for the default-app target' }, 400);
-        const result = await readWorktreePath(run.worktreePath, relPath);
-        if (result.kind !== 'file') {
-          return c.json(
-            {
-              error: result.kind === 'dir' ? `not a file: ${relPath}` : result.error,
-            },
-            409,
-          );
-        }
-        // This route's whole contract is "preview an image in its default app", and containment
-        // alone does not enforce it. Without this gate any regular file in the worktree — a
-        // `.command`/`.desktop` an agent just wrote, an `.exe` — would be handed to the OS
-        // launcher, which EXECUTES it. Not remotely reachable (random run ids, same-origin, local
-        // mode), so: defense in depth.
-        //
-        // Deliberately `isOsOpenableImage`, NOT the raw route's `imageMimeType`: that list allows
-        // SVG on the strength of an `<img>` + no-script CSP the OS launcher never applies (the
-        // default `.svg` handler is usually a browser, which would run the file's `<script>`).
-        if (!isOsOpenableImage(result.path)) {
-          // Say which rule refused, in the route's own words — "limited to images" would be a lie
-          // to someone holding an SVG, which IS an image and DOES preview inline.
-          return c.json(
-            {
-              error: imageMimeType(result.path)
-                ? `SVG can carry scripts, so it previews inline but is never handed to the OS: ${result.path}`
-                : `opening in the default app is limited to images: ${result.path}`,
-            },
-            409,
-          );
-        }
-        const filePath = join(run.worktreePath, result.path);
-        const opened = await openFile(filePath);
-        if (!opened) return c.json({ error: `could not open ${result.path}`, path: filePath }, 409);
-        return c.json({ opened: true, path: filePath });
+        return openRunDefaultApp(c, run, relPath, openFile, NO_WORKTREE);
       }
-
-      // Coding-agent CLI handoff (#cli-handoff, #402): open a terminal in the worktree that resumes
-      // THIS run's latest session when the chosen CLI owns it (and a session exists), or
-      // starts a fresh CLI there otherwise. Same terminal launcher the Terminal button uses.
-      // Records that predate the runner choice carry no `runner` at all — they default to Claude
-      // everywhere else (resumeCommand, the client's resumeHint/cliTargetResumes), so the match
-      // check defaults the same way here; without it, a legacy run's own Claude CLI would never
-      // resume its own session, only ever launch fresh.
-      // A run the engine still owns never resumes: `sessionId` is seeded when the agent step STARTS
-      // (workflows/run.ts), so a running/queued/waiting run already carries one, and resuming it
-      // would attach a SECOND CLI process to the transcript the engine is actively writing. Those
-      // picks launch the CLI fresh in the worktree — the same degradation as a cross-runner pick,
-      // and what the client's cliTargetResumes now labels. Resume-after-finish is untouched.
       const cliRunner = agentCliRunner(target);
       if (cliRunner) {
-        const blocked = await providerActionError([cliRunner]);
-        if (blocked) return c.json({ error: blocked }, 409);
-        // A usage-limit hold has no session until its resume (hearsay-tools/cezarion#1236), so it resumes.
-        const sessionStep = engineOwnsRun(run) ? undefined : [...run.steps].reverse().find((s) => s.sessionId);
-        const sessionId = sessionStep?.sessionId;
-        // An id resumeCommand refuses (#431) degrades to a fresh CLI in the worktree,
-        // exactly like a run that never recorded a session.
-        const resume = sessionId && cliRunner === (sessionStep?.backend ?? run.runner ?? 'claude') ? resumeCommand(cliRunner, sessionId) : null;
-        // Runners with a CEZ_*_BIN override launch the configured binary, not the PATH name.
-        const command = resume ?? (cliRunner === 'cursor'
-          ? quoteExecutable(resolveCursorExecutable(), process.platform)
-          : cliRunner === 'omp' ? quoteExecutable(resolveOmpExecutable(), process.platform) : cliRunner);
-        if (command === null) {
-          return c.json({ error: `the configured ${cliRunner === 'omp' ? 'OMP' : 'Cursor'} executable cannot be used in a terminal command` }, 409);
-        }
-        // BOTH branches carry the account (spec 2026-07-29-agent-profiles): a resume needs the
-        // config dir that holds its session, and a FRESH CLI in this worktree should still open
-        // on the account the project works under — otherwise "Open in → Claude CLI" quietly
-        // hands the user a different subscription than every task in the same project uses.
-        const account = resume
-          ? await handoffEnv(cliRunner, sessionStep?.profileId)
-          : await resolveProfileEnvForRoot(repoRoot, cliRunner).then(({ env }) => ({ env }), (err: unknown) => {
-            if (err instanceof AgentAccountUnavailableError) return { error: err.message };
-            throw err;
-          });
-        if ('error' in account) return c.json({ error: account.error }, 409);
-        const fallback = handoffFallbackCommand(dir, command, account.env);
-        if (fallback === null) {
-          return c.json({ error: 'this account\'s folder cannot be used in a terminal command' }, 409);
-        }
-        const opened = await openTerminal(dir, command, account.env);
-        if (!opened) {
-          return c.json({ error: 'no terminal emulator found', command: fallback }, 409);
-        }
-        return c.json({ opened: true, path: dir, command });
+        return openRunCli(c, run, cliRunner, dir, repoRoot, {
+          providerActionError, resumeCommand, handoffEnv, handoffFallbackCommand, openTerminal,
+        });
       }
-
-      const opened = await openApp(target, dir);
-      if (!opened) return c.json({ error: `could not open ${target}`, path: dir }, 409);
-      return c.json({ opened: true, path: dir });
+      return openRunApp(c, target, dir, openApp);
     })
 
     // Handoff journal (spec 007): the per-task handoff.md as markdown, with cezar's records from the
