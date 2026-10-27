@@ -39,7 +39,7 @@ int main(void) {
   if (fstatat(p, "root", &moved, AT_SYMLINK_NOFOLLOW) || !same(owned, moved)) return 1;
   printf("resumed_restore_matches=1\n");
   close(root);
-  if (unlinkat(p, "root/link", 0) || unlinkat(p, "root", AT_REMOVEDIR)) return 1;
+  if (unlinkat(p, "root/link", 0) || renameat(p, "root", p, "original")) return 1;
   if (unlinkat(p, "target", AT_REMOVEDIR)) return 1;
   /* Simulate a replacement before claim; identity mismatch stops before chmod. */
   if (mkdirat(p, "root", 0000)) return 1;
@@ -49,7 +49,7 @@ int main(void) {
   if (same(owned, moved) || (moved.st_mode & 0777) != 0) return 1;
   /* Restore an unowned entry only into a vacant original name. */
   if (renameatx_np(stage, "owned", p, "root", RENAME_EXCL)) return 1;
-  unlinkat(p, "root", AT_REMOVEDIR); unlinkat(p, "intent", 0);
+  unlinkat(p, "root", AT_REMOVEDIR); unlinkat(p, "original", AT_REMOVEDIR); unlinkat(p, "intent", 0);
   close(stage); unlinkat(p, "stage", AT_REMOVEDIR); close(p); rmdir(name);
   return 0;
 }
