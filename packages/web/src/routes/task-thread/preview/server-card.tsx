@@ -25,26 +25,25 @@ interface CardView {
   action?: { label: 'Run and open' | 'Open' | 'View' | 'Start again'; run: boolean }
 }
 
+/** Each server state supplies the same next action as its card row. */
+const ACTIONS: Record<ThreadPreviewServer['state'], (entry: ThreadPreviewServer) => CardView['action']> = {
+  registered: entry => entry.server.answeredAtRegistration
+    ? { label: 'Open', run: false }
+    : { label: 'Run and open', run: true },
+  adopted: () => ({ label: 'Open', run: false }),
+  starting: () => ({ label: 'Open', run: false }),
+  up: () => ({ label: 'Open', run: false }),
+  stalled: () => ({ label: 'View', run: false }),
+  exited: () => ({ label: 'Start again', run: true }),
+  stopped: () => ({ label: 'Start again', run: true }),
+  unavailable: () => undefined,
+}
+
 function view(entry: ThreadPreviewServer): CardView {
   const { text, ...look } = serverStatus(entry)
   const status = { ...look, status: text }
-  switch (entry.state) {
-    case 'registered':
-      return entry.server.answeredAtRegistration
-        ? { ...status, action: { label: 'Open', run: false } }
-        : { ...status, action: { label: 'Run and open', run: true } }
-    case 'adopted':
-    case 'starting':
-    case 'up':
-      return { ...status, action: { label: 'Open', run: false } }
-    case 'stalled':
-      return { ...status, action: { label: 'View', run: false } }
-    case 'exited':
-    case 'stopped':
-      return { ...status, action: { label: 'Start again', run: true } }
-    case 'unavailable':
-      return status
-  }
+  const action = ACTIONS[entry.state](entry)
+  return action ? { ...status, action } : status
 }
 
 const ICONS = { 'Run and open': PlayIcon, Open: AppWindowIcon, View: FileTextIcon, 'Start again': RotateCcwIcon } as const
@@ -63,9 +62,6 @@ export function PreviewServerCard({
   const current = view(entry)
   const unavailable = entry.state === 'unavailable'
   const action = onOpen ? current.action : undefined
-  const showingHere = inPreview && action !== undefined && !action.run
-  const label = showingHere ? 'In preview' : action?.label
-  const Icon = showingHere ? AppWindowIcon : action ? ICONS[action.label] : null
   // The exact command sits in the block above the note; the note names only the script.
   const script = serverScript(server.command)
   const registered = shortAge(server.registeredAt)
@@ -91,17 +87,7 @@ export function PreviewServerCard({
           <span className="font-mono text-muted-foreground">:{server.port}</span>
           <span className="text-muted-foreground">{current.status}</span>
         </div>
-        {action && label && Icon ? (
-          <Button
-            variant={showingHere || action.label === 'View' || (action.label === 'Open' && entry.state === 'starting') ? 'outline' : 'contrast'}
-            size="sm"
-            className="max-md:h-11 max-md:px-3.5"
-            onClick={() => onOpen?.({ port: server.port, run: action.run })}
-          >
-            <Icon aria-hidden="true" />
-            {label}
-          </Button>
-        ) : null}
+        <CardAction entry={entry} inPreview={inPreview} action={action} onOpen={onOpen} />
       </div>
 
       <div className="mt-2.5 min-w-0 rounded-md bg-muted px-3 py-2 font-mono text-xs">
@@ -124,6 +110,29 @@ export function PreviewServerCard({
       ) : null}
     </div>
   )
+}
+
+function CardAction({ entry, inPreview, action, onOpen }: {
+  entry: ThreadPreviewServer
+  inPreview: boolean
+  action: CardView['action']
+  onOpen: ((request: Required<Omit<PreviewOpenRequest, 'agent'>>) => void) | undefined
+}) {
+  const { server } = entry
+  const showingHere = inPreview && action !== undefined && !action.run
+  const label = showingHere ? 'In preview' : action?.label
+  const Icon = showingHere ? AppWindowIcon : action ? ICONS[action.label] : null
+  return action && label && Icon ? (
+    <Button
+      variant={showingHere || action.label === 'View' || (action.label === 'Open' && entry.state === 'starting') ? 'outline' : 'contrast'}
+      size="sm"
+      className="max-md:h-11 max-md:px-3.5"
+      onClick={() => onOpen?.({ port: server.port, run: action.run })}
+    >
+      <Icon aria-hidden="true" />
+      {label}
+    </Button>
+  ) : null
 }
 
 function Note({ icon, children }: { icon?: ReactNode | undefined; children: string }) {
