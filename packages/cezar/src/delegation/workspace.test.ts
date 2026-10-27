@@ -488,6 +488,48 @@ exec "${realGit}" "$@"
     expect(await readFile(join(workspace.path, 'leftover'), 'utf8')).toBe('data');
   });
 
+  it('refuses a worktree registered during permission traversal', async () => {
+    const { root, workspace, first } = await partialLeftover();
+    const original = fsPromises.readdir;
+    let replaced = false;
+    const spy = vi.spyOn(fsPromises, 'readdir').mockImplementation(async (path, options) => {
+      if (!replaced && path === workspace.path) {
+        replaced = true;
+        await rm(workspace.path, { recursive: true });
+        git(root, 'worktree', 'add', '--detach', workspace.path, first);
+        await writeFile(join(workspace.path, 'KEEP'), 'new work');
+      }
+      return original(path, options as never) as never;
+    });
+    syncBuiltinESMExports();
+    try {
+      const result = await removeOwnedWorkspace(root, workspace);
+      expect(replaced).toBe(true);
+      expect(result).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+      expect(await readFile(join(workspace.path, 'KEEP'), 'utf8')).toBe('new work');
+      expect(git(root, 'worktree', 'list', '--porcelain')).toContain(workspace.path);
+    } finally { spy.mockRestore(); syncBuiltinESMExports(); }
+  });
+
+  it('refuses a holder appearing during permission traversal', async () => {
+    const { root, workspace } = await partialLeftover();
+    const original = fsPromises.readdir;
+    let held = false;
+    const spy = vi.spyOn(fsPromises, 'readdir').mockImplementation(async (path, options) => {
+      if (path === workspace.path) held = true;
+      return original(path, options as never) as never;
+    });
+    syncBuiltinESMExports();
+    try {
+      const result = await removeOwnedWorkspace(root, workspace, undefined, undefined, () => {
+        if (held) throw new Error('new holder');
+      });
+      expect(held).toBe(true);
+      expect(result).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+      expect(await readFile(join(workspace.path, 'leftover'), 'utf8')).toBe('data');
+    } finally { spy.mockRestore(); syncBuiltinESMExports(); }
+  });
+
   it('refuses a path registered again during release', async () => {
     const { root, workspace, first } = await partialLeftover();
     const result = await removeOwnedWorkspace(root, workspace, undefined, async () => {

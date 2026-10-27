@@ -435,26 +435,47 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
             !await exists(receipt.gitDir) && !(await registered()).includes(`worktree ${workspace.path}`);
         };
         if (!await safe()) return false;
+        const original = await lstat(workspace.path);
+        const unheld = () => {
+          assertCurrent?.(); assertUnheld?.();
+          const holders = inspectGeneration({ paths: [workspace.path] });
+          if (holders.liveness === 'gone') return true;
+          if (holders.pids.length) held(holders.pids); else report?.unexplained?.();
+          return false;
+        };
+        const stillOwned = async () => {
+          await validateIntent(repoRoot, value);
+          if (!same(await readReceipt(path), receipt) ||
+              !same(cleanupSchema.parse(JSON.parse(await readIdentityFile(checkpointPath, RECEIPT_CAP))), checkpoint) ||
+              !await safe()) return false;
+          const current = await lstat(workspace.path);
+          return current.dev === original.dev && current.ino === original.ino;
+        };
+        const removeFiles = async () => {
+          try { await makeDirectoriesWritable(workspace.path); }
+          catch (error) { return failedRemoval(error); }
+          // Permission repair yields: a new checkout or holder can arrive while it runs.
+          if (!await stillOwned()) { report?.unexplained?.(); return false; }
+          if (!unheld()) return false;
+          try { await rm(workspace.path, { recursive: true, force: true }); }
+          catch (error) { return failedRemoval(error); }
+          remaining = ['branch'];
+          return true;
+        };
+        const failedRemoval = (error: unknown) => {
+          leftoverError = error instanceof Error ? error.message : String(error);
+          report?.unexplained?.();
+          return false;
+        };
         assertCurrent?.();
         await beforeRemove?.();
         assertCurrent?.();
         checkUnheld(assertUnheld);
         return withIdleTestApp(workspace.path, async (_stopped, busy) => {
           if (busy || !await waitForTestAppWatcher(workspace.path)) { report?.unexplained?.(); return false; }
-          assertCurrent?.(); assertUnheld?.();
-          const holders = inspectGeneration({ paths: [workspace.path] });
-          if (holders.liveness !== 'gone') { if (holders.pids.length) held(holders.pids); else report?.unexplained?.(); return false; }
+          if (!unheld()) return false;
           if (!await safe()) { report?.unexplained?.(); return false; }
-          try {
-            await makeDirectoriesWritable(workspace.path);
-            await rm(workspace.path, { recursive: true, force: true });
-          } catch (error) {
-            leftoverError = error instanceof Error ? error.message : String(error);
-            report?.unexplained?.();
-            return false;
-          }
-          remaining = ['branch'];
-          return true;
+          return removeFiles();
         });
       }
 
