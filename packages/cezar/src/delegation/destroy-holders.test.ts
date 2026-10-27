@@ -1,4 +1,6 @@
 import { spawn, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { once } from 'node:events';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -6,6 +8,17 @@ import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { reapDestroyHolders } from './destroy-holders.ts';
+
+const readFault = vi.hoisted(() => ({ pids: [] as number[], enabled: false, count: 0 }));
+vi.mock('node:fs', async importOriginal => {
+  const actual = await importOriginal<typeof import('node:fs')>();
+  return { ...actual, readdirSync: ((...args: unknown[]) => Reflect.apply(fs.readdirSync, fs, args)) as typeof fs.readdirSync, readlinkSync: ((path: fs.PathLike, ...args: unknown[]) => {
+    if (readFault.enabled && readFault.pids.some(pid => String(path) === `/proc/${pid}/cwd`)) {
+      readFault.count++; throw Object.assign(new Error('denied'), { code: 'EACCES' });
+    }
+    return Reflect.apply(actual.readlinkSync, actual, [path, ...args]);
+  }) as typeof fs.readlinkSync };
+});
 
 it.runIf(process.platform === 'linux' || process.platform === 'darwin')('stops scoped cwd and open-file holders without touching an unrelated process', async () => {
   const unscope = scopeFixtureProcesses();
@@ -70,3 +83,33 @@ it.runIf(process.platform === 'linux' || process.platform === 'darwin')('checks 
     unscope(); await rm(root, { recursive: true, force: true });
   }
 }, 60_000);
+
+
+it.runIf(process.platform === 'linux')('keeps cleanup incomplete when a known holder becomes unreadable after a stop attempt', async () => {
+  const unscope = scopeFixtureProcesses();
+  const root = await mkdtemp(join(tmpdir(), 'cez-holder-denied-'));
+  const child = spawn(process.execPath, ['-e', 'console.log("ready"); setInterval(()=>{},1000)'],
+    { cwd: root, stdio: ['ignore', 'pipe', 'ignore'] });
+  const exited = once(child, 'exit');
+  let denied = false;
+  readFault.count = 0;
+  const kill = process.kill;
+  const killSpy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: NodeJS.Signals | number) => {
+    if (readFault.pids.includes(pid) && signal === 'SIGTERM') { denied = true; readFault.enabled = true; return true; }
+    return kill(pid, signal);
+  }) as typeof process.kill);
+  syncBuiltinESMExports();
+  try {
+    await once(child.stdout!, 'data');
+    readFault.pids = fs.readdirSync(`/proc/${child.pid}/task`).map(Number);
+    const outcome = await reapDestroyHolders([root], () => {}).then(() => undefined, error => error);
+    expect(denied).toBe(true);
+    expect(readFault.count).toBeGreaterThan(0);
+    expect(outcome?.message).toContain(`Cannot read evidence for destroy holder ${child.pid}`);
+    expect(child.exitCode).toBeNull();
+  } finally {
+    killSpy.mockRestore(); readFault.enabled = false; syncBuiltinESMExports();
+    child.kill('SIGKILL'); await exited;
+    unscope(); await rm(root, { recursive: true, force: true });
+  }
+}, 30_000);
