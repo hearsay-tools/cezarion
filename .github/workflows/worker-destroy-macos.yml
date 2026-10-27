@@ -30,6 +30,8 @@ jobs:
       - name: Verify mode-000 owned worktree recovery
         run: npm test -- packages/cezar/src/delegation/workspace.test.ts -t 'recovers a leftover with an inaccessible'
       - name: Verify scoped holder termination
+        if: always()
         run: npm test -- packages/cezar/src/delegation/destroy-holders.test.ts
       - name: Verify authoritative service destroy
+        if: always()
         run: npm test -- packages/cezar/src/delegation/service.test.ts -t 'authoritative destroy removes a prepared leftover'
