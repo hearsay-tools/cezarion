@@ -27,6 +27,7 @@ import {
 } from './runner-runtime.ts';
 import { parseAskRequest, type AskQuestion } from './ask.ts';
 import { readNdjson } from './ndjson.ts';
+import { drainsAfterClose, isServerRequest, isStaleTurnOutcome, parseNativeLine, stringField, turnIdOf } from './codex-native-frames.ts';
 import { V1TextCoalescer } from './v1-text-coalescer.ts';
 import { InputSubmissions } from './input-submissions.ts';
 import { codexStreamError } from './codex-stream-error.ts';
@@ -805,27 +806,13 @@ class CodexSession implements AgentSession {
 
   /** Lifecycle eligibility, then the current-turn filters, in that order. */
   private admitsNotification(msg: CodexAppServerMessage): boolean {
-    if (!this.open && !this.drainsAfterClose(msg)) return false;
+    if (!this.open && !drainsAfterClose(msg, () => this.stdinOpen && this.hasExited())) return false;
     // Child turns do not reach either channel.
     if (this.isForeignTurnLifecycle(msg)) return false;
     // The UI mapper must not retire a live approval on an older turn's tail.
-    if (this.isStaleTurnOutcome(msg)) return false;
+    if (isStaleTurnOutcome(msg, this.activeTurnId)) return false;
     // Stale/child retry errors must neither fail nor warn on this turn.
     return msg.method !== 'error' || this.isCurrentTurn((msg.params ?? {}) as Record<string, unknown>);
-  }
-
-  /** After close, only passive output and, after natural exit, the final
-   *  outcome are drained, without restoring input authority. */
-  private drainsAfterClose(msg: CodexAppServerMessage): boolean {
-    if (msg.id !== undefined) return false;
-    if (PASSIVE_OUTPUT_METHODS.has(msg.method ?? '')) return true;
-    return this.stdinOpen && this.hasExited() && isTurnOutcome(msg.method);
-  }
-
-  private isStaleTurnOutcome(msg: CodexAppServerMessage): boolean {
-    if (!isTurnOutcome(msg.method) || !this.activeTurnId) return false;
-    const turnId = turnIdOf(msg.params ?? {});
-    return !!turnId && turnId !== this.activeTurnId;
   }
 
   /** Clean EOF while the process lives: a startup failure, or automatic cleanup. */
@@ -1213,14 +1200,6 @@ const NON_TOOL_ITEMS = new Set(['agentMessage', 'userMessage', 'reasoning', 'pla
  *  dropped so a sub-agent turn can't be mistaken for the parent's (#600). */
 const TURN_LIFECYCLE_METHODS = new Set(['turn/started', 'turn/completed', 'turn/failed']);
 
-/** Notifications that only collect output; never dispatch control after close. */
-const PASSIVE_OUTPUT_METHODS = new Set([
-  'item/started', 'item/updated', 'item/completed', 'item/agentMessage/delta',
-  'item/reasoning/textDelta', 'item/reasoning/summaryDelta', 'item/reasoning/summaryTextDelta',
-  'item/commandExecution/outputDelta', 'thread/tokenUsage/updated', 'turn/plan/updated',
-  'hook/started', 'hook/completed',
-]);
-
 const REASONING_SUMMARIES = new Set(['auto', 'concise', 'detailed', 'none']);
 
 /**
@@ -1270,33 +1249,9 @@ function clean<T extends Record<string, unknown>>(obj: T): Partial<T> {
   return out;
 }
 
-function stringField(obj: Record<string, unknown>, key: string): string | undefined {
-  const v = obj[key];
-  return typeof v === 'string' ? v : undefined;
-}
-
 function threadIdOf(res: Record<string, unknown>): string | undefined {
   const thread = res.thread as { id?: unknown } | undefined;
   return typeof thread?.id === 'string' ? thread.id : stringField(res, 'threadId');
-}
-
-/** One native NDJSON line, or undefined when it is not JSON. */
-function parseNativeLine(line: string): CodexAppServerMessage | undefined {
-  try { return JSON.parse(line) as CodexAppServerMessage; }
-  catch { return undefined; }
-}
-
-function isServerRequest(msg: CodexAppServerMessage): boolean {
-  return typeof msg.method === 'string' && (typeof msg.id === 'number' || typeof msg.id === 'string');
-}
-
-function isTurnOutcome(method: string | undefined): boolean {
-  return method === 'turn/completed' || method === 'turn/failed';
-}
-
-function turnIdOf(obj: Record<string, unknown>): string | undefined {
-  const turn = obj.turn as { id?: unknown } | undefined;
-  return typeof turn?.id === 'string' ? turn.id : stringField(obj, 'turnId');
 }
 
 /** Cumulative tokens from a `thread/tokenUsage/updated` notification:
