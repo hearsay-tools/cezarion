@@ -493,6 +493,17 @@ exec "${realGit}" "$@"
     expect(await readFile(join(saved, 'tracked.txt'), 'utf8')).toBe('base');
   });
 
+  it.runIf(process.platform === 'linux')('recovers a leftover with an inaccessible directory', async () => {
+    const { root, workspace } = await partialLeftover();
+    const locked = join(workspace.path, 'locked');
+    await mkdir(locked);
+    await writeFile(join(locked, 'file'), 'data');
+    await chmod(locked, 0);
+    try {
+      expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+    } finally { if (existsSync(locked)) await chmod(locked, 0o700); }
+  });
+
   it('names the leftover and filesystem error when deletion fails', async () => {
     const { root, workspace } = await partialLeftover();
     const original = fsPromises.rm;

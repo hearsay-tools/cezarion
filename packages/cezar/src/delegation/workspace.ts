@@ -4,7 +4,7 @@ import { windowsIdentityDirectory, windowsReadIdentity, windowsWriteIdentity } f
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, mkdir, mkdtemp, open, readdir, realpath, rename, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, open, readdir, realpath, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, normalize } from 'node:path';
 import { z } from 'zod';
@@ -103,15 +103,23 @@ async function exists(path: string): Promise<boolean> {
 async function makeDirectoriesWritable(path: string): Promise<void> {
   const info = await lstat(path);
   if (!info.isDirectory() || info.isSymbolicLink() || await realpath(path) !== path) throw new Error(`Unsafe directory: ${path}`);
-  const directory = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
-  try {
-    const opened = await directory.stat();
-    if (!opened.isDirectory() || opened.dev !== info.dev || opened.ino !== info.ino) throw new Error(`Directory changed: ${path}`);
-    await directory.chmod(opened.mode | 0o700);
-    for (const entry of await readdir(path, { withFileTypes: true })) {
-      if (entry.isDirectory()) await makeDirectoriesWritable(join(path, entry.name));
-    }
-  } finally { await directory.close(); }
+  if (process.platform !== 'win32') {
+    // Linux O_PATH pins a directory even with mode 000; chmod the pinned inode
+    // through procfs because fchmod on an O_PATH descriptor fails with EBADF.
+    const linuxPath = process.platform === 'linux';
+    const directory = await open(path, (linuxPath ? 0x200000 : constants.O_RDONLY) | constants.O_NOFOLLOW);
+    try {
+      const opened = await directory.stat();
+      if (!opened.isDirectory() || opened.dev !== info.dev || opened.ino !== info.ino) throw new Error(`Directory changed: ${path}`);
+      if (linuxPath) await chmod(`/proc/self/fd/${directory.fd}`, opened.mode | 0o700);
+      else await directory.chmod(opened.mode | 0o700);
+    } finally { await directory.close(); }
+  }
+  // Windows directory mode bits do not control directory deletion; Node cannot
+  // open directories there. Reparse points are rejected above and not traversed.
+  for (const entry of await readdir(path, { withFileTypes: true })) {
+    if (entry.isDirectory()) await makeDirectoriesWritable(join(path, entry.name));
+  }
 }
 
 /** Reads only committed state in the server-known parent cwd; never flushes its edits. */

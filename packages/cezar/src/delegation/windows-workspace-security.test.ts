@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { mkdtemp, realpath, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, expect, it } from 'vitest';
@@ -60,4 +60,18 @@ it.runIf(process.platform === 'win32')('provisions and removes a worker under Re
     if (previous === undefined) delete process.env.PSExecutionPolicyPreference;
     else process.env.PSExecutionPolicyPreference = previous;
   }
+}, 120_000);
+
+
+it.runIf(process.platform === 'win32')('removes an unregistered prepared leftover on Windows', async () => {
+  const f = await fixture();
+  expect(await removeOwnedWorkspace(f.root, f.workspace, undefined, async () => { throw new Error('interrupt'); })).toMatchObject({ state: 'incomplete' });
+  const saved = `${f.workspace.path}-saved`;
+  await rename(f.workspace.path, saved);
+  f.git('worktree', 'prune', '--expire', 'now');
+  await rename(saved, f.workspace.path);
+  await rm(join(f.workspace.path, '.git'));
+  await mkdir(join(f.workspace.path, 'leftover'));
+  await writeFile(join(f.workspace.path, 'leftover', 'file'), 'data');
+  expect(await removeOwnedWorkspace(f.root, f.workspace)).toMatchObject({ state: 'complete', remaining: [] });
 }, 120_000);
