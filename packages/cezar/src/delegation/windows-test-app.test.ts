@@ -5,12 +5,10 @@ import { once } from 'node:events';
 import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { DatabaseSync } from 'node:sqlite';
+import { DatabaseSync, StatementSync } from 'node:sqlite';
 import { syncBuiltinESMExports } from 'node:module';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { windowsStartToken, windowsTestAppHolds, windowsTestAppOwned } from './windows-test-app.ts';
-import * as windowsAppProbe from './windows-test-app.ts';
-import * as detachedProcess from '../detached-process.ts';
 import { createOwnedWorkspace, removeOwnedWorkspace } from './workspace.ts';
 
 describe('Windows test app ownership', () => {
@@ -87,24 +85,30 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
     expect(app.exitCode).toBeNull(); expect(other.exitCode).toBeNull();
     db.exec('DELETE FROM holders'); db.close(); db = undefined;
     await writeFile(join(qa, 'test-env.json'), descriptor(other.pid!));
-    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete' });
+    const deleteErrors: string[] = [];
+    const originalRun = StatementSync.prototype.run;
+    const deleteProbe = vi.spyOn(StatementSync.prototype, 'run').mockImplementation(function (this: StatementSync, ...args) {
+      try { return originalRun.apply(this, args); }
+      catch (error) {
+        if (this.sourceSQL.startsWith('DELETE FROM holders')) {
+          const sqliteError = error as NodeJS.ErrnoException & { errcode?: number };
+          deleteErrors.push(`${sqliteError.code ?? 'unknown'}:${sqliteError.errcode ?? 'unknown'}`);
+        }
+        throw error;
+      }
+    });
+    try { expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete' }); }
+    finally { deleteProbe.mockRestore(); }
+    let afterRefusal: unknown = 'unavailable';
+    try {
+      const afterRefusalDb = new DatabaseSync(join(qa, 'test-env-lease.sqlite'), { readOnly: true });
+      try { afterRefusal = afterRefusalDb.prepare("SELECT count(*) AS total, sum(CASE WHEN id LIKE 'destroy-%' AND pid = ? THEN 1 ELSE 0 END) AS own_destroy FROM holders").get(process.pid); }
+      finally { afterRefusalDb.close(); }
+    } catch { /* Diagnostic only. */ }
     expect(other.exitCode).toBeNull();
     await writeFile(join(qa, 'test-env.json'), descriptor(app.pid!));
     console.info('native cleanup: stopping owned app');
-    const gates: string[] = [];
-    const originalOwned = windowsAppProbe.windowsTestAppHolds;
-    const originalStop = detachedProcess.stopGroup;
-    const ownedProbe = vi.spyOn(windowsAppProbe, 'windowsTestAppHolds').mockImplementation((...args) => {
-      try { const owned = originalOwned(...args); gates.push(`owned:${owned}`); return owned; }
-      catch (error) { gates.push(`owned-error:${(error as NodeJS.ErrnoException).code ?? 'unknown'}`); throw error; }
-    });
-    const stopProbe = vi.spyOn(detachedProcess, 'stopGroup').mockImplementation(async (...args) => {
-      try { const stopped = await originalStop(...args); gates.push(`stop:${stopped}`); return stopped; }
-      catch (error) { gates.push(`stop-error:${(error as NodeJS.ErrnoException).code ?? 'unknown'}`); throw error; }
-    });
-    let result: Awaited<ReturnType<typeof removeOwnedWorkspace>>;
-    try { result = await removeOwnedWorkspace(root, workspace); }
-    finally { ownedProbe.mockRestore(); stopProbe.mockRestore(); }
+    const result = await removeOwnedWorkspace(root, workspace);
     if (result.state !== 'complete') {
       try {
         const state = await readFile(join(qa, 'test-env.json'), 'utf8').then(text => JSON.parse(text)).catch(() => null);
@@ -116,7 +120,7 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
           watcherExit: watcher.exitCode, watcherSignal: watcher.signalCode, watcherIdentityLive: windowsStartToken(watcher.pid!) !== undefined,
           descriptorStatus: state?.status ?? 'missing-or-running', descriptorHasPid: Number.isSafeInteger(state?.app?.pid),
           descriptorStartMatches: state?.app?.start === windowsStartToken(app.pid!), leaseRows,
-          ownedAtDiagnostic: windowsTestAppHolds(app.pid!, state?.app?.start, workspace.path), gates,
+          ownedAtDiagnostic: windowsTestAppHolds(app.pid!, state?.app?.start, workspace.path), afterRefusal, deleteErrors,
         }));
       } catch { console.info('native cleanup diagnostic unavailable'); }
     }
