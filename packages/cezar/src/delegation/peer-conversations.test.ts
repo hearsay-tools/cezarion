@@ -8,6 +8,8 @@ import {
   type ConversationMessage,
   type ConversationSendRequest,
 } from '@open-mercato/cezar-contract/conversations';
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import type { RunRecord } from '../runs/store.ts';
 import { RunStore } from '../runs/store.ts';
 import { fixture } from './service.testkit.ts';
@@ -24,14 +26,14 @@ describe('peer conversations', () => {
   });
   const permissions = ['spawn', 'inspect', 'steer', 'stop', 'destroy', 'diff', 'wait'] as const;
   /** Another root task of the project. `provisioned: false` is a top-level run that never opened a session. */
-  function peer(status: RunRecord['status'] = 'running', provisioned = true) {
+  function peer(status: RunRecord['status'] = RUN_STATUS.running, provisioned = true) {
     const run = f.store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
     f.store.updateRun(run.id, { status, ...(provisioned ? { delegation: { role: 'root', permissions: [...permissions], receipts: [] } } : {}) });
     return { id: run.id, caller: f.credentials.authenticate(f.credentials.issue('project', run.id, randomUUID()))! };
   }
   async function worker(parent = f.caller) {
     const { workerId } = await f.service.spawn(parent, { task: 'work', baseline: 'parent-head', requestId: randomUUID() });
-    f.store.updateRun(workerId, { status: 'running' });
+    f.store.updateRun(workerId, { status: RUN_STATUS.running });
     return { id: workerId, caller: f.credentials.authenticate(f.credentials.issue('project', workerId, randomUUID()))! };
   }
   const message = (recipientRunId: string, kind: ConversationSendRequest['kind'] = 'request', extra: Partial<ConversationSendRequest> = {}): ConversationSendRequest =>
@@ -63,12 +65,12 @@ describe('peer conversations', () => {
   });
 
   it('R1 a peer message is agent input: it reaches a task with an open question and answers nothing', async () => {
-    const b = peer('waiting');
+    const b = peer(RUN_STATUS.waiting);
     f.store.appendEvent(b.id, { type: 'ask.requested', requestId: randomUUID(), questions: [{ question: 'Ignored file?', header: 'Ignored', options: [{ label: 'Yes' }, { label: 'No' }] }] });
     const askSeq = f.store.transcriptFacts(b.id).pendingAsk?.seq;
     expect(askSeq).toBeDefined();
     const sent = await f.service.send(f.caller, message(b.id, 'progress', { text: 'Coordinator continues wave 2' }));
-    expect(f.store.getRun(b.id)?.agentInputs).toEqual([expect.objectContaining({ id: sent.message.id, source: 'agent' })]);
+    expect(f.store.getRun(b.id)?.agentInputs).toEqual([expect.objectContaining({ id: sent.message.id, source: agentInputSchema.shape.source.enum.agent })]);
     expect(f.store.readEvents(b.id).filter(event => event.type === 'user-message' || event.type === 'human-input-delivered')).toEqual([]);
     expect(f.store.transcriptFacts(b.id).pendingAsk?.seq).toBe(askSeq);
   });
@@ -96,7 +98,7 @@ describe('peer conversations', () => {
   });
 
   it('R8 a peer recipient that has not opened a session becomes a root task with its first message', async () => {
-    const b = peer('queued', false);
+    const b = peer(RUN_STATUS.queued, false);
     const sent = await f.service.send(f.caller, message(b.id, 'progress'));
     expect(sent).toMatchObject({ delivery: 'queued', message: { state: 'accepted' } });
     expect(f.store.getRun(b.id)?.delegation).toEqual({ role: 'root', permissions: [...permissions], receipts: [] });
@@ -126,7 +128,7 @@ describe('peer conversations', () => {
       f.store.updateRun(b.id, { status });
       expect((await f.service.conversation(f.caller, { recipientRunId: b.id })).outcomes).toEqual([expect.objectContaining({ requestId: sent.message.id, status: outcome })]);
       // A reply after a human continues the peer is recorded late and reopens nothing.
-      f.store.updateRun(b.id, { status: 'running' });
+      f.store.updateRun(b.id, { status: RUN_STATUS.running });
       const late = await f.service.reply(b.caller, message(f.parent.id, 'reply', { requestId: sent.message.id }));
       expect(late).toMatchObject({ message: { state: 'late' }, outcome: { status: outcome } });
     });
@@ -166,10 +168,10 @@ describe('peer conversations', () => {
   });
 
   it('R14 a message ID already projected on the recipient is refused even when the recipient never queued it', async () => {
-    const b = peer('review'); const c = peer();
+    const b = peer(RUN_STATUS.review); const c = peer();
     const id = randomUUID();
     expect((await f.service.send(f.caller, message(b.id, 'progress', { id }))).delivery).toBe('not-delivered');
-    f.store.updateRun(b.id, { status: 'running' });
+    f.store.updateRun(b.id, { status: RUN_STATUS.running });
     await expect(f.service.send(c.caller, message(b.id, 'progress', { id }))).rejects.toMatchObject({ code: 'invalid_input' });
     expect(ledger(c.id)).toBeUndefined();
   });
@@ -178,7 +180,7 @@ describe('peer conversations', () => {
     const b = peer();
     const progress = await f.service.send(f.caller, message(b.id, 'progress'));
     const open = await f.service.send(f.caller, message(b.id));
-    f.store.updateRun(b.id, { status: 'done' });
+    f.store.updateRun(b.id, { status: RUN_STATUS.done });
     expect(f.store.deleteRun(b.id)).toBe(true);
     // The deletion itself reconciles the live ledgers: no read is needed to settle it.
     expect(ledger(f.parent.id)?.outcomes).toEqual([expect.objectContaining({ requestId: open.message.id, status: 'deleted' })]);
@@ -195,13 +197,13 @@ describe('peer conversations', () => {
   it('R15 a sender deleted before the first inbox reserve, or between reserve and acknowledge, leaves the recipient\'s batch whole', async () => {
     const b = peer(); const c = peer();
     const fromB = await f.service.send(b.caller, message(f.parent.id, 'progress', { text: 'from B' }));
-    f.store.updateRun(b.id, { status: 'done' });
+    f.store.updateRun(b.id, { status: RUN_STATUS.done });
     expect(f.store.deleteRun(b.id)).toBe(true);
     const fromC = await f.service.send(c.caller, message(f.parent.id, 'progress', { text: 'from C' }));
     const batch = await f.service.inbox(f.caller);
     expect(batch.messages.map(entry => [entry.id, entry.text])).toEqual([[fromB.message.id, 'from B'], [fromC.message.id, 'from C']]);
     expect(batch.receiptId).toBeDefined();
-    f.store.updateRun(c.id, { status: 'done' });
+    f.store.updateRun(c.id, { status: RUN_STATUS.done });
     expect(f.store.deleteRun(c.id)).toBe(true);
     expect(await f.service.ackInbox(f.caller, { receiptId: batch.receiptId! })).toEqual({ receiptId: batch.receiptId, status: 'acknowledged' });
     expect(f.store.getRun(f.parent.id)?.agentInputs?.every(input => !!input.deliveredAt)).toBe(true);
@@ -210,7 +212,7 @@ describe('peer conversations', () => {
   it('R15 a reply to a deleted sender\'s request is refused', async () => {
     const b = peer();
     const request = await f.service.send(b.caller, message(f.parent.id));
-    f.store.updateRun(b.id, { status: 'done' });
+    f.store.updateRun(b.id, { status: RUN_STATUS.done });
     expect(f.store.deleteRun(b.id)).toBe(true);
     await expect(f.service.reply(f.caller, message(b.id, 'reply', { requestId: request.message.id }))).rejects.toMatchObject({ code: 'denied_scope' });
   });

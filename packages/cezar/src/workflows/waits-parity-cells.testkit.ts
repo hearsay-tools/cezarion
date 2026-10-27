@@ -4,7 +4,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
-import { WAIT_PHASE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import type { AgentInput, CiWaitResult, ConversationMessage, HumanWaitEntry, ProcessWaitResult, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
@@ -1866,7 +1866,7 @@ function workersCells(runners: RunnerId[]): void {
      *  whose authenticated caller sends to `to` through the conversing parent's service. */
     function peerOf(f: Awaited<ReturnType<typeof conversingParent>>, to: string) {
       const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
-      store.updateRun(peer.id, { status: 'running', delegation: { role: 'root', permissions: ['spawn', 'wait', 'steer', 'inspect'], receipts: [] } });
+      store.updateRun(peer.id, { status: RUN_STATUS.running, delegation: { role: 'root', permissions: ['spawn', 'wait', 'steer', 'inspect'], receipts: [] } });
       const progress = async (text: string) => {
         const id = randomUUID();
         await f.service.send(f.callerFor(peer.id), { id, recipientRunId: to, kind: 'progress', text, timeoutSeconds: 600 });
@@ -1894,7 +1894,7 @@ function workersCells(runners: RunnerId[]): void {
       expect(store.readEvents(f.p.id).filter(event => event.type === 'user-message')).toHaveLength(users);
       expect(answered(f.p.id, askSeq)).toBe(false);
       expect(asks(f.p.id).map(event => event.seq)).toEqual([askSeq]);
-      expect(humanOpen(f.p.id)).toEqual([expect.objectContaining({ phase: 'open', askSeq })]);
+      expect(humanOpen(f.p.id)).toEqual([expect.objectContaining({ phase: WAIT_PHASE.open, askSeq })]);
       expect(store.transcriptFacts(f.p.id).pendingAsk?.seq).toBe(askSeq);
       expect(deriveAttention(store.getRun(f.p.id)!).label).toBe('needs you');
       expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'Parser' }])).toBe(true);
@@ -1921,7 +1921,7 @@ function workersCells(runners: RunnerId[]): void {
       const held = await peer.progress('Peer progress u19q held');
       expect(delivered(f.p.id, held)).toBe(false);
       expect((manager as unknown as { owesWake(run: RunRecord): boolean }).owesWake(store.getRun(f.p.id)!)).toBe(false);
-      expect(humanOpen(f.p.id)).toEqual([expect.objectContaining({ phase: 'open', source: 'cezar' })]);
+      expect(humanOpen(f.p.id)).toEqual([expect.objectContaining({ phase: WAIT_PHASE.open, source: WAIT_SOURCE.cezar })]);
       expect(deriveAttention(store.getRun(f.p.id)!).label).toBe('needs you');
       // A human message restarts the budget, and its turn takes the held message.
       expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'Carry on' }])).toBe(true);

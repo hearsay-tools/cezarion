@@ -1,6 +1,7 @@
 import { discoveredRunners, missingModelChoices, type HostDiscovery } from '../discovery/catalog.ts';
-import { reconcileConversationState, projectConversationEvents } from './conversations.ts';
-import { openQuestions } from './questions.ts';
+import { assertConversationCapacity, assertFamilySender, byCreatedAtAndId, commitAccepted, familyPair, inboxEntryIn, isRootTask, notDeliveredInstruction,
+  orphanedPeerMessage, peerPair, projectConversationEvents, reconcileConversationState, replyOutcomes, type InboxEntry } from './conversations.ts';
+export { rootDelegation } from './conversations.ts';
 import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision } from './results.ts';
 import { join } from 'node:path';
 import { prepareWorkerContext, workerContextTask } from './context.ts';
@@ -35,7 +36,6 @@ import {
   type RequestOutcome,
 } from '@open-mercato/cezar-contract/conversations';
 import {
-  workerOperationSchema,
   workerSpawnRequestSchema,
   workerSteerRequestSchema,
   workerWaitRequestSchema,
@@ -55,9 +55,9 @@ import {
   type WorkerWait,
   type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract/delegation';
-import type { AgentInput, DelegationState } from '@open-mercato/cezar-contract';
+import type { AgentInput } from '@open-mercato/cezar-contract';
 import { completionWaitEntry, hasWorkerDeadline, workerCompletionWaitProjection, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
-import { ConversationIdInUseError, type RunStore, type RunRecord } from '../runs/store.ts';
+import type { RunStore, RunRecord } from '../runs/store.ts';
 import { workerDestroyView, workerOutcome } from '../runs/delegation-state.ts';
 import type { DelegationExecutionSettings, RunManager } from '../workflows/run.ts';
 import { QUICK_TASK_WORKFLOW, skillTaskSteps, plannedWorkflow, allowedToolsForStep, stepKind, type WorkflowDef, type WorkflowStepDef } from '../workflows/types.ts';
@@ -140,119 +140,8 @@ function stepIdentityFields({ settings, grants }: ResolvedSpawnStep) {
 }
 export const delegationEnabled = () => process.env.CEZ_DELEGATION === '1';
 
-/** The record that makes a run a root task: every worker operation, no receipts yet. */
-export const rootDelegation = (): DelegationState => ({ role: 'root', permissions: [...workerOperationSchema.options], receipts: [] });
-
-/** A root task: a root delegation record, or a top-level run with no record yet, which has not
- *  opened a session under `CEZ_DELEGATION=1` (spec 2026-10-27-task-communication-protocol § 2). */
-function isRootTask(run: RunRecord | undefined): run is RunRecord {
-  return !!run && (run.delegation?.role === 'root' || run.delegation === undefined);
-}
-
-const denyScope = (): never => { throw new DelegationPolicyError('denied_scope', 'Worker scope denied'); };
-
-/** Two root tasks of one project (spec § 2), neither family deleting its history; a sender of a new
- *  message is live. Undefined when the two are not both root tasks. */
-function peerPair(sender: RunRecord | undefined, recipient: RunRecord | undefined, send: boolean) {
-  if (sender?.delegation?.role !== 'root' || !isRootTask(recipient) || sender.id === recipient.id) return undefined;
-  if (sender.delegation.historyDeletion || (recipient.delegation?.role === 'root' && recipient.delegation.historyDeletion)) denyScope();
-  if (send && (!['running', 'waiting'].includes(sender.status) || sender.delegation.finishRequestedAt)) throw new DelegationPolicyError('incompatible_state', 'Sender session is not active');
-  return { relationship: 'peer' as const, sender, recipient };
-}
-
-/** A root and its direct owned worker, in either direction; anything else is `denied_scope`. */
-function familyPair(sender: RunRecord | undefined, recipient: RunRecord | undefined): { root: RunRecord; worker: RunRecord } {
-  const root = sender?.delegation?.role === 'root' ? sender : recipient;
-  const worker = sender?.delegation?.role === 'worker' ? sender : recipient;
-  if (!sender || !recipient || sender.id === recipient.id || !root || !worker || !ownsWorker(root, worker)) return denyScope();
-  return { root, worker };
-}
-
-/** The root owns the worker by a live receipt, and no history deletion is pending on the family. */
-function ownsWorker(root: RunRecord, worker: RunRecord): boolean {
-  return root.delegation?.role === 'root' && worker.delegation?.role === 'worker' && worker.delegation.parentRunId === root.id &&
-    worker.delegation.workspace.ownerRunId === worker.id && !root.delegation.historyDeletion &&
-    root.delegation.receipts.some(receipt => receipt.workerId === worker.id && !receipt.deletion);
-}
-
-/** A family sender of a new message: a parent holding `steer`, live and not finishing; a worker live and not being destroyed. */
-function assertFamilySender(sender: RunRecord, root: RunRecord, send: boolean): void {
-  if (!send) return;
-  const parent = root.delegation?.role === 'root' ? root.delegation : undefined;
-  if (sender.id === root.id && !parent?.permissions.includes('steer')) denyScope();
-  if (!['running', 'waiting'].includes(sender.status) || (sender.id === root.id && parent?.finishRequestedAt) ||
-    (sender.delegation?.role === 'worker' && sender.delegation.destroy)) throw new DelegationPolicyError('incompatible_state', 'Sender session is not active');
-}
-
-/** Why a send to a run that cannot take it now was not delivered, and the next step. */
-function notDeliveredInstruction(pair: { relationship: 'family' | 'peer'; sender: RunRecord; recipient: RunRecord }, root: RunRecord): string {
-  const { sender, recipient } = pair;
-  if (recipient.delegation?.role === 'worker' && (recipient.status === 'cancelled' || recipient.stopping || recipient.delegation.destroy)) {
-    return 'Not delivered: this worker was stopped or is being destroyed. Spawn a new worker for further work.';
-  }
-  if (pair.relationship === 'peer') return `Not delivered: task is ${recipient.stopping ? 'stopping' : recipient.status}. Only its human can continue it.`;
-  return sender.id === root.id
-    ? `Not delivered: worker is ${recipient.status}. To resume it with a new instruction, run worker send ${recipient.id} "<instruction>" --kind request --resume --id <new-message-UUID>; use a new message ID. Retrying this rejected ID will not deliver it.`
-    : `Not delivered: parent is ${recipient.status}. A worker cannot resume its parent; the parent must be continued by its owner.`;
-}
-
-/** The ledger's 1,024 messages (open questions reserve their replies), its 32 open requests, and
- *  the recipient's 32 undelivered inputs (an answer to a question may pass that last bound, #505). */
-function assertConversationCapacity(state: ConversationState, recipient: RunRecord, kind: ConversationSendRequest['kind'], enqueue: boolean, answering: boolean): void {
-  const reservedMessages = openQuestions(state).length - (answering ? 1 : 0);
-  const openRequests = () => state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length;
-  const undelivered = () => (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length;
-  if (state.messages.length + reservedMessages >= 1024 || (enqueue && kind === 'request' && openRequests() >= 32) ||
-    (enqueue && !answering && undelivered() >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
-}
-
-/** A reply settles its request, or amends a deadline expiry to `replied-late`. Cancellation,
- *  lifecycle settlement and an earlier reply still win; the request never becomes pending again. */
-function replyOutcomes(state: ConversationState, request: ConversationSendRequest, settled: RequestOutcome | undefined, now: string): RequestOutcome[] {
-  const outcomes = [...state.outcomes];
-  if (request.kind !== 'reply' || (settled && settled.status !== 'timed-out')) return outcomes;
-  const outcome = { requestId: request.requestId!, status: settled ? 'replied-late' as const : 'replied' as const, observedAt: now, replyId: request.id };
-  if (settled) outcomes[outcomes.indexOf(settled)] = outcome;
-  else outcomes.push(outcome);
-  return outcomes;
-}
-
-/** One write for the message, its ledger and the recipient's input; a message ID already in use
- *  there refuses the whole write. A peer that has not opened a session yet becomes a root task
- *  with its first message (spec § 2). */
-function commitAccepted(store: RunStore, ledgerId: string, next: ConversationState, input: AgentInput | undefined, provision: boolean): void {
-  const message = next.messages.at(-1)!;
-  const delivery = input ? { recipientRunId: message.recipientRunId, input, ...(provision ? { recipientDelegation: rootDelegation() } : {}) } : undefined;
-  try { store.commitConversation(ledgerId, next, delivery, { id: message.id, senderRunId: message.senderRunId, recipientRunId: message.recipientRunId }); }
-  catch (error) {
-    if (error instanceof ConversationIdInUseError) throw new DelegationPolicyError('invalid_input', error.message);
-    throw error;
-  }
-}
-
-type InboxEntry = { message: ConversationMessage; outcome?: RequestOutcome | undefined };
-
-/** The accepted message an input carries, as its ledger holds it, with its request's outcome. */
-function inboxEntryIn(state: ConversationState, input: AgentInput, recipientId: string): InboxEntry | undefined {
-  const message = state.messages.find(entry => entry.id === input.id && entry.state === 'accepted' && entry.senderRunId === input.conversation?.senderRunId && entry.recipientRunId === recipientId);
-  return message && { message, outcome: state.outcomes.find(entry => entry.requestId === (message.requestId ?? message.id)) };
-}
-
 type ConversationPair = { project: DelegationProject; sender: RunRecord; recipient: RunRecord } &
   ({ relationship: 'peer' } | { relationship: 'family'; root: RunRecord; worker: RunRecord });
-
-/** The merged history order: `createdAt`, then `id`, a total order a cursor can name. */
-function byCreatedAtAndId(a: { createdAt: string; id: string }, b: { createdAt: string; id: string }): number {
-  return a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
-}
-
-/** A peer message whose sender's ledger was deleted with the sender: the recipient's own input
- *  still carries it, so its inbox can return it (spec § 5). */
-function orphanedPeerMessage(input: AgentInput): ConversationMessage | undefined {
-  if (!input.conversation) return undefined;
-  const requestHash = createHash('sha256').update(JSON.stringify({ ...input.conversation, text: input.text })).digest('hex');
-  return { id: input.id, ...input.conversation, text: input.text, createdAt: input.createdAt, requestHash, state: 'accepted' };
-}
 
 /** A single controller's shared policy adapter; managers retain scheduling and lifecycle ownership. */
 export class DelegationService {
