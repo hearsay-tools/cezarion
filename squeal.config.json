@@ -9,7 +9,7 @@
     "waitMs": 0
   },
   "baseline": {
-    "onStart": "lookup-only"
+    "onStart": "lookup-then-run-missing"
   },
   "complexity": {
     "enabled": true
