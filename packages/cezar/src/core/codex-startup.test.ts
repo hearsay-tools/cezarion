@@ -710,3 +710,57 @@ describe('Codex native approvals (hearsay-tools/cezarion#1049)', () => {
     expect(session.sendAgentMessage([{ type: 'text', text: 'worker' }])).toBe(false);
   });
 });
+
+describe('Codex native output reader (hearsay-tools/cezarion#1965)', () => {
+  let log: string[];
+  function startLogged() {
+    log = [];
+    session = new CodexAppServerRunner({ bin: 'fake-only', timeoutMs: 0 }).startSession({ toolGrant: UNSET_TOOL_GRANT,
+      cwd: process.cwd(), userPrompt: 'test',
+    }, (event) => { events.push(event); log.push(`v1:${event.type}`); }, {
+      onUiEvent: (event) => { ui.push(event); log.push(`ui:${event.type}`); },
+      onActivity: () => { log.push('activity'); },
+    });
+    void session.result.then(() => { outcome = 'resolved'; }, (error: unknown) => { failure = error; outcome = 'rejected'; });
+  }
+  async function running() { startLogged(); await initialize(); await thread(); await opening(); log = []; }
+  const responses = () => fake.requests.filter((e) => !e.method);
+  function agentMessage(text: string) {
+    fake.frame({ method: 'item/completed', params: { threadId: 'thread_1', turnId: 'turn_1', item: { type: 'agentMessage', id: text, text } } });
+  }
+
+  it('skips a malformed line and keeps reading the frames after it', async () => {
+    await running();
+    (fake.child.stdout as PassThrough).write('{"method":"item/completed",\n');
+    agentMessage('Still reading.'); await flush();
+    expect(log).toEqual(['activity', 'ui:item.completed', 'v1:text']);
+    expect(session.open).toBe(true);
+  });
+
+  it('dispatches a server request without activity, and drops one that arrives after close', async () => {
+    await running();
+    fake.frame({ id: 7, method: 'item/unknown/requestApproval', params: { threadId: 'thread_1', turnId: 'turn_1' } }); await flush();
+    expect(responses()).toEqual([{ id: 7, error: { code: -32601, message: expect.any(String) } }]);
+    expect(log).toEqual([]);
+    fake.exit(0, null, true);
+    fake.frame({ id: 8, method: 'item/unknown/requestApproval', params: { threadId: 'thread_1', turnId: 'turn_1' } });
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(responses()).toHaveLength(1);
+    expect(outcome).toBe('resolved');
+    expect(log).toEqual(['v1:done']);
+  });
+
+  it('drops foreign and stale frames before activity, then maps and dispatches a current frame in order', async () => {
+    await running();
+    fake.frame({ method: 'turn/started', params: { threadId: 'child', turn: { id: 'turn_child', status: 'inProgress', items: [] } } });
+    fake.frame({ method: 'turn/completed', params: { threadId: 'child', turn: { id: 'turn_child', status: 'completed' } } });
+    fake.frame({ method: 'turn/failed', params: { threadId: 'thread_1', turn: { id: 'old', status: 'failed' } } });
+    fake.frame({ method: 'error', params: { threadId: 'thread_1', turnId: 'old', willRetry: true, error: { message: 'old' } } });
+    fake.frame({ method: 'error', params: { threadId: 'child', turnId: 'turn_1', willRetry: true, error: { message: 'child' } } });
+    await flush();
+    expect(log).toEqual([]);
+    expect(session.open).toBe(true);
+    agentMessage('Current turn.'); await flush();
+    expect(log).toEqual(['activity', 'ui:item.completed', 'v1:text']);
+  });
+});
