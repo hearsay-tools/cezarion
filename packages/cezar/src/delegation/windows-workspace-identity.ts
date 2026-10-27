@@ -18,6 +18,12 @@ export function windowsReadIdentity(path: string, cap: number, privateParent = t
   if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(result)) throw new Error('Invalid Windows identity response');
   return Buffer.from(result, 'base64').toString('utf8');
 }
+export function windowsReadEither(legacy: string, current: string, cap: number): string | undefined {
+  const result = identityOperation({ operation: 'read-either', legacy, current, cap });
+  if (result === '~') return undefined;
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(result)) throw new Error('Invalid Windows identity response');
+  return Buffer.from(result, 'base64').toString('utf8');
+}
 export function windowsWriteIdentity(path: string, content: string, replace = false, privateParent = true): void {
   identityOperation({ operation: 'write', path, content: Buffer.from(content).toString('base64'), replace, privateParent });
 }

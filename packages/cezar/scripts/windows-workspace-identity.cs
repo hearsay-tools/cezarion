@@ -152,14 +152,33 @@ public static class CezWorkspaceIdentity {
     using (var parents = new Parents(path)) {
       if (privateParent) PrivateDirectory(Path.GetDirectoryName(path));
       using (var file = PrivateFile(path, false, ShareRead)) {
-        var info = CheckObject(file, path, false);
-        if (cap < 0 || cap > 16384 || info.SizeHigh != 0 || info.SizeLow > cap) throw new IOException("Oversized workspace identity");
-        using (var stream = new FileStream(file, FileAccess.Read)) {
-          byte[] bytes = new byte[cap + 1]; int count = 0, read;
-          while (count < bytes.Length && (read = stream.Read(bytes, count, bytes.Length - count)) != 0) count += read;
-          if (count > cap) throw new IOException("Oversized workspace identity");
-          return Convert.ToBase64String(bytes, 0, count);
-        }
+        return ReadFile(file, path, cap);
+      }
+    }
+  }
+  static string ReadFile(SafeFileHandle file, string path, int cap) {
+    var info = CheckObject(file, path, false);
+    if (cap < 0 || cap > 16384 || info.SizeHigh != 0 || info.SizeLow > cap) throw new IOException("Oversized workspace identity");
+    using (var stream = new FileStream(file, FileAccess.Read)) {
+      byte[] bytes = new byte[cap + 1]; int count = 0, read;
+      while (count < bytes.Length && (read = stream.Read(bytes, count, bytes.Length - count)) != 0) count += read;
+      if (count > cap) throw new IOException("Oversized workspace identity");
+      return Convert.ToBase64String(bytes, 0, count);
+    }
+  }
+  public static string ReadEither(string legacyInput, string currentInput, int cap) {
+    string legacy = Canonical(legacyInput), current = Canonical(currentInput);
+    string directory = Path.GetDirectoryName(current);
+    using (var legacyParents = new Parents(legacy))
+    using (var currentParents = new Parents(directory))
+    using (var dir = Open(directory, ReadAttributes | ReadControl, ShareRead | ShareWrite, true))
+    using (var old = PrivateFile(legacy, true, ShareRead)) {
+      if (dir != null) { CheckObject(dir, directory, true); CheckPrivate(dir); }
+      using (var modern = dir == null ? null : PrivateFile(current, true, ShareRead)) {
+        if (old != null && modern != null) throw new IOException("Duplicate worker evidence");
+        if (old != null) return ReadFile(old, legacy, cap);
+        if (modern != null) return ReadFile(modern, current, cap);
+        return "~";
       }
     }
   }

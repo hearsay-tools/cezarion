@@ -3,7 +3,7 @@ import { runIds } from '../runs/run-store.testkit.ts';
 import { syncBuiltinESMExports } from 'node:module';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
-import { execFileSync, spawn } from 'node:child_process';
+import childProcess, { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import fs, { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { delegationStateSchema, workerSpawnRequestSchema } from '@open-mercato/cezar-contract/delegation';
@@ -701,6 +701,18 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     }, 120_000);
 
   it.runIf(process.platform === 'win32')('authoritative destroy stops a cwd and open-file holder', async () => {
+    const started = Date.now();
+    let nativeCalls = 0;
+    const exec = childProcess.execFileSync;
+    const native = vi.spyOn(childProcess, 'execFileSync').mockImplementation(((...args: Parameters<typeof exec>) => {
+      if (args[0] === 'powershell.exe') nativeCalls++;
+      return Reflect.apply(exec, childProcess, args);
+    }) as typeof exec);
+    syncBuiltinESMExports();
+    onTestFinished(() => {
+      console.log(`Windows native helper calls: ${nativeCalls}; elapsed: ${Date.now() - started} ms`);
+      native.mockRestore(); syncBuiltinESMExports();
+    });
     const { workerId, workspace } = await settled(false);
     const file = join(workspace.path, 'holder-file'); writeFileSync(file, 'owned');
     const script = 'if(process.argv[1]) require("fs").openSync(process.argv[1],"r"); console.log("ready"); setInterval(()=>{},1000)';

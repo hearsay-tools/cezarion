@@ -1,7 +1,7 @@
 import { lstatSync } from 'node:fs';
 import { join } from 'node:path';
 import { z } from 'zod';
-import { windowsIdentityDirectory, windowsMigrateIdentity, windowsReadIdentity, windowsRemoveIdentity, windowsWriteIdentity } from '../delegation/windows-workspace-identity.ts';
+import { windowsIdentityDirectory, windowsMigrateIdentity, windowsReadEither, windowsRemoveIdentity, windowsWriteIdentity } from '../delegation/windows-workspace-identity.ts';
 
 export const isWindowsWorkerEvidence = process.platform === 'win32';
 
@@ -30,9 +30,9 @@ export function windowsEvidencePath(dataDir: string, id: string, kind: Kind, cre
 }
 
 export function readWindowsEvidence(dataDir: string, id: string, kind: Kind, cap: number): string | undefined {
-  const path = windowsEvidencePath(dataDir, id, kind);
-  if (!present(path)) return undefined;
-  return windowsReadIdentity(path, cap, path === join(dataDir, 'runs', 'worker-evidence', `${id}.${kind}.json`));
+  z.string().uuid().parse(id);
+  const name = `${id}.${kind}.json`, runs = join(dataDir, 'runs');
+  return windowsReadEither(join(runs, name), join(runs, 'worker-evidence', name), cap);
 }
 
 export function writeWindowsEvidence(dataDir: string, id: string, kind: Kind, value: string, fresh = false): void {
