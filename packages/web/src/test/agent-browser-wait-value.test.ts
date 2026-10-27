@@ -241,7 +241,28 @@ describe('AgentBrowser.waitForValue (#409)', () => {
   it('a sample that kept throwing reports the page error instead of a value', () => {
     shortTimeout()
     const { browser } = open([{ error: 'ReferenceError: nope' }])
-    expect(() => browser.waitForValue('nope()')).toThrow(/ReferenceError: nope/)
+    let now = 0
+    let probes = 0
+    const clock = vi.spyOn(performance, 'now').mockImplementation(() => now)
+    const transport = browser as unknown as { run: (args: string[], timeoutMs?: number) => Record<string, unknown> }
+    const invoke = transport.run.bind(browser)
+    const run = vi.spyOn(transport, 'run').mockImplementation((args, timeoutMs) => {
+      if (args[0] !== 'eval' || args[1] !== 'nope()') return invoke(args, timeoutMs)
+      try {
+        // bound: allow the fake Node process to start under CPU contention, outside the scripted polling clock.
+        return invoke(args, 10_000)
+      } finally {
+        probes++
+        now += 100
+      }
+    })
+    try {
+      expect(() => browser.waitForValue('nope()', undefined, { intervalMs: 0 })).toThrow(/ReferenceError: nope/)
+      expect(probes).toBe(4)
+    } finally {
+      run.mockRestore()
+      clock.mockRestore()
+    }
   })
 })
 
