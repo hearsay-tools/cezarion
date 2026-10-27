@@ -37,8 +37,21 @@ async function readBoundedFile(path: string, limit: number): Promise<{ bytes: Bu
   } finally { await file.close(); }
 }
 
-async function canonicalFile(path: string): Promise<void> {
-  if (await realpath(path) !== path || !(await lstat(path)).isFile()) throw invalid();
+async function canonicalFile(path: string): Promise<Stats> {
+  if (await realpath(path) !== path) throw invalid();
+  const entry = await lstat(path);
+  if (!entry.isFile()) throw invalid();
+  return entry;
+}
+/** Bind bounded bytes to the canonical path, even if an ancestor was redirected only during open. */
+async function readCanonicalFile(
+  path: string, limit: number, canonical: () => Promise<Stats>,
+  changed: (error?: NodeJS.ErrnoException) => Error = invalid,
+): Promise<Buffer> {
+  const read = await readBoundedFile(path, limit).catch((error: NodeJS.ErrnoException) => { throw changed(error); });
+  const entry = await canonical();
+  if (entry.dev !== read.stat.dev || entry.ino !== read.stat.ino) throw changed();
+  return read.bytes;
 }
 async function inputDirectory(dataDir: string, workerId: string): Promise<string> {
   const root = await realpath(dataDir);
@@ -68,9 +81,7 @@ async function attachmentBytes(dataDir: string, parentId: string, id: string, li
   const expected = join(await realpath(dataDir), 'runs', `${parentId}-images`, id);
   if (!source || source !== expected) throw invalid();
   await canonicalFile(source);
-  const bytes = await readBoundedContextFile(source, limit);
-  await canonicalFile(source);
-  return bytes;
+  return readCanonicalFile(source, limit, () => canonicalFile(source));
 }
 
 const refuse = (message: string) => new DelegationPolicyError('invalid_input', message);
@@ -93,12 +104,8 @@ async function parentFile(parentCwd: string, path: string): Promise<{ read(limit
   return { async read(limit) {
     if (checked.size > limit) throw invalid();
     // It was a regular file at the canonical path a moment ago: any read failure is a change.
-    const read = await readBoundedFile(source, limit).catch((error: NodeJS.ErrnoException) => {
-      throw notFound(error) ? refuse(`--attach path not found: ${path}`) : refuse(`--attach path changed while it was read: ${path}`);
-    });
-    const entry = await canonical();
-    if (entry.dev !== read.stat.dev || entry.ino !== read.stat.ino) throw refuse(`--attach path changed while it was read: ${path}`);
-    return read.bytes;
+    return readCanonicalFile(source, limit, canonical, error => error && notFound(error)
+      ? refuse(`--attach path not found: ${path}`) : refuse(`--attach path changed while it was read: ${path}`));
   } };
 }
 async function ignoredByGit(cwd: string, path: string): Promise<boolean> {

@@ -28,7 +28,52 @@ describe('explicit owned worker context', () => {
     writeFileSync(join(dir, name), content); return join(dir, name);
   };
   beforeEach(() => { vi.stubEnv('CEZ_DELEGATION', '1'); f = fixture(); });
-  afterEach(async () => { await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  afterEach(async () => { openHook.current = undefined; await f.close(); vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  const swapAttachmentAncestorDuringOpen = (source: string, content: string) => {
+    const outside = join(f.root, 'outside-attachments');
+    mkdirSync(outside);
+    writeFileSync(join(outside, 'document.txt'), content);
+    const ancestor = dirname(source);
+    openHook.current = path => {
+      if (path !== source) return undefined;
+      openHook.current = undefined;
+      renameSync(ancestor, `${ancestor}.real`);
+      symlinkSync(outside, ancestor);
+      return () => { unlinkSync(ancestor); renameSync(`${ancestor}.real`, ancestor); };
+    };
+  };
+  it('refuses parent-attachment preparation through an ancestor swapped during the read', async () => {
+    const source = attachment();
+    const dataDir = join(f.root, '.ai/cezar');
+    const before = readdirSync(join(dataDir, 'runs')).sort();
+    const workspace = await planOwnedWorkspace(f.root, randomUUID(), f.sha);
+    swapAttachmentAncestorDuringOpen(source, 'outside document');
+    await expect(prepareWorkerContext({ repoRoot: f.root, dataDir, parentId: f.parent.id, workspace, parentCwd: f.root,
+      context: { artifacts: [{ kind: 'parent-attachment', id: 'document.txt' }] }, containsSecret: () => false }))
+      .rejects.toMatchObject({ code: 'invalid_input' });
+    expect(openHook.current).toBeUndefined();
+    expect(readFileSync(source, 'utf8')).toBe('parent document');
+    expect(readdirSync(join(dataDir, 'runs')).sort()).toEqual(before);
+    expect(() => lstatSync(join(dataDir, 'runs', `${workspace.ownerRunId}-images`))).toThrow();
+  });
+  it('refuses parent-attachment rebuild through an ancestor swapped during the read', async () => {
+    const source = attachment();
+    const { workerId } = await f.service.spawn(f.caller, input({ artifacts: [{ kind: 'parent-attachment', id: 'document.txt' }] }));
+    const worker = f.store.getRun(workerId)!;
+    if (worker.delegation?.role !== 'worker') throw Error('worker');
+    const { context, workspace, parentRunId } = worker.delegation;
+    const snapshot = context!.inputs[0]!.path;
+    const dataDir = join(f.root, '.ai/cezar');
+    rmSync(snapshot);
+    // Identical outside bytes pass the hash check: only descriptor identity can refuse them.
+    swapAttachmentAncestorDuringOpen(source, 'parent document');
+    await expect(verifyWorkerContext({ dataDir, parentId: parentRunId, workspace, context })).rejects.toMatchObject({ code: 'invalid_input' });
+    expect(openHook.current).toBeUndefined();
+    expect(readFileSync(source, 'utf8')).toBe('parent document');
+    expect(() => lstatSync(snapshot)).toThrow();
+    await expect(verifyWorkerContext({ dataDir, parentId: parentRunId, workspace, context })).resolves.toBeUndefined();
+    expect(readFileSync(snapshot, 'utf8')).toBe('parent document');
+  });
   it('pins repository references and copies parent attachments into owned input storage before enqueue', async () => {
     writeFileSync(join(f.root, 'source.txt'), 'committed');
     execFileSync('git', ['add', 'source.txt'], { cwd: f.root });
