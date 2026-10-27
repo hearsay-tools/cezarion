@@ -38,8 +38,10 @@ baseline changes are included.
 All probes ran on CPU0 with one Vitest worker. The host has 24 logical CPUs;
 `nproc` inside the affinity scope prints 1. Each probe was bounded by GNU timeout
 at 120 seconds with a five-second kill grace. Traps stopped and reaped its own
-busy loops. Another worker used bounded load on CPUs1–23 during the scheduled
-probes; none of those loops belonged to this task.
+busy loops. The parent authorized another worker to use CPUs1–23, but that
+worker observed existing host load of 46.8 and started zero burners. No extra
+parent-coordinated load was created. The table records the observed host load;
+only this task’s CPU0 loop counts are controlled by these probes.
 
 | Probe | CPU0 loops | Observer schedule | Result | Host load average at start |
 | --- | --- | --- | --- | --- |
