@@ -690,7 +690,8 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
       const locked = part === 'root' ? workspace.path : join(workspace.path, '.ai');
       try {
         await once(app.stdout!, 'data'); chmodSync(locked, 0);
-        expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete', remaining: [] });
+        const result = await f.service.destroy(f.caller, { workerId });
+        expect(result, JSON.stringify(result)).toMatchObject({ state: 'complete', remaining: [] });
         await exited;
         expect(existsSync(workspace.path)).toBe(false);
       } finally {
