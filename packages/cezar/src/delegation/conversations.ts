@@ -1,4 +1,4 @@
-import type { ConversationState, RequestOutcome } from '@open-mercato/cezar-contract';
+import type { ConversationMessage, ConversationState, RequestOutcome } from '@open-mercato/cezar-contract';
 import type { RunRecord } from '../runs/store.ts';
 
 /**
@@ -14,23 +14,33 @@ export function reconcileConversationState(root: RunRecord, lookup: (id: string)
   const outcomes = [...state.outcomes];
   for (const request of state.messages) {
     if (request.kind !== 'request' || request.state !== 'accepted' || outcomes.some(outcome => outcome.requestId === request.id)) continue;
-    const sender = lookup(request.senderRunId);
     const recipient = lookup(request.recipientRunId);
+    const status = request.relationship === 'peer' ? peerRecipientSettlement(recipient, isSettled) : familyRecipientSettlement(root, request, recipient, isSettled);
     const closed = (run: RunRecord | undefined) => run && ['done', 'failed', 'cancelled'].includes(run.status) && isSettled(run);
-    const peer = request.relationship === 'peer';
-    let status: RequestOutcome['status'] | undefined;
-    const deletedRecipient = !recipient && root.delegation.receipts.some(receipt => receipt.workerId === request.recipientRunId && receipt.deletion?.phase === 'complete');
-    if (peer && !recipient) status = 'deleted';
-    else if (peer && recipient?.status === 'review' && isSettled(recipient)) status = 'completed-without-reply';
-    else if (deletedRecipient || (recipient?.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete')) status = 'destroyed';
-    // A worker's question outlives its parent: the human answers it instead (#505).
-    else if (closed(recipient) && request.question) status = 'human-fallback';
-    else if (closed(recipient)) status = recipient!.status === 'done' ? 'completed-without-reply' : recipient!.status as 'failed' | 'cancelled';
-    else if (closed(root) || closed(sender)) status = 'sender-closed';
-    else if (request.deadline && request.deadline <= now) status = 'timed-out';
-    if (status) outcomes.push({ requestId: request.id, status, observedAt: now });
+    const settled = status ?? (closed(root) || closed(lookup(request.senderRunId)) ? 'sender-closed'
+      : request.deadline && request.deadline <= now ? 'timed-out' : undefined);
+    if (settled) outcomes.push({ requestId: request.id, status: settled, observedAt: now });
   }
   return outcomes.length === state.outcomes.length ? state : { ...state, outcomes };
+}
+
+/** A peer recipient settles the request when it is deleted, rests at `review` (no peer can resume
+ *  it), or ends `done`, `failed` or `cancelled`. */
+function peerRecipientSettlement(recipient: RunRecord | undefined, isSettled: (run: RunRecord) => boolean): RequestOutcome['status'] | undefined {
+  if (!recipient) return 'deleted';
+  if (!['review', 'done', 'failed', 'cancelled'].includes(recipient.status) || !isSettled(recipient)) return undefined;
+  return recipient.status === 'review' || recipient.status === 'done' ? 'completed-without-reply' : recipient.status as 'failed' | 'cancelled';
+}
+
+/** A family recipient: a destroyed worker, or a closed one. Review is not completion: its parent can resume it. */
+function familyRecipientSettlement(root: RunRecord, request: ConversationMessage, recipient: RunRecord | undefined, isSettled: (run: RunRecord) => boolean): RequestOutcome['status'] | undefined {
+  const receipts = root.delegation?.role === 'root' ? root.delegation.receipts : [];
+  const deletedRecipient = !recipient && receipts.some(receipt => receipt.workerId === request.recipientRunId && receipt.deletion?.phase === 'complete');
+  if (deletedRecipient || (recipient?.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete')) return 'destroyed';
+  if (!recipient || !['done', 'failed', 'cancelled'].includes(recipient.status) || !isSettled(recipient)) return undefined;
+  // A worker's question outlives its parent: the human answers it instead (#505).
+  if (request.question) return 'human-fallback';
+  return recipient.status === 'done' ? 'completed-without-reply' : recipient.status as 'failed' | 'cancelled';
 }
 
 /** Repair observation only; replay never inserts agent inputs or starts execution. */

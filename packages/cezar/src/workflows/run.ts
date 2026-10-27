@@ -6236,12 +6236,7 @@ export class RunManager {
     // A batch with timer results is an automatic wake: it reserves one unit of the budget now, so a
     // timer that comes due before this acknowledgement counts it, and gives it back if the batch is
     // refused or its acknowledgement rejects (hearsay-tools/cezarion#1233).
-    const timerResults = resolvedWaits(this.store.getRun(runId) ?? {}).filter(wait => chargesBudget(wait) && inputIds.includes(wait.id));
-    // A peer message that opens an admitted wake turn reserves its unit the same way; past the
-    // budget it opens no turn (`pendingConversationWakes`), so one carried by another wake is free.
-    const peerWake = !!flight.admittedWake && this.automaticWakes(runId) < MAX_AUTO_CONTINUES &&
-      !!this.store.getRun(runId)?.agentInputs?.some(input => inputIds.includes(input.id) && chargesBudgetMessage(input));
-    if (timerResults.length || peerWake) flight.wakeReserved = true;
+    if (this.reservesAutomaticWake(runId, flight, inputIds)) flight.wakeReserved = true;
     const refund = (): void => { flight.wakeReserved = false; };
     state.agentInputFlight = flight;
     const current = (): boolean => !this.disposed && this.active.get(runId) === state && state.session === session &&
@@ -6308,6 +6303,16 @@ export class RunManager {
       this.awaitCompletionNudgeReply(runId, state, session);
     } else if (inputIds.length) this.startCompletionCycle(state);
     return true;
+  }
+
+  /** A batch with timer results is an automatic wake, and so is an admitted wake turn a peer message
+   *  opens (spec 2026-10-27-task-communication-protocol § 8). Past the budget a peer message opens
+   *  no turn (`pendingConversationWakes`), so one carried by another wake is free. */
+  private reservesAutomaticWake(runId: string, flight: NonNullable<ActiveRun['agentInputFlight']>, inputIds: readonly string[]): boolean {
+    const run = this.store.getRun(runId);
+    if (resolvedWaits(run ?? {}).some(wait => chargesBudget(wait) && inputIds.includes(wait.id))) return true;
+    return !!flight.admittedWake && this.automaticWakes(runId) < MAX_AUTO_CONTINUES &&
+      !!run?.agentInputs?.some(input => inputIds.includes(input.id) && chargesBudgetMessage(input));
   }
 
   /** Apply the acknowledgement's effects only after its outcome commit succeeds. */
