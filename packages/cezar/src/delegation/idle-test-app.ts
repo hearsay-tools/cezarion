@@ -42,12 +42,23 @@ function readApp(root: string) {
   return { app, pid: pid as number, start, database, descriptor };
 }
 
+function recordedAppGone(pid: number, start: string): boolean {
+  const current = startToken(pid);
+  if (current !== undefined) return current !== start;
+  try { process.kill(pid, 0); return false; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
+}
+
 async function stopOwnedApp(root: string, entry: NonNullable<ReturnType<typeof readApp>>): Promise<boolean> {
   if (entry.pid === null) return false;
   const leader = { pid: entry.pid, start: entry.start! };
-  const owned = process.platform === 'win32' ? windowsTestAppHolds(leader.pid, leader.start, root)
-    : inspectGeneration({ paths: [root] }).pids.includes(leader.pid);
-  if (!owned || startToken(leader.pid) !== leader.start || !await stopGroup(leader, { graceMs: 1000, readStart: startToken })) return false;
+  if (recordedAppGone(leader.pid, leader.start)) {
+    if (!await waitForTestAppWatcher(root)) return false;
+  } else {
+    const owned = process.platform === 'win32' ? windowsTestAppHolds(leader.pid, leader.start, root)
+      : inspectGeneration({ paths: [root] }).pids.includes(leader.pid);
+    if (!owned || startToken(leader.pid) !== leader.start || !await stopGroup(leader, { graceMs: 1000, readStart: startToken })) return false;
+  }
   entry.app.status = 'stopped'; delete entry.app.app.pid; delete entry.app.app.start;
   writeFileSync(entry.descriptor, JSON.stringify(entry.app, null, 2) + '\n');
   return true;
