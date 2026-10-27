@@ -321,7 +321,18 @@ Local exit contract of `npm run test:e2e`:
 The server boots on a free port with `CEZ_DRY_RUN=1` (agent CLIs mocked — no login, no network) from the
 `VITE_CEZ_E2E=1` build, never `packages/cezar/dist` or `packages/cezar/web/dist`, which stay the
 production build. It reuses an already-healthy instance instead of double-booting and writes
-`.ai/qa/test-env.json` so QA skills attach to the same instance. Stop it with
+`.ai/qa/test-env.json` so QA skills attach to the same instance.
+
+That descriptor is runtime state: a pid, a port, timestamps and a status, rewritten by every
+boot and stop. `squeal.config.json` declares it in `runtimeFiles`, so a restart does not
+queue the browser specs again (hearsay-tools/cezarion#1977). Settings that can change a
+result live in the tracked `.ai/scripts/test-env.inputs.json`: the server's default
+`--server-env` set and the pinned agent-browser release. The bootstrap uses an agent-browser
+on `PATH` only when it is that release. Otherwise it downloads the pinned release into
+`~/.cache/agent-tools/agent-browser/<version>/`, and a release it cannot get leaves the
+browser unavailable. The descriptor records the inputs' digest: a changed input
+cold-boots the server, and `readTestEnv()` refuses an environment booted from other inputs.
+Edit that file, never the descriptor, to change what the specs run against. Stop the server with
 `.ai/scripts/test-env-down.sh`. When another process holds the test-env lease, the
 timeout message names the holder's executable and interpreter script, with other arguments
 omitted so no credentials reach the log. It reuses the diagnostic snapshot taken when the wait
