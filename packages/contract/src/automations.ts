@@ -134,7 +134,7 @@ export type AutomationCursor = z.infer<typeof automationCursorSchema>;
  * The scheduler's own bookkeeping for one automation. Every key is optional — a definition that
  * has never run has no state at all, and the keys appear as the poller reaches each stage.
  */
-/** Durable position inside a bounded historical search, independent of the live overlap. */
+/** Durable position inside a bounded GitHub scan, including live overlap and historical searches. */
 export const automationHistoryScanSchema = z.object({
   since: z.string().datetime(),
   until: z.string().datetime(),

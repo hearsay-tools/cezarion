@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   buildSearchQuery,
   GithubPoller,
@@ -23,6 +23,8 @@ const item = {
 };
 
 describe('GithubPoller', () => {
+  beforeEach(() => vi.useFakeTimers({ now: Date.parse('2026-07-27T00:00:00.000Z'), toFake: ['Date'] }));
+  afterEach(() => vi.useRealTimers());
   it('uses a fixed executable and argument array and rejects foreign repository rows', async () => {
     const run = vi.fn(async () => JSON.stringify({ items: [item, { ...item, node_id: 'foreign', repository_url: 'https://api.github.com/repos/evil/demo' }] }));
     const result = await new GithubPoller({ run }).poll('acme', 'demo', definition);
@@ -160,11 +162,9 @@ describe('GithubPoller', () => {
     const rule = { ...definition, filters: { ...definition.filters, includeExisting: true, maxRecords: 1, excludeLabels: ['ignored'] } };
     const poller = new GithubPoller({ run: async () => JSON.stringify({ items: [{ ...item, labels: [{ name: 'ignored' }] }, { ...item, number: 8, node_id: 'I_two' }] }) });
     const first = await poller.poll('acme', 'demo', rule, { since: '2026-07-25T00:00:00.000Z' });
-    expect(first.candidates).toEqual([]);
-    expect(first.historyScan).toBeDefined();
-    const second = await poller.poll('acme', 'demo', rule, { historyScan: first.historyScan });
-    expect(second.candidates.map((candidate) => candidate.number)).toEqual([8]);
-    expect(second.truncated).toBe(false);
+    expect(first.candidates.map(candidate => candidate.number)).toEqual([8]);
+    expect(first.historyScan).toBeUndefined();
+    expect(first.truncated).toBe(false);
   });
 
   it.each([

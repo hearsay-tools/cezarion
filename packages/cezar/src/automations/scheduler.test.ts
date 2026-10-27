@@ -34,6 +34,7 @@ describe('ProjectAutomationScheduler', () => {
       expect((await scheduler.check(rule, 'preview')).candidates.map((row) => row.number)).toEqual([7]);
       expect(poll).toHaveBeenCalledWith('acme', 'demo', rule, {
         since: includeExisting ? '2026-07-19T05:00:00.000Z' : '2026-07-26T00:58:00.000Z',
+        accept: expect.any(Function),
       });
       expect(store.state(rule.id)).toEqual(before);
       expect(store.receipts()).toEqual([]);
@@ -319,6 +320,7 @@ describe('ProjectAutomationScheduler', () => {
     await scheduler.check(definition);
     expect(poll).toHaveBeenCalledWith('acme', 'demo', definition, {
       since: '2026-07-26T00:58:00.000Z',
+      accept: expect.any(Function),
     });
   });
 

@@ -75,86 +75,26 @@ export class ProjectAutomationScheduler {
       if (state.backoffUntil && Date.parse(state.backoffUntil) > Date.now()) {
         throw new Error(`automation is backed off until ${state.backoffUntil}`);
       }
-      // Preview tests the rule's window, independently of how far execution has scanned.
-      const historyStart = definition.filters.includeExisting
-        ? new Date(Date.now() - definition.filters.lookbackDays * 86_400_000).toISOString()
-        : undefined;
-      const baseline = historyStart
-        ? new Date(Math.max(Date.parse(historyStart), mode === 'preview' ? 0 : Date.parse(state.baselineAt ?? historyStart))).toISOString()
-        : state.baselineAt;
-      const since = mode === 'preview' ? baseline : state.cursor?.timestamp ?? baseline;
-      let overlapSince = mode === 'preview' && historyStart ? historyStart : since
-        ? new Date(Date.parse(since) - 120_000).toISOString()
-        : undefined;
-      if (historyStart && (!overlapSince || Date.parse(overlapSince) < Date.parse(historyStart))) overlapSince = historyStart;
+      const { baseline, overlapSince } = pollWindow(definition, state, mode);
+      const accept = candidateAcceptor(definition, baseline, mode, store);
       const result = await githubRequests.run(() => github.poller.poll(
         github.owner,
         github.repo,
         definition,
-        { since: overlapSince, ...(mode === 'execute' && definition.filters.includeExisting && state.historyScan ? { historyScan: state.historyScan } : {}) },
+        { since: overlapSince, accept, ...(mode === 'execute' && state.historyScan ? { historyScan: state.historyScan } : {}) },
       ));
       this.assertCurrent(definition);
-      const eligible = result.candidates.filter((candidate) => {
-        if (baseline && (definition.filters.includeExisting
-          ? Date.parse(candidate.timestamp) < Date.parse(baseline)
-          : Date.parse(candidate.timestamp) <= Date.parse(baseline))) return false;
-        if (mode === 'preview' || !state.cursor
-          || (definition.filters.includeExisting && (candidate.event === 'issue.labeled' || candidate.event === 'issue.unlabeled'))) return true;
-        const overlap = Date.parse(state.cursor.timestamp) - 120_000;
-        return Date.parse(candidate.timestamp) >= overlap;
-      });
-      if (mode === 'execute' && this.handle.launch) {
-        if (eligible.length > 0) await this.handle.ready?.();
-        for (const candidate of eligible) {
-          this.assertCurrent(definition);
-          await this.launch(definition, candidate);
-        }
-      }
+      const eligible = result.candidates.filter(candidate => afterBaseline(candidate, definition, baseline));
+      if (mode === 'execute') await this.launchCandidates(definition, eligible);
       this.assertCurrent(definition);
-      if (mode === 'execute') {
-        const now = new Date().toISOString();
-        const cursor = laterCursor(state.cursor, result.cursor);
-        store.setState(definition.id, (current) => ({
-          ...this.currentState(definition, current),
-          revision: definition.revision,
-          cursor,
-          historyScan: result.historyScan,
-          frozenHighWatermark: result.truncated && cursor?.tieBreaker
-            ? { timestamp: cursor.timestamp, tieBreaker: cursor.tieBreaker }
-            : undefined,
-          lastSuccessAt: now,
-          nextCheckAt: new Date(Date.now() + definition.intervalSeconds * 1_000).toISOString(),
-          consecutiveFailures: 0,
-          backoffUntil: undefined,
-        }));
-      } else if (detectionOnly) {
-        store.setState(definition.id, (current) => ({
-          ...this.currentState(definition, current),
-          revision: definition.revision,
-          nextCheckAt: new Date(Date.now() + definition.intervalSeconds * 1_000).toISOString(),
-        }));
-      }
+      this.recordSuccess(definition, state, result, mode, detectionOnly);
       this.handle.onChange?.(definition.id, definition.revision);
       completion = mode === 'preview'
         ? { result: 'preview', reason: `Bounded preview found ${eligible.length} filter match${eligible.length === 1 ? '' : 'es'}; no tasks were launched. Counts can include closed items and previously processed events.` }
         : { result: 'no-match', reason: 'Scheduled check completed.' };
       return { ...result, candidates: eligible };
     } catch (error) {
-      // A definition edit can re-arm state while a provider call or launch is in flight.
-      // Never write the old window (including failure backoff) over the new policy.
-      if (!(error instanceof LeaseHeldError)) {
-        try { this.assertCurrent(definition); } catch (obsolete) {
-          if (!(obsolete instanceof ObsoleteAutomationCheck)) throw obsolete;
-          await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'skipped', reason: obsolete.message });
-          return { candidates: [], truncated: false, pages: 0 };
-        }
-      }
-      if (error instanceof LeaseHeldError) await this.recordSkip(definition, error);
-      // Not a failure: nothing was launched or moved, and the timer retries at its floor.
-      else if (error instanceof AutomationProjectUnavailableError) { /* see above */ }
-      else if (mode === 'execute') await this.recordFailure(definition, error);
-      else await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
-      throw error;
+      return await this.handleCheckError(definition, mode, error);
     } finally {
       try {
         if (completion) await store.appendLog({ automationId: definition.id, revision: definition.revision, ...completion, durationMs: Date.now() - started });
@@ -165,6 +105,62 @@ export class ProjectAutomationScheduler {
         lease?.release();
       }
     }
+  }
+
+  private async launchCandidates(definition: GithubAutomationDefinition, candidates: GithubCandidate[]): Promise<void> {
+    if (!this.handle.launch || !candidates.length) return;
+    await this.handle.ready?.();
+    for (const candidate of candidates) {
+      this.assertCurrent(definition);
+      await this.launch(definition, candidate);
+    }
+  }
+
+  private recordSuccess(definition: GithubAutomationDefinition, state: AutomationRuntimeState,
+    result: GithubPollResult, mode: 'preview' | 'execute', detectionOnly: boolean): void {
+    const { store } = this.handle;
+    if (mode === 'execute') {
+      const now = new Date().toISOString();
+      const cursor = laterCursor(state.cursor, result.cursor);
+      store.setState(definition.id, (current) => ({
+        ...this.currentState(definition, current),
+        revision: definition.revision,
+        cursor,
+        historyScan: result.historyScan,
+        frozenHighWatermark: result.truncated && cursor?.tieBreaker
+          ? { timestamp: cursor.timestamp, tieBreaker: cursor.tieBreaker }
+          : undefined,
+        lastSuccessAt: now,
+        nextCheckAt: new Date(Date.now() + definition.intervalSeconds * 1_000).toISOString(),
+        consecutiveFailures: 0,
+        backoffUntil: undefined,
+      }));
+    } else if (detectionOnly) {
+      store.setState(definition.id, (current) => ({
+        ...this.currentState(definition, current),
+        revision: definition.revision,
+        nextCheckAt: new Date(Date.now() + definition.intervalSeconds * 1_000).toISOString(),
+      }));
+    }
+  }
+
+  private async handleCheckError(definition: GithubAutomationDefinition, mode: 'preview' | 'execute', error: unknown): Promise<GithubPollResult> {
+    const { store } = this.handle;
+    // A definition edit can re-arm state while a provider call or launch is in flight.
+    // Never write the old window (including failure backoff) over the new policy.
+    if (!(error instanceof LeaseHeldError)) {
+      try { this.assertCurrent(definition); } catch (obsolete) {
+        if (!(obsolete instanceof ObsoleteAutomationCheck)) throw obsolete;
+        await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'skipped', reason: obsolete.message });
+        return { candidates: [], truncated: false, pages: 0 };
+      }
+    }
+    if (error instanceof LeaseHeldError) await this.recordSkip(definition, error);
+    // Not a failure: nothing was launched or moved, and the timer retries at its floor.
+    else if (error instanceof AutomationProjectUnavailableError) { /* see above */ }
+    else if (mode === 'execute') await this.recordFailure(definition, error);
+    else await store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
+    throw error;
   }
 
   private currentState(definition: GithubAutomationDefinition, current: AutomationRuntimeState) {
@@ -255,6 +251,51 @@ export class ProjectAutomationScheduler {
     await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, result: 'error', reason: error instanceof Error ? error.message : String(error) });
     this.handle.onChange?.(definition.id, definition.revision);
   }
+}
+
+/** Preview uses the rule window; execution resumes its durable scan with a two-minute overlap. */
+function pollWindow(definition: GithubAutomationDefinition, state: AutomationRuntimeState, mode: 'preview' | 'execute') {
+  // Preview tests the rule's window, independently of how far execution has scanned.
+  const historyStart = definition.filters.includeExisting
+    ? new Date(Date.now() - definition.filters.lookbackDays * 86_400_000).toISOString()
+    : undefined;
+  const baseline = historyStart
+    ? new Date(Math.max(Date.parse(historyStart), mode === 'preview' ? 0 : Date.parse(state.baselineAt ?? historyStart))).toISOString()
+    : state.baselineAt;
+  const since = mode === 'preview' ? baseline : state.cursor?.timestamp ?? baseline;
+  let overlapSince = mode === 'preview' && historyStart ? historyStart : since
+    ? new Date(Date.parse(since) - 120_000).toISOString()
+    : undefined;
+  if (historyStart && (!overlapSince || Date.parse(overlapSince) < Date.parse(historyStart))) overlapSince = historyStart;
+  return { baseline, overlapSince };
+}
+
+function afterBaseline(candidate: GithubCandidate, definition: GithubAutomationDefinition, baseline?: string): boolean {
+  if (!baseline) return true;
+  const timestamp = Date.parse(candidate.timestamp);
+  return definition.filters.includeExisting ? timestamp >= Date.parse(baseline) : timestamp > Date.parse(baseline);
+}
+
+function candidateAcceptor(definition: GithubAutomationDefinition, baseline: string | undefined,
+  mode: 'preview' | 'execute', store: AutomationStore): (candidate: GithubCandidate) => boolean {
+  const handled = new Set([...store.latestReceipts().values()]
+    .filter(receipt => receipt.automationId === definition.id && receipt.status !== 'released')
+    .map(receipt => receipt.candidate ? candidateKey(receipt.candidate) : receipt.eventId));
+  return candidate => {
+    if (!afterBaseline(candidate, definition, baseline)) return false;
+    if (mode === 'preview') return true;
+    const key = candidateKey(candidate);
+    if (handled.has(key)) return false;
+    handled.add(key);
+    return true;
+  };
+}
+
+/** Issue receipts own the item across transitions; PR receipts own their opened event. */
+function candidateKey(candidate: GithubCandidate): string {
+  return candidate.event.startsWith('issue.')
+    ? `${candidate.repo.toLowerCase()}:issue:${candidate.number}`
+    : candidate.eventId;
 }
 
 function laterCursor(

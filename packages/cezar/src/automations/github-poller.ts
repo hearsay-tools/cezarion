@@ -27,6 +27,10 @@ const githubItemSchema = z.object({
   pull_request: z.unknown().optional(),
 });
 
+type GithubItem = z.infer<typeof githubItemSchema>;
+type PollSource = { family: 'issues' | 'prs' | 'mixed'; activity: 'created' | 'updated'; opened: boolean; labels: boolean };
+type Scan = NonNullable<AutomationRuntimeState['historyScan']>;
+
 const searchResponseSchema = z.object({ items: z.array(githubItemSchema) });
 const timelineEventSchema = z.object({
   id: z.number().int().positive().optional(),
@@ -65,6 +69,8 @@ export interface GithubPollerOptions {
 }
 
 export interface GithubPollOptions {
+  /** Execution eligibility, including baseline and durable receipts, before charging the item cap. */
+  accept?: ((candidate: GithubCandidate) => boolean) | undefined;
   since?: string | undefined;
   historyScan?: AutomationRuntimeState['historyScan'];
 }
@@ -103,12 +109,7 @@ export class GithubPoller {
     const labelEvents = definition.events.filter(
       (event) => event === 'issue.labeled' || event === 'issue.unlabeled',
     );
-    const sources: Array<{
-      family: 'issues' | 'prs' | 'mixed';
-      activity: 'created' | 'updated';
-      opened: boolean;
-      labels: boolean;
-    }> = [];
+    const sources: PollSource[] = [];
     if (openedEvents.length) {
       sources.push({
         family: openedEvents.every((event) => event === 'pull_request.opened')
@@ -123,128 +124,31 @@ export class GithubPoller {
       sources.push({ family: 'issues', activity: 'updated', opened: false, labels: true });
     }
 
-    if (definition.filters.includeExisting) {
-      return this.pollHistory(owner, repo, definition, sources, options);
-    }
-    const perPage = Math.min(definition.filters.maxRecords, HARD_CANDIDATE_CAP);
-    const expectedRepoUrl = `https://api.github.com/repos/${owner}/${repo}`.toLowerCase();
-    const observations: Array<{
-      timestamp: string;
-      tieBreaker: string;
-      candidate?: GithubCandidate | undefined;
-    }> = [];
-    let truncated = false;
-    for (const source of sources) {
-      const query = buildSearchQuery(
-        owner,
-        repo,
-        definition,
-        source.family,
-        source.activity,
-        options.since,
-      );
-      const args = [
-        'api', '--method', 'GET', '/search/issues',
-        '-f', `q=${query}`,
-        '-f', `per_page=${perPage}`,
-        '-f', `sort=${source.activity}`,
-        '-f', 'order=asc',
-      ];
-      const raw = await this.run('gh', args);
-      const response = searchResponseSchema.parse(JSON.parse(raw));
-      const sourceObservations: typeof observations = [];
-      truncated ||= response.items.length >= perPage;
-      for (const item of response.items.slice(0, HARD_CANDIDATE_CAP)) {
-        if (item.repository_url.toLowerCase() !== expectedRepoUrl) continue;
-        if (source.opened && item.pull_request && definition.events.includes('pull_request.opened')) {
-          const candidate = normalizeOpened(owner, repo, item, 'pull_request.opened');
-          if (atOrAfter(candidate.timestamp, options.since)) {
-            sourceObservations.push({
-              timestamp: candidate.timestamp,
-              tieBreaker: candidate.tieBreaker,
-              candidate: matchesFilters(candidate, definition) ? candidate : undefined,
-            });
-          }
-        } else if (source.opened && !item.pull_request && definition.events.includes('issue.opened')) {
-          const candidate = normalizeOpened(owner, repo, item, 'issue.opened');
-          if (atOrAfter(candidate.timestamp, options.since)) {
-            sourceObservations.push({
-              timestamp: candidate.timestamp,
-              tieBreaker: candidate.tieBreaker,
-              candidate: matchesFilters(candidate, definition) ? candidate : undefined,
-            });
-          }
-        }
-        if (source.labels && !item.pull_request) {
-          const timeline = await this.timeline(owner, repo, item.number, TIMELINE_PAGE_CAP);
-          if (!timeline.complete) throw incompleteHistory(owner, repo, item.number, TIMELINE_PAGE_CAP);
-          const events = reconstructLabelEvents(owner, repo, item, timeline.events);
-          for (const event of events) {
-            if (!atOrAfter(event.timestamp, options.since)) continue;
-            sourceObservations.push({
-              timestamp: event.timestamp,
-              tieBreaker: event.tieBreaker,
-              candidate: definition.events.includes(event.event) && matchesFilters(event, definition)
-                ? event
-                : undefined,
-            });
-            if (sourceObservations.length >= perPage) break;
-          }
-          const lastEventAt = events.at(-1)?.timestamp;
-          if (
-            sourceObservations.length < perPage
-            && item.updated_at
-            && atOrAfter(item.updated_at, options.since)
-            && (!lastEventAt || item.updated_at > lastEventAt)
-          ) {
-            sourceObservations.push({
-              timestamp: item.updated_at,
-              tieBreaker: `activity:${item.node_id}`,
-            });
-          }
-        }
-        if (sourceObservations.length >= perPage) break;
-      }
-      sourceObservations.sort(compareObservation);
-      truncated ||= sourceObservations.length >= perPage;
-      observations.push(...sourceObservations.slice(0, perPage));
-    }
-    observations.sort(compareObservation);
-    const evaluated = observations.slice(0, definition.filters.maxRecords);
-    const cursor = evaluated.at(-1);
-    return {
-      candidates: evaluated.flatMap((observation) => observation.candidate ? [observation.candidate] : []),
-      truncated: truncated || observations.length > definition.filters.maxRecords,
-      pages: sources.length,
-      cursor: cursor ? { timestamp: cursor.timestamp, tieBreaker: cursor.tieBreaker } : undefined,
-    };
+    return this.pollScan(owner, repo, definition, sources, options);
   }
 
   /** Resume a fixed search window instead of letting overlap duplicates fill every page.
-   * Each check evaluates at most maxRecords observations and 100 items, with at most ten
-   * provider requests. The successful live cursor moves only after every source is drained. */
-  private async pollHistory(
+   * Each check accepts at most maxRecords new items and scans at most 100 items.
+   * Provider requests have a separate bound. The successful live cursor moves only after every source is drained. */
+  private async pollScan(
     owner: string,
     repo: string,
     definition: GithubAutomationDefinition,
-    sources: Array<{ family: 'issues' | 'prs' | 'mixed'; activity: 'created' | 'updated'; opened: boolean; labels: boolean }>,
+    sources: PollSource[],
     options: GithubPollOptions,
   ): Promise<GithubPollResult> {
-    const since = options.since ?? new Date(Date.now() - definition.filters.lookbackDays * 86_400_000).toISOString();
-    const scan = options.historyScan ? structuredClone(options.historyScan) : {
-      since, until: new Date().toISOString(), source: 0, page: 1, item: 0, event: 0,
-      cursor: undefined as AutomationRuntimeState['cursor'],
-    };
+    const scan = startScan(definition, options);
     const candidates: GithubCandidate[] = [];
     let requests = 0;
     let evaluated = 0;
+    const requestCap = definition.filters.includeExisting ? HISTORY_REQUEST_CAP : TIMELINE_PAGE_CAP + 1;
     let itemsRead = 0;
     const cap = Math.min(definition.filters.maxRecords, HARD_CANDIDATE_CAP);
-    while (scan.source < sources.length && requests < HISTORY_REQUEST_CAP && evaluated < cap && itemsRead < HARD_CANDIDATE_CAP) {
+    while (scan.source < sources.length && requests < requestCap && evaluated < cap && itemsRead < HARD_CANDIDATE_CAP) {
       const source = sources[scan.source]!;
       // Issue activity is mutable: comments must not evict unseen label transitions from
       // a frozen updated-time query. Revisit the full label lookback on each completed scan.
-      const sourceSince = source.labels
+      const sourceSince = source.labels && definition.filters.includeExisting
         ? new Date(Date.parse(scan.until) - definition.filters.lookbackDays * 86_400_000).toISOString()
         : scan.since;
       const query = buildSearchQuery(owner, repo, definition, source.family, source.activity, sourceSince)
@@ -260,57 +164,37 @@ export class GithubPoller {
         const item = response.items[scan.item]!;
         itemsRead++;
         if (item.repository_url.toLowerCase() !== `https://api.github.com/repos/${owner}/${repo}`.toLowerCase()) continue;
-        let rows: GithubCandidate[];
-        if (source.labels) {
-          if (item.pull_request) continue;
-          if (requests >= HISTORY_REQUEST_CAP) break;
-          const budget = HISTORY_REQUEST_CAP - requests;
-          const timeline = await this.timeline(owner, repo, item.number, budget);
-          requests += timeline.pages;
-          if (!timeline.complete) {
-            // Resume this item next check, which starts with more budget. A check spends one
-            // request on its search, so a timeline that fills the rest of a fresh check can never
-            // be read whole: do not silently certify an incomplete history.
-            if (budget < HISTORY_REQUEST_CAP - 1) break;
-            throw incompleteHistory(owner, repo, item.number, budget);
-          }
-          rows = reconstructLabelEvents(owner, repo, item, timeline.events)
-            .filter((row) => Date.parse(row.timestamp) >= Date.parse(sourceSince) && Date.parse(row.timestamp) <= Date.parse(scan.until));
-        } else {
-          const event = item.pull_request ? 'pull_request.opened' : 'issue.opened';
-          rows = [normalizeOpened(owner, repo, item, event)]
-            .filter((row) => Date.parse(row.timestamp) >= Date.parse(sourceSince) && Date.parse(row.timestamp) <= Date.parse(scan.until));
+        if (source.labels && requests >= requestCap) break;
+        const budget = requestCap - requests;
+        const batch = await this.scanRows(owner, repo, item, source, budget, sourceSince, scan.until);
+        requests += batch.pages;
+        if (!batch.complete) {
+          // A fresh check must fit one complete timeline; partial remaining budgets resume next check.
+          if (budget < requestCap - 1) break;
+          throw incompleteHistory(owner, repo, item.number, budget);
         }
-        for (; scan.event < rows.length && evaluated < cap; scan.event++) {
-          const row = rows[scan.event]!;
-          evaluated++;
-          if (!source.labels && (!scan.cursor || compareObservation(row, { ...scan.cursor, tieBreaker: scan.cursor.tieBreaker ?? '' }) > 0)) {
-            scan.cursor = { timestamp: row.timestamp, tieBreaker: row.tieBreaker };
-          }
-          if (definition.events.includes(row.event) && matchesFilters(row, definition)) candidates.push(row);
-        }
+        const rows = batch.rows;
+        evaluated += collectCandidates(scan, rows, candidates, cap - evaluated, definition, source, options);
         if (scan.event < rows.length) break;
-        // Empty/nonmatching items count towards the work budget too.
-        if (!rows.length) evaluated++;
+        // Scan work stays bounded independently of the number of new matches.
         scan.event = 0;
       }
       if (scan.item < response.items.length) break;
-      if (response.items.length >= 100) {
-        if (scan.page >= 10) throw new Error('GitHub search reached its 1000-item limit; narrow the automation lookback or filters.');
-        scan.page++;
-      } else {
-        scan.source++;
-        scan.page = 1;
-      }
-      scan.item = 0;
-      scan.event = 0;
+      advanceScanPage(scan, response.items.length);
     }
-    const truncated = scan.source < sources.length;
-    candidates.sort(compareObservation);
-    const cursor = !truncated && scan.cursor?.tieBreaker !== undefined
-      ? { timestamp: scan.cursor.timestamp, tieBreaker: scan.cursor.tieBreaker }
-      : undefined;
-    return { candidates, truncated, pages: requests, cursor, ...(truncated ? { historyScan: scan } : {}) };
+    return scanResult(scan, sources.length, candidates, requests);
+  }
+
+  private async scanRows(owner: string, repo: string, item: GithubItem, source: PollSource,
+    budget: number, since: string, until: string) {
+    if (source.labels && item.pull_request) return { rows: [], pages: 0, complete: true };
+    const timeline = source.labels ? await this.timeline(owner, repo, item.number, budget) : undefined;
+    const rows = timeline ? reconstructLabelEvents(owner, repo, item, timeline.events)
+      : [normalizeOpened(owner, repo, item, item.pull_request ? 'pull_request.opened' : 'issue.opened')];
+    return {
+      rows: rows.filter(row => Date.parse(row.timestamp) >= Date.parse(since) && Date.parse(row.timestamp) <= Date.parse(until)),
+      pages: timeline?.pages ?? 0, complete: timeline?.complete ?? true,
+    };
   }
 
   /** The timeline mixes comments, assignments, closures and more with label changes, oldest
@@ -341,6 +225,54 @@ export class GithubPoller {
     }
     return { events, pages: maxPages, complete: false };
   }
+}
+
+function startScan(definition: GithubAutomationDefinition, options: GithubPollOptions): Scan {
+  if (options.historyScan) return structuredClone(options.historyScan);
+  const since = options.since ?? new Date(Date.now() - definition.filters.lookbackDays * 86_400_000).toISOString();
+  return { since, until: new Date().toISOString(), source: 0, page: 1, item: 0, event: 0 };
+}
+
+function scanResult(scan: Scan, sources: number, candidates: GithubCandidate[], pages: number): GithubPollResult {
+  const truncated = scan.source < sources;
+  candidates.sort(compareObservation);
+  const cursor = !truncated && scan.cursor?.tieBreaker !== undefined
+    ? { timestamp: scan.cursor.timestamp, tieBreaker: scan.cursor.tieBreaker } : undefined;
+  return { candidates, truncated, pages, cursor, ...(truncated ? { historyScan: scan } : {}) };
+}
+
+function collectCandidates(scan: Scan, rows: GithubCandidate[], candidates: GithubCandidate[], cap: number,
+  definition: GithubAutomationDefinition, source: PollSource, options: GithubPollOptions): number {
+  let evaluated = 0;
+  for (; scan.event < rows.length && evaluated < cap; scan.event++) {
+    const row = rows[scan.event]!;
+    advanceScanCursor(scan, row, source.labels && !!definition.filters.includeExisting);
+    const matches = definition.events.includes(row.event) && matchesFilters(row, definition);
+    if (matches && (options.accept?.(row) ?? true)) {
+      candidates.push(row);
+      evaluated++;
+    }
+  }
+  return evaluated;
+}
+
+function advanceScanCursor(scan: Scan, row: GithubCandidate, historicalLabels: boolean): void {
+  if (historicalLabels) return;
+  if (!scan.cursor || compareObservation(row, { ...scan.cursor, tieBreaker: scan.cursor.tieBreaker ?? '' }) > 0) {
+    scan.cursor = { timestamp: row.timestamp, tieBreaker: row.tieBreaker };
+  }
+}
+
+function advanceScanPage(scan: Scan, size: number): void {
+  if (size >= 100) {
+    if (scan.page >= 10) throw new Error('GitHub search reached its 1000-item limit; narrow the automation lookback or filters.');
+    scan.page++;
+  } else {
+    scan.source++;
+    scan.page = 1;
+  }
+  scan.item = 0;
+  scan.event = 0;
 }
 
 export function buildSearchQuery(
@@ -445,8 +377,4 @@ function compareObservation(
   b: { timestamp: string; tieBreaker: string },
 ): number {
   return a.timestamp.localeCompare(b.timestamp) || a.tieBreaker.localeCompare(b.tieBreaker);
-}
-
-function atOrAfter(timestamp: string, since: string | undefined): boolean {
-  return !since || timestamp >= since;
 }

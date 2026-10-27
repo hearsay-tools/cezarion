@@ -144,7 +144,7 @@ export const storedAutomationCursorSchema = z
   })
   .passthrough();
 
-/** Durable position inside a bounded historical search, independent of the live overlap. */
+/** Durable position inside a bounded GitHub scan, including live overlap and historical searches. */
 export const storedAutomationHistoryScanSchema = automationHistoryScanSchema.extend({
   cursor: storedAutomationCursorSchema.optional(),
 });
