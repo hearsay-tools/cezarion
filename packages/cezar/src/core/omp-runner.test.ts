@@ -474,10 +474,13 @@ ${turn}
 `, { mode: 0o755 });
     return bin;
   };
-  const settleTurn = (stopReason = 'stop') => `      send({ type: 'message_end', message: { role: 'assistant', stopReason: '${stopReason}', errorMessage: 'Overloaded', usage: { input: 1, output: 1 } } });
+  /** The mock lines that end the turn: an assistant message_end with `stopReason`, then the settle. */
+  function settleTurn(stopReason = 'stop'): string {
+    return `      send({ type: 'message_end', message: { role: 'assistant', stopReason: '${stopReason}', errorMessage: 'Overloaded', usage: { input: 1, output: 1 } } });
       send({ type: 'agent_end', messages: [], isTerminal: true, yielded: true });
       send({ type: 'prompt_result', agentInvoked: true, status: 'completed', sessionSettled: true });
       send({ type: 'session_settled' });`;
+  }
 
   // Pins the Pi-family text and tool handling omp shares with pi (hearsay-tools/cezarion#1955).
   it('completes text blocks without a snapshot or an index, and records only named tool calls', async () => {
