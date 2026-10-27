@@ -111,9 +111,10 @@ async function exists(path: string): Promise<boolean> {
 }
 
 /** Restore owner access only on real directories; do not chmod symlinks or their targets. */
-async function makeDirectoriesWritable(path: string): Promise<void> {
+async function makeDirectoryWritable(path: string, expected?: { dev: number; ino: number }): Promise<void> {
   const info = await lstat(path);
-  if (!info.isDirectory() || info.isSymbolicLink() || await realpath(path) !== path) throw new Error(`Unsafe directory: ${path}`);
+  if (!info.isDirectory() || info.isSymbolicLink() || await realpath(path) !== path ||
+      (expected && (info.dev !== expected.dev || info.ino !== expected.ino))) throw new Error(`Unsafe directory: ${path}`);
   if (process.platform !== 'win32') {
     // Linux O_PATH pins a directory even with mode 000; chmod the pinned inode
     // through procfs because fchmod on an O_PATH descriptor fails with EBADF.
@@ -126,8 +127,11 @@ async function makeDirectoriesWritable(path: string): Promise<void> {
       else await directory.chmod(opened.mode | 0o700);
     } finally { await directory.close(); }
   }
-  // Windows directory mode bits do not control directory deletion; Node cannot
-  // open directories there. Reparse points are rejected above and not traversed.
+}
+
+/** Windows directory mode bits do not control deletion; reparse points are never traversed. */
+async function makeDirectoriesWritable(path: string): Promise<void> {
+  await makeDirectoryWritable(path);
   for (const entry of await readdir(path, { withFileTypes: true })) {
     if (entry.isDirectory()) await makeDirectoriesWritable(join(path, entry.name));
   }
@@ -499,6 +503,15 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         await beforeRemove?.();
         assertCurrent?.();
         checkUnheld(assertUnheld);
+        // The test-app probe needs search access to these ancestors. Repair only
+        // those paths before claiming its lease, not the rest of the checkout.
+        for (const component of [workspace.path, join(workspace.path, '.ai'), join(workspace.path, '.ai', 'qa')]) {
+          if (!await stillOwned() || !unheld()) return false;
+          if (!await exists(component)) break;
+          try { await makeDirectoryWritable(component, component === workspace.path ? original : undefined); }
+          catch (error) { return failedRemoval(error); }
+          if (!await stillOwned() || !unheld()) return false;
+        }
         return withIdleTestApp(workspace.path, async (_stopped, busy) => {
           if (busy || !await waitForTestAppWatcher(workspace.path)) { report?.unexplained?.(); return false; }
           if (!unheld()) return false;

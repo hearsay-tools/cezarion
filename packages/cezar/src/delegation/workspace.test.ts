@@ -527,6 +527,49 @@ exec "${realGit}" "$@"
     } finally { if (existsSync(locked)) await chmod(locked, 0o700); }
   });
 
+  it.runIf(process.platform === 'linux').each(['root', '.ai'])('recovers a leftover with inaccessible %s before probing the test app', async (part) => {
+    const { root, workspace } = await partialLeftover();
+    const locked = part === 'root' ? workspace.path : join(workspace.path, '.ai');
+    if (part === '.ai') await mkdir(locked);
+    await chmod(locked, 0);
+    try {
+      expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+    } finally { if (existsSync(locked)) await chmod(locked, 0o700); }
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a symlink in the test-app probe path', async () => {
+    const { root, workspace } = await partialLeftover();
+    const outside = join(root, 'outside-probe');
+    await mkdir(outside);
+    await writeFile(join(outside, 'KEEP'), 'safe');
+    await symlink(outside, join(workspace.path, '.ai'));
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    expect(await readFile(join(outside, 'KEEP'), 'utf8')).toBe('safe');
+  });
+
+  it.runIf(process.platform === 'linux')('refuses a holder appearing during pre-probe permission repair', async () => {
+    const { root, workspace } = await partialLeftover();
+    const next = join(workspace.path, '.ai');
+    await mkdir(next);
+    await chmod(next, 0);
+    const original = fsPromises.chmod;
+    let held = false;
+    const spy = vi.spyOn(fsPromises, 'chmod').mockImplementation(async (path, mode) => {
+      await original(path, mode);
+      held = true;
+    });
+    syncBuiltinESMExports();
+    try {
+      const result = await removeOwnedWorkspace(root, workspace, undefined, undefined, () => {
+        if (held) throw new Error('new holder');
+      });
+      expect(held).toBe(true);
+      expect(result).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+      expect(await readFile(join(workspace.path, 'leftover'), 'utf8')).toBe('data');
+      expect((await lstat(next)).mode & 0o777).toBe(0);
+    } finally { spy.mockRestore(); syncBuiltinESMExports(); await chmod(next, 0o700); }
+  });
+
   it('names the leftover and filesystem error when deletion fails', async () => {
     const { root, workspace } = await partialLeftover();
     const original = fsPromises.rm;
