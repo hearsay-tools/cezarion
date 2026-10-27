@@ -8,6 +8,8 @@ import { processStartToken, stopGroup } from '../detached-process.ts';
 import { inspectGeneration } from './process-liveness.ts';
 import { windowsStartToken, windowsTestAppHolds } from './windows-test-app.ts';
 
+// Process probes use the host OS even when a test simulates another platform.
+const windowsWatchers = process.platform === 'win32';
 const startToken = (pid: number) => process.platform === 'win32' ? windowsStartToken(pid) : processStartToken(pid);
 const samePath = (a: string, b: string) => process.platform === 'win32' ? a.toLowerCase() === b.toLowerCase() : a === b;
 
@@ -90,7 +92,7 @@ export async function withIdleTestApp<T>(root: string, remove: (stopped: boolean
 /** Read command lines, not cwd: production watchers run from the system temp directory.
  * This probe never authorizes a signal. Ambiguous matches only delay/refuse removal. */
 function watcherPresent(root: string): boolean {
-  const windows = process.platform === 'win32';
+  const windows = windowsWatchers;
   const script = "$ErrorActionPreference='Stop'; ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" | ForEach-Object { if (!$_.CommandLine) { throw 'Unreadable node command line' }; $_.CommandLine })";
   const result = windows
     ? spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 10_000, windowsHide: true })

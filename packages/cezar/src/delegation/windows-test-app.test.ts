@@ -67,9 +67,16 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
     const descriptor = (pid: number) => JSON.stringify({ startedByThisRepo: true, app: { pid, start: windowsStartToken(pid) } });
     await writeFile(join(qa, 'test-env.json'), descriptor(app.pid!));
     const watcher = spawn(process.execPath, [resolve(import.meta.dirname, '../../../../.ai/scripts/test-env-lease.mjs'), 'watch-app', String(app.pid), windowsStartToken(app.pid!)!, workspace.path, workspace.path], {
-      cwd: tmpdir(), env: { ...process.env, TEST_ENV_WATCH_INTERVAL_SECONDS: '2' }, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true,
+      cwd: tmpdir(), env: { ...process.env, TEST_ENV_WATCH_INTERVAL_SECONDS: '2' }, stdio: ['ignore', 'pipe', 'pipe'], windowsHide: true,
     });
-    children.push(watcher); await once(watcher.stdout!, 'data');
+    children.push(watcher);
+    let watcherError = '';
+    watcher.stderr!.on('data', chunk => { watcherError += String(chunk); });
+    await Promise.race([
+      once(watcher.stdout!, 'data'),
+      once(watcher, 'exit').then(([code]) => { throw new Error(`watcher exited before ready (${code}): ${watcherError}`); }),
+    ]);
+    console.info('native cleanup: watcher ready');
     const db = new DatabaseSync(join(qa, 'test-env-lease.sqlite'));
     db.exec('CREATE TABLE holders (id TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, start TEXT, pgid INTEGER)');
     db.prepare('INSERT INTO holders VALUES (?, ?, ?, ?, NULL)').run('live', 'live', process.pid, windowsStartToken(process.pid)!);
@@ -80,6 +87,7 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete' });
     expect(other.exitCode).toBeNull();
     await writeFile(join(qa, 'test-env.json'), descriptor(app.pid!));
+    console.info('native cleanup: stopping owned app');
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
     expect(watcher.exitCode).not.toBeNull();
     expect(other.exitCode).toBeNull();
