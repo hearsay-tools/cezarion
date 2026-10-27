@@ -285,7 +285,7 @@ async function conversingParent(runner: RunnerId) {
     await service.send(workerCaller, { id, recipientRunId: p.id, kind: 'progress', text, timeoutSeconds: 600 });
     return id;
   };
-  return { p, w, progress, inspect };
+  return { p, w, progress, inspect, service, callerFor };
 }
 
 const timerText = (wait: Wait, note: string) => `Timer ${wait.id} fired: ${note}. Continue toward the task goal; register another wait if you are still waiting.`;
@@ -321,7 +321,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U7q', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U7q', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U19p', 'U19q', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
 
@@ -1860,6 +1860,74 @@ function workersCells(runners: RunnerId[]): void {
       // The human's answer checkpoints that same question.
       expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'Parser' }])).toBe(true);
       await until(() => answered(f.p.id, askSeq));
+    });
+
+    /** Another root task of the project (hearsay-tools/cezarion#1990): a record with no session,
+     *  whose authenticated caller sends to `to` through the conversing parent's service. */
+    function peerOf(f: Awaited<ReturnType<typeof conversingParent>>, to: string) {
+      const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
+      store.updateRun(peer.id, { status: 'running', delegation: { role: 'root', permissions: ['spawn', 'wait', 'steer', 'inspect'], receipts: [] } });
+      const progress = async (text: string) => {
+        const id = randomUUID();
+        await f.service.send(f.callerFor(peer.id), { id, recipientRunId: to, kind: 'progress', text, timeoutSeconds: 600 });
+        return id;
+      };
+      return { id: peer.id, progress };
+    }
+    const peerWakeNotes = (id: string) => store.readEvents(id).filter(event => event.type === 'note' && String(event.message).startsWith('automatic peer message wake-up'));
+
+    it(`${runner} U19p a peer message beside a pending portable question is delivered with its peer attribution and the question stays answerable`, async () => {
+      const f = await conversingParent(runner);
+      const peer = peerOf(f, f.p.id);
+      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: messagesPrompt(runner, [ASK_TEXT]) }])).toBe(true);
+      await until(() => pendingQuestion(f.p.id) && asks(f.p.id).length === 1);
+      const askSeq = asks(f.p.id)[0]!.seq;
+      const turns = turnEnds(f.p.id);
+      const users = store.readEvents(f.p.id).filter(event => event.type === 'user-message').length;
+      const id = await peer.progress('Peer progress u19p');
+      await until(() => delivered(f.p.id, id) && prompted(runner, 'Peer progress u19p').length > 0);
+      // The agent reads who sent it: the peer task, as a peer, never the user.
+      const [prompt] = prompted(runner, 'Peer progress u19p');
+      expect(prompt).toContain(`"senderRunId":"${peer.id}"`);
+      expect(prompt).toContain('"relationship":"peer"');
+      await until(() => turnEnds(f.p.id) > turns && pendingQuestion(f.p.id));
+      expect(store.readEvents(f.p.id).filter(event => event.type === 'user-message')).toHaveLength(users);
+      expect(answered(f.p.id, askSeq)).toBe(false);
+      expect(asks(f.p.id).map(event => event.seq)).toEqual([askSeq]);
+      expect(humanOpen(f.p.id)).toEqual([expect.objectContaining({ phase: 'open', askSeq })]);
+      expect(store.transcriptFacts(f.p.id).pendingAsk?.seq).toBe(askSeq);
+      expect(deriveAttention(store.getRun(f.p.id)!).label).toBe('needs you');
+      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'Parser' }])).toBe(true);
+      await until(() => answered(f.p.id, askSeq));
+    });
+
+    it(`${runner} U19q a peer message that wakes a parked run spends one unit of the automatic-wake budget, a family message spends none, and past the budget a peer message stays queued until a human message`, async () => {
+      const f = await conversingParent(runner);
+      const peer = peerOf(f, f.p.id);
+      // A family message wakes the parked parent and charges nothing.
+      let turns = turnEnds(f.p.id);
+      const family = await f.progress('Worker progress u19q');
+      await until(() => delivered(f.p.id, family) && turnEnds(f.p.id) > turns && store.getRun(f.p.id)?.status === 'waiting');
+      expect(peerWakeNotes(f.p.id)).toEqual([]);
+      // A peer message that opens the wake turn spends the budget's last unit.
+      fixtureUpdateRun(f.p.id, { automaticWakes: MAX_AUTO_CONTINUES - 1 });
+      turns = turnEnds(f.p.id);
+      const first = await peer.progress('Peer progress u19q one');
+      await until(() => delivered(f.p.id, first) && peerWakeNotes(f.p.id).length === 1);
+      expect(peerWakeNotes(f.p.id)).toEqual([expect.objectContaining({ message: `automatic peer message wake-up (${MAX_AUTO_CONTINUES}/${MAX_AUTO_CONTINUES})` })]);
+      await until(() => turnEnds(f.p.id) > turns && store.getRun(f.p.id)?.status === 'waiting');
+      // Past the budget the next peer message wakes nothing: it stays queued and Cezar's human wait opens.
+      fixtureUpdateRun(f.p.id, { automaticWakes: MAX_AUTO_CONTINUES });
+      const held = await peer.progress('Peer progress u19q held');
+      expect(delivered(f.p.id, held)).toBe(false);
+      expect((manager as unknown as { owesWake(run: RunRecord): boolean }).owesWake(store.getRun(f.p.id)!)).toBe(false);
+      expect(humanOpen(f.p.id)).toEqual([expect.objectContaining({ phase: 'open', source: 'cezar' })]);
+      expect(deriveAttention(store.getRun(f.p.id)!).label).toBe('needs you');
+      // A human message restarts the budget, and its turn takes the held message.
+      expect(manager.sendMessage(f.p.id, [{ type: 'text', text: 'Carry on' }])).toBe(true);
+      await until(() => delivered(f.p.id, held) && prompted(runner, 'Peer progress u19q held').length > 0);
+      expect(store.getRun(f.p.id)?.automaticWakes ?? 0).toBeLessThan(MAX_AUTO_CONTINUES);
+      expect(peerWakeNotes(f.p.id)).toHaveLength(1);
     });
 
     // hearsay-tools/cezarion#1301: a blocked done at the turn end is answered with the refusal

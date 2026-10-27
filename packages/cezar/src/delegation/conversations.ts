@@ -3,7 +3,10 @@ import type { RunRecord } from '../runs/store.ts';
 
 /**
  * First durable request settlement wins, with the defined late-reply timeout amendment handled
- * by send. Review is not completion. Lookup only the named sender/recipient runs.
+ * by send. Review is not completion for a worker, which its parent can resume; a peer recipient at
+ * review settles `completed-without-reply` at once, because no peer can resume it, and a deleted
+ * one settles `deleted` (spec 2026-10-27-task-communication-protocol § 5, § 7). Lookup only the
+ * named sender/recipient runs.
  */
 export function reconcileConversationState(root: RunRecord, lookup: (id: string) => RunRecord | undefined, now: string, isSettled: (run: RunRecord) => boolean): ConversationState | undefined {
   if (root.delegation?.role !== 'root' || !root.delegation.conversation) return undefined;
@@ -14,9 +17,12 @@ export function reconcileConversationState(root: RunRecord, lookup: (id: string)
     const sender = lookup(request.senderRunId);
     const recipient = lookup(request.recipientRunId);
     const closed = (run: RunRecord | undefined) => run && ['done', 'failed', 'cancelled'].includes(run.status) && isSettled(run);
+    const peer = request.relationship === 'peer';
     let status: RequestOutcome['status'] | undefined;
     const deletedRecipient = !recipient && root.delegation.receipts.some(receipt => receipt.workerId === request.recipientRunId && receipt.deletion?.phase === 'complete');
-    if (deletedRecipient || (recipient?.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete')) status = 'destroyed';
+    if (peer && !recipient) status = 'deleted';
+    else if (peer && recipient?.status === 'review' && isSettled(recipient)) status = 'completed-without-reply';
+    else if (deletedRecipient || (recipient?.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete')) status = 'destroyed';
     // A worker's question outlives its parent: the human answers it instead (#505).
     else if (closed(recipient) && request.question) status = 'human-fallback';
     else if (closed(recipient)) status = recipient!.status === 'done' ? 'completed-without-reply' : recipient!.status as 'failed' | 'cancelled';

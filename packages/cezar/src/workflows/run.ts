@@ -16,7 +16,7 @@ import { nextLineEntry } from './line-order.ts';
 import { accountHeldFor, formatWakeInstant, resumeInFlight, runAccountKey, queuedRecoveryInput, queuedStartAt, sessionlessWakePrompt } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { executionAccount } from './execution-account.ts';
-import { chargesBudget, ciWatchRequest, hasPrWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
+import { chargesBudget, chargesBudgetMessage, ciWatchRequest, hasPrWait, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitInputId, waitResultText } from './waits.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewCdpSession, previewRunContext, previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
 import { acquireCiResources } from '../ci-wait/resources.ts';
@@ -2925,9 +2925,24 @@ export class RunManager {
     const owed = new Set(resolvedWaits(run).map(waitInputId));
     const named = waitNamedInputIds(run);
     const answer = this.routedAnswer(run.id);
+    // Past the automatic-wake budget a peer message wakes nothing: it stays queued for the next
+    // turn (spec 2026-10-27-task-communication-protocol § 8, `holdPeerWakesAtCap`).
+    const spent = this.automaticWakes(run.id) >= MAX_AUTO_CONTINUES;
     return (run.agentInputs ?? []).filter(input => (input.conversation || (input.source === 'lifecycle' && !named.has(input.id))) &&
-      !input.deliveredAt && !hasLiveInboxClaim(input) &&
+      !input.deliveredAt && !hasLiveInboxClaim(input) && !(spent && chargesBudgetMessage(input)) &&
       !owed.has(input.id) && input.id !== answer?.id && !this.providerOwnsInboxInput(run.id, input.id));
+  }
+
+  /** Peer messages the spent budget keeps from waking the run (spec § 8). A turn in progress takes
+   *  them as steering, which charges nothing. A parked run waits on the user instead: Cezar's
+   *  `budget` human wait opens and is shown, and a human message resets the budget. */
+  private holdPeerWakesAtCap(runId: string): void {
+    const run = this.store.getRun(runId);
+    if (!run || this.automaticWakes(runId) < MAX_AUTO_CONTINUES ||
+      !run.agentInputs?.some(input => !input.deliveredAt && !hasLiveInboxClaim(input) && chargesBudgetMessage(input))) return;
+    const state = this.active.get(runId);
+    if (state?.session?.open && state.atTurnBoundary !== state.session) { if (!this.recoveringRun(runId)) this.flushAgentInputs(runId); return; }
+    if (run.status === 'waiting') this.surfaceHumanWait(runId, state, this.openHumanAlias(runId, state, 'budget'));
   }
 
   /** The parent's reply that answers a worker's pending routed question, still undelivered. */
@@ -3007,7 +3022,13 @@ export class RunManager {
   }
 
   /** A deleted run's row is gone with its waits; only what they armed in memory is left. */
-  private readonly onRunDeleted = (runId: string): void => { this.disarmRunWaits(runId); };
+  private readonly onRunDeleted = (runId: string): void => {
+    this.disarmRunWaits(runId);
+    // A peer's open requests to the deleted run settle `deleted` (spec 2026-10-27 § 5): the live
+    // families' ledgers are reconciled, as a settled run's are.
+    if (this.disposed || process.env.CEZ_DELEGATION !== '1') return;
+    try { this.reconcileWorkerWaits(); } catch { /* the next reconcile settles them */ }
+  };
 
   /** Snapshot of the actual active session, never guessed from partial run settings. */
   delegationExecutionSettings(runId: string): DelegationExecutionSettings {
@@ -5314,7 +5335,7 @@ export class RunManager {
     // through the wait list's admission, beside every open wait and a pending question, and ends
     // none of them. A turn in progress takes it at once, as steering.
     const current = this.store.getRun(runId);
-    if (!current || !this.pendingConversationWakes(current).length) return;
+    if (!current || !this.pendingConversationWakes(current).length) { this.holdPeerWakesAtCap(runId); return; }
     const state = this.active.get(runId);
     if (current.status === 'waiting' && (!state || state.atTurnBoundary === state.session)) this.queueWaitWake(runId);
     else if (!this.recoveringRun(runId)) this.flushAgentInputs(runId);
@@ -6216,7 +6237,11 @@ export class RunManager {
     // timer that comes due before this acknowledgement counts it, and gives it back if the batch is
     // refused or its acknowledgement rejects (hearsay-tools/cezarion#1233).
     const timerResults = resolvedWaits(this.store.getRun(runId) ?? {}).filter(wait => chargesBudget(wait) && inputIds.includes(wait.id));
-    if (timerResults.length) flight.wakeReserved = true;
+    // A peer message that opens an admitted wake turn reserves its unit the same way; past the
+    // budget it opens no turn (`pendingConversationWakes`), so one carried by another wake is free.
+    const peerWake = !!flight.admittedWake && this.automaticWakes(runId) < MAX_AUTO_CONTINUES &&
+      !!this.store.getRun(runId)?.agentInputs?.some(input => inputIds.includes(input.id) && chargesBudgetMessage(input));
+    if (timerResults.length || peerWake) flight.wakeReserved = true;
     const refund = (): void => { flight.wakeReserved = false; };
     state.agentInputFlight = flight;
     const current = (): boolean => !this.disposed && this.active.get(runId) === state && state.session === session &&
@@ -6287,11 +6312,12 @@ export class RunManager {
 
   /** Apply the acknowledgement's effects only after its outcome commit succeeds. */
   private applyAcknowledgedInput(runId: string, state: ActiveRun, flight: NonNullable<ActiveRun['agentInputFlight']>, batch: AcknowledgedInput, refusal: boolean): void {
-    const { accepted, resolvedIds, early, spent, observable, timers, resumes, owedBefore } = batch;
+    const { accepted, resolvedIds, early, spent, observable, timers, peers, resumes, owedBefore } = batch;
     const { session } = flight;
     if (spent !== undefined) {
       flight.wakeReserved = false;
-      this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : timers.some(wait => wait.kind === 'timer') ? 'timer' : 'process'} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
+      const kind = !timers.length && peers.length ? 'peer message' : timers.some(isMonitoringTimer) ? 'monitoring' : timers.some(wait => wait.kind === 'timer') ? 'timer' : 'process';
+      this.store.appendEvent(runId, { type: 'note', message: `automatic ${kind} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
     }
     // A wake of results always spends its admission; a wake of messages alone, only one it holds.
     if (resumes && (this.waitWakeAdmitted.delete(runId) || resolvedIds.length > 0)) {

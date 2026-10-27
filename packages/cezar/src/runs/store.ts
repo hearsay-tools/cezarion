@@ -1142,6 +1142,14 @@ export const RUN_QUARANTINED = 'run changed under this cezar process — restart
 
 /** A write this store must not make: another process owns the run, its owner died with work
  *  still live (adopt it first), or a conflict quarantined it. Nothing was changed. */
+/** The delivery steps a `conversation-message:<id>:<step>` projection names (`projectConversationEvents`). */
+export const CONVERSATION_DELIVERY_STEPS = ['queued', 'delivered', 'consumed', 'not-delivered'] as const;
+
+/** `commitConversation` refused a message whose ID is already in use where it would land. */
+export class ConversationIdInUseError extends Error {
+  constructor() { super('Message ID already in use; use a new message ID'); this.name = 'ConversationIdInUseError'; }
+}
+
 export class RunWriteRefusedError extends Error {
   constructor(readonly runId: string, readonly ownership: Exclude<RunOwnership, 'held' | 'free'>) {
     super(ownership === 'quarantined' ? `${RUN_QUARANTINED}: ${runId}`
@@ -2387,10 +2395,20 @@ export class RunStore extends EventEmitter {
     return run;
   }
 
-  /** Accept the family ledger and its recipient queue in a single durable index replacement. */
-  commitConversation(rootId: string, conversation: ConversationState, delivery?: { recipientRunId: string; input: AgentInput }): void {
+  /**
+   * Accept the family ledger and its recipient queue in a single durable index replacement.
+   * `message` names a newly accepted message: its ID must be unused in this ledger, in the
+   * recipient's inputs and in either run's projections, or nothing is written
+   * (`ConversationIdInUseError`). Two senders on two ledgers reach one recipient through this
+   * synchronous check, so only the first can pass it (spec 2026-10-27-task-communication-protocol
+   * § Message identity). `delivery.recipientDelegation` provisions a peer recipient that has no
+   * delegation record yet, in the same write.
+   */
+  commitConversation(rootId: string, conversation: ConversationState, delivery?: { recipientRunId: string; input: AgentInput; recipientDelegation?: DelegationState },
+    message?: { id: string; senderRunId: string; recipientRunId: string }): void {
     const root = this.peek(rootId);
     if (root?.delegation?.role !== 'root') throw new Error('missing conversation root');
+    if (message && this.conversationIdInUse(root, message)) throw new ConversationIdInUseError();
     const staged = new Map<string, RunRecord>();
     staged.set(rootId, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...conversation,
       messages: conversation.messages.map(message => ({ ...message, text: this.redactText(message.text) })),
@@ -2399,9 +2417,17 @@ export class RunStore extends EventEmitter {
       const recipient = staged.get(delivery.recipientRunId) ?? this.peek(delivery.recipientRunId);
       if (!recipient) throw new Error('missing conversation recipient');
       const input = agentInputSchema.parse({ ...delivery.input, text: this.redactText(delivery.input.text) });
-      staged.set(recipient.id, { ...recipient, agentInputs: [...(recipient.agentInputs ?? []), input] });
+      const delegation = !recipient.delegation && delivery.recipientDelegation ? { delegation: delegationStateSchema.parse(delivery.recipientDelegation) } : {};
+      staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(recipient.agentInputs ?? []), input] });
     }
     this.commitIndex(staged);
+  }
+
+  private conversationIdInUse(root: RunRecord, message: { id: string; senderRunId: string; recipientRunId: string }): boolean {
+    if (root.delegation?.role === 'root' && root.delegation.conversation?.messages.some(entry => entry.id === message.id)) return true;
+    if (this.peek(message.recipientRunId)?.agentInputs?.some(input => input.id === message.id)) return true;
+    const projections = [...CONVERSATION_DELIVERY_STEPS.map(step => `conversation-message:${message.id}:${step}`), `request-outcome:${message.id}`, `request-outcome:${message.id}:replied-late`];
+    return [message.senderRunId, message.recipientRunId].some(runId => this.peek(runId) !== undefined && projections.some(id => this.hasProjection(runId, id)));
   }
 
   /** Crash recovery (#505): input a harness accepted but was never seen reading goes

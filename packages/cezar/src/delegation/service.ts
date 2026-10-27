@@ -12,6 +12,9 @@ import {
   type DiscoveryResponse,
 } from '@open-mercato/cezar-contract/discovery';
 import {
+  CONVERSATION_PAGE_MESSAGES,
+  decodeConversationCursor,
+  encodeConversationCursor,
   MAX_CONVERSATION_REQUEST_SECONDS,
   conversationSendRequestSchema,
   conversationInspectRequestSchema,
@@ -23,6 +26,7 @@ import {
   type ConversationInspectRequest,
   type ConversationInspectResult,
   type ConversationCancelRequest,
+  type ConversationMessage,
   type ConversationState,
   type InboxReserveResult,
   type InboxReceiptRequest,
@@ -31,6 +35,7 @@ import {
   type RequestOutcome,
 } from '@open-mercato/cezar-contract/conversations';
 import {
+  workerOperationSchema,
   workerSpawnRequestSchema,
   workerSteerRequestSchema,
   workerWaitRequestSchema,
@@ -50,8 +55,9 @@ import {
   type WorkerWait,
   type WorkerWaitRequest,
 } from '@open-mercato/cezar-contract/delegation';
+import type { AgentInput, DelegationState } from '@open-mercato/cezar-contract';
 import { completionWaitEntry, hasWorkerDeadline, workerCompletionWaitProjection, workerWaitEntryToLegacy, type DeadlinedWorkerWaitEntry } from '@open-mercato/cezar-contract/waits';
-import type { RunStore, RunRecord } from '../runs/store.ts';
+import { ConversationIdInUseError, type RunStore, type RunRecord } from '../runs/store.ts';
 import { workerDestroyView, workerOutcome } from '../runs/delegation-state.ts';
 import type { DelegationExecutionSettings, RunManager } from '../workflows/run.ts';
 import { QUICK_TASK_WORKFLOW, skillTaskSteps, plannedWorkflow, allowedToolsForStep, stepKind, type WorkflowDef, type WorkflowStepDef } from '../workflows/types.ts';
@@ -133,6 +139,31 @@ function stepIdentityFields({ settings, grants }: ResolvedSpawnStep) {
   return { account: settings.accountBinding, grants, ...(settings.model === undefined ? {} : { model: settings.model }), ...(settings.effort === undefined ? {} : { effort: settings.effort }) };
 }
 export const delegationEnabled = () => process.env.CEZ_DELEGATION === '1';
+
+/** The record that makes a run a root task: every worker operation, no receipts yet. */
+export const rootDelegation = (): DelegationState => ({ role: 'root', permissions: [...workerOperationSchema.options], receipts: [] });
+
+/** A root task: a root delegation record, or a top-level run with no record yet, which has not
+ *  opened a session under `CEZ_DELEGATION=1` (spec 2026-10-27-task-communication-protocol § 2). */
+function isRootTask(run: RunRecord | undefined): run is RunRecord {
+  return !!run && (run.delegation?.role === 'root' || run.delegation === undefined);
+}
+
+type ConversationPair = { project: DelegationProject; sender: RunRecord; recipient: RunRecord } &
+  ({ relationship: 'peer' } | { relationship: 'family'; root: RunRecord; worker: RunRecord });
+
+/** The merged history order: `createdAt`, then `id`, a total order a cursor can name. */
+function byCreatedAtAndId(a: { createdAt: string; id: string }, b: { createdAt: string; id: string }): number {
+  return a.createdAt < b.createdAt ? -1 : a.createdAt > b.createdAt ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+}
+
+/** A peer message whose sender's ledger was deleted with the sender: the recipient's own input
+ *  still carries it, so its inbox can return it (spec § 5). */
+function orphanedPeerMessage(input: AgentInput): ConversationMessage | undefined {
+  if (!input.conversation) return undefined;
+  const requestHash = createHash('sha256').update(JSON.stringify({ ...input.conversation, text: input.text })).digest('hex');
+  return { id: input.id, ...input.conversation, text: input.text, createdAt: input.createdAt, requestHash, state: 'accepted' };
+}
 
 /** A single controller's shared policy adapter; managers retain scheduling and lifecycle ownership. */
 export class DelegationService {
@@ -295,10 +326,22 @@ export class DelegationService {
     authorizeWorker(caller, worker, operation, parent, project.id);
     return { project, parent: parent!, worker: worker! };
   }
-  private conversationPair(caller: Caller, recipientRunId: string, send = false) {
+  /**
+   * The relationship resolver (spec 2026-10-27-task-communication-protocol § 2): `family` for a
+   * root and its direct owned worker, `peer` for two root tasks of the caller's project, and
+   * `denied_scope` with one text for everything else. `send` asks for the live pair a new message
+   * needs; without it the pair is checked for reading. A peer's own durable records (history, its
+   * requests, its inbox) are read through `peerRecords` instead, which a deleted peer does not block.
+   */
+  private conversationPair(caller: Caller, recipientRunId: string, send = false): ConversationPair {
     const project = this.context(caller);
     const sender = project.store.getRun(caller.runId);
     const recipient = project.store.getRun(recipientRunId);
+    if (sender?.delegation?.role === 'root' && isRootTask(recipient) && sender.id !== recipient.id) {
+      if (sender.delegation.historyDeletion || (recipient.delegation?.role === 'root' && recipient.delegation.historyDeletion)) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+      if (send && (!['running', 'waiting'].includes(sender.status) || sender.delegation.finishRequestedAt)) throw new DelegationPolicyError('incompatible_state', 'Sender session is not active');
+      return { project, relationship: 'peer', sender, recipient };
+    }
     const root = sender?.delegation?.role === 'root' ? sender : recipient;
     const worker = sender?.delegation?.role === 'worker' ? sender : recipient;
     if (!sender || !recipient || sender.id === recipient.id || root?.delegation?.role !== 'root' || worker?.delegation?.role !== 'worker' ||
@@ -309,27 +352,50 @@ export class DelegationService {
     if (send && sender.id === root.id && !root.delegation.permissions.includes('steer')) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
     if (send && (!['running', 'waiting'].includes(sender.status) || (sender.id === root.id && root.delegation.finishRequestedAt) ||
       (sender.delegation?.role === 'worker' && sender.delegation.destroy))) throw new DelegationPolicyError('incompatible_state', 'Sender session is not active');
-    return { project, sender, recipient, root, worker };
+    return { project, relationship: 'family', sender, recipient, root, worker };
+  }
+  /** The caller's own peer records need only its participation: a root task whose own history is
+   *  not being deleted. The record read names the counterpart; a deleted peer does not block it. */
+  private peerRecords(caller: Caller) {
+    const project = this.context(caller);
+    const self = project.store.getRun(caller.runId);
+    if (self?.delegation?.role !== 'root' || self.delegation.historyDeletion) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    return { project, self };
+  }
+  /** The ledger a new message lands in (spec § 2, Which ledger holds a message): a new request or
+   *  progress message in the sender's family ledger, a follow-up or reply with the request it names. */
+  private ledgerFor(pair: ConversationPair, kind: ConversationSendRequest['kind']): RunRecord {
+    if (pair.relationship === 'family') return pair.root;
+    const ledger = kind === 'reply' ? pair.recipient : pair.sender;
+    // A peer that never opened a session has no ledger, so it holds no request to reply to.
+    if (ledger.delegation?.role !== 'root') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    return ledger;
   }
   private currentConversation(project: DelegationProject, root: RunRecord): ConversationState {
+    // A ledger whose history is being deleted is read as it stands: reconciliation would write to it.
+    if (root.delegation?.role === 'root' && root.delegation.historyDeletion) return root.delegation.conversation ?? { messages: [], outcomes: [] };
     const state = reconcileConversationState(root, (id) => project.store.getRun(id), new Date().toISOString(), run => run.delegation?.role === 'worker'
       ? project.store.readWorkerExecution(run.id)?.phase === 'complete' : !project.manager.isActive(run.id));
     if (root.delegation?.role === 'root' && state && state !== root.delegation.conversation) project.store.commitConversation(root.id, state);
     return state ?? { messages: [], outcomes: [] };
   }
-  private conversationReceipt(project: DelegationProject, root: RunRecord, message: ConversationSendResult['message']): ConversationSendResult {
+  private conversationReceipt(project: DelegationProject, ledgerId: string, message: ConversationSendResult['message']): ConversationSendResult {
     const recipient = project.store.getRun(message.recipientRunId);
     const input = recipient?.agentInputs?.find(input => input.id === message.id);
-    const state = root.delegation?.role === 'root' ? root.delegation.conversation : undefined;
+    const ledger = project.store.getRun(ledgerId);
+    const state = ledger?.delegation?.role === 'root' ? ledger.delegation.conversation : undefined;
     const outcome = state?.outcomes.find(outcome => outcome.requestId === (message.requestId ?? message.id));
     return { message, delivery: input?.consumedAt ? 'consumed' : input?.deliveredAt ? 'delivered' : input ? 'queued' : 'not-delivered', ...(outcome ? { outcome } : {}) };
   }
   async send(caller: Caller, value: ConversationSendRequest): Promise<ConversationSendResult> {
     const request = conversationSendRequestSchema.parse(value);
     const initial = this.conversationPair(caller, request.recipientRunId, true);
-    return this.serialized(`conversation:${initial.project.id}:${initial.root.id}`, async () => {
-      const { project, root, sender, recipient } = this.conversationPair(caller, request.recipientRunId, true);
-      if (request.resume && (sender.id !== root.id || recipient.delegation?.role !== 'worker')) {
+    return this.serialized(`conversation:${initial.project.id}:${this.ledgerFor(initial, request.kind).id}`, async () => {
+      const pair = this.conversationPair(caller, request.recipientRunId, true);
+      const { project, sender, recipient, relationship } = pair;
+      const root = this.ledgerFor(pair, request.kind);
+      const peer = relationship === 'peer';
+      if (request.resume && (peer || sender.id !== root.id || recipient.delegation?.role !== 'worker')) {
         throw new DelegationPolicyError('denied_scope', 'Only an active parent may use --resume for its owned worker');
       }
       if (project.store.containsSessionSecret(JSON.stringify(request))) throw new DelegationPolicyError('invalid_input', 'Credentials cannot be included in delegated input');
@@ -338,10 +404,10 @@ export class DelegationService {
       const existing = state.messages.find(message => message.id === request.id);
       if (existing) {
         if (existing.requestHash !== requestHash) throw new DelegationPolicyError('invalid_input', 'Message ID payload conflict');
-        projectConversationEvents(project.store, root);
+        projectConversationEvents(project.store, project.store.getRun(root.id)!);
         project.manager.reconcileWorkerWaits();
         if (recipient.agentInputs?.some(input => input.id === existing.id && !input.deliveredAt)) project.manager.deliverConversationInput(recipient.id);
-        return this.conversationReceipt(project, root, existing);
+        return this.conversationReceipt(project, root.id, existing);
       }
       const original = request.requestId ? state.messages.find(message => message.id === request.requestId && message.kind === 'request' && message.state === 'accepted') : undefined;
       if (request.requestId && (!original || (request.kind === 'reply'
@@ -365,12 +431,15 @@ export class DelegationService {
       const stopped = recipient.delegation?.role === 'worker' && (recipient.status === 'cancelled' || recipient.stopping || recipient.delegation.destroy);
       const instruction = destroyed ? 'Not delivered: this worker was destroyed. Spawn a new worker for further work.'
         : stopped ? 'Not delivered: this worker was stopped or is being destroyed. Spawn a new worker for further work.'
-        : resumable && !resume ? sender.id === root.id
+        : resumable && !resume ? peer
+          ? `Not delivered: task is ${recipient.stopping ? 'stopping' : recipient.status}. Only its human can continue it.`
+          : sender.id === root.id
           ? `Not delivered: worker is ${recipient.status}. To resume it with a new instruction, run worker send ${recipient.id} "<instruction>" --kind request --resume --id <new-message-UUID>; use a new message ID. Retrying this rejected ID will not deliver it.`
           : `Not delivered: parent is ${recipient.status}. A worker cannot resume its parent; the parent must be continued by its owner.`
         : undefined;
       const message: ConversationSendResult['message'] = { id: request.id, senderRunId: sender.id, recipientRunId: recipient.id,
-        kind: request.kind, ...(request.requestId ? { requestId: request.requestId } : {}), text: project.store.redactText(request.text), createdAt: now, requestHash,
+        kind: request.kind, ...(request.requestId ? { requestId: request.requestId } : {}), ...(peer ? { relationship } : {}),
+        text: project.store.redactText(request.text), createdAt: now, requestHash,
         ...(request.kind === 'request' && !destroyed && (!resumable || resume) ? { deadline: new Date(Date.parse(now) + request.timeoutSeconds * 1000).toISOString() } : {}),
         ...(resume ? { resumed: true as const } : {}), ...(instruction ? { instruction } : {}),
         state: request.kind === 'reply' && settled ? 'late' : destroyed ? 'destroyed' : resumable && !resume ? 'continuation-required' : 'accepted' };
@@ -394,19 +463,28 @@ export class DelegationService {
         if (settled) outcomes[outcomes.indexOf(settled)] = outcome;
         else outcomes.push(outcome);
       }
+      // `parentRunId` keeps its name and holds the ledger owner (spec § 2, Message identity).
       const input = { id: message.id, source: 'agent' as const, parentRunId: root.id, text: message.text, createdAt: now,
-        conversation: { senderRunId: sender.id, recipientRunId: recipient.id, kind: message.kind, ...(message.requestId ? { requestId: message.requestId } : {}) } };
+        conversation: { senderRunId: sender.id, recipientRunId: recipient.id, kind: message.kind, ...(message.requestId ? { requestId: message.requestId } : {}), ...(peer ? { relationship } : {}) } };
       const next = { messages: [...state.messages, message], outcomes };
       if (resume) {
         const result = project.manager.continueRun(recipient.id, {
           text: `Your parent resumed this worker with a new instruction.\nAgent conversation ${JSON.stringify({ id: input.id, ...input.conversation })}\n${input.text}`,
         }, true, { rootId: root.id, state: next, input });
         if (!result.ok) throw new DelegationPolicyError('incompatible_state', `Worker was not resumed: ${result.error}. No message was accepted; resolve this condition and retry the same command`);
-      } else project.store.commitConversation(root.id, next, enqueue ? { recipientRunId: recipient.id, input } : undefined);
-      projectConversationEvents(project.store, root);
+      } else {
+        // A peer that has not opened a session yet becomes a root task with its first message.
+        const delivery = enqueue ? { recipientRunId: recipient.id, input, ...(peer && !recipient.delegation ? { recipientDelegation: rootDelegation() } : {}) } : undefined;
+        try { project.store.commitConversation(root.id, next, delivery, { id: message.id, senderRunId: sender.id, recipientRunId: recipient.id }); }
+        catch (error) {
+          if (error instanceof ConversationIdInUseError) throw new DelegationPolicyError('invalid_input', error.message);
+          throw error;
+        }
+      }
+      projectConversationEvents(project.store, project.store.getRun(root.id)!);
       project.manager.reconcileWorkerWaits();
       if (enqueue) project.manager.deliverConversationInput(recipient.id);
-      return this.conversationReceipt(project, root, message);
+      return this.conversationReceipt(project, root.id, message);
     });
   }
   async followUp(caller: Caller, value: ConversationSendRequest): Promise<ConversationSendResult> {
@@ -417,17 +495,47 @@ export class DelegationService {
     if (value.kind !== 'reply') throw new DelegationPolicyError('invalid_input', 'Expected reply');
     return this.send(caller, value);
   }
+  /**
+   * One pair's history. A family pair reads its one ledger; a peer pair reads both roots' ledgers
+   * and merges them in `(createdAt, id)` order, newest `CONVERSATION_PAGE_MESSAGES` first, with
+   * `nextBefore` when older messages exist (spec § 2). A deleted peer leaves the caller's ledger.
+   */
   async conversation(caller: Caller, value: ConversationInspectRequest): Promise<ConversationInspectResult> {
     const request = conversationInspectRequestSchema.parse(value);
-    const { project, root, sender, recipient } = this.conversationPair(caller, request.recipientRunId);
-    const state = this.currentConversation(project, root);
-    projectConversationEvents(project.store, root);
-    const messages = state.messages.filter(message => (message.senderRunId === sender.id && message.recipientRunId === recipient.id) || (message.senderRunId === recipient.id && message.recipientRunId === sender.id));
+    const { project, ledgers, self, other } = this.historyLedgers(caller, request.recipientRunId);
+    const between = (message: ConversationMessage) => (message.senderRunId === self && message.recipientRunId === other) || (message.senderRunId === other && message.recipientRunId === self);
+    const states = ledgers.map(ledger => {
+      const state = this.currentConversation(project, ledger);
+      projectConversationEvents(project.store, project.store.getRun(ledger.id) ?? ledger);
+      return state;
+    });
+    const before = request.before === undefined ? undefined : decodeConversationCursor(request.before);
+    const merged = states.flatMap(state => state.messages.filter(between)).sort(byCreatedAtAndId)
+      .filter(message => !before || byCreatedAtAndId(message, before) < 0);
+    const messages = merged.slice(-CONVERSATION_PAGE_MESSAGES);
+    const ids = new Set(messages.map(message => message.id));
+    const outcomes = states.flatMap(state => state.outcomes.filter(outcome => ids.has(outcome.requestId)));
     const inputs = project.store.getRun(caller.runId)?.agentInputs ?? [];
     const unread = messages.some(message => message.recipientRunId === caller.runId &&
       inputs.some(input => input.id === message.id && !input.deliveredAt));
-    return { messages, outcomes: state.outcomes.filter(outcome => messages.some(message => message.id === outcome.requestId)),
+    return { messages, outcomes,
+      ...(merged.length > messages.length ? { nextBefore: encodeConversationCursor(messages[0]!) } : {}),
       ...(unread ? { hint: 'This history includes unread messages. Run worker inbox to receive and mark them delivered. Inbox will show them again intentionally; after acknowledgement, Cezar will not queue them again for normal end-of-turn delivery.' } : {}) };
+  }
+  /** The ledgers a history read covers: the family's one, or each live peer root's own. A peer the
+   *  caller's ledger names stays readable after its record is deleted or while its history is. */
+  private historyLedgers(caller: Caller, otherId: string): { project: DelegationProject; ledgers: RunRecord[]; self: string; other: string } {
+    let pair: ConversationPair | undefined;
+    try { pair = this.conversationPair(caller, otherId); } catch (error) {
+      if (!(error instanceof DelegationPolicyError) || error.code !== 'denied_scope') throw error;
+    }
+    if (pair?.relationship === 'family') return { project: pair.project, ledgers: [pair.root], self: caller.runId, other: otherId };
+    const { project, self } = this.peerRecords(caller);
+    const other = project.store.getRun(otherId);
+    const named = self.delegation?.role === 'root' && !!self.delegation.conversation?.messages.some(message => message.relationship === 'peer' &&
+      (message.senderRunId === otherId || message.recipientRunId === otherId));
+    if (!pair && !named) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    return { project, ledgers: [self, ...(other?.delegation?.role === 'root' ? [other] : [])], self: self.id, other: otherId };
   }
   async inbox(caller: Caller): Promise<InboxReserveResult> {
     const project = this.context(caller);
@@ -436,21 +544,39 @@ export class DelegationService {
     const selected: { message: ConversationState['messages'][number]; outcome?: RequestOutcome | undefined }[] = [];
     let characters = 0;
     const states = new Map<string, ConversationState>();
+    const ledgerState = (ledger: RunRecord) => {
+      let state = states.get(ledger.id);
+      if (!state) { state = this.currentConversation(project, ledger); states.set(ledger.id, state); }
+      return state;
+    };
     for (const input of run.agentInputs ?? []) {
       if (!input.conversation || input.conversation.recipientRunId !== run.id || !project.manager.canClaimInboxInput(run.id, input.id)) continue;
       const senderId = input.conversation.senderRunId;
-      let pair: ReturnType<DelegationService['conversationPair']>;
-      try { pair = this.conversationPair(caller, senderId); } catch (error) {
-        if (error instanceof DelegationPolicyError && error.code === 'denied_scope') continue;
-        throw error;
+      let found: { message: ConversationMessage; outcome?: RequestOutcome | undefined } | undefined;
+      if (input.conversation.relationship === 'peer') {
+        // The caller's own input: its participation is the whole check (spec § 2, two levels).
+        if (run.delegation?.role !== 'root') continue;
+        const ledger = project.store.getRun(input.parentRunId);
+        const state = ledger?.delegation?.role === 'root' ? ledgerState(ledger) : undefined;
+        const message = state ? state.messages.find(entry => entry.id === input.id && entry.state === 'accepted' && entry.senderRunId === senderId && entry.recipientRunId === run.id)
+          // The sender's ledger went with its deletion; the input still carries the message.
+          : !ledger ? orphanedPeerMessage(input) : undefined;
+        if (message) found = { message, outcome: state?.outcomes.find(entry => entry.requestId === (message.requestId ?? message.id)) };
+      } else {
+        let pair: ConversationPair;
+        try { pair = this.conversationPair(caller, senderId); } catch (error) {
+          if (error instanceof DelegationPolicyError && error.code === 'denied_scope') continue;
+          throw error;
+        }
+        if (pair.relationship !== 'family') continue;
+        const state = ledgerState(pair.root);
+        const message = state.messages.find(entry => entry.id === input.id && entry.state === 'accepted' && entry.senderRunId === senderId && entry.recipientRunId === run.id);
+        if (message) found = { message, outcome: state.outcomes.find(entry => entry.requestId === (message.requestId ?? message.id)) };
       }
-      let state = states.get(pair.root.id);
-      if (!state) { state = this.currentConversation(project, pair.root); states.set(pair.root.id, state); }
-      const message = state.messages.find(entry => entry.id === input.id && entry.state === 'accepted' && entry.senderRunId === senderId && entry.recipientRunId === run.id);
-      if (!message) continue;
-      if (selected.length >= 32 || (selected.length > 0 && characters + message.text.length > 100_000)) break;
-      characters += message.text.length;
-      selected.push({ message, outcome: state.outcomes.find(entry => entry.requestId === (message.requestId ?? message.id)) });
+      if (!found) continue;
+      if (selected.length >= 32 || (selected.length > 0 && characters + found.message.text.length > 100_000)) break;
+      characters += found.message.text.length;
+      selected.push(found);
     }
     if (!selected.length) return { messages: [], outcomes: [] };
     const receipt = project.manager.reserveInboxInputs(run.id, caller.generation, selected.map(entry => entry.message.id));
@@ -469,7 +595,12 @@ export class DelegationService {
     const members = run?.agentInputs?.filter(input => input.inboxClaim?.receiptId === receiptId && input.inboxClaim.generation === caller.generation) ?? [];
     if (!members.length || members.some(input => !input.conversation || input.conversation.recipientRunId !== caller.runId))
       throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-    for (const input of members) this.conversationPair(caller, input.conversation!.senderRunId);
+    // A peer member is checked against the caller's own record only: a sender deleted between
+    // reserve and acknowledge does not refuse the batch (spec § 2).
+    for (const input of members) {
+      if (input.conversation!.relationship === 'peer') this.peerRecords(caller);
+      else this.conversationPair(caller, input.conversation!.senderRunId);
+    }
     return { project, receiptId };
   }
   async ackInbox(caller: Caller, value: InboxReceiptRequest): Promise<InboxReceiptResult> {
@@ -482,12 +613,17 @@ export class DelegationService {
     try { return { receiptId, status: project.manager.releaseInbox(caller.runId, caller.generation, receiptId) }; }
     catch { throw new DelegationPolicyError('incompatible_state', 'Inbox release failed'); }
   }
-  private ownRequest(caller: Caller, requestId: string) {
+  /** A request the caller sent, from its family ledger. A peer request needs only the caller's own
+   *  record: wait and cancel still work after the peer's deletion (spec § 2). */
+  private ownRequest(caller: Caller, requestId: string): { project: DelegationProject; root: RunRecord; message: ConversationMessage } {
     const project = this.context(caller); const sender = project.store.getRun(caller.runId);
     const root = sender?.delegation?.role === 'root' ? sender : sender?.delegation?.role === 'worker' ? project.store.getRun(sender.delegation.parentRunId) : undefined;
     const message = root?.delegation?.role === 'root' ? root.delegation.conversation?.messages.find(message => message.id === requestId && message.kind === 'request' && message.state === 'accepted' && message.senderRunId === caller.runId) : undefined;
     if (!message) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-    return { ...this.conversationPair(caller, message.recipientRunId), message };
+    if (message.relationship === 'peer') return { ...this.peerRecords(caller), root: root!, message };
+    const pair = this.conversationPair(caller, message.recipientRunId);
+    if (pair.relationship !== 'family') throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
+    return { project: pair.project, root: pair.root, message };
   }
   async cancelRequest(caller: Caller, value: ConversationCancelRequest): Promise<RequestOutcome> {
     const { requestId } = conversationCancelRequestSchema.parse(value);
@@ -495,12 +631,12 @@ export class DelegationService {
     const state = this.currentConversation(project, root);
     const existing = state.outcomes.find(outcome => outcome.requestId === requestId);
     if (existing) {
-      projectConversationEvents(project.store, root); project.manager.reconcileWorkerWaits();
+      projectConversationEvents(project.store, project.store.getRun(root.id)!); project.manager.reconcileWorkerWaits();
       return existing;
     }
     const outcome: RequestOutcome = { requestId, status: 'cancelled', observedAt: new Date().toISOString() };
     project.store.commitConversation(root.id, { ...state, outcomes: [...state.outcomes, outcome] });
-    projectConversationEvents(project.store, root); project.manager.reconcileWorkerWaits();
+    projectConversationEvents(project.store, project.store.getRun(root.id)!); project.manager.reconcileWorkerWaits();
     return outcome;
   }
   async waitRequests(caller: Caller, value: RequestWaitRequest) {
