@@ -10,13 +10,13 @@ const suite = job => (job.steps || []).find(step => /\bnpm test\b/.test(step.run
 
 // The unsharded suite outgrew the nightly's single 20-minute job on 2026-10-06,
 // and 14 nights timed out before anyone noticed (hearsay-tools/cezarion#1272).
-// Keep ci.yml's shard count and bound, while nightly uses GitHub-hosted runners
-// and the frequently run CI shards trial Ubicloud.
+// ci.yml's shard count, runner and bound are measured on every push, so the
+// nightly reuses them rather than keeping its own estimate.
 test('nightly shards the suite exactly as ci.yml does', () => {
   const nightly = read('nightly.yml'), ci = read('ci.yml');
   const shards = nightly.jobs.vitest;
   assert.deepEqual(shards.strategy.matrix.shard, ci.jobs.vitest.strategy.matrix.shard);
-  assert.equal(shards['runs-on'], 'ubuntu-24.04');
+  assert.equal(shards['runs-on'], ci.jobs.vitest['runs-on']);
   assert.equal(shards['timeout-minutes'], ci.jobs.vitest['timeout-minutes']);
   assert.equal(suite(shards), suite(ci.jobs.vitest));
   for (const [name, job] of Object.entries(nightly.jobs)) {
