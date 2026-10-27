@@ -426,7 +426,10 @@ describe('removeOwnedWorkspace verified retryable destruction', { timeout: WORKS
     const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
     await writeFile(join(shim, 'git'), `#!/bin/sh
 if [ "$1" = worktree ] && [ "$2" = remove ]; then
-  "${realGit}" "$@" || exit $?
+  mv "$4" "$4.saved"
+  "${realGit}" worktree prune --expire now || exit $?
+  mv "$4.saved" "$4"
+  rm -f "$4/.git"
   mkdir -p "$4/locked"
   echo leftover > "$4/locked/file"
   chmod 555 "$4/locked"
@@ -458,11 +461,37 @@ exec "${realGit}" "$@"
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);
     expect(await removeOwnedWorkspace(root, workspace, undefined, async () => { throw new Error('interrupt'); }))
       .toMatchObject({ state: 'incomplete' });
+    // Recreate the old on-disk checkpoint shape for legacy retry coverage.
+    const checkpointPath = receiptPath(root, workspace).replace(/\.json$/, '.cleanup.json');
+    const legacy = JSON.parse(await readFile(checkpointPath, 'utf8'));
+    delete legacy.rootIdentity;
+    await writeFile(checkpointPath, JSON.stringify(legacy));
     git(root, 'worktree', 'remove', '--force', workspace.path);
     await mkdir(workspace.path, { recursive: true });
     await writeFile(join(workspace.path, 'leftover'), 'data');
     return { root, workspace, first, second };
   }
+
+  it('recovers a legacy prepared leftover without a root identity', async () => {
+    const { root, workspace } = await partialLeftover();
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+    expect(existsSync(workspace.path)).toBe(false);
+  });
+
+  it('refuses an unregistered replacement of a prepared owned worktree', async () => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    expect(await removeOwnedWorkspace(root, workspace, undefined, async () => { throw new Error('interrupt'); }))
+      .toMatchObject({ state: 'incomplete' });
+    const saved = join(root, 'saved-worktree');
+    await rename(workspace.path, saved);
+    git(root, 'worktree', 'prune', '--expire', 'now');
+    await mkdir(workspace.path, { recursive: true });
+    await writeFile(join(workspace.path, 'KEEP'), 'replacement');
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    expect(await readFile(join(workspace.path, 'KEEP'), 'utf8')).toBe('replacement');
+    expect(await readFile(join(saved, 'tracked.txt'), 'utf8')).toBe('base');
+  });
 
   it('names the leftover and filesystem error when deletion fails', async () => {
     const { root, workspace } = await partialLeftover();

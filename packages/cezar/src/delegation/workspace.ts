@@ -27,11 +27,13 @@ const fileIdentitySchema = z.object({ dev: z.number(), ino: z.number(), birthtim
 const branchIdentitySchema = z.object({ file: fileIdentitySchema, prefixBytes: z.number().int().min(1).max(4096), prefixHash: z.string().length(64) }).strict();
 const receiptSchema = z.object({ workspace: workerWorkspaceSchema, gitDir: z.string().min(1), branchIdentity: branchIdentitySchema.optional() }).strict();
 const cleanupSchema = z.object({ workspace: workerWorkspaceSchema, gitDir: z.string(), sha: workerWorkspaceSchema.shape.baselineSha,
-  logFile: fileIdentitySchema, logHash: z.string().length(64), phase: z.enum(['prepared', 'worktree-removed', 'complete']) }).strict();
+  logFile: fileIdentitySchema, logHash: z.string().length(64), rootIdentity: z.object({ dev: z.number(), ino: z.number() }).strict().optional(), phase: z.enum(['prepared', 'worktree-removed', 'complete']) }).strict();
 type Cleanup = z.infer<typeof cleanupSchema>;
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const hash = (content: Buffer) => createHash('sha256').update(content).digest('hex');
 const checkUnheld = (assertUnheld?: () => void) => assertUnheld?.();
+const matchesRootIdentity = (identity: Cleanup['rootIdentity'], info: { dev: number; ino: number }) =>
+  !identity || (identity.dev === info.dev && identity.ino === info.ino);
 
 // Git for Windows emits forward slashes even for native absolute paths.
 function worktreeEntries(listed: string): string[] {
@@ -399,7 +401,10 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         }
         const current = await verifyBranch(repoRoot, workspace, receipt);
         if (checkpoint && (checkpoint.sha !== current.sha || checkpoint.logHash !== hash(current.log.content))) return undefined;
-        checkpoint ??= { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content), phase: 'prepared' };
+        const rootInfo = await lstat(workspace.path);
+        if (!matchesRootIdentity(checkpoint?.rootIdentity, rootInfo)) return undefined;
+        checkpoint ??= { workspace, gitDir: receipt.gitDir, sha: current.sha, logFile: current.log.file, logHash: hash(current.log.content),
+          rootIdentity: { dev: rootInfo.dev, ino: rootInfo.ino }, phase: 'prepared' };
         return checkpoint;
       }
 
@@ -436,6 +441,11 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         };
         if (!await safe()) return false;
         const original = await lstat(workspace.path);
+        // Old prepared checkpoints have no root identity. Their recovery relies on the
+        // cooperative same-path assumption that authorized the original cleanup.
+        if (!matchesRootIdentity(checkpoint?.rootIdentity, original)) {
+          report?.unexplained?.(); return false;
+        }
         const unheld = () => {
           assertCurrent?.(); assertUnheld?.();
           const holders = inspectGeneration({ paths: [workspace.path] });
