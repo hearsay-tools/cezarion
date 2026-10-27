@@ -91,12 +91,14 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
     console.info('native cleanup: stopping owned app');
     const result = await removeOwnedWorkspace(root, workspace);
     if (result.state !== 'complete') {
-      const state = await readFile(join(qa, 'test-env.json'), 'utf8').then(text => JSON.parse(text)).catch(() => null);
-      console.info('native cleanup diagnostic:', JSON.stringify({
-        appExit: app.exitCode, appSignal: app.signalCode, appIdentityLive: windowsStartToken(app.pid!) !== undefined,
-        watcherExit: watcher.exitCode, watcherSignal: watcher.signalCode, watcherIdentityLive: windowsStartToken(watcher.pid!) !== undefined,
-        descriptorStatus: state?.status ?? 'missing-or-running', descriptorHasPid: Number.isSafeInteger(state?.app?.pid),
-      }));
+      try {
+        const state = await readFile(join(qa, 'test-env.json'), 'utf8').then(text => JSON.parse(text)).catch(() => null);
+        console.info('native cleanup diagnostic:', JSON.stringify({
+          appExit: app.exitCode, appSignal: app.signalCode, appIdentityLive: windowsStartToken(app.pid!) !== undefined,
+          watcherExit: watcher.exitCode, watcherSignal: watcher.signalCode, watcherIdentityLive: windowsStartToken(watcher.pid!) !== undefined,
+          descriptorStatus: state?.status ?? 'missing-or-running', descriptorHasPid: Number.isSafeInteger(state?.app?.pid),
+        }));
+      } catch { console.info('native cleanup diagnostic unavailable'); }
     }
     expect(result, JSON.stringify(result)).toMatchObject({ state: 'complete', remaining: [] });
     expect(watcher.exitCode).not.toBeNull();
