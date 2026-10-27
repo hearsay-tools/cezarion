@@ -1,7 +1,7 @@
 'use strict';
 
-// Guards the Vitest coverage jobs of ci.yml (hearsay-tools/cezarion#1780): the three shards must keep
-// producing one merged artifact, and nothing about them may reach a required check or a test verdict.
+// Guards single-pass coverage (hearsay-tools/cezarion#1958): the required shards run tests once,
+// and optional report publication cannot change their test verdict.
 const assert = require('node:assert/strict');
 const { spawnSync } = require('node:child_process');
 const fs = require('node:fs');
@@ -13,7 +13,7 @@ const yaml = require('yaml');
 
 const repoRoot = path.join(__dirname, '..', '..');
 const ci = () => yaml.parse(fs.readFileSync(path.join(repoRoot, '.github', 'workflows', 'ci.yml'), 'utf8'));
-const COVERAGE_JOBS = ['vitest-coverage', 'vitest-coverage-merge'];
+const COVERAGE_JOBS = ['vitest-coverage-merge'];
 const SHARD_RUN = 'npm test -- --shard=${{ matrix.shard }}/3 --maxWorkers=4';
 const named = (job, name) => job.steps.find((step) => step.name === name);
 
@@ -29,40 +29,40 @@ function context(event, { surface = 'full-matrix', bump = 'false', verified = 'f
       'queue-proof': { result: 'success', outputs: { verified } },
       'change-surface': { result: 'success', outputs: { surface } },
       'classify-pr': { result: 'success', outputs: { bump_pr: bump } },
-      'vitest-coverage': { result: shards },
+      vitest: { result: shards },
     },
     cancelled: () => cancelled,
   };
 }
 
-test('the coverage jobs run the Vitest shards again with coverage, and the vitest job is not touched', () => {
+test('the required shards run once, with coverage only on PRs and dispatches', () => {
   const { jobs } = ci();
-  const vitest = jobs.vitest;
-  assert.equal(vitest.steps.find((step) => step.run?.startsWith('npm test --')).run, SHARD_RUN);
-  assert.doesNotMatch(JSON.stringify(vitest), /coverage|continue-on-error/i, 'the required shard job must not change');
-  const coverage = jobs['vitest-coverage'];
-  assert.deepEqual(coverage.strategy.matrix.shard, vitest.strategy.matrix.shard);
-  assert.equal(coverage.strategy['fail-fast'], false);
-  assert.equal(named(coverage, 'Collect Vitest coverage').run, `${SHARD_RUN} --coverage.enabled`);
+  assert.equal(jobs['vitest-coverage'], undefined, 'no duplicate test matrix');
+  const runs = jobs.vitest.steps.filter((step) => step.run?.startsWith('npm test --'));
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0]['continue-on-error'], undefined, 'test failures must block');
+  for (const event of ['pull_request_target', 'workflow_dispatch', 'merge_group', 'push']) {
+    const expected = ['pull_request_target', 'workflow_dispatch'].includes(event);
+    const command = runs[0].run.replace(/\$\{\{.*?\}\}/g, (raw) => raw.includes('matrix.shard') ? '1' : expression(raw, context(event)));
+    assert.equal(command.trim(), `${SHARD_RUN.replace('${{ matrix.shard }}', '1')}${expected ? ' --coverage.enabled' : ''}`);
+    assert.equal(expression(jobs.vitest['timeout-minutes'], context(event)), expected ? 25 : 15);
+  }
 });
 
-test('the coverage jobs run on pull requests and dispatches, and never in the merge queue or on main', () => {
+test('coverage publication follows eligible shards, including failures, but never main or the merge queue', () => {
   const { jobs } = ci();
-  const collect = jobs['vitest-coverage'].if;
   const merge = jobs['vitest-coverage-merge'].if;
+  const upload = named(jobs.vitest, 'Upload shard coverage').if;
   for (const event of ['pull_request_target', 'workflow_dispatch']) {
-    assert.equal(expression(collect, context(event)), true, event);
-    assert.equal(expression(merge, context(event)), true, event);
-    assert.equal(expression(merge, context(event, { shards: 'failure' })), true, `${event}: a failed shard still gets a warning`);
+    assert.equal(expression(upload, context(event)), true);
+    assert.equal(expression(merge, context(event)), true);
+    assert.equal(expression(merge, context(event, { shards: 'failure' })), true);
+    assert.equal(expression(merge, context(event, { shards: 'skipped' })), false);
   }
-  for (const event of ['merge_group', 'push']) assert.equal(expression(collect, context(event)), false, event);
-  assert.equal(expression(collect, context('pull_request_target', { surface: 'docs-only' })), false);
-  assert.equal(expression(collect, context('pull_request_target', { surface: 'infra-only' })), false);
-  assert.equal(expression(collect, context('pull_request_target', { bump: 'true' })), false);
-  assert.equal(expression(collect, context('push', { verified: 'true' })), false);
-  assert.equal(expression(collect, context('pull_request_target', { cancelled: true })), false);
-  assert.equal(expression(merge, context('merge_group', { shards: 'skipped' })), false);
-  assert.equal(expression(merge, context('pull_request_target', { shards: 'skipped' })), false);
+  for (const event of ['merge_group', 'push']) {
+    assert.equal(expression(upload, context(event)), false);
+    assert.equal(expression(merge, context(event)), false);
+  }
   assert.equal(expression(merge, context('pull_request_target', { cancelled: true })), false);
 });
 
@@ -79,7 +79,7 @@ test('no coverage job is a required check, a verify dependency or a merge-queue 
     }
   }
   assert.doesNotMatch(jobs.verify.steps.map((step) => step.run).join('\n'), /coverage/i);
-  assert.deepEqual(jobs['vitest-coverage-merge'].needs, ['vitest-coverage']);
+  assert.deepEqual(jobs['vitest-coverage-merge'].needs, ['vitest']);
 });
 
 test('the coverage jobs hold no secret, read only, pin every action and keep expressions out of scripts', () => {
@@ -102,15 +102,16 @@ test('every coverage step can fail without failing its job, so a problem is only
       assert.equal(step['continue-on-error'], true, `${id}: "${step.name}" must set continue-on-error`);
     }
   }
-  const collect = named(jobs['vitest-coverage'], 'Collect Vitest coverage');
-  assert.ok(collect['timeout-minutes'] < jobs['vitest-coverage']['timeout-minutes'], 'a slow run ends the step, not the job');
+  for (const name of ['Upload shard coverage', 'Report a missing shard coverage report']) {
+    assert.equal(named(jobs.vitest, name)['continue-on-error'], true);
+  }
 });
 
 test('the shards keep producing one merged artifact named for the head commit', () => {
   const { jobs } = ci();
   const config = fs.readFileSync(path.join(repoRoot, 'vitest.config.ts'), 'utf8');
   const reports = config.match(/reportsDirectory: '([^']+)'/)[1];
-  const shardUpload = named(jobs['vitest-coverage'], 'Upload shard coverage');
+  const shardUpload = named(jobs.vitest, 'Upload shard coverage');
   assert.equal(shardUpload.with.path, `${reports}/coverage-final.json`);
   assert.match(shardUpload.with.name, /^vitest-coverage-shard-\$\{\{ matrix\.shard \}\}$/);
   assert.equal(shardUpload.with['if-no-files-found'], 'error');
@@ -189,12 +190,12 @@ test('a coverage artifact that is not uploaded is a warning annotation and a sum
 });
 
 test('a shard that produced no report warns with its number and says where the verdict comes from', (t) => {
-  const step = named(ci().jobs['vitest-coverage'], 'Report a missing shard coverage report');
+  const step = named(ci().jobs.vitest, 'Report a missing shard coverage report');
   assert.match(step.if, /^always\(\)/);
   const directory = sandbox(t);
   const timedOut = runStep(directory, step, { SHARD: '2', COLLECT: 'failure', UPLOAD: 'skipped' });
   assert.equal(timedOut.status, 0);
-  assert.match(timedOut.stdout, /^::warning title=Vitest coverage shard 2\/3 missing::No coverage report from shard 2: the coverage run ended as failure .*Vitest shard job\.$/m);
+  assert.match(timedOut.stdout, /^::warning title=Vitest coverage shard 2\/3 missing::No coverage report from shard 2: the test run ended as failure .*Vitest shard job\.$/m);
   assert.match(timedOut.summary, /Vitest coverage shard 2\/3: no report/);
   const upload = runStep(directory, step, { SHARD: '3', COLLECT: 'success', UPLOAD: 'failure' });
   assert.match(upload.stdout, /shard 3: the upload ended as failure/);

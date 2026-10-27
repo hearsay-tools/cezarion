@@ -28,7 +28,7 @@ export default defineConfig({
       ...(process.env.GITHUB_ACTIONS === 'true' ? [['github-actions', { jobSummary: { title: 'Vitest Test Report' } }] as const] : []),
       ...(coverageRequested() ? [new KeepTestFilesInCoverage()] : []),
     ],
-    // Opt in with `--coverage` (CI's coverage jobs do). V8 coverage of the code the tests load,
+    // Opt in with `--coverage` (CI's PR/dispatch test shards do). V8 coverage of the code the tests load,
     // test files included, written where the ignored `.ai/qa/` directory keeps it. The default
     // `exclude` list holds test-file patterns, so it is replaced rather than extended.
     coverage: {

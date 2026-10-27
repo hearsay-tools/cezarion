@@ -168,11 +168,11 @@ the stopped collection are removed.
 
 ### Coverage from CI
 
-CI's `Vitest coverage shard N/3` jobs run the same three shards as the required Vitest
-shards, with V8 coverage, and `Merge Vitest coverage` uploads one artifact for the head:
+CI's required `Vitest shard N/3` jobs collect V8 coverage during their single test run
+on eligible pull requests and dispatches. The optional `Merge Vitest coverage` job uploads one artifact for the head:
 `vitest-coverage-<head SHA>`, holding `coverage-final.json` (paths relative to the
 repository root, test files included) and `provenance.json`. It runs on every pull request
-and on a dispatch of `ci.yml`, and it is not a required check. This saves a local coverage
+and on a dispatch of `ci.yml`, and report publication is not a required check. This saves a local coverage
 run, which took about 10 minutes at high load on hearsay-tools/cezarion#1772.
 
 1. Get the run for the exact head you have checked out, with a clean tree:

@@ -366,7 +366,7 @@ test('verification bindings keep the final gate in CI and reserve local full bro
   const shards = vitest.strategy.matrix.shard;
   const run = vitest.steps.map((step) => step.run).find((cmd) => /^npm test -- --shard=/.test(cmd ?? ''));
   assert.ok(run, 'expected the Vitest job to run sharded npm test');
-  const shardCommands = shards.map((n) => run.replace('${{ matrix.shard }}', String(n)));
+  const shardCommands = shards.map((n) => run.replace('${{ matrix.shard }}', String(n)).replace(/ \$\{\{.*?\}\}/g, ''));
   assert.deepEqual(commands.filter((cmd) => cmd.startsWith('npm test')), shardCommands,
     'validation.commands must list exactly the Vitest shards CI runs (hearsay-tools/cezarion#981)');
   const claude = fs.readFileSync(path.join(repoRoot, 'CLAUDE.md'), 'utf8');
