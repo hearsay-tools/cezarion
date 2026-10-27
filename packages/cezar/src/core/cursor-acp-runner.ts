@@ -323,11 +323,26 @@ class CursorSession implements AgentSession {
     });
   }
   private async bootstrap(): Promise<void> {
+    await this.initialize();
+    if (!this.open) return;
+    const session = await this.openSession();
+    if (!this.open || !session) return;
+    await this.applyModelAndEffort(session.config);
+    if (!this.open) return;
+    this.emit({ type: 'session', sessionId: session.sessionId });
+    this.ui({ type: 'session.started', backend: 'cursor', sessionId: session.sessionId, cwd: this.spec.cwd, ...(this.spec.model ? { model: this.spec.model } : {}) });
+    this.ready = true;
+    this.stopStdinProbe();
+    this.startTurn([{ type: 'text', text: prependSystemPrompt(this.spec.systemPrompt, this.spec.userPrompt) }, ...(this.spec.images ?? [])]);
+  }
+  private async initialize(): Promise<void> {
     const init = await this.request('initialize', { protocolVersion: 1, clientInfo: { name: 'cezar', version: '1' },
       clientCapabilities: { _meta: { subagents: !this.spec.restrictNativeDelegation, parameterizedModelPicker: true } } });
     if (!this.open) return;
     if (init.protocolVersion !== 1) throw new Error('Cursor ACP protocol version is unsupported');
     if (this.spec.resume && this.spec.sessionId && object(init.agentCapabilities).loadSession !== true) throw new Error('Cursor CLI does not support session resume');
+  }
+  private async openSession(): Promise<{ sessionId: string; config: CursorConfigOption[] | undefined } | undefined> {
     const resume = this.spec.resume && this.spec.sessionId;
     const response = await this.request(resume ? 'session/load' : 'session/new', {
       cwd: this.spec.cwd,
@@ -347,6 +362,9 @@ class CursorSession implements AgentSession {
     this.state = { ...this.state, sessionId: this.sessionId };
     const config = parseCursorConfigOptions(response.configOptions);
     if (config) this.configOptions = config;
+    return { sessionId: this.sessionId, config };
+  }
+  private async applyModelAndEffort(config: CursorConfigOption[] | undefined): Promise<void> {
     const modelOption = this.configOptions.find(option => option.id === 'model');
     if (this.spec.model && modelOption?.options.some(option => option.value === this.spec.model)) {
       if (modelOption.currentValue !== this.spec.model) await this.setConfigOption('model', this.spec.model);
@@ -359,12 +377,6 @@ class CursorSession implements AgentSession {
       const selection = cursorEffortSelection(this.configOptions, this.spec.effort);
       await this.setConfigOption(selection.configId, selection.value);
     }
-    if (!this.open) return;
-    this.emit({ type: 'session', sessionId: this.sessionId });
-    this.ui({ type: 'session.started', backend: 'cursor', sessionId: this.sessionId, cwd: this.spec.cwd, ...(this.spec.model ? { model: this.spec.model } : {}) });
-    this.ready = true;
-    this.stopStdinProbe();
-    this.startTurn([{ type: 'text', text: prependSystemPrompt(this.spec.systemPrompt, this.spec.userPrompt) }, ...(this.spec.images ?? [])]);
   }
   private async setConfigOption(configId: string, value: string): Promise<void> {
     const response = await this.request('session/set_config_option', { sessionId: this.sessionId, configId, value });
