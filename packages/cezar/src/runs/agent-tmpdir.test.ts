@@ -215,6 +215,8 @@ describe('reaping the per-run temp directories (#785)', () => {
     const outsider = join(root, name);
     const gone = join(root, `missing-${randomBytes(8).toString('hex')}`);
     await mkdirAsync(outsider);
+    // A recursive mkdir that finds an existing entry must not claim it.
+    mkdirSync(outsider, { recursive: true });
     try {
       writeFileSync(join(outsider, '.synthetic-proof'), 'fixture');
       writeFileSync(join(outsider, '.cez-owner-dir'), gone);
