@@ -454,6 +454,84 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     expect(events.filter(event => event.type === 'error')).toEqual([]);
   });
 
+  /** A mock whose first prompt runs `turn`, then settles; it answers every `set_` command. */
+  const writeTurnMock = (name: string, turn: string): string => {
+    const bin = join(cwd, name);
+    writeFileSync(bin, `#!/usr/bin/env node
+import readline from 'node:readline';
+const send = (v) => process.stdout.write(JSON.stringify(v) + '\\n');
+send({ type: 'ready', protocolVersion: 1, supportedProtocolVersions: [1, 2] });
+let prompts = 0;
+for await (const line of readline.createInterface({ input: process.stdin })) {
+  const command = JSON.parse(line);
+  if (command.type === 'get_state') send({ id: command.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'pins' } });
+  else if (command.type === 'prompt') {
+    prompts += 1;
+    send({ id: command.id, type: 'response', command: 'prompt', success: true });
+${turn}
+  } else if (command.type.startsWith('set_')) send({ id: command.id, type: 'response', command: command.type, success: true });
+}
+`, { mode: 0o755 });
+    return bin;
+  };
+  const settleTurn = (stopReason = 'stop') => `      send({ type: 'message_end', message: { role: 'assistant', stopReason: '${stopReason}', errorMessage: 'Overloaded', usage: { input: 1, output: 1 } } });
+      send({ type: 'agent_end', messages: [], isTerminal: true, yielded: true });
+      send({ type: 'prompt_result', agentInvoked: true, status: 'completed', sessionSettled: true });
+      send({ type: 'session_settled' });`;
+
+  // Pins the Pi-family text and tool handling omp shares with pi (hearsay-tools/cezarion#1955).
+  it('completes text blocks without a snapshot or an index, and records only named tool calls', async () => {
+    const bin = writeTurnMock('mock-omp-text-tools.mjs', `    send({ type: 'agent_start' });
+    const update = (event) => send({ type: 'message_update', message: { role: 'assistant' }, assistantMessageEvent: event });
+    update({ type: 'text_delta', contentIndex: 0, delta: 'alpha ' });
+    update({ type: 'text_delta', contentIndex: 0, delta: 'beta' });
+    update({ type: 'text_end', contentIndex: 0 });
+    update({ type: 'text_delta', delta: 'anonymous' });
+    update({ type: 'text_end' });
+    send({ type: 'tool_execution_start', toolCallId: 'call-unnamed' });
+    send({ type: 'tool_execution_start', toolCallId: 'call-1', toolName: 'read', args: { path: 'a.txt' } });
+${settleTurn()}`);
+    const { events, result } = await runSession(spec('pins'), undefined, bin);
+    expect(events.filter(event => event.type === 'text')).toEqual([
+      { type: 'text', text: 'alpha beta' },
+      { type: 'text', text: 'anonymous' },
+    ]);
+    expect(events.filter(event => event.type === 'tool-call')).toEqual([
+      { type: 'tool-call', id: 'call-1', tool: 'read', input: { path: 'a.txt' } },
+    ]);
+    expect(result.toolCalls).toEqual([{ id: 'call-1', name: 'read', input: { path: 'a.txt' } }]);
+  });
+
+  it.each([
+    { stopReason: 'stop', consumed: [['input-1']] },
+    { stopReason: 'error', consumed: [] },
+  ])('a steer acknowledged before a later agent_start is read when that turn settles, unless it failed ($stopReason)', async ({ stopReason, consumed: expected }) => {
+    // The steer gets no user message_start: only the agent_start after its ack carries it.
+    const bin = writeTurnMock('mock-omp-carried.mjs', `    if (prompts === 1) {
+      send({ type: 'agent_start' });
+      send({ type: 'tool_execution_start', toolCallId: 'call-1', toolName: 'read', args: {} });
+    } else {
+      send({ type: 'agent_start' });
+${settleTurn(stopReason)}
+    }`);
+    const consumed: string[][] = [];
+    let acknowledged: Promise<void> | boolean | undefined;
+    let session: AgentSession;
+    const events: AgentEvent[] = [];
+    session = new OmpRunner({ bin }).startSession(
+      spec('carry'),
+      (event) => {
+        events.push(event);
+        if (event.type === 'tool-call') acknowledged = session.sendAgentMessage([{ type: 'text', text: 'worker reply' }], ['input-1']);
+      },
+      { autoEndAfterFirstTurn: true, onAgentInputConsumed: (ids) => consumed.push([...ids]) },
+    );
+    await session.result;
+    await expect(acknowledged).resolves.toBeUndefined();
+    expect(consumed).toEqual(expected);
+    expect(turnEnds(events)).toBe(1);
+  });
+
   it.each(['mock:local-command', 'mock:local-result'])('agentInvoked false ends the turn without session_settled (%s)', async (prompt) => {
     const { events, ui } = await runSession(spec(prompt));
     expect(turnEnds(events)).toBe(1);
