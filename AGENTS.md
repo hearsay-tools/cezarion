@@ -622,9 +622,8 @@ explicitly requested or needed to investigate a CI failure. A full local Vitest
 run is CI's three shards, one after another: `npm test -- --shard=1/3 --maxWorkers=4`,
 then `--shard=2/3` and `--shard=3/3` with the same flags. An unsharded `npm test`
 is not the local full gate: on a host with about 30 GiB free it can be OOM-killed
-(exit 137). Squeal reuses cached
-results at startup (`baseline.onStart: "lookup-only"`) and validates edits without
-a cold-start full run; its Stop policy requires neither a full nor a slow suite.
+(exit 137). Squeal's `baseline.onStart: "lookup-then-run-missing"` reuses cached
+results and runs missing tests at startup; Stop requires neither a full nor a slow suite.
 Record the tested revision (or uncommitted diff), commands or Squeal status,
 outcomes, and subsequent edits in the handoff. After later code changes, rerun
 affected checks. A targeted run, skipped browser suite, or old pass for changed
