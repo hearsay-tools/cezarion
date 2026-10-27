@@ -1,4 +1,7 @@
+import { EventEmitter } from 'node:events';
 import { execFile, execFileSync, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import * as fs from 'node:fs';
+import * as childProcess from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,12 +9,15 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('node:child_process', async original => ({ ...await original<typeof import('node:child_process')>() }));
+vi.mock('node:fs', async original => ({ ...await original<typeof import('node:fs')>() }));
+
 vi.mock('./runner-runtime.ts', async (original) => ({
   ...await original<typeof import('./runner-runtime.ts')>(),
   KILL_GRACE_MS: 100,
 }));
 
-import { forwardToSessionGroups, procStatExited, sessionGroupOf, signalSession, spawnSessionLeader } from './session-process.ts';
+import { leaderState, probeLeaderState, psLeaderState, forwardToSessionGroups, procStatExited, sessionGroupOf, signalSession, spawnSessionLeader } from './session-process.ts';
 import { requirePid } from '../pid-file.testkit.ts';
 
 /** A zombie has exited; only its reaper's wait remains. */
@@ -56,6 +62,138 @@ describe('procStatExited (hearsay-tools/cezarion#890)', () => {
   });
 });
 
+describe('leader exit evidence (hearsay-tools/cezarion#1899)', () => {
+  const child = () => Object.assign(new EventEmitter(), { pid: 123456, exitCode: null, signalCode: null }) as ChildProcess;
+  afterEach(() => { vi.restoreAllMocks(); vi.useRealTimers(); });
+
+  function mockPs(stdout: string, error: Error | null = null, stderr = '') {
+    const probe = Object.assign(new EventEmitter(), { exitCode: null, signalCode: null, kill: vi.fn() }) as unknown as ChildProcess;
+    const run = vi.spyOn(childProcess, 'execFile').mockImplementation(((...args: unknown[]) => {
+      const callback = args.at(-1) as (error: Error | null, stdout: string, stderr: string) => void;
+      callback(error, stdout, stderr);
+      return probe;
+    }) as typeof childProcess.execFile);
+    return { run, probe };
+  }
+
+  it('accepts an observed exit or a missing process, including without proc support', () => {
+    expect(leaderState({ ...child(), exitCode: 143 } as ChildProcess)).toBe('exited');
+    vi.spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('gone'), { code: 'ESRCH' }); });
+    expect(leaderState(child(), 'win32')).toBe('exited');
+  });
+
+  it('does not infer exit or liveness from an unavailable PID or denied process probe', () => {
+    expect(leaderState({ ...child(), pid: undefined } as unknown as ChildProcess)).toBe('unknown');
+    vi.spyOn(process, 'kill').mockImplementation(() => { throw Object.assign(new Error('denied'), { code: 'EPERM' }); });
+    expect(leaderState(child(), 'win32')).toBe('unknown');
+  });
+
+  it.each(['EACCES', 'ENOENT'])('keeps unknown evidence when proc cannot be read (%s)', code => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    vi.spyOn(fs, 'readFileSync').mockImplementation(() => { throw Object.assign(new Error('unavailable'), { code }); });
+    expect(leaderState(child(), 'linux')).toBe('unknown');
+  });
+
+  it.each([
+    ['123456 (node) Z 1 123456 123456 0 -1 0', 'exited'],
+    ['123456 (node) D 1 123456 123456 0 -1 4', 'exited'],
+    ['123456 (node) S 1 123456 123456 0 -1 0', 'live'],
+    ['123456 (node) X 1 123456 123456 0 -1 0', 'exited'],
+    ['123456 (node) ? 1 123456 123456 0 -1 0', 'unknown'],
+    ['999999 (node) S 1 123456 123456 0 -1 0', 'unknown'],
+    ['123456 (node) S 1 123456 123456 0 -1 999999999999999999999', 'unknown'],
+    ['unparseable', 'unknown'],
+  ] as const)('requires positive process-state evidence: %s', (stat, expected) => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    vi.spyOn(fs, 'readFileSync').mockReturnValue(stat);
+    expect(leaderState(child(), 'linux')).toBe(expected);
+  });
+
+  it.each([
+    ['Z', 'exited'], ['Z+', 'exited'], ['Zs', 'exited'], ['E', 'exited'], ['E+', 'exited'],
+    ['S', 'live'], ['R+', 'live'], ['T', 'live'], ['', 'unknown'], ['STAT', 'unknown'],
+    ['ZOMBIE', 'unknown'], ['ERROR: denied', 'unknown'], ['R\nZ', 'unknown'],
+  ] as const)('Darwin requires one positive ps state: %s', (stdout, expected) => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    const { run } = mockPs(stdout);
+    expect(probeLeaderState(child(), 50, 'darwin')()).toBe(expected);
+    expect(run).toHaveBeenCalledWith('ps', ['-o', 'stat=', '-p', '123456'],
+      { encoding: 'utf8', timeout: 50, killSignal: 'SIGKILL', maxBuffer: 128 }, expect.any(Function));
+  });
+
+  it.each([
+    [1, ''], [1, 'Z'], ['ETIMEDOUT', 'Z'], ['ENOENT', ''], ['EACCES', 'Z'],
+  ])('Darwin keeps cleanup on unavailable ps evidence: %s %s', (code, stdout) => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    mockPs(String(stdout), Object.assign(new Error('unavailable'), { code }));
+    expect(probeLeaderState(child(), 50, 'darwin')()).toBe('unknown');
+  });
+
+  it('Darwin keeps cleanup when starting the ps probe throws', () => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    vi.spyOn(childProcess, 'execFile').mockImplementation(() => { throw new Error('probe unavailable'); });
+    expect(probeLeaderState(child(), 50, 'darwin')()).toBe('unknown');
+  });
+
+  it.each(['T', 'Sl', 'R+'])('Linux fallback preserves live evidence with unreadable proc: %s', state => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    vi.spyOn(fs, 'readFileSync').mockImplementation(() => { throw new Error('unreadable'); });
+    mockPs(state);
+    expect(probeLeaderState(child(), 50, 'linux')()).toBe('live');
+  });
+
+  it('rejects contradictory ps diagnostics and contradictory live proc/exited ps', () => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    mockPs('T', null, 'permission denied');
+    expect(probeLeaderState(child(), 50, 'darwin')()).toBe('unknown');
+    const read = vi.spyOn(fs, 'readFileSync').mockImplementation(() => { throw new Error('unavailable'); });
+    mockPs('Z');
+    const sample = probeLeaderState(child(), 50, 'linux');
+    read.mockReturnValue('123456 (node) S 1 123456 123456 0 -1 0');
+    expect(sample()).toBe('unknown');
+  });
+
+  it('never waits past the existing grace and ignores late ps output', () => {
+    vi.useFakeTimers();
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    let deliver!: (error: Error | null, stdout: string, stderr: string) => void;
+    const { run, probe } = mockPs('');
+    run.mockImplementation(((...args: unknown[]) => { deliver = args.at(-1) as typeof deliver; return probe; }) as typeof childProcess.execFile);
+    const sample = probeLeaderState(child(), 8000, 'darwin');
+    vi.advanceTimersByTime(7949);
+    expect(run).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(run).toHaveBeenCalledTimes(1);
+    vi.advanceTimersByTime(50);
+    expect(sample()).toBe('unknown');
+    expect(probe.kill).toHaveBeenCalledWith('SIGKILL');
+    deliver(null, 'S', '');
+    expect(sample()).toBe('unknown');
+  });
+
+  it('cancels an in-flight probe at native exit and a scheduled probe before launch', () => {
+    vi.useFakeTimers();
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    const { run, probe } = mockPs('');
+    const first = child();
+    probeLeaderState(first, 50, 'darwin');
+    first.emit('exit', 0);
+    expect(probe.kill).toHaveBeenCalledWith('SIGKILL');
+    const second = child();
+    probeLeaderState(second, 8000, 'darwin');
+    second.emit('exit', 0);
+    vi.advanceTimersByTime(8000);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps cleanup and unknown attribution without a supported state probe', () => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    const { run } = mockPs('S');
+    expect(probeLeaderState(child(), 50, 'win32')()).toBe('unknown');
+    expect(run).not.toHaveBeenCalled();
+  });
+});
+
 describe.skipIf(process.platform === 'win32')('session process groups (hearsay-tools/cezarion#890)', () => {
   const pids: number[] = [];
   const dirs: string[] = [];
@@ -79,6 +217,15 @@ describe.skipIf(process.platform === 'win32')('session process groups (hearsay-t
   const exited = (child: ChildProcess) => new Promise<void>(resolve => {
     if (child.exitCode !== null || child.signalCode !== null) resolve();
     else child.once('exit', () => resolve());
+  });
+
+  it('reads a real ps live state independently of the runner probe budget', async () => {
+    const { leader } = await start(leaderScript(DEFAULT_TERM));
+    leader.kill('SIGSTOP');
+    // Integration bound only: production cleanup still gives the probe at most 50ms.
+    const { stdout } = await promisify(execFile)('ps', ['-o', 'stat=', '-p', String(leader.pid)],
+      { encoding: 'utf8', timeout: 2000, killSignal: 'SIGKILL' });
+    expect(psLeaderState(stdout, process.platform)).toBe('live');
   });
 
   it('spawns a leader that leads its own process group', async () => {

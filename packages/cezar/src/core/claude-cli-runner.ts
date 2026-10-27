@@ -30,7 +30,7 @@ import type {
 // Re-exported for backends and the run manager that still import them from here.
 export type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { isSignalTerminationExit, trackChildExit, unknownToolGrant } from './agent-runner.ts';
-import { signalSession, spawnSessionLeader } from './session-process.ts';
+import { signalSession, spawnSessionLeader, waitForEofExit } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { cezarToolEnvNames, cezarToolNames } from '../ci-wait/tools.ts';
 import { costWeightedTokens, type RawUsage } from './usage.ts';
@@ -263,8 +263,10 @@ export class ClaudeCliRunner implements AgentRunner {
     // 143 instead of dying from the signal, so without this flag our own
     // teardown reads as an agent failure (#703).
     let terminatedByCezar = false;
-    const signalChild = (signal: 'SIGTERM' | 'SIGKILL'): void => {
-      terminatedByCezar = true;
+    let explicitEnd = false;
+    let automaticCleanupStarted = false;
+    const signalChild = (signal: 'SIGTERM' | 'SIGKILL', intentional = true): void => {
+      terminatedByCezar ||= intentional;
       signalSession(child, signal);
     };
     // Every watchdog below asks "is the child still alive?" — and that question
@@ -274,6 +276,10 @@ export class ClaudeCliRunner implements AgentRunner {
     const hasExited = trackChildExit(child);
 
     const end = (): void => {
+      if (!hasExited()) {
+        explicitEnd = true;
+        terminatedByCezar ||= automaticCleanupStarted;
+      }
       if (!stdinOpen) return;
       stdinOpen = false;
       cancelRefusalRetry();
@@ -292,13 +298,14 @@ export class ClaudeCliRunner implements AgentRunner {
       eofTermTimer.unref?.();
     };
 
-    const interrupt = (): void => {
+    const interrupt = (intentional = true): void => {
+      if (!hasExited()) terminatedByCezar ||= intentional;
       stdinOpen = false;
       cancelRefusalRetry();
       if (hasExited() || killTimer) return;
-      signalChild('SIGTERM');
+      signalChild('SIGTERM', intentional);
       killTimer = setTimeout(() => {
-        if (!hasExited()) signalChild('SIGKILL');
+        if (!hasExited()) signalChild('SIGKILL', intentional);
       }, KILL_GRACE_MS);
       killTimer.unref?.();
     };
@@ -332,6 +339,17 @@ export class ClaudeCliRunner implements AgentRunner {
       }, limitMs);
       deadline.unref?.();
     }
+
+    // EOF retains the existing grace and escalation order. Only attribution depends on evidence.
+    const cleanupAfterEof = async (): Promise<void> => {
+      if (!timedOut && !hasExited()) {
+        const state = await waitForEofExit(child);
+        if (state !== 'exited') {
+          automaticCleanupStarted = true;
+          interrupt(explicitEnd || state === 'live');
+        }
+      }
+    };
 
     const result = (async (): Promise<AgentRunResult> => {
       let outputFailure: { error: unknown } | undefined;
@@ -518,20 +536,7 @@ export class ClaudeCliRunner implements AgentRunner {
         cancelRefusalRetry();
       }
 
-      // Clean stdout EOF is not a read failure, but a still-running child would
-      // leave waitForExit hanging on a timeout-less session. Give the normal
-      // EOF→exit race a tick, then use the same SIGTERM→SIGKILL path as interrupt().
-      if (!timedOut && !hasExited()) {
-        await new Promise<void>((resolve) => {
-          if (hasExited()) return resolve();
-          const done = () => { child.off('exit', done); child.off('close', done); clearTimeout(timer); resolve(); };
-          const timer = setTimeout(done, 50);
-          timer.unref?.();
-          child.once('exit', done);
-          child.once('close', done);
-        });
-        if (!hasExited()) interrupt();
-      }
+      await cleanupAfterEof();
 
       const exitCode = await waitForExit(child);
       // Draining/destroying stdout is not process exit. Keep timeout escalation

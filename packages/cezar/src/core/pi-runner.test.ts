@@ -1,7 +1,25 @@
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// Delay only delivery of a real native exit, without changing its status or wire.
+const lateExit = vi.hoisted(() => ({ enabled: false }));
+vi.mock('node:child_process', async (original) => {
+  const actual = await original<typeof import('node:child_process')>();
+  return { ...actual, spawn: ((...args: Parameters<typeof actual.spawn>) => {
+    const child = actual.spawn(...args);
+    if (lateExit.enabled) {
+      const handle = (child as unknown as { _handle: { onexit: (...args: unknown[]) => void } })._handle;
+      const onexit = handle.onexit;
+      handle.onexit = function (...exitArgs) {
+        // Exceed the 50 ms EOF grace after the OS has already reported exit.
+        setTimeout(() => onexit.apply(this, exitArgs), 250);
+      };
+    }
+    return child;
+  }) as typeof actual.spawn };
+});
 
 import type { AgentEvent, AgentSession } from './agent-runner.js';
 import type { UiEvent } from './ui-events.js';
@@ -1028,6 +1046,22 @@ describe('Pi signal teardown (#73)', () => {
     expect(events.filter((e) => e.type === 'done')).toHaveLength(1);
     expect(ui.filter((e) => e.type === 'session.ended')).toHaveLength(1);
   }, 25_000);
+
+  it('rejects self-exit 143 when its native exit notification arrives after EOF cleanup', async () => {
+    lateExit.enabled = true;
+    const events: AgentEvent[] = [];
+    try {
+      const session = new PiRunner({ bin }).startSession(
+        { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'self-exit', cwd: tmpdir(), timeoutMs: 5000 },
+        event => events.push(event),
+      );
+      await expect(session.result).rejects.toThrow('pi CLI exited with code 143');
+      expect(events.some(event => event.type === 'note' && event.message.includes('terminated by cezar'))).toBe(false);
+      expect(events.some(event => event.type === 'done')).toBe(false);
+    } finally {
+      lateExit.enabled = false;
+    }
+  });
 
   it('still rejects exit 143 when Cezar did not send the signal', async () => {
     await expect(new PiRunner({ bin }).startSession(
