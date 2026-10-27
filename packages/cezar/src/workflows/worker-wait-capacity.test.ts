@@ -14,7 +14,7 @@ import { RunManager } from './run.ts';
 import { currentUsage } from '../core/process-usage.ts';
 import type { AgentSession } from '../core/agent-runner.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
-import { withHeldAck } from '../core/owned-input-delivery.testkit.ts';
+import { withHeldAck, withHeldResponse } from '../core/owned-input-delivery.testkit.ts';
 import { QUICK_TASK_WORKFLOW } from './types.ts';
 
 import {
@@ -36,35 +36,58 @@ const parkedOnWorkers = (runId: string) =>
 describe('worker waits through RunManager', { timeout: 30_000 }, () => {
   useWorkerWaitFixture();
   it.each(['agent', 'check'].flatMap(next => ['early', 'late'].map(timing => ({ next, timing }))))('holds a nonfinal agent session and the following $next behind $timing admitted worker wake at cap one', async ({ next, timing }) => {
-    const run = manager.startRun({ name: 'multi-step wait', source: 'built-in', steps: [
-      { id: 'first', prompt: 'mock:hold' },
-      next === 'agent' ? { id: 'next', prompt: 'mock:hold' } : { id: 'next', command: 'echo checked' },
-    ] }, { task: 'parent', runner: 'claude' });
-    store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
-    // hearsay-tools/cezarion#1235: an agent worker wait parks through the wait list, not `workerWaiting`.
-    const engine = manager as unknown as { active: Map<string, { sessionEverOpened?: boolean; session?: { open: boolean } }> };
-    await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
-    const first = engine.active.get(run.id)!.session;
-    const w = await worker(run.id, 'mock:slow');
-    if (timing === 'late') await until(() => store.readEvents(run.id).some(event => event.type === 'turn-end'));
-    register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
-    await until(() => parkedOnWorkers(run.id) && !!engine.active.get(w.id)?.sessionEverOpened);
-    // bound: negative window. It must outlast the real 250 ms runner auto-end timer, whose firing is what the assertions rule out.
-    await new Promise(resolve => setTimeout(resolve, 400));
-    expect.soft(engine.active.get(run.id)?.session).toBe(first);
-    expect.soft(first?.open).toBe(true);
-    expect.soft(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
-    expect.soft(semaphore.busy()).toBe(1);
-    manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
-    await until(() => !!store.getRun(run.id)?.agentInputs?.some(input => input.source === 'lifecycle' && input.deliveredAt));
-    expect(parkedOnWorkers(run.id)).toBe(false); expect(semaphore.busy()).toBe(1);
-    // The wake turn signals nothing; the earlier step completes only on a done (hearsay-tools/cezarion#1620),
-    // which the uncollected worker would refuse on any step.
-    await collect(w.id);
-    expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
-    await until(() => store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status !== 'pending');
-    expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')?.status).toBe('done');
-    expect(parkedOnWorkers(run.id)).toBe(false);
+    // hearsay-tools/cezarion#1856: delivery can outlive the wake turn and its slot. Hold the native
+    // response while checking admission; after release, the next step still needs an explicit done.
+    // Proof: .ai/specs/2026-10-27-worker-wake-capacity-proof.md (same scheduled observer: old 1/1
+    // failed, fixed 1/1 passed; a parent-slot-release mutant still fails the busy=1 assertion).
+    await withHeldResponse('claude', async (release, held) => {
+      try {
+        const run = manager.startRun({ name: 'multi-step wait', source: 'built-in', steps: [
+          { id: 'first', prompt: 'mock:hold' },
+          next === 'agent' ? { id: 'next', prompt: 'mock:hold' } : { id: 'next', command: 'echo checked' },
+        ] }, { task: 'parent', runner: 'claude' });
+        store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['spawn', 'wait'], receipts: [] } }]);
+        // hearsay-tools/cezarion#1235: an agent worker wait parks through the wait list, not `workerWaiting`.
+        const engine = manager as unknown as { active: Map<string, { sessionEverOpened?: boolean; session?: { open: boolean } }> };
+        await until(() => !!engine.active.get(run.id)?.sessionEverOpened);
+        const first = engine.active.get(run.id)!.session;
+        const w = await worker(run.id, 'mock:slow');
+        if (timing === 'late') await until(() => store.readEvents(run.id).some(event => event.type === 'turn-end'));
+        register(run.id, [w.id]); manager.enqueueOwnedRun(w.id);
+        await until(() => parkedOnWorkers(run.id) && !!engine.active.get(w.id)?.sessionEverOpened);
+        // bound: negative window. It must outlast the real 250 ms runner auto-end timer, whose firing is what the assertions rule out.
+        await new Promise(resolve => setTimeout(resolve, 400));
+        expect.soft(engine.active.get(run.id)?.session).toBe(first);
+        expect.soft(first?.open).toBe(true);
+        expect.soft(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
+        expect.soft(semaphore.busy()).toBe(1);
+        manager.requestWorkerStop(w.id); expect(await manager.awaitRunTermination(w.id, 15000)).toBe(true);
+        await until(() => held() && !!store.getRun(run.id)?.agentInputs?.some(input => input.source === 'lifecycle' && input.deliveredAt));
+        expect(parkedOnWorkers(run.id)).toBe(false); expect(semaphore.busy()).toBe(1);
+        expect(engine.active.get(run.id)?.session).toBe(first);
+        expect(first?.open).toBe(true);
+        expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
+        const boundaries = store.readEvents(run.id).filter(event => event.type === 'turn-end').length;
+        release();
+        await until(() => store.getRun(run.id)?.status === 'waiting'
+          && store.readEvents(run.id).filter(event => event.type === 'turn-end').length > boundaries);
+        expect(engine.active.get(run.id)?.session).toBe(first);
+        expect(first?.open).toBe(true);
+        expect(store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status).toBe('pending');
+        // The wake turn signals nothing; the earlier step completes only on a done (hearsay-tools/cezarion#1620),
+        // which the uncollected worker would refuse on any step.
+        await collect(w.id);
+        expect(manager.sendMessage(run.id, [{ type: 'text', text: 'mock:done' }])).toBe(true);
+        await until(() => store.getRun(run.id)?.steps.find(step => step.id === 'next')?.status !== 'pending');
+        expect(store.getRun(run.id)?.steps.find(step => step.id === 'first')?.status).toBe('done');
+        expect(parkedOnWorkers(run.id)).toBe(false);
+      } finally {
+        setFailureState(captureState());
+        release();
+        for (const record of store.listRuns()) manager.cancel(record.id);
+        await until(() => store.listRuns().every(record => !manager.isActive(record.id)));
+      }
+    }, 'Worker wait');
   });
 
   it.each(['codex', 'opencode', 'pi', 'omp'].flatMap(backend => ['agent', 'check'].map(next => ({ backend: backend as 'codex' | 'opencode' | 'pi' | 'omp', next }))))(
