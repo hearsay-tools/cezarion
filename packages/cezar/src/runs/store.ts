@@ -39,7 +39,7 @@ import {
   TIMER_MIN_SECONDS,
   WAIT_LIMIT,
 } from '@open-mercato/cezar-contract/waits';
-import { isSweepable } from '@open-mercato/cezar-contract/run-predicates';
+import { engineOwnsRun, isSweepable } from '@open-mercato/cezar-contract/run-predicates';
 import type { ArchiveFinishedScope, ArchivedRunsResponse, ArchivePullRequestIdentity, CiWait, PrWaitEntry, ConversationState, AgentInput, InboxClaim, DelegationState, MergedPullRequest, RunPullRequest, RunSummary, Wait, WorkerCollectedResult, WorkerDestroyRetry, WorkerWait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { matchesRunSearch, sqlPrefilterTokens, type AutomationNames } from '@open-mercato/cezar-contract/run-search';
 import { storedDelegationStateSchema } from './delegation-state.ts';
@@ -64,7 +64,7 @@ import {
   ARCHIVED_ROOT, RUNS_DB_FILE, RUNS_IMPORT_COMPLETE_KEY, RunConflictError, RunDatabase, RunDatabaseBusyError,
   type RunConflictEvidence, type RunDatabaseChanges, type RunDatabaseCommit, type RunFenceClaim, type RunRow, type RunRowInput, type RunWriteFence,
 } from './run-database.ts';
-import { healLoadedRunLifecycle } from './loaded-run-healing.ts';
+import { restoreLostReferencedPullRequest } from './loaded-run-healing.ts';
 import { encodeRunRow, isLiveRecord, isLiveStatus } from './run-row.ts';
 import { collectRawExtras, encodeRawRecord, type RawExtras } from './raw-record.ts';
 import { assertNoLegacyCockpit, assertNoLegacyWriter, backUpLegacyIndex, LEGACY_INDEX_FILE, LegacyWriterError, readLegacyIndex } from './legacy-index.ts';
@@ -854,8 +854,11 @@ function createdPrUrls(claim: string, haystack: string, toolOutput?: string): st
  * are marked failed so no ghost stays behind.
  */
 export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }): RunRecord {
-  healLoadedRunLifecycle(run, opts);
-  restoreLostReferencedPullRequest(run);
+  settleLoadedStop(run);
+  restoreLoadedUsageLimitHold(run);
+  failLoadedInterruptedRun(run, opts);
+  clearLoadedStaleResume(run);
+  restoreLostReferencedPullRequest(run, referencedPrDeclaration, resolveReferencedRef);
   restoreOriginatingIssue(run);
   // Repository scoping follows reconciliation: stores arm a handle asynchronously, while
   // the read-only index applies its cached handle to these fresh records (#97). This ordering
@@ -863,26 +866,51 @@ export function reconcileLoadedRun(run: RunRecord, opts?: { keepLive?: boolean }
   return run;
 }
 
-function restoreLostReferencedPullRequest(run: RunRecord): void {
-  // Heal a record written before `referencedPrDeclaration` existed: a task that re-declared
-  // `CEZ:PR` with the PR it had just CREATED cleared the PR it was ABOUT, because no candidate
-  // could match the created number. The evidence is all still on the record — only the
-  // conclusion drawn from it was wrong — so re-resolve without that declaration instead of
-  // asking for a migration. Deliberately one-directional: it only runs on a record that HAS no
-  // referenced PR, so it can never take one away from a record written by an older cezar whose
-  // candidate list no longer explains it. `prNumber` is not recoverable this way (the
-  // declaration overwrote it) and is left alone — the restored URL is what paints the chip.
-  if (
-    run.referencedPullRequestUrl === undefined &&
-    run.markerRefs?.pr !== undefined &&
-    referencedPrDeclaration(run) === undefined
-  ) {
-    run.referencedPullRequestUrl = resolveReferencedRef(
-      run.referencedPrCandidates ?? [],
-      run.task,
-      undefined,
-    );
+function settleLoadedStop(run: RunRecord): void {
+  // An accepted Stop is durable intent, never an interrupted run to auto-resume.
+  if (run.stopping) {
+    run.status = 'cancelled';
+    run.finishedAt ??= new Date().toISOString();
+    for (const step of run.steps) {
+      if (step.status === 'running' || step.status === 'waiting') step.status = 'cancelled';
+    }
   }
+  run.stopping = undefined;
+}
+
+function restoreLoadedUsageLimitHold(run: RunRecord): void {
+  // A usage-limited run is waiting for its resume (hearsay-tools/cezarion#1236, phase 4a). Rows a
+  // schema-7 cezar wrote kept it failed with the appointment; they read as the waiting run they are.
+  if (run.status === 'failed' && run.autoResumeAt !== undefined) {
+    run.status = 'waiting';
+    run.finishedAt = undefined;
+  }
+}
+
+function failLoadedInterruptedRun(run: RunRecord, opts?: { keepLive?: boolean }): void {
+  // A run that was live when the previous process exited can never finish —
+  // surface that instead of a forever-"running" ghost. `review` survives
+  // restarts on purpose: the gate is pure data (worktree + branch + record)
+  // with no live process, so the diff panel, Send back (resume) and Draft PR
+  // all still work.
+  // A usage-limit hold runs no process, so no exit interrupted it: its appointment stands.
+  if (!opts?.keepLive && engineOwnsRun(run)) {
+    run.status = 'failed';
+    run.error = 'interrupted — cezar process exited during the run';
+    run.finishedAt = run.finishedAt ?? new Date().toISOString();
+    for (const step of run.steps) {
+      if (step.status === 'running' || step.status === 'waiting') step.status = 'failed';
+    }
+  }
+}
+
+function clearLoadedStaleResume(run: RunRecord): void {
+  // Open waits are left alone at every status: RunManager cancels them when a run ends (spec
+  // 2026-10-17-unified-waits), and recovery reads the ones a crash left behind.
+  // A pending usage-limit resume survives the restart on purpose (the wait can be
+  // hours) — `RunManager.recover()` re-arms it from this field. It can only mean
+  // anything on a `waiting` run, so anywhere else it is stale bookkeeping.
+  if (run.status !== 'waiting') run.autoResumeAt = undefined;
 }
 
 /**
