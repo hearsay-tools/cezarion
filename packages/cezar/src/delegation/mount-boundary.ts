@@ -51,7 +51,8 @@ export function darwinMountPoints(content: string): string[] {
   return mounts;
 }
 
-function canonicalRoot(value: string): string {
+/** Resolve trusted ancestor aliases, including when the resource is absent. */
+export function canonicalResourceRoot(value: string): string {
   let path = resolve(value);
   const missing: string[] = [];
   for (;;) {
@@ -86,7 +87,7 @@ export function assertDarwinMountBoundary(paths: readonly string[]): void {
     const result = spawnSync('/sbin/mount', [], { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 });
     if (result.error || result.status !== 0) throw result.error ?? new Error('Mount enumeration failed');
     const mounts = darwinMountPoints(result.stdout);
-    for (const path of paths) assertNoMountedResource(canonicalRoot(path), mounts);
+    for (const path of paths) assertNoMountedResource(canonicalResourceRoot(path), mounts);
   } catch (error) {
     if (error instanceof MountBoundaryError) throw error;
     throw new MountBoundaryError(`Mount boundary cannot be verified: ${error instanceof Error ? error.message : String(error)}`);
@@ -96,7 +97,7 @@ export function assertDarwinMountBoundary(paths: readonly string[]): void {
 export function assertMountBoundary(paths: readonly string[], mountInfo: string): void {
   const mounts = linuxMountPoints(mountInfo);
   for (const value of paths) {
-    const root = canonicalRoot(value);
+    const root = canonicalResourceRoot(value);
     assertNoMountedResource(root, mounts);
   }
 }

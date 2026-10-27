@@ -1,9 +1,10 @@
-import { lstatSync, readdirSync, readlinkSync, realpathSync } from 'node:fs';
+import { readdirSync, readlinkSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
-import { basename, dirname, join, resolve, sep } from 'node:path';
+import { sep } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { processStartToken } from '../detached-process.ts';
 import { windowsDestroyHolders, windowsStopDestroyHolder } from './windows-workspace-identity.ts';
+import { canonicalResourceRoot } from './mount-boundary.ts';
 
 /** Destroy-only evidence. Admission and retention keep their existing liveness policy. */
 function holds(pid: number, paths: readonly string[]): boolean {
@@ -31,26 +32,9 @@ function unreadableHolderEvidence(pid: number): boolean {
   return false;
 }
 
-/** Resolve trusted ancestor aliases even for an absent scratch path. Never
- * follow a symlink at the owned root itself. */
-function canonicalRoot(value: string): string {
-  let path = resolve(value); const missing: string[] = [];
-  for (;;) {
-    try {
-      if (missing.length === 0 && lstatSync(path).isSymbolicLink()) throw new Error(`Redirected destroy root: ${path}`);
-      return join(realpathSync(path), ...missing);
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
-      const parent = dirname(path);
-      if (parent === path) throw error;
-      missing.unshift(basename(path)); path = parent;
-    }
-  }
-}
-
 /** Signal only a live incarnation that still holds an authenticated resource. */
 export async function reapDestroyHolders(paths: readonly string[], assertCurrent: () => void | Promise<void>, timeoutMs = 3_000): Promise<void> {
-  const roots = paths.map(canonicalRoot);
+  const roots = paths.map(canonicalResourceRoot);
   if (process.platform === 'win32') return reapWindowsHolders(roots, assertCurrent, Math.max(timeoutMs, 30_000));
   if (process.platform !== 'linux' && process.platform !== 'darwin') throw new Error(`Destroy holder scan is unavailable on ${process.platform}`);
   const deadline = Date.now() + timeoutMs;
