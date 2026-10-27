@@ -12,9 +12,8 @@ import {
   type RunHistoryEvent,
   type RunHistoryPage,
 } from '@open-mercato/cezar-contract/events';
-import { advancePendingHumanAsk } from '@open-mercato/cezar-contract/ask';
-import { permissionRequestedSchema } from '@open-mercato/cezar-contract/permissions';
 
+import { createContextTrackers } from './event-history-context.ts';
 import { emptyHistorySource, openHistorySource, type HistorySource } from './history-file.ts';
 
 const READ_CHUNK_BYTES = 64 * 1024;
@@ -522,18 +521,6 @@ async function pageFromSource(
   };
 }
 
-interface ContextItem {
-  id: string;
-  parentId?: string;
-  turn: number;
-  first: RunHistoryEvent;
-  latest: RunHistoryEvent;
-  status?: string | undefined;
-}
-
-const isSettledContextStatus = (status: string | undefined) =>
-  status !== undefined && status !== 'pending' && status !== 'running';
-
 /**
  * One forward pass retaining the latest Plan snapshot, the latest agent-browser state
  * (hearsay-tools/cezarion#784) and only the selector-equivalent agent episode.
@@ -542,69 +529,9 @@ export async function deriveRunContextEvents(dataDir: string, id: string): Promi
   return withHistorySource(dataDir, id, contextFromSource);
 }
 
-/** Permission requests still waiting on an answer: a resolution or a session or turn boundary ends them. */
-function trackPendingPermission(pending: Map<string, RunHistoryEvent>, event: RunHistoryEvent): void {
-  if (event.type === 'permission.requested') {
-    const { seq: _seq, ts: _ts, stepId: _stepId, ...payload } = event;
-    if (permissionRequestedSchema.safeParse(payload).success) pending.set(event.requestId as string, event);
-  } else if (event.type === 'permission.resolved' && typeof event.requestId === 'string') {
-    pending.delete(event.requestId);
-  } else if (event.type === 'session.ended' || event.type === 'session.started' || event.type === 'turn.completed') {
-    pending.clear();
-  }
-}
-
 async function contextFromSource(source: HistorySource): Promise<RunHistoryContext> {
-  let latestPlan: RunHistoryEvent | undefined;
-  let latestAgentBrowser: RunHistoryEvent | undefined;
-  let pendingAsk: RunHistoryEvent | undefined;
-  const pendingPermissions = new Map<string, RunHistoryEvent>();
-  /** The pending ask's latest routing transition (#505): routed to the parent or handed back. */
-  let askRouting: RunHistoryEvent | undefined;
+  const trackers = createContextTrackers();
   let asOfSeq = 0;
-  let turn = 0;
-  const boundaries: RunHistoryEvent[] = [];
-  const roots = new Map<string, ContextItem>();
-  const children = new Map<string, ContextItem>();
-  const rootsByTurn = new Map<number, Set<string>>();
-
-  const itemIdentity = (event: RunHistoryEvent, id: string) => `${event.stepId ?? ''}:${id}`;
-  const pruneSettledHistory = () => {
-    const rootTurns = [...rootsByTurn.keys()].sort((a, b) => a - b);
-    const latestRootTurn = rootTurns.at(-1);
-    if (latestRootTurn === undefined) return;
-    let pruneThrough: number | undefined;
-    for (let index = rootTurns.length - 2; index >= 0; index -= 1) {
-      const candidate = rootTurns[index]!;
-      const ids = rootsByTurn.get(candidate)!;
-      if ([...ids].every((id) => isSettledContextStatus(roots.get(id)?.status))) {
-        pruneThrough = candidate;
-        break;
-      }
-    }
-    const latestIds = rootsByTurn.get(latestRootTurn)!;
-    if (
-      turn > latestRootTurn &&
-      [...latestIds].every((id) => isSettledContextStatus(roots.get(id)?.status))
-    ) {
-      pruneThrough = latestRootTurn;
-    }
-    if (pruneThrough === undefined) return;
-    for (const [candidateTurn, ids] of rootsByTurn) {
-      if (candidateTurn > pruneThrough) continue;
-      for (const id of ids) roots.delete(id);
-      rootsByTurn.delete(candidateTurn);
-    }
-    const retainedRootIds = new Set([...roots.values()].map(({ id }) => id));
-    for (const [key, item] of children) {
-      if (item.parentId === undefined || !retainedRootIds.has(item.parentId)) children.delete(key);
-    }
-    const earliest = Math.min(...[...roots.values()].map(({ first }) => first.seq), Number.MAX_SAFE_INTEGER);
-    const firstRetained = boundaries.findIndex(({ seq }) => seq >= earliest);
-    if (firstRetained === -1) boundaries.length = 0;
-    else if (firstRetained > 0) boundaries.splice(0, firstRetained);
-  };
-
   try {
     const input = source.stream();
     const lines = createInterface({ input, crlfDelay: Infinity });
@@ -612,89 +539,13 @@ async function contextFromSource(source: HistorySource): Promise<RunHistoryConte
       const event = parseLine(line);
       if (!event) continue;
       asOfSeq = Math.max(asOfSeq, event.seq);
-      // Match manager delivery receipts: agent/lifecycle input and refused human
-      // attempts do not answer a question. Retain one current ask, not its history.
-      pendingAsk = advancePendingHumanAsk(pendingAsk, event);
-      trackPendingPermission(pendingPermissions, event);
-      if ((event.type === 'worker-question-routed' || event.type === 'worker-question-fallback') && event.askSeq === pendingAsk?.seq) askRouting = event;
-      // The cockpit lists the agent's page while it is connected, however many events came since.
-      if (event.type === 'preview.agent-browser') {
-        latestAgentBrowser = event;
-        continue;
-      }
-      if (event.type === 'plan.updated' || (event.type === 'tool-call' && stringField(event, 'tool') === 'TodoWrite')) {
-        latestPlan = event;
-        continue;
-      }
-      if (event.type === 'user-message' || event.type === 'turn.started') {
-        turn += 1;
-        boundaries.push(event);
-        pruneSettledHistory();
-        continue;
-      }
-      if (
-        event.type === 'turn.completed' ||
-        event.type === 'session.ended' ||
-        event.type === 'session.error'
-      ) {
-        boundaries.push(event);
-        continue;
-      }
-      if (event.type === 'item.started' || event.type === 'item.updated' || event.type === 'item.completed') {
-        const raw = event.item;
-        if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) continue;
-        const item = raw as {
-          id?: unknown;
-          kind?: unknown;
-          toolKind?: unknown;
-          parentItemId?: unknown;
-          status?: unknown;
-        };
-        if (item.kind !== 'tool' || typeof item.id !== 'string' || item.id === '') continue;
-        const parentId = typeof item.parentItemId === 'string' ? item.parentItemId : undefined;
-        const isRoot = item.toolKind === 'task' && parentId === undefined;
-        if (!isRoot && parentId === undefined) continue;
-        const key = itemIdentity(event, item.id);
-        const collection = isRoot ? roots : children;
-        const existing = collection.get(key);
-        const next: ContextItem = existing
-          ? { ...existing, latest: event, status: typeof item.status === 'string' ? item.status : existing.status }
-          : {
-              id: item.id,
-              ...(parentId === undefined ? {} : { parentId }),
-              turn,
-              first: event,
-              latest: event,
-              ...(typeof item.status === 'string' ? { status: item.status } : {}),
-            };
-        collection.set(key, next);
-        if (isRoot && !existing) {
-          const ids = rootsByTurn.get(turn);
-          if (ids) ids.add(key);
-          else rootsByTurn.set(turn, new Set([key]));
-        }
-        pruneSettledHistory();
-      }
+      trackers.observe(event);
     }
   } catch {
     return { contextEvents: [], asOfSeq: 0 };
   }
-  pruneSettledHistory();
-  const retainedRootIds = new Set([...roots.values()].map(({ id }) => id));
-  const relevantChildren = [...children.values()].filter(
-    ({ parentId }) => parentId !== undefined && retainedRootIds.has(parentId),
-  );
   const contextEvents = new Map<number, RunHistoryEvent>();
-  if (latestPlan) contextEvents.set(latestPlan.seq, latestPlan);
-  if (latestAgentBrowser) contextEvents.set(latestAgentBrowser.seq, latestAgentBrowser);
-  if (pendingAsk) contextEvents.set(pendingAsk.seq, pendingAsk);
-  for (const event of pendingPermissions.values()) contextEvents.set(event.seq, event);
-  if (pendingAsk && askRouting?.askSeq === pendingAsk.seq) contextEvents.set(askRouting.seq, askRouting);
-  for (const event of boundaries) contextEvents.set(event.seq, event);
-  for (const item of [...roots.values(), ...relevantChildren]) {
-    contextEvents.set(item.first.seq, item.first);
-    contextEvents.set(item.latest.seq, item.latest);
-  }
+  for (const event of trackers.events()) contextEvents.set(event.seq, event);
   return { contextEvents: [...contextEvents.values()].sort((a, b) => a.seq - b.seq), asOfSeq };
 }
 
