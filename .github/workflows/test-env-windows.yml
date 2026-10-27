@@ -142,10 +142,14 @@ jobs:
           }
           $global:LASTEXITCODE = 0
       - name: Verify worker cleanup on native Windows
+        if: ${{ !cancelled() }}
         run: npm test -- packages/cezar/src/delegation/windows-test-app.test.ts packages/cezar/src/delegation/idle-test-app-refusal.test.ts packages/cezar/src/delegation/idle-test-app.test.ts
       - name: Verify scoped holder termination on native Windows
+        if: ${{ !cancelled() }}
         run: npm test -- packages/cezar/src/delegation/windows-destroy-holders.test.ts
       - name: Verify native private worker evidence
+        if: ${{ !cancelled() }}
         run: npm test -- packages/cezar/src/runs/windows-worker-evidence.test.ts
       - name: Verify authoritative service destroy on native Windows
+        if: ${{ !cancelled() }}
         run: npm test -- packages/cezar/src/delegation/service.test.ts -t 'authoritative destroy stops a cwd and open-file holder'

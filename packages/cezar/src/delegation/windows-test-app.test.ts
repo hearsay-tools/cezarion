@@ -44,6 +44,7 @@ it('requires the recorded start identity and refuses unreadable process evidence
 it.runIf(process.platform === 'win32')('stops the owned app only after its live lease is released', async () => {
   const root = await mkdtemp(join(tmpdir(), 'cez-windows-app-'));
   const children: Array<ReturnType<typeof spawn>> = [];
+  let db: DatabaseSync | undefined;
   try {
     const git = (...args: string[]) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
     git('init', '-q', '-b', 'main'); git('config', 'user.name', 'test'); git('config', 'user.email', 'test@local');
@@ -77,12 +78,12 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
       once(watcher, 'exit').then(([code]) => { throw new Error(`watcher exited before ready (${code}): ${watcherError}`); }),
     ]);
     console.info('native cleanup: watcher ready');
-    const db = new DatabaseSync(join(qa, 'test-env-lease.sqlite'));
+    db = new DatabaseSync(join(qa, 'test-env-lease.sqlite'));
     db.exec('CREATE TABLE holders (id TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, start TEXT, pgid INTEGER)');
     db.prepare('INSERT INTO holders VALUES (?, ?, ?, ?, NULL)').run('live', 'live', process.pid, windowsStartToken(process.pid)!);
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete' });
     expect(app.exitCode).toBeNull(); expect(other.exitCode).toBeNull();
-    db.exec('DELETE FROM holders'); db.close();
+    db.exec('DELETE FROM holders'); db.close(); db = undefined;
     await writeFile(join(qa, 'test-env.json'), descriptor(other.pid!));
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete' });
     expect(other.exitCode).toBeNull();
@@ -92,6 +93,7 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
     expect(watcher.exitCode).not.toBeNull();
     expect(other.exitCode).toBeNull();
   } finally {
+    db?.close();
     for (const child of children) {
       if (child.exitCode === null && child.signalCode === null) {
         const exited = once(child, 'exit'); child.kill('SIGKILL'); await exited;
