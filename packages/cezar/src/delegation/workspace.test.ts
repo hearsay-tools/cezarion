@@ -1,7 +1,10 @@
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { syncBuiltinESMExports } from 'node:module';
 import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture-cleanup.testkit.ts';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
+import { DatabaseSync } from 'node:sqlite';
+import { processStartToken } from '../detached-process.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import fsPromises from 'node:fs/promises';
@@ -477,6 +480,25 @@ exec "${realGit}" "$@"
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
     expect(existsSync(workspace.path)).toBe(false);
   });
+
+  it.runIf(process.platform === 'linux')('claims and stops an idle app in a prepared leftover', async () => {
+    const { root, workspace } = await partialLeftover();
+    const app = spawn(process.execPath, ['-e', 'console.log("ready"); setInterval(() => {}, 1000)'], {
+      cwd: workspace.path, detached: true, stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    try {
+      await once(app.stdout!, 'data');
+      const qa = join(workspace.path, '.ai', 'qa');
+      await mkdir(qa, { recursive: true });
+      await writeFile(join(qa, 'test-env.json'), JSON.stringify({ startedByThisRepo: true, app: { pid: app.pid, start: processStartToken(app.pid!) } }));
+      const db = new DatabaseSync(join(qa, 'test-env-lease.sqlite'));
+      db.exec('CREATE TABLE holders (id TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, start TEXT, pgid INTEGER)');
+      db.close();
+      const exited = once(app, 'exit');
+      expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+      expect((await exited)[1]).toBe('SIGTERM');
+    } finally { try { process.kill(-app.pid!, 'SIGKILL'); } catch {} }
+  }, 60_000);
 
   it('binds a legacy checkpoint to its still-registered worktree before removal', async () => {
     const { root, first } = await fixture();

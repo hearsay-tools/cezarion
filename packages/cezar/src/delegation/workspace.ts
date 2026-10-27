@@ -137,6 +137,22 @@ async function makeDirectoriesWritable(path: string): Promise<void> {
   }
 }
 
+/** Check probe access without changing permissions or claiming the test-app lease. */
+async function probeAccessible(path: string, components: string[]): Promise<boolean> {
+  try {
+    for (const component of components) {
+      if (!await exists(component)) break;
+      const info = await lstat(component);
+      if (!info.isDirectory() || info.isSymbolicLink() || await realpath(component) !== component) throw new Error(`Unsafe directory: ${component}`);
+    }
+    await exists(join(path, '.ai', 'qa', 'test-env.json'));
+    return true;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'EACCES') return false;
+    throw error;
+  }
+}
+
 /** Reads only committed state in the server-known parent cwd; never flushes its edits. */
 export async function resolveWorkerBaseline(repoRoot: string, parentCwd: string, baseline: string): Promise<string> {
   try {
@@ -503,14 +519,19 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         await beforeRemove?.();
         assertCurrent?.();
         checkUnheld(assertUnheld);
-        // The test-app probe needs search access to these ancestors. Repair only
-        // those paths before claiming its lease, not the rest of the checkout.
-        for (const component of [workspace.path, join(workspace.path, '.ai'), join(workspace.path, '.ai', 'qa')]) {
-          if (!await stillOwned() || !unheld()) return false;
-          if (!await exists(component)) break;
-          try { await makeDirectoryWritable(component, component === workspace.path ? original : undefined); }
-          catch (error) { return failedRemoval(error); }
-          if (!await stillOwned() || !unheld()) return false;
+        const components = [workspace.path, join(workspace.path, '.ai'), join(workspace.path, '.ai', 'qa')];
+        let inaccessible: boolean;
+        try { inaccessible = !await probeAccessible(workspace.path, components); }
+        catch (error) { return failedRemoval(error); }
+        if (inaccessible) {
+          // Repair only the probe ancestors before claiming the test-app lease.
+          for (const component of components) {
+            if (!await stillOwned() || !unheld()) return false;
+            if (!await exists(component)) break;
+            try { await makeDirectoryWritable(component, component === workspace.path ? original : undefined); }
+            catch (error) { return failedRemoval(error); }
+            if (!await stillOwned() || !unheld()) return false;
+          }
         }
         return withIdleTestApp(workspace.path, async (_stopped, busy) => {
           if (busy || !await waitForTestAppWatcher(workspace.path)) { report?.unexplained?.(); return false; }
