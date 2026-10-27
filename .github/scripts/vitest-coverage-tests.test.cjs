@@ -122,3 +122,95 @@ test('a run with --coverage reports the test files it ran next to the sources th
   assert.ok(files.some((file) => file.startsWith('packages/contract/src/') && !file.endsWith('.test.ts')), 'sources must be in the report');
   assert.equal(files.some((file) => file.startsWith('node_modules/')), false);
 });
+
+for (const stage of ['generateCoverage', 'reportCoverage']) {
+  test(`coverage ${stage} errors warn only in CI without hiding test failures`, (t) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'vitest-optional-report-'));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    const provider = path.join(directory, 'provider.mjs');
+    const native = pathToFileURL(require.resolve('@vitest/coverage-v8')).href;
+    fs.writeFileSync(provider, `import native from ${JSON.stringify(native)};
+      export default { ...native, async getProvider() {
+        const provider = await native.getProvider();
+        provider.${stage} = async () => { throw new Error('injected coverage report failure'); };
+        return provider;
+      } };`);
+    for (const [ci, fails] of [['true', false], ['true', true], ['false', false]]) {
+      const spec = path.join(directory, 'verdict.test.js');
+      fs.writeFileSync(spec, `test('verdict', () => expect(${fails}).toBe(false));`);
+      const config = path.join(directory, 'vitest.config.mjs');
+      const reporter = pathToFileURL(path.join(__dirname, 'vitest-coverage-tests.mjs')).href;
+      fs.writeFileSync(config, `import Reporter from ${JSON.stringify(reporter)};
+        export default { root: ${JSON.stringify(repoRoot)}, test: {
+          include: [${JSON.stringify(spec)}], globals: true, reporters: ['default', new Reporter()],
+          coverage: { enabled: true, provider: 'custom', customProviderModule: ${JSON.stringify(provider)},
+            reportsDirectory: ${JSON.stringify(path.join(directory, 'coverage'))}, reporter: ['json'], reportOnFailure: true }
+        } };`);
+      const result = spawnSync(vitestBin, ['run', '--config', config], {
+        cwd: repoRoot, encoding: 'utf8', env: { ...process.env, GITHUB_ACTIONS: ci, NO_COLOR: '1' },
+      });
+      const output = result.stdout + result.stderr;
+      assert.equal(result.status, ci === 'true' && !fails ? 0 : 1, output);
+      if (ci === 'true') {
+        assert.match(output, /::warning title=Vitest coverage report failed::/);
+        assert.match(output, fails ? /1 failed/ : /1 passed/);
+      } else {
+        assert.doesNotMatch(output, /::warning title=Vitest coverage report failed::/);
+        assert.match(output, /injected coverage report failure/);
+      }
+    }
+  });
+}
+
+test('optional coverage reports preserve receivers, arguments and results', async (t) => {
+  const { optionalCoverageReports } = await import(moduleUrl);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'optional-coverage-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const provider = {
+    options: { reportsDirectory: directory },
+    async generateCoverage(options) { assert.equal(this, provider); return options; },
+    async reportCoverage(report, options) { assert.equal(this, provider); return [report, options]; },
+  };
+  optionalCoverageReports(provider);
+  const report = await provider.generateCoverage({ allTestsRun: true });
+  assert.deepEqual(report, { allTestsRun: true });
+  assert.deepEqual(await provider.reportCoverage(report, 'options'), [report, 'options']);
+});
+
+test('a report failure deletes partial output and skips further reporting without changing an exit code', async (t) => {
+  const { optionalCoverageReports } = await import(moduleUrl);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'optional-coverage-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const report = path.join(directory, 'coverage-final.json');
+  fs.writeFileSync(report, 'partial');
+  const warning = t.mock.method(console, 'warn', () => {});
+  const exitCode = process.exitCode;
+  let writes = 0;
+  const provider = { options: { reportsDirectory: directory },
+    generateCoverage() { throw new Error('conversion failed'); },
+    reportCoverage() { writes++; },
+  };
+  optionalCoverageReports(provider);
+  assert.equal(await provider.generateCoverage(), undefined);
+  assert.equal(await provider.reportCoverage(), undefined);
+  assert.equal(writes, 0);
+  assert.equal(fs.existsSync(report), false);
+  assert.equal(process.exitCode, exitCode);
+  assert.equal(warning.mock.callCount(), 1);
+});
+
+test('failed report cleanup stays optional, and a provider without report hooks stays usable', async (t) => {
+  const { optionalCoverageReports } = await import(moduleUrl);
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'optional-coverage-'));
+  t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+  const file = path.join(directory, 'file');
+  fs.writeFileSync(file, 'not a directory');
+  const warning = t.mock.method(console, 'warn', () => {});
+  const provider = { options: { reportsDirectory: file }, reportCoverage() { throw new Error('write failed'); } };
+  optionalCoverageReports(provider);
+  assert.equal(await provider.reportCoverage(), undefined);
+  assert.equal(warning.mock.callCount(), 2);
+  const noHooks = {};
+  optionalCoverageReports(noHooks);
+  assert.deepEqual(noHooks, {});
+});
