@@ -33,7 +33,7 @@ describe('GithubPoller', () => {
     expect(result.candidates[0]).toMatchObject({ repo: 'acme/demo', number: 7, title: 'A  title' });
   });
 
-  it('drains opened and label-event searches independently in oldest-first order', async () => {
+  it('drains opened and label-event searches independently in stable creation order', async () => {
     const pullRequest = {
       ...item,
       node_id: 'PR_one',
@@ -83,7 +83,7 @@ describe('GithubPoller', () => {
       expect.stringContaining('created:>=2026-07-25T23:58:00.000Z'),
     ]));
     expect(searchCalls[1]?.[1]).toEqual(expect.arrayContaining([
-      'sort=updated',
+      'sort=created',
       'order=asc',
       expect.stringContaining('updated:>=2026-07-25T23:58:00.000Z'),
     ]));
@@ -94,6 +94,14 @@ describe('GithubPoller', () => {
       .toContain('created:>=2026-07-25T00:00:00.000Z');
     expect(buildSearchQuery('acme', 'demo', definition, 'issues', 'updated', '2026-07-25T00:00:00.000Z'))
       .toContain('updated:>=2026-07-25T00:00:00.000Z');
+  });
+
+  it.each(['created', 'updated'] as const)('keeps mutable qualifiers out of %s search membership', activity => {
+    const rule = { ...definition, filters: { ...definition.filters, allLabels: ['bug'], assignees: ['bob'], authors: ['alice'] } };
+    const query = buildSearchQuery('acme', 'demo', rule, 'issues', activity);
+    expect(query).toContain('author:alice');
+    expect(query).not.toContain('label:');
+    expect(query).not.toContain('assignee:');
   });
 
   it('advances its scan cursor across locally filtered rows', async () => {

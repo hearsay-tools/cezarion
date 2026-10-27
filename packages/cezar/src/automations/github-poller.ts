@@ -156,7 +156,8 @@ export class GithubPoller {
       const raw = await this.run('gh', [
         'api', '--method', 'GET', '/search/issues', '-f', `q=${query}`,
         '-f', 'per_page=100', '-f', `page=${scan.page}`,
-        '-f', `sort=${source.activity}`, '-f', 'order=asc',
+        // Label/assignee changes also move updated-time order. Creation order stays fixed.
+        '-f', 'sort=created', '-f', 'order=asc',
       ]);
       requests++;
       const response = searchResponseSchema.parse(JSON.parse(raw));
@@ -291,12 +292,9 @@ export function buildSearchQuery(
     `${activity}:>=${start}`,
   ];
   for (const author of definition.filters.authors ?? []) terms.push(`author:${safeQualifier(author)}`);
-  for (const assignee of definition.filters.assignees ?? []) terms.push(`assignee:${safeQualifier(assignee)}`);
-  // Label transitions are filtered against reconstructed event labels. Current
-  // issue labels cannot exclude a transition whose matching label was removed.
-  if (activity === 'created') {
-    for (const label of definition.filters.allLabels ?? []) terms.push(`label:${JSON.stringify(label)}`);
-  }
+  // Apply mutable label/assignee filters locally. Removing either from a passed item
+  // must not remove a search row and shift an unseen item behind the saved offset.
+  // Label transitions also need reconstructed labels, independent of current labels.
   return terms.filter(Boolean).join(' ');
 }
 

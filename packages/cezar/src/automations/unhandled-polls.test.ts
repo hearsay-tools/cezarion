@@ -132,3 +132,44 @@ it('recovers a scan past 100 timeline events without losing the activation basel
   expect(reopened.state(rule.id)?.historyScan).toBeUndefined();
   expect(reopened.state(rule.id)?.baselineAt).toBe(at(50));
 });
+
+it.each([
+  { event: 'issue.opened' as const, changed: 'label' },
+  { event: 'issue.opened' as const, changed: 'assignee' },
+  { event: 'issue.labeled' as const, changed: 'label' },
+  { event: 'issue.labeled' as const, changed: 'assignee' },
+])('does not skip a shifted $event issue after an earlier issue loses its $changed', async ({ event, changed }) => {
+  const { store, rule: original } = await setup(false, 1);
+  const rule = store.update(original.id, original.revision, { ...original, events: [event],
+    filters: { ...original.filters, allLabels: ['bug'], assignees: ['alice'] },
+  }) as GithubAutomationDefinition;
+  store.setState(rule.id, () => ({ revision: rule.revision, baselineAt: at(0) }));
+  const items = [1, 2, 3].map(number => ({ ...issue(number), created_at: at(number * 10),
+    updated_at: at(number * 10), assignees: [{ login: 'alice' }],
+  }));
+  const poller = new GithubPoller({ run: async (_exe, args) => {
+    const path = args.find(arg => arg.includes('/timeline'));
+    if (path) {
+      const number = Number(path.split('/').at(-2));
+      return JSON.stringify([{ id: number, event: 'labeled', created_at: at(number * 10), label: { name: 'bug' } }]);
+    }
+    const query = args.find(arg => arg.startsWith('q='))!;
+    const matches = items.filter(item => {
+      return (!query.includes('label:') || item.labels.some(label => label.name === 'bug'))
+        && (!query.includes('assignee:') || item.assignees.some(assignee => assignee.login === 'alice'));
+    });
+    const sort = args.includes('sort=updated') ? 'updated_at' : 'created_at';
+    matches.sort((a, b) => a[sort].localeCompare(b[sort]));
+    return JSON.stringify({ items: matches });
+  } });
+  const launched: number[] = [];
+  await scheduler(store, poller, launched).check(rule);
+  expect(launched).toEqual([1]);
+  if (changed === 'label') items[0]!.labels = [];
+  else items[0]!.assignees = [];
+  items[0]!.updated_at = at(200);
+  await scheduler(AutomationStore.open(store.dataDir), poller, launched).check(rule);
+  expect(launched).toEqual([1, 2]);
+  await scheduler(AutomationStore.open(store.dataDir), poller, launched).check(rule);
+  expect(launched).toEqual([1, 2, 3]);
+});
