@@ -12,6 +12,10 @@ on:
       - 'packages/cezar/src/delegation/windows-destroy-holders*'
       - 'packages/cezar/src/delegation/destroy-holders*'
       - 'packages/cezar/src/delegation/service*'
+      - 'packages/cezar/src/runs/store.ts'
+      - 'packages/cezar/src/runs/worker-execution.ts'
+      - 'packages/cezar/src/runs/windows-worker-evidence*'
+      - 'packages/cezar/src/runs/private-worker-file.ts'
       - 'packages/cezar/src/delegation/process-liveness*'
       - 'packages/cezar/src/detached-process*'
       - 'packages/cezar/src/workflows/run.ts'
@@ -141,5 +145,7 @@ jobs:
         run: npm test -- packages/cezar/src/delegation/windows-test-app.test.ts packages/cezar/src/delegation/idle-test-app-refusal.test.ts packages/cezar/src/delegation/idle-test-app.test.ts
       - name: Verify scoped holder termination on native Windows
         run: npm test -- packages/cezar/src/delegation/windows-destroy-holders.test.ts
+      - name: Verify native private worker evidence
+        run: npm test -- packages/cezar/src/runs/windows-worker-evidence.test.ts
       - name: Verify authoritative service destroy on native Windows
         run: npm test -- packages/cezar/src/delegation/service.test.ts -t 'authoritative destroy stops a cwd and open-file holder'

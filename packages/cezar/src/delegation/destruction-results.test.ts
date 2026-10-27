@@ -5,7 +5,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { onTestFinished, afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { fixture, scheduledDestroyAttempts } from './service.testkit.ts';
+import { fixture } from './service.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { ensureOwnedWorkspace, planOwnedWorkspace } from './workspace.ts';
 import { RunStore } from '../runs/store.ts';
@@ -51,31 +51,16 @@ describe('verified destruction retains results through explicit history deletion
   it('leaves worktree and branch intact when the parent result checkpoint fails', async () => {
     const { workerId, workspace } = await completed();
     vi.spyOn(f.store, 'commitWorkerResult').mockImplementation(() => { throw Error('snapshot disk failure'); });
-    await expect(f.service.destroy(f.caller, { workerId })).rejects.toThrow('snapshot disk failure');
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', error: 'snapshot disk failure' });
     expect(readFileSync(join(workspace.path, 'result.txt'), 'utf8')).toBe('retained patch');
     expect(execFileSync('git', ['rev-parse', `refs/heads/${workspace.branch}`], { cwd: f.root, encoding: 'utf8' }).trim()).toBe(f.sha);
   });
-  // Two full destroy attempts (the explicit one that meets the lock, then the awaited retry) on top of
-  // the worker setup: about twice the Git work of this suite's other cases, so twice its 15 s budget.
-  // With every owned-workspace Git call slowed by 100 ms it needs ~10 s (hearsay-tools/cezarion#1109).
-  it('retries a locked owned worktree after the Git lock is removed', { timeout: 30_000 }, async () => {
-    Object.assign(f.service, { destroyBackoff: { fastMs: 50, fastCount: 100, capMs: 50 } });
+  it('destroys a locked owned worktree and retains its snapshot', { timeout: 30_000 }, async () => {
     const { workerId, workspace } = await completed();
     execFileSync('git', ['worktree', 'lock', workspace.path], { cwd: f.root });
-    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
-    expect(existsSync(workspace.path)).toBe(true);
-    // Armed before the unlock, and no timer can fire between the destroy's return and here, so the
-    // first scheduled attempt is the one that sees the lock gone.
-    const attempts = scheduledDestroyAttempts(f.service);
-    execFileSync('git', ['worktree', 'unlock', workspace.path], { cwd: f.root });
-    // The wait covers only what starts that attempt: one 50 ms tick and a stat-only change check, and
-    // its bound only ends a hang. The attempt itself (evidence capture, removal, the lock keeper: tens
-    // of Git and node spawns) is awaited, not timed: at load ~90 it outlasted 3 s and was caught
-    // mid-`cleaning` (hearsay-tools/cezarion#1109).
-    await vi.waitFor(() => expect(attempts.length).toBeGreaterThan(0), { timeout: 15_000 });
-    await attempts[0];
-    // That first retry after the unlock completes the destroy; it is not left to a later one.
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete', remaining: [] });
     expect(f.store.getRun(workerId)?.delegation).toMatchObject({ destroy: { phase: 'complete', remaining: [] } });
+    expect(f.store.readWorkerResultDiff(f.parent.id, workerId)).toContain('+retained patch');
     expect(existsSync(workspace.path)).toBe(false);
   });
   it('preserves a settled summary and diff after destruction, child deletion and restart', async () => {
@@ -148,7 +133,7 @@ describe('verified destruction retains results through explicit history deletion
     const { workerId } = await completed();
     const original = f.store.commitWorkerResult.bind(f.store); let calls = 0;
     const fault = vi.spyOn(f.store, 'commitWorkerResult').mockImplementation((...args) => {
-      if (++calls === 2) throw Error('final result checkpoint failed');
+      if (++calls === 3) throw Error('final result checkpoint failed');
       return original(...args);
     });
     await expect(f.service.destroy(f.caller, { workerId })).rejects.toThrow('final result checkpoint failed');

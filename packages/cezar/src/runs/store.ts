@@ -2,6 +2,8 @@ import { defined } from '../core/defined.ts';
 import { autosaveCleanupBlocker, clearAutosaveCleanup } from '../autosave-cleanup.ts';
 import { EventEmitter } from 'node:events';
 import { workerEvidenceRunIds, workerExecutionSchema, type WorkerExecution } from './worker-execution.ts';
+import { isWindowsWorkerEvidence, readWindowsEvidence, removeWindowsEvidence, windowsEvidencePath, writeWindowsEvidence } from './windows-worker-evidence.ts';
+import { executionEvidenceAbsent, readPrivateWorkerFile, replacePrivateWorkerFile } from './private-worker-file.ts';
 import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, removeAgentTmpDir } from './agent-tmpdir.ts';
 import { removeArtifacts } from '../artifacts/lifecycle.ts';
 import { randomUUID, createHash } from 'node:crypto';
@@ -3856,22 +3858,22 @@ export class RunStore extends EventEmitter {
 
   /** Private process-generation evidence; never part of run JSON or SSE. */
   private identityPath(id: string): string {
+    if (isWindowsWorkerEvidence) return windowsEvidencePath(this.dataDir, id, 'identity');
     return this.executionPath(id).replace(/\.execution\.json$/, '.identity.json');
   }
 
   readWorkerIdentity(id: string): WorkerExecutionIdentity | undefined {
     try {
-      const fd = openSync(this.identityPath(id), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-      try {
-        const info = fstatSync(fd);
-        if (!info.isFile() || info.size > 16384 || (info.mode & 0o077)) return undefined;
-        const buffer = Buffer.alloc(16385); const count = readSync(fd, buffer, 0, buffer.length, 0);
-        return workerExecutionIdentitySchema.parse(JSON.parse(buffer.subarray(0, count).toString('utf8')));
-      } finally { closeSync(fd); }
+      if (isWindowsWorkerEvidence) {
+        const content = readWindowsEvidence(this.dataDir, id, 'identity', 16384);
+        return content === undefined ? undefined : workerExecutionIdentitySchema.parse(JSON.parse(content));
+      }
+      return workerExecutionIdentitySchema.parse(JSON.parse(readPrivateWorkerFile(this.identityPath(id), 16384)));
     } catch { return undefined; }
   }
 
   private writeWorkerIdentity(id: string, identity: WorkerExecutionIdentity): void {
+    if (isWindowsWorkerEvidence) { writeWindowsEvidence(this.dataDir, id, 'identity', JSON.stringify(identity), true); return; }
     // Immutable acceptance evidence. An orphan from failed index publication cannot be adopted.
     const fd = openSync(this.identityPath(id), constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     try { writeFileSync(fd, JSON.stringify(identity)); fsyncSync(fd); } finally { closeSync(fd); }
@@ -3882,32 +3884,23 @@ export class RunStore extends EventEmitter {
     const dir = join(this.dataDir, 'runs');
     mkdirSync(dir, { recursive: true });
     if (lstatSync(dir).isSymbolicLink() || realpathSync(dir) !== resolve(dir)) throw new Error('Unsafe execution directory');
+    if (isWindowsWorkerEvidence) return windowsEvidencePath(this.dataDir, id, 'execution');
     return join(dir, `${id}.execution.json`);
   }
 
   readWorkerExecution(id: string): WorkerExecution | undefined {
     try {
-      const path = this.executionPath(id);
-      const fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-      try {
-        const info = fstatSync(fd);
-        if (!info.isFile() || info.size > 16384 || (info.mode & 0o077)) return undefined;
-        const buffer = Buffer.alloc(16385); const count = readSync(fd, buffer, 0, buffer.length, 0);
-        return workerExecutionSchema.parse(JSON.parse(buffer.subarray(0, count).toString('utf8')));
-      } finally { closeSync(fd); }
+      if (isWindowsWorkerEvidence) {
+        const content = readWindowsEvidence(this.dataDir, id, 'execution', 16384);
+        return content === undefined ? undefined : workerExecutionSchema.parse(JSON.parse(content));
+      }
+      return workerExecutionSchema.parse(JSON.parse(readPrivateWorkerFile(this.executionPath(id), 16384)));
     } catch { return undefined; }
   }
 
   private writeWorkerExecution(id: string, proof: WorkerExecution, fresh = false): void {
-    const path = this.executionPath(id);
-    try {
-      const existing = lstatSync(path);
-      if (fresh || !existing.isFile() || existing.isSymbolicLink()) throw new Error('Unsafe execution checkpoint');
-    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    const temporary = `${path}.${randomUUID()}.tmp`;
-    const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-    try { writeFileSync(fd, JSON.stringify(proof)); fsyncSync(fd); } finally { closeSync(fd); }
-    try { renameSync(temporary, path); } finally { rmSync(temporary, { force: true }); }
+    if (isWindowsWorkerEvidence) { writeWindowsEvidence(this.dataDir, id, 'execution', JSON.stringify(proof), fresh); return; }
+    replacePrivateWorkerFile(this.executionPath(id), JSON.stringify(proof), fresh);
   }
 
   /** Complete execution is not permission to reuse/delete persistent resources (#738).
@@ -3988,6 +3981,7 @@ export class RunStore extends EventEmitter {
 
   /** Private process record (#469): which processes a generation spawned, never part of run JSON or SSE. */
   private processesPath(id: string): string {
+    if (isWindowsWorkerEvidence) return windowsEvidencePath(this.dataDir, id, 'processes');
     return this.executionPath(id).replace(/\.execution\.json$/, '.processes.json');
   }
 
@@ -3995,27 +3989,20 @@ export class RunStore extends EventEmitter {
    * wrongly permissioned, malformed or of another generation is `unknown`: never finalized or reaped. */
   readWorkerProcesses(id: string, generation: string): WorkerProcessRecord | 'absent' | 'unknown' {
     try {
-      const fd = openSync(this.processesPath(id), constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
-      try {
-        const info = fstatSync(fd);
-        if (!info.isFile() || info.size > 8192 || (info.mode & 0o077)) return 'unknown';
-        const buffer = Buffer.alloc(8193); const count = readSync(fd, buffer, 0, buffer.length, 0);
-        const record = workerProcessRecordSchema.parse(JSON.parse(buffer.subarray(0, count).toString('utf8')));
+      if (isWindowsWorkerEvidence) {
+        const content = readWindowsEvidence(this.dataDir, id, 'processes', 8192);
+        if (content === undefined) return 'absent';
+        const record = workerProcessRecordSchema.parse(JSON.parse(content));
         return record.generation === generation ? record : 'unknown';
-      } finally { closeSync(fd); }
+      }
+      const record = workerProcessRecordSchema.parse(JSON.parse(readPrivateWorkerFile(this.processesPath(id), 8192)));
+      return record.generation === generation ? record : 'unknown';
     } catch (error) { return (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'absent' : 'unknown'; }
   }
 
   private writeWorkerProcesses(id: string, record: WorkerProcessRecord): void {
-    const path = this.processesPath(id);
-    try {
-      const existing = lstatSync(path);
-      if (!existing.isFile() || existing.isSymbolicLink()) throw new Error('Unsafe process record');
-    } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error; }
-    const temporary = `${path}.${randomUUID()}.tmp`;
-    const fd = openSync(temporary, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-    try { writeFileSync(fd, JSON.stringify(workerProcessRecordSchema.parse(record))); fsyncSync(fd); } finally { closeSync(fd); }
-    try { renameSync(temporary, path); } finally { rmSync(temporary, { force: true }); }
+    if (isWindowsWorkerEvidence) { writeWindowsEvidence(this.dataDir, id, 'processes', JSON.stringify(workerProcessRecordSchema.parse(record))); return; }
+    replacePrivateWorkerFile(this.processesPath(id), JSON.stringify(workerProcessRecordSchema.parse(record)));
   }
 
   /** Bound to the current generation. Past the cap the record never drops an entry: the
@@ -4093,7 +4080,7 @@ export class RunStore extends EventEmitter {
     if (!proof && agentTmpDirMayExist(this.dataDir, id)) return false;
     if (receipt.deletion) return receipt.deletion.revision === result.revision &&
       receipt.deletion.resourceId === workspace.resourceId && receipt.deletion.phase === 'pending' &&
-      (proof ? proof.phase === 'complete' && proof.generation === receipt.deletion.generation : !existsSync(this.executionPath(id)));
+      (proof ? proof.phase === 'complete' && proof.generation === receipt.deletion.generation : executionEvidenceAbsent(this.dataDir, id, this.executionPath(id)));
     return proof?.phase === 'complete';
   }
 
@@ -4145,9 +4132,15 @@ export class RunStore extends EventEmitter {
         removeAgentTmpDir(this.dataDir, id);
         if (agentTmpDirMayExist(this.dataDir, id)) return false;
         // Private process/account evidence is now replaced by the exact parent receipt.
-        rmSync(this.identityPath(id), { force: true });
-        rmSync(this.processesPath(id), { force: true });
-        rmSync(this.executionPath(id), { force: true });
+        if (isWindowsWorkerEvidence) {
+          removeWindowsEvidence(this.dataDir, id, 'identity');
+          removeWindowsEvidence(this.dataDir, id, 'processes');
+          removeWindowsEvidence(this.dataDir, id, 'execution');
+        } else {
+          rmSync(this.identityPath(id), { force: true });
+          rmSync(this.processesPath(id), { force: true });
+          rmSync(this.executionPath(id), { force: true });
+        }
         const retained = this.readWorkerResult(parent.id, id)!;
         this.commitWorkerResult(parent.id, { ...retained, observedAt: new Date().toISOString(),
           diff: retained.diff.state === 'available' ? { ...retained.diff, snapshotId: randomUUID() } : retained.diff,

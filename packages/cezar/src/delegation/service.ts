@@ -74,6 +74,28 @@ import { DESTROY_ATTENTION_ATTEMPTS, DESTROY_BACKOFF, retryDelayMs, type Backoff
 
 export type DelegationProject = { id: string; root: string; store: RunStore; manager: RunManager };
 
+type TerminationBlocker = NonNullable<ReturnType<RunManager['takeWorkerTerminationBlocker']>>;
+
+function terminationFailure(workerId: string, resources: ('worktree' | 'branch')[], taken: TerminationBlocker | undefined) {
+  const blocker = taken?.blocker;
+  const reason = !blocker ? undefined : blocker.kind === 'unreadable' ? 'worker process record is unreadable; termination cannot be proven'
+    : blocker.kind === 'controller' ? `the worker is still controlled by a live cezar (pid ${blocker.pid})`
+    : `${blocker.pids.length === 1 ? 'process' : 'processes'} ${blocker.pids.join(', ')} still ${blocker.pids.length === 1 ? 'holds' : 'hold'} the worker's worktree or scratch`;
+  const error = !blocker ? 'Worker termination is not proven; retry cleanup later'
+    : blocker.kind === 'unreadable' ? reason! : `Worker termination is not proven: ${reason}; retry cleanup later`;
+  const holders = blocker?.kind === 'processes' ? blocker.pids : blocker?.kind === 'controller' ? [blocker.pid] : [];
+  const result: WorkerDestroyResult = { workerId, state: 'incomplete', remaining: ['process', ...resources], error };
+  return { result, holders, reason };
+}
+
+function assertRecordedProcessesStopped(project: DelegationProject, workerId: string, generation: string): void {
+  const record = project.store.readWorkerProcesses(workerId, generation);
+  if (record === 'unknown' || (record !== 'absent' &&
+    ((!isCurrentProcess(record.controller) && recordedProcessLive(record.controller)) || record.processes.some(recordedProcessLive)))) {
+    throw new Error('Recorded worker processes remain or cannot be verified; cleanup will retry');
+  }
+}
+
 /** Authenticate and snapshot before a destroy-only resource reaper can signal. */
 async function prepareAuthoritativeReaper(project: DelegationProject, workerId: string, workspace: Extract<NonNullable<RunRecord['delegation']>, { role: 'worker' }>['workspace'],
   check: () => RunRecord, assertAttached: () => void): Promise<() => Promise<void>> {
@@ -818,14 +840,10 @@ export class DelegationService {
       if (!terminated) {
         // #469: name what blocks a crashed generation; other causes keep the generic message.
         const taken = project.manager.takeWorkerTerminationBlocker(workerId);
-        const reason = taken && (taken.blocker.kind === 'unreadable' ? 'worker process record is unreadable; termination cannot be proven'
-          : taken.blocker.kind === 'controller' ? `the worker is still controlled by a live cezar (pid ${taken.blocker.pid})`
-          : `${taken.blocker.pids.length === 1 ? 'process' : 'processes'} ${taken.blocker.pids.join(', ')} still ${taken.blocker.pids.length === 1 ? 'holds' : 'hold'} the worker's worktree or scratch`);
-        if (taken?.changed) project.store.appendEvent(workerId, { type: 'lifecycle', message: `destroy blocked: ${reason}` });
-        result = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: !taken ? 'Worker termination is not proven; retry cleanup later'
-          : taken.blocker.kind === 'unreadable' ? reason! : `Worker termination is not proven: ${reason}; retry cleanup later` };
-        persist(result.state, result.remaining, result.error);
-        return observed(result, taken?.blocker.kind === 'processes' ? taken.blocker.pids : taken?.blocker.kind === 'controller' ? [taken.blocker.pid] : [], !!taken);
+        const failure = terminationFailure(workerId, resources, taken);
+        if (taken?.changed) project.store.appendEvent(workerId, { type: 'lifecycle', message: `destroy blocked: ${failure.reason}` });
+        persist(failure.result.state, failure.result.remaining, failure.result.error);
+        return observed(failure.result, failure.holders, !!taken);
       }
       persist('cleaning', resources);
       const snapshot = structuredClone(check());
@@ -851,11 +869,7 @@ export class DelegationService {
           project.store.readWorkerExecution(workerId)?.phase !== 'complete') {
           throw new Error('Worker resource ownership changed');
         }
-        const record = project.store.readWorkerProcesses(workerId, proof.generation);
-        if (record === 'unknown' || (record !== 'absent' &&
-          ((!isCurrentProcess(record.controller) && recordedProcessLive(record.controller)) || record.processes.some(recordedProcessLive)))) {
-          throw new Error('Recorded worker processes remain or cannot be verified; cleanup will retry');
-        }
+        assertRecordedProcessesStopped(project, workerId, proof.generation);
       };
       const assertSafe = () => {
         assertCurrent();

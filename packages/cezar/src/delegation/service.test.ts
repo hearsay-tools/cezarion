@@ -779,7 +779,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     expect(first.attempts).toBe(5);
     // Attempt 5 is the first capped delay (300 ms); jitter only stretches it.
     expect(Date.parse(first.nextAt) - first.at).toBeGreaterThanOrEqual(290);
-    expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', remaining: ['worktree', 'branch'] });
+    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', remaining: ['process', 'worktree', 'branch'] }), { timeout: 10_000 });
   });
 
   it.runIf(linux)('a holder that exits inside the fast window lets the destroy complete within it', async () => {
@@ -814,9 +814,9 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     const { workerId } = await settled(false);
     let release!: (value: boolean) => void;
     const gate = new Promise<boolean>(resolve => { release = resolve; });
-    vi.spyOn(f.manager, 'awaitRunTermination').mockReturnValue(gate);
+    const termination = vi.spyOn(f.manager, 'awaitRunTermination').mockReturnValue(gate);
     const explicit = f.service.destroy(f.caller, { workerId });
-    await vi.waitFor(() => expect(destroyOf(workerId)?.phase).toBe('terminating'), { timeout: 10_000 });
+    await vi.waitFor(() => expect(termination).toHaveBeenCalled(), { timeout: 10_000 });
     const replacementManager = createFixtureManager(f.store, f.root);
     const detachReplacement = f.service.registerProject({ id: 'project', root: f.root, store: f.store, manager: replacementManager });
     const armed = () => (f.service as unknown as { destroyRetryTimers: Map<string, Map<string, unknown>> }).destroyRetryTimers.get('project')?.has(workerId);
@@ -842,7 +842,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
       await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
       expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', error: WORKTREE_LOCK_BUSY_ERROR });
     } finally { unlock(); await keeper; }
-    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
+    await vi.waitFor(() => expect(destroyOf(workerId), JSON.stringify(destroyOf(workerId))).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
     expect(existsSync(workspace.path)).toBe(false);
   });
 
@@ -1022,6 +1022,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     const { workerId } = await settled();
     await f.service.destroy(f.caller, { workerId });
     await vi.waitFor(() => expect(f.store.getRun(workerId)?.destroyRetry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+    await vi.waitFor(() => expect(destroyOf(workerId)?.phase).toBe('incomplete'), { timeout: 10_000 });
     const run = f.store.getRun(workerId)!;
     if (run.delegation?.role !== 'worker') throw Error('worker');
     // The pre-#879 destroy keys exactly: a strict reader that has never heard of retries still parses it.

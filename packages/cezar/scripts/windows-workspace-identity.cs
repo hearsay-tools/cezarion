@@ -163,6 +163,21 @@ public static class CezWorkspaceIdentity {
       }
     }
   }
+  public static void Remove(string input, bool privateParent) {
+    string path = Canonical(input);
+    using (var parents = new Parents(path)) {
+      if (privateParent) PrivateDirectory(Path.GetDirectoryName(path));
+      using (var file = Open(path, GenericRead | ReadControl | Delete, ShareRead, true)) {
+        if (file == null) return;
+        CheckObject(file, path, false); CheckPrivate(file);
+        IntPtr disposition = Marshal.AllocHGlobal(1);
+        try {
+          Marshal.WriteByte(disposition, 1);
+          if (!SetFileInformationByHandle(file, 4 /* FileDispositionInfo */, disposition, 1)) throw new Win32Exception();
+        } finally { Marshal.FreeHGlobal(disposition); }
+      }
+    }
+  }
   static SafeFileHandle Create(string path) {
     using (var security = new PrivateSecurity(false)) {
       var file = CreateFileW(path, GenericWrite | ReadControl | Delete, 0, security.Pointer, CreateNew, OpenReparse, IntPtr.Zero);
@@ -171,7 +186,7 @@ public static class CezWorkspaceIdentity {
       catch { file.Dispose(); throw; }
     }
   }
-  static void Rename(SafeFileHandle file, string path) {
+  static void Rename(SafeFileHandle file, string path, bool replace = true) {
     byte[] name = Encoding.Unicode.GetBytes(path);
     int offset = (int)Marshal.OffsetOf(typeof(RenameInformation), "Name");
     // The Win32 path conversion needs a terminated string; Length excludes its NUL.
@@ -181,13 +196,25 @@ public static class CezWorkspaceIdentity {
       // Zero padding as well as RootDirectory; use the pinned absolute destination.
       // REPLACE_IF_EXISTS | POSIX_SEMANTICS permits replacing the destination while
       // its verified read handle stays open. Never close it to make rename work.
-      Marshal.Copy(new byte[size], 0, memory, size); Marshal.WriteInt32(memory, 3);
+      Marshal.Copy(new byte[size], 0, memory, size); Marshal.WriteInt32(memory, replace ? 3 : 0);
       Marshal.WriteInt32(memory, (int)Marshal.OffsetOf(typeof(RenameInformation), "Length"), name.Length);
       Marshal.Copy(name, 0, IntPtr.Add(memory, offset), name.Length);
       if (!SetFileInformationByHandle(file, 22 /* FileRenameInfoEx */, memory, (uint)size)) {
         int error = Marshal.GetLastWin32Error(); throw new Win32Exception(error, "Cannot rename workspace checkpoint (" + error + ")");
       }
     } finally { Marshal.FreeHGlobal(memory); }
+  }
+  public static void Migrate(string input, string destination) {
+    string source = Canonical(input), target = Canonical(destination);
+    using (var sourceParents = new Parents(source))
+    using (var targetParents = new Parents(target)) {
+      PrivateDirectory(Path.GetDirectoryName(target));
+      using (var file = Open(source, GenericRead | ReadControl | Delete, ShareRead, false)) {
+        CheckObject(file, source, false); CheckPrivate(file);
+        // Rename the verified object itself. An existing destination is never replaced.
+        Rename(file, target, false);
+      }
+    }
   }
   public static void Write(string input, string content, bool replace, bool privateParent) {
     string path = Canonical(input); byte[] bytes = Convert.FromBase64String(content);

@@ -313,8 +313,16 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       expect.soft(existsSync(scratch)).toBe(true);
       expect.soft(other.continueRun(w.id, { text: 'try again' })).toMatchObject({ ok: false, error: expect.stringContaining('checkpoint') });
       await until(() => !other.isActive(w.id));
+      // Recovery above sees the still-live fixture controller and must refuse.
+      // Model its later exit before explicit destroy, without ever signalling it.
+      const exitedController = spawn(process.execPath, ['-e', '']);
+      await new Promise<void>(resolve => exitedController.once('exit', () => resolve()));
+      const processFile = join(root, '.ai/cezar/runs', `${w.id}.processes.json`);
+      const processRecord = JSON.parse(readFileSync(processFile, 'utf8'));
+      writeFileSync(processFile, JSON.stringify({ ...processRecord, controller: { pid: exitedController.pid, startToken: '1' } }));
       const service = new DelegationService(); service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
-      expect.soft(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+      const result = await service.destroyForHuman('reopened', w.id);
+      expect.soft(result, JSON.stringify(result)).toMatchObject({ state: 'complete', remaining: [] });
       expect.soft(launches).toBe(1); expect.soft(existsSync(workspace(w).path)).toBe(false);
       expect.soft(existsSync(scratch)).toBe(false);
       expect.soft(child!.signalCode).toBe('SIGKILL');
@@ -639,7 +647,8 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       const service = new DelegationService();
       const detach = service.registerProject({ id: 'p', root, store, manager });
       try {
-        expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+        const result = await service.destroyForHuman('p', w.id);
+        expect(result, JSON.stringify(result)).toMatchObject({ state: 'complete', remaining: [] });
         expect(child.proc.exitCode).toBe(42);
       } finally { detach(); }
     });
@@ -935,14 +944,11 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       } finally { detach(); for (const holder of [...daemons, ...later]) await holder.close(); }
     });
 
-    it('win32 has no cwd scan: destroy removes an unheld worktree instead of staying unknown', async () => {
+    it.runIf(process.platform === 'win32')('win32 destroy removes an unheld worktree', async () => {
       const { w, service, detach } = await settled();
-      const platform = Object.getOwnPropertyDescriptor(process, 'platform')!;
-      // Windows refuses to delete a directory a process holds, so the checked removal is the proof there.
-      Object.defineProperty(process, 'platform', { ...platform, value: 'win32' });
       try {
         expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
-      } finally { Object.defineProperty(process, 'platform', platform); detach(); }
+      } finally { detach(); }
       expect(existsSync(workspace(w).path)).toBe(false); expect(branchExists(workspace(w).branch)).toBe(false);
     });
 

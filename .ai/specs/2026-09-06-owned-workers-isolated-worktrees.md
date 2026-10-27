@@ -541,3 +541,18 @@ tracked separately in [#136](https://github.com/wjarka/cezar/issues/136) and
 to keep further work scoped to hearsay-tools/cezarion#111. Exact commands, observations, incident
 limitations and artifact references are in the adjacent QA report. Publication
 and CI are controller-owned and pending.
+
+### Windows worker execution evidence
+
+Worker acceptance identity, execution checkpoints and process records remain private authority. On Windows, ACL and handle validation replace POSIX mode-bit checks. New records use a private evidence directory. Existing POSIX paths and behavior stay unchanged.
+
+| Case | Required behavior |
+| --- | --- |
+| Fresh worker | Create private directory and immutable acceptance evidence before admission; atomically replace execution and process checkpoints. |
+| Restart | Reopen and validate the ACL, object type, generation and resource identity on every read. |
+| Genuine private legacy record | Read only after native ACL and object validation; retain a safe update path. |
+| Broad ACL, reparse point, hardlink, malformed or unreadable record | Refuse; a present process record is unknown, never absent. |
+| New and legacy copies | Do not silently choose conflicting or unverified evidence; an interrupted migration must be recoverable. |
+| History deletion | Check and remove all relevant evidence paths without deleting unverified substitutes. |
+
+Readers include RunStore admission, recovery, generation and scratch cleanup, destroy observation, and history deletion. Tests and packaged fixtures that construct legacy paths remain legacy tests; Windows native fixtures exercise the new paths and ACL checks. Fresh checks must not be cached across destructive boundaries.

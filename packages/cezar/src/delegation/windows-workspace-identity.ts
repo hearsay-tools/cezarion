@@ -21,6 +21,12 @@ export function windowsReadIdentity(path: string, cap: number, privateParent = t
 export function windowsWriteIdentity(path: string, content: string, replace = false, privateParent = true): void {
   identityOperation({ operation: 'write', path, content: Buffer.from(content).toString('base64'), replace, privateParent });
 }
+export function windowsRemoveIdentity(path: string, privateParent = true): void {
+  identityOperation({ operation: 'remove', path, privateParent });
+}
+export function windowsMigrateIdentity(path: string, destination: string): void {
+  identityOperation({ operation: 'migrate', path, destination });
+}
 
 /** Process identities are obtained from OS handles, never an app lease. */
 export function windowsDestroyHolders(paths: readonly string[], pid = 0): Array<{ pid: number; token: string }> {
