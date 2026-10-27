@@ -123,11 +123,13 @@ import { reconcileWorkerEntry } from '../delegation/wait.ts';
 import { reconcileConversationState, projectConversationEvents } from '../delegation/conversations.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
 import { answersQuestion, openQuestions, questionMessage } from '../delegation/questions.ts';
+import { workerQuestionFallback } from './question-routing.ts';
 import { messagedParentSince, parkNoticeMessage, parkNoticeWait, parkingTurn } from '../delegation/park-notice.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
 import { applyOutcomes, type RunOutcome } from '../runs/outcome-commit.ts';
 import { acknowledgedBatch, answerOutcomes, chargedIf } from './outcome-batches.ts';
+import { analyseAcknowledgedInput, type AcknowledgedInput } from './input-acknowledgement.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
 import { isReclaimable, reclaimWorktrees, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import {
@@ -5358,16 +5360,9 @@ export class RunManager {
       this.store.appendEvent(workerId, { type: 'worker-question-routed', askSeq: ask.seq, messageId: message.id, parentRunId: parentId });
       return;
     }
-    // Recovery can find a question that never left a worker which has since stopped.
-    if (!['queued', 'running', 'waiting'].includes(worker.status)) { fallback('worker-stopped'); return; }
-    if (root?.delegation?.role !== 'root' || !this.parentCanReceive(root)) { fallback('the parent can no longer receive messages'); return; }
-    const state = root.delegation.conversation ?? { messages: [], outcomes: [] };
-    // Room in the ledger for the question AND its reply, beside the replies other open questions
-    // reserve. The reply itself is always admitted to this worker's inbox (service.send).
-    if (state.messages.length + openQuestions(state).length + 2 > 1024 || (root.agentInputs ?? []).filter(input => !input.deliveredAt).length >= 32 ||
-      state.messages.filter(m => m.kind === 'request' && m.state === 'accepted' && !state.outcomes.some(o => o.requestId === m.id)).length >= 32) {
-      fallback('the parent conversation is at capacity'); return;
-    }
+    const reason = workerQuestionFallback(worker, root, parent => this.parentCanReceive(parent));
+    if (reason) { fallback(reason); return; }
+    const state = (root!.delegation as Extract<RunRecord['delegation'], { role: 'root' }>).conversation ?? { messages: [], outcomes: [] };
     const input = { id: message.id, source: 'agent' as const, parentRunId: parentId, text: message.text, createdAt: now,
       conversation: { senderRunId: workerId, recipientRunId: parentId, kind: 'request' as const } };
     this.store.commitConversation(parentId, { ...state, messages: [...state.messages, message] }, { recipientRunId: parentId, input });
@@ -5465,24 +5460,38 @@ export class RunManager {
   /** The parent's reply answers the routed question like a human answer would: through the
    * live session's native answer seam, or by reopening a session that is gone (#505). */
   private answerRoutedQuestion(runId: string, admitted = false): void {
+    const answer = this.pendingRoutedAnswer(runId);
+    if (!answer) return;
+    const { state } = answer;
+    if (!state) this.reopenRoutedAnswer(runId, answer);
+    else this.deliverRoutedAnswer(runId, state, answer, admitted);
+  }
+
+  private pendingRoutedAnswer(runId: string) {
     const routed = this.routedAsk(runId);
     const run = this.store.getRun(runId);
     const reply = routed && run?.agentInputs?.find(input => !input.deliveredAt && answersQuestion(routed.message, input));
     // A stopped worker is the human's to continue; a parent answer never revives it.
-    if (!routed || !reply || run?.delegation?.role !== 'worker' || !['queued', 'running', 'waiting'].includes(run.status)) return;
+    if (!routed || !reply || run?.delegation?.role !== 'worker' || !['queued', 'running', 'waiting'].includes(run.status)) return undefined;
     // Verbatim: a native answer seam parses `Header: label` lines, exactly as a human's.
     const text = reply.text;
     const state = this.active.get(runId);
     const fallback = this.isWorkerFallbackAsk(runId, routed.askSeq);
-    if (!state) {
-      // An automated answer is not a human override: the reopened session waits for capacity.
-      // It withdraws no wait (hearsay-tools/cezarion#1235).
-      if (this.isActive(runId)) return;
-      const result = this.continueRun(runId, { text, answerInputId: reply.id }, true);
-      if (!result.ok) this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: `parent answer not delivered: ${result.error}` });
-      else if (fallback) this.chargeWorkerFallbackReply(runId);
-      return;
-    }
+    return { routed, reply, text, state, fallback };
+  }
+
+  private reopenRoutedAnswer(runId: string, answer: NonNullable<ReturnType<RunManager['pendingRoutedAnswer']>>): void {
+    const { text, reply, fallback } = answer;
+    // An automated answer is not a human override: the reopened session waits for capacity.
+    // It withdraws no wait (hearsay-tools/cezarion#1235).
+    if (this.isActive(runId)) return;
+    const result = this.continueRun(runId, { text, answerInputId: reply.id }, true);
+    if (!result.ok) this.store.appendEvent(runId, { type: 'note', tone: 'warning', message: `parent answer not delivered: ${result.error}` });
+    else if (fallback) this.chargeWorkerFallbackReply(runId);
+  }
+
+  private deliverRoutedAnswer(runId: string, state: ActiveRun, answer: NonNullable<ReturnType<RunManager['pendingRoutedAnswer']>>, admitted: boolean): void {
+    const { routed, reply, text, fallback } = answer;
     if (!state.session?.open || state.cancelled || state.openingAgentInputId === reply.id) return;
     // Already waiting for admission: only the admission itself may deliver it.
     if (!admitted && (this.waitWakeQueuedAt.has(runId) || this.waitWakeAdmitted.has(runId))) return;
@@ -5497,8 +5506,7 @@ export class RunManager {
     if (!state.session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])])) return;
     this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: routed.askSeq, source: 'parent' });
     this.commitRoutedAnswer(runId, state, [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])], fallback);
-    // As in submitAgentInput: the wake that admitted this answer is spent, and a stale one
-    // would hold back every later message until the answer's turn ends.
+    // Spend the answer's admission now so later messages can steer before its turn ends.
     if (this.waitWakeAdmitted.delete(runId)) state.waitWakeTurn = state.session;
     state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
     if (!state.pendingHumanAsk) this.flushAgentInputs(runId);
@@ -6256,55 +6264,15 @@ export class RunManager {
       if (!current()) return;
       try {
         if (inputIds.length) {
-          const queue = this.store.getRun(runId)?.agentInputs ?? [];
-          if (!queue.some(input => inputIds.includes(input.id) && !input.deliveredAt)) return;
-          // One checkpoint per wake batch: every resolved wait it carries is delivered together
-          // (hearsay-tools/cezarion#1233); the rest of the batch keeps the ordinary bookkeeping.
-          const batch = resolvedWaits(this.store.getRun(runId) ?? {}).filter(wait => inputIds.includes(waitInputId(wait)));
-          const resolvedIds = batch.map(waitInputId);
-          // A message an upgraded wait carries as its wake (`wakeInputId`) is still a message: it
-          // keeps the conversation bookkeeping beside the wait's delivery.
-          const carried = resolvedIds.filter(id => queue.some(input => input.id === id && input.source !== 'lifecycle'));
-          const conversationIds = inputIds.filter(id => !resolvedIds.includes(id) || carried.includes(id));
-          // Input the harness reported unread while this very POST was pending stays queued:
-          // the flush after this acknowledgement resubmits it (#505 review).
-          const accepted = conversationIds.filter(id => !state.retiredInFlight?.has(id));
-          for (const id of conversationIds) state.retiredInFlight?.delete(id);
-          // An observable harness still owes a read: mark it so a restart replays it (#505). A read
-          // it reported while this acknowledgement was pending lands with it.
-          const observable = state.inputDelivery?.consumption === 'observable';
-          const early = observable ? accepted.filter(id => state.consumedBeforeAck?.has(id)) : [];
-          // A timer expiry is a self-generated wake: one admitted turn that carries timer results
-          // spends the one unit it reserved, however many it carries. CI wakes are external events
-          // and do not count.
-          const timers = batch.filter(chargesBudget);
-          const spent = timers.length && flight.wakeReserved ? (this.store.getRun(runId)?.automaticWakes ?? 0) + 1 : undefined;
-          // A wake of messages alone (hearsay-tools/cezarion#1235) spends its admission the same way;
-          // what it still owes is read before its messages are delivered.
-          const messageWake = !resolvedIds.length && !!flight.admittedWake && this.waitWakeAdmitted.has(runId);
-          const owedBefore = messageWake && this.owesWake(this.store.getRun(runId)!);
-          const at = new Date().toISOString();
+          const batch = analyseAcknowledgedInput(runId, state, flight, inputIds, this.store, this.waitWakeAdmitted, run => this.owesWake(run));
+          if (!batch) return;
+          const { accepted, resolvedIds, early, spent, observable, at, resumes } = batch;
           // One commit (hearsay-tools/cezarion#1805): the messages, then each wait's delivery (a message
           // a wait carries keeps its read receipt), the charge, the early reads, the cleared failure
           // count and the resume (hearsay-tools/cezarion#1235).
-          const resumes = resolvedIds.length > 0 || messageWake;
           this.store.commitOutcome(runId, this.withFailuresCleared(runId, acknowledgedBatch({ accepted, resolvedIds, early, spent, observable, at }), accepted, resolvedIds.length > 0),
             resumes ? { patch: { status: transition('resume', () => this.store.getRun(runId)) }, resumeStepId: resolvedIds.length ? state.currentStepId : undefined } : {});
-          if (spent !== undefined) {
-            flight.wakeReserved = false;
-            this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : timers.some(wait => wait.kind === 'timer') ? 'timer' : 'process'} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
-          }
-          // A wake of results always spends its admission; a wake of messages alone, only one it holds.
-          if (resumes && (this.waitWakeAdmitted.delete(runId) || resolvedIds.length > 0)) {
-            this.spendWakeAdmission(runId, state, resolvedIds.length ? resolvedWaits(this.store.getRun(runId) ?? {}).length > 0 : owedBefore);
-          }
-          // The wake's checkpoint clears the park's timers, the nudge's reply bound with them: a
-          // refusal's bound belongs to its turn (hearsay-tools/cezarion#1301).
-          if (refusal && state.completionNudged === session) this.armNoWaitNudgeReplyTimer(runId, state);
-          // An observable harness has delivered a message once it reads it: a steering session
-          // that fails before then requeues it unread and counts a failure (#1235).
-          for (const id of observable ? accepted : []) { if (early.includes(id)) state.consumedBeforeAck?.delete(id); else state.unreadInputIds?.add(id); }
-          this.reconcileWorkerWaits();
+          this.applyAcknowledgedInput(runId, state, flight, batch, refusal);
         }
       } catch (error) { fail(error, true); }
     }, error => { refund(); fail(error, false); }).then(() => {
@@ -6333,6 +6301,25 @@ export class RunManager {
       this.awaitCompletionNudgeReply(runId, state, session);
     } else if (inputIds.length) this.startCompletionCycle(state);
     return true;
+  }
+
+  /** Apply the acknowledgement's effects only after its outcome commit succeeds. */
+  private applyAcknowledgedInput(runId: string, state: ActiveRun, flight: NonNullable<ActiveRun['agentInputFlight']>, batch: AcknowledgedInput, refusal: boolean): void {
+    const { accepted, resolvedIds, early, spent, observable, timers, resumes, owedBefore } = batch;
+    const { session } = flight;
+    if (spent !== undefined) {
+      flight.wakeReserved = false;
+      this.store.appendEvent(runId, { type: 'note', message: `automatic ${timers.some(isMonitoringTimer) ? 'monitoring' : timers.some(wait => wait.kind === 'timer') ? 'timer' : 'process'} wake-up (${spent}/${MAX_AUTO_CONTINUES})` });
+    }
+    // A wake of results always spends its admission; a wake of messages alone, only one it holds.
+    if (resumes && (this.waitWakeAdmitted.delete(runId) || resolvedIds.length > 0)) {
+      this.spendWakeAdmission(runId, state, resolvedIds.length ? resolvedWaits(this.store.getRun(runId) ?? {}).length > 0 : owedBefore);
+    }
+    // Rearm the refusal turn's bound after the wake checkpoint cleared the park's timers.
+    if (refusal && state.completionNudged === session) this.armNoWaitNudgeReplyTimer(runId, state);
+    // Until observed read, a failed steering session requeues the input and counts a failure.
+    for (const id of observable ? accepted : []) { if (early.includes(id)) state.consumedBeforeAck?.delete(id); else state.unreadInputIds?.add(id); }
+    this.reconcileWorkerWaits();
   }
 
   /** False leaves the durable entry untouched. No human-answer/slash-expansion fallback. */
@@ -6506,13 +6493,23 @@ export class RunManager {
     // Cezar's fallback question on a worker never holds what the plain park it replaced let
     // through: an automatic message supersedes it, as a parent's input does (hearsay-tools/cezarion#1301).
     if (!userAuthored) this.supersedeWorkerFallback(runId);
+    const prepared = this.prepareMessageContent(runId, state, content, userAuthored);
+    const { blocks, expanded, deliverable } = prepared;
+    const delivered = userAuthored ? state.session.sendMessage(deliverable) : this.submitAgentInput(runId, state, deliverable);
+    if (delivered && expanded !== blocks) this.provisionLiveSlashSkill(runId, state, blocks);
+    if (delivered) {
+      if (userAuthored) this.applyHumanMessageDelivery(runId, state, prepared, messageId);
+      this.resumeParkedRun(runId, state);
+    }
+    return delivered;
+  }
+
+  private prepareMessageContent(runId: string, state: ActiveRun, content: PastedContent[], userAuthored: boolean) {
     const text = content
       .filter((b): b is Extract<ContentBlock, { type: 'text' }> => b.type === 'text')
       .map((b) => b.text)
       .join('\n');
-    // Persist the attachments so the thread can render them (not just count them) — the same
-    // on-disk store + `/images/` route the agent's own screenshots use. `pasted` prefix marks
-    // these as user attachments (vs. agent tool screenshots) on disk (#357).
+    // Persist human attachments before the user-message event so the thread can render them.
     const persisted = userAuthored ? this.persistPastedAttachments(runId, content) : [];
     const images = persisted.map((saved) => saved.url);
     if (userAuthored) {
@@ -6525,49 +6522,39 @@ export class RunManager {
       });
     }
 
-    // Tell the agent where the pasted files live on disk (#357): the base64 blocks below still
-    // ride along so the model can *view* them, but a real path is what lets it *operate* on them
-    // (save, `cp`, attach to a GitHub issue/PR) — and it's the only usable reference on backends
-    // (codex, opencode) that drop image blocks entirely before reaching the model.
+    // Send paths beside image blocks: backends that drop images still receive usable files.
     const blocks = contentBlocksOf(content);
     const expanded = userAuthored ? expandRegistrySlashSkill(blocks, this.enabledSkills(state)) : blocks;
-    const deliverable: ContentBlock[] = persisted.length
+    const attached: ContentBlock[] = persisted.length
       ? [...expanded, pastedAttachmentsNote(persisted)]
       : expanded.length ? expanded : [{ type: 'text', text: 'The user attached a document, but it could not be saved. Ask them to attach it again before discussing its contents.' }];
     const answeringAskSeq = userAuthored ? this.pendingHumanAskSeq(runId) : undefined;
-    // #505: an answer that opens a new turn (a CEZ:ASK answer at a boundary) carries the
-    // held conversation messages in the same submission, after the answer.
+    // An answer opening a turn carries held conversation messages after the answer.
     const bundle = userAuthored && answeringAskSeq !== undefined && state.atTurnBoundary === state.session
       ? this.pendingConversationBatch(runId, state) : undefined;
-    // The open-waits footer is the turn's last block; `submitAgentInput` adds its own. This message
-    // answers every human wait, so the footer names none.
+    // Human input answers all human waits. Agent input gets its footer in submitAgentInput.
     const footer = userAuthored ? openWaitsFooter((this.store.getRun(runId)?.waits ?? []).filter(wait => wait.kind !== 'human'), { tools: !state.toolless }) : undefined;
-    const delivered = userAuthored ? state.session.sendMessage([...deliverable, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : []),
-      ...(footer ? [{ type: 'text' as const, text: `\n\n${footer}` }] : [])])
-      : this.submitAgentInput(runId, state, deliverable);
-    if (delivered && expanded !== blocks) this.provisionLiveSlashSkill(runId, state, blocks);
-    if (delivered) {
-      if (userAuthored) {
-        // The turn that would have finished now answers the user (hearsay-tools/cezarion#1234).
-        state.doneRequested = undefined;
-        state.noWaitNudged = undefined;
-        state.noWaitNudgeParked = undefined;
-        state.noWaitNudgeSawContent = undefined;
-        // A human message starts a fresh completion cycle (hearsay-tools/cezarion#1301).
-        this.startCompletionCycle(state);
-        if (answeringAskSeq !== undefined) {
-          this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: answeringAskSeq });
-        }
-        // The budget restarts after the rest steer (`sendMessage`).
-        this.commitAnswer(runId, state, bundle, messageId);
-        state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
-        // A native answer continues the turn, and a bundle can leave messages that did not
-        // fit its batch: either way the rest steer right behind the answer.
-        if (answeringAskSeq !== undefined && !state.pendingHumanAsk) this.flushAgentInputs(runId);
-      }
-      this.resumeParkedRun(runId, state);
+    const deliverable = userAuthored ? [...attached, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : []),
+      ...(footer ? [{ type: 'text' as const, text: `\n\n${footer}` }] : [])] : attached;
+    return { blocks, expanded, deliverable, answeringAskSeq, bundle };
+  }
+
+  private applyHumanMessageDelivery(runId: string, state: ActiveRun, prepared: ReturnType<RunManager['prepareMessageContent']>, messageId: string | undefined): void {
+    const { answeringAskSeq, bundle } = prepared;
+    // The turn that would have finished now answers the user (hearsay-tools/cezarion#1234).
+    state.doneRequested = undefined;
+    state.noWaitNudged = undefined;
+    state.noWaitNudgeParked = undefined;
+    state.noWaitNudgeSawContent = undefined;
+    // A human message starts a fresh completion cycle (hearsay-tools/cezarion#1301).
+    this.startCompletionCycle(state);
+    if (answeringAskSeq !== undefined) {
+      this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: answeringAskSeq });
     }
-    return delivered;
+    this.commitAnswer(runId, state, bundle, messageId);
+    state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
+    // A native answer or a full bundle leaves remaining messages to steer behind the answer.
+    if (answeringAskSeq !== undefined && !state.pendingHumanAsk) this.flushAgentInputs(runId);
   }
 
   /** Close the open session gracefully — the run then completes as `done`
@@ -9258,45 +9245,16 @@ export class RunManager {
       state.atTurnBoundary = undefined; state.doneAtBoundary = undefined; state.parkAfterAck = undefined;
     }
     if (event.type === 'permission.requested') {
-      (state.pendingPermissions ??= new Set()).add(event.requestId);
-      this.prepareHumanAsk(state);
-      state.session?.discardQueuedMessages();
-      this.clearIdleTimer(state);
-      this.clearUnreadInputTimer(state);
-      this.clearHeldHumanInputTimer(state);
-      this.monitoring.delete(runId); // released below; its waits stay open
-      this.waiting.add(runId);
-      this.move(runId, 'park', { hasPendingPermission: true });
-      if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
-      this.releaseSlot();
-      // Authorization is the human's, even when this run is an owned worker.
+      this.handlePermissionRequested(runId, state, event.requestId);
       return;
     }
     if (event.type === 'permission.resolved' && state.pendingPermissions?.delete(event.requestId)) {
-      if (!state.pendingPermissions.size) {
-        this.store.updateRun(runId, { hasPendingPermission: false });
-        state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
-        if (!state.pendingHumanAsk && state.session?.open && !this.store.getRun(runId)?.stopping) {
-          this.resumeParkedRun(runId, state);
-          this.flushAgentInputs(runId);
-        }
-      }
+      this.handlePermissionResolved(runId, state);
       return;
     }
     const ask = askPayloadOf(event);
     if (ask) {
-      this.prepareHumanAsk(state);
-      // A native ask is a human wait the user already sees (hearsay-tools/cezarion#1234).
-      const questions = askRequestOf({ questions: ask.questions })?.questions;
-      const wait = this.openHumanAlias(runId, state, 'native-ask', questions ? { questions } : undefined);
-      if (wait) this.markHumanWaitSurfaced(runId, wait, questions ? { questions } : undefined);
-      this.clearIdleTimer(state);
-      this.monitoring.delete(runId); // released below; its waits stay open
-      this.waiting.add(runId);
-      this.move(runId, 'park');
-      if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
-      this.releaseSlot();
-      this.routeWorkerQuestion(runId);
+      this.handleNativeAskRequested(runId, state, ask);
       return;
     }
     // Pi can resume autonomously when an async subagent completes — the mapper
@@ -9307,6 +9265,47 @@ export class RunManager {
     if (this.waiting.has(runId) && (this.monitoring.has(runId) || this.parkedOnWorkers(runId)) && isRunnerActivity(event)) {
       this.resumeParkedRun(runId, state);
     }
+  }
+
+  private handlePermissionRequested(runId: string, state: ActiveRun, requestId: string): void {
+    (state.pendingPermissions ??= new Set()).add(requestId);
+    this.prepareHumanAsk(state);
+    state.session?.discardQueuedMessages();
+    this.clearIdleTimer(state);
+    this.clearUnreadInputTimer(state);
+    this.clearHeldHumanInputTimer(state);
+    this.monitoring.delete(runId); // released below; its waits stay open
+    this.waiting.add(runId);
+    this.move(runId, 'park', { hasPendingPermission: true });
+    if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
+    this.releaseSlot();
+    // Authorization is the human's, even when this run is an owned worker.
+  }
+
+  private handlePermissionResolved(runId: string, state: ActiveRun): void {
+    if (!state.pendingPermissions!.size) {
+      this.store.updateRun(runId, { hasPendingPermission: false });
+      state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
+      if (!state.pendingHumanAsk && state.session?.open && !this.store.getRun(runId)?.stopping) {
+        this.resumeParkedRun(runId, state);
+        this.flushAgentInputs(runId);
+      }
+    }
+  }
+
+  private handleNativeAskRequested(runId: string, state: ActiveRun, ask: NonNullable<ReturnType<typeof askPayloadOf>>): void {
+    this.prepareHumanAsk(state);
+    // A native ask is a human wait the user already sees (hearsay-tools/cezarion#1234).
+    const questions = askRequestOf({ questions: ask.questions })?.questions;
+    const wait = this.openHumanAlias(runId, state, 'native-ask', questions ? { questions } : undefined);
+    if (wait) this.markHumanWaitSurfaced(runId, wait, questions ? { questions } : undefined);
+    this.clearIdleTimer(state);
+    this.monitoring.delete(runId); // released below; its waits stay open
+    this.waiting.add(runId);
+    this.move(runId, 'park');
+    if (state.currentStepId) this.store.updateStep(runId, state.currentStepId, { status: 'waiting' });
+    this.releaseSlot();
+    this.routeWorkerQuestion(runId);
   }
 
   /** Persist the invocation checkpoint before launching a runner. A throw or
