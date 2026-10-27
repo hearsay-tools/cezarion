@@ -300,7 +300,7 @@ exit wait. S24, S33/S34 and the deadline tests cover these paths.
 
 
 After that extraction and the exact during-probe test correction, the final local
-quality rerun again passed all 217 tests. It measured 103/103 changed functions.
+quality rerun again passed all 217 tests. It measured 102/102 changed functions.
 Only the same three inherited findings remain; Pi's output loop complexity is now
-120 (baseline 127). Server typecheck passed. The parent reviewed the helper's
+121 (baseline 127). Server typecheck passed. The parent reviewed the helper's
 ordered effects and the exact intent boundary with no further finding.
