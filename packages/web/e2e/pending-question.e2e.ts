@@ -9,6 +9,7 @@ import { AgentBrowser, bootProjectId, cezarCli, fixtureServeEnv } from './agent-
 import { contrastSampleExpression, type ContrastSample } from './contrast'
 import { captureFixtureServer, spawnFixtureServer, stopFixtureServer, waitForFixtureServer } from './fixture-server'
 import { seedTranscript } from './seed-transcript'
+import { waitForSettledSample } from './visual-ready'
 // fixture-server starts: 1
 
 /**
@@ -127,6 +128,44 @@ describe.each([
   { name: '360×640', width: 360, height: 640, query: '' },
   { name: 'desktop, virtualized rows', width: 1440, height: 900, query: '?thread=virtual' },
 ])('the pinned pending question at $name', ({ width, height, query }) => {
+  it('restores Activity without scrolling the question again at the folded footer bottom', () => {
+    openTask(width, height, query)
+    const activity = '[data-slot="run-activity-dock"] > button'
+    const initiallyOpen = browser.waitForValue(`document.querySelector('${activity}')?.getAttribute('aria-expanded')`)
+    if (initiallyOpen === 'false') browser.click(activity)
+    browser.waitForValue(`document.querySelector('${activity}')?.getAttribute('aria-expanded')`,
+      (value): value is string => value === 'true')
+    waitForSettledSample(browser, `${MAIN}.scrollHeight`)
+    browser.evaluate(`(() => {
+      const main = ${MAIN};
+      main.dispatchEvent(new WheelEvent('wheel', { deltaY: -1000, bubbles: true }));
+      window.__cezThreadScrollTo(main.scrollHeight - main.clientHeight - 1000);
+    })()`)
+    browser.waitForValue(`document.querySelector('${activity}')?.getAttribute('aria-expanded')`,
+      (value): value is string => value === (width >= 768 ? 'false' : 'true'))
+    waitForSettledSample(browser, `${MAIN}.scrollHeight`)
+    const target = Number(browser.evaluate(`(() => {
+      const main = ${MAIN}, target = main.scrollHeight - main.clientHeight;
+      main.dispatchEvent(new WheelEvent('wheel', { deltaY: 1000, bubbles: true }));
+      window.__cezThreadScrollTo(target);
+      return target;
+    })()`))
+    browser.waitForValue(`document.querySelector('${activity}')?.getAttribute('aria-expanded')`,
+      (value): value is string => value === 'true')
+    const actual = waitForSettledSample<number>(browser, `${MAIN}.scrollTop`)
+    expect(Math.abs(actual - target)).toBeLessThan(2)
+    if (width >= 768) {
+      expect(browser.evaluate(`document.querySelector('${PILL}') !== null`)).toBe(true)
+    }
+    // A further reader movement can still reach the expanded footer's real bottom.
+    browser.evaluate(`(() => {
+      const main = ${MAIN};
+      main.dispatchEvent(new WheelEvent('wheel', { deltaY: 1000, bubbles: true }));
+      window.__cezThreadScrollTo(main.scrollHeight - main.clientHeight);
+    })()`)
+    browser.waitForFunction(`document.querySelector('${PILL}') === null`)
+  })
+
   it('pins the pending question at the tail and never answers the earlier one', () => {
     openTask(width, height, query)
     expect(browser.evaluate(`document.querySelector('[data-slot="thread-rows"]')?.dataset.virtualized ?? null`)).toBe(query ? 'true' : 'false')

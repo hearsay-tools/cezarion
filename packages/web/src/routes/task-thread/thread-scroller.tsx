@@ -9,6 +9,7 @@ import {
   type RefObject,
 } from 'react'
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
+import { flushSync } from 'react-dom'
 
 import { isCockpitE2e } from '@/lib/e2e-mode'
 import { jumpLabel } from './pending-ask-navigation'
@@ -570,7 +571,10 @@ export function useThreadScroll(
       }
       travel += Math.abs(delta)
       if (travel >= READER_DIRECTION_SLOP_PX) {
-        emitReaderScroll({ direction, distanceFromBottom: scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop })
+        // Reader chrome can restore Activity. Commit that layout before onScroll tests
+        // the tail, or its resize re-pins against the folded footer and moves the question.
+        // Only reader signals need this flush; replay and layout scrolls stay batched.
+        flushSync(() => emitReaderScroll({ direction, distanceFromBottom: scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop }))
       }
     }
     const onScroll = () => {
