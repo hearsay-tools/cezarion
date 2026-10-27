@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useLocation, useNavigate, useSearchParams } from 'react-router'
+import { useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router'
 
 /** One change to the query string, from the params as they will be once earlier writes land. */
 export type SearchParamsUpdate = (current: URLSearchParams) => URLSearchParams
@@ -18,22 +18,24 @@ export type SearchParamsUpdate = (current: URLSearchParams) => URLSearchParams
  * `__writerSession` is a random token generated at mount, so Back/Forward cannot restore a state
  * from a previous instance. `__writerSeq` is a monotone counter: when the landed seq equals
  * `latestSeq`, the last pending write has arrived and `next` resets; when the landed seq is
- * smaller, a newer write is still in flight and `next` is preserved. A navigation without our
- * session token is external (sidebar link, pasted URL, Back/Forward) and resets `next` to the
- * new URL (hearsay-tools/cezarion#1790).
+ * smaller, a newer write is still in flight and `next` is preserved. All writes use `replace:
+ * true`, so they produce REPLACE navigations; a POP (Back/Forward) or PUSH is always external
+ * and resets `next` to the restored URL, even when its state carries our session tag from an
+ * earlier entry (hearsay-tools/cezarion#1790).
  */
 export function useSearchParamsWriter(): [URLSearchParams, (update: SearchParamsUpdate) => void] {
   const [searchParams] = useSearchParams()
   const location = useLocation()
   const navigate = useNavigate()
+  const navigationType = useNavigationType()
   const session = React.useRef(Math.random())
   const pending = React.useRef({ rendered: searchParams, next: searchParams, seq: 0, latestSeq: 0 })
   React.useLayoutEffect(() => {
     if (pending.current.rendered === searchParams) return
     const state = location.state as { __writerSession?: number; __writerSeq?: number } | null
     const writerSeq = state?.__writerSession === session.current ? state.__writerSeq : undefined
-    if (writerSeq !== undefined && writerSeq <= pending.current.latestSeq) {
-      // One of our writes landed.
+    if (navigationType === 'REPLACE' && writerSeq !== undefined && writerSeq <= pending.current.latestSeq) {
+      // One of our REPLACE writes landed (never a Back/Forward POP, which may carry our tag).
       pending.current.rendered = searchParams
       if (writerSeq === pending.current.latestSeq) {
         // The latest write landed; reset next to signal we've arrived.
@@ -41,10 +43,10 @@ export function useSearchParamsWriter(): [URLSearchParams, (update: SearchParams
       }
       // An older write landed while a newer one is still in flight — preserve next.
     } else {
-      // External navigation: reset so subsequent writes start from the new URL.
+      // External navigation (POP, PUSH, or no matching session tag): reset.
       pending.current = { rendered: searchParams, next: searchParams, seq: pending.current.seq, latestSeq: 0 }
     }
-  }, [searchParams, location])
+  }, [searchParams, location, navigationType])
   const write = React.useCallback((update: SearchParamsUpdate) => {
     const next = update(new URLSearchParams(pending.current.next))
     // A write that changes nothing navigates nowhere. Even a same-URL navigation can land after

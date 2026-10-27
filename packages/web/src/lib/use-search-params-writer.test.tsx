@@ -16,6 +16,8 @@ function renderWriter(initial = '/p/x/') {
   const handle: {
     write?: (update: SearchParamsUpdate) => void
     externalNavigate?: (search: string) => void
+    push?: (search: string) => void
+    back?: () => void
     search?: string | undefined
     params?: string
     key?: string
@@ -25,6 +27,8 @@ function renderWriter(initial = '/p/x/') {
     const nav = useNavigate()
     handle.write = write
     handle.externalNavigate = (search) => nav({ search }, { replace: true })
+    handle.push = (search) => nav({ search })
+    handle.back = () => nav(-1)
     handle.params = params.toString()
     const location = useLocation()
     handle.search = location.search
@@ -106,5 +110,21 @@ describe('useSearchParamsWriter (hearsay-tools/cezarion#1616)', () => {
     act(() => probe.externalNavigate!('?q=x'))
     act(() => probe.write!(set('origin', 'direct')))
     expect(new URLSearchParams(probe.search)).toEqual(new URLSearchParams('q=x&origin=direct'))
+  })
+
+  // hearsay-tools/cezarion#1790: a Back navigation (POP) may restore a history entry that carries
+  // our session tag and an old seq. Without the navigation-type check, the seq guard treats it as
+  // an intermediate write still in flight and preserves the stale `next`. The next write then
+  // composes from `next` instead of the URL Back restored.
+  it('treats Back as external even when the restored entry carries our session tag', () => {
+    const probe = renderWriter('/p/x/')
+    act(() => probe.write!(set('q', 'done')))   // seq 1: ?q=done (REPLACE, our state)
+    act(() => probe.push!('?q=done'))            // external PUSH — new entry, no writer state
+    act(() => probe.write!(set('f', '1')))       // seq 2: ?q=done&f=1 (REPLACE, replaces push)
+    // Back → POP to seq-1 entry (?q=done, state {__writerSession, __writerSeq: 1}).
+    // Must be treated as external; next must reset to ?q=done.
+    act(() => probe.back!())
+    act(() => probe.write!(set('new', '1')))     // compose on ?q=done, not stale ?q=done&f=1
+    expect(new URLSearchParams(probe.search)).toEqual(new URLSearchParams('q=done&new=1'))
   })
 })
