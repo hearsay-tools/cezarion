@@ -12,7 +12,7 @@
     "packages/cezar/src/runs/store.ts": 4560,
     "packages/cezar/src/server-install/platforms/ubuntu-vps.ts": 1146,
     "packages/cezar/src/server/forge/github.ts": 3562,
-    "packages/cezar/src/server/server.ts": 5984,
+    "packages/cezar/src/server/server.ts": 5892,
     "packages/cezar/src/workflows/run.ts": 10906,
     "packages/contract/src/runs.ts": 1014,
     "packages/web/e2e/agent-browser.ts": 1288,
