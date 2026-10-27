@@ -1,11 +1,11 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { FileDiffIcon, GitCommitHorizontalIcon } from '@/components/design-icons'
-import { useMemo, useRef, useState } from 'react'
+import { useMemo, useRef, useState, type ReactNode } from 'react'
 import { useParams } from 'react-router'
 
 import { ApiError, createRunPr, getRunFile, openRunFileInApp, openRunInCli, pushRun, runFileRawUrl } from '@/api/client'
 import { queryKeys, useHealth, useRepo, useRun, useRunChanges } from '@/api/queries'
-import type { ApiRun } from '@open-mercato/cezar-api-client'
+import type { ApiRun, ChangedFile } from '@open-mercato/cezar-api-client'
 import { CenteredState } from '@/components/centered-state'
 import { canPreviewMarkdown, Diff, type DiffHandle, type DiffMode } from '@/components/diff'
 import { toast } from '@/components/ui/toaster'
@@ -17,7 +17,7 @@ import { lastSessionId } from '../task-thread/run-actions'
 import { RunHeader } from '../task-thread/run-header'
 import { ChangesTree } from './changes-tree'
 import { CommitDialog } from './commit-dialog'
-import { buildFileTree } from './file-tree'
+import { buildFileTree, type TreeDir } from './file-tree'
 import { GitTabLoadError, GitTabLoading } from './git-tab-loading'
 import { GitToolbar } from './git-toolbar'
 
@@ -174,61 +174,102 @@ function ChangesView({ run }: { run: ApiRun }) {
         </p>
       ) : null}
 
-      {changes.isPending ? (
-        <p data-slot="changes-loading" className="px-4 py-6 text-center text-xs text-soft-foreground md:px-9">
-          Loading changes…
-        </p>
-      ) : changes.isError ? (
-        <CenteredState
-          icon={changesRefused ? <FileDiffIcon size={16} /> : <GitCommitHorizontalIcon size={16} />}
-          tone={changesRefused ? 'neutral' : 'danger'}
-          heading="h2"
-          title={changesRefused ? 'No changes to show' : 'Could not load the changes'}
-          subtitle={changes.error.message}
+      <ChangesState changes={changes} changesRefused={changesRefused} fileCount={files.length}>
+        <ChangesLayout
+          runId={run.id}
+          files={files}
+          tree={tree}
+          selected={selected}
+          selectFile={selectFile}
+          diffRef={diffRef}
+          effectiveMode={effectiveMode}
+          effectiveWrap={effectiveWrap}
+          preview={preview}
+          localHandoff={health.data?.capabilities.localHandoff}
+          onOpenInApp={openImage.mutate}
         />
-      ) : files.length === 0 ? (
-        <CenteredState
-          icon={<FileDiffIcon size={16} />}
-          tone="neutral"
-          heading="h2"
-          title="No changes yet"
-          subtitle="The worktree matches its base branch. Changes appear here as the agent works."
-        />
-      ) : (
-        <div className="flex min-h-0 flex-1 flex-col items-stretch gap-5 md:flex-row md:items-start px-[18px] pb-9 pt-0 [--diff-sticky-top:0px] md:[--diff-sticky-top:1rem] md:px-9">
-          {/* The tree column: sticky under the header so long diffs scroll beside it, and its OWN
-              scroller. Sticky alone is not enough — a tree taller than the viewport grows the page
-              instead, so the only way to reach its last file was to drag the shared `main` scroller
-              (and the diff with it) to the bottom. Capping the pane at the space left under the
-              sticky chrome gives the list its own scrollbar; `overscroll-contain` keeps a wheel
-              inside it from chaining into the diff once it bottoms out. */}
-          <aside
-            data-slot="changes-tree-pane"
-            className="md:sticky md:top-4 max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)] w-full md:w-60 shrink-0 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-3.5 md:block lg:w-[250px]"
-          >
-            <h2 className="mb-3 border-b border-border pb-3 text-xs font-semibold">Changed files</h2>
-            <ChangesTree root={tree} selected={selected} onSelect={selectFile} />
-          </aside>
-          <Diff
-            files={files}
-            viewRef={diffRef}
-            mode={effectiveMode}
-            wrap={effectiveWrap}
-            // Phones included: a rendered document is the one view a narrow screen reads well.
-            // The preview's full text reloads only when this diff's coordinated read changes a
-            // file's patch, so it adds no polling of its own.
-            preview={preview}
-            loadFileText={(path) => loadWorktreeText(run.id, path)}
-            imageSrc={(path) => runFileRawUrl(run.id, path)}
-            onOpenInApp={
-              health.data?.capabilities.localHandoff ? (path) => openImage.mutate(path) : undefined
-            }
-            className="min-w-0 flex-1"
-          />
-        </div>
-      )}
+      </ChangesState>
 
       <CommitDialog run={run} open={commitOpen} onOpenChange={setCommitOpen} />
+    </div>
+  )
+}
+
+function ChangesState({ changes, changesRefused, fileCount, children }: {
+  changes: ReturnType<typeof useRunChanges>
+  changesRefused: boolean
+  fileCount: number
+  children: ReactNode
+}) {
+  return changes.isPending ? (
+    <p data-slot="changes-loading" className="px-4 py-6 text-center text-xs text-soft-foreground md:px-9">
+      Loading changes…
+    </p>
+  ) : changes.isError ? (
+    <CenteredState
+      icon={changesRefused ? <FileDiffIcon size={16} /> : <GitCommitHorizontalIcon size={16} />}
+      tone={changesRefused ? 'neutral' : 'danger'}
+      heading="h2"
+      title={changesRefused ? 'No changes to show' : 'Could not load the changes'}
+      subtitle={changes.error.message}
+    />
+  ) : fileCount === 0 ? (
+    <CenteredState
+      icon={<FileDiffIcon size={16} />}
+      tone="neutral"
+      heading="h2"
+      title="No changes yet"
+      subtitle="The worktree matches its base branch. Changes appear here as the agent works."
+    />
+  ) : (
+    children
+  )
+}
+
+function ChangesLayout({
+  runId, files, tree, selected, selectFile, diffRef, effectiveMode, effectiveWrap, preview, localHandoff, onOpenInApp,
+}: {
+  runId: string
+  files: ChangedFile[]
+  tree: TreeDir
+  selected: string | null
+  selectFile: (path: string) => void
+  diffRef: { current: DiffHandle | null }
+  effectiveMode: DiffMode
+  effectiveWrap: boolean
+  preview: boolean
+  localHandoff: boolean | undefined
+  onOpenInApp: (path: string) => void
+}) {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-stretch gap-5 md:flex-row md:items-start px-[18px] pb-9 pt-0 [--diff-sticky-top:0px] md:[--diff-sticky-top:1rem] md:px-9">
+      {/* The tree column: sticky under the header so long diffs scroll beside it, and its OWN
+          scroller. Sticky alone is not enough — a tree taller than the viewport grows the page
+          instead, so the only way to reach its last file was to drag the shared `main` scroller
+          (and the diff with it) to the bottom. Capping the pane at the space left under the
+          sticky chrome gives the list its own scrollbar; `overscroll-contain` keeps a wheel
+          inside it from chaining into the diff once it bottoms out. */}
+      <aside
+        data-slot="changes-tree-pane"
+        className="md:sticky md:top-4 max-h-[calc(100dvh_-_64px_-_var(--diff-sticky-top)_-_1rem)] w-full md:w-60 shrink-0 overflow-y-auto overscroll-contain rounded-xl border border-border bg-card p-3.5 md:block lg:w-[250px]"
+      >
+        <h2 className="mb-3 border-b border-border pb-3 text-xs font-semibold">Changed files</h2>
+        <ChangesTree root={tree} selected={selected} onSelect={selectFile} />
+      </aside>
+      <Diff
+        files={files}
+        viewRef={diffRef}
+        mode={effectiveMode}
+        wrap={effectiveWrap}
+        // Phones included: a rendered document is the one view a narrow screen reads well.
+        // The preview's full text reloads only when this diff's coordinated read changes a
+        // file's patch, so it adds no polling of its own.
+        preview={preview}
+        loadFileText={(path) => loadWorktreeText(runId, path)}
+        imageSrc={(path) => runFileRawUrl(runId, path)}
+        onOpenInApp={localHandoff ? (path) => onOpenInApp(path) : undefined}
+        className="min-w-0 flex-1"
+      />
     </div>
   )
 }
