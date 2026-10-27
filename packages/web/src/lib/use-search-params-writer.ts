@@ -1,5 +1,5 @@
 import * as React from 'react'
-import { useNavigate, useSearchParams } from 'react-router'
+import { useLocation, useNavigate, useNavigationType, useSearchParams } from 'react-router'
 
 /** One change to the query string, from the params as they will be once earlier writes land. */
 export type SearchParamsUpdate = (current: URLSearchParams) => URLSearchParams
@@ -13,21 +13,55 @@ export type SearchParamsUpdate = (current: URLSearchParams) => URLSearchParams
  * tab click, then the search debounce) then starts from the old params and silently undoes the
  * first. This writer starts from the last params it wrote until the router renders a newer URL,
  * skips a write that changes nothing, and makes every write a `replace`, so Back leaves the page.
+ *
+ * Each dispatched navigation carries `{ __writerSession, __writerSeq }` in its history state.
+ * `__writerSession` is a random token generated at mount, so Back/Forward cannot restore a state
+ * from a previous instance. `__writerSeq` is a monotone counter: when the landed seq equals
+ * `latestSeq`, the last pending write has arrived and `next` resets; when the landed seq is
+ * smaller, a newer write is still in flight and `next` is preserved. All writes use `replace:
+ * true`, so they produce REPLACE navigations; a POP (Back/Forward) or PUSH is always external
+ * and resets `next` to the restored URL, even when its state carries our session tag from an
+ * earlier entry. Navigation entries are tracked by `location.key` (unique per entry) rather than
+ * the params object, because `useSearchParams` memoises by search string: Back to an entry with
+ * the same search as the last rendered URL returns the same object reference and would otherwise
+ * silently skip the external-navigation reset (hearsay-tools/cezarion#1790).
  */
 export function useSearchParamsWriter(): [URLSearchParams, (update: SearchParamsUpdate) => void] {
   const [searchParams] = useSearchParams()
+  const location = useLocation()
   const navigate = useNavigate()
-  const pending = React.useRef({ rendered: searchParams, next: searchParams })
+  const navigationType = useNavigationType()
+  const session = React.useRef(Math.random())
+  // Track the last processed location by key rather than by the URLSearchParams object reference.
+  // useSearchParams memoises by search string, so two different history entries with the same
+  // search return the same object — a rendered===searchParams check would incorrectly skip the
+  // external-navigation reset on a Back to a same-search entry.
+  const pending = React.useRef({ renderedKey: '', next: searchParams, seq: 0, latestSeq: 0 })
   React.useLayoutEffect(() => {
-    if (pending.current.rendered !== searchParams) pending.current = { rendered: searchParams, next: searchParams }
-  }, [searchParams])
+    if (pending.current.renderedKey === location.key) return
+    const state = location.state as { __writerSession?: number; __writerSeq?: number } | null
+    const writerSeq = state?.__writerSession === session.current ? state.__writerSeq : undefined
+    if (navigationType === 'REPLACE' && writerSeq !== undefined && writerSeq <= pending.current.latestSeq) {
+      // One of our REPLACE writes landed (never a Back/Forward POP, which may carry our tag).
+      pending.current.renderedKey = location.key
+      if (writerSeq === pending.current.latestSeq) {
+        // The latest write landed; reset next to signal we've arrived.
+        pending.current.next = searchParams
+      }
+      // An older write landed while a newer one is still in flight — preserve next.
+    } else {
+      // External navigation (POP, PUSH, same-search reuse, or no matching session tag): reset.
+      pending.current = { renderedKey: location.key, next: searchParams, seq: pending.current.seq, latestSeq: 0 }
+    }
+  }, [searchParams, location, navigationType])
   const write = React.useCallback((update: SearchParamsUpdate) => {
     const next = update(new URLSearchParams(pending.current.next))
     // A write that changes nothing navigates nowhere. Even a same-URL navigation can land after
     // the reader opened another page, and take them back to this one.
     if (next.toString() === pending.current.next.toString()) return
-    pending.current = { ...pending.current, next }
-    void navigate({ search: `?${next}` }, { replace: true })
+    const seq = pending.current.seq + 1
+    pending.current = { ...pending.current, next, seq, latestSeq: seq }
+    void navigate({ search: `?${next}` }, { replace: true, state: { __writerSession: session.current, __writerSeq: seq } })
   }, [navigate])
   return [searchParams, write]
 }

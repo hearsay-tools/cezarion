@@ -2293,12 +2293,30 @@ accepted identity, empty grants and distinct per-session delegation credentials.
 
 | Backend (locally verified version) | Per-invocation control | Evidence and limitation |
 | --- | --- | --- |
-| Claude Code 2.1.303 | `--disallowedTools Agent,Task,Workflow` | `claude --help` documents the deny flag; installed `sdk-tools.d.ts` names `AgentInput`. `Task` covers the legacy name in recorded fixtures. `Workflow` runs a script that starts subagents: a free 2.1.303 probe (`/reload-plugins` as the only stream-json line, no model call) lists it in the init `tools` under `--disallowedTools Agent,Task` and drops it under `Agent,Task,Workflow` (hearsay-tools/cezarion#1284). `Skill` stays listed under both. Other tools and permission modes are preserved. Forked skills are not blocked; see the gap below. |
+| Claude Code 2.1.311 | `--disallowedTools Agent,Task,Workflow,SendMessage,ListAgents` | `claude --help` documents the deny flag; installed `sdk-tools.d.ts` names `AgentInput`. `Task` covers the legacy name in recorded fixtures. `Workflow` runs a script that starts subagents: a free 2.1.303 probe (`/reload-plugins` as the only stream-json line, no model call) lists it in the init `tools` under `--disallowedTools Agent,Task` and drops it under `Agent,Task,Workflow` (hearsay-tools/cezarion#1284). `Skill` stays listed under both. Other tools and permission modes are preserved. Forked skills are not blocked; see the gap below. |
 | Codex 0.153.4 | `thread/start` and `thread/resume` `config: { "features.multi_agent": false, "features.multi_agent_v2": false }` | `codex features list` names both flags; `codex --help` documents dotted config overrides; `codex app-server generate-json-schema` confirms both request config fields. Existing sandbox, approval, account and model settings remain unchanged. |
 | OpenCode 1.18.33 | `POST /session` `permission: [{ permission: "task", pattern: "*", action: "deny" }]` on a fresh session; `PATCH /session/{id}` `permission` on resume when that deny is absent (installed `/doc` `session.update` accepts `PermissionRuleset`) | Installed server `/doc` declares `PermissionRuleset`; its embedded `TaskTool.execute` checks `task`. Live 1.18.33: `PATCH` with `{permission:[X]}` **appends** X (no replace, no dedupe); a title-only PATCH leaves permission alone; GET returns the session including `permission`. The deny therefore persists on the session once added — a later unrestricted Continue cannot remove it (fails closed). Continue GETs `/session/{id}` and PATCHes the deny only when `restrictNativeDelegation` is set and the rule is not already present; a 404 fallback POSTs a fresh session with the same rule. It still does not map general `allowedTools`. OpenCode 1.18.35's `task` tool skips the `task` permission ask when `extra.bypassAgentCheck` is set: for a `subtask` part, which only the `POST /session/{id}/command` handler creates (a command with `subtask: true`, or one whose agent is a subagent), and when the last user message carries an `agent` part (a client `@agent` mention). cezar's wire never takes that path: it posts only `text` parts through `prompt_async`, never calls `/command`, and `prompt_async` turns no text into either part. OpenCode's `skill` tool returns the skill's content as tool output in the same session. |
 | Cursor 2026.09.15-d2fe57e | `initialize.clientCapabilities._meta.subagents = false` | Installed `src/acp/agent.ts` negotiates native delegation from this capability; `src/acp/session.ts` passes it to the agent. Ordinary runs advertise `true`; start and Continue use the same handshake. Custom tools and unrestricted shell remain outside hard isolation. |
 | OMP 18.4.11 | `--config` overlay `tools.approval.task: deny`, plus `task`, `wait` and `eval` left out of `--tools` | OMP's user `deny` is absolute in every approval mode (`approval-mode.md`). OMP has no `--exclude-tools`, and no setting disables `eval`'s `agent()`/`workpool()` helpers, so `eval` is dropped from the list. With no workflow `allowedTools`, D1 passes an explicit list (OMP's default set minus those three) instead of no `--tools`, failing closed. Verified with `get_state.dumpTools` on the real binary. |
 | pi 0.85.1 | `--exclude-tools subagent` | Installed `pi --help` applies exclusions to built-in/extension/custom names; the shipped `examples/extensions/subagent/index.ts` registers `subagent`. Other extension discovery and ordinary tool settings remain unchanged. |
+
+Claude native peer messaging is suppressed for **both governed root tasks and
+owned workers** whenever `restrictNativeDelegation` applies
+(hearsay-tools/cezarion#557). `ListAgents` lists other native sessions and
+`SendMessage` contacts them outside cezar's recorded conversations. Neither
+`dontAsk` nor a narrow `--allowedTools` grant blocks these tools; the explicit
+deny removes them even when a grant names them. Ordinary runner specs with the
+restriction absent retain their native settings.
+
+A bounded Claude Code 2.1.311 probe on 2026-10-27 sent only `/reload-plugins` as a
+stream-json user message, with `--permission-mode dontAsk`,
+`--allowedTools Read,Edit,Write,Grep,Glob,Bash` and no session persistence.
+The init `tools` listed `SendMessage` and `ListAgents` under the old
+`Agent,Task,Workflow` deny. Adding both names removed exactly those two tools.
+A third probe explicitly allowed `Read,SendMessage,ListAgents` while denying
+all five names: `Read` remained and both peer tools were absent. Each probe
+reported zero model turns and zero cost; none listed or contacted another
+session. These probes attest the tool catalog, not a messaging call.
 
 **Explicit D1 pi exemption:** pi's RPC has no native delegation primitive or
 capability identifying arbitrary custom delegation extensions. Only the verified
@@ -2337,7 +2355,7 @@ that a forked skill start no native subagent in a restricted session
 capture (golden fixture `__fixtures__/claude/forked-skill.ndjson`) whatever
 `--disallowedTools` says, as real Claude does. Claude's `capability-absent`
 exemption is pinned by the inverted assertion: the restricted argv carries
-`--disallowedTools Agent,Task,Workflow`, and the child `Bash` call still nests
+`--disallowedTools Agent,Task,Workflow,SendMessage,ListAgents`, and the child `Bash` call still nests
 under the `Skill` item. The day Claude can block forks, that cell fails and the
 row must go live. A typed `/name` takes the same launcher, but its task frames
 arrive before `init` and its children name a synthetic `forked-command-<name>`

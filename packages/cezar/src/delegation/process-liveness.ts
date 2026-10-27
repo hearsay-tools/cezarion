@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 
-import { linuxBootId, parseProcStat, processStartToken } from '../detached-process.ts';
+import { exitedStat, linuxBootId, parseProcStat, processStartToken } from '../detached-process.ts';
 import type { RunRecord } from '../runs/store.ts';
 
 /**
@@ -22,15 +22,15 @@ export function sameDestroyGeneration(run: RunRecord | undefined, generation: st
     JSON.stringify(run.delegation.workspace) === JSON.stringify(workspace);
 }
 
-function procStat(pid: number) {
-  try { return parseProcStat(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return undefined; }
-}
-
 function pidExists(pid: number): boolean {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
-  // A zombie has exited; only its parent's wait remains.
-  return process.platform !== 'linux' || procStat(pid)?.state !== 'Z';
+  if (process.platform !== 'linux') return true;
+  // A zombie leader can still have live threads. Unreadable stat is not proof of exit.
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return !exitedStat(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/));
+  } catch { return true; }
 }
 
 const LINUX_TOKEN = /^(?:[0-9a-f-]{36}:)?(\d+)$/;

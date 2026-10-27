@@ -35,6 +35,35 @@ function reconcile(): void {
 }
 
 describe('application update chrome', () => {
+  it.each(['update', 'restart'] as const)('closes the %s tooltip before Tab moves focus to the next drawer link', (action) => {
+    browser.setViewport(360, 640)
+    fixture(action === 'update' ? { status: 'idle', supported: true } : { status: 'ready', supported: true, targetVersion: '2.0.0' })
+    browser.goto(`${baseUrl}/p/${project}/`)
+    browser.click('[data-slot="mobile-top-bar"] button[aria-label^="Open projects"]')
+    browser.waitForStable(`document.querySelector('${drawer}')?.getBoundingClientRect().left ?? null`, { holdMs: 150, matcher: value => value === 0 })
+    const label = action === 'update' ? 'Update application' : 'Restart application'
+    const trigger = `${drawer} [aria-label="${label}"]`
+    browser.evaluate(`document.querySelector(${JSON.stringify(trigger)}).focus()`)
+    browser.waitForFunction(`document.querySelector('[data-slot="tooltip-content"][data-state$="open"]') !== null`)
+    // Observe before React's blur handler: tooltip removal must precede native focus transfer.
+    browser.evaluate(`(() => {
+      window.__updateTooltipOpenAtBlur = null
+      const trigger = document.querySelector(${JSON.stringify(trigger)})
+      trigger.addEventListener('blur', () => {
+        window.__updateTooltipOpenAtBlur = !!document.querySelector('[data-slot="tooltip-content"][data-state$="open"]')
+      }, { capture: true, once: true })
+    })()`)
+    browser.press('Tab')
+    const result = browser.waitForValue<{ tooltipOpenAtBlur: boolean; onNextLink: boolean }>(`(() => {
+      if (window.__updateTooltipOpenAtBlur === null) return null
+      return {
+        tooltipOpenAtBlur: window.__updateTooltipOpenAtBlur,
+        onNextLink: document.activeElement === document.querySelector('${drawer} a[href]'),
+      }
+    })()`, sample => sample.onNextLink)
+    expect(result).toEqual({ tooltipOpenAtBlur: false, onNextLink: true })
+  })
+
   it.each([
     { width: 1024, theme: 'light' }, { width: 1024, theme: 'dark' },
     { width: 360, theme: 'light' }, { width: 360, theme: 'dark' },

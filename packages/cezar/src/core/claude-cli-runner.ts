@@ -83,7 +83,7 @@ export const CLAUDE_SPEC_SUPPORT: AgentRunSpecSupport = {
   images: { honored: true, via: 'image blocks ahead of the text in the first stdin message' },
   cwd: { honored: true, via: 'spawn cwd' },
   toolGrant: { honored: true, via: '--allowedTools, through buildAllowedTools, with a bashAllowlist as Bash(<prefix>:*) entries, one per prefix; unset and an empty list send none' },
-  restrictNativeDelegation: { honored: true, via: '--disallowedTools Agent,Task,Workflow (D1); context: fork skills are not blocked' },
+  restrictNativeDelegation: { honored: true, via: '--disallowedTools Agent,Task,Workflow,SendMessage,ListAgents (D1); context: fork skills are not blocked' },
   additionalDirectories: { honored: true, via: '--add-dir, once per directory' },
   env: { honored: true, via: 'merged over the child env through buildChildEnv' },
   model: { honored: true, via: '--model' },
@@ -744,8 +744,10 @@ function claudeToolArgs(spec: AgentRunSpec): string[] {
   // the only stream-json line) lists it in init `tools` under `Agent,Task` and
   // drops it under this deny. `context: fork` skills still start a subagent
   // (AGENT_PROTOCOL.md D1 forked-skill gap, hearsay-tools/cezarion#1284).
-  // Never widen grants.
-  if (spec.restrictNativeDelegation) args.push('--disallowedTools', 'Agent,Task,Workflow');
+  // SendMessage and ListAgents bypass cezar's recorded conversations. A free
+  // 2.1.311 init probe confirms these names and that deny beats explicit allow.
+  // Apply to governed root tasks and workers; never widen grants.
+  if (spec.restrictNativeDelegation) args.push('--disallowedTools', 'Agent,Task,Workflow,SendMessage,ListAgents');
   const allowed = claudeAllowedTools(spec.toolGrant);
   if (spec.cezarTools) {
     const { name, command, args: toolArgs } = spec.cezarTools;

@@ -330,3 +330,18 @@ it('surfaces helper arming rejection after early Restart health and clears the r
   expect(result.current.error).toBe('Application restart is unavailable.')
   expect(sessionStorage.getItem('cez:application-restart-from')).toBeNull()
 })
+
+it('dismisses the keyboard tooltip before Tab blur, while other keys keep it open', async () => {
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  render(<ApplicationUpdateControl version="1.0.0" latestVersion="2.0.0"
+    state={{ status: 'idle', supported: true }} onApplyUpdate={async () => {}} />)
+  const trigger = screen.getByRole('button', { name: 'Update application' })
+  act(() => trigger.focus())
+  const openTooltip = () => document.querySelector('[data-slot="tooltip-content"][data-state$="open"]')
+  await waitFor(() => expect(openTooltip()).not.toBeNull())
+  fireEvent.keyDown(trigger, { key: 'ArrowRight' })
+  expect(openTooltip()).not.toBeNull()
+  fireEvent.keyDown(trigger, { key: 'Tab' })
+  await waitFor(() => expect(openTooltip()).toBeNull())
+  expect(document.activeElement).toBe(trigger)
+})

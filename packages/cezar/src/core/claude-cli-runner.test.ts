@@ -12,6 +12,7 @@ import { buildClaudeArgs, ClaudeCliRunner, claudeHelpFeatures } from './claude-c
 import { EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS, KILL_GRACE_MS } from './runner-runtime.ts';
 import type { UiEvent } from './ui-events.ts';
 import { UNSET_TOOL_GRANT } from './tool-grant.testkit.ts';
+import { TOOL_GRANT_CASES } from './tool-grant-parity-cells.testkit.ts';
 
 /** Only the escalation tests below swap the child out; every other test in this
  *  file keeps spawning its real stub binary through the untouched `spawn`. */
@@ -108,6 +109,32 @@ describe('buildClaudeArgs approval gate', () => {
     const args = buildClaudeArgs(spec, { CEZ_APPROVAL_GATE: '1' });
     const idx = args.indexOf('--permission-mode');
     expect(args[idx + 1]).toBe('acceptEdits');
+  });
+});
+
+describe('buildClaudeArgs governed native messaging', () => {
+  const spec = { userPrompt: 'do it', cwd: '/tmp', sessionId: 'governed-session' };
+
+  describe.each([false, true])('resume=%s', resume => {
+    describe.each(['dontAsk', 'acceptEdits', 'bypass'])('permission mode=%s', mode => {
+      it.each(TOOL_GRANT_CASES)('denies native delegation and peer messaging for $id without changing grants', entry => {
+        const ordinary = buildClaudeArgs({ ...spec, resume, toolGrant: entry.grant('claude') }, { CEZ_CLAUDE_PERMISSION_MODE: mode });
+        const restricted = buildClaudeArgs({ ...spec, resume, toolGrant: entry.grant('claude'), restrictNativeDelegation: true }, { CEZ_CLAUDE_PERMISSION_MODE: mode });
+        const index = restricted.indexOf('--disallowedTools');
+        expect(index).toBeGreaterThanOrEqual(0);
+        expect(restricted[index + 1]).toBe('Agent,Task,Workflow,SendMessage,ListAgents');
+        expect(ordinary).not.toContain('--disallowedTools');
+        expect(restricted.filter((_, i) => i !== index && i !== index + 1)).toEqual(ordinary);
+      });
+    });
+  });
+
+  it('keeps the native messaging deny when an explicit grant names both tools', () => {
+    const args = buildClaudeArgs({ ...spec, restrictNativeDelegation: true,
+      toolGrant: { kind: 'explicit', tools: ['Read', 'SendMessage', 'ListAgents'] },
+    }, {});
+    expect(args[args.indexOf('--allowedTools') + 1]).toBe('Read,SendMessage,ListAgents');
+    expect(args[args.indexOf('--disallowedTools') + 1]).toBe('Agent,Task,Workflow,SendMessage,ListAgents');
   });
 });
 

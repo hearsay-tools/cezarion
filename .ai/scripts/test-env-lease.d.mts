@@ -12,3 +12,5 @@ export declare function describeTestEnvHolders(holders: readonly { pid: number; 
   identify?: (pid: number, timeoutMs: number) => { start?: string; dead?: boolean };
   command?: (pid: number, timeoutMs: number) => string[] | { text: string } | undefined;
 }): { owners: string; guidance: string };
+
+export declare function identity(pid: number, timeout?: number): { dead?: boolean; start?: string };
