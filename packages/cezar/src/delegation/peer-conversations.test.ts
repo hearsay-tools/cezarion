@@ -37,7 +37,7 @@ describe('peer conversations', () => {
   const message = (recipientRunId: string, kind: ConversationSendRequest['kind'] = 'request', extra: Partial<ConversationSendRequest> = {}): ConversationSendRequest =>
     ({ id: randomUUID(), recipientRunId, kind, text: `${kind} text`, timeoutSeconds: 600, ...extra });
   const ledger = (id: string) => { const run = f.store.getRun(id); return run?.delegation?.role === 'root' ? run.delegation.conversation : undefined; };
-  const projections = (id: string) => f.store.readEvents(id).filter(event => event.type === 'conversation-message' || event.type === 'request-outcome').map(event => event.projectionId);
+  const projections = (id: string) => f.store.readEvents(id).filter(event => event.type === 'conversation-message' || event.type === 'request-outcome').map(event => String(event.projectionId));
 
   it('R7 a root requests a peer, the peer replies, and the request settles replied in the requester\'s ledger', async () => {
     const b = peer();
@@ -160,7 +160,7 @@ describe('peer conversations', () => {
     }
     expect(ledger(second.ledger)?.messages ?? []).toEqual([]);
     expect(f.store.getRun(f.parent.id)?.agentInputs).toEqual([expect.objectContaining({ id, text: first.request.text, conversation: expect.objectContaining({ senderRunId: first.ledger }) })]);
-    expect(projections(f.parent.id).filter(projection => projection?.startsWith(`conversation-message:${id}:`))).toEqual([`conversation-message:${id}:queued`]);
+    expect(projections(f.parent.id).filter(projection => projection.startsWith(`conversation-message:${id}:`))).toEqual([`conversation-message:${id}:queued`]);
     // An exact retry of the first returns its receipt.
     expect(await f.service.send(first.caller, first.request)).toEqual(receipt);
   });
