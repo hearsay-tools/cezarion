@@ -5,6 +5,9 @@ self-hosted-runner:
   # the 8-vCPU one.
   labels:
     - blacksmith-*-ubuntu-2404
+    # Ubicloud trial: Vitest/coverage and browser CI shards, respectively.
+    - ubicloud-standard-4
+    - ubicloud-standard-2
 
 paths:
   .github/workflows/**/*.{yml,yaml}:

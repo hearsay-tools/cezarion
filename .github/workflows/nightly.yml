@@ -86,7 +86,7 @@ jobs:
   # dependency's new major, an expired fixture), and a broken `@nightly` is worse
   # than a missing one.
   #
-  # The gate is split the way ci.yml splits it, on ci.yml's runner and bounds: the
+  # The gate uses ci.yml's shard count and bounds, on GitHub-hosted runners: the
   # whole suite in one 20-minute job outgrew that job on 2026-10-06, and every
   # nightly after it was stopped at the time limit (hearsay-tools/cezarion#1272).
   # nightly.workflow.test.cjs keeps the Vitest shards equal to ci.yml's.

@@ -550,7 +550,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3]
-    runs-on: ubuntu-24.04
+    runs-on: ubicloud-standard-4
     # Refreshed Oct 2026 timings split the two longest files across three shards.
     # Keep the hang bound; measured runtime must stay below 11m15s (25% headroom).
     timeout-minutes: 15
@@ -616,7 +616,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3]
-    runs-on: ubuntu-24.04
+    runs-on: ubicloud-standard-4
     # Hang bound only. The collect step has its own, shorter timeout, so a slow run ends as a
     # failed step and leaves the job green.
     timeout-minutes: 25
@@ -806,7 +806,7 @@ jobs:
       fail-fast: false
       matrix:
         shard: [1, 2, 3, 4]
-    runs-on: ubuntu-latest
+    runs-on: ubicloud-standard-2
     timeout-minutes: 30
 
     permissions:
