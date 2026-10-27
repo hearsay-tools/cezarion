@@ -89,7 +89,8 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
     expect(other.exitCode).toBeNull();
     await writeFile(join(qa, 'test-env.json'), descriptor(app.pid!));
     console.info('native cleanup: stopping owned app');
-    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+    const result = await removeOwnedWorkspace(root, workspace);
+    expect(result, JSON.stringify(result)).toMatchObject({ state: 'complete', remaining: [] });
     expect(watcher.exitCode).not.toBeNull();
     expect(other.exitCode).toBeNull();
   } finally {
