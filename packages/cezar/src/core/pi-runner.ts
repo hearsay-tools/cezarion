@@ -357,6 +357,15 @@ export class PiRunner implements AgentRunner {
         : undefined;
     deadline?.unref?.();
 
+    const terminateAfterOutput = (): NodeJS.Timeout => {
+      signalSession(child, 'SIGTERM');
+      const reap = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
+      }, KILL_GRACE_MS);
+      reap.unref?.();
+      return reap;
+    };
+
     // EOF retains the existing grace and escalation order. Only attribution depends on evidence.
     const cleanupAfterEof = async (): Promise<void> => {
       if (child.exitCode === null && child.signalCode === null) {
@@ -364,11 +373,7 @@ export class PiRunner implements AgentRunner {
         if (state !== 'exited') {
           automaticCleanupStarted = true;
           terminatedByCezar ||= explicitEnd || state === 'live';
-          signalSession(child, 'SIGTERM');
-          const reap = setTimeout(() => {
-            if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
-          }, KILL_GRACE_MS);
-          reap.unref?.();
+          terminateAfterOutput();
         }
       }
     };
@@ -526,11 +531,7 @@ export class PiRunner implements AgentRunner {
           open = false;
           rejectAgentAck();
           terminatedByCezar = true;
-          signalSession(child, 'SIGTERM');
-          const reap = setTimeout(() => {
-            if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
-          }, KILL_GRACE_MS);
-          reap.unref?.();
+          const reap = terminateAfterOutput();
           await waitForExit(child);
           clearTimeout(reap);
           throw error;

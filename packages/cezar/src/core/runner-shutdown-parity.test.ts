@@ -390,7 +390,7 @@ for (const backend of ['claude', 'codex', 'pi'] as const) {
           child.kill('SIGSTOP');
           const kill = child.kill.bind(child);
           let applyIntent = when === 'after TERM';
-          vi.spyOn(child, 'kill').mockImplementation(signal => {
+          const signals = vi.spyOn(child, 'kill').mockImplementation(signal => {
             const sent = kill(signal);
             if (signal === 'SIGTERM' && applyIntent) {
               applyIntent = false;
@@ -398,14 +398,19 @@ for (const backend of ['claude', 'codex', 'pi'] as const) {
             }
             return sent;
           });
-          if (when === 'before EOF') session[intent]();
-          child.stdout!.push(null);
-          if (when === 'during probe') {
-            // The async reader has revoked input and begun its existing EOF grace.
-            // bound: wait for the native reader's EOF processing, not a timing guess.
-            await vi.waitFor(() => expect(session.open).toBe(false), { timeout: 1000, interval: 1 });
-            session[intent]();
-          }
+          if (when === 'during probe') vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+          try {
+            if (when === 'before EOF') session[intent]();
+            child.stdout!.push(null);
+            if (when === 'during probe') {
+              // Drain the real stream while holding every cleanup timeout at its origin.
+              await new Promise<void>(resolve => setImmediate(resolve));
+              expect(session.open).toBe(false);
+              expect(signals).not.toHaveBeenCalledWith('SIGTERM');
+              session[intent]();
+              await vi.advanceTimersByTimeAsync(500);
+            }
+          } finally { if (when === 'during probe') vi.useRealTimers(); }
           await expect(settled).resolves.not.toBeInstanceOf(Error);
           expect(child.signalCode).toBe('SIGKILL');
           expect(events.filter(event => event.type === 'error')).toEqual([]);

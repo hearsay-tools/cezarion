@@ -284,3 +284,23 @@ CRAP 2242.3396; Codex reader complexity 33 (baseline 33), CRAP 40.5258; and Pi o
 loop complexity 122 (baseline 127), CRAP 137.2076. Their follow-up issues are
 hearsay-tools/cezarion#1954, hearsay-tools/cezarion#1965 and hearsay-tools/cezarion#1955.
 New evidence/probe and attribution helpers meet both quality thresholds.
+
+
+Parent review made the during-probe intent test deterministic: after native child
+admission, it controls timeout timers, drains real EOF, asserts input closed and
+no TERM call, applies intent, then advances the original grace/escalation. It
+cannot silently become the after-TERM case on a loaded host.
+
+The committed clone gate found the Pi TERM/KILL block duplicated between clean
+EOF and output failure after its movement. A local `terminateAfterOutput` helper
+now preserves the shared order: TERM; arm the same KILL grace; unref the timer;
+return its handle. The failure caller still awaits native exit, clears that timer,
+and throws its original error. The clean-EOF caller retains its ordinary native
+exit wait. S24, S33/S34 and the deadline tests cover these paths.
+
+
+After that extraction and the exact during-probe test correction, the final local
+quality rerun again passed all 217 tests. It measured 103/103 changed functions.
+Only the same three inherited findings remain; Pi's output loop complexity is now
+120 (baseline 127). Server typecheck passed. The parent reviewed the helper's
+ordered effects and the exact intent boundary with no further finding.
