@@ -209,7 +209,7 @@ importers:
   packages/api-client:
     dependencies:
       '@open-mercato/cezar-contract':
-        specifier: ^0.16.0
+        specifier: ^0.17.0
         version: link:../contract
       hono:
         specifier: ^4.6.0
@@ -250,10 +250,10 @@ importers:
         version: 4.4.3
     devDependencies:
       '@open-mercato/cezar-api-client':
-        specifier: ^0.16.0
+        specifier: ^0.17.0
         version: link:../api-client
       '@open-mercato/cezar-contract':
-        specifier: ^0.16.0
+        specifier: ^0.17.0
         version: link:../contract
       '@types/node':
         specifier: ^24.19.1
@@ -298,7 +298,7 @@ importers:
         specifier: ^5.3.0
         version: 5.3.0
       '@open-mercato/cezar-api-client':
-        specifier: ^0.16.0
+        specifier: ^0.17.0
         version: link:../api-client
       '@shikijs/langs':
         specifier: ^4.3.1
@@ -380,7 +380,7 @@ importers:
         specifier: ^6.0.3
         version: 6.0.3(vite@8.1.4(@types/node@24.19.1)(esbuild@0.28.1)(jiti@2.7.0)(tsx@4.23.0)(yaml@2.9.0))
       '@wjarka/cezarion':
-        specifier: ^0.16.0
+        specifier: ^0.17.0
         version: link:../cezar
       hono:
         specifier: ^4.12.29
