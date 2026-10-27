@@ -134,7 +134,7 @@ export const OPERATIONS: Record<string, Operation> = {
   },
   send: {
     args: "<id> '<text>' | <id> --text-file <path|->",
-    description: 'This is human input: steer or answer a task: delivered to a live session, queued before it starts, resumed from a closed session with --resume (examples below).',
+    description: 'Human input: steer or answer a task. Delivered to a live session, queued before it starts, resumed from a closed session with --resume (examples below).',
     positionals: [1, 2],
     flags: {
       'text-file': { type: 'string', help: '<path|->     Read the text from a file, or stdin with -.' },
@@ -661,7 +661,7 @@ async function execute(
 export const AGENT_TASK_SEND_REMEDY = 'Agent-to-task messaging is not available yet. The planned path is CEZ_DELEGATION=1 and the cez message family.';
 
 function refuseAgentSend(name: string, env: NodeJS.ProcessEnv): void {
-  if (name === 'send' && env.CEZ_TASK_ID !== undefined) {
+  if (name === 'send' && env.CEZ_TASK_ID?.trim()) {
     throw new TaskCliError(EXIT.usage, {
       code: 'invalid_input',
       error: 'cez task send is human input. An agent inside a task cannot use it to message another task.',

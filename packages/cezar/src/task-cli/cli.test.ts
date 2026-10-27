@@ -655,7 +655,7 @@ describe('cez task', () => {
         "cez task send <id> 'Use option A'",
         "cez task send <id> --resume '…'",
         'delivered', 'queued', 'resumed', 'attention: waiting', 'question',
-        'human input', 'delivery: not-delivered', 'next', '--text-file <path|->', '--text-file -', 'cez task start --help',
+        'Human input', 'delivery: not-delivered', 'next', '--text-file <path|->', '--text-file -', 'cez task start --help',
       ]) expect(help).toContain(text);
       expect(discoveries).toBe(0);
     });
@@ -666,6 +666,12 @@ describe('cez task', () => {
       expect(await runTaskCommand(['send', 'target', 'hello', ...flags], { CEZ_TASK_ID: 'sender' }, io())).toBe(64);
       expect(last()).toMatchObject({ code: 'invalid_input', error: expect.stringContaining('human input'), next: expect.stringContaining('not available yet') });
       expect(discoveries).toBe(0);
+    });
+
+    it.each(['', '   '])('treats an empty task ID as outside a task: %j', async (taskId) => {
+      const id = await start();
+      expect(await runTaskCommand(['send', id, 'hello'], { CEZ_TASK_ID: taskId }, io())).toBe(0);
+      expect(store.getRun(id)?.queuedMessages?.[0]?.text).toBe('hello');
     });
 
     it('stacks a message onto a queued run', async () => {

@@ -157,6 +157,8 @@ real exit (or a failed spawn). After exit, inherited stdout gets a bounded
 250ms drain; remaining pipe handles are closed. Neither a timeout nor sending
 a signal can fabricate an exit or free a still-live session's capacity.
 
+`cez task send` is human input. When `CEZ_TASK_ID` is nonempty, it exits 64 before contacting the cockpit, including with `--resume` or `--notify`. Agent-to-task messaging is not available yet; `CEZ_DELEGATION=1` and the `cez message` family are the planned path.
+
 **Non-human input (owned workers, 2026-09-06; immediate delivery, hearsay-tools/cezarion#505).** `sendAgentMessage`
 must never resolve a native question or a portable marker ask. False means the caller
 still owns the input and must retry later, NEVER fall back to `sendMessage`. A runner
@@ -2903,5 +2905,3 @@ observation must survive without reclassification. No timer or repair authority
 is introduced.
 R84 cancels an open wait while native gh checks are blocked, then attempts late
 resolution and proves there is no lifecycle input or native conflict prompt.
-
-`cez task send` is human input. When `CEZ_TASK_ID` is set, it exits 64 before contacting the cockpit, including with `--resume` or `--notify`. Agent-to-task messaging is not available yet; `CEZ_DELEGATION=1` and the `cez message` family are the planned path.
