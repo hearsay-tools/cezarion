@@ -53,11 +53,13 @@ import { inspectGeneration, isCurrentProcess, recordedProcessLive, processStartT
 import { collectSecretValues, redactDeep, redactSecrets } from '../core/secret-redaction.ts';
 // Pure, dependency-free reference helpers — the same sanity bound the marker parser applies.
 import { archivePullRequests, pullRequestKey, mergePullRequests } from './pull-requests.ts';
-import { extractTaskRefs, MAX_REF } from './task-refs.ts';
+import { extractTaskRefs, isRepoScopedRef, MAX_REF, promptNamesRepo, refUrlRepo } from './task-refs.ts';
 // Type-only module (zod + nothing else), so this cannot cycle back into the store.
 import { workflowDefSchema } from '../workflows/types.ts';
 import { waitInputId } from '../workflows/waits.ts';
 import { applyOutcomes, type OutcomeDependencies, type RunOutcome } from './outcome-commit.ts';
+import { assertConversationIdFree, type ConversationIdentity } from './conversation-identity.ts';
+export { ConversationIdInUseError } from './conversation-identity.ts';
 
 import { RUNNER_IDS, type RunnerId } from '../core/agent-runner.ts';
 import {
@@ -534,38 +536,6 @@ const MAX_PR_CANDIDATES = 8;
 /** The repository a project IS, as `resolveRepoHandle` reports it. `null`/absent means "unknown",
  *  which is a real and common state (no `gh`, no remote, a non-git root) — never an error. */
 export type RepoHandle = { owner: string; name: string };
-
-/** `https://github.com/open-mercato/cezar/pull/402` → `open-mercato/cezar`, lowercased.
- *  Undefined for anything that is not a `<host>/<owner>/<repo>/<kind>/<n>` forge URL. */
-function refUrlRepo(url: string): string | undefined {
-  const parts = url.split('/');
-  const owner = parts[parts.length - 4];
-  const name = parts[parts.length - 3];
-  return owner && name ? `${owner}/${name}`.toLowerCase() : undefined;
-}
-
-/**
- * A foreign referenced URL needs task-prompt corroboration of its repository. Unknown project
- * handles preserve the degraded rule. This check vets the resolved winner, not the candidate
- * list.
- */
-function isRepoScopedRef(url: string, task: string, handle?: RepoHandle | null): boolean {
-  if (!handle) return true;
-  const repo = refUrlRepo(url);
-  if (!repo) return true;
-  if (repo === `${handle.owner}/${handle.name}`.toLowerCase()) return true;
-  return promptNamesRepo(url, task);
-}
-
-/** Positive scope evidence for permanent declarations; legacy discovery still fails open. */
-function promptNamesRepo(url: string, task: string): boolean {
-  const repo = refUrlRepo(url);
-  if (!repo) return false;
-  // Match whole owner/repository segments: naming acme/service2 must not corroborate
-  // acme/service. Slashes remain valid boundaries for full URLs and their /pull or /issues path.
-  const escapedRepo = repo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return new RegExp(`(?<![a-z0-9_.-])${escapedRepo}(?![a-z0-9_.-])`, 'i').test(task);
-}
 
 /**
  * Every scannable string of one persisted event: the v1 top-level fields plus
@@ -1142,14 +1112,6 @@ export const RUN_QUARANTINED = 'run changed under this cezar process — restart
 
 /** A write this store must not make: another process owns the run, its owner died with work
  *  still live (adopt it first), or a conflict quarantined it. Nothing was changed. */
-/** The delivery steps a `conversation-message:<id>:<step>` projection names (`projectConversationEvents`). */
-export const CONVERSATION_DELIVERY_STEPS = ['queued', 'delivered', 'consumed', 'not-delivered'] as const;
-
-/** `commitConversation` refused a message whose ID is already in use where it would land. */
-export class ConversationIdInUseError extends Error {
-  constructor() { super('Message ID already in use; use a new message ID'); this.name = 'ConversationIdInUseError'; }
-}
-
 export class RunWriteRefusedError extends Error {
   constructor(readonly runId: string, readonly ownership: Exclude<RunOwnership, 'held' | 'free'>) {
     super(ownership === 'quarantined' ? `${RUN_QUARANTINED}: ${runId}`
@@ -2395,20 +2357,14 @@ export class RunStore extends EventEmitter {
     return run;
   }
 
-  /**
-   * Accept the family ledger and its recipient queue in a single durable index replacement.
-   * `message` names a newly accepted message: its ID must be unused in this ledger, in the
-   * recipient's inputs and in either run's projections, or nothing is written
-   * (`ConversationIdInUseError`). Two senders on two ledgers reach one recipient through this
-   * synchronous check, so only the first can pass it (spec 2026-10-27-task-communication-protocol
-   * § Message identity). `delivery.recipientDelegation` provisions a peer recipient that has no
-   * delegation record yet, in the same write.
-   */
+  /** Accept the family ledger and its recipient queue in a single durable index replacement. A new
+   *  `message` whose ID is in use writes nothing (`assertConversationIdFree`); `recipientDelegation`
+   *  makes a peer recipient with no delegation record a root task in the same write. */
   commitConversation(rootId: string, conversation: ConversationState, delivery?: { recipientRunId: string; input: AgentInput; recipientDelegation?: DelegationState },
-    message?: { id: string; senderRunId: string; recipientRunId: string }): void {
+    message?: ConversationIdentity): void {
     const root = this.peek(rootId);
     if (root?.delegation?.role !== 'root') throw new Error('missing conversation root');
-    if (message && this.conversationIdInUse(root, message)) throw new ConversationIdInUseError();
+    if (message) assertConversationIdFree(root, message, id => this.peek(id), (runId, id) => this.hasProjection(runId, id));
     const staged = new Map<string, RunRecord>();
     staged.set(rootId, { ...root, delegation: delegationStateSchema.parse({ ...root.delegation, conversation: { ...conversation,
       messages: conversation.messages.map(message => ({ ...message, text: this.redactText(message.text) })),
@@ -2421,13 +2377,6 @@ export class RunStore extends EventEmitter {
       staged.set(recipient.id, { ...recipient, ...delegation, agentInputs: [...(recipient.agentInputs ?? []), input] });
     }
     this.commitIndex(staged);
-  }
-
-  private conversationIdInUse(root: RunRecord, message: { id: string; senderRunId: string; recipientRunId: string }): boolean {
-    if (root.delegation?.role === 'root' && root.delegation.conversation?.messages.some(entry => entry.id === message.id)) return true;
-    if (this.peek(message.recipientRunId)?.agentInputs?.some(input => input.id === message.id)) return true;
-    const projections = [...CONVERSATION_DELIVERY_STEPS.map(step => `conversation-message:${message.id}:${step}`), `request-outcome:${message.id}`, `request-outcome:${message.id}:replied-late`];
-    return [message.senderRunId, message.recipientRunId].some(runId => this.peek(runId) !== undefined && projections.some(id => this.hasProjection(runId, id)));
   }
 
   /** Crash recovery (#505): input a harness accepted but was never seen reading goes
