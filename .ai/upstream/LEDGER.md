@@ -4,10 +4,10 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 
 - Upstream: [open-mercato/cezar](https://github.com/open-mercato/cezar) `main`
 - Fork point: `feb85666` (2026-08-31)
-- Last scan: 2026-10-19 to `8908221a` ([report](scans/2026-10-19.md))
-- Entries: 289 · pending: 239 · planned: 7 · ported: 29 · partial: 1 · diverged: 6 · n/a: 7
+- Last scan: 2026-10-26 to `f6b910f3` ([report](scans/2026-10-26.md))
+- Entries: 366 · pending: 316 · planned: 7 · ported: 29 · partial: 1 · diverged: 6 · n/a: 7
 
-## Pending (239)
+## Pending (316)
 
 | Upstream | Date | Title | Conflicts | Note |
 | --- | --- | --- | --- | --- |
@@ -250,6 +250,83 @@ Generated from `ledger.yaml` by `node .github/scripts/upstream-scan.cjs render`.
 | [#1519](https://github.com/open-mercato/cezar/pull/1519) | 2026-10-19 | fix(provider-auth): a hung status probe keeps a recent connected answer (telemetry b28d2993) (#1519) | 2 |  |
 | [#1520](https://github.com/open-mercato/cezar/pull/1520) | 2026-10-19 | fix(runs): never prune a live run or its dispatch ancestors (telemetry 73c6e796) (#1520) | 2 |  |
 | [#1521](https://github.com/open-mercato/cezar/pull/1521) | 2026-10-19 | fix(web): stop the host widget's per-frame effect setState from tripping React #185 (telemetry 21762d83) (#1521) | 4 |  |
+| [#1522](https://github.com/open-mercato/cezar/pull/1522) | 2026-10-19 | fix(runs): honor a cancel that lands while a continuation awaits its lifecycle gate (#1522) | 3 |  |
+| [#1527](https://github.com/open-mercato/cezar/pull/1527) | 2026-10-19 | fix(runs): honor Finish while a closed session is still settling (telemetry 6a3cecee) (#1527) | 2 |  |
+| [#1525](https://github.com/open-mercato/cezar/pull/1525) | 2026-10-19 | feat(web): task tab row, Terminal as a view, layouts saved by name for every task (#1525) | 29 |  |
+| [#1523](https://github.com/open-mercato/cezar/pull/1523) | 2026-10-19 | perf(web): make the Changes tab instant to revisit and responsive on large diffs (#1523) | 9 |  |
+| [#1528](https://github.com/open-mercato/cezar/pull/1528) | 2026-10-19 | feat(git): Source-Control sync for the main checkout + in-place tasks on a new branch (#1528) | 17 |  |
+| [#1530](https://github.com/open-mercato/cezar/pull/1530) | 2026-10-19 | fix(self-update): show a worktree-linked version as -dev (#1530) | 8 |  |
+| [#1524](https://github.com/open-mercato/cezar/pull/1524) | 2026-10-19 | fix(self-update): count running tasks across every project; when idle for every picker (#1524) | 9 |  |
+| [#1529](https://github.com/open-mercato/cezar/pull/1529) | 2026-10-19 | feat(web): agent-driven git steps with loading states in the run header (#1529) | 24 |  |
+| [#1494](https://github.com/open-mercato/cezar/pull/1494) | 2026-10-19 | feat(preview): run the task's app from an empty Preview, with per-project start recipes (#1494) | 14 |  |
+| [#1531](https://github.com/open-mercato/cezar/pull/1531) | 2026-10-19 | ci(release): release lines — cut, patch-first release and backport workflows; main → 0.16.0 (#1531) | 12 |  |
+| [#1532](https://github.com/open-mercato/cezar/pull/1532) | 2026-10-19 | chore(release): open 0.17.0 on main (#1532) | 5 |  |
+| [#1534](https://github.com/open-mercato/cezar/pull/1534) | 2026-10-19 | fix(provider-auth): fall back on any --format rejection, read more plain Cursor status shapes (telemetry 1cd541cc) (#1534) | 2 |  |
+| [#1535](https://github.com/open-mercato/cezar/pull/1535) | 2026-10-19 | docs(agents): make the backport decision part of opening a fix PR, add a PR template (#1535) | 2 |  |
+| [#1537](https://github.com/open-mercato/cezar/pull/1537) | 2026-10-19 | fix(opencode): don't fail a run whose server starts slowly or prints its URL elsewhere (telemetry 2d01c3c9) (#1537) | 3 |  |
+| [#1539](https://github.com/open-mercato/cezar/pull/1539) | 2026-10-20 | fix(boot): don't exit when a project's .ai/cezar cannot be created (telemetry 5af5aec6) (#1539) | 3 |  |
+| [#1542](https://github.com/open-mercato/cezar/pull/1542) | 2026-10-20 | docs(changelog): add the 0.16.0 entry (#1542) | 1 |  |
+| [#1544](https://github.com/open-mercato/cezar/pull/1544) | 2026-10-20 | fix(desktop): load the task Preview in the app, keep colored ports in detected addresses (shell 0.1.9) (#1544) | 10 |  |
+| [#1546](https://github.com/open-mercato/cezar/pull/1546) | 2026-10-20 | fix(provider-auth): hold Copilot's probe stdin open until session/new is answered (telemetry 298c2e1f) (#1546) | 2 |  |
+| [#1548](https://github.com/open-mercato/cezar/pull/1548) | 2026-10-20 | fix(provider-auth): report Cursor and pi not-installed when the binary on PATH isn't the CLI (telemetry 8d304c50, f67df9d2) (#1548) | 5 |  |
+| [#1550](https://github.com/open-mercato/cezar/pull/1550) | 2026-10-20 | fix(codex): wait out or fork a thread another app-server still holds on resume (telemetry 4c9de01a) (#1550) | 3 |  |
+| [#1551](https://github.com/open-mercato/cezar/pull/1551) | 2026-10-20 | fix(desktop): let the macOS app use the microphone for dictation (shell 0.1.10, telemetry c55c7b0b) (#1551) | 7 |  |
+| [#1552](https://github.com/open-mercato/cezar/pull/1552) | 2026-10-20 | fix(telemetry): group usage-limit agent errors across reset instants; honor a weekly reset's day (telemetry 987e8238) (#1552) | 3 |  |
+| [#1553](https://github.com/open-mercato/cezar/pull/1553) | 2026-10-20 | fix(provider-auth): ask OpenCode 2.x with a private server when its background service fails (telemetry 107e44a9) (#1553) | 2 |  |
+| [#1559](https://github.com/open-mercato/cezar/pull/1559) | 2026-10-20 | fix(settings): disable Add project for a launch folder the server refuses (telemetry 48dc0f71) (#1559) | 7 |  |
+| [#1560](https://github.com/open-mercato/cezar/pull/1560) | 2026-10-20 | fix(telemetry): scrub every attachable file name from toast reports (telemetry 5fc3ffbb, d77d0047) (#1560) | 3 |  |
+| [#1561](https://github.com/open-mercato/cezar/pull/1561) | 2026-10-20 | fix(provider-auth): keep a dead Claude login latched instead of self-checking it away (telemetry 9e4a95db) (#1561) | 5 |  |
+| [#1567](https://github.com/open-mercato/cezar/pull/1567) | 2026-10-20 | docs(changelog): add the 0.16.1 entry (#1567) | 1 |  |
+| [#1573](https://github.com/open-mercato/cezar/pull/1573) | 2026-10-20 | fix(opencode): name OpenCode 2.x instead of failing with a bare 405 (telemetry dc1a91a6) (#1573) | 3 |  |
+| [#1574](https://github.com/open-mercato/cezar/pull/1574) | 2026-10-21 | fix(provider-auth): silence OpenCode CLI startup failures (telemetry 107e44a9) (#1574) | 2 |  |
+| [#1575](https://github.com/open-mercato/cezar/pull/1575) | 2026-10-21 | fix(web): retry transient query fetch failures (telemetry 4678fce9) (#1575) | 0 |  |
+| [#1592](https://github.com/open-mercato/cezar/pull/1592) | 2026-10-21 | fix(dispatch): don't hand a child another runner's model (telemetry 43bdda11) (#1592) | 3 |  |
+| [#1570](https://github.com/open-mercato/cezar/pull/1570) | 2026-10-21 | fix(server-install): forward Host with its port in the nginx vhost (#1570) | 0 |  |
+| [#1585](https://github.com/open-mercato/cezar/pull/1585) | 2026-10-21 | fix(opencode): respawn on a fresh port when the random one is taken (#1585) | 2 |  |
+| [#1571](https://github.com/open-mercato/cezar/pull/1571) | 2026-10-21 | fix(codex): surface a turn/completed whose status is failed as a turn error (#1571) | 3 |  |
+| [#1597](https://github.com/open-mercato/cezar/pull/1597) | 2026-10-21 | feat(projects): trunk-based development model — work in the checkout, review, Commit to the base branch (#1597) | 29 |  |
+| [#1606](https://github.com/open-mercato/cezar/pull/1606) | 2026-10-22 | fix(composer): keep the thread still while the composer autosizes (#1606) | 1 |  |
+| [#1371](https://github.com/open-mercato/cezar/pull/1371) | 2026-10-23 | fix(security): accept mapped IPv6 loopback authorities (#1371) | 0 |  |
+| [#1425](https://github.com/open-mercato/cezar/pull/1425) | 2026-10-23 | fix(web): preserve relative file links in transcripts (#1425) | 3 |  |
+| [#1427](https://github.com/open-mercato/cezar/pull/1427) | 2026-10-23 | fix(web): keep the GitHub tab for a recognized remote while the forge probe is cold or failing (#1427) | 9 |  |
+| [#1631](https://github.com/open-mercato/cezar/pull/1631) | 2026-10-23 | feat(accounts): manage agent accounts on an authenticated self-hosted cockpit (#1631) | 8 |  |
+| [#1419](https://github.com/open-mercato/cezar/pull/1419) | 2026-10-23 | fix(runs): stop processes a task leaves running when it settles (#1419) | 5 |  |
+| [#1469](https://github.com/open-mercato/cezar/pull/1469) | 2026-10-23 | fix(gh): run gh without a session bus it would have to start, so no dbus-daemon is left behind per call (#1469) | 6 |  |
+| [#1605](https://github.com/open-mercato/cezar/pull/1605) | 2026-10-23 | feat(ask): answer an agent's question with your own text or ask for more context (#1605) | 5 |  |
+| [#1434](https://github.com/open-mercato/cezar/pull/1434) | 2026-10-23 | feat(tasks): schedule task starts by date or usage reset (#1340) (#1434) | 50 |  |
+| [#1634](https://github.com/open-mercato/cezar/pull/1634) | 2026-10-23 | fix(preview): follow in-page URL changes in the address bar and Reload (#1634) | 4 |  |
+| [#1638](https://github.com/open-mercato/cezar/pull/1638) | 2026-10-23 | chore(desktop): bump shell to 0.1.11 (#1638) | 4 |  |
+| [#1639](https://github.com/open-mercato/cezar/pull/1639) | 2026-10-23 | docs(changelog): add the 0.16.2 entry (#1639) | 1 |  |
+| [#1640](https://github.com/open-mercato/cezar/pull/1640) | 2026-10-23 | ci(release): GitHub App token, tag-triggered publish, resume-safe release lines (#1640) | 17 |  |
+| [#1644](https://github.com/open-mercato/cezar/pull/1644) | 2026-10-23 | docs(release): runbook for a conflicted backport (#1644) | 1 |  |
+| [#1568](https://github.com/open-mercato/cezar/pull/1568) | 2026-10-23 | feat(changes): preview the old side of deleted and modified images (#1568) | 8 |  |
+| [#1335](https://github.com/open-mercato/cezar/pull/1335) | 2026-10-23 | fix(ui): preserve Windows roots in folder browser back navigation (#1335) | 2 |  |
+| [#1442](https://github.com/open-mercato/cezar/pull/1442) | 2026-10-23 | fix(runs): carry pasted attachments into a fresh-session continuation (#1442) | 3 |  |
+| [#1572](https://github.com/open-mercato/cezar/pull/1572) | 2026-10-23 | fix(models): know `fable` as a Claude tier alias so a runner switch clears it (#1572) | 3 |  |
+| [#1309](https://github.com/open-mercato/cezar/pull/1309) | 2026-10-23 | docs(spec): full command in expanded tool cards (#1306) (#1309) | 0 |  |
+| [#1645](https://github.com/open-mercato/cezar/pull/1645) | 2026-10-23 | fix(auto-resume): resume now when a clock-only usage-limit reset just passed (telemetry 4bf9686a) (#1645) | 1 |  |
+| [#1190](https://github.com/open-mercato/cezar/pull/1190) | 2026-10-23 | perf(events): slim the workspace run frame and serialize each frame once (#1190) | 11 |  |
+| [#1479](https://github.com/open-mercato/cezar/pull/1479) | 2026-10-23 | feat(skills): organisation skills repos in Global settings, grouped by repository (#1479) | 18 |  |
+| [#1191](https://github.com/open-mercato/cezar/pull/1191) | 2026-10-23 | perf(tasks): render only changed task rows and drop idle cockpit polls (#1191) | 11 |  |
+| [#1650](https://github.com/open-mercato/cezar/pull/1650) | 2026-10-23 | feat(web): resizable file tree on the Changes views (#1650) | 5 |  |
+| [#1124](https://github.com/open-mercato/cezar/pull/1124) | 2026-10-23 | fix(cli): preserve the cockpit API origin for dispatch (#1124) | 1 |  |
+| [#1653](https://github.com/open-mercato/cezar/pull/1653) | 2026-10-24 | feat(queue): Start now — run a queued task over the maxParallel cap (#1653) | 6 |  |
+| [#1654](https://github.com/open-mercato/cezar/pull/1654) | 2026-10-24 | fix(opencode): fail a turn stuck in a long session.status retry (#1654) | 3 |  |
+| [#1657](https://github.com/open-mercato/cezar/pull/1657) | 2026-10-24 | feat(web): schedule from a split Send button, with telemetry (#1657) | 12 |  |
+| [#1658](https://github.com/open-mercato/cezar/pull/1658) | 2026-10-24 | feat(design-mode): batch notes, deliberate delete, ⌥D toggle (#1658) | 12 |  |
+| [#1659](https://github.com/open-mercato/cezar/pull/1659) | 2026-10-24 | fix(provider-auth): read probe failures as what they are (telemetry 298c2e1f, a5c13018, 35838a52, b82b92cf, 1ba77383, ff609bf9) (#1659) | 4 |  |
+| [#1660](https://github.com/open-mercato/cezar/pull/1660) | 2026-10-24 | fix(agents): attribute errors to the step's backend; copilot add-dir and mid-turn exit (#1660) | 7 |  |
+| [#1661](https://github.com/open-mercato/cezar/pull/1661) | 2026-10-24 | fix: deliver Continue through a settling run, a lost POST and a refused history write (#1661) | 7 |  |
+| [#1662](https://github.com/open-mercato/cezar/pull/1662) | 2026-10-24 | fix(cockpit): fix toast bugs and stop reporting expected outcomes as errors (#1662) | 15 |  |
+| [#1664](https://github.com/open-mercato/cezar/pull/1664) | 2026-10-24 | fix(agents): latch real vendor auth failures, read JSON error envelopes (+ spec) (#1664) | 9 |  |
+| [#1665](https://github.com/open-mercato/cezar/pull/1665) | 2026-10-24 | fix(engine): drop a foreign model pin when Continue switches runner (#1665) | 0 |  |
+| [#1663](https://github.com/open-mercato/cezar/pull/1663) | 2026-10-24 | fix(desktop): boot the sidecar from home, take wry's drag-drop fix; guard child stdin EPIPE (#1663) | 9 |  |
+| [#1678](https://github.com/open-mercato/cezar/pull/1678) | 2026-10-24 | fix(provider-auth): recognize configured Codex API keys (#1678) | 0 |  |
+| [#1666](https://github.com/open-mercato/cezar/pull/1666) | 2026-10-24 | fix(models): accept Copilot/Cursor vendor ids; automations drop a cross-runner model (#1666) | 6 |  |
+| [#1676](https://github.com/open-mercato/cezar/pull/1676) | 2026-10-25 | feat(telemetry): measure who uses automations, workflows, skills and dispatch (#1676) | 11 |  |
+| [#1629](https://github.com/open-mercato/cezar/pull/1629) | 2026-10-25 | fix(workspace): never merge-write defaults over a config that could not be read (#1629) | 4 |  |
+| [#976](https://github.com/open-mercato/cezar/pull/976) | 2026-10-25 | fix(cockpit): use full task detail width by default (#976) | 7 |  |
+| [#1315](https://github.com/open-mercato/cezar/pull/1315) | 2026-10-25 | fix(workflows): resume remaining steps after a usage limit (#1315) | 5 |  |
 
 ## Planned (7)
 
