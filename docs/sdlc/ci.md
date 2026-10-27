@@ -90,10 +90,13 @@ The path-filtered `Windows test environment lease` workflow also runs the worker
 cleanup regression on native Windows when its cleanup code changes. It checks the pre-fix
 failure and the fixed result, including lease and checkout isolation.
 
-Verification runs in eight parallel jobs, and a ninth, `complexity-gate`, gates pull requests. Seven of the eight use the current Node LTS; the build/package job uses exactly the `engines.node` minimum (Node 24.21.0):
+Required verification has nine parallel test jobs, plus the complexity and clone
+gates. Seven test jobs use the current Node LTS; typecheck and build/package use
+exactly the `engines.node` minimum (Node 24.21.0):
 
 - Three Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/3 --maxWorkers=4` for N=1..3.
-- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It runs the issue-citation check, typechecking, Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
+- The required typecheck job uses `blacksmith-2vcpu-ubuntu-2404` (2 vCPU, 8 GB) for PRs and manual dispatches, and `ubuntu-24.04` for pushes and merge groups. It runs `npm run typecheck` for all change surfaces, including docs, infrastructure and release bumps. It keeps the minimum-Node setup and its bounded retry.
+- The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It runs the issue-citation check, builds server declarations, then runs Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing. The explicit server build preserves the preparation that typecheck supplied before the split. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
 - Four cockpit browser E2E shards on `ubicloud-standard-2` (2 vCPU, 8 GB RAM, Ubuntu 24.04 x64) each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
 
 The Ubicloud trial moves only the four browser CI shards to the lowest x64 tier,
@@ -103,11 +106,26 @@ Ubuntu. Compare browser job times after the switch before changing shard counts
 or worker limits. Other jobs, including nightly verification, keep their existing
 runners. The trial changes no test command, worker count, timeout or required check.
 
+The separate typecheck uses Blacksmith's 3,000 monthly x64 2-vCPU equivalent
+minutes. A seven-day sample projects about 2,833 PR/dispatch typecheck jobs per
+30 days. One hosted Blacksmith typecheck job passed in 54 seconds; at that
+runtime, the projection is about 2,629 equivalent minutes including existing
+release verification. If every job took that long and billing rounded each job
+up to a minute, the estimate would be 2,921 minutes including releases. Typecheck
+itself took 30 seconds on Blacksmith versus 22 seconds on the same-head GitHub
+control, so no execution-speed gain is claimed. Rounding and other organization
+usage are unknown; this is an allocation estimate, not a guaranteed free bill. See the [allocation report](../benchmarks/ci-runner-allocation-2026-10.md).
+
 The full Vitest suite runs once across the three LTS shards. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
 
 The legacy floor config, sequencer, reporter and duration manifest remain for PR compatibility. PR CI loads `ci.yml` from the target branch, whose old floor jobs still read these files from the PR checkout. The new workflow has no floor jobs and does not use these helpers. Remove the helpers only after the new workflow reaches the target branch.
 
-The required check keeps its name, **Unit, build, E2E, and package**. It succeeds only when the build/package job, all three Vitest shards, and all four cockpit browser shards succeed, and, on a pull request, the `complexity-gate` job (see [Checking function complexity and file length](#checking-function-complexity-and-file-length)). Packaged CLI E2E and cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs remain on GitHub-hosted Ubuntu. Develop snapshot publishing still waits for this aggregate. Same-repository
+The required check keeps its name, **Unit, build, E2E, and package**. It requires
+typecheck and build/package on every change surface. Full-matrix changes also
+require all three Vitest shards and all four cockpit browser shards. Pull requests
+and merge groups require the complexity and clone gates. Packaged CLI E2E and
+cockpit browser E2E stay separate named checks. The aggregate and snapshot jobs
+remain on GitHub-hosted Ubuntu. Develop snapshot publishing still waits for this aggregate. Same-repository
 PRs instead run `prepare-pr-snapshot` after verification, packing snapshot
 archives without publishing credentials. `publish-pr-snapshot.yml` listens for
 completed CI, validates the current open PR head, authoritative run/attempt,
@@ -219,7 +237,7 @@ Every job in this run can upload artifacts, including jobs that build PR code, s
 
 Bot-authored `release/v*` version-bump PRs skip Vitest, cockpit browser E2E, and automated code review only when all of these hold: PR author is `github-actions[bot]` or the exact bot configured in `RELEASE_APP_BOT_LOGIN`, head is `release/v*`, the live file list matches the release-finalization allowlist (`packages/*/package.json`, `alias-cezarion/package.json`, `pnpm-lock.yaml`), the event head SHA still matches the live PR head, the file-list fetch succeeded in full, and base→head manifests differ only by one shared old→new semver pair (optional caret; same keys/structure — no added scripts, deps, or arbitrary retargets), and the pnpm lockfile stays byte-identical except matching local workspace specifiers (including its pnpm package-manager document).
 
- The shared check lives in `.github/scripts/release-bump-pr.cjs` (loaded from the trusted base checkout) and feeds CI `classify-pr` and automated review `can_review`. The required CI aggregate still runs `build-and-package` and accepts `skipped` for Vitest/cockpit only on that verified shape. Automated review keeps the named **Automated Code Review** check green without a model round when it skips. A human-authored `release/v*` PR still runs the full matrix and review. Manual `workflow_dispatch` of automated review is unchanged.
+ The shared check lives in `.github/scripts/release-bump-pr.cjs` (loaded from the trusted base checkout) and feeds CI `classify-pr` and automated review `can_review`. The required CI aggregate still runs `typecheck` and `build-and-package` and accepts `skipped` for Vitest/cockpit only on that verified shape. Automated review keeps the named **Automated Code Review** check green without a model round when it skips. A human-authored `release/v*` PR still runs the full matrix and review. Manual `workflow_dispatch` of automated review is unchanged.
 
 Release finalization creates bump PRs with a repository-scoped GitHub App token,
 which emits native `pull_request_target` CI. It waits for that run and never
@@ -613,7 +631,7 @@ target workflow before opening PRs against it.
 
 CI accepts `merge_group: checks_requested` for `main`. It tests the immutable
 combined commit with all nine verification jobs, including the function complexity
-gate, the minimum-version build/package job and browser E2E. Queue runs never use docs/infra or release-bump exemptions. They have no
+gate, the minimum-version typecheck and build/package jobs and browser E2E. Queue runs never use docs/infra or release-bump exemptions. They have no
 model keys, npm credentials, publishing jobs or OIDC permission.
 
 The required `Automated Code Review` check verifies existing PR-head review

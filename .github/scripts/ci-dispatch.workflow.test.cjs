@@ -54,7 +54,7 @@ process.stdout.write(JSON.stringify(value));
     for (const step of job.steps) {
       if (step.if && !runInNewContext(step.if, context)) continue;
       if (step.uses?.startsWith('actions/checkout@')) {
-        if (['build-and-package', 'vitest', 'cockpit-browser'].includes(jobName)) return evaluate(step.with.ref, context);
+        if (['typecheck', 'build-and-package', 'vitest', 'cockpit-browser'].includes(jobName)) return evaluate(step.with.ref, context);
         assert.equal(evaluate(step.with.ref, context), BASE, 'classifier comes from API base, never dispatch head');
         fs.mkdirSync(path.join(dir, '.github/scripts'), { recursive: true });
         for (const name of ['release-bump-pr.cjs', 'change-surface.cjs']) {
@@ -111,7 +111,7 @@ test('dispatch cannot skip tests for incomplete lists, docs, code, or non-versio
 
 test('verification uses a PR merge ref only after validating dispatch attribution', () => {
   const moved = prFixture(); moved.head.sha = 'c'.repeat(40);
-  for (const job of ['build-and-package', 'vitest', 'cockpit-browser']) {
+  for (const job of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) {
     assert.equal(classify(job), 'refs/pull/42/merge');
     for (const options of [{ pr: moved }, { number: '' }, { number: 'bad' }, { apiFails: true }]) {
       assert.equal(classify(job, options), HEAD, `${job}: ${JSON.stringify(options)}`);
