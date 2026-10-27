@@ -42,7 +42,7 @@ import { ProcessWaitSupervisor, probeProcessWait } from '../process-wait/supervi
 import { confineExitFile, type ExitFileRoots } from '../process-wait/exit-file.ts';
 import { WorkerScratchCleanup } from '../delegation/scratch-cleanup.ts';
 import { noJitter, ORPHAN_BACKOFF, retryDelayMs, WAKE_RETRY_BACKOFF, type Backoff } from '../delegation/retry-backoff.ts';
-import { inspectExecutionGeneration, isCurrentProcess, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, sharedCwdScan, type CwdSource, type GenerationProbe, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
+import { inspectExecutionGeneration, isCurrentProcess, processesWithCwdUnder, processStartToken, recordedGroupSignalable, recordedProcessLive, sameDestroyGeneration, sharedCwdScan, type CwdSource, type GenerationProbe, type RecordedProcess, type WorkerProcessRecord } from '../delegation/process-liveness.ts';
 import { parseUsageLimit } from '../core/usage-limit.ts';
 import { startManagedSession } from '../core/managed-session.ts';
 import { createRunner } from '../core/runner-factory.ts';
@@ -1248,9 +1248,7 @@ export class RunManager {
     if (living()) signal('SIGKILL');
   }
 
-  /** Destroy of a finished generation (hearsay-tools/cezarion#890): a dev server or watcher its
-   * agent left in its process group holds the worktree, and nothing else ties it to the worker.
-   * A record whose controller is another live cezar is not ours to act on. */
+  /** Destroy recorded survivors, excluding a foreign live controller (hearsay-tools/cezarion#890). */
   private async terminateFinishedWorkerGroups(runId: string, timeoutMs: number): Promise<void> {
     const proof = this.store.readWorkerExecution(runId);
     if (proof?.phase !== 'complete') return;
@@ -1259,11 +1257,12 @@ export class RunManager {
     if (typeof record === 'string' || run?.delegation?.role !== 'worker' ||
       (recordedProcessLive(record.controller) && !isCurrentProcess(record.controller))) return;
     const groups = record.processes.filter(entry => entry.pgid !== undefined);
-    if (!groups.length) return;
+    const pids = record.processes.filter(entry => entry.pgid === undefined && entry.startToken !== undefined && recordedProcessLive(entry));
+    if (!groups.length && !pids.length) return;
     const deadline = Date.now() + Math.min(30_000, Math.max(0, Number.isFinite(timeoutMs) ? timeoutMs : 0));
     const pause = () => new Promise(resolve => setTimeout(resolve, Math.max(0, Math.min(100, deadline - Date.now()))));
-    const paths = [run.delegation.workspace.path, ...agentTmpDirLocationEvidence(this.dataDir, runId).paths];
-    await this.terminateRecorded({ pids: [], groups, paths }, deadline, pause);
+    const workspace = run.delegation.workspace, requestedAt = run.delegation.destroy?.requestedAt, paths = [workspace.path, ...agentTmpDirLocationEvidence(this.dataDir, runId).paths];
+    await this.terminateRecorded({ pids, groups, paths }, deadline, pause, () => !this.disposed && sameDestroyGeneration(this.store.getRun(runId), this.store.readWorkerExecution(runId)?.generation, proof.generation, workspace, requestedAt));
   }
 
   /** Best effort: a failed write leaves the working-directory scan as this process's evidence. */

@@ -4,14 +4,13 @@ import { readPid, requirePid, requirePidText } from '../pid-file.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import fs from 'node:fs';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readlinkSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
-import { syncBuiltinESMExports } from 'node:module';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, sep } from 'node:path';
+import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { managerDisposed } from './fixture-cleanup.testkit.ts';
 import { RunStore, type RunRecord } from '../runs/store.ts';
-import { agentTmpDir, agentTmpDirLocations, resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
+import { agentTmpEnv, resolveAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { ensureOwnedWorkspace, planOwnedWorkspace, removeOwnedWorkspace } from '../delegation/workspace.ts';
 import { isReclaimable, rematerializeReclaimedWorktree } from '../runs/retention.ts';
 import { WorkspaceSemaphore } from '../workspace/semaphore.ts';
@@ -284,7 +283,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     expect(await manager.awaitRunTermination(w.id, 10)).toBe(false);
   });
 
-  it.each(['running', 'waiting', 'queued', 'failed', 'cancelled'] as const)('refuses %s recovery and Continue over a surviving prior process, then refuses real destroy', async status => {
+  it.each(['running', 'waiting', 'queued', 'failed', 'cancelled'] as const)('refuses %s recovery and Continue, then destroys the surviving owned process', async status => {
     const w = await worker(); let child: ReturnType<typeof spawn> | undefined; let ready = false; let launches = 0;
     vi.spyOn(runners, 'createRunner').mockReturnValue({ backend: 'claude', specSupport: CLAUDE_SPEC_SUPPORT, systemPromptOnResume: 'resent', interrupt: async () => undefined,
       run: async () => { throw Error('unused'); }, startSession: () => {
@@ -302,8 +301,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
     const prior = store.readWorkerExecution(w.id)!;
     // Resolved, not hand-built: the run's scratch lives wherever the socket-safe
     // resolver (#387) put it, and the recovery barrier must see that location.
-    const scratchDir = resolveAgentTmpDir(join(root, '.ai/cezar'), w.id);
-    mkdirSync(scratchDir, { recursive: true });
+    const scratchDir = agentTmpEnv(join(root, '.ai/cezar'), w.id, { ...process.env, CEZ_AGENT_TMPDIR: '1' }).TMPDIR!;
     const scratch = join(scratchDir, 'retained.txt'); writeFileSync(scratch, 'old process scratch');
     manager.dispose(); store.updateRun(w.id, { status }); store.flush();
     store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true }); const other = new RunManager(reopened, root);
@@ -315,11 +313,11 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       expect.soft(other.continueRun(w.id, { text: 'try again' })).toMatchObject({ ok: false, error: expect.stringContaining('checkpoint') });
       await until(() => !other.isActive(w.id));
       const service = new DelegationService(); service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
-      expect.soft(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'incomplete', remaining: expect.arrayContaining(['process', 'worktree', 'branch']) });
-      expect.soft(launches).toBe(1); expect.soft(existsSync(workspace(w).path)).toBe(true);
-      expect.soft(existsSync(scratch)).toBe(true);
-      expect.soft(child!.exitCode).toBeNull(); expect.soft(child!.signalCode).toBeNull();
-      expect.soft(reopened.readWorkerExecution(w.id)).toEqual(prior);
+      expect.soft(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+      expect.soft(launches).toBe(1); expect.soft(existsSync(workspace(w).path)).toBe(false);
+      expect.soft(existsSync(scratch)).toBe(false);
+      expect.soft(child!.signalCode).toBe('SIGKILL');
+      expect.soft(reopened.readWorkerExecution(w.id)?.phase).toBe('complete');
       expect(reopened.getRun(w.id)).toBeDefined(); expect(reopened.readEvents(w.id).length).toBeGreaterThan(0);
     } finally { other.dispose(); reopened.flush(); child?.kill('SIGKILL'); }
   });
@@ -629,6 +627,22 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       rmSync(recordPath(w.id)); expect(store.readWorkerProcesses(w.id, generation)).toBe('absent');
     });
 
+    it.runIf(process.platform === 'linux')('destroy stops a recorded survivor outside owned paths after generation completion', async () => {
+      const w = await worker();
+      await ensureOwnedWorkspace(root, w);
+      const generation = store.commitWorkerExecutionStart(w.id);
+      const child = await spawnReady(tmpdir(), "process.on('SIGTERM',()=>process.exit(42)); console.log('ready'); setInterval(()=>{},1000)");
+      expect(store.appendWorkerProcess(w.id, generation, child.proc.pid!)).toBe(true);
+      store.updateRun(w.id, { status: 'review' });
+      expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
+      const service = new DelegationService();
+      const detach = service.registerProject({ id: 'p', root, store, manager });
+      try {
+        expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+        expect(child.proc.exitCode).toBe(42);
+      } finally { detach(); }
+    });
+
     it('a dead child is finalized by recovery, re-launches, and destroy completes', async () => {
       const { w, child, prior, reopened, other, service, launches } = await crashed();
       try {
@@ -658,129 +672,31 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       } finally { other.dispose(); reopened.flush(); }
     });
 
-    it('scan-only survivors are reported exactly, never signalled, and keep the worktree', async () => {
+    it('recovery retains scan-only holders, then explicit destroy stops the owned holders', async () => {
       const w = await worker();
-      // Finish every Git operation before the scan. No original manager owns a live execution,
-      // so the fixture cannot launch an autosave while destroy probes the orphan.
       await ensureOwnedWorkspace(root, w);
       store.commitWorkerExecutionStart(w.id);
       store.updateRun(w.id, { status: 'failed' }); store.flush();
       manager.dispose();
-      const signalSensitive = "process.on('SIGTERM',()=>process.exit(42)); console.log('ready'); setInterval(()=>{},1000)";
-      const worktreeHolder = await spawnReady(workspace(w).path, signalSensitive);
-      const scratch = resolveAgentTmpDir(join(root, '.ai/cezar'), w.id); mkdirSync(scratch, { recursive: true });
-      const scratchHolder = await spawnReady(scratch, signalSensitive);
-      const expectedPids = [worktreeHolder.proc.pid!, scratchHolder.proc.pid!].sort((a, b) => a - b);
-      const processKills = vi.spyOn(process, 'kill');
-      const worktreeKills = vi.spyOn(worktreeHolder.proc, 'kill');
-      const scratchKills = vi.spyOn(scratchHolder.proc, 'kill');
-      const mutatingSignals = () => [
-        ...processKills.mock.calls.filter(([pid, signal]) => expectedPids.includes(pid) && signal !== 0),
-        ...worktreeKills.mock.calls.filter(([signal]) => signal !== 0),
-        ...scratchKills.mock.calls.filter(([signal]) => signal !== 0),
-      ];
-      // A missing record makes these two real cwd holders scan-only evidence.
+      const script = "process.on('SIGTERM',()=>process.exit(42)); console.log('ready'); setInterval(()=>{},1000)";
+      const worktreeHolder = await spawnReady(workspace(w).path, script);
+      const scratch = agentTmpEnv(join(root, '.ai/cezar'), w.id, { ...process.env, CEZ_AGENT_TMPDIR: '1' }).TMPDIR!;
+      const scratchHolder = await spawnReady(scratch, script);
+      const expected = [worktreeHolder.proc.pid!, scratchHolder.proc.pid!];
       rmSync(recordPath(w.id));
-      const prior = store.readWorkerExecution(w.id);
       store.close(); const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
       const other = new RunManager(reopened, root);
       const service = new DelegationService(); service.registerProject({ id: 'reopened', root, store: reopened, manager: other });
-      type ScanRead = { cwd?: string | undefined; readlinkError?: string | undefined };
-      const scanReads = new Map<number, ScanRead>();
-      const observed = (pid: number) => {
-        let entry = scanReads.get(pid);
-        if (!entry) { entry = {}; scanReads.set(pid, entry); }
-        return entry;
-      };
-      // Pass through the exact fs calls the Linux scanner makes. A second /proc read after
-      // destroy can see a process that has exited or changed dumpability.
-      const realReadlink = fs.readlinkSync;
-      vi.spyOn(fs, 'readlinkSync').mockImplementation(((...args: unknown[]) => {
-        const pid = /^\/proc\/(\d+)\/cwd$/.exec(String(args[0]))?.[1];
-        // Each cwd read starts a fresh probe for this PID.
-        if (pid) scanReads.set(Number(pid), {});
-        try {
-          const result = Reflect.apply(realReadlink, fs, args);
-          if (pid) { const entry = observed(Number(pid)); entry.cwd = String(result); entry.readlinkError = undefined; }
-          return result;
-        } catch (error) {
-          if (pid) { const entry = observed(Number(pid)); entry.cwd = undefined; entry.readlinkError = (error as NodeJS.ErrnoException).code; }
-          throw error;
-        }
-      }) as typeof fs.readlinkSync);
-      syncBuiltinESMExports();
+      const signals = vi.spyOn(process, 'kill');
       try {
-        const describePid = (pid: number) => {
-          const file = `/proc/${pid}`;
-          const read = (path: string) => { try { return readFileSync(path, 'utf8').trim().slice(0, 160); } catch (error) { return (error as NodeJS.ErrnoException).code; } };
-          let cwd: string | undefined;
-          try { cwd = readlinkSync(`${file}/cwd`); } catch (error) { cwd = `readlink:${(error as NodeJS.ErrnoException).code}`; }
-          const stat = read(`${file}/stat`);
-          const ppid = stat?.includes(')') ? stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/)[1] : undefined;
-          let uid: number | undefined;
-          try { uid = statSync(file).uid; } catch { /* The PID may have exited since the scan. */ }
-          return { pid, ppid, cwd, comm: read(`${file}/comm`), startToken: processStartToken(pid), uid };
-        };
-        // Snapshot the returned blocker immediately, before a transient PID can disappear.
-        let blockerDiagnostics: ReturnType<typeof describePid>[] = [];
-        let blockerPids: number[] = [];
-        let blockerReads = new Map<number, ScanRead>();
-        const takeBlocker = other.takeWorkerTerminationBlocker.bind(other);
-        vi.spyOn(other, 'takeWorkerTerminationBlocker').mockImplementation(runId => {
-          const taken = takeBlocker(runId);
-          if (taken?.blocker.kind === 'processes') {
-            blockerPids = [...taken.blocker.pids];
-            blockerReads = new Map(blockerPids.map(pid => [pid, { ...scanReads.get(pid) }]));
-            blockerDiagnostics = blockerPids.map(describePid);
-          }
-          return taken;
-        });
-        // Neither holder exits on its own, so each destroy waits out its deadline (#469).
-        (service as unknown as { terminationTimeoutMs: number }).terminationTimeoutMs = 1_500;
         await other.recover();
-        expect(mutatingSignals()).toEqual([]);
-        expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
-        scanReads.clear();
-        const blocked = await service.destroyForHuman('reopened', w.id);
-        expect(blocked).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
-        const assertReported = (error: string | undefined) => {
-          const reason = /^Worker termination is not proven: (processes [\d, ]+ still hold the worker's worktree or scratch); retry cleanup later$/.exec(error ?? '')?.[1];
-          expect(reason).toBeDefined();
-          const reported = reason!.match(/\d+/g)!.map(Number).sort((a, b) => a - b);
-          const boundedDiagnostics = blockerDiagnostics.slice(0, 8).map(entry => ({ ...entry, cwd: entry.cwd?.slice(0, 160) }));
-          expect(reported, JSON.stringify(boundedDiagnostics)).toEqual([...blockerPids].sort((a, b) => a - b));
-          for (const pid of expectedPids) expect(reported).toContain(pid);
-          // Every reported PID must have been observed by the real scan as a readable cwd holder:
-          // an unreadable cwd is no evidence (hearsay-tools/cezarion#889).
-          if (process.platform === 'linux') {
-            const targets = [workspace(w).path, ...agentTmpDirLocations(join(root, '.ai/cezar'), w.id)]
-              .map(path => { try { return realpathSync(path); } catch { return path; } });
-            for (const entry of blockerDiagnostics) {
-              const scan = blockerReads.get(entry.pid);
-              expect(scan, JSON.stringify({ ...entry, cwd: entry.cwd?.slice(0, 160) })).toBeDefined();
-              const cwd = scan?.cwd?.replace(/ \(deleted\)$/, '');
-              expect(cwd !== undefined && targets.some(target => cwd === target || cwd.startsWith(target + sep)),
-                JSON.stringify({ pid: entry.pid, ...scan, cwd: cwd?.slice(0, 160) })).toBe(true);
-            }
-          }
-          return reason!;
-        };
-        const reason = assertReported(blocked.error);
-        expect(mutatingSignals()).toEqual([]);
-        scanReads.clear();
-        const retried = await service.destroyForHuman('reopened', w.id);
-        expect(retried).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
-        const retryReason = assertReported(retried.error);
-        expect(mutatingSignals()).toEqual([]);
-        // An unchanged blocker set appends no second event; a changed set is reported exactly.
-        expect(reopened.readEvents(w.id).filter(event => event.type === 'lifecycle' && String(event.message).startsWith('destroy blocked:'))).toEqual([
-          expect.objectContaining({ message: `destroy blocked: ${reason}` }),
-          ...(retryReason === reason ? [] : [expect.objectContaining({ message: `destroy blocked: ${retryReason}` })])]);
-        expect(existsSync(workspace(w).path)).toBe(true);
-        expect(worktreeHolder.proc.exitCode).toBeNull(); expect(worktreeHolder.proc.signalCode).toBeNull();
-        expect(scratchHolder.proc.exitCode).toBeNull(); expect(scratchHolder.proc.signalCode).toBeNull();
-        expect(reopened.readWorkerExecution(w.id)).toEqual(prior);
-      } finally { other.dispose(); reopened.flush(); vi.restoreAllMocks(); syncBuiltinESMExports(); }
+        expect(expected.some(pid => signals.mock.calls.some(([target, signal]) => target === pid && signal !== 0))).toBe(false);
+        expect(await service.destroyForHuman('reopened', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+        await Promise.all([worktreeHolder.exited, scratchHolder.exited]);
+        for (const pid of expected) expect(signals.mock.calls.some(([target, signal]) => target === pid && signal === 'SIGTERM')).toBe(true);
+        expect(existsSync(workspace(w).path)).toBe(false);
+        expect(existsSync(scratch)).toBe(false);
+      } finally { other.dispose(); reopened.flush(); }
     });
 
     it('a live foreign controller keeps the generation: nothing is finalized or signalled', async () => {
@@ -1017,9 +933,9 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       } finally { Object.defineProperty(process, 'platform', platform); }
     });
 
-    it.each(['worktree', 'scratch'] as const)('retains resources and names the PID of a process whose cwd is in the %s', async location => {
+    it.each(['worktree', 'scratch'] as const)('stops a process whose cwd is in the owned %s', async location => {
       const { w, service, detach } = await settled();
-      const cwd = location === 'worktree' ? workspace(w).path : agentTmpDir(join(root, '.ai/cezar'), w.id);
+      const cwd = location === 'worktree' ? workspace(w).path : agentTmpEnv(join(root, '.ai/cezar'), w.id, { ...process.env, CEZ_AGENT_TMPDIR: '1' }).TMPDIR!;
       mkdirSync(cwd, { recursive: true });
       const holder = spawn(process.execPath, ['-e', "console.log('ready'); setInterval(()=>{},1000)"], { cwd, stdio: ['ignore', 'pipe', 'ignore'] });
       const exited = new Promise(resolve => holder.once('exit', resolve));
@@ -1027,11 +943,9 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       await new Promise(resolve => holder.stdout!.once('data', resolve));
       try {
         const result = await service.destroyForHuman('p', w.id);
-        expect(result).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
-        expect(result.error).toContain(String(holder.pid));
-        expect(existsSync(workspace(w).path)).toBe(true); expect(holder.exitCode).toBeNull(); expect(holder.signalCode).toBeNull();
-        holder.kill('SIGKILL'); await exited;
-        expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+        expect(result).toMatchObject({ state: 'complete', remaining: [] });
+        await exited;
+        expect(existsSync(workspace(w).path)).toBe(false); expect(holder.signalCode).toBe('SIGTERM');
       } finally { holder.kill('SIGKILL'); await exited; detach(); }
     });
   });
@@ -1138,16 +1052,15 @@ console.log(String(m.pid)); ${opts.leader === 'exit' ? "m.unref(); process.stdin
       expect(alive(member)).toBe(true);
     });
 
-    it.skipIf(process.platform === 'win32')('a setsid child keeps destroy incomplete and is never signalled', async () => {
+    it.runIf(process.platform === 'linux')('destroy stops a setsid child that holds the owned worktree', async () => {
       const { w, member } = await groupedWorker({ member: 'setsid', leader: 'exit' });
       await until(() => !manager.isActive(w.id) && store.readWorkerExecution(w.id)?.phase === 'complete');
       const kills = vi.spyOn(process, 'kill');
       const result = await service(store, manager).destroyForHuman('p', w.id);
-      expect(result).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
-      expect(result.error).toContain(String(member));
-      expect(alive(member)).toBe(true);
-      expect(kills.mock.calls.filter(([pid, signal]) => Math.abs(pid) === member && signal !== 0)).toEqual([]);
-      expect(existsSync(workspace(w).path)).toBe(true);
+      expect(result).toMatchObject({ state: 'complete', remaining: [] });
+      expect(alive(member)).toBe(false);
+      expect(kills.mock.calls.some(([pid, signal]) => pid === member && signal === 'SIGTERM')).toBe(true);
+      expect(existsSync(workspace(w).path)).toBe(false);
     });
   });
 });

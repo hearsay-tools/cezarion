@@ -206,3 +206,103 @@ public static class CezWorkspaceIdentity {
     }
   }
 }
+
+// Destroy-only OS evidence. Each signal uses a process handle whose creation
+// time was checked after a fresh handle scan; PIDs and lease files alone do not
+// authorize termination. Handles for unrelated inaccessible processes are skipped.
+public static class CezDestroyHolders {
+  const uint Query = 0x1000, Duplicate = 0x40, Terminate = 1, SameAccess = 2;
+  const int ExtendedHandles = 64;
+  const int LengthMismatch = unchecked((int)0xC0000004);
+  [StructLayout(LayoutKind.Sequential)] struct Entry {
+    public IntPtr Object, Pid, Handle;
+    public uint Access; public ushort Trace, Type; public uint Attributes, Reserved;
+  }
+  [DllImport("ntdll.dll")] static extern int NtQuerySystemInformation(int kind, IntPtr data, int size, out int needed);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern IntPtr OpenProcess(uint access, bool inherit, int pid);
+  [DllImport("kernel32.dll")] static extern IntPtr GetCurrentProcess();
+  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool DuplicateHandle(IntPtr source, IntPtr handle, IntPtr target, out SafeFileHandle copy, uint access, bool inherit, uint flags);
+  [DllImport("kernel32.dll")] static extern uint GetFileType(SafeFileHandle handle);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)] static extern uint GetFinalPathNameByHandleW(SafeFileHandle handle, StringBuilder path, uint size, uint flags);
+  [DllImport("kernel32.dll")] static extern bool GetProcessTimes(IntPtr process, out long creation, out long exit, out long kernel, out long user);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool TerminateProcess(IntPtr process, uint code);
+
+  static string Token(IntPtr process) {
+    long creation, exit, kernel, user;
+    return GetProcessTimes(process, out creation, out exit, out kernel, out user) ? creation.ToString() : null;
+  }
+  static string Normalize(string path) {
+    if (path.StartsWith("\\\\?\\")) path = path.Substring(4);
+    return Path.GetFullPath(path).TrimEnd('\\');
+  }
+  static bool Under(string name, string[] roots) {
+    string path;
+    try { path = Normalize(name); } catch { return false; }
+    foreach (string root in roots) {
+      string canonical = Normalize(root);
+      if (String.Equals(path, canonical, StringComparison.OrdinalIgnoreCase) ||
+          path.StartsWith(canonical + "\\", StringComparison.OrdinalIgnoreCase)) return true;
+    }
+    return false;
+  }
+  public static string[] Find(string[] roots, int selectedPid) {
+    int size = 1024 * 1024, needed, status; IntPtr data = IntPtr.Zero;
+    try {
+      do {
+        if (data != IntPtr.Zero) Marshal.FreeHGlobal(data);
+        if (size > 256 * 1024 * 1024) { data = IntPtr.Zero; throw new IOException("Windows handle scan exceeds limit"); }
+        data = Marshal.AllocHGlobal(size);
+        status = NtQuerySystemInformation(ExtendedHandles, data, size, out needed);
+        if (status == LengthMismatch) size = Math.Max(size * 2, needed);
+      } while (status == LengthMismatch);
+      if (status != 0) throw new IOException("Windows handle scan failed: " + status);
+      long count = Marshal.ReadIntPtr(data).ToInt64(); int entrySize = Marshal.SizeOf(typeof(Entry));
+      if (count < 0 || count > (size - IntPtr.Size * 2) / entrySize) throw new IOException("Invalid Windows handle scan");
+      var processes = new Dictionary<int, IntPtr>(); var found = new Dictionary<int, string>();
+      int self = System.Diagnostics.Process.GetCurrentProcess().Id;
+      try {
+        if (selectedPid != 0) {
+          IntPtr selected = OpenProcess(Query | Duplicate, false, selectedPid);
+          if (selected == IntPtr.Zero && Marshal.GetLastWin32Error() != 87) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot inspect Windows holder " + selectedPid);
+          processes[selectedPid] = selected;
+        }
+        for (long i = 0; i < count; i++) {
+          var entry = (Entry)Marshal.PtrToStructure(IntPtr.Add(data, checked(IntPtr.Size * 2 + (int)i * entrySize)), typeof(Entry));
+          long value = entry.Pid.ToInt64(); if (value <= 1 || value > Int32.MaxValue) continue;
+          int pid = (int)value;
+          if (pid == self || (selectedPid != 0 && pid != selectedPid) || found.ContainsKey(pid)) continue;
+          IntPtr process;
+          if (!processes.TryGetValue(pid, out process)) { process = OpenProcess(Query | Duplicate, false, pid); processes[pid] = process; }
+          if (process == IntPtr.Zero) continue;
+          SafeFileHandle copy;
+          if (!DuplicateHandle(process, entry.Handle, GetCurrentProcess(), out copy, 0, false, SameAccess)) {
+            int error = Marshal.GetLastWin32Error();
+            if (selectedPid != 0 && error == 5) throw new Win32Exception(error, "Cannot inspect Windows holder handle " + pid);
+            continue;
+          }
+          using (copy) {
+            if (GetFileType(copy) != 1) continue;
+            var name = new StringBuilder(32768); uint length = GetFinalPathNameByHandleW(copy, name, (uint)name.Capacity, 0);
+            if (length == 0 || length >= name.Capacity) {
+              if (selectedPid != 0 && Marshal.GetLastWin32Error() == 5) throw new IOException("Cannot name Windows holder handle " + pid);
+              continue;
+            }
+            if (!Under(name.ToString(), roots)) continue;
+            string token = Token(process); if (token == null) throw new IOException("Cannot verify Windows holder " + pid);
+            found[pid] = token;
+          }
+        }
+        var result = new List<string>(); foreach (var item in found) result.Add(item.Key + ":" + item.Value); return result.ToArray();
+      } finally { foreach (IntPtr process in processes.Values) if (process != IntPtr.Zero) CloseHandle(process); }
+    } finally { if (data != IntPtr.Zero) Marshal.FreeHGlobal(data); }
+  }
+  public static void Stop(string[] roots, int pid, string token) {
+    IntPtr process = OpenProcess(Query | Terminate, false, pid);
+    if (process == IntPtr.Zero) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot open Windows holder " + pid);
+    try {
+      if (Token(process) != token || Array.IndexOf(Find(roots, pid), pid + ":" + token) < 0 || Token(process) != token) return;
+      if (!TerminateProcess(process, 1)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot stop Windows holder " + pid);
+    } finally { CloseHandle(process); }
+  }
+}

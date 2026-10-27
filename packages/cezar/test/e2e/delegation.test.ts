@@ -221,8 +221,8 @@ rl.on('close', () => queue.then(() => process.exit(0)));
     assert.equal(diff.baselineSha, baseline); assert.equal(diff.truncated, false);
     assert.equal((await command(['stop', workerId])).state, 'terminated');
     assert.equal(store.getRun(workerId)?.status, 'review', 'stop never accepts review');
-    // A real unrecorded descendant still holds the installed worker's checkout.
-    // Scope must preserve that blocker until it exits; no liveness result is replaced.
+    // An unrecorded process holds the installed worker's checkout. Explicit
+    // destroy finds it from the OS, stops it and completes through the CLI.
     const holder = spawnProcess(process.execPath, ['-e', `
       process.stdout.write('ready');
       process.stdin.on('data', data => {
@@ -232,24 +232,15 @@ rl.on('close', () => queue.then(() => process.exit(0)));
       process.stdin.on('end', () => process.exit(0));
     `], { cwd: workspace.path, stdio: ['pipe', 'pipe', 'inherit'] });
     const holderExit = once(holder, 'exit');
-    try {
-      await once(holder.stdout, 'data');
-      await assert.rejects(command(['destroy', workerId]), error => {
-        const failure = error as Error & { code: number; stdout: string; stderr: string };
-        assert.equal(failure.code, 1); assert.equal(failure.stderr, '');
-        const result = JSON.parse(failure.stdout);
-        assert.equal(result.workerId, workerId); assert.equal(result.state, 'incomplete');
-        assert.deepEqual(result.remaining, ['worktree', 'branch']); assert.deepEqual(result.deleted, []);
-        return true;
-      });
-      const written = once(holder.stdout, 'data'); holder.stdin.write('still writable\n'); await written;
-      assert.equal(await readFile(join(workspace.path, 'held-after-refusal.txt'), 'utf8'), 'still writable\n');
-      assert.notEqual((await git('branch', '--list', workspace.branch)).stdout.trim(), '');
-    } finally { holder.stdin.end(); await holderExit; }
     const destroyed = { workerId, state: 'complete', remaining: [], deleted: [
       { kind: 'worktree', path: workspace.path }, { kind: 'branch', ref: `refs/heads/${workspace.branch}` },
     ] };
-    assert.deepEqual(await command(['destroy', workerId]), destroyed);
+    try {
+      await once(holder.stdout, 'data');
+      assert.deepEqual(await command(['destroy', workerId]), destroyed);
+      await holderExit;
+      assert.equal(holder.signalCode, 'SIGTERM');
+    } finally { holder.kill('SIGKILL'); await holderExit; }
     assert.deepEqual(await command(['destroy', workerId]), destroyed);
     assert.equal(await exists(workspace.path), false);
     assert.doesNotMatch((await git('worktree', 'list', '--porcelain')).stdout, new RegExp(workerId));

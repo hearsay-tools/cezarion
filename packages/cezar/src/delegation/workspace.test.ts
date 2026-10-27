@@ -5,6 +5,7 @@ import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { processStartToken } from '../detached-process.ts';
+import { reapDestroyHolders } from './destroy-holders.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import fsPromises from 'node:fs/promises';
@@ -500,6 +501,30 @@ exec "${realGit}" "$@"
     } finally { try { process.kill(-app.pid!, 'SIGKILL'); } catch {} }
   }, 60_000);
 
+  it.runIf(process.platform === 'linux')('destroys a prepared leftover with a live app and inaccessible root', async () => {
+    const { root, workspace } = await partialLeftover();
+    const app = spawn(process.execPath, ['-e', 'console.log("ready"); setInterval(() => {}, 1000)'], {
+      cwd: workspace.path, detached: true, stdio: ['ignore', 'pipe', 'ignore'],
+    });
+    try {
+      await once(app.stdout!, 'data');
+      const qa = join(workspace.path, '.ai', 'qa');
+      await mkdir(qa, { recursive: true });
+      await writeFile(join(qa, 'test-env.json'), JSON.stringify({ startedByThisRepo: true, app: { pid: app.pid, start: processStartToken(app.pid!) } }));
+      const db = new DatabaseSync(join(qa, 'test-env-lease.sqlite'));
+      db.exec('CREATE TABLE holders (id TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, start TEXT, pgid INTEGER)');
+      db.close();
+      await chmod(workspace.path, 0);
+      const exited = once(app, 'exit');
+      expect(await removeOwnedWorkspace(root, workspace, undefined, undefined, undefined, undefined,
+        () => reapDestroyHolders([workspace.path], () => {}))).toMatchObject({ state: 'complete', remaining: [] });
+      expect((await exited)[1]).toBe('SIGTERM');
+    } finally {
+      if (existsSync(workspace.path)) await chmod(workspace.path, 0o700);
+      try { process.kill(-app.pid!, 'SIGKILL'); } catch {}
+    }
+  }, 60_000);
+
   it('binds a legacy checkpoint to its still-registered worktree before removal', async () => {
     const { root, first } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);
@@ -538,7 +563,7 @@ exec "${realGit}" "$@"
     expect(await readFile(join(saved, 'tracked.txt'), 'utf8')).toBe('base');
   });
 
-  it.runIf(process.platform === 'linux')('recovers a leftover with an inaccessible directory', async () => {
+  it.runIf(process.platform === 'linux' || process.platform === 'darwin')('recovers a leftover with an inaccessible directory', async () => {
     const { root, workspace } = await partialLeftover();
     const locked = join(workspace.path, 'locked');
     await mkdir(locked);
@@ -549,7 +574,7 @@ exec "${realGit}" "$@"
     } finally { if (existsSync(locked)) await chmod(locked, 0o700); }
   });
 
-  it.runIf(process.platform === 'linux').each(['root', '.ai'])('recovers a leftover with inaccessible %s before probing the test app', async (part) => {
+  it.runIf(process.platform === 'linux' || process.platform === 'darwin').each(['root', '.ai'])('recovers a leftover with inaccessible %s before probing the test app', async (part) => {
     const { root, workspace } = await partialLeftover();
     const locked = part === 'root' ? workspace.path : join(workspace.path, '.ai');
     if (part === '.ai') await mkdir(locked);

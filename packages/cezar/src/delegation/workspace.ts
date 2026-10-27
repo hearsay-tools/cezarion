@@ -3,7 +3,7 @@ import { waitForTestAppWatcher, withIdleTestApp } from './idle-test-app.ts';
 import { windowsIdentityDirectory, windowsReadIdentity, windowsWriteIdentity } from './windows-workspace-identity.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
-import { constants } from 'node:fs';
+import { constants, lstatSync } from 'node:fs';
 import { chmod, lstat, mkdir, mkdtemp, open, readdir, realpath, rename, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join, normalize } from 'node:path';
@@ -32,6 +32,12 @@ type Cleanup = z.infer<typeof cleanupSchema>;
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const hash = (content: Buffer) => createHash('sha256').update(content).digest('hex');
 const checkUnheld = (assertUnheld?: () => void) => assertUnheld?.();
+async function removeAfterIdleApp(path: string, remove: () => Promise<boolean>, report?: RemovalReport): Promise<boolean> {
+  return withIdleTestApp(path, async (_stopped, busy) => {
+    if (busy || !await waitForTestAppWatcher(path)) { report?.unexplained?.(); return false; }
+    return remove();
+  });
+}
 const matchesRootIdentity = (identity: Cleanup['rootIdentity'], info: { dev: number; ino: number }) =>
   !identity || (identity.dev === info.dev && identity.ino === info.ino);
 async function verifiedRootIdentity(path: string) {
@@ -119,7 +125,11 @@ async function makeDirectoryWritable(path: string, expected?: { dev: number; ino
     // Linux O_PATH pins a directory even with mode 000; chmod the pinned inode
     // through procfs because fchmod on an O_PATH descriptor fails with EBADF.
     const linuxPath = process.platform === 'linux';
-    const directory = await open(path, (linuxPath ? 0x200000 : constants.O_RDONLY) | constants.O_NOFOLLOW);
+    // Darwin O_EVTONLY opens an event descriptor without requesting read access;
+    // O_NOFOLLOW_ANY rejects a symlink in any component. Native CI must verify
+    // both opening mode-000 directories and fchmod on this descriptor.
+    const flags = linuxPath ? 0x200000 : process.platform === 'darwin' ? 0x00008000 | 0x20000000 : constants.O_RDONLY;
+    const directory = await open(path, flags | constants.O_NOFOLLOW);
     try {
       const opened = await directory.stat();
       if (!opened.isDirectory() || opened.dev !== info.dev || opened.ino !== info.ino) throw new Error(`Directory changed: ${path}`);
@@ -299,6 +309,54 @@ export async function verifyOwnedWorkspace(repoRoot: string, run: RunRecord): Pr
   return workspace;
 }
 
+/** Authenticate the owned root before an explicit destroy can inspect or signal its holders. */
+export async function prepareDestroyAccess(repoRoot: string, value: WorkerWorkspace): Promise<() => Promise<void>> {
+  return withWorktreeMutation(repoRoot, async () => {
+    const workspace = await validateIntent(repoRoot, value);
+    const path = await receiptLocation(repoRoot, workspace);
+    const receipt = await readReceipt(path);
+    if (!receipt || !same(receipt.workspace, workspace)) throw new Error('Owned workspace receipt missing or mismatched');
+    const root = await verifiedRootIdentity(workspace.path);
+    const checkpointPath = path.replace(/\.json$/, '.cleanup.json');
+    const checkpoint = await exists(checkpointPath) ? cleanupSchema.parse(JSON.parse(await readIdentityFile(checkpointPath, RECEIPT_CAP))) : undefined;
+    if (checkpoint && (!same(checkpoint.workspace, workspace) || checkpoint.gitDir !== receipt.gitDir || !matchesRootIdentity(checkpoint.rootIdentity, root))) {
+      throw new Error('Owned workspace checkpoint identity changed');
+    }
+    const entries = worktreeEntries(await checkedGit(repoRoot, ['worktree', 'list', '--porcelain', '-z']));
+    const registered = entries.includes(`worktree ${workspace.path}`);
+    if (registered) {
+      if (await readIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), 36, false) !== workspace.resourceId) throw new Error('Owned workspace marker changed');
+      // A registration alone does not prove that the directory at its path is
+      // still the checkout. Only a checkpoint-bound inode can authorize repair
+      // before the worktree's own Git link is readable.
+      if (!checkpoint?.rootIdentity && await liveGitDir(repoRoot, workspace) !== receipt.gitDir) throw new Error('Owned workspace Git identity changed');
+    } else if (checkpoint?.phase !== 'prepared' || await exists(receipt.gitDir)) {
+      throw new Error('Owned workspace is not an authenticated prepared leftover');
+    }
+    // Repair only the authenticated root before Git and evidence reads. The opened
+    // descriptor is checked against the captured inode before chmod.
+    await makeDirectoryWritable(workspace.path, root);
+    if (registered && await liveGitDir(repoRoot, workspace) !== receipt.gitDir) throw new Error('Owned workspace Git identity changed');
+    return async () => {
+      await validateIntent(repoRoot, value);
+      if (!same(await readReceipt(path), receipt)) throw new Error('Owned workspace receipt changed');
+      const currentCheckpoint = await exists(checkpointPath) ? cleanupSchema.parse(JSON.parse(await readIdentityFile(checkpointPath, RECEIPT_CAP))) : undefined;
+      if (checkpoint && !currentCheckpoint) throw new Error('Owned workspace checkpoint disappeared');
+      if (currentCheckpoint && (!same(currentCheckpoint.workspace, workspace) || currentCheckpoint.gitDir !== receipt.gitDir ||
+          !matchesRootIdentity(currentCheckpoint.rootIdentity, root))) throw new Error('Owned workspace checkpoint identity changed');
+      const currentEntries = worktreeEntries(await checkedGit(repoRoot, ['worktree', 'list', '--porcelain', '-z']));
+      if (currentEntries.includes(`worktree ${workspace.path}`)) {
+        if (await readIdentityFile(join(receipt.gitDir, 'cezar-owned-resource'), 36, false) !== workspace.resourceId ||
+            await liveGitDir(repoRoot, workspace) !== receipt.gitDir) throw new Error('Owned workspace Git identity changed');
+      } else if (currentCheckpoint?.phase !== 'prepared' || await exists(receipt.gitDir)) {
+        throw new Error('Owned workspace is not an authenticated prepared leftover');
+      }
+      const current = lstatSync(workspace.path);
+      if (!current.isDirectory() || current.isSymbolicLink() || current.dev !== root.dev || current.ino !== root.ino) throw new Error('Owned workspace root changed');
+    };
+  }, { waitMs: 1_000 });
+}
+
 /** Reuse only proven resources. No reattachment/replacement after resource loss or ambiguous provisioning. */
 export async function ensureOwnedWorkspace(repoRoot: string, run: RunRecord): Promise<WorkerWorkspace> {
   const workspace = await validateIntent(repoRoot, workerWorkspace(run));
@@ -348,7 +406,8 @@ export class WorkspaceHeldError extends Error {
  */
 export type RemovalReport = { held?: (pids: readonly number[]) => void; unexplained?: () => void };
 export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorkspace, assertCurrent?: () => void,
-  beforeRemove?: () => Promise<void>, assertUnheld?: () => void, report?: RemovalReport): Promise<WorkerDestroyResult> {
+  beforeRemove?: () => Promise<void>, assertUnheld?: () => void, report?: RemovalReport,
+  reapHolders?: () => Promise<void>): Promise<WorkerDestroyResult> {
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
   const held = (pids: readonly number[]) => { heldBy = pids; report?.held?.(pids); };
@@ -453,19 +512,30 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         assertCurrent?.();
         await beforeRemove?.();
         assertCurrent?.();
-        // Preview release may itself terminate a known owned holder. Check unrelated holders
-        // only afterwards, immediately before destructive Git; they are never signalled.
-        checkUnheld(assertUnheld);
-        const removed = await withIdleTestApp(workspace.path, async (_stopped, busy) => {
-          if (busy) { report?.unexplained?.(); return false; }
-          if (!await waitForTestAppWatcher(workspace.path)) { report?.unexplained?.(); return false; }
-          assertCurrent?.(); assertUnheld?.();
-          const holders = inspectGeneration({ paths: [workspace.path] });
-          if (holders.liveness !== 'gone') { if (holders.pids.length) held(holders.pids); else report?.unexplained?.(); return false; }
-          const removal = await mutationGit(repoRoot, ['worktree', 'remove', '--force', workspace.path]);
+        if (reapHolders) {
+          await reapHolders();
+          if (!await preparePresentWorktree(receipt)) return false;
+          await makeDirectoriesWritable(workspace.path);
+          if (!await preparePresentWorktree(receipt)) return false;
+          await reapHolders();
+        }
+        if (!reapHolders) checkUnheld(assertUnheld);
+        const remove = async () => {
+          await reapHolders?.();
+          if (!await preparePresentWorktree(receipt)) return false;
+          assertCurrent?.();
+          if (!reapHolders) {
+            assertUnheld?.();
+            const holders = inspectGeneration({ paths: [workspace.path] });
+            if (holders.liveness !== 'gone') { if (holders.pids.length) held(holders.pids); else report?.unexplained?.(); return false; }
+          }
+          // Git requires a second force for a locked worktree. Explicit destroy has
+          // already authenticated this resource; an owned lock cannot veto it.
+          const removal = await mutationGit(repoRoot, ['worktree', 'remove', '--force', ...(reapHolders ? ['--force'] : []), workspace.path]);
           if (!removal.ok) { report?.unexplained?.(); return false; }
           return true;
-        });
+        };
+        const removed = reapHolders ? await remove() : await removeAfterIdleApp(workspace.path, remove, report);
         if (!removed) return false;
         remaining = ['branch'];
         return true;
@@ -485,7 +555,9 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           report?.unexplained?.(); return false;
         }
         const unheld = () => {
-          assertCurrent?.(); assertUnheld?.();
+          assertCurrent?.();
+          if (reapHolders) return true;
+          assertUnheld?.();
           const holders = inspectGeneration({ paths: [workspace.path] });
           if (holders.liveness === 'gone') return true;
           if (holders.pids.length) held(holders.pids); else report?.unexplained?.();
@@ -504,6 +576,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           catch (error) { return failedRemoval(error); }
           // Permission repair yields: a new checkout or holder can arrive while it runs.
           if (!await stillOwned()) { report?.unexplained?.(); return false; }
+          if (!await reapVerified()) return false;
           if (!unheld()) return false;
           try { await rm(workspace.path, { recursive: true, force: true }); }
           catch (error) { return failedRemoval(error); }
@@ -515,16 +588,13 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           report?.unexplained?.();
           return false;
         };
-        assertCurrent?.();
-        await beforeRemove?.();
-        assertCurrent?.();
-        checkUnheld(assertUnheld);
-        const components = [workspace.path, join(workspace.path, '.ai'), join(workspace.path, '.ai', 'qa')];
-        let inaccessible: boolean;
-        try { inaccessible = !await probeAccessible(workspace.path, components); }
-        catch (error) { return failedRemoval(error); }
-        if (inaccessible) {
-          // Repair only the probe ancestors before claiming the test-app lease.
+        const reapVerified = async () => {
+          if (!reapHolders) return true;
+          if (!await stillOwned()) return false;
+          await reapHolders();
+          return stillOwned();
+        };
+        const repairProbeAccess = async (components: string[]) => {
           for (const component of components) {
             if (!await stillOwned() || !unheld()) return false;
             if (!await exists(component)) break;
@@ -532,13 +602,26 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
             catch (error) { return failedRemoval(error); }
             if (!await stillOwned() || !unheld()) return false;
           }
-        }
-        return withIdleTestApp(workspace.path, async (_stopped, busy) => {
-          if (busy || !await waitForTestAppWatcher(workspace.path)) { report?.unexplained?.(); return false; }
+          return true;
+        };
+        assertCurrent?.();
+        await beforeRemove?.();
+        assertCurrent?.();
+        if (!await reapVerified()) return false;
+        if (!reapHolders) checkUnheld(assertUnheld);
+        const components = [workspace.path, join(workspace.path, '.ai'), join(workspace.path, '.ai', 'qa')];
+        let inaccessible: boolean;
+        try { inaccessible = !await probeAccessible(workspace.path, components); }
+        catch (error) { return failedRemoval(error); }
+        // Repair only the probe ancestors before claiming the test-app lease.
+        if (inaccessible && !await repairProbeAccess(components)) return false;
+        const remove = async () => {
+          if (!await reapVerified()) return false;
           if (!unheld()) return false;
           if (!await safe()) { report?.unexplained?.(); return false; }
           return removeFiles();
-        });
+        };
+        return reapHolders ? remove() : removeAfterIdleApp(workspace.path, remove, report);
       }
 
       async function prepareMissingWorktree(receipt: Receipt): Promise<Cleanup | undefined> {
@@ -588,7 +671,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           if (current.sha !== checkpoint.sha || hash(current.log.content) !== checkpoint.logHash) return;
           // Ref CAS: never delete a branch advanced after our verified snapshot.
           assertCurrent?.();
-          assertUnheld?.();
+          if (!reapHolders) assertUnheld?.();
           const removed = await mutationGit(repoRoot, ['update-ref', '-d', `refs/heads/${workspace.branch}`, checkpoint.sha]);
           if (!removed.ok || await branchExists()) { report?.unexplained?.(); return; }
         }

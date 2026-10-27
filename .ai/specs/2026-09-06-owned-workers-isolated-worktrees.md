@@ -309,6 +309,19 @@ resumes completion after ACK without inventing a later turn.
 
 ## Stop, destruction, and retention
 
+### Explicit destroy cases
+
+| Case | Shipped behavior |
+| --- | --- |
+| Authenticated worktree, branch and scratch | Snapshot evidence, stop verified processes, remove resources and record completion only after absence checks. |
+| New file, app or other holder in an owned path | Re-scan, terminate the verified holder with bounded escalation and retry removal. |
+| Recorded generation process outside owned paths | Check its incarnation and terminate it; a reused identity is never signalled. |
+| Lease missing, stale, forged or unreadable | Do not use it to choose a signal; independently verified OS and generation evidence drive destruction. |
+| Replaced root, foreign receipt, external symlink target or branch used elsewhere | Preserve it; report incomplete and retain the durable request. |
+| Git removal interrupted or scratch remains after worktree removal | Keep the checkpoint and retry the remaining resources after restart. |
+| Unreadable evidence for a known candidate or a failed OS scan | Report the failure and retry; unrelated unreadable processes do not block the scan. |
+| Process starts after the last scan or its PID changes between a POSIX token check and signal | No hard isolation or atomic check-and-signal is claimed. Later attempts scan again. |
+
 Cancellation requested is not proof of process termination. Add a manager
 termination barrier covering queued, dequeue/startup gaps, workflow checks and
 agent sessions. Wait for runner result/process termination and finalization, not
@@ -319,9 +332,12 @@ Destroy is serialized per worker and durable:
 1. Verify parent and recorded resource ownership; persist destruction intent.
 2. Block new launches, continuations, steering and rematerialization for that run,
    including human-facing execution paths, while allowing human inspection.
-3. Remove queued work or request cancellation. Wait up to 30 seconds for proven
-   termination. Unknown termination after restart is incomplete cleanup, not a
-   license to kill a potentially reused PID or delete a live workspace.
+3. Snapshot evidence before destructive action. For an explicit destroy, terminate
+   verified generation processes and processes independently shown to hold owned
+   worktree or scratch paths, with bounded escalation and repeated scans. A holder,
+   new file or untrusted lease does not revoke ownership. A stale PID alone is not
+   authority to signal; verify its incarnation before each signal. Unknown scoped
+   evidence or an OS failure remains incomplete and is retried.
 4. Verify canonical managed path, Git registration, original branch ownership,
    and absence of another user's checkout before deletion. Preserve moved,
    symlink-replaced, repurposed, or otherwise ambiguous resources.
@@ -349,7 +365,8 @@ Destroy is serialized per worker and durable:
    Cleanup records a `worktree-removed` checkpoint at the baseline first and
    deletes by compare-and-swap on it. Any other branch stays for a human, and
    the error names the branch and, when its tip moved, its commit count.
-6. Persist complete or incomplete state and remaining resource details. Repeated
+6. Remove verified owned scratch, and persist complete only after the worktree,
+   branch and scratch are absent. Persist incomplete state and remaining resource details. Repeated
    calls join or retry the same operation. Already absent verified resources
    count as cleaned. Preserve run records and NDJSON events.
 
@@ -372,7 +389,9 @@ removal already in progress may finish; its checkpoint lets the new controller
 resume without publishing stale results from the detached store. Every attempt
 must repeat process termination proof, ownership checks, the parent result
 checkpoint and checked Git removal; incomplete remains incomplete if any proof
-fails. A fresh request is still required to begin destruction of a worker that
+fails. Each retry repeats bounded reaping even when its holder observation is
+unchanged. The scans cannot prevent a new same-user process after the final scan;
+on POSIX the incarnation check and signal are not atomic. A fresh request is still required to begin destruction of a worker that
 has no recorded destroy intent. This supersedes the former prohibition on
 autonomous retry after restart, without granting generic prune or retention
 permission to delete owned resources.

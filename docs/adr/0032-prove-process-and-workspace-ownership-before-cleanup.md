@@ -27,11 +27,23 @@ so an interruption preserves either the old or the new checkpoint. An incomplete
 temporary file cannot authorize cleanup. This store requires a local drive with Windows
 ACL support; unsupported or unreadable evidence retains resources.
 
-Cleanup claims an idle test environment before stopping its app and scanning holders.
+Ordinary cleanup claims an idle test environment before stopping its app and scanning holders.
 The claim remains durable through worktree removal, while the SQLite handle is closed
 so it does not itself prevent Windows deletion. An active lease, unverified app identity
 or failed stop retains the worktree. Windows has no cwd scan, so that refusal must not
 depend on a later scan finding the app.
+
+Explicit destruction of a verified owned worker follows the owner's later policy:
+new contents, a live holder, or a stale, forged, or unreadable lease do not revoke
+ownership. Persist the evidence snapshot before signalling or deletion. Check the
+receipt, generation, root and registration again at destructive boundaries; retain
+external resources, replaced roots and branches that fail their compare-and-swap.
+Use independent OS path evidence or a trusted generation record to select processes,
+check their incarnation before bounded termination and retry after OS failures.
+Do not signal a PID solely because an untrusted lease names it. A process can start
+after a scan, and a token check and POSIX signal are not atomic. This policy does not
+claim hard isolation or that every future same-user process can be prevented.
+Destroy remains incomplete until owned worktree, branch and scratch are gone.
 
 Implementation: [session-process.ts](../../packages/cezar/src/core/session-process.ts), [process-liveness.ts](../../packages/cezar/src/delegation/process-liveness.ts), [workspace.ts](../../packages/cezar/src/delegation/workspace.ts).
 
@@ -39,7 +51,7 @@ Coverage: [session-process.test.ts](../../packages/cezar/src/core/session-proces
 
 ### Waiting for the test-app watcher
 
-The watcher starts with the system temporary directory as its working directory.
+For ordinary cleanup, the watcher starts with the system temporary directory as its working directory.
 A checkout cwd scan therefore cannot prove that it has closed its log and SQLite
 handles. Before Git removal, cleanup scans full process command lines for the
 checkout's `test-env-lease.mjs watch-app` process, on Windows as well as POSIX.

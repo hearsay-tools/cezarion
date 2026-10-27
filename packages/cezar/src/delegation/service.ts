@@ -3,6 +3,9 @@ import { reconcileConversationState, projectConversationEvents } from './convers
 import { openQuestions } from './questions.ts';
 import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision } from './results.ts';
 import { join } from 'node:path';
+import { lstatSync } from 'node:fs';
+import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, removeAgentTmpDir } from '../runs/agent-tmpdir.ts';
+import { reapDestroyHolders } from './destroy-holders.ts';
 import { prepareWorkerContext, workerContextTask } from './context.ts';
 import { acceptedWorkerIdentitySchema, workerContextHash, workerWorkflowHash } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
@@ -63,11 +66,51 @@ import { isAuthenticatedCaller } from './credentials.ts';
 import { parseDelegationEffort } from './effort.ts';
 import { authorizeWorkerList, authorizeSpawn, authorizeSpawnReplay, authorizeWorker, authorizeCancelWait, authorizeRetainedResult, DelegationPolicyError } from './policy.ts';
 import { releaseThenRemoveOwnedWorkspace } from '../git-worktree-release.ts';
-import { gitCommonDir, planOwnedWorkspace, readOwnedDiff, resolveWorkerBaseline, WorkspaceHeldError } from './workspace.ts';
-import { holdersStillHold, observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
+import { gitCommonDir, planOwnedWorkspace, prepareDestroyAccess, readOwnedDiff, resolveWorkerBaseline, WORKTREE_LOCK_BUSY_ERROR, WorkspaceHeldError } from './workspace.ts';
+import { WorktreeMutationLockTimeout } from '../git-worktree-lock.ts';
+import { observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
 import { DESTROY_ATTENTION_ATTEMPTS, DESTROY_BACKOFF, retryDelayMs, type Backoff } from './retry-backoff.ts';
 
 export type DelegationProject = { id: string; root: string; store: RunStore; manager: RunManager };
+
+/** Authenticate and snapshot before a destroy-only resource reaper can signal. */
+async function prepareAuthoritativeReaper(project: DelegationProject, workerId: string, workspace: Extract<NonNullable<RunRecord['delegation']>, { role: 'worker' }>['workspace'],
+  check: () => RunRecord, assertAttached: () => void): Promise<() => Promise<void>> {
+  let rootPresent = true;
+  try { lstatSync(workspace.path); } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    rootPresent = false;
+  }
+  const rootCurrent = rootPresent ? await prepareDestroyAccess(project.root, workspace) : () => {
+    try { lstatSync(workspace.path); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+      throw error;
+    }
+    throw new Error('Worker workspace appeared during scratch cleanup');
+  };
+  const dataDir = join(project.root, '.ai/cezar');
+  if (!agentTmpDirOwnershipProven(dataDir, workerId)) throw new Error('Worker scratch ownership cannot be verified');
+  const generation = project.store.readWorkerExecution(workerId)?.generation;
+  const initial = check();
+  const requestedAt = initial.delegation?.role === 'worker' ? initial.delegation.destroy?.requestedAt : undefined;
+  if (!requestedAt) throw new Error('Worker destroy intent is missing');
+  const current = async () => {
+    assertAttached(); await rootCurrent(); assertAttached();
+    const run = check();
+    if (run.delegation?.role !== 'worker' || run.delegation.destroy?.requestedAt !== requestedAt || JSON.stringify(run.delegation.workspace) !== JSON.stringify(workspace) ||
+        !agentTmpDirOwnershipProven(dataDir, workerId) ||
+        project.store.readWorkerExecution(workerId)?.generation !== generation) throw new Error('Worker resource ownership changed');
+  };
+  const snapshot = structuredClone(check());
+  const evidence = await collectWorkerEvidence(project.root, project.store, snapshot);
+  await current();
+  project.store.commitWorkerResult(evidence.result.parentRunId, evidence.result, evidence.diffSnapshot, { ignoreCleanup: true });
+  return async () => {
+    await current();
+    const paths = [...(rootPresent ? [workspace.path] : []), ...agentTmpDirLocations(dataDir, workerId)];
+    await reapDestroyHolders(paths, current);
+  };
+}
 
 /**
  * Resolve an explicit workflow or skill. With neither, use the built-in quick-task constant, not
@@ -229,9 +272,7 @@ export class DelegationService {
     timer.unref?.();
     timers.set(workerId, timer);
   }
-  /** One automatic attempt. It runs in full only when something its last full attempt observed has
-   * changed, or a holder it named has exited; either way it records the attempt and when the next
-   * is due, and from the attention threshold on the cockpit says the cleanup needs attention. */
+  /** Retry the full authoritative destroy, including another bounded process reaping attempt. */
   private destroyTick(project: DelegationProject, workerId: string) {
     return this.serialized(`worker:${project.id}:${workerId}`, async () => {
       const check = () => {
@@ -243,13 +284,9 @@ export class DelegationService {
         return current;
       };
       check();
-      const seen = this.destroyObservations.get(project.id)?.get(workerId);
-      const dataDir = join(project.root, '.ai/cezar');
-      const unchanged = !!seen && holdersStillHold({ store: project.store, dataDir, workerId, holders: seen.holders }) &&
-        seen.key === observeDestroy({ store: project.store, dataDir, commonDir: await this.commonDir(project), workerId });
       // One automatic full attempt at a time per project: attempts that coincide (every pending destroy after a
-      // restart) would otherwise contend for the worktree mutation lock and come back lock-busy, never skipped.
-      if (!unchanged) await this.serialized(`destroy-retries:${project.id}`, () => this.destroyAttempt(project, workerId, check, 'scheduled')).catch(() => undefined);
+      // restart) would otherwise contend for the worktree mutation lock and come back lock-busy.
+      await this.serialized(`destroy-retries:${project.id}`, () => this.destroyAttempt(project, workerId, check, 'scheduled')).catch(() => undefined);
       if (this.projects.get(project.id) !== project) return;
       const current = project.store.getRun(workerId);
       if (current?.delegation?.role !== 'worker' || !current.delegation.destroy || current.delegation.destroy.phase === 'complete') return;
@@ -770,6 +807,8 @@ export class DelegationService {
     persist('requested', worker.delegation.destroy?.remaining ?? ['process', 'worktree', 'branch']);
     try {
       persist('terminating', ['process', ...resources]);
+      const reapHolders = await prepareAuthoritativeReaper(project, workerId, workspace, check, assertAttached);
+      await reapHolders?.();
       project.manager.requestWorkerStop(workerId);
       let result: WorkerDestroyResult;
       const terminated = await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true });
@@ -828,10 +867,21 @@ export class DelegationService {
         assertCurrent();
         // #781: release preview before the final fresh proof immediately preceding removal.
         result = await releaseThenRemoveOwnedWorkspace({ previewHost: project.manager.previewHost }, project.root, workspace,
-          assertCurrent, assertSafe, { held: pids => { holders = pids; }, unexplained: () => { explained = false; } });
-      } catch {
+          assertCurrent, assertSafe, { held: pids => { holders = pids; }, unexplained: () => { explained = false; } }, reapHolders);
+        if (result.state === 'complete') {
+          assertCurrent();
+          const dataDir = join(project.root, '.ai/cezar');
+          if (!agentTmpDirOwnershipProven(dataDir, workerId)) throw new Error('Worker scratch ownership cannot be verified');
+          removeAgentTmpDir(dataDir, workerId);
+          if (agentTmpDirMayExist(dataDir, workerId)) {
+            explained = false;
+            result = { workerId, state: 'incomplete', remaining: ['process'],
+              error: `Worker scratch remains or cannot be verified: ${agentTmpDirLocations(dataDir, workerId).join(', ')}` };
+          }
+        }
+      } catch (error) {
         explained = false;
-        result = { workerId, state: 'incomplete', remaining: resources, error: 'Worker resources may still be held; cleanup will retry' };
+        result = { workerId, state: 'incomplete', remaining: resources, error: `Worker cleanup failed: ${error instanceof Error ? error.message : String(error)}` };
       } finally { release?.(); }
       // An already-started checked Git operation may finish after detach. Its
       // checkpoint makes a new controller's retry safe; the old store must not
@@ -856,7 +906,10 @@ export class DelegationService {
       try {
         const current = this.projects.get(project.id) === project ? project.store.getRun(workerId) : undefined;
         if (current?.delegation?.role === 'worker' && current.delegation.destroy?.requestedAt === requestedAt && current.delegation.destroy.phase !== 'complete') {
-          persist('incomplete', current.delegation.destroy.remaining, error instanceof Error ? error.message : String(error));
+          const reason = error instanceof WorktreeMutationLockTimeout ? WORKTREE_LOCK_BUSY_ERROR : error instanceof Error ? error.message : String(error);
+          const remaining = current.delegation.destroy.remaining;
+          persist('incomplete', remaining, reason);
+          return observed({ workerId, state: 'incomplete', remaining, error: reason }, [], false);
         }
       } catch { /* the attempt's own error is the one to report */ }
       throw error;

@@ -21,3 +21,19 @@ export function windowsReadIdentity(path: string, cap: number, privateParent = t
 export function windowsWriteIdentity(path: string, content: string, replace = false, privateParent = true): void {
   identityOperation({ operation: 'write', path, content: Buffer.from(content).toString('base64'), replace, privateParent });
 }
+
+/** Process identities are obtained from OS handles, never an app lease. */
+export function windowsDestroyHolders(paths: readonly string[], pid = 0): Array<{ pid: number; token: string }> {
+  const result: unknown = JSON.parse(identityOperation({ operation: 'holders', paths, pid }));
+  if (!Array.isArray(result) || !result.every(value => typeof value === 'string' && /^\d+:\d+$/.test(value))) {
+    throw new Error('Invalid Windows holder scan');
+  }
+  return result.map(value => {
+    const [id, token] = (value as string).split(':');
+    return { pid: Number(id), token: token! };
+  });
+}
+
+export function windowsStopDestroyHolder(paths: readonly string[], pid: number, token: string): void {
+  identityOperation({ operation: 'stop-holder', paths, pid, token });
+}

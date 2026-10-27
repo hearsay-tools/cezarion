@@ -6,5 +6,7 @@ switch ($request.operation) {
   'directory' { [CezWorkspaceIdentity]::Directory($request.path, [bool]$request.create) }
   'read' { [CezWorkspaceIdentity]::Read($request.path, [int]$request.cap, [bool]$request.privateParent) }
   'write' { [CezWorkspaceIdentity]::Write($request.path, $request.content, [bool]$request.replace, [bool]$request.privateParent) }
+  'holders' { ConvertTo-Json -InputObject @([CezDestroyHolders]::Find([string[]]$request.paths, [int]$request.pid)) -Compress }
+  'stop-holder' { [CezDestroyHolders]::Stop([string[]]$request.paths, [int]$request.pid, [string]$request.token) }
   default { throw 'Unknown workspace identity operation' }
 }

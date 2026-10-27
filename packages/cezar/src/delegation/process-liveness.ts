@@ -3,6 +3,7 @@ import { readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 
 import { linuxBootId, parseProcStat, processStartToken } from '../detached-process.ts';
+import type { RunRecord } from '../runs/store.ts';
 
 /**
  * Synchronous process evidence for worker recovery and resource cleanup. Unreadable cwd is no
@@ -14,6 +15,12 @@ export { parseProcStat, processStartToken };
 export type RecordedProcess = { pid: number; startToken?: string | undefined; pgid?: number | undefined };
 export type WorkerProcessRecord = { generation: string; controller: RecordedProcess; processes: RecordedProcess[] };
 export type GenerationLiveness = 'gone' | 'alive' | 'unknown';
+
+/** A recorded survivor is signalable only while this exact destroy and execution remain current. */
+export function sameDestroyGeneration(run: RunRecord | undefined, generation: string | undefined, expected: string, workspace: unknown, requestedAt: string | undefined): boolean {
+  return generation === expected && run?.delegation?.role === 'worker' && !!requestedAt && run.delegation.destroy?.requestedAt === requestedAt &&
+    JSON.stringify(run.delegation.workspace) === JSON.stringify(workspace);
+}
 
 function procStat(pid: number) {
   try { return parseProcStat(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return undefined; }

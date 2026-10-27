@@ -4,7 +4,8 @@ import { syncBuiltinESMExports } from 'node:module';
 import { createFixtureManager } from '../workflows/fixture-cleanup.testkit.ts';
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync, spawn } from 'node:child_process';
-import fs, { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { once } from 'node:events';
+import fs, { chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { delegationStateSchema, workerSpawnRequestSchema } from '@open-mercato/cezar-contract/delegation';
 import { DelegationPolicyError } from './policy.ts';
 import { workerWorkflowHash } from './execution-identity.ts';
@@ -18,12 +19,12 @@ import { mergeWriteAgentAccounts } from '../workspace/agent-accounts.ts';
 import type { Caller } from './credentials.ts';
 
 import { fixture, scheduledDestroyAttempts, seedWorkerWait } from './service.testkit.ts';
-import { ensureOwnedWorkspace, gitCommonDir, WORKTREE_LOCK_BUSY_ERROR } from './workspace.ts';
+import { ensureOwnedWorkspace, gitCommonDir, removeOwnedWorkspace, WORKTREE_LOCK_BUSY_ERROR } from './workspace.ts';
 import { DelegationService } from './service.ts';
 import { withWorktreeMutation } from '../git-worktree-lock.ts';
 import { readableHolder } from './non-dumpable.testkit.ts';
 import { workerDestroyView } from '../runs/delegation-state.ts';
-import { agentTmpDir } from '../runs/agent-tmpdir.ts';
+import { agentTmpDir, agentTmpEnv } from '../runs/agent-tmpdir.ts';
 
 describe('delegation service durable authority', () => {
   let f: ReturnType<typeof fixture>;
@@ -639,14 +640,23 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     Object.assign(f.service, { destroyBackoff: backoff, destroyAttentionAttempts: attention, destroyRetryDelayMs: backoff.fastMs });
 
   /** A settled worker with a real worktree and complete execution, optionally held by a real process. */
-  async function settled(hold = true) {
+  async function settled(hold = true, refuseSignal = true) {
     const { workerId } = await f.service.spawn(f.caller, input());
     const generation = f.store.commitWorkerExecutionStart(workerId);
     const workspace = await ensureOwnedWorkspace(f.root, f.store.getRun(workerId)!);
     f.store.updateRun(workerId, { status: 'review', worktreePath: workspace.path, branch: workspace.branch });
     expect(f.store.commitWorkerExecutionComplete(workerId, generation)).toBe(true);
     const holder = hold ? await readableHolder(workspace.path) : undefined;
-    if (holder) onTestFinished(() => holder.close());
+    if (holder) {
+      onTestFinished(() => holder.close());
+      if (refuseSignal) {
+        const kill = process.kill.bind(process);
+        vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+          if (pid === holder.pid && signal !== 0 && signal !== undefined) throw Object.assign(new Error('fixture signal failure'), { code: 'EPERM' });
+          return kill(pid, signal);
+        }) as typeof process.kill);
+      }
+    }
     return { workerId, workspace, holder };
   }
   /** The destroy as the API shows it: the stored phase plus the run's retry state. */
@@ -654,22 +664,76 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
   /** One `/proc` listing is one full holder scan; the fixture's process scope spies the listing. */
   const listings = () => vi.mocked(fs.readdirSync).mock.calls.filter(([path]) => path === '/proc').length;
 
-  it.runIf(linux)('a held destroy runs one full attempt, then skips the ticks that would see the same', async () => {
+  it.runIf(linux)('reaps a scratch holder after an earlier worktree removal', async () => {
+    const { workerId, workspace } = await settled(false);
+    expect(await removeOwnedWorkspace(f.root, workspace)).toMatchObject({ state: 'complete' });
+    const scratch = agentTmpEnv(join(f.root, '.ai/cezar'), workerId, { ...process.env, CEZ_AGENT_TMPDIR: '1' }).TMPDIR!;
+    const holder = await readableHolder(scratch);
+    onTestFinished(() => holder.close());
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete', remaining: [] });
+    expect(holder.running).toBe(false);
+    expect(existsSync(scratch)).toBe(false);
+  });
+
+  it.runIf(process.platform === 'linux' || process.platform === 'darwin').each(['root', '.ai'])(
+    'authoritative destroy removes a prepared leftover with inaccessible %s and a live app', async part => {
+      const { workerId, workspace } = await settled(false);
+      expect(await removeOwnedWorkspace(f.root, workspace, undefined, async () => { throw new Error('interrupt'); })).toMatchObject({ state: 'incomplete' });
+      const saved = `${workspace.path}.saved`;
+      renameSync(workspace.path, saved);
+      execFileSync('git', ['worktree', 'prune', '--expire', 'now'], { cwd: f.root });
+      renameSync(saved, workspace.path); rmSync(join(workspace.path, '.git'));
+      mkdirSync(join(workspace.path, '.ai'), { recursive: true });
+      const app = spawn(process.execPath, ['-e', 'console.log("ready"); setInterval(()=>{},1000)'],
+        { cwd: workspace.path, stdio: ['ignore', 'pipe', 'ignore'] });
+      const exited = once(app, 'exit');
+      const locked = part === 'root' ? workspace.path : join(workspace.path, '.ai');
+      try {
+        await once(app.stdout!, 'data'); chmodSync(locked, 0);
+        expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete', remaining: [] });
+        await exited;
+        expect(existsSync(workspace.path)).toBe(false);
+      } finally {
+        if (existsSync(locked)) chmodSync(locked, 0o700);
+        app.kill('SIGKILL'); await exited;
+      }
+    }, 120_000);
+
+  it.runIf(process.platform === 'win32')('authoritative destroy stops a cwd and open-file holder', async () => {
+    const { workerId, workspace } = await settled(false);
+    const file = join(workspace.path, 'holder-file'); writeFileSync(file, 'owned');
+    const script = 'if(process.argv[1]) require("fs").openSync(process.argv[1],"r"); console.log("ready"); setInterval(()=>{},1000)';
+    const cwdHolder = spawn(process.execPath, ['-e', script], { cwd: workspace.path, stdio: ['ignore', 'pipe', 'ignore'] });
+    const fileHolder = spawn(process.execPath, ['-e', script, file], { cwd: f.root, stdio: ['ignore', 'pipe', 'ignore'] });
+    const holders = [cwdHolder, fileHolder], exited = holders.map(app => once(app, 'exit'));
+    try {
+      await Promise.all(holders.map(app => once(app.stdout!, 'data')));
+      expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete', remaining: [] });
+      await Promise.all(exited);
+      expect(existsSync(workspace.path)).toBe(false);
+    } finally { for (const app of holders) app.kill(); await Promise.all(exited); }
+  }, 120_000);
+
+  it.runIf(linux)('retries a failed signal even when the same holder stays alive', async () => {
     cadence();
-    const { workerId } = await settled();
-    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
-    // That attempt stopped the fixture's queued worker and wrote the removal's checkpoint before it met
-    // the holder; neither is a change, because the key is taken where the attempt decides.
-    const reads = vi.spyOn(f.store, 'readEventsAsync');
-    const scans = listings();
-    const results = dirname(f.store.workerResultSnapshotPath(f.parent.id, workerId, randomUUID()));
-    const snapshots = readdirSync(results).sort();
-    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(4), { timeout: 10_000 });
-    // No transcript read, no /proc scan, no snapshot written: nothing it could see changed.
-    expect(reads).not.toHaveBeenCalled();
-    expect(listings()).toBe(scans);
-    expect(readdirSync(results).sort()).toEqual(snapshots);
-    expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', remaining: ['worktree', 'branch'] });
+    const { workerId, holder, workspace } = await settled(true, false);
+    const kill = process.kill.bind(process);
+    let attempts = 0;
+    let refuse = true;
+    vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+      if (pid === holder!.pid && signal === 'SIGTERM') {
+        attempts++;
+        if (refuse) throw Object.assign(new Error('fixture signal failure'), { code: 'EPERM' });
+      }
+      return kill(pid, signal);
+    }) as typeof process.kill);
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', error: expect.stringContaining('Cannot stop destroy holder') });
+    await vi.waitFor(() => expect(attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
+    expect(holder!.running).toBe(true);
+    expect(existsSync(workspace.path)).toBe(true);
+    refuse = false;
+    await vi.waitFor(() => expect(destroyOf(workerId)?.phase).toBe('complete'), { timeout: 15_000 });
+    expect(existsSync(workspace.path)).toBe(false);
   });
 
   it.runIf(linux)("a project's automatic full attempts run one at a time", async () => {
@@ -681,11 +745,11 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     }
     // After a restart nothing has been observed yet, so both first ticks attempt in full, at the same moment.
     let inFlight = 0, most = 0;
-    const termination = f.manager.awaitRunTermination.bind(f.manager);
-    vi.spyOn(f.manager, 'awaitRunTermination').mockImplementation(async (...args) => {
+    const readEvents = f.store.readEventsAsync.bind(f.store);
+    vi.spyOn(f.store, 'readEventsAsync').mockImplementation(async (...args) => {
       most = Math.max(most, ++inFlight);
       // bound: not a wait on the product. It holds each termination open for 150 ms, so a second attempt that started at the same 40 ms tick would overlap it and raise `most` above 1.
-      try { await sleep(150); return await termination(...args); } finally { inFlight--; }
+      try { await sleep(150); return await readEvents(...args); } finally { inFlight--; }
     });
     const restarted = new DelegationService();
     Object.assign(restarted, { destroyBackoff: { fastMs: 40, fastCount: 3, capMs: 300 }, destroyAttentionAttempts: 5 });
@@ -746,7 +810,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
 
   it.runIf(linux)("an explicit destroy cut off by project replacement leaves the replacement's retry armed", async () => {
     cadence();
-    const { workerId } = await settled();
+    const { workerId } = await settled(false);
     let release!: (value: boolean) => void;
     const gate = new Promise<boolean>(resolve => { release = resolve; });
     vi.spyOn(f.manager, 'awaitRunTermination').mockReturnValue(gate);
@@ -795,45 +859,41 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     expect(existsSync(workspace.path)).toBe(false);
   });
 
-  it.runIf(linux)('a holder that moves out of the worktree ends the skipping', async () => {
-    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+  it.runIf(linux)('a process that leaves the worktree before the holder scan is not signalled', async () => {
     const { workerId, workspace } = await settled(false);
     const child = spawn(process.execPath, ['-e', "console.log('ready'); process.stdin.on('data', () => { process.chdir('/'); console.log('moved'); })"],
       { cwd: workspace.path, stdio: ['pipe', 'pipe', 'ignore'] });
     onTestFinished(() => { child.kill('SIGKILL'); });
     const line = () => new Promise<void>(done => child.stdout!.once('data', () => done()));
     await line();
-    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete' });
-    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
-    const moved = line(); child.stdin!.write('go\n'); await moved;
-    // Still running, so only its cwd says it no longer holds anything.
-    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
+    const readEvents = f.store.readEventsAsync.bind(f.store);
+    vi.spyOn(f.store, 'readEventsAsync').mockImplementationOnce(async (...args) => {
+      const moved = line(); child.stdin!.write('go\n'); await moved;
+      return readEvents(...args);
+    });
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete', remaining: [] });
     expect(child.exitCode).toBeNull();
   });
 
-  it.runIf(linux)("a holder only the removal's own last check saw still ends the skipping when it exits", async () => {
-    cadence({ fastMs: 200, fastCount: 10, capMs: 2_000 });
+  it.runIf(linux)('a holder that enters during evidence collection is stopped', async () => {
     const { workerId, workspace } = await settled(false);
-    // A locked worktree fails Git's removal after both holder checks pass, so ticks settle into skipping.
-    execFileSync('git', ['worktree', 'lock', workspace.path], { cwd: f.root });
-    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete' });
-    await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
-    // The next full attempt: its own proof answers safe, then a process enters the worktree before the
-    // removal's second check, the real race between the two scans.
     let late: ReturnType<typeof spawn> | undefined;
-    const proof = f.store.workerResourceHolders.bind(f.store);
-    vi.spyOn(f.store, 'workerResourceHolders').mockImplementation((...args) => {
-      const answer = proof(...args);
-      if (answer === 'safe' && !late) late = spawn('sleep', ['30'], { cwd: workspace.path, stdio: 'ignore' });
-      return answer;
+    const readEvents = f.store.readEventsAsync.bind(f.store);
+    vi.spyOn(f.store, 'readEventsAsync').mockImplementationOnce(async (...args) => {
+      late = spawn(process.execPath, ['-e', 'console.log("ready"); setInterval(()=>{},1000)'], { cwd: workspace.path, stdio: ['ignore', 'pipe', 'ignore'] });
+      await once(late.stdout!, 'data');
+      return readEvents(...args);
     });
     onTestFinished(() => { late?.kill('SIGKILL'); });
-    execFileSync('git', ['worktree', 'unlock', workspace.path], { cwd: f.root });
-    await vi.waitFor(() => expect(late).toBeDefined(), { timeout: 10_000 });
-    await vi.waitFor(() => expect(destroyOf(workerId)?.error).toMatch(new RegExp(`processes ${late!.pid}\\b`)), { timeout: 10_000 });
-    const exited = new Promise<void>(resolve => late!.once('exit', () => resolve()));
-    late!.kill('SIGKILL'); await exited;
-    await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete', remaining: [] });
+    expect(late?.exitCode !== null || late?.signalCode !== null).toBe(true);
+    expect(existsSync(workspace.path)).toBe(false);
+  });
+
+  it('explicit destroy removes an authenticated locked worktree', async () => {
+    const { workerId, workspace } = await settled(false);
+    execFileSync('git', ['worktree', 'lock', workspace.path], { cwd: f.root });
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'complete', remaining: [] });
     expect(existsSync(workspace.path)).toBe(false);
   });
 
@@ -844,7 +904,7 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     // nothing in the scratch directory's own stamp to show the repair.
     const scratch = agentTmpDir(join(f.root, '.ai/cezar'), workerId);
     mkdirSync(scratch, { recursive: true }); writeFileSync(join(scratch, '.cez-fallback'), '{not a pointer');
-    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', remaining: ['process', 'worktree', 'branch'] });
     await vi.waitFor(() => expect(destroyOf(workerId)?.retry?.attempts).toBeGreaterThanOrEqual(2), { timeout: 10_000 });
     expect(destroyOf(workerId)?.phase).toBe('incomplete');
     rmSync(join(scratch, '.cez-fallback'));
@@ -906,8 +966,8 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     cadence();
     const { workerId } = await settled(false);
     vi.spyOn(f.store, 'readEventsAsync').mockRejectedValueOnce(new Error('transcript unreadable'));
-    await expect(f.service.destroy(f.caller, { workerId })).rejects.toThrow('transcript unreadable');
-    expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', remaining: ['worktree', 'branch'], error: 'transcript unreadable' });
+    expect(await f.service.destroy(f.caller, { workerId })).toMatchObject({ state: 'incomplete', error: 'transcript unreadable' });
+    expect(destroyOf(workerId)).toMatchObject({ phase: 'incomplete', remaining: ['process', 'worktree', 'branch'], error: 'transcript unreadable' });
     // Nothing a tick can observe explains a throw, so it is never skipped: the next tick completes.
     await vi.waitFor(() => expect(destroyOf(workerId)).toMatchObject({ phase: 'complete', remaining: [] }), { timeout: 10_000 });
   });
