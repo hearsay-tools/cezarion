@@ -1,8 +1,9 @@
 # Task communication protocol — hearsay-tools/cezarion#1933
 
 Status: the owner approved the design decisions on 2026-10-27, at the design gate of
-hearsay-tools/cezarion#1933. This spec is the record under review. It changes no code.
-Implementation is tracked separately: see [Follow-ups](#14-follow-ups).
+hearsay-tools/cezarion#1933, and approved this spec in review the same day. It changes no
+code. Implementation is tracked in hearsay-tools/cezarion#1989 to hearsay-tools/cezarion#1996:
+see [Follow-ups](#14-follow-ups).
 
 ## Why
 
@@ -643,19 +644,20 @@ regression test fails without the fix).
 
 ## 14. Follow-ups
 
-Each is one issue, filed after this spec is approved in review. F1 is independent and closes
-the incident path. F2 comes before F3, F4, F7 and F8. F5 travels with the change it documents.
+The owner approved this spec on 2026-10-27, and each follow-up is filed as one issue. F1 is
+independent and closes the incident path. F2 comes before F3, F4, F7 and F8. F5 travels with
+the change it documents.
 
-| ID | Scope | Scenarios |
-| --- | --- | --- |
-| F1 | `cez task send` refuses with exit 64 when `CEZ_TASK_ID` is set, and names the remedy | R2, R3 |
-| F2 | The relationship resolver with its two levels; peer conversations in the service, ledger and outcomes (`relationship`, `deleted`, `review` settling a peer request); message identity across ledgers; merged, paged history (`nextBefore`, `before`); peer wakes charge the wake budget; parity cells | R1, R4–R8, R10, R11, R14–R17 |
-| F3 | The `cez message` CLI family (including `conversation --before`), `cez message tasks` discovery, `cez worker resume`; removal of the `cez worker` message verbs; new session instructions in `delegation/provision.ts` | R4, R12 |
-| F4 | Cockpit: peer message cards name and link the peer task; thread and relationship views; light and dark themes; 360 px width | R1 (thread) |
-| F5 | `AGENT_PROTOCOL.md`, `BACKWARD_COMPATIBILITY.md` (the delegation CLI is agent-facing and not a protected surface; the new optional fields and the `peer` wait), README | — |
-| F6 | Runner-native cross-session messaging at shipped defaults: decide, per runner, whether to restrict it, and update instructions | — |
-| F7 | The `peer` wait kind: contract, `run-states.ts` rows, `waitingOn` and attention (including "waiting on replies" for peer requests), `cezar_wait` kinds `peer` and `request`, `cez message wait --peer`, parity cells | R9, R11 |
-| F8 | The completion gate and requests: open requests a root sent block its done (`parentCompletionBlockers`, Cezar's completion request wait); unanswered incoming requests refuse its first done once; the refusal and no-wait nudge texts; `run-states.ts` rows; parity cells | R13, R17 |
+| ID | Issue | Scope | Scenarios |
+| --- | --- | --- | --- |
+| F1 | hearsay-tools/cezarion#1989 | `cez task send` refuses with exit 64 when `CEZ_TASK_ID` is set, and names the remedy | R2, R3 |
+| F2 | hearsay-tools/cezarion#1990 | The relationship resolver with its two levels; peer conversations in the service, ledger and outcomes (`relationship`, `deleted`, `review` settling a peer request); message identity across ledgers; merged, paged history (`nextBefore`, `before`); peer wakes charge the wake budget; parity cells | R1, R4–R8, R10, R11, R14–R17 |
+| F3 | hearsay-tools/cezarion#1991 | The `cez message` CLI family (including `conversation --before`), `cez message tasks` discovery, `cez worker resume`; removal of the `cez worker` message verbs; new session instructions in `delegation/provision.ts` | R4, R12 |
+| F4 | hearsay-tools/cezarion#1992 | Cockpit: peer message cards name and link the peer task; thread and relationship views; light and dark themes; 360 px width | R1 (thread) |
+| F5 | hearsay-tools/cezarion#1993 | `AGENT_PROTOCOL.md`, `BACKWARD_COMPATIBILITY.md` (the delegation CLI is agent-facing and not a protected surface; the new optional fields and the `peer` wait), README | — |
+| F6 | hearsay-tools/cezarion#1994 | Runner-native cross-session messaging at shipped defaults: decide, per runner, whether to restrict it, and update instructions | — |
+| F7 | hearsay-tools/cezarion#1995 | The `peer` wait kind: contract, `run-states.ts` rows, `waitingOn` and attention (including "waiting on replies" for peer requests), `cezar_wait` kinds `peer` and `request`, `cez message wait --peer`, parity cells | R9, R11 |
+| F8 | hearsay-tools/cezarion#1996 | The completion gate and requests: open requests a root sent block its done (`parentCompletionBlockers`, Cezar's completion request wait); unanswered incoming requests refuse its first done once; the refusal and no-wait nudge texts; `run-states.ts` rows; parity cells | R13, R17 |
 
 ## Migration
 
