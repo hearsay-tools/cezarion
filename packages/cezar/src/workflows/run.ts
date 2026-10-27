@@ -5360,9 +5360,9 @@ export class RunManager {
       this.store.appendEvent(workerId, { type: 'worker-question-routed', askSeq: ask.seq, messageId: message.id, parentRunId: parentId });
       return;
     }
-    const reason = workerQuestionFallback(worker, root, parent => this.parentCanReceive(parent));
-    if (reason) { fallback(reason); return; }
-    const state = (root!.delegation as Extract<RunRecord['delegation'], { role: 'root' }>).conversation ?? { messages: [], outcomes: [] };
+    const routing = workerQuestionFallback(worker, root, parent => this.parentCanReceive(parent));
+    if ('reason' in routing) { fallback(routing.reason); return; }
+    const { state } = routing;
     const input = { id: message.id, source: 'agent' as const, parentRunId: parentId, text: message.text, createdAt: now,
       conversation: { senderRunId: workerId, recipientRunId: parentId, kind: 'request' as const } };
     this.store.commitConversation(parentId, { ...state, messages: [...state.messages, message] }, { recipientRunId: parentId, input });
@@ -9249,7 +9249,7 @@ export class RunManager {
       return;
     }
     if (event.type === 'permission.resolved' && state.pendingPermissions?.delete(event.requestId)) {
-      this.handlePermissionResolved(runId, state);
+      this.handlePermissionResolved(runId, state, state.pendingPermissions);
       return;
     }
     const ask = askPayloadOf(event);
@@ -9282,8 +9282,8 @@ export class RunManager {
     // Authorization is the human's, even when this run is an owned worker.
   }
 
-  private handlePermissionResolved(runId: string, state: ActiveRun): void {
-    if (!state.pendingPermissions!.size) {
+  private handlePermissionResolved(runId: string, state: ActiveRun, pendingPermissions: ReadonlySet<string>): void {
+    if (!pendingPermissions.size) {
       this.store.updateRun(runId, { hasPendingPermission: false });
       state.pendingHumanAsk = this.hasPendingHumanAsk(runId);
       if (!state.pendingHumanAsk && state.session?.open && !this.store.getRun(runId)?.stopping) {
