@@ -1,4 +1,5 @@
 import { Virtualizer, type VirtualizerHandle } from 'virtua'
+import { useLayoutEffect, useState } from 'react'
 
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
@@ -1400,6 +1401,50 @@ describe('useThreadScroll — reader scroll signals (#1601)', () => {
     fireEvent.wheel(scroller, { deltaY: 200 })
     moveTo(1600)
     expect(events.map((event) => event.direction)).toEqual(['up', 'down', 'tail'])
+  })
+
+  it('measures the tail after Activity restores so its resize does not move the reader again', () => {
+    const resizeCallbacks: ResizeObserverCallback[] = []
+    vi.stubGlobal('ResizeObserver', class {
+      constructor(callback: ResizeObserverCallback) { resizeCallbacks.push(callback) }
+      observe() {}
+      disconnect() {}
+    })
+    function ReadingThread() {
+      const [open, setOpen] = useState(true)
+      const controls = useThreadScroll('restoring-activity')
+      useLayoutEffect(() => controls.subscribeReaderScroll(event => {
+        setOpen(event.direction !== 'up')
+      }), [controls.subscribeReaderScroll])
+      return <main data-slot="main" ref={element => {
+        if (!element) return
+        Object.defineProperties(element, {
+          clientHeight: { configurable: true, value: 400 },
+          scrollHeight: { configurable: true, get: () =>
+            element.querySelector('[data-slot="thread-dock"]')?.getAttribute('data-open') === 'true' ? 2180 : 2000 },
+        })
+      }}>
+        <div data-route="task-thread">
+          <div ref={controls.attachContent} />
+          <div data-slot="thread-dock" data-open={open} />
+        </div>
+      </main>
+    }
+    render(<ReadingThread />)
+    const main = document.querySelector<HTMLElement>('[data-slot="main"]')!
+    fireEvent.wheel(main, { deltaY: -600 })
+    main.scrollTop = 1000
+    fireEvent.scroll(main)
+    expect(main.scrollHeight).toBe(2000)
+
+    fireEvent.wheel(main, { deltaY: 600 })
+    main.scrollTop = 1600 // The folded footer's bottom; restoration adds another 180 px.
+    fireEvent.scroll(main)
+    expect(main.scrollHeight).toBe(2180)
+    act(() => {
+      for (const callback of resizeCallbacks) callback([], {} as ResizeObserver)
+    })
+    expect(main.scrollTop).toBe(1600)
   })
 
   it('reports tail for Jump to latest', async () => {
