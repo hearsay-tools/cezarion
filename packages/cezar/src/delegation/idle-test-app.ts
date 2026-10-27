@@ -34,11 +34,12 @@ function readApp(root: string) {
   const descriptor = join(qa, 'test-env.json');
   if (!existsSync(database) || !samePath(realpathSync(qa), qa) || !samePath(realpathSync(database), database) || !samePath(realpathSync(descriptor), descriptor)) return undefined;
   const app = JSON.parse(readFileSync(descriptor, 'utf8'));
-  const pid = app?.app?.pid; const start = app?.app?.start;
-  if (app?.startedByThisRepo === true && app?.status === 'stopped' && pid === undefined && start === undefined) {
+  if (app?.startedByThisRepo !== true) return undefined;
+  const pid = app.app?.pid; const start = app.app?.start;
+  if (app.status === 'stopped' && pid === undefined && start === undefined) {
     return { app, pid: null, start: null, database, descriptor };
   }
-  if (app?.startedByThisRepo !== true || !Number.isSafeInteger(pid) || pid <= 1 || (start !== undefined && typeof start !== 'string')) return undefined;
+  if (!Number.isSafeInteger(pid) || pid <= 1 || (start !== undefined && typeof start !== 'string')) return undefined;
   return { app, pid: pid as number, start: typeof start === 'string' ? start : null, database, descriptor };
 }
 
