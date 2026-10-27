@@ -3,7 +3,47 @@
 Task: hearsay-tools/cezarion#1899. Parent approved preparation of the shared
 fix; merge stays on hold for a user decision about the behavior correction.
 
-## Cause and scope
+## Final policy and acceptance
+
+The candidate separates cleanup from attribution. Confirmed exit retains the
+native failure. Positive live evidence permits successful automatic teardown.
+Unknown evidence still triggers bounded TERM/KILL, but nonzero/signal exit fails
+unless explicit end/interrupt intent takes precedence before native exit.
+
+**Tradeoff:** delayed or unavailable probes can make an otherwise live automatic
+cleanup report failure, including under ordinary host load. Windows has no live
+state fallback. Explicit teardown remains successful. A positive live sample is
+not causal proof against an external signal arriving later. This policy is
+prepared and verified for review; product merge remains on hold for the user.
+
+The asynchronous ps fallback runs inside the final 50 ms of existing grace; it
+adds no scheduled cleanup delay. Native Linux execution, mocked Darwin probes,
+and an independent real-ps integration test are recorded below. There is no real
+macOS or Windows execution claim. Old signalSession safety semantics remain.
+
+Latest acceptance source: `80cb3dcd3e9ccc5dd0daa5066b99a3d99b75ecc8`.
+Exactly 20 native Pi self-exit attempts rejected code 143, each at sampled load
+41.21. Both original explicit interrupt/end 143 guards passed. Failures: zero;
+below-threshold attempts: zero; retries: zero. Nine positive-evidence and
+unknown/unavailable/timeout live-EOF guards also passed in the same load window.
+Their positive-live cases assert success GIVEN evidence; they do not promise
+real ps availability inside 50 ms.
+
+Initial host load was 11.7876. The authorized supervisor started 23 loops, one
+on each CPU except acceptance CPU 2. Actual load reached 41.2109 after 100.041 s.
+Acceptance took 13.421 s. Evidence guards ran next; all owned loops were terminated
+and reaped by 123.434 s total. Each PID/start identity and post-cleanup absence is
+recorded. Independent post-check found all 23 PIDs absent. No source changed during
+acceptance, and no test attempt was dropped or restarted.
+
+Final checks: server typecheck, citations, committed clone and complexity gates
+pass. Local quality measured 102/102 functions and passed all 217 selected tests;
+only the three documented inherited findings remain. Squeal revision 36 reports
+current passing shutdown parity. The historical 46-case proof below preceded the
+shared Pi cleanup extraction; the final 217-test quality run includes those cases
+and the exact during-probe intent correction.
+
+## Historical initial diagnosis and scope
 
 The original failure is run 40278727734, attempt 1, job 121427131876.
 The self-exit test took 157 ms, not its 5,000 ms timeout. Its promise resolved
@@ -12,7 +52,7 @@ Pi and Claude allow 50 ms between stdout EOF and native exit notification.
 If notification arrives later, they mark a cleanup signal as Cezar teardown.
 Codex can make the same attribution in its EOF watchdog.
 
-The fix checks positive exit evidence before those cleanup signals. A recorded
+The first implementation checked positive exit evidence before those cleanup signals. A recorded
 exit, an absent PID (`ESRCH`), or Linux/Darwin zombie/exit-in-progress state prevents
 false teardown attribution. Missing PID data, denied probes, unreadable proc
 files and malformed state preserve bounded cleanup. The existing `signalSession`
@@ -20,7 +60,7 @@ safety decision is unchanged. Darwin also reads a successful single `ps` STAT va
 state. Other platforms confirm recorded exit or an absent PID only.
 It does not replace waiting for Node to report the actual exit status.
 
-| Case | Before | After |
+| Case | Before initial fix | Initial fixed behavior |
 | --- | --- | --- |
 | Pi self-exit 143; exit notification delayed beyond EOF grace | Resolves with teardown note | Rejects code 143 |
 | Outside SIGKILL; notification delayed beyond cleanup | Claude/Codex/Pi can succeed | Each reports failure |
@@ -28,7 +68,7 @@ It does not replace waiting for Node to report the actual exit status.
 | Intentional interrupt/end with signal exit | Successful teardown | Same |
 | Live child closes output and ignores TERM | Bounded KILL cleanup | Same, including unreadable process evidence |
 
-No existing regression assertion was removed or relaxed. The original self-exit,
+The initial regression assertions were retained. Later sections record the explicitly approved evidence-policy and fixture changes. The original self-exit,
 interrupt and end cases remain. S33 extends native `HARNESS_ADAPTERS` coverage to
 every `RUNNER_IDS` backend with the existing S22 failure contract. Pi/Claude/Codex
 keep its stronger rejection, SIGKILL diagnostic and no-success-event assertions.
