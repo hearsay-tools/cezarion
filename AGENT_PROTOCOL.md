@@ -1590,10 +1590,14 @@ abandonment and no new execution revision, although an unrecorded unreadable
 process still runs inside the worktree. Real mutation keepers make owned cleanup
 refuse promptly and withdraw its queued claim, preserving resources until an
 explicit retry after unlock; that retry completes while the unreadable process
-runs, and latest settled collection then authorizes Finish. Mixed probes with
-absent or incomplete ledgers recheck each fresh poll: destroy waits while a
-readable holder runs, then completes even though an unreadable process remains,
-never signalling it. Linux-only OS coverage exempts no runner. Checkpoints an
+runs, and latest settled collection then authorizes Finish. In explicit destroy,
+mixed probes with absent or incomplete ledgers identify a readable holder of the
+owned worktree, terminate it, and verify its recorded incarnation is gone before
+removing resources. An unrelated unreadable process remains alive and is not
+signalled. If authentication or the mutation lock blocks preflight, termination is
+unverified and the durable incomplete result retains process, worktree and branch
+until retry. Ordinary retention, history deletion and reuse keep their holder
+checks. Linux-only OS coverage exempts no runner. Checkpoints an
 older cezar wrote with `abandoned` still parse and still refuse a new generation.
 
 **R48–R52** (hearsay-tools/cezarion#779), in `core/harness-parity.test.ts`, drive every
