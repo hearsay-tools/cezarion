@@ -1016,7 +1016,11 @@ describe('Claude output loop side-effect order (hearsay-tools/cezarion#1954)', (
       stdout.end();
       stderr.end();
     };
-    return { child, finish, stdinUuids: () => written.map(line => (JSON.parse(line) as { uuid: string }).uuid) };
+    const stdinUuids = (): string[] => {
+      const frames = written.map(line => JSON.parse(line) as { uuid: string });
+      return frames.map(frame => frame.uuid);
+    };
+    return { child, finish, stdinUuids };
   }
 
   function start(fake: ReturnType<typeof scripted>) {
