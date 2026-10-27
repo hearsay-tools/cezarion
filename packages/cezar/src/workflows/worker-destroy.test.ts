@@ -747,7 +747,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       const w = await worker();
       await ensureOwnedWorkspace(root, w);
       store.commitWorkerExecutionStart(w.id);
-      store.updateRun(w.id, { status: 'failed' }); store.flush();
+      store.updateRun(w.id, { status: RUN_STATUS.failed }); store.flush();
       const scratch = agentTmpEnv(join(root, '.ai/cezar'), w.id, { ...process.env, CEZ_AGENT_TMPDIR: '1' }).TMPDIR!;
       const marker = join(scratch, 'protected'); writeFileSync(marker, 'keep');
       const holder = await spawnReady(scratch, "process.on('SIGTERM',()=>process.exit(42)); console.log('ready'); setInterval(()=>{},1000)");
