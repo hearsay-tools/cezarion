@@ -94,7 +94,14 @@ Verification runs in eight parallel jobs, and a ninth, `complexity-gate`, gates 
 
 - Three Vitest shards on `ubuntu-24.04` each install dependencies, build the server, and run `npm test -- --shard=N/3 --maxWorkers=4` for N=1..3.
 - The build/package job on `ubuntu-24.04` runs on exactly Node 24.21.0. It runs the issue-citation check, typechecking, Node unit tests, the full application build, packaged CLI E2E tests, and release-package dry-run packing. The packaged tests install the tarball, start the CLI and exercise the SQLite run store on the minimum supported Node version.
-- Four cockpit browser E2E shards on `ubuntu-latest` each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
+- Four cockpit browser E2E shards on `ubicloud-standard-2` (2 vCPU, 8 GB RAM, Ubuntu 24.04 x64) each provision the `agent-browser` provider, build and start their own test environment, and run `npm run test:e2e -- --shard=N/4`. Every shard rejects skipped or failed `TEST_E2E_STATUS` logs.
+
+The Ubicloud trial moves only the four browser CI shards to the lowest x64 tier,
+`ubicloud-standard-2`. The Vitest and coverage trials on that tier hit the existing
+15-minute job and 20-minute coverage limits, so those suites stay on GitHub-hosted
+Ubuntu. Compare browser job times after the switch before changing shard counts
+or worker limits. Other jobs, including nightly verification, keep their existing
+runners. The trial changes no test command, worker count, timeout or required check.
 
 The full Vitest suite runs once across the three LTS shards. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
 
