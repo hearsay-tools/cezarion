@@ -26,6 +26,23 @@ int main(void) {
   result = fchmodat(parent, "link", 0000, AT_SYMLINK_NOFOLLOW);
   printf("symlink_fchmodat=%d errno=%d\n", result, errno);
   if (fstatat(parent, "outside", &after, AT_SYMLINK_NOFOLLOW) || (after.st_mode & 0777) != 0700) return 1;
+  /* Replace the observed child with a symlink before chmod: only the link may change. */
+  if (renameat(parent, "child", parent, "saved") || symlinkat("outside", parent, "child")) return 1;
+  errno = 0;
+  result = fchmodat(parent, "child", 0000, AT_SYMLINK_NOFOLLOW);
+  printf("replaced_symlink_fchmodat=%d errno=%d\n", result, errno);
+  if (fstatat(parent, "outside", &after, AT_SYMLINK_NOFOLLOW) || (after.st_mode & 0777) != 0700) return 1;
+  if (openat(parent, "child", O_RDONLY | O_DIRECTORY | O_NOFOLLOW) >= 0) return 1;
+  unlinkat(parent, "child", 0);
+  if (renameat(parent, "saved", parent, "child")) return 1;
+  /* A replaced root is detected before its name is used for permission repair. */
+  if (mkdirat(parent, "owned-root", 0700) || fstatat(parent, "owned-root", &before, AT_SYMLINK_NOFOLLOW)) return 1;
+  if (renameat(parent, "owned-root", parent, "old-root") || mkdirat(parent, "owned-root", 0000)) return 1;
+  if (fstatat(parent, "owned-root", &after, AT_SYMLINK_NOFOLLOW)) return 1;
+  int root_matches = before.st_dev == after.st_dev && before.st_ino == after.st_ino;
+  printf("replaced_root_matches=%d\n", root_matches);
+  if (root_matches || (after.st_mode & 0777) != 0) return 1;
+  unlinkat(parent, "owned-root", AT_REMOVEDIR); unlinkat(parent, "old-root", AT_REMOVEDIR);
   unlinkat(parent, "link", 0); unlinkat(parent, "outside", AT_REMOVEDIR);
   unlinkat(parent, "child", AT_REMOVEDIR); close(parent); rmdir(path);
   return 0;
