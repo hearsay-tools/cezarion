@@ -212,20 +212,27 @@ export class PreviewHost implements PreviewHostLike {
     }
     // A server or a URL loads in cezar's own page; the agent's tab is left as it is.
     this.leaveAgentPage(entry);
-    if ('url' in target) {
-      let url: string;
-      try {
-        url = normalizePreviewUrl(target.url);
-      } catch {
-        return;
-      }
-      entry.port = undefined;
-      return this.show(entry, url, false);
+    if ('url' in target) return this.openUrl(entry, target.url);
+    return this.openPort(entry, viewer, target.port);
+  }
+
+  private async openUrl(entry: RunEntry, raw: string): Promise<void> {
+    let url: string;
+    try {
+      url = normalizePreviewUrl(raw);
+    } catch {
+      return;
     }
-    const server = this.registration(entry, target.port);
+    entry.port = undefined;
+    return this.show(entry, url, false);
+  }
+
+  private async openPort(entry: RunEntry, viewer: Viewer, port: number): Promise<void> {
+    const { runId } = entry.ctx;
+    const server = this.registration(entry, port);
     if (!server) {
       entry.port = undefined;
-      return this.show(entry, `http://localhost:${target.port}/`, false);
+      return this.show(entry, `http://localhost:${port}/`, false);
     }
     entry.port = server.port;
     const current = entry.servers.get(server.port);
@@ -234,7 +241,7 @@ export class PreviewHost implements PreviewHostLike {
     // Another task's server would answer the probe: streaming it here would show that task's app.
     if (this.heldByOther(entry, server)) return;
     const answering = await this.deps.probe(server.port).catch(() => false);
-    if (this.entries.get(ctx.runId) !== entry || entry.viewer !== viewer || entry.port !== server.port || entry.servers.get(server.port) !== current) return;
+    if (this.entries.get(runId) !== entry || entry.viewer !== viewer || entry.port !== server.port || entry.servers.get(server.port) !== current) return;
     if (owned(current) && this.stopping.has(current)) return this.report(entry, server.port, current);
     if (answering) {
       entry.servers.set(server.port, 'adopted');
