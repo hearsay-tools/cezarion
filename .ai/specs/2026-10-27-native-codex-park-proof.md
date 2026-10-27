@@ -15,19 +15,24 @@ AssertionError: expected 'running' to be 'waiting' // Object.is equality
 The test observed the native `turn-end` in the event file. That event does not
 order its next status read after the manager commits the park. The existing
 assertion requires the run to park after its native ask receives an answer.
-The fix preserves that guarantee and every existing assertion. It adds a wait
-for committed `waiting` after the existing event observation. It retains the
-15-second predicate bound and 30-second test bound.
+The fix preserves that guarantee and every existing assertion. The existing
+post-answer predicate now requires both native turn-end and committed `waiting`.
+It retains two sequential wait phases, the 15-second predicate bound and the
+30-second test bound. It does not add a third wait or increase either bound.
 
 The parent approved this bounded plan in request
 `65c70ccd-5036-4589-9155-5ccca3d0252c`, reply
-`9921a66a-a064-4662-b273-c0a6393cf52d`. Product behavior, shared mocks, runner
+`9921a66a-a064-4662-b273-c0a6393cf52d`. Review comment
+[4387688997](https://github.com/hearsay-tools/cezarion/pull/1961#discussion_r4387688997)
+identified the extra sequential wait in the first version. Parent instruction
+`83440cac-de49-4a5b-9dc5-46712f43cc21` approved the combined predicate while
+retaining the original bounds. Product behavior, shared mocks, runner
 helpers, parity cells, configuration and baselines stay unchanged. This is a
 test observation fix, so it adds no new runner behavior to cover across runners.
 
 ## Controlled scheduling
 
-The proof used an ignored scratch copy under `.ai/qa/1641-proof`, outside the
+The proof used an ignored scratch copy under `.ai/qa/1641-review-proof`, outside the
 ordinary test include paths. It loaded the repository's server Vitest setup.
 Relative imports and the fixture directory were adjusted for that location.
 Contract imports resolved to the same contract source files. The native Codex
@@ -63,8 +68,11 @@ await waitFor(() => {
 });
 ```
 
-The only difference between the old and fixed scratch tests was the added
-status wait. The gate does not inspect that wait or its assertion. It controls
+The fixed scratch predicate replaces `return seen` with
+`return seen && store.getRun(record.id)?.status === RUN_STATUS.waiting`.
+The event observer releases the gate before and independently of that status
+condition. This predicate is the only difference between old and fixed scratch
+tests. The gate does not inspect the final assertion. It controls
 the disputed event/write order. It uses no load loop, fixed delay, retry or
 synthetic normalized runner event. This is controlled ordering evidence, not a
 claim that an unchanged test failed again under natural host load.
@@ -77,8 +85,8 @@ by the name filter. Captured output on 2026-10-27:
 | Case | Selected tests | Result and throwing frame |
 | --- | --- | --- |
 | Old test, release on `setImmediate` | 1/1 failed | `AssertionError: expected 'running' to be 'waiting' // Object.is equality`, scratch line 3554:45, final one-shot assertion |
-| Fixed test, identical release | 1/1 passed | Real park ran; committed status satisfied the new predicate and the unchanged final assertion |
-| Fixed test, never release | 1/1 failed as required | `Error: condition not met in time`, scratch line 3554:5, new status wait; setup and teardown completed |
+| Fixed test, identical release | 1/1 passed | Real park ran; committed status satisfied the combined predicate and the unchanged final assertion |
+| Fixed test, never release | 1/1 failed as required | `Error: condition not met in time`, scratch line 3549:5, combined post-answer wait; setup and teardown completed |
 
 These are three separate executions. The never-release case retained the
 existing 15-second bound. Its failure shows that observing native turn-end
@@ -87,19 +95,20 @@ alone cannot make the fixed test pass.
 Commands from the repository root:
 
 ```bash
-npm test -- --config .ai/qa/1641-proof/vitest.config.ts \
+npm test -- --config .ai/qa/1641-review-proof/vitest.config.ts \
   -t 'persists the ask, parks immediately, then routes the answer to the pending RPC'
-PROOF_NEVER_RELEASE=1 npm test -- --config .ai/qa/1641-proof/vitest.config.ts \
+PROOF_NEVER_RELEASE=1 npm test -- --config .ai/qa/1641-review-proof/vitest.config.ts \
   -t 'persists the ask, parks immediately, then routes the answer to the pending RPC'
 ```
 
-The published `cezar-1641-proof.tar.gz` snapshot contains `setup.py` to rebuild
+The published `cezar-1641-review-proof.tar.gz` snapshot contains `setup.py` to rebuild
 the old scratch copy from `proof_base`, `replay.py` to run the three cases in
-order, both scratch snapshots, the config, all three runner logs, and the
-original job log. Extract it to `.ai/qa/1641-proof` in a checkout containing
+order, both scratch snapshots, the config and all three runner logs. The earlier published
+archive `57d0716f-832f-44e7-b0e4-fc5cbd1129d8` retains the original job log
+and the superseded third-wait proof. Extract it to `.ai/qa/1641-review-proof` in a checkout containing
 `proof_base`, with the repository dependencies installed, then run
-`python3 .ai/qa/1641-proof/replay.py`. Inspect the failure frames as well as
-the exit codes. Artifact ID: `57d0716f-832f-44e7-b0e4-fc5cbd1129d8`.
+`python3 .ai/qa/1641-review-proof/replay.py`. Inspect the failure frames as well as
+the exit codes. Artifact ID: `b635dd17-59ca-46aa-b806-6528aeae11b5`.
 
 Initial scratch setup failures from import resolution and fixture relocation
 were corrected before these three measured runs. They are not counted as red
