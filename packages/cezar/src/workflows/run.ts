@@ -1,3 +1,5 @@
+import * as continuation from './continuation-admission.ts';
+import type { ContinueRunOptions } from './continuation-admission.ts';
 import { defined } from '../core/defined.ts';
 import { uiAskQuestions } from '../core/ask.ts';
 import { autosaveCleanupBlocker, retainAutosaveCleanup, clearAutosaveCleanup } from '../autosave-cleanup.ts';
@@ -472,26 +474,6 @@ const REPOSITORY_ROOT_LOCK_DISABLED_NOTE =
   'repository-root lock disabled by CEZ_DISABLE_REPO_LOCK=1 (shared checkout is unsafe)';
 
 export type DelegationExecutionSettings = { cwd: string; runner: RunnerId; model?: string | undefined; modelIdentity?: string | undefined; effort?: string | undefined; agentProfile: string; accountBinding?: WorkerAccountBinding | undefined; systemPrompt?: string | undefined; allowedTools?: string[] | undefined; bashAllowlist?: string[] | undefined };
-
-/** What a Continue may carry (`RunManager.continueRun`). */
-type ContinueRunOptions = {
-  text?: string | undefined;
-  /** Internal: a scheduler-owned continuation that only delivers resolved waits. It may open
-   *  beside a pending question, which stays answerable (hearsay-tools/cezarion#1233). */
-  waitWake?: true;
-  images?: PastedContent[] | undefined;
-  runner?: RunnerId | undefined;
-  /** Internal configured fallback for an untouched workflow, resolved by the route. */
-  originalRunner?: RunnerId;
-  model?: string | undefined;
-  /** Reasoning-effort pin (#45). Omitted keeps the run's pin; empty string clears it. */
-  effort?: string | undefined;
-  /** Agent account for the reopened session (spec 2026-07-29-agent-profiles). Omitted = the
-   *  account the run is already on. */
-  agentProfile?: string | undefined;
-  /** #505: the parent reply this continuation delivers as the answer to a routed question. */
-  answerInputId?: string;
-};
 
 /** What a turn end said, as the entry that settles it reads it (hearsay-tools/cezarion#1525). The
  *  turn end reads it from the turn; a later entry from what `parkAfterAck` kept (`boundaryTurn`). */
@@ -6756,234 +6738,92 @@ export class RunManager {
     runId: string,
     opts: ContinueRunOptions,
     deferForCapacity: boolean,
-    conversation: Parameters<RunStore['commitWorkerContinuation']>[3] | undefined,
+    conversation: continuation.ContinuationConversation,
   ): { ok: boolean; error?: string } {
-    if (agentModelsLocked(this.repoRoot) && (opts.model?.trim() || opts.effort?.trim())) {
-      return { ok: false, error: AGENT_MODELS_LOCKED_ERROR };
+    const admitted = new continuation.ContinuationChecks(runId, this.repoRoot, opts, deferForCapacity, conversation, {
+      active: () => this.isActive(runId),
+      autosaveBlocker: () => this.autosaveCleanupBlocker(runId),
+      reclaiming: () => this.reclaiming.has(runId),
+      run: () => this.store.getRun(runId),
+      historyDeletionPending: () => this.historyDeletionPending(runId),
+      parentInReview: parentId => this.store.getRun(parentId)?.status === 'review',
+      answersFallback: () => this.answersFallenBackAsk(runId, opts, deferForCapacity),
+      identity: (run, session) => this.workerStep(runId, this.continuationDefStep(run, session)?.id),
+      beforeFinalStep: run => this.waitingBeforeFinalWorkflowStep(run),
+      waitingStepIndex: run => this.waitingWorkflowStepIndex(run),
+      pendingFallback: () => this.pendingWorkerFallback(runId),
+      pendingAsk: () => this.hasPendingHumanAsk(runId),
+      rootFinishing: run => this.executionBlockedByRootFinish(run),
+      routedAsk: () => this.routedAsk(runId),
+      ciStepIndex: run => this.ciWorkflowResumeStepIndex(run),
+      untouched: isUntouchedCancelledRun,
+      sessionId: step => this.resumableSessionId(runId, step),
+    }, ROUTED_QUESTION_REFUSAL).prepare();
+    if (!admitted.ok) return admitted;
+    return this.acceptContinuation(runId, opts, deferForCapacity, conversation, admitted);
+  }
+
+  /** Overrides still persist before the execution checkpoint, even if that checkpoint refuses. */
+  private acceptContinuation(runId: string, opts: ContinueRunOptions, deferForCapacity: boolean,
+    conversation: continuation.ContinuationConversation, admitted: continuation.ContinuationAdmission): { ok: boolean; error?: string } {
+    if (admitted.identity === undefined && continuation.hasOverrides(opts)) {
+      const refusal = continuation.modelRefusal(opts, admitted.targetRunner);
+      if (refusal) return refusal;
+      this.store.updateRun(runId, continuation.overridePatch(admitted.run, opts, admitted.targetRunner, admitted.originalRunner));
     }
-    if (this.isActive(runId)) return { ok: false, error: 'run is still active' };
-    const autosaveBlocker = this.autosaveCleanupBlocker(runId);
-    if (autosaveBlocker) return { ok: false, error: autosaveBlocker };
-    if (this.reclaiming.has(runId)) return { ok: false, error: 'its worktree or branch is being cleaned up — retry in a moment' };
-    const run = this.store.getRun(runId);
-    if (!run) return { ok: false, error: 'not found' };
-    if (conversation && (!deferForCapacity || run.delegation?.role !== 'worker' || run.delegation.parentRunId !== conversation.rootId ||
-      !['done', 'review', 'failed'].includes(run.status))) return { ok: false, error: 'Only a settled owned worker can be resumed by its parent message' };
-    if (run.stopping) return { ok: false, error: 'run is still stopping' };
-    if (this.historyDeletionPending(runId)) return { ok: false, error: 'Parent history deletion is pending; retry deletion' };
-    if (run.delegation?.role === 'worker' && this.store.getRun(run.delegation.parentRunId)?.status === 'review' && !opts.answerInputId && !this.answersFallenBackAsk(runId, opts, deferForCapacity)) {
-      return { ok: false, error: 'Continue the reviewing parent before continuing its worker' };
-    }
-    // Held against the identity of the step this continuation extends (#452), which for a mixed
-    // chain is not the run-level (first-step) one; `runContinuation` resolves the same step.
-    let resumeIdentity: WorkerStepIdentity | undefined;
+    if (admitted.untouched) return this.acceptUntouchedContinuation(runId, opts, admitted.supersedes);
+    return this.acceptResumedContinuation(runId, opts, deferForCapacity, conversation, admitted);
+  }
+
+  private acceptUntouchedContinuation(runId: string, opts: ContinueRunOptions, supersedes: boolean): { ok: boolean; error?: string } {
+    const current = this.store.getRun(runId)!;
+    let job: { workflow: WorkflowDef; input: StartRunInput };
     try {
-      const resumeSession = [...run.steps].reverse().find((s) => s.sessionId)?.sessionId;
-      resumeIdentity = this.workerStep(runId, this.continuationDefStep(run, resumeSession)?.id);
-      if (resumeIdentity && ((opts.runner !== undefined && opts.runner !== resumeIdentity.account.provider) ||
-          (opts.agentProfile !== undefined && opts.agentProfile !== resumeIdentity.account.profileId) ||
-          (opts.model !== undefined && opts.model !== resumeIdentity.model) ||
-          (opts.effort !== undefined && opts.effort !== resumeIdentity.effort))) {
-        return { ok: false, error: 'Accepted worker execution identity cannot change' };
-      }
-    } catch (error) { if (error instanceof WorkerIdentityError) return { ok: false, error: error.message }; throw error; }
-    if (run.delegation?.role === 'root' && this.isActive(runId)) return { ok: false, error: 'run is still active' };
-    if (run.status === 'waiting' && !isUsageLimitHold(run) && !hasRegisteredRunProcess(runId) && (run.delegation === undefined || run.delegation.role === 'root') && !this.isActive(runId) &&
-      this.waitingBeforeFinalWorkflowStep(run) && (!run.workflowDef || this.waitingWorkflowStepIndex(run) < 0)) {
-      return { ok: false, error: 'cannot continue a waiting run before its final workflow step' };
-    }
-    // A Continue supersedes Cezar's fallback question on a worker (hearsay-tools/cezarion#1301), so
-    // the checks below treat it as gone; it closes only once the Continue is admitted.
-    const supersedes = !opts.answerInputId && this.pendingWorkerFallback(runId);
-    const pendingHumanAsk = run.delegation?.role !== 'invalid' && this.hasPendingHumanAsk(runId) && !supersedes;
-    if (run.status === 'waiting' && hasRegisteredRunProcess(runId)) {
-      return { ok: false, error: 'cannot continue a waiting run' };
-    }
-    if (run.delegation?.role === 'invalid' || (run.delegation?.role === 'worker' && run.delegation.destroy)) return { ok: false, error: 'worker cannot continue' };
-    if (this.executionBlockedByRootFinish(run)) return { ok: false, error: 'parent finish is pending' };
-    if (pendingHumanAsk && !deferForCapacity && !opts.answerInputId && this.routedAsk(runId)) return { ok: false, error: ROUTED_QUESTION_REFUSAL };
-    const answers = deferForCapacity ? [run.continuationMessage, ...(run.queuedMessages ?? [])] : [opts];
-    if (pendingHumanAsk && !opts.answerInputId && !(opts.waitWake && deferForCapacity) && (conversation || (deferForCapacity && run.continuationMessage?.origin !== 'human') ||
-      !answers.some(answer => answer?.text?.trim() || answer?.images?.length))) {
-      return { ok: false, error: 'pending human question requires an explicit answer' };
-    }
-    // A disconnected CI monitor has durable intent but no live session to receive human input.
-    const disconnectedCiWait = !!run.waits?.length && !this.isActive(runId) && !hasRegisteredRunProcess(runId);
-    // `review` is continuable too — that's the "Send back" path (spec 009).
-    // A run on a usage-limit hold continues as the failed run it was (hearsay-tools/cezarion#1236).
-    if (!disconnectedCiWait && !['done', 'failed', 'cancelled', 'review'].includes(run.status) && !isUsageLimitHold(run) && !(pendingHumanAsk && run.status === 'waiting') &&
-      !(run.status === 'waiting' && !this.isActive(runId) && ((!hasRegisteredRunProcess(runId) &&
-        (run.delegation === undefined || run.delegation.role === 'root')) ||
-        (deferForCapacity && run.delegation?.role === 'worker' && (!!run.waits?.length || this.ciWorkflowResumeStepIndex(run) >= 0))))) {
-      return { ok: false, error: `cannot continue a ${run.status} run` };
-    }
-    const sessionStep = [...run.steps].reverse().find((s) => s.sessionId);
-    // Absence of a session alone is insufficient: command/check steps can already
-    // have changed the repository. Only the untouched original workflow may restart.
-    const untouched = isUntouchedCancelledRun(run);
-    if (!sessionStep?.sessionId && !untouched) return { ok: false, error: 'no agent session to resume' };
-    // An accepted worker continues under the identity of the step it extends, whatever the
-    // run-level (first-step) runner says.
-    const originalRunner = resumeIdentity?.account.provider ?? run.runner ?? (untouched ? opts.originalRunner : undefined) ?? 'claude';
-    const targetRunner = opts.runner ?? originalRunner;
-    // Session ids are provider-owned opaque values. New records carry explicit
-    // affinity; for legacy records, the run's current runner is the conservative
-    // owner until a continuation emits a new, attributed session id (#562).
-    const sessionBackend = sessionStep?.backend ?? run.runner ?? 'claude';
-    // A session id only resolves inside the config dir that created it (spec
-    // 2026-07-29-agent-profiles), so switching ACCOUNT ends the session exactly like switching
-    // backend does: `claude --resume <id>` under another login finds nothing and would silently
-    // open a fresh conversation while the thread claimed it had resumed. A step that recorded no
-    // account predates the feature and therefore ran under the discovered one.
-    const sessionAccount = sessionStep?.profileId ?? DEFAULT_AGENT_ACCOUNT_ID;
-    // A mixed-chain worker's run-level account is its FIRST step's; the resumed step's own pinned
-    // account is what decides whether the session can be reattached (#452).
-    const accountSwitched = (opts.agentProfile ?? resumeIdentity?.account.profileId ?? run.agentProfile ?? sessionAccount) !== sessionAccount;
-    const resume = sessionBackend === targetRunner && !accountSwitched;
-    const resumeSessionId = resume ? this.resumableSessionId(runId, sessionStep) : undefined;
-    if (resume && sessionStep?.sessionTransport === 'cursor-print' && !resumeSessionId) {
-      return { ok: false, error: 'Cursor print session identity lacks a matching recorded session event' };
-    }
+      job = current.delegation?.role === 'worker'
+        // A projection of the job the line will start, not a status write.
+        // ast-grep-ignore: run-status-write-outside-transition
+        ? this.ownedJob({ ...current, status: 'queued' })
+        : { workflow: current.workflowDef!, input: {
+          task: current.task, runner: current.runner, model: current.model, effort: current.effort,
+          agentProfile: current.agentProfile, systemPrompt: current.systemPrompt,
+          autonomous: current.autonomous, worktree: current.worktree,
+        } };
+      this.beginWorkerExecution(runId, false);
+    } catch (error) { return { ok: false, error: admissionError(error, 'original execution checkpoint unavailable') }; }
+    if (supersedes) this.supersedeWorkerFallback(runId);
+    const content = continuation.content(opts);
+    const message = content.length ? this.toQueuedMessage(runId, content) : undefined;
+    this.clearAutoResume(runId);
+    this.store.setArchived(runId, false);
+    this.move(runId, 'continue-line', { stopping: undefined, error: undefined, finishedAt: undefined,
+      currentStepId: undefined, ...(message ? { queuedMessages: [...(current.queuedMessages ?? []), message] } : {}) });
+    this.store.flush();
+    this.pendingJobs.set(runId, job);
+    this.queue.push(runId);
+    void this.pump();
+    return { ok: true };
+  }
 
-    // Follow-up runner/model/account override (#401, spec 2026-07-29-agent-profiles): the composer
-    // lets the user pick which backend, model and login handle this continuation — the same flat
-    // pill the /new composer offers. Omitted → the run's current backend/model/account is kept
-    // (backward compat). A provided choice is persisted BEFORE scheduling, so it becomes the
-    // run's current backend — `runContinuation` reads it off the record, later continuations
-    // default to it, and the header reflects the active engine. An empty model ('') clears the
-    // pin, letting the runner pick the model (auto).
-    // An accepted worker's identity is frozen, and the check above already required any override
-    // to equal the resumed step's entry, so there is nothing to persist — and writing a step-level
-    // runner onto a mixed chain's record would break the run-level identity match.
-    if (resumeIdentity === undefined && (
-      opts.runner !== undefined ||
-      opts.model !== undefined ||
-      opts.effort !== undefined ||
-      opts.agentProfile !== undefined
-    )) {
-      // Guard the pairing before persisting anything: the model override applies to the runner
-      // this continuation will actually use (`opts.runner ?? record.runner ?? 'claude'` — the
-      // same resolution `runContinuation` reads off the record). A model that is recognizably
-      // another runner's preset would corrupt the run; free-form/custom ids pass untouched.
-      if (opts.model && modelConflictsWithRunner(opts.model, targetRunner)) {
-        return { ok: false, error: `model '${opts.model}' is not a ${targetRunner} model` };
-      }
-      // A runner switch that carries NO explicit model must not leave the previous backend's pin
-      // on the record: the guard above only sees `opts.model`, so without this an inherited
-      // `opus` would survive a switch to codex and `runContinuation` would hand it to the codex
-      // runner. Clearing (not rejecting) is right — the pin belonged to the old backend and is
-      // meaningless for the new one, which is exactly what the composer already displays (auto).
-      // Only a recognizably foreign preset is cleared; a free-form/custom id is left alone.
-      const inheritedPinIsForeign =
-        opts.model === undefined &&
-        run.model !== undefined &&
-        modelConflictsWithRunner(run.model, targetRunner);
-      // An account belongs to ONE agent, so a runner switch that names no account must not leave
-      // the previous backend's login on the record. It is inert immediately (resolution applies
-      // the run's account only to steps on the run's own runner) and wrong later, when a further
-      // continuation switches back and inherits a login the user picked for a different task.
-      const inheritedAccountIsForeign =
-        opts.agentProfile === undefined &&
-        run.agentProfile !== undefined &&
-        targetRunner !== originalRunner;
-      this.store.updateRun(runId, {
-        ...(opts.runner !== undefined ? { runner: opts.runner } : {}),
-        ...(opts.model !== undefined
-          ? { model: opts.model === '' ? undefined : opts.model }
-          : inheritedPinIsForeign
-            ? { model: undefined }
-            : {}),
-        // Persisted BEFORE scheduling, like the runner/model pair: `runContinuation` resolves the
-        // account off the record, and every later continuation then defaults to it.
-        ...(opts.agentProfile !== undefined
-          ? { agentProfile: opts.agentProfile }
-          : inheritedAccountIsForeign
-            ? { agentProfile: undefined }
-            : {}),
-        // Effort is shared vocabulary, not per-backend, so a runner switch keeps the pin.
-        // Empty string clears it the same way `model: ''` clears auto.
-        ...(opts.effort !== undefined ? { effort: opts.effort === '' ? undefined : opts.effort } : {}),
-      });
-    }
-
-    if (untouched) {
-      const current = this.store.getRun(runId)!;
-      let job: { workflow: WorkflowDef; input: StartRunInput };
-      try {
-        job = current.delegation?.role === 'worker'
-          // A projection of the job the line will start, not a status write.
-          // ast-grep-ignore: run-status-write-outside-transition
-          ? this.ownedJob({ ...current, status: 'queued' })
-          : { workflow: current.workflowDef!, input: {
-            task: current.task, runner: current.runner, model: current.model, effort: current.effort,
-            agentProfile: current.agentProfile, systemPrompt: current.systemPrompt,
-            autonomous: current.autonomous, worktree: current.worktree,
-          } };
-        this.beginWorkerExecution(runId, false);
-      } catch (error) { return { ok: false, error: admissionError(error, 'original execution checkpoint unavailable') }; }
-      if (supersedes) this.supersedeWorkerFallback(runId);
-      const content: PastedContent[] = [
-        ...(opts.text?.trim() ? [{ type: 'text' as const, text: opts.text.trim() }] : []), ...(opts.images ?? []),
-      ];
-      const message = content.length ? this.toQueuedMessage(runId, content) : undefined;
-      this.clearAutoResume(runId);
-      this.store.setArchived(runId, false);
-      this.move(runId, 'continue-line', { stopping: undefined, error: undefined, finishedAt: undefined,
-        currentStepId: undefined, ...(message ? { queuedMessages: [...(current.queuedMessages ?? []), message] } : {}) });
-      this.store.flush();
-      this.pendingJobs.set(runId, job);
-      this.queue.push(runId);
-      void this.pump();
-      return { ok: true };
-    }
-
-    // A human Continue of a run held for its usage-limit resume has no session to steer, so it
-    // joins the line as a wake instead of starting at once: another run's known deadline on the
-    // same account still holds it (hearsay-tools/cezarion#1236). It stays the human's own
-    // continuation in every other way. `fireAutoResume` always defers, so this is never the resume.
+  private acceptResumedContinuation(runId: string, opts: ContinueRunOptions, deferForCapacity: boolean,
+    conversation: continuation.ContinuationConversation, admitted: continuation.ContinuationAdmission): { ok: boolean; error?: string } {
+    const { run, supersedes } = admitted;
+    // Usage-limit holds join the line even for a human Continue, behind known account deadlines.
     const toLine = deferForCapacity || isUsageLimitHold(run);
-    // A continuation bound for the line reserves its worker execution unadmitted, so the pump can
-    // admit it when it leaves; an admitted one with no session is refused by `canLeaveLine`.
     try { this.beginWorkerExecution(runId, !toLine); }
     catch (error) { return { ok: false, error: admissionError(error, 'worker execution checkpoint unavailable') }; }
-    // Everything that could refuse this continuation has now passed, so a pending usage-limit
-    // resume is superseded either way: this IS that resume (it re-stamps its own counter), or a
-    // human got there first — and then the counter starts over, because the cap only exists to
-    // bound UNATTENDED resumes.
     this.clearAutoResume(runId);
-    // Only a human Continue is immediate; it ends a delivery backoff now, and restarts the
-    // automatic-wake budget and answers every human wait with the answer itself, below.
     if (!deferForCapacity) this.clearWakeBackoff(runId);
-
-    const previousStep = [...run.steps].reverse().find(step => step.status !== 'pending');
-    const failure = previousStep?.status === 'failed' && previousStep.error
-      ? { stepId: previousStep.id, error: previousStep.error }
-      : run.error ? { error: run.error } : undefined;
-    let continuationNumber = 1;
-    while (run.steps.some(step => step.id === `continue-${continuationNumber}`)) continuationNumber++;
-    const stepId = `continue-${continuationNumber}`;
-    const continuationStep = { id: stepId, name: 'Continue', kind: 'agent' as const, synthetic: 'continuation' as const };
+    const failure = continuation.previousFailure(run);
+    const continuationStep = continuation.nextStep(run);
+    const stepId = continuationStep.id;
     if (run.delegation?.role !== 'worker') this.store.addStep(runId, continuationStep);
     const recovered = deferForCapacity && !conversation && !opts.answerInputId ? run.continuationMessage : undefined;
-    const message = recovered ?? this.toQueuedMessage(runId, [
-      ...(opts.text?.trim() ? [{ type: 'text' as const, text: opts.text.trim() }] : []),
-      ...(opts.images ?? []),
-    ]);
-    const lifecycleRestart = message.text === RESTART_CONTINUATION_PROMPT
-      && (recovered ? recovered.origin === 'lifecycle' : deferForCapacity && !conversation && !opts.answerInputId);
-    const prompt = lifecycleRestart ? 'Continue.' : message.text || 'Continue.';
-    // Generated restart text becomes structured evidence. Human text remains verbatim,
-    // even when it happens to equal the old lifecycle fallback.
-    const resumeContext = lifecycleRestart ? { ...recovered?.resumeContext, restarted: true as const }
-      : recovered?.resumeContext ?? (failure ? { failure } : undefined);
-    // Accepting a continuation is a crash boundary: both its recoverable status
-    // and the original prompt/URLs must reach disk before the first startup await.
+    const message = recovered ?? this.toQueuedMessage(runId, continuation.content(opts));
+    const { prompt, resumeContext } = continuation.opening(message, recovered, deferForCapacity, conversation, opts,
+      RESTART_CONTINUATION_PROMPT, failure);
+    // The recoverable status and original input must commit before startup can await anything.
     const acceptedPatch = {
-      continuationMessage: { ...message, id: stepId, text: prompt,
-        ...(resumeContext ? { resumeContext } : {}),
-        ...(conversation ? { agentInputId: conversation.input.id } : opts.answerInputId ? { agentInputId: opts.answerInputId } : {}),
-        // A parent's answer (#505) answers the ask exactly like a human's.
-        origin: recovered ? recovered.origin : deferForCapacity && !opts.answerInputId ? 'lifecycle' as const : 'human' as const },
+      continuationMessage: continuation.acceptedMessage(message, stepId, prompt, resumeContext, recovered, conversation, opts, deferForCapacity),
       status: transition(toLine ? 'continue-line' : 'continue-now', () => this.store.getRun(runId)),
       error: undefined,
       finishedAt: undefined,
@@ -6992,53 +6832,45 @@ export class RunManager {
       archived: false,
       archivedAt: undefined,
     };
+    const refusal = this.checkpointContinuation(runId, run, acceptedPatch, continuationStep, conversation);
+    if (refusal) return refusal;
+    if (supersedes) this.supersedeWorkerFallback(runId);
+    // Resolve waits/restart budgets only with or after the dependent answer (hearsay-tools/cezarion#1805).
+    this.commitContinuation(runId, !deferForCapacity);
+    this.continuationGenerations.set(runId, Symbol());
+    const images = contentBlocksOf(opts.images ?? []).filter(block => block.type === 'image');
+    return this.dispatchAcceptedContinuation(runId, toLine, stepId, admitted.resumeSessionId, admitted.targetRunner, prompt, images);
+  }
+
+  private checkpointContinuation(runId: string, run: RunRecord,
+    acceptedPatch: Parameters<RunStore['commitWorkerContinuation']>[1],
+    continuationStep: Parameters<RunStore['commitWorkerContinuation']>[2],
+    conversation: continuation.ContinuationConversation): continuation.ContinuationRefusal | undefined {
     if (run.delegation?.role === 'worker') {
       try { this.store.commitWorkerContinuation(runId, acceptedPatch, continuationStep, conversation); }
       catch {
-        // No session or async launch exists yet. Release the private execution
-        // reservation through the same finalization/proof machinery.
+        // No session exists yet. Release the private reservation through execution finalization.
         void this.finishWorkerExecution(runId);
         return { ok: false, error: 'worker execution checkpoint unavailable' };
       }
-    }
-    else this.store.updateRun(runId, acceptedPatch);
-    // The continuation is admitted: only now does it supersede Cezar's fallback question.
-    if (supersedes) this.supersedeWorkerFallback(runId);
-    // With the continuation, or after its checkpoint (hearsay-tools/cezarion#1805): a row that
-    // records the wait delivered or the budget restarted also holds the answer.
-    this.commitContinuation(runId, !deferForCapacity);
-    this.continuationGenerations.set(runId, Symbol());
-    // Keep fresh viewable images even if persistence failed; recovery uses saved URLs.
-    const images = contentBlocksOf(opts.images ?? []).filter((block) => block.type === 'image');
+    } else this.store.updateRun(runId, acceptedPatch);
+  }
+
+  private dispatchAcceptedContinuation(runId: string, toLine: boolean, stepId: string,
+    resumeSessionId: string | undefined, targetRunner: RunnerId, prompt: string, images: PastedContent[]): { ok: boolean } {
     if (toLine) {
       this.pendingContinuations.set(runId, {
-        stepId,
-        sessionId: resumeSessionId,
-        backend: targetRunner,
-        prompt,
-        images,
-        lineJoinedAt: Date.now(),
+        stepId, sessionId: resumeSessionId, backend: targetRunner, prompt, images, lineJoinedAt: Date.now(),
       });
       this.queue.push(runId);
-      this.move(runId, 'continue-line', {
-        error: undefined,
-        finishedAt: undefined,
-        currentStepId: undefined,
-      });
-      // Enqueueing must wake the scheduler even if the previous execution's
-      // slot-release sweep has already finished (#364).
+      this.move(runId, 'continue-line', { error: undefined, finishedAt: undefined, currentStepId: undefined });
+      // Enqueueing wakes the scheduler even after the previous execution released its slot.
       void this.pump();
       return { ok: true };
     }
     this.starting.add(runId);
-    void this.runContinuation(
-      runId,
-      stepId,
-      resumeSessionId,
-      targetRunner,
-      prompt,
-      images,
-    ).catch((err: unknown) => this.failCrashedContinuation(runId, err))
+    void this.runContinuation(runId, stepId, resumeSessionId, targetRunner, prompt, images)
+      .catch((err: unknown) => this.failCrashedContinuation(runId, err))
       .finally(() => this.finishWorkerExecution(runId));
     return { ok: true };
   }
