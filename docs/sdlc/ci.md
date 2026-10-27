@@ -104,11 +104,13 @@ runners. The trial changes no test command, worker count, timeout or required ch
 
 The separate typecheck uses Blacksmith's 3,000 monthly x64 2-vCPU equivalent
 minutes. A seven-day sample projects about 2,833 PR/dispatch typecheck jobs per
-30 days. Their GitHub-derived setup and execution estimate is 1,671 minutes,
-plus 79 equivalent minutes for existing release verification. If billing rounds
-each job up to a minute, the planning estimate becomes 2,925 minutes including
-releases. Rounding and other organization usage are unknown; this is an allocation
-estimate, not a guaranteed free bill. See the [allocation report](../benchmarks/ci-runner-allocation-2026-10.md).
+30 days. One hosted Blacksmith typecheck job passed in 54 seconds; at that
+runtime, the projection is about 2,629 equivalent minutes including existing
+release verification. If every job took that long and billing rounded each job
+up to a minute, the estimate would be 2,921 minutes including releases. Typecheck
+itself took 30 seconds on Blacksmith versus 22 seconds on the same-head GitHub
+control, so no execution-speed gain is claimed. Rounding and other organization
+usage are unknown; this is an allocation estimate, not a guaranteed free bill. See the [allocation report](../benchmarks/ci-runner-allocation-2026-10.md).
 
 The full Vitest suite runs once across the three LTS shards. There is no second full-suite floor matrix. The build/package job checks compatibility at the minimum version; it does not claim full Vitest coverage there once current LTS moves on. Its Node setup retains a three-minute step timeout and one retry for stalled downloads (hearsay-tools/cezarion#1214). The LTS sequencer keeps its measured weights, median fallback for new files and complete test inventory. Individual test timeouts remain unchanged.
 

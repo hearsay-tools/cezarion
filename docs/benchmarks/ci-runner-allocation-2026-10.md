@@ -1,6 +1,6 @@
 # Blacksmith allocation calculation
 
-Status: proposed allocation. Hosted timing for the new job is still required.
+Status: smallest-tier typecheck measured successfully. Final CI and review remain merge gates.
 
 ## Sample and method
 
@@ -51,9 +51,8 @@ install, cleanup and typecheck steps averaged 35.34 seconds combined, with a
 For 33 manual-dispatch attempts, the combined mean was 36.09 seconds, with a
 37-second median and 49-second maximum.
 
-These GitHub timings are a sizing baseline. A new Blacksmith job has different
-hardware and setup costs. It needs a hosted measurement before the selection
-is final.
+These GitHub timings are a sizing baseline. The hosted Blacksmith measurement
+below supplies a second estimate; one run does not establish a monthly average.
 
 | Accounting scenario | Selected new job | Existing release verification | Combined equivalent minutes |
 | --- | ---: | ---: | ---: |
@@ -66,6 +65,34 @@ usage. A 31-day month, growth, cold downloads and more retries can exceed that
 amount. Existing release use comes from three jobs on the 8-vCPU tier over
 2026-09-27 through 2026-10-26: 521, 364 and 303 seconds. No `ci-benchmark.yml`
 runs appeared in that 30-day window. Ad hoc experiments consume allowance too.
+
+## Hosted measurement
+
+[Dispatch 40436779269](https://github.com/hearsay-tools/cezarion/actions/runs/40436779269),
+[Typecheck job 121968595424](https://github.com/hearsay-tools/cezarion/actions/runs/40436779269/job/121968595424),
+ran commit `5f6bc9e1d3494fa8e329b9231083bf0aea7e2eeb` on
+`blacksmith-2vcpu-ubuntu-2404`. The job passed from 02:13:48 to 02:14:42 UTC
+on 2026-10-27: 54 seconds. Checkout took 4 seconds, pnpm setup 3 seconds,
+Node/cache setup 5 seconds, dependency installation 3 seconds, and the full
+`npm run typecheck` 30 seconds. Remaining time includes runner setup and cleanup.
+
+The same-head GitHub control's typecheck step in
+[job 121968399298](https://github.com/hearsay-tools/cezarion/actions/runs/40436740535/job/121968399298)
+took 22 seconds, Node setup 5 seconds and dependency installation 2 seconds.
+Blacksmith did not improve typecheck execution speed in this pair. The control
+uses a combined build/package job, so its whole-job duration is not comparable
+to standalone typecheck. The new leaf runs alongside build/package rather than
+adding a serial dependency. The change targets available capacity within the
+allowance; it does not claim a workflow speedup.
+
+Applying 54 seconds to the projected 2,832.9 monthly jobs gives 2,549.6 runtime
+minutes. Adding the observed 79.2 equivalent release minutes gives **2,628.8**.
+If every new job took 54 seconds and billing rounded each job up to one minute,
+the estimate would be **2,920.9**, including 88 rounded release minutes. This
+fits a 30-day allowance before other organization usage. Neither estimate is a
+billing cap: the sample is short, runtime varies, and growth, retries, other
+repositories or a 31-day month can exceed it. Keep push and merge-group
+verification on GitHub and compare actual Blacksmith usage before adding jobs.
 
 ## Alternatives
 
@@ -108,10 +135,11 @@ required aggregate. Preserve immutable checkouts, read-only permissions,
 installer selection, the Node minimum, setup retry and queue-proof fallback.
 Add the new job to the exact-queue proof roster and its parity checks.
 
-The old typecheck builds server declarations before checking the web. Splitting
-it removes that preparation from the build/package VM. Confirm whether its
-unit tests need that output and preserve any required preparation explicitly.
+The old typecheck built server declarations before checking the web. The new
+build/package job explicitly runs `npm run build:server` before unit tests,
+preserving that preparation on its own VM.
 
 Native PR checks use the base branch workflow. A branch workflow dispatch must
-exercise the final Blacksmith runner selection before merge. Update this
-report with actual hosted job durations and the final budget projection.
+exercise the final Blacksmith runner selection before merge. The typecheck
+measurement above passed; the complete dispatch and current-head PR gates
+must still pass. The PR's verification section records their final results.
