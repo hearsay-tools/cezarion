@@ -114,6 +114,25 @@ its direct owned worker. It becomes a **relationship resolver**. It returns
 | Root ↔ root | `peer` | Both are root tasks in the caller's project, the two IDs differ, and neither family has a history deletion pending |
 | Anything else | — | Refused with `denied_scope`, with the same text for absent, unrelated, wrong-project and malformed records, as `denyScope` does today |
 
+The resolver checks history deletion after the relationship, and both failures return
+`denied_scope`, as `conversationPair` does today (`service.ts:306`).
+
+The resolver has two levels:
+
+- **New sends** (`request`, `progress`, `follow-up`, `reply`) need the live pair from the
+  table above.
+- **Operations on the caller's own durable records** need only the caller's participation,
+  for a `peer` pair:
+  - history: messages in an existing ledger where the caller is the sender or the recipient;
+  - wait and cancel: a request the caller sent, held in its own family ledger;
+  - inbox reserve, acknowledge and release: inputs addressed to the caller, with a live
+    receipt in the caller's session generation.
+
+  A deleted peer, or one whose family has a history deletion pending, does not block these.
+  Inbox acknowledge and release check each member against the caller's own record, so a
+  sender deleted between reserve and acknowledge does not refuse the batch. Family pairs
+  keep today's checks for both levels.
+
 A top-level task with no delegation record yet counts as a root task. This covers a task
 that has not started a session under `CEZ_DELEGATION=1`. The first accepted message writes
 its root record, as provisioning does. The record grants the recipient nothing it would not
@@ -130,6 +149,37 @@ For a family pair, both rules name the same ledger, so family behavior does not 
 a peer pair, a request and its reply stay together in the requester's ledger. That is where
 the requester waits on the outcome. A two-way peer exchange can therefore use two ledgers.
 `cez message conversation <peer>` reads both and merges them by `createdAt`.
+
+Two full ledgers can hold 2,048 messages for one pair, while the history response keeps its
+bound of 1,024 messages and 1,024 outcomes (`conversationStateSchema`,
+`packages/contract/src/conversations.ts`). The merged response therefore returns the newest
+1,024 messages and the outcomes of the requests among them. When older messages exist, it
+adds `nextBefore`, the `createdAt` of the oldest message returned, and
+`cez message conversation <peer> --before <time>` reads the page before it. Both fields are
+new and optional in the contract.
+
+### Message identity
+
+Today a message ID is unique inside one ledger only: `send` looks up the ID in that ledger
+(`service.ts:337`). The recipient's queued input, its delivery and read checkpoints, inbox
+receipts and the `conversation-message:<id>:<step>` projections all use the message ID with
+no ledger in it. Within one family that is safe, because one family has one ledger. With
+peers it is not: two peers can each pick the same UUID for a message to one recipient, and
+both messages are valid in their own ledgers.
+
+So a new message ID must be unused at every place it reaches:
+
+- a message in the ledger that will hold it, unless it is an exact retry (same ID, same
+  payload hash), which returns the existing receipt as today;
+- an input of the recipient;
+- a projection on the sender's or the recipient's run (`RunStore.hasProjection`, an indexed
+  read).
+
+The check runs inside the same `commitConversation` write that stores the message and the
+input. The store writes synchronously, so two senders on two ledgers cannot both pass it for
+one recipient. A refused send returns `invalid_input`, "Message ID already in use; use a new
+message ID", and writes nothing. IDs stay caller-chosen UUIDs, so a refusal means a reused ID,
+never a random clash.
 
 `AgentInput.parentRunId` keeps its name and holds the ledger owner. Inbox, acknowledge,
 release, cancel and wait find the ledger through that field or through the request ID. They
@@ -226,12 +276,17 @@ This table is for a peer recipient. A family recipient keeps its current behavio
 | `waiting` on Cezar's `budget` human wait | Yes | `queued` | No: the wake budget is spent ([§ 8](#8-bounds)) | Pending | The human resets it |
 | `review`, `done`, `failed`, `cancelled`, or stopping | Not delivered: a durable `continuation-required` receipt with no input, deadline or obligation | `not-delivered` | No | A request accepted before this settles: `done` → `completed-without-reply`; `failed` → `failed`; `cancelled` → `cancelled`; `review` → pending until its deadline | The instruction says: "Not delivered: task is `<status>`. Only its human can continue it." A peer cannot resume it |
 | Archived | Same as its status | | | | `cez message tasks` hides it unless `--all` |
-| Deleted | `denied_scope`, indistinguishable from an unrelated ID | — | — | **New** outcome `deleted` | Pick another recipient |
-| History deletion pending on its family | `incompatible_state` | — | — | Pending | Retry later |
+| Deleted | `denied_scope`, indistinguishable from an unrelated ID | — | — | **New** outcome `deleted` | Pick another recipient. The sender can still read its history, wait on and cancel its request ([§ 2](#the-relationship-resolver)) |
+| History deletion pending on its family | `denied_scope`, as above | — | — | Pending | Retry later |
 | Controller restart | Durable state is kept | Undelivered inputs replay; an input the provider accepted just before a crash, before its delivery checkpoint, may replay once, as documented today | Recovery re-arms deadlines and reconciles outcomes | Kept | Retry with the same message ID; a retry never creates a second message |
 
 The sender must be `running` or `waiting`, as today. A sender that closes settles its open
 requests as `sender-closed`.
+
+When the sender is deleted, its ledger goes with it. An input it already queued for the
+recipient stays in the recipient's own record and is still delivered, with the attribution
+the input carries. A reply to one of its requests has no ledger to go to, so it is refused
+with `denied_scope`. The recipient's history shows only what remains in existing ledgers.
 
 ## 6. Human questions and human input
 
@@ -374,7 +429,9 @@ deadlines, which the per-ledger timer fires.
 ## 8. Bounds
 
 All existing caps apply unchanged ([§ 2](#2-reuse-and-the-one-abstraction)). Peer messages
-count toward the ledger that holds them and toward the recipient's 32 undelivered inputs.
+count toward the ledger that holds them and toward the recipient's 32 undelivered inputs. A
+pair's merged history is paged at 1,024 messages
+([§ 2](#which-ledger-holds-a-message)).
 
 A family has a parent that can stop a loop. Two peers do not: two coordinators that reply to
 each other could run until their ledgers fill, up to 1,024 messages each, and every message
@@ -428,7 +485,7 @@ the relationship. No request field carries it.
 | Give an update | `cez message progress <task-id> '<text>' --id <UUID>` | `…/send`, `kind: progress` |
 | Clarify your request | `cez message follow-up <task-id> '<text>' --id <UUID> --request-id <UUID>` | `…/follow-up` |
 | Answer a request | `cez message reply <task-id> '<text>' --id <UUID> --request-id <UUID>` | `…/reply` |
-| Read history | `cez message conversation <task-id>` | `…/conversation` |
+| Read history | `cez message conversation <task-id> [--before <time>]` | `…/conversation` |
 | Read unread input mid-turn | `cez message inbox` | `…/inbox`, `…/inbox/ack`, `…/inbox/release` |
 | Cancel your request | `cez message cancel-request <UUID>` | `…/cancel-request` |
 | Wait on requests | `cez message wait --request <UUID> [--request …] [--mode one\|any\|all]`, or `cezar_wait` kind `request` | `…/wait` |
@@ -537,12 +594,15 @@ regression test fails without the fix).
 | R5 | Root → a task in another project, and a forged recipient ID | `denied_scope`, with text identical to an unrelated ID | F2 |
 | R6 | A peer replies to another task's routed worker question | `denied_scope`; the question stays pending | F2 |
 | R7 | Peer request, reply, then restart | Request and reply are in the requester's ledger; the recipient's ledger is unchanged; projections replay without new inputs | F2 |
-| R8 | Peer recipient in each [§ 5](#5-recipient-lifecycle) state, including deletion after acceptance | The row's acceptance, delivery, wake and outcome; `deleted` for the deleted case | F2 |
+| R8 | Peer recipient in each [§ 5](#5-recipient-lifecycle) state, including deletion after acceptance and a pending history deletion | The row's acceptance, delivery, wake and outcome; `deleted` for the deleted case; `denied_scope` for a pending history deletion | F2 |
 | R9 | A `peer` wait: matching message, non-matching peer, human message, family message, peer settles, deadline, restart | Each [Transitions out](#transitions-out) row | F7 |
 | R10 | Peer messages past the wake budget | The 41st wake opens the `budget` human wait; a human message resets it; family messages never charge | F2 |
 | R11 | `RUNNER_IDS` parity: peer attribution and a pending human question on every native wire | Every runner keeps the question and shows the peer sender | F2, F7 |
 | R12 | `cez message request --resume`, and a removed `cez worker` message verb | Exit 64, naming the replacement command | F3 |
 | R13 | A root calls `cezar_done` with an open peer request; then again; then the peer replies. Separately: it cancels the request first; it sent only progress; a human presses Finish | First done: a refusal nudge naming the request. Second: Cezar's completion request wait, and the reply wakes the run. Cancel first, progress only, or Finish: done passes; Finish settles the request `sender-closed` | F8 |
+| R14 | Peers B and C send a message with the same ID to A, in both orders and concurrently | The second is refused with `invalid_input` and writes nothing; A gets the first once; projections on A stay intact; an exact retry of the first returns its receipt | F2 |
+| R15 | A peer is deleted after A's request to it was accepted; a sender is deleted between A's inbox reserve and acknowledge | A can still read its history, wait on and cancel its request; the request settles `deleted`; the inbox acknowledge succeeds for the whole batch; a reply to the deleted sender's request is refused | F2 |
+| R16 | A pair whose two ledgers are both full | The history returns the newest 1,024 messages with `nextBefore`; `--before` returns the rest; no response passes the schema bound | F2, F3 |
 
 ## 14. Follow-ups
 
@@ -552,8 +612,8 @@ the incident path. F2 comes before F3, F4, F7 and F8. F5 travels with the change
 | ID | Scope | Scenarios |
 | --- | --- | --- |
 | F1 | `cez task send` refuses with exit 64 when `CEZ_TASK_ID` is set, and names the remedy | R2, R3 |
-| F2 | The relationship resolver; peer conversations in the service, ledger and outcomes (`relationship`, `deleted`); peer wakes charge the wake budget; parity cells | R1, R4–R8, R10, R11 |
-| F3 | The `cez message` CLI family, `cez message tasks` discovery, `cez worker resume`; removal of the `cez worker` message verbs; new session instructions in `delegation/provision.ts` | R4, R12 |
+| F2 | The relationship resolver with its two levels; peer conversations in the service, ledger and outcomes (`relationship`, `deleted`); message identity across ledgers; merged, paged history (`nextBefore`, `before`); peer wakes charge the wake budget; parity cells | R1, R4–R8, R10, R11, R14–R16 |
+| F3 | The `cez message` CLI family (including `conversation --before`), `cez message tasks` discovery, `cez worker resume`; removal of the `cez worker` message verbs; new session instructions in `delegation/provision.ts` | R4, R12 |
 | F4 | Cockpit: peer message cards name and link the peer task; thread and relationship views; light and dark themes; 360 px width | R1 (thread) |
 | F5 | `AGENT_PROTOCOL.md`, `BACKWARD_COMPATIBILITY.md` (the delegation CLI is agent-facing and not a protected surface; the new optional fields and the `peer` wait), README | — |
 | F6 | Runner-native cross-session messaging at shipped defaults: decide, per runner, whether to restrict it, and update instructions | — |
