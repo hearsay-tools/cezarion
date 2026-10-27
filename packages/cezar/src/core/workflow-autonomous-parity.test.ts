@@ -130,12 +130,15 @@ describe('autonomous turn-end parity — #426', () => {
       const modes = row.id === 'A2' || row.id === 'A4' || row.id === 'A12' ? ['continuation'] : row.id === 'A5' || row.id === 'A6' ? ['fresh', 'continuation'] : ['fresh'];
       for (const mode of modes) it(`${backend} ${row.id} ${row.name} (${mode})`, async () => {
         await withOwnedInputRun(backend, mode === 'continuation' ? 'autonomous' : row.scenario, async ({ store, manager, runId }) => {
-          if (mode === 'continuation') {
-            manager.enqueueOwnedRun(runId);
-            await waitFor(() => store.getRun(runId)?.status === 'waiting', ROW_SETTLE_MS);
-            manager.finish(runId);
-            await waitFor(() => !manager.isActive(runId), ROW_SETTLE_MS);
+          async function prepareContinuation(): Promise<void> {
+            if (mode === 'continuation') {
+              manager.enqueueOwnedRun(runId);
+              await waitFor(() => store.getRun(runId)?.status === 'waiting', ROW_SETTLE_MS);
+              manager.finish(runId);
+              await waitFor(() => !manager.isActive(runId), ROW_SETTLE_MS);
+            }
           }
+          await prepareContinuation();
           // Only this row's turns: a continuation's first step settled before the spy.
           const turns = watchTurnOutcomes();
           store.updateRun(runId, { autonomous: row.id !== 'A6' });
@@ -161,12 +164,13 @@ describe('autonomous turn-end parity — #426', () => {
           if (row.id === 'A9') await new Promise(resolve => setTimeout(resolve, 150));
           const events = store.readEvents(runId).slice(startSeq);
           const notes = nudges(events);
-          if (row.id === 'A5' || row.id === 'A11' || row.id === 'A12') {
+          function assertCapOutcome(): void {
             expect(store.getRun(runId)?.status).toBe('waiting');
             expect(notes).toHaveLength(MAX_AUTO_CONTINUES);
             expect(events.some(e => e.type === 'note' && String(e.message).includes(`autonomous — safety cap reached (${MAX_AUTO_CONTINUES})`))).toBe(true);
             expect(turns.words(runId).filter(word => word === 'waiting')).toHaveLength(1);
-          } else if (row.id === 'A6' || row.id === 'A9' || row.id === 'A10') {
+          }
+          function assertParkedOutcome(): void {
             expect(store.getRun(runId)?.status).toBe('waiting');
             expect(notes).toHaveLength(0);
             if (row.id !== 'A6') {
@@ -174,7 +178,8 @@ describe('autonomous turn-end parity — #426', () => {
               expect(events.some(e => e.type === 'human-input-delivered')).toBe(false);
               expect(events.some(e => e.type === 'note' && String(e.message).startsWith(AUTONOMOUS_ASK_NOTE))).toBe(false);
             }
-          } else {
+          }
+          function assertDoneOutcome(): void {
             expect(store.getRun(runId)?.status).toBe('done');
             expect(notes).toHaveLength(row.id === 'A8' ? 0 : 1);
             expect(updates.mock.calls.filter(([id]) => id === runId).map(([, patch]) => patch.status)).not.toContain('waiting');
@@ -187,6 +192,13 @@ describe('autonomous turn-end parity — #426', () => {
               expect(events.filter(e => e.type === 'ask.requested' || e.type === 'human-input-delivered')).toEqual([]);
               expect(events.filter(e => e.type === 'user-message' && String(e.text).startsWith('Continue working autonomously'))).toEqual([]);
             }
+          }
+          if (row.id === 'A5' || row.id === 'A11' || row.id === 'A12') {
+            assertCapOutcome();
+          } else if (row.id === 'A6' || row.id === 'A9' || row.id === 'A10') {
+            assertParkedOutcome();
+          } else {
+            assertDoneOutcome();
           }
           if (row.id === 'A11' || row.id === 'A12') {
             expect(events.filter(e => e.type === 'note' && String(e.message).startsWith(AUTONOMOUS_ASK_NOTE))).toHaveLength(1);
