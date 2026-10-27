@@ -116,6 +116,25 @@ describe('useSearchParamsWriter (hearsay-tools/cezarion#1616)', () => {
   // our session tag and an old seq. Without the navigation-type check, the seq guard treats it as
   // an intermediate write still in flight and preserves the stale `next`. The next write then
   // composes from `next` instead of the URL Back restored.
+  // hearsay-tools/cezarion#1790: useSearchParams memoises by search string (useMemo([search])),
+  // so navigating to a same-search entry returns the same URLSearchParams object. A guard that
+  // compares rendered===searchParams would short-circuit on that navigation and leave `next`
+  // pointing at an abandoned write's URL. Tracking by location.key (unique per entry) avoids
+  // the object-reuse false-positive.
+  it('does not short-circuit on a same-search navigation when a write is pending', () => {
+    const probe = renderWriter('/p/x/?q=done')
+    act(() => {
+      // Dispatch a write (REPLACE to ?q=done&archived=1) and a same-search PUSH in the same
+      // batch. The PUSH is applied last; its search string (?q=done) matches the initial
+      // rendered URL, so useSearchParams returns the same memoised object. The location.key
+      // is new, so the external reset must still fire.
+      probe.write!(set('archived', '1'))  // REPLACE to ?q=done&archived=1
+      probe.push!('?q=done')             // PUSH back to ?q=done (same search, same object)
+    })
+    act(() => probe.write!(set('f', '1')))
+    expect(new URLSearchParams(probe.search)).toEqual(new URLSearchParams('q=done&f=1'))
+  })
+
   it('treats Back as external even when the restored entry carries our session tag', () => {
     const probe = renderWriter('/p/x/')
     act(() => probe.write!(set('q', 'done')))   // seq 1: ?q=done (REPLACE, our state)
