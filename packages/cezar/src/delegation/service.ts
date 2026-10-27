@@ -68,6 +68,7 @@ import { authorizeWorkerList, authorizeSpawn, authorizeSpawnReplay, authorizeWor
 import { releaseThenRemoveOwnedWorkspace } from '../git-worktree-release.ts';
 import { gitCommonDir, planOwnedWorkspace, prepareDestroyAccess, readOwnedDiff, resolveWorkerBaseline, WORKTREE_LOCK_BUSY_ERROR, WorkspaceHeldError } from './workspace.ts';
 import { WorktreeMutationLockTimeout } from '../git-worktree-lock.ts';
+import { isCurrentProcess, recordedProcessLive } from './process-liveness.ts';
 import { observeDestroy, recordHolders, type DestroyObservation } from './destroy-observation.ts';
 import { DESTROY_ATTENTION_ATTEMPTS, DESTROY_BACKOFF, retryDelayMs, type Backoff } from './retry-backoff.ts';
 
@@ -849,6 +850,11 @@ export class DelegationService {
           project.store.readWorkerExecution(workerId)?.generation !== proof.generation ||
           project.store.readWorkerExecution(workerId)?.phase !== 'complete') {
           throw new Error('Worker resource ownership changed');
+        }
+        const record = project.store.readWorkerProcesses(workerId, proof.generation);
+        if (record === 'unknown' || (record !== 'absent' &&
+          ((!isCurrentProcess(record.controller) && recordedProcessLive(record.controller)) || record.processes.some(recordedProcessLive)))) {
+          throw new Error('Recorded worker processes remain or cannot be verified; cleanup will retry');
         }
       };
       const assertSafe = () => {

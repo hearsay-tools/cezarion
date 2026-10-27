@@ -25,6 +25,7 @@ import { processesWithCwdUnder, processStartToken } from '../delegation/process-
 import { signalSession, spawnSessionLeader } from '../core/session-process.ts';
 import { blockRunWrites } from '../runs/run-store.testkit.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
+import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
 
 /** Hang guard for the waits below: each ends the moment its condition holds, so the bound only ends a hang. */
 const HANG_GUARD_MS = 15_000;
@@ -633,7 +634,7 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
       const generation = store.commitWorkerExecutionStart(w.id);
       const child = await spawnReady(tmpdir(), "process.on('SIGTERM',()=>process.exit(42)); console.log('ready'); setInterval(()=>{},1000)");
       expect(store.appendWorkerProcess(w.id, generation, child.proc.pid!)).toBe(true);
-      store.updateRun(w.id, { status: 'review' });
+      store.updateRun(w.id, { status: RUN_STATUS.review });
       expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
       const service = new DelegationService();
       const detach = service.registerProject({ id: 'p', root, store, manager });
@@ -641,6 +642,39 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
         expect(child.proc.exitCode).toBe(42);
       } finally { detach(); }
+    });
+
+    it.runIf(process.platform === 'linux')('retries destroy when a recorded survivor outside owned paths cannot be signalled', async () => {
+      const w = await worker();
+      await ensureOwnedWorkspace(root, w);
+      const generation = store.commitWorkerExecutionStart(w.id);
+      const child = await spawnReady(tmpdir(), "console.log('ready'); setInterval(()=>{},1000)");
+      expect(store.appendWorkerProcess(w.id, generation, child.proc.pid!)).toBe(true);
+      store.updateRun(w.id, { status: RUN_STATUS.review });
+      expect(store.commitWorkerExecutionComplete(w.id, generation)).toBe(true);
+      const kill = process.kill.bind(process);
+      let denied = true, attempts = 0;
+      const spy = vi.spyOn(process, 'kill').mockImplementation(((pid: number, signal?: string | number) => {
+        if (pid === child.proc.pid && signal !== 0 && signal !== undefined && denied) {
+          attempts++; throw Object.assign(new Error('denied by fixture'), { code: 'EPERM' });
+        }
+        return kill(pid, signal);
+      }) as typeof process.kill);
+      const service = new DelegationService();
+      Object.assign(service, { terminationTimeoutMs: 500 });
+      (manager as unknown as { orphanTermGraceMs: number }).orphanTermGraceMs = 50;
+      const detach = service.registerProject({ id: 'p', root, store, manager });
+      try {
+        const result = await service.destroyForHuman('p', w.id);
+        expect(result).toMatchObject({ state: 'incomplete', error: expect.stringContaining('Recorded worker processes remain') });
+        expect(attempts).toBeGreaterThanOrEqual(2);
+        expect(child.proc.exitCode).toBeNull();
+        expect(existsSync(workspace(w).path)).toBe(true);
+        denied = false;
+        expect(await service.destroyForHuman('p', w.id)).toMatchObject({ state: 'complete', remaining: [] });
+        await child.exited;
+        expect(existsSync(workspace(w).path)).toBe(false);
+      } finally { spy.mockRestore(); detach(); }
     });
 
     it('a dead child is finalized by recovery, re-launches, and destroy completes', async () => {

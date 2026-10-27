@@ -129,7 +129,9 @@ async function makeDirectoryWritable(path: string, expected?: { dev: number; ino
     // O_NOFOLLOW_ANY rejects a symlink in any component. Native CI must verify
     // both opening mode-000 directories and fchmod on this descriptor.
     const flags = linuxPath ? 0x200000 : process.platform === 'darwin' ? 0x00008000 | 0x20000000 : constants.O_RDONLY;
-    const directory = await open(path, flags | constants.O_NOFOLLOW);
+    // Darwin rejects O_NOFOLLOW combined with O_NOFOLLOW_ANY. The latter
+    // already refuses a symlink in the final component as well as ancestors.
+    const directory = await open(path, flags | (process.platform === 'darwin' ? 0 : constants.O_NOFOLLOW));
     try {
       const opened = await directory.stat();
       if (!opened.isDirectory() || opened.dev !== info.dev || opened.ino !== info.ino) throw new Error(`Directory changed: ${path}`);
