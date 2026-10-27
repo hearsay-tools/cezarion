@@ -4,7 +4,7 @@ import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { syncBuiltinESMExports } from 'node:module';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -66,6 +66,10 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
     const qa = join(workspace.path, '.ai/qa');
     const descriptor = (pid: number) => JSON.stringify({ startedByThisRepo: true, app: { pid, start: windowsStartToken(pid) } });
     await writeFile(join(qa, 'test-env.json'), descriptor(app.pid!));
+    const watcher = spawn(process.execPath, [resolve(import.meta.dirname, '../../../../.ai/scripts/test-env-lease.mjs'), 'watch-app', String(app.pid), windowsStartToken(app.pid!)!, workspace.path, workspace.path], {
+      cwd: tmpdir(), env: { ...process.env, TEST_ENV_WATCH_INTERVAL_SECONDS: '2' }, stdio: ['ignore', 'pipe', 'ignore'], windowsHide: true,
+    });
+    children.push(watcher); await once(watcher.stdout!, 'data');
     const db = new DatabaseSync(join(qa, 'test-env-lease.sqlite'));
     db.exec('CREATE TABLE holders (id TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, start TEXT, pgid INTEGER)');
     db.prepare('INSERT INTO holders VALUES (?, ?, ?, ?, NULL)').run('live', 'live', process.pid, windowsStartToken(process.pid)!);
@@ -77,6 +81,7 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
     expect(other.exitCode).toBeNull();
     await writeFile(join(qa, 'test-env.json'), descriptor(app.pid!));
     expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+    expect(watcher.exitCode).not.toBeNull();
     expect(other.exitCode).toBeNull();
   } finally {
     for (const child of children) {

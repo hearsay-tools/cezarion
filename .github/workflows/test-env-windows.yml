@@ -94,7 +94,13 @@ jobs:
         shell: pwsh
         run: |
           git fetch --depth=1 origin 471fc954423631d021c94e870ef0bd3976e209a4
-          git show 471fc954423631d021c94e870ef0bd3976e209a4:packages/cezar/src/delegation/idle-test-app.ts > packages/cezar/src/delegation/idle-test-app.ts
+          # Keep the current watcher API; restore only the old app-cleanup implementation.
+          $file = 'packages/cezar/src/delegation/idle-test-app.ts'
+          $current = Get-Content $file -Raw
+          $old = (git show "471fc954423631d021c94e870ef0bd3976e209a4:$file") -join "`n"
+          $oldCleanup = $old.Substring(0, $old.IndexOf('/** The app watcher checks'))
+          $watcher = $current.Substring($current.IndexOf('/** Read command lines'))
+          Set-Content $file ("import { spawnSync } from 'node:child_process';`n" + $oldCleanup + $watcher)
           try {
             $output = npm test -- packages/cezar/src/delegation/windows-test-app.test.ts -t 'stops the owned app' 2>&1 | Out-String
             $failed = $LASTEXITCODE -ne 0

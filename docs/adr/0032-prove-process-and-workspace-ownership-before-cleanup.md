@@ -36,3 +36,21 @@ depend on a later scan finding the app.
 Implementation: [session-process.ts](../../packages/cezar/src/core/session-process.ts), [process-liveness.ts](../../packages/cezar/src/delegation/process-liveness.ts), [workspace.ts](../../packages/cezar/src/delegation/workspace.ts).
 
 Coverage: [session-process.test.ts](../../packages/cezar/src/core/session-process.test.ts), [process-liveness.test.ts](../../packages/cezar/src/delegation/process-liveness.test.ts), [workspace.test.ts](../../packages/cezar/src/delegation/workspace.test.ts).
+
+### Waiting for the test-app watcher
+
+The watcher starts with the system temporary directory as its working directory.
+A checkout cwd scan therefore cannot prove that it has closed its log and SQLite
+handles. Before Git removal, cleanup scans full process command lines for the
+checkout's `test-env-lease.mjs watch-app` process, on Windows as well as POSIX.
+This scan authorizes no signal. An ambiguous match, failed scan or timeout keeps
+the checkout for retry. Cleanup performs it even for an already-stopped app.
+
+| Case | What stops it | Behavior at shipped defaults |
+| --- | --- | --- |
+| App stopped normally | Existing watcher observes the leader exit | Cleanup waits for watcher exit before removing files |
+| Starting command interrupted before watcher start | No watcher exists | Successful process scan permits cleanup |
+| Starting command interrupted after watcher start | Watcher observes the leader exit | Command-line scan finds it regardless of cwd or missing descriptor watcher identity |
+| App descriptor deleted or forged | Existing app ownership checks refuse uncertain cleanup | Watcher scan never signals a process |
+| Watcher remains live beyond 32 seconds | Existing watcher policy still applies | Cleanup refuses; a later destroy retries |
+| Process table unavailable | No process is signalled | Cleanup refuses |

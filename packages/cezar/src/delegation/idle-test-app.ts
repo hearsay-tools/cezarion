@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -86,8 +87,29 @@ export async function withIdleTestApp<T>(root: string, remove: (stopped: boolean
   }
 }
 
-/** The app watcher checks its leader every 30 seconds and exits after the app stops. */
-export async function waitForTestAppWatcher(root: string): Promise<void> {
+/** Read command lines, not cwd: production watchers run from the system temp directory.
+ * This probe never authorizes a signal. Ambiguous matches only delay/refuse removal. */
+function watcherPresent(root: string): boolean {
+  const windows = process.platform === 'win32';
+  const script = "$ErrorActionPreference='Stop'; ConvertTo-Json -Compress -InputObject @(Get-CimInstance Win32_Process -Filter \"Name = 'node.exe'\" | ForEach-Object { if (!$_.CommandLine) { throw 'Unreadable node command line' }; $_.CommandLine })";
+  const result = windows
+    ? spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(script, 'utf16le').toString('base64')], { encoding: 'utf8', timeout: 10_000, windowsHide: true })
+    : spawnSync('ps', ['-axww', '-o', 'args='], { encoding: 'utf8', timeout: 2_000 });
+  if (result.status !== 0) return true;
+  try {
+    const lines: string[] = windows ? JSON.parse(result.stdout || '[]') : result.stdout.split('\n');
+    if (!Array.isArray(lines)) return true;
+    const normalize = (value: string) => windows ? value.replaceAll('\\', '/').toLowerCase() : value;
+    return lines.some(line => line.includes('test-env-lease.mjs') && line.includes('watch-app') && normalize(line).includes(normalize(root)));
+  } catch { return true; }
+}
+
+/** A timeout or unreadable process table keeps the checkout intact for a later retry. */
+export async function waitForTestAppWatcher(root: string): Promise<boolean> {
   const deadline = Date.now() + 32_000;
-  while (Date.now() < deadline && inspectGeneration({ paths: [root] }).liveness !== 'gone') await delay(250);
+  while (watcherPresent(root)) {
+    if (Date.now() >= deadline) return false;
+    await delay(250);
+  }
+  return true;
 }

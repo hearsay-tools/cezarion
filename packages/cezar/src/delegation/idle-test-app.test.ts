@@ -51,7 +51,7 @@ it.skipIf(process.platform !== 'linux')('removes the idle worker app but preserv
   db.exec('CREATE TABLE holders (id TEXT PRIMARY KEY, token TEXT NOT NULL, pid INTEGER NOT NULL, start TEXT, pgid INTEGER)');
   db.prepare('INSERT INTO holders VALUES (?, ?, ?, ?, NULL)').run('live', 'live', process.pid, processStartToken(process.pid)!);
   const watcher = spawn(process.execPath, [resolve(import.meta.dirname, '../../../../.ai/scripts/test-env-lease.mjs'), 'watch-app', String(app.pid), processStartToken(app.pid!)!, workspace.path, workspace.path], {
-    cwd: workspace.path, detached: true, env: { ...process.env, TEST_ENV_WATCH_INTERVAL_SECONDS: '0.1' }, stdio: ['ignore', 'pipe', 'ignore'],
+    cwd: tmpdir(), detached: true, env: { ...process.env, TEST_ENV_WATCH_INTERVAL_SECONDS: '2' }, stdio: ['ignore', 'pipe', 'ignore'],
   });
   children.push(watcher); await once(watcher.stdout!, 'data');
   expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete' });
@@ -63,6 +63,7 @@ it.skipIf(process.platform !== 'linux')('removes the idle worker app but preserv
   expect(other.exitCode).toBeNull();
   await writeFile(join(qa, 'test-env.json'), JSON.stringify({ startedByThisRepo: true, app: { pid: app.pid, start: processStartToken(app.pid!) } }));
   expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+  expect(watcher.exitCode).not.toBeNull();
   expect(other.exitCode).toBeNull();
   expect(git('branch', '--list', workspace.branch)).toBe('');
 }, 60_000);
