@@ -5,6 +5,7 @@ on:
       - '.github/workflows/worker-destroy-macos.yml'
       - '.github/scripts/macos-event-descriptor-probe.c'
       - '.github/scripts/macos-parent-chmod-probe.c'
+      - '.github/scripts/macos-staged-root-probe.c'
       - 'packages/cezar/src/delegation/workspace*'
       - 'packages/cezar/src/delegation/destroy-holders*'
       - 'packages/cezar/src/delegation/darwin-open-flags.test.ts'
@@ -61,6 +62,11 @@ jobs:
         run: |
           cc -Wall -Wextra .github/scripts/macos-parent-chmod-probe.c -o "$RUNNER_TEMP/parent-probe"
           "$RUNNER_TEMP/parent-probe"
+      - name: Probe staged root recovery
+        if: always()
+        run: |
+          cc -Wall -Wextra .github/scripts/macos-staged-root-probe.c -o "$RUNNER_TEMP/staged-probe"
+          "$RUNNER_TEMP/staged-probe"
       - name: Verify mode-000 owned worktree recovery
         run: npm test -- packages/cezar/src/delegation/workspace.test.ts -t 'recovers a leftover with an inaccessible'
       - name: Verify scoped holder termination
