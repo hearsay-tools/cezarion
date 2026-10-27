@@ -542,8 +542,16 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
   });
 });
 
-function writePiRpcMock(cwd: string, name: string, afterPrompt: string): string {
+/** `commands` replaces the mock's get_state answer, or adds a set_steering_mode answer (none by default). */
+function writePiRpcMock(
+  cwd: string,
+  name: string,
+  afterPrompt: string,
+  commands: { getState?: string; steering?: string } = {},
+): string {
   const mockPath = join(cwd, name);
+  const getState = commands.getState
+    ?? "send({ id: command.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'pi-err', model: { id: 'gpt-5.6-sol' } } });";
   writeFileSync(
     mockPath,
     `#!/usr/bin/env node
@@ -552,7 +560,9 @@ const send = (v) => process.stdout.write(JSON.stringify(v) + '\\n');
 for await (const line of readline.createInterface({ input: process.stdin })) {
   const command = JSON.parse(line);
   if (command.type === 'get_state') {
-    send({ id: command.id, type: 'response', command: 'get_state', success: true, data: { sessionId: 'pi-err', model: { id: 'gpt-5.6-sol' } } });
+    ${getState}
+  } else if (command.type === 'set_steering_mode') {
+    ${commands.steering ?? ''}
   } else if (command.type === 'prompt') {
     send({ type: 'response', command: 'prompt', success: true });
     send({ type: 'agent_start' });
@@ -750,6 +760,137 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     expect(uiEvents.filter((e) => e.type === 'turn.completed')).toEqual([
       { type: 'turn.completed', turnId: 'turn_1', stopReason: 'end_turn' },
     ]);
+  });
+});
+
+/**
+ * Native messages the parity suites do not reach, pinned before the output loop was split into
+ * one handler per message kind (hearsay-tools/cezarion#1955). Each case fixes today's events.
+ */
+describe('pi native output handlers', () => {
+  let cwd: string;
+
+  beforeEach(() => {
+    cwd = mkdtempSync(join(tmpdir(), 'cez-pi-native-'));
+  });
+  afterEach(() => {
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  const assistantEnd = (usage = '') =>
+    `    send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }]${usage} } });`;
+
+  it('notes a refused set_steering_mode and still runs the turn', async () => {
+    const mockPath = writePiRpcMock(cwd, 'mock-pi-steering-refused.mjs', assistantEnd(), {
+      steering: "send({ type: 'response', command: 'set_steering_mode', success: false, error: { message: 'steering locked' } });",
+    });
+    const { events } = await runPiMock(cwd, mockPath);
+    expect(events).toContainEqual({ type: 'note', message: 'pi: set_steering_mode failed: steering locked' });
+    expect(events.filter((e) => e.type === 'error')).toEqual([]);
+    expect(events.filter((e) => e.type === 'turn-end')).toHaveLength(1);
+  });
+
+  it('reports a failed get_state, and any other failed command, as an error without a session event', async () => {
+    const mockPath = writePiRpcMock(
+      cwd,
+      'mock-pi-failed-responses.mjs',
+      `    send({ type: 'response', command: 'compact', success: false });
+${assistantEnd()}`,
+      { getState: "send({ id: command.id, type: 'response', command: 'get_state', success: false, message: 'state unavailable' });" },
+    );
+    const { events } = await runPiMock(cwd, mockPath);
+    expect(events.filter((e) => e.type === 'error')).toEqual([
+      { type: 'error', message: 'state unavailable' },
+      { type: 'error', message: 'pi RPC command compact failed' },
+    ]);
+    expect(events.some((e) => e.type === 'session')).toBe(false);
+    expect(events.filter((e) => e.type === 'done')).toHaveLength(1);
+  });
+
+  it('notes extension errors and unparseable lines, and skips a non-object line', async () => {
+    const mockPath = writePiRpcMock(
+      cwd,
+      'mock-pi-extension-error.mjs',
+      `    send({ type: 'extension_error', error: 'extension exploded' });
+    send({ type: 'extension_error' });
+    process.stdout.write('not json\\n');
+    process.stdout.write('[1,2]\\n');
+${assistantEnd()}`,
+    );
+    const { events } = await runPiMock(cwd, mockPath);
+    const notes = events.filter((e) => e.type === 'note').map((e) => e.message);
+    expect(notes).toEqual(expect.arrayContaining([
+      'extension exploded',
+      'pi extension error',
+      'pi: skipped unparseable RPC line: not json',
+    ]));
+    expect(events.filter((e) => e.type === 'error')).toEqual([]);
+    expect(events.filter((e) => e.type === 'turn-end')).toHaveLength(1);
+  });
+
+  it('emits tool-result images after the tool result, and skips incomplete image parts', async () => {
+    const mockPath = writePiRpcMock(
+      cwd,
+      'mock-pi-tool-images.mjs',
+      `    send({ type: 'tool_execution_start', toolCallId: 'call-1', toolName: 'read', args: { path: 'shot.png' } });
+    send({ type: 'tool_execution_end', toolCallId: 'call-1', isError: false, result: { content: [
+      { type: 'text', text: 'read shot.png' },
+      { type: 'image', data: 'aW1n', mimeType: 'image/png' },
+      { type: 'image', data: 'bm8tdHlwZQ==' },
+    ] } });
+    send({ type: 'tool_execution_end', toolCallId: 'call-2', isError: true, result: 'not a record' });
+${assistantEnd()}`,
+    );
+    const { events } = await runPiMock(cwd, mockPath);
+    const toolEvents = events.filter((e) => e.type === 'tool-call' || e.type === 'tool-result' || e.type === 'image');
+    expect(toolEvents).toEqual([
+      { type: 'tool-call', id: 'call-1', tool: 'read', input: { path: 'shot.png' } },
+      { type: 'tool-result', toolCallId: 'call-1', result: 'read shot.png', isError: false },
+      { type: 'image', data: 'aW1n', mediaType: 'image/png' },
+      { type: 'tool-result', toolCallId: 'call-2', result: '', isError: true },
+    ]);
+  });
+
+  it('notes missing token usage, and reports usage and cost when pi sends them', async () => {
+    const silent = await runPiMock(cwd, writePiRpcMock(cwd, 'mock-pi-no-usage.mjs', assistantEnd()));
+    expect(silent.events).toContainEqual({ type: 'note', message: 'token usage not reported by pi CLI' });
+    expect(silent.events.some((e) => e.type === 'token-usage' || e.type === 'cost')).toBe(false);
+
+    const reported = await runPiMock(cwd, writePiRpcMock(
+      cwd,
+      'mock-pi-usage.mjs',
+      assistantEnd(", usage: { input: 10, output: 5, cacheRead: 20, cacheWrite: 4, cost: { total: 0.25 } }"),
+    ));
+    expect(reported.events.filter((e) => e.type === 'token-usage' || e.type === 'cost')).toEqual([
+      { type: 'token-usage', tokensUsed: 22 },
+      { type: 'cost', usd: 0.25 },
+    ]);
+    expect(reported.events.some((e) => e.type === 'note' && e.message === 'token usage not reported by pi CLI')).toBe(false);
+  });
+
+  it('ignores native messages whose guard does not match, exactly as if they were absent', async () => {
+    const plain = await runPiMock(cwd, writePiRpcMock(cwd, 'mock-pi-plain.mjs', assistantEnd()));
+    const guarded = await runPiMock(cwd, writePiRpcMock(
+      cwd,
+      'mock-pi-guarded.mjs',
+      `    send({ type: 'message_end', message: { role: 'user', content: 'echo' } });
+    send({ type: 'message_end', message: 'not a record' });
+    send({ type: 'message_start', message: { role: 'assistant', content: [] } });
+    send({ type: 'message_update', assistantMessageEvent: 'not a record' });
+    send({ type: 'response', command: 'compact', success: true });
+    send({ type: 'tool_execution_start', toolCallId: 'call-without-name' });
+    send({ type: 'tool_execution_end' });
+    send({ type: 'unknown_native_message' });
+${assistantEnd()}`,
+    ));
+    expect(guarded.events).toEqual(plain.events);
+  });
+
+  it('rejects with an install hint when the pi binary is missing', async () => {
+    const bin = join(cwd, 'pi-does-not-exist');
+    await expect(new PiRunner({ bin }).startSession(
+      { toolGrant: UNSET_TOOL_GRANT, userPrompt: 'go', cwd, timeoutMs: 10_000 },
+    ).result).rejects.toThrow(`\`${bin}\` not found on PATH`);
   });
 });
 
