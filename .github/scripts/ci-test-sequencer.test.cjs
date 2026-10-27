@@ -104,7 +104,8 @@ test('the actual LTS workflow command loads all unit projects and a sequencer co
   const step = job.steps.find(step => step.name === 'Run server and cockpit unit suites');
   const npmTest = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')).scripts.test;
   for (const index of job.strategy.matrix.shard) {
-    const command = step.run.replace('npm test --', npmTest).replaceAll('${{ matrix.shard }}', String(index));
+    const command = step.run.replace('npm test --', npmTest).replaceAll('${{ matrix.shard }}', String(index))
+      .replace(/\$\{\{.*?\}\}/g, '--coverage.enabled');
     const { options } = parseCLI(command);
     const vitest = await createVitest('test', { ...options, root, watch: false });
     try {

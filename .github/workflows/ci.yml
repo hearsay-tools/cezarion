@@ -618,9 +618,9 @@ jobs:
       matrix:
         shard: [1, 2, 3]
     runs-on: ubuntu-24.04
-    # Refreshed Oct 2026 timings split the two longest files across three shards.
-    # Keep the hang bound; measured runtime must stay below 11m15s (25% headroom).
-    timeout-minutes: 15
+    # Coverage now shares the required test run on PRs and dispatches. Keep the
+    # previous coverage job bound there; main and merge groups retain 15 minutes.
+    timeout-minutes: ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && 25 || 15 }}
 
     permissions:
       contents: read
@@ -661,86 +661,12 @@ jobs:
         run: npm run build:server
 
       - name: Run server and cockpit unit suites
-        run: npm test -- --shard=${{ matrix.shard }}/3 --maxWorkers=4
-
-  # Vitest coverage for the pre-PR code-quality check (hearsay-tools/cezarion#1780). These two jobs
-  # run the same three shards as `vitest` again, with V8 coverage, beside it. They are not in
-  # `verify.needs`, not in the merge-queue roster and not required checks, and `vitest` is
-  # unchanged: a slow, failed or missing coverage run cannot change a test verdict. Every step that
-  # can fail has `continue-on-error`, so a problem shows as a warning annotation and a job-summary
-  # line while the job stays green. They run on pull requests and dispatches only: the merge queue
-  # and `main` keep their jobs and their time.
-  vitest-coverage:
-    name: Vitest coverage shard ${{ matrix.shard }}/3
-    needs: [queue-proof, change-surface, classify-pr]
-    if: >-
-      !cancelled() &&
-      (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') &&
-      (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') &&
-      needs.change-surface.outputs.surface == 'full-matrix' &&
-      needs.classify-pr.outputs.bump_pr != 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3]
-    runs-on: ubuntu-24.04
-    # Hang bound only. The collect step has its own, shorter timeout, so a slow run ends as a
-    # failed step and leaves the job green.
-    timeout-minutes: 25
-
-    permissions:
-      contents: read
-      pull-requests: read
-
-    steps:
-      - *resolve-dispatch
-      - name: Check out repository
-        continue-on-error: true
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ (github.event.pull_request.number || steps['resolve-dispatch'].outputs.valid == 'true') && format('refs/pull/{0}/merge', github.event.pull_request.number || inputs.pr_number) || github.sha }}
-          allow-unsafe-pr-checkout: true
-          persist-credentials: false
-
-      - name: Set up pnpm
-        if: hashFiles('pnpm-lock.yaml') != ''
-        continue-on-error: true
-        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
-        with:
-          version: '12.11.2'
-
-      - name: Set up Node.js
-        continue-on-error: true
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: lts/*
-          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
-          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
-
-      - name: Install dependencies
-        if: hashFiles('pnpm-lock.yaml') == ''
-        continue-on-error: true
-        run: npm ci
-
-      - name: Install pnpm dependencies
-        if: hashFiles('pnpm-lock.yaml') != ''
-        continue-on-error: true
-        run: pnpm install --frozen-lockfile
-
-      - name: Build server dependencies
-        continue-on-error: true
-        run: npm run build:server
-
-      # Same shard and worker count as `vitest`. The coverage settings live in vitest.config.ts.
-      - name: Collect Vitest coverage
         id: collect
-        continue-on-error: true
-        timeout-minutes: 20
-        run: npm test -- --shard=${{ matrix.shard }}/3 --maxWorkers=4 --coverage.enabled
+        run: npm test -- --shard=${{ matrix.shard }}/3 --maxWorkers=4 ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && '--coverage.enabled' || '' }}
 
       - name: Upload shard coverage
         id: upload
-        if: steps.collect.outcome == 'success'
+        if: ${{ !cancelled() && (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') }}
         continue-on-error: true
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
@@ -751,7 +677,7 @@ jobs:
           overwrite: true
 
       - name: Report a missing shard coverage report
-        if: always() && (steps.collect.outcome != 'success' || steps.upload.outcome != 'success')
+        if: always() && (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && (steps.collect.outcome != 'success' || steps.upload.outcome != 'success')
         continue-on-error: true
         env:
           SHARD: ${{ matrix.shard }}
@@ -759,7 +685,7 @@ jobs:
           UPLOAD: ${{ steps.upload.outcome }}
         run: |
           if [ "$COLLECT" != success ]; then
-            reason="the coverage run ended as $COLLECT (failed tests, a timeout, or a setup or coverage error)"
+            reason="the test run ended as $COLLECT (failed tests, a timeout, or a setup or coverage error)"
           else
             reason="the upload ended as $UPLOAD"
           fi
@@ -770,8 +696,8 @@ jobs:
   # uploads it as `vitest-coverage-<head SHA>`. See docs/sdlc/ci.md § Vitest coverage artifact.
   vitest-coverage-merge:
     name: Merge Vitest coverage
-    needs: [vitest-coverage]
-    if: ${{ !cancelled() && needs.vitest-coverage.result != 'skipped' }}
+    needs: [vitest]
+    if: ${{ !cancelled() && (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && needs.vitest.result != 'skipped' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
 
@@ -835,7 +761,7 @@ jobs:
         continue-on-error: true
         env:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
-          SHARDS_RESULT: ${{ needs.vitest-coverage.result }}
+          SHARDS_RESULT: ${{ needs.vitest.result }}
           DOWNLOAD: ${{ steps.download.outcome }}
           MERGE: ${{ steps.merge.outcome }}
           UPLOAD: ${{ steps.upload.outcome }}

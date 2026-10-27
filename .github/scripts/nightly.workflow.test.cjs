@@ -17,8 +17,9 @@ test('nightly shards the suite exactly as ci.yml does', () => {
   const shards = nightly.jobs.vitest;
   assert.deepEqual(shards.strategy.matrix.shard, ci.jobs.vitest.strategy.matrix.shard);
   assert.equal(shards['runs-on'], ci.jobs.vitest['runs-on']);
-  assert.equal(shards['timeout-minutes'], ci.jobs.vitest['timeout-minutes']);
-  assert.equal(suite(shards), suite(ci.jobs.vitest));
+  // Nightly keeps the non-coverage path: same shards, command and 15-minute bound.
+  assert.equal(shards['timeout-minutes'], 15);
+  assert.equal(suite(shards), suite(ci.jobs.vitest).replace(/ \$\{\{.*?\}\}/g, ''));
   for (const [name, job] of Object.entries(nightly.jobs)) {
     if (name !== 'vitest') assert.equal(suite(job), undefined, `${name} must not run the whole suite in one job`);
   }

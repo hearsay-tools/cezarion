@@ -3532,7 +3532,10 @@ describe('native Codex requestUserInput parks and resumes the run (#565)', () =>
     const eventsPath = join(repoRoot, '.ai/cezar/runs', `${record.id}.ndjson`);
     expect(readFileSync(eventsPath, 'utf8')).toContain('"type":"ask.requested"');
     expect(manager.sendMessage(record.id, [{ type: 'text', text: 'Library: Vitest' }])).toBe(true);
-    await waitFor(() => readFileSync(eventsPath, 'utf8').includes('"type":"turn-end"'));
+    // The native turn-end precedes the committed park (hearsay-tools/cezarion#1641).
+    // Controlled ordering proof: .ai/specs/2026-10-27-native-codex-park-proof.md.
+    await waitFor(() => readFileSync(eventsPath, 'utf8').includes('"type":"turn-end"')
+      && store.getRun(record.id)?.status === RUN_STATUS.waiting);
     expect(store.getRun(record.id)?.status).toBe('waiting');
   }, 30_000);
 });

@@ -151,7 +151,8 @@ it('scrolls a keyboard-focused transcript control above the desktop footer', () 
   // Repro: LOOPS=2 RUNS=1 LABEL=old-1 timeout --kill-after=5s 120s taskset -c 15
   // bash .ai/qa/1510-proof/run-loaded.sh. Matched scratch proof: old failed 1/1,
   // fixed passed 1/1; final targeted acceptance passed 10/10 with the same CPU/load.
-  // This proves the paging/layout variant; the historical focused:false cause is unproved.
+  // This proves the paging/layout variant. The later historical focus proof is recorded in
+  // .ai/specs/2026-10-27-1510-keyboard-focus-proof.md, with its remaining evidence limits.
   browser.evaluate(`document.querySelector('[data-slot="history-boundary"] button').click()`)
   browser.waitForFunction(`document.querySelector('[data-slot="history-boundary"]')?.dataset.retainedPages === '2' &&
     document.querySelector('[data-slot="history-boundary"]')?.getAttribute('aria-busy') === 'false' && window.__cezIdle === true`)
@@ -171,9 +172,11 @@ it('scrolls a keyboard-focused transcript control above the desktop footer', () 
     const start = document.createElement('span');
     start.id = 'footer-focus-start'; start.tabIndex = -1;
     button.before(start); start.focus({ preventScroll: true });
-    // Retain the node rather than re-querying after a prepend. The earlier repair in
-    // hearsay-tools/cezarion#1495 fixed that separate selector race: 4/4 keyboard-focused
-    // runs failed before retention and 2/2 passed after it (PR's session-footer bundle).
+    // Retain the node rather than re-querying after a prepend (PR hearsay-tools/cezarion#1507).
+    // Historical 9d41b6faa on its own application failed 5/5 with focused:false: Tab reached
+    // this button, but the final query selected an older card. Current test on the same build
+    // passed 5/5; uninstrumented current CPU1/two-loop acceptance passed 10/10. Reproduction,
+    // full failure-bundle path and focus traces: .ai/specs/2026-10-27-1510-keyboard-focus-proof.md.
     window.__footerFocusTarget = button;
   })()`)
   browser.waitForFunction(`document.activeElement === document.getElementById('footer-focus-start') && window.__footerFocusTarget.isConnected`)
