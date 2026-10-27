@@ -2,7 +2,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import childProcess from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { once } from 'node:events';
-import { lstat, mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -90,6 +90,14 @@ it.runIf(process.platform === 'win32')('stops the owned app only after its live 
     await writeFile(join(qa, 'test-env.json'), descriptor(app.pid!));
     console.info('native cleanup: stopping owned app');
     const result = await removeOwnedWorkspace(root, workspace);
+    if (result.state !== 'complete') {
+      const state = await readFile(join(qa, 'test-env.json'), 'utf8').then(text => JSON.parse(text)).catch(() => null);
+      console.info('native cleanup diagnostic:', JSON.stringify({
+        appExit: app.exitCode, appSignal: app.signalCode, appIdentityLive: windowsStartToken(app.pid!) !== undefined,
+        watcherExit: watcher.exitCode, watcherSignal: watcher.signalCode, watcherIdentityLive: windowsStartToken(watcher.pid!) !== undefined,
+        descriptorStatus: state?.status ?? 'missing-or-running', descriptorHasPid: Number.isSafeInteger(state?.app?.pid),
+      }));
+    }
     expect(result, JSON.stringify(result)).toMatchObject({ state: 'complete', remaining: [] });
     expect(watcher.exitCode).not.toBeNull();
     expect(other.exitCode).toBeNull();
