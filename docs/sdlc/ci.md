@@ -86,6 +86,10 @@ intentionally trading single-run latency for lower concurrency on a shared host.
 
 ### CI verification
 
+The path-filtered `Windows test environment lease` workflow also runs the worker test-app
+cleanup regression on native Windows when its cleanup code changes. It checks the pre-fix
+failure and the fixed result, including lease and checkout isolation.
+
 Required verification has nine parallel test jobs, plus the complexity and clone
 gates. Seven test jobs use the current Node LTS; typecheck and build/package use
 exactly the `engines.node` minimum (Node 24.21.0):
