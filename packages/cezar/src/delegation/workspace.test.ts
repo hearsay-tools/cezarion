@@ -4,7 +4,8 @@ import { createFixtureManager, drainFixtureManagers } from '../workflows/fixture
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import fsPromises from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -417,6 +418,106 @@ describe('owned workspace continuation and queued recovery', { timeout: WORKSPAC
 
 
 describe('removeOwnedWorkspace verified retryable destruction', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, () => {
+  it.skipIf(process.platform === 'win32')('retries a partially failed Git removal with read-only directories (hearsay-tools/cezarion#954)', async () => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    const shim = await mkdtemp(join(tmpdir(), 'cez-git-shim-'));
+    roots.push(shim);
+    const realGit = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
+    await writeFile(join(shim, 'git'), `#!/bin/sh
+if [ "$1" = worktree ] && [ "$2" = remove ]; then
+  "${realGit}" "$@" || exit $?
+  mkdir -p "$4/locked"
+  echo leftover > "$4/locked/file"
+  chmod 555 "$4/locked"
+  exit 1
+fi
+exec "${realGit}" "$@"
+`, { mode: 0o755 });
+    vi.stubEnv('PATH', `${shim}:${process.env.PATH}`);
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    expect(git(root, 'worktree', 'list', '--porcelain')).not.toContain(workspace.path);
+    const checkpoint = receiptPath(root, workspace).replace(/\.json$/, '.cleanup.json');
+    expect(JSON.parse(await readFile(checkpoint, 'utf8')).phase).toBe('prepared');
+    const outside = join(root, 'outside');
+    await mkdir(outside);
+    await writeFile(join(outside, 'keep'), 'safe');
+    await symlink(outside, join(workspace.path, 'link'));
+    try {
+      expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'complete', remaining: [] });
+    } finally {
+      if (existsSync(join(workspace.path, 'locked'))) await chmod(join(workspace.path, 'locked'), 0o755);
+    }
+    expect(existsSync(workspace.path)).toBe(false);
+    expect(await readFile(join(outside, 'keep'), 'utf8')).toBe('safe');
+    expect(JSON.parse(await readFile(checkpoint, 'utf8')).phase).toBe('complete');
+  });
+
+  async function partialLeftover() {
+    const { root, first, second } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    expect(await removeOwnedWorkspace(root, workspace, undefined, async () => { throw new Error('interrupt'); }))
+      .toMatchObject({ state: 'incomplete' });
+    git(root, 'worktree', 'remove', '--force', workspace.path);
+    await mkdir(workspace.path, { recursive: true });
+    await writeFile(join(workspace.path, 'leftover'), 'data');
+    return { root, workspace, first, second };
+  }
+
+  it('names the leftover and filesystem error when deletion fails', async () => {
+    const { root, workspace } = await partialLeftover();
+    const original = fsPromises.rm;
+    const spy = vi.spyOn(fsPromises, 'rm').mockImplementation(async (path, options) => {
+      if (path === workspace.path) throw new Error('simulated deletion failure');
+      return original(path, options);
+    });
+    syncBuiltinESMExports();
+    try {
+      const result = await removeOwnedWorkspace(root, workspace);
+      expect(result).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+      expect(result.error).toContain(workspace.path);
+      expect(result.error).toContain('Git no longer registers');
+      expect(result.error).toContain('simulated deletion failure');
+    } finally { spy.mockRestore(); syncBuiltinESMExports(); }
+  });
+
+  it('keeps a partial leftover when the fresh holder check refuses', async () => {
+    const { root, workspace } = await partialLeftover();
+    expect(await removeOwnedWorkspace(root, workspace, undefined, undefined, () => { throw new Error('held'); }))
+      .toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    expect(await readFile(join(workspace.path, 'leftover'), 'utf8')).toBe('data');
+  });
+
+  it('refuses a path registered again during release', async () => {
+    const { root, workspace, first } = await partialLeftover();
+    const result = await removeOwnedWorkspace(root, workspace, undefined, async () => {
+      await rm(workspace.path, { recursive: true });
+      git(root, 'worktree', 'add', '--detach', workspace.path, first);
+    });
+    expect(result).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    expect(git(root, 'worktree', 'list', '--porcelain')).toContain(workspace.path);
+    expect(existsSync(join(workspace.path, '.git'))).toBe(true);
+  });
+
+  it('leaves an advanced branch after removing a partial leftover', async () => {
+    const { root, workspace, second } = await partialLeftover();
+    git(root, 'update-ref', `refs/heads/${workspace.branch}`, second);
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['branch'] });
+    expect(existsSync(workspace.path)).toBe(false);
+    expect(git(root, 'rev-parse', workspace.branch)).toBe(second);
+  });
+
+  it.skipIf(process.platform === 'win32')('refuses a symlink replacing a partial leftover', async () => {
+    const { root, workspace } = await partialLeftover();
+    const outside = join(root, 'outside');
+    await mkdir(outside);
+    await writeFile(join(outside, 'keep'), 'safe');
+    await rm(workspace.path, { recursive: true });
+    await symlink(outside, workspace.path);
+    expect(await removeOwnedWorkspace(root, workspace)).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'] });
+    expect(await readFile(join(outside, 'keep'), 'utf8')).toBe('safe');
+  });
+
   it('preserves owned resources when shared mutation coordination is unavailable', async () => {
     const { root, first } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);

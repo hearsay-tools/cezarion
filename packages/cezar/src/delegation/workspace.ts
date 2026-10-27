@@ -97,6 +97,21 @@ async function exists(path: string): Promise<boolean> {
   });
 }
 
+/** Restore owner access only on real directories; do not chmod symlinks or their targets. */
+async function makeDirectoriesWritable(path: string): Promise<void> {
+  const info = await lstat(path);
+  if (!info.isDirectory() || info.isSymbolicLink() || await realpath(path) !== path) throw new Error(`Unsafe directory: ${path}`);
+  const directory = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+  try {
+    const opened = await directory.stat();
+    if (!opened.isDirectory() || opened.dev !== info.dev || opened.ino !== info.ino) throw new Error(`Directory changed: ${path}`);
+    await directory.chmod(opened.mode | 0o700);
+    for (const entry of await readdir(path, { withFileTypes: true })) {
+      if (entry.isDirectory()) await makeDirectoriesWritable(join(path, entry.name));
+    }
+  } finally { await directory.close(); }
+}
+
 /** Reads only committed state in the server-known parent cwd; never flushes its edits. */
 export async function resolveWorkerBaseline(repoRoot: string, parentCwd: string, baseline: string): Promise<string> {
   try {
@@ -296,11 +311,12 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
   const held = (pids: readonly number[]) => { heldBy = pids; report?.held?.(pids); };
-  let stranded: string | undefined;
+  let stranded: string | undefined; let leftoverError: string | undefined;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
     ...(remaining.length ? { error: lockBusy ? WORKTREE_LOCK_BUSY_ERROR
       : heldBy.length ? `Owned resources retained: processes ${heldBy.join(', ')} may still hold the worker worktree or scratch; retry destroy after they exit`
       : stranded ? `Owned branch ${value.branch} ${stranded}; keep what you need, delete the branch, then retry destroy`
+      : leftoverError ? `Git no longer registers owned worktree ${value.path}; cleanup failed: ${leftoverError}`
       : 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
     ...(provisioned ? { deleted: [
       ...(!remaining.includes('worktree') ? [{ kind: 'worktree' as const, path: value.path }] : []),
@@ -331,7 +347,11 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         await inspectCompletedCleanup(receipt);
         return result();
       }
-      if (await exists(workspace.path) && !await removePresentWorktree(receipt)) return result();
+      if (await exists(workspace.path)) {
+        const partial = checkpoint?.phase === 'prepared' && !await exists(receipt.gitDir) &&
+          !(await registered()).includes(`worktree ${workspace.path}`);
+        if (partial ? !await removeLeftover(receipt) : !await removePresentWorktree(receipt)) return result();
+      }
       if (!checkpoint) {
         checkpoint = await prepareMissingWorktree(receipt);
         if (!checkpoint) return result();
@@ -406,6 +426,36 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
         if (!removed) return false;
         remaining = ['branch'];
         return true;
+      }
+
+      async function removeLeftover(receipt: Receipt): Promise<boolean> {
+        const safe = async () => {
+          const info = await lstat(workspace.path);
+          return info.isDirectory() && !info.isSymbolicLink() && await realpath(workspace.path) === workspace.path &&
+            !await exists(receipt.gitDir) && !(await registered()).includes(`worktree ${workspace.path}`);
+        };
+        if (!await safe()) return false;
+        assertCurrent?.();
+        await beforeRemove?.();
+        assertCurrent?.();
+        checkUnheld(assertUnheld);
+        return withIdleTestApp(workspace.path, async (_stopped, busy) => {
+          if (busy || !await waitForTestAppWatcher(workspace.path)) { report?.unexplained?.(); return false; }
+          assertCurrent?.(); assertUnheld?.();
+          const holders = inspectGeneration({ paths: [workspace.path] });
+          if (holders.liveness !== 'gone') { if (holders.pids.length) held(holders.pids); else report?.unexplained?.(); return false; }
+          if (!await safe()) { report?.unexplained?.(); return false; }
+          try {
+            await makeDirectoriesWritable(workspace.path);
+            await rm(workspace.path, { recursive: true, force: true });
+          } catch (error) {
+            leftoverError = error instanceof Error ? error.message : String(error);
+            report?.unexplained?.();
+            return false;
+          }
+          remaining = ['branch'];
+          return true;
+        });
       }
 
       async function prepareMissingWorktree(receipt: Receipt): Promise<Cleanup | undefined> {
