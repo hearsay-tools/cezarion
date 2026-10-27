@@ -102,3 +102,33 @@ it('keeps a failed launch retryable without advancing discovery', async () => {
   expect(store.state(rule.id)?.cursor?.timestamp).toBe(at(100));
   expect([...store.latestReceipts().values()][0]?.status).toBe('launch-error');
 });
+
+it('recovers a scan past 100 timeline events without losing the activation baseline', async () => {
+  const { store, rule } = await setup(false, 1);
+  store.setState(rule.id, current => ({ ...current, baselineAt: at(50) }));
+  const timeline = Array.from({ length: 112 }, (_, index) => ({
+    id: index + 1, event: 'labeled', created_at: at(60 + index / 10),
+    label: { name: index === 110 ? 'bug' : 'other' },
+  }));
+  const poller = new GithubPoller({ run: async (_exe, args) => {
+    const path = args.find(arg => arg.includes('/timeline'));
+    if (!path) return JSON.stringify({ items: [issue(1), issue(2)] });
+    if (path.includes('/issues/2/')) {
+      return JSON.stringify([{ id: 200, event: 'labeled', created_at: at(10), label: { name: 'bug' } }]);
+    }
+    const page = Number(args.find(arg => arg.startsWith('page='))!.slice(5));
+    return JSON.stringify(timeline.slice((page - 1) * 100, page * 100));
+  } });
+  const launched: number[] = [];
+  await scheduler(store, poller, launched).check(rule);
+  expect(launched).toEqual([1]);
+  expect(store.state(rule.id)?.historyScan?.event).toBe(111);
+
+  const reopened = AutomationStore.open(store.dataDir);
+  expect(reopened.state(rule.id)?.baselineAt).toBe(at(50));
+  expect(reopened.state(rule.id)?.historyScan?.event).toBe(111);
+  await scheduler(reopened, poller, launched).check(rule);
+  expect(launched).toEqual([1]);
+  expect(reopened.state(rule.id)?.historyScan).toBeUndefined();
+  expect(reopened.state(rule.id)?.baselineAt).toBe(at(50));
+});

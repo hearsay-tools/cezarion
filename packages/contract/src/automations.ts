@@ -141,7 +141,8 @@ export const automationHistoryScanSchema = z.object({
   source: z.number().int().min(0).max(2),
   page: z.number().int().min(1).max(10),
   item: z.number().int().min(0).max(100),
-  event: z.number().int().min(0).max(100),
+  // One item can contain ten pages of 100 timeline entries, independent of the new-work cap.
+  event: z.number().int().min(0).max(1000),
   cursor: automationCursorSchema.optional(),
 });
 
