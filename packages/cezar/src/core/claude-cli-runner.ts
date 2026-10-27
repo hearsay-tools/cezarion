@@ -30,7 +30,7 @@ import type {
 // Re-exported for backends and the run manager that still import them from here.
 export type { AgentSession, SessionOptions } from './agent-runner.ts';
 import { isSignalTerminationExit, trackChildExit, unknownToolGrant } from './agent-runner.ts';
-import { confirmedLeaderExit, signalSession, spawnSessionLeader } from './session-process.ts';
+import { confirmedLeaderExit, signalSession, spawnSessionLeader, waitForEofExit } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { cezarToolEnvNames, cezarToolNames } from '../ci-wait/tools.ts';
 import { costWeightedTokens, type RawUsage } from './usage.ts';
@@ -522,14 +522,7 @@ export class ClaudeCliRunner implements AgentRunner {
       // leave waitForExit hanging on a timeout-less session. Give the normal
       // EOF→exit race a tick, then use the same SIGTERM→SIGKILL path as interrupt().
       if (!timedOut && !hasExited()) {
-        await new Promise<void>((resolve) => {
-          if (hasExited()) return resolve();
-          const done = () => { child.off('exit', done); child.off('close', done); clearTimeout(timer); resolve(); };
-          const timer = setTimeout(done, 50);
-          timer.unref?.();
-          child.once('exit', done);
-          child.once('close', done);
-        });
+        await waitForEofExit(child);
         if (!confirmedLeaderExit(child)) interrupt();
       }
 

@@ -18,7 +18,7 @@ import type {
   ToolGrant,
 } from './agent-runner.js';
 import { isSignalTerminationExit, unknownToolGrant } from './agent-runner.js';
-import { confirmedLeaderExit, signalSession, spawnSessionLeader } from './session-process.js';
+import { confirmedLeaderExit, signalSession, spawnSessionLeader, waitForEofExit } from './session-process.js';
 import { buildChildEnv } from './agent-env.js';
 import { cezarToolNames } from '../ci-wait/tools.js';
 import { readNdjson } from './ndjson.js';
@@ -523,14 +523,7 @@ export class PiRunner implements AgentRunner {
       // leave waitForExit hanging on a timeout-less session. Give the normal
       // EOF→exit race a tick, then the same SIGTERM→SIGKILL path as a thrown read.
       if (child.exitCode === null && child.signalCode === null) {
-        await new Promise<void>((resolve) => {
-          if (child.exitCode !== null || child.signalCode !== null) return resolve();
-          const done = () => { child.off('exit', done); child.off('close', done); clearTimeout(timer); resolve(); };
-          const timer = setTimeout(done, 50);
-          timer.unref?.();
-          child.once('exit', done);
-          child.once('close', done);
-        });
+        await waitForEofExit(child);
         if (!confirmedLeaderExit(child)) {
           terminatedByCezar = true;
           signalSession(child, 'SIGTERM');

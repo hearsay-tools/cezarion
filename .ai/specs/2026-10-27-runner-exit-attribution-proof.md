@@ -79,3 +79,14 @@ All attempts are retained under the task's evidence directory until publication:
 The issue's 20/20 run at observed host load >= 40 is still pending coordinated
 load. Ordinary green runs and delayed-callback proof do not satisfy that criterion.
 No timeout was widened. No host-wide load generator was started by this worker.
+
+## CI clone correction
+
+The first CI run, 40484583509 attempt 1, job 122123065198, found that the
+matching new guards extended an existing Pi/Claude EOF-wait clone. The correction
+extracts only that common wait into `waitForEofExit`; it changes no timer value.
+Both old paths perform the same ordered side effects: check observed exit;
+register exit/close listeners and an unreferenced 50 ms timer; on either exit
+notification or timer, remove both listeners, clear the timer, and resolve.
+The callers still decide attribution after the wait and await the real exit
+status. S33 and the three live-EOF guards cover both timer outcomes.

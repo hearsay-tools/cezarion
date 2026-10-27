@@ -42,6 +42,18 @@ function leaderExited(child: ChildProcess): boolean {
   const ps = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8', timeout: 2_000 });
   return ps.status === 0 ? /^Z|E/.test(ps.stdout.trim()) : ps.status === 1;
 }
+/** Let the ordinary stdout EOF/exit ordering settle before bounded cleanup. */
+export function waitForEofExit(child: ChildProcess): Promise<void> {
+  return new Promise(resolve => {
+    if (exited(child)) return resolve();
+    const done = () => { child.off('exit', done); child.off('close', done); clearTimeout(timer); resolve(); };
+    const timer = setTimeout(done, 50);
+    timer.unref?.();
+    child.once('exit', done);
+    child.once('close', done);
+  });
+}
+
 /** Positive exit evidence before classifying a cleanup signal as our teardown.
  * Unlike leaderExited's group-signal safety check, unknown evidence must keep
  * bounded cleanup armed (hearsay-tools/cezarion#1899). Node's exit notification
