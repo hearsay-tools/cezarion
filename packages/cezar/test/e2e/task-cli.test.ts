@@ -49,7 +49,7 @@ test('built cez task drives a dry-run cockpit it discovers from the checkout', {
   await execFile('git', ['-c', 'user.name=test', '-c', 'user.email=test@local', 'commit', '--allow-empty', '-qm', 'base'], { cwd: repo });
   // The mock answers the no-wait nudge in plain text (hearsay-tools/cezarion#1234), so a turn that
   // ends without a marker parks on Cezar's own wait with no card, as #609 below pins.
-  const env = { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_AUTONAME: '0',
+  const env: NodeJS.ProcessEnv = { ...process.env, CEZ_HOME: join(root, 'home'), CEZ_DRY_RUN: '1', CEZ_AUTONAME: '0',
     CEZ_REMOTE: '0', CEZ_URL: '', CEZ_DELEGATION_URL: '', CEZ_DELEGATION_TOKEN: '', CEZ_MOCK_NUDGE_REPLY: 'plain' };
   delete env.CEZ_TASK_ID; // These commands represent an operator outside a task.
   const task = async (args: string[]): Promise<Result> => {
