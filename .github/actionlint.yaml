@@ -1,8 +1,8 @@
 # actionlint configuration for the `Lint workflows` step in ci.yml
 # (hearsay-tools/cezarion#1130).
 self-hosted-runner:
-  # Blacksmith runners: ci-benchmark.yml uses the 4-vCPU label, release.yml
-  # the 8-vCPU one.
+  # Blacksmith runners: CI typecheck uses 2 vCPU, ci-benchmark.yml 4 vCPU,
+  # and release.yml 8 vCPU.
   labels:
     - blacksmith-*-ubuntu-2404
     # Ubicloud trial: browser CI shards use the lowest tier.

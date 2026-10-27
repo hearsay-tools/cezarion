@@ -408,8 +408,73 @@ jobs:
           fi
           node .github/scripts/check-clones.cjs --base "$base" --head "$head"
 
+  # Keep typechecking mandatory while using Blacksmith's smallest x64 tier
+  # for PRs and diagnostic dispatches. Main and queue verification stay free.
+  typecheck:
+    name: Typecheck
+    needs: queue-proof
+    if: ${{ !cancelled() && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') }}
+    runs-on: ${{ (github.event_name == 'pull_request_target' || github.event_name == 'workflow_dispatch') && 'blacksmith-2vcpu-ubuntu-2404' || 'ubuntu-24.04' }}
+    timeout-minutes: 15
+
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - *resolve-dispatch
+      # PR-aware dispatch verifies the same merge result as the PR event.
+      # Bare dispatch keeps the immutable SHA receiving the check.
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ (github.event.pull_request.number || steps['resolve-dispatch'].outputs.valid == 'true') && format('refs/pull/{0}/merge', github.event.pull_request.number || inputs.pr_number) || github.sha }}
+          # CI intentionally executes the PR merge result under pull_request_target;
+          # opt out of checkout's fork protection for this reviewed, read-only gate.
+          allow-unsafe-pr-checkout: true
+          persist-credentials: false
+          fetch-depth: 1
+
+      - name: Set up pnpm
+        if: hashFiles('pnpm-lock.yaml') != ''
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with:
+          version: '12.11.2'
+
+      - name: Set up Node.js
+        id: setup-node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
+        continue-on-error: true
+        with:
+          node-version: '24.21.0'
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
+          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+
+      # Keep the bounded download retry from the former floor job
+      # (hearsay-tools/cezarion#1214). A second failure fails this job.
+      - name: Retry Node.js setup
+        if: steps['setup-node'].outcome != 'success'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        timeout-minutes: 3
+        with:
+          node-version: '24.21.0'
+          cache: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm' || 'npm' }}
+          cache-dependency-path: ${{ hashFiles('pnpm-lock.yaml') != '' && 'pnpm-lock.yaml' || 'package-lock.json' }}
+
+      - name: Install dependencies
+        if: hashFiles('pnpm-lock.yaml') == ''
+        run: npm ci
+
+      - name: Install pnpm dependencies
+        if: hashFiles('pnpm-lock.yaml') != ''
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: npm run typecheck
+
   build-and-package:
-    name: Typecheck, unit, build, and package
+    name: Unit, build, and package
     needs: queue-proof
     if: ${{ !cancelled() && (needs.queue-proof.result != 'success' || needs.queue-proof.outputs.verified != 'true') }}
     runs-on: ubuntu-24.04
@@ -512,8 +577,10 @@ jobs:
         if: github.event_name != 'push'
         run: node .github/scripts/check-citations.cjs --base HEAD^1
 
-      - name: Typecheck
-        run: npm run typecheck
+      # The former typecheck step built the server before these unit tests.
+      # Keep that preparation on this VM after moving typecheck to its own job.
+      - name: Build server for unit tests
+        run: npm run build:server
 
       - name: Run unit tests
         run: npm run test:unit
@@ -877,7 +944,7 @@ jobs:
   # cockpit browser jobs.
   verify:
     name: Unit, build, E2E, and package
-    needs: [queue-proof, change-surface, classify-pr, complexity-gate, clone-gate, build-and-package, vitest, cockpit-browser]
+    needs: [queue-proof, change-surface, classify-pr, complexity-gate, clone-gate, typecheck, build-and-package, vitest, cockpit-browser]
     if: always()
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -894,6 +961,7 @@ jobs:
           SURFACE_RESULT: ${{ needs.change-surface.result }}
           CLONE_GATE_RESULT: ${{ needs['clone-gate'].result }}
           COMPLEXITY_GATE_RESULT: ${{ needs['complexity-gate'].result }}
+          TYPECHECK_RESULT: ${{ needs.typecheck.result }}
           BUILD_AND_PACKAGE_RESULT: ${{ needs['build-and-package'].result }}
           VITEST_RESULT: ${{ needs.vitest.result }}
           COCKPIT_BROWSER_RESULT: ${{ needs['cockpit-browser'].result }}
@@ -915,12 +983,14 @@ jobs:
             test "$CLONE_GATE_RESULT" = success -o "$CLONE_GATE_RESULT" = skipped
           fi
           if [ "$EVENT_NAME" = push ] && [ "$PROOF_RESULT" = success ] && [ "$PROOF_VERIFIED" = true ]; then
+            test "$TYPECHECK_RESULT" = skipped
             test "$BUILD_AND_PACKAGE_RESULT" = skipped
             test "$VITEST_RESULT" = skipped
             test "$COCKPIT_BROWSER_RESULT" = skipped
             printf 'Reused queue verification for %s: %s\n' "$VERIFIED_SHA" "$PROOF_SOURCE" >> "$GITHUB_STEP_SUMMARY"
             exit 0
           fi
+          test "$TYPECHECK_RESULT" = success
           test "$BUILD_AND_PACKAGE_RESULT" = success
           if [ "$EVENT_NAME" != merge_group ] && { [ "$CHANGE_SURFACE" = docs-only ] || [ "$CHANGE_SURFACE" = infra-only ] || [ "$BUMP_PR" = true ]; }; then
             test "$VITEST_RESULT" = success -o "$VITEST_RESULT" = skipped

@@ -102,6 +102,15 @@ test('failed verification blocks review but standalone context retains failed sh
   assert.ok(!h.calls.some(args => args.includes('--log-failed')));
 });
 
+for (const name of ['Typecheck', 'Unit, build, and package', 'Typecheck, unit, build, and package']) {
+  test(`review diagnostics retain failed ${name} logs`, () => {
+    const h = harness([{ jobs: [job({ conclusion: 'failure' }), job({ databaseId: 103, name, conclusion: 'failure' })] }]);
+    const result = collectCiResults(h.options);
+    assert.equal(result.failedJobs.some(job => job.name === name), true);
+    assert.ok(result.failedLog.includes(`AssertionError from ${name}`));
+  });
+}
+
 for (const conclusion of ['failure', 'timed_out', 'cancelled', 'skipped', 'neutral', 'action_required', null, '']) {
   test(`completed verification ${conclusion} blocks model work`, () => {
     const h = harness([{ jobs: [job({ conclusion }), publish()] }]);
