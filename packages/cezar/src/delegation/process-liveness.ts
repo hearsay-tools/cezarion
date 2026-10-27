@@ -2,7 +2,7 @@ import { spawnSync } from 'node:child_process';
 import { readdirSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 
-import { linuxBootId, parseProcStat, processStartToken } from '../detached-process.ts';
+import { exitedStat, linuxBootId, parseProcStat, processStartToken } from '../detached-process.ts';
 
 /**
  * Synchronous process evidence for worker recovery and resource cleanup. Unreadable cwd is no
@@ -15,15 +15,15 @@ export type RecordedProcess = { pid: number; startToken?: string | undefined; pg
 export type WorkerProcessRecord = { generation: string; controller: RecordedProcess; processes: RecordedProcess[] };
 export type GenerationLiveness = 'gone' | 'alive' | 'unknown';
 
-function procStat(pid: number) {
-  try { return parseProcStat(readFileSync(`/proc/${pid}/stat`, 'utf8')); } catch { return undefined; }
-}
-
 function pidExists(pid: number): boolean {
   if (!Number.isSafeInteger(pid) || pid <= 0) return false;
   try { process.kill(pid, 0); } catch (error) { return (error as NodeJS.ErrnoException).code === 'EPERM'; }
-  // A zombie has exited; only its parent's wait remains.
-  return process.platform !== 'linux' || procStat(pid)?.state !== 'Z';
+  if (process.platform !== 'linux') return true;
+  // A zombie leader can still have live threads. Unreadable stat is not proof of exit.
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    return !exitedStat(stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/));
+  } catch { return true; }
 }
 
 const LINUX_TOKEN = /^(?:[0-9a-f-]{36}:)?(\d+)$/;

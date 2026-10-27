@@ -11,7 +11,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
-import { groupExists, processStartToken, startOwnedGroup, stopGroup, watchGroup } from '../../packages/cezar/src/detached-process.ts';
+import { exitedStat, groupExists, processStartToken, startOwnedGroup, stopGroup, watchGroup } from '../../packages/cezar/src/detached-process.ts';
 
 const windowsScript = resolve(import.meta.dirname, 'test-env-windows.ps1');
 function windowsProbe(mode, payload, timeout = 15_000) {
@@ -40,7 +40,7 @@ export function identity(pid, timeout = 15_000) {
     try {
       const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
       const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
-      if (fields[0] === 'Z' || fields[0] === 'X') return { dead: true };
+      if (exitedStat(fields)) return { dead: true };
       const boot = readFileSync('/proc/sys/kernel/random/boot_id', 'utf8').trim();
       if (boot && /^\d+$/.test(fields[19] ?? '')) return { start: `${boot}:${fields[19]}` };
     } catch { /* Unreadable identity is not proof of death. */ }
@@ -184,7 +184,7 @@ function groupLive(pgid) {
           const fields = stat.slice(stat.lastIndexOf(')') + 1).trim().split(/\s+/);
           if (Number(fields[2]) === pgid) {
             sawMember = true;
-            if (!['Z', 'X'].includes(fields[0])) return true;
+            if (!exitedStat(fields)) return true;
           }
         } catch (error) { if (error.code !== 'ENOENT' && error.code !== 'ESRCH') unknown = true; }
       }

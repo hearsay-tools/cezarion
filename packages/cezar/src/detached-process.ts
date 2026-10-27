@@ -41,7 +41,7 @@ function statFields(stat: string): string[] {
 /** Whether the `/proc/<pid>/stat` fields are of an exited process. A leader whose main thread
  *  exited reads Z while its other threads run and keep its files open, a listening port among them,
  *  so it is exited only once `num_threads` (field 20) counts no thread but its own. */
-function exitedStat(fields: readonly string[]): boolean {
+export function exitedStat(fields: readonly string[]): boolean {
   return /^[ZX]$/.test(fields[0] ?? '') && Number(fields[17]) <= 1;
 }
 
