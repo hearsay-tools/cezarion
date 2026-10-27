@@ -57,8 +57,8 @@ export function waitForEofExit(child: ChildProcess): Promise<void> {
 /** Positive exit evidence before classifying a cleanup signal as our teardown.
  * Unlike leaderExited's group-signal safety check, unknown evidence must keep
  * bounded cleanup armed (hearsay-tools/cezarion#1899). Node's exit notification
- * can lag EOF; signal 0 detects a reaped PID on every platform, and Linux also
- * exposes a zombie or exit-in-progress. Other platforms retain cleanup until
+ * can lag EOF; signal 0 detects a reaped PID on every platform. Linux proc and
+ * Darwin ps also expose a zombie or exit-in-progress. Other platforms retain cleanup until
  * Node reports exit or the PID probe confirms absence. */
 export function confirmedLeaderExit(child: ChildProcess, platform: NodeJS.Platform = process.platform): boolean {
   if (exited(child)) return true;
@@ -66,6 +66,16 @@ export function confirmedLeaderExit(child: ChildProcess, platform: NodeJS.Platfo
   if (pid === undefined || !groupId(pid)) return false;
   try { process.kill(pid, 0); }
   catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
+  if (platform === 'darwin') {
+    try {
+      const ps = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], {
+        encoding: 'utf8', timeout: 2_000, killSignal: 'SIGKILL',
+      });
+      // Require one valid STAT value, not an error or a partial failed probe.
+      return ps.status === 0 && !ps.error && typeof ps.stdout === 'string'
+        && /^[ZE][+<>LNsXW]*$/.test(ps.stdout.trim());
+    } catch { return false; }
+  }
   if (platform !== 'linux') return false;
   try { return procStatExited(readFileSync(`/proc/${pid}/stat`, 'utf8')); }
   catch { return false; }

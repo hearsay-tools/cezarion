@@ -1,5 +1,6 @@
 import { execFile, execFileSync, type ChildProcess, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import * as fs from 'node:fs';
+import * as childProcess from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -7,6 +8,7 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
+vi.mock('node:child_process', async original => ({ ...await original<typeof import('node:child_process')>() }));
 vi.mock('node:fs', async original => ({ ...await original<typeof import('node:fs')>() }));
 
 vi.mock('./runner-runtime.ts', async (original) => ({
@@ -90,6 +92,40 @@ describe('confirmedLeaderExit (hearsay-tools/cezarion#1899)', () => {
     vi.spyOn(process, 'kill').mockReturnValue(true);
     vi.spyOn(fs, 'readFileSync').mockReturnValue(stat);
     expect(confirmedLeaderExit(child, 'linux')).toBe(expected);
+  });
+
+  it.each([
+    ['Z', true], ['Z+', true], ['Zs', true], ['E', true], ['E+', true],
+    ['S', false], ['R+', false], ['', false], ['STAT', false],
+    ['ZOMBIE', false], ['ERROR: denied', false], ['R\nZ', false],
+  ] as const)('Darwin requires one positive ps state: %s', (stdout, expected) => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    const probe = vi.spyOn(childProcess, 'spawnSync').mockReturnValue({
+      pid: 987654, output: [null, stdout, ''], stdout, stderr: '', status: 0, signal: null,
+    });
+    expect(confirmedLeaderExit(child, 'darwin')).toBe(expected);
+    expect(probe).toHaveBeenCalledWith('ps', ['-o', 'stat=', '-p', '123456'],
+      { encoding: 'utf8', timeout: 2_000, killSignal: 'SIGKILL' });
+  });
+
+  it.each([
+    { status: 1, stdout: '' },
+    { status: 1, stdout: 'Z' },
+    { status: null, stdout: 'Z', error: Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' }) },
+    { status: null, stdout: '', error: Object.assign(new Error('missing ps'), { code: 'ENOENT' }) },
+    { status: 0, stdout: 'Z', error: Object.assign(new Error('denied'), { code: 'EACCES' }) },
+  ])('Darwin keeps cleanup on unavailable ps evidence: %j', result => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    vi.spyOn(childProcess, 'spawnSync').mockReturnValue({
+      pid: 987654, output: [null, result.stdout, ''], stderr: '', signal: null, ...result,
+    });
+    expect(confirmedLeaderExit(child, 'darwin')).toBe(false);
+  });
+
+  it('Darwin keeps cleanup when starting the ps probe throws', () => {
+    vi.spyOn(process, 'kill').mockReturnValue(true);
+    vi.spyOn(childProcess, 'spawnSync').mockImplementation(() => { throw new Error('probe unavailable'); });
+    expect(confirmedLeaderExit(child, 'darwin')).toBe(false);
   });
 
   it('keeps cleanup on a live process without a supported state probe', () => {

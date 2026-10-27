@@ -13,11 +13,11 @@ If notification arrives later, they mark a cleanup signal as Cezar teardown.
 Codex can make the same attribution in its EOF watchdog.
 
 The fix checks positive exit evidence before those cleanup signals. A recorded
-exit, an absent PID (`ESRCH`), or Linux zombie/exit-in-progress state prevents
+exit, an absent PID (`ESRCH`), or Linux/Darwin zombie/exit-in-progress state prevents
 false teardown attribution. Missing PID data, denied probes, unreadable proc
 files and malformed state preserve bounded cleanup. The existing `signalSession`
-safety decision is unchanged. Outside Linux, the new probe confirms recorded
-exit or an absent PID only; it does not detect every exit-in-progress race.
+safety decision is unchanged. Darwin also reads a successful single `ps` STAT value for zombie or exiting
+state. Other platforms confirm recorded exit or an absent PID only.
 It does not replace waiting for Node to report the actual exit status.
 
 | Case | Before | After |
@@ -122,3 +122,30 @@ above policy, tracked in hearsay-tools/cezarion#1954 and hearsay-tools/cezarion#
 The 146 tests in the quality collection passed. One earlier collection reported
 incomplete because HEAD changed during measurement; rerunning against the
 unchanged source head produced the complete report.
+
+## Darwin review correction
+
+Review comment 4387561584 on hearsay-tools/cezarion#1956 identified an unreaped
+macOS zombie that can still answer signal 0. The confirmed-exit helper now reads
+`ps -o stat= -p PID` on Darwin, bounded to two seconds with SIGKILL on timeout.
+Only a successful single Z/E state, with recognized STAT modifiers, confirms
+exit. A live state, malformed/multiple values, nonzero status, timeout, spawn
+error, denied probe or thrown call retains cleanup. The older `leaderExited`
+and `signalSession` implementations remain unchanged.
+
+Darwin `proof_base`: `50110aa43bd8c2ce7d29102cda53638a363690a7`.
+The new test file ran against that source in `/tmp/cezar-1899-darwin-proof`
+with its own frozen dependency installation, then against only the fixed helper:
+
+```sh
+npm --prefix /tmp/cezar-1899-darwin-proof test -- \
+  packages/cezar/src/core/session-process.test.ts -t Darwin
+```
+
+Before: 12 failed, 6 passed, 23 skipped. Five failures returned false for actual
+Z/E test inputs; seven showed that no Darwin state probe ran. After: 18 passed,
+23 skipped. Squeal separately observed the failing new cases and their recovery.
+These are mocked platform-probe tests on Linux, **not a real macOS execution**.
+The existing native six-runner delayed-exit and live-EOF guards remain in place.
+The prior high-load acceptance exercises the Linux path, which this correction
+leaves unchanged.
