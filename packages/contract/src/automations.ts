@@ -134,14 +134,15 @@ export type AutomationCursor = z.infer<typeof automationCursorSchema>;
  * The scheduler's own bookkeeping for one automation. Every key is optional — a definition that
  * has never run has no state at all, and the keys appear as the poller reaches each stage.
  */
-/** Durable position inside a bounded historical search, independent of the live overlap. */
+/** Durable position inside a bounded GitHub scan, including live overlap and historical searches. */
 export const automationHistoryScanSchema = z.object({
   since: z.string().datetime(),
   until: z.string().datetime(),
   source: z.number().int().min(0).max(2),
   page: z.number().int().min(1).max(10),
   item: z.number().int().min(0).max(100),
-  event: z.number().int().min(0).max(100),
+  // One item can contain ten pages of 100 timeline entries, independent of the new-work cap.
+  event: z.number().int().min(0).max(1000),
   cursor: automationCursorSchema.optional(),
 });
 

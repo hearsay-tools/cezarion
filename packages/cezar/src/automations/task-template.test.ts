@@ -178,7 +178,7 @@ describe('automation task templates', () => {
     } finally { store.close(); await rm(root, { recursive: true, force: true }); }
   });
 
-  it('backfill skips a manual task with a secondary reference and logs its id for both events', async () => {
+  it('backfill skips a manual task with a secondary reference and audits each matching event', async () => {
     const root = await mkdtemp(join(tmpdir(), 'cezar-backfill-'));
     const store = RunStore.open(join(root, '.ai/cezar'));
     try {

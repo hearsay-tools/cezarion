@@ -22,11 +22,15 @@ Test filter uses the selected eligibility window without the execution cursor. I
 receipts and launches nothing. History remains bounded by the rolling lookback and existing
 per-check caps. The CLI exposes `--include-existing` for GitHub `add`, plus the JSON filter key.
 
-Historical scans save an optional `historyScan` position (fixed since/until, source, page, item,
+Live and historical scans save an optional `historyScan` position (fixed since/until, source, page, item,
 and label-event offset), retaining the successful cursor until the window drains. Each check
-keeps the configured record cap, 100-item budget and ten-request budget. The default future-only
-polling path retains its two-minute overlap. Provider search (1,000 items) and label timeline
-(100 events per item) limits report actionable errors instead of certifying unvisited history.
+counts only new matching items against the configured record cap; handled matching events still
+produce duplicate audit rows, including their owning task when available. It uses a separate 100-item scan
+budget and ten-request historical or eleven-request live budget. Mutable label and assignee filters
+run locally, and both sources use creation order: changing either on an earlier item cannot remove
+or reorder a search row and shift the saved offset past an unseen item. The default future-only polling path retains its two-minute
+overlap. Provider search (1,000 items) and label timeline (ten pages of 100 entries per item) limits
+report actionable errors instead of certifying unvisited history.
 Rearming clears continuation; ordinary query edits clear its offsets while preserving the
 successful cursor. Lookback-only edits do not reopen completed discovery; re-enable to reopen
 a wider window. Historical label searches revisit the rolling lookback independently of the live
