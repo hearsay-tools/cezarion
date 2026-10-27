@@ -13,6 +13,18 @@ int main(void) {
   if (!mkdtemp(name)) return 1;
   int p = open(name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
   if (p < 0 || mkdirat(p, "stage", 0700) || mkdirat(p, "root", 0000)) return 1;
+  /* Probe same-parent swap before the exclusive cross-parent claim. */
+  if (mkdirat(p, "placeholder", 0700)) return 1;
+  struct stat swapBefore, swapAfter;
+  if (fstatat(p, "root", &swapBefore, AT_SYMLINK_NOFOLLOW)) return 1;
+  errno = 0;
+  int swapped = renameatx_np(p, "root", p, "placeholder", RENAME_SWAP);
+  printf("same_parent_swap=%d errno=%d\n", swapped, errno);
+  if (swapped == 0) {
+    if (fstatat(p, "placeholder", &swapAfter, AT_SYMLINK_NOFOLLOW) || !same(swapBefore, swapAfter)) return 1;
+    if (renameatx_np(p, "root", p, "placeholder", RENAME_SWAP)) return 1;
+  }
+  if (unlinkat(p, "placeholder", AT_REMOVEDIR)) return 1;
   int stage = openat(p, "stage", O_RDONLY | O_DIRECTORY | O_NOFOLLOW);
   struct stat owned, moved, outside;
   if (stage < 0 || fstatat(p, "root", &owned, AT_SYMLINK_NOFOLLOW)) return 1;
