@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { trackChildExit } from './agent-runner.ts';
-import { confirmedLeaderExit, signalSession, spawnSessionLeader } from './session-process.ts';
+import { probeLeaderState, type LeaderState, signalSession, spawnSessionLeader } from './session-process.ts';
 import { buildChildEnv } from './agent-env.ts';
 import { EOF_KILL_GRACE_MS, EOF_TERM_GRACE_MS } from './runner-runtime.ts';
 
@@ -146,13 +146,13 @@ export class CodexAppServerRpc {
 
 /**
  * Close stdin, then escalate SIGTERM→SIGKILL for a server that ignores EOF.
- * `onSignal` fires when the watchdog actually signals: the caller needs to
- * know a non-zero exit was its own doing, not a codex failure (#703).
+ * `onSignal` receives the evidence available before each signal attempt.
+ * The caller combines that sample with explicit intent; an attempt alone is not causation.
  */
 export function endCodexAppServer(
   child: ChildProcessWithoutNullStreams,
   onTimers?: (term: NodeJS.Timeout, kill: NodeJS.Timeout | undefined) => void,
-  onSignal?: () => void,
+  onSignal?: (state: LeaderState) => void,
 ): void {
   try {
     child.stdin.end();
@@ -164,14 +164,18 @@ export function endCodexAppServer(
   // app-server that handles the signal instead of dying from it (#844).
   const hasExited = trackChildExit(child);
   let killTimer: NodeJS.Timeout | undefined;
+  const termState = probeLeaderState(child, EOF_TERM_GRACE_MS);
   const termTimer = setTimeout(() => {
-    if (!hasExited() && !confirmedLeaderExit(child)) {
-      onSignal?.();
+    const state = termState();
+    if (!hasExited() && state !== 'exited') {
+      onSignal?.(state);
       signalSession(child, 'SIGTERM');
     }
+    const killState = probeLeaderState(child, EOF_KILL_GRACE_MS);
     killTimer = setTimeout(() => {
-      if (!hasExited() && !confirmedLeaderExit(child)) {
-        onSignal?.();
+      const state = killState();
+      if (!hasExited() && state !== 'exited') {
+        onSignal?.(state);
         signalSession(child, 'SIGKILL');
       }
     }, EOF_KILL_GRACE_MS);

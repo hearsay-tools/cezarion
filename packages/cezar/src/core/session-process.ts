@@ -1,4 +1,4 @@
-import { ChildProcess, spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { ChildProcess, execFile, spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { readdirSync, readFileSync } from 'node:fs';
 import { afterExitDrain, exitDrainBudget, KILL_GRACE_MS } from './runner-runtime.ts';
 
@@ -42,43 +42,82 @@ function leaderExited(child: ChildProcess): boolean {
   const ps = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], { encoding: 'utf8', timeout: 2_000 });
   return ps.status === 0 ? /^Z|E/.test(ps.stdout.trim()) : ps.status === 1;
 }
-/** Let the ordinary stdout EOF/exit ordering settle before bounded cleanup. */
-export function waitForEofExit(child: ChildProcess): Promise<void> {
+/** A state sample permits cleanup attribution; it is not proof of signal causation. */
+export type LeaderState = 'exited' | 'live' | 'unknown';
+
+/** Fast evidence only. Failed probes never turn an unknown process into a live one. */
+export function leaderState(child: ChildProcess, platform: NodeJS.Platform = process.platform): LeaderState {
+  if (exited(child)) return 'exited';
+  const pid = child.pid;
+  if (pid === undefined || !groupId(pid)) return 'unknown';
+  try { process.kill(pid, 0); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ESRCH') return 'exited'; }
+  if (platform !== 'linux') return 'unknown';
+  try {
+    const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+    const match = /^(\d+) \(.*\) ([RSDZTtXxKWPI]) (?:\S+ ){5}(\d+)(?: |$)/.exec(stat);
+    if (!match || Number(match[1]) !== pid || !Number.isSafeInteger(Number(match[3]))) return 'unknown';
+    return procStatExited(stat) || /^[Xx]$/.test(match[2]!) ? 'exited' : 'live';
+  } catch { return 'unknown'; }
+}
+
+/** Read one complete ps state; diagnostics, multiple states and unknown flags are not evidence. */
+export function psLeaderState(stdout: string, platform: NodeJS.Platform): LeaderState {
+  const state = stdout.trim();
+  const valid = platform === 'darwin' ? /^[RUSTIZE][+<>LNsXW]*$/ : /^[RSDZTtXxKWPI][<NLsl+]*$/;
+  if (!valid.test(state)) return 'unknown';
+  return /^[ZEXx]/.test(state) ? 'exited' : 'live';
+}
+
+/** Start fallback evidence within the last 50ms of an EXISTING grace. The caller takes
+ * the sample at its unchanged signal deadline; it never awaits ps. Taking the sample,
+ * or native exit, cancels the probe. A slow/missing ps keeps bounded cleanup, with unknown
+ * attribution. Windows has no state fallback. Signal 0 alone cannot distinguish zombies. */
+export function probeLeaderState(child: ChildProcess, graceMs: number, platform: NodeJS.Platform = process.platform): () => LeaderState {
+  let sampled: LeaderState = 'unknown';
+  let probe: ChildProcess | undefined;
+  let stopped = false;
+  let launch: NodeJS.Timeout | undefined;
+  const cancel = (): void => {
+    stopped = true;
+    clearTimeout(launch);
+    child.off('exit', cancel);
+    if (probe && !exited(probe)) probe.kill('SIGKILL');
+  };
+  const start = (): void => {
+    if (stopped || leaderState(child, platform) !== 'unknown' || !child.pid || !groupId(child.pid)) return;
+    if (platform !== 'linux' && platform !== 'darwin') return;
+    try {
+      probe = execFile('ps', ['-o', 'stat=', '-p', String(child.pid)], {
+        encoding: 'utf8', timeout: Math.min(50, graceMs), killSignal: 'SIGKILL', maxBuffer: 128,
+      }, (error, stdout, stderr) => {
+        if (!stopped && !error && !stderr.trim()) sampled = psLeaderState(stdout, platform);
+      });
+    } catch { /* unknown; the signal deadline still owns cleanup */ }
+  };
+  child.once('exit', cancel);
+  if (graceMs <= 50) start();
+  else { launch = setTimeout(start, graceMs - 50); launch.unref?.(); }
+  return () => {
+    cancel();
+    const current = leaderState(child, platform);
+    // A PID that changed state inconsistently is not positive evidence of liveness.
+    if (current === 'live' && sampled === 'exited') return 'unknown';
+    return current === 'unknown' ? sampled : current;
+  };
+}
+
+/** Let ordinary stdout EOF/exit ordering settle; collect fallback evidence in that same budget. */
+export function waitForEofExit(child: ChildProcess): Promise<LeaderState> {
+  const sample = probeLeaderState(child, 50);
   return new Promise(resolve => {
-    if (exited(child)) return resolve();
-    const done = () => { child.off('exit', done); child.off('close', done); clearTimeout(timer); resolve(); };
+    if (exited(child)) return resolve(sample());
+    const done = () => { child.off('exit', done); child.off('close', done); clearTimeout(timer); resolve(sample()); };
     const timer = setTimeout(done, 50);
     timer.unref?.();
     child.once('exit', done);
     child.once('close', done);
   });
-}
-
-/** Positive exit evidence before classifying a cleanup signal as our teardown.
- * Unlike leaderExited's group-signal safety check, unknown evidence must keep
- * bounded cleanup armed (hearsay-tools/cezarion#1899). Node's exit notification
- * can lag EOF; signal 0 detects a reaped PID on every platform. Linux proc and
- * Darwin ps also expose a zombie or exit-in-progress. Other platforms retain cleanup until
- * Node reports exit or the PID probe confirms absence. */
-export function confirmedLeaderExit(child: ChildProcess, platform: NodeJS.Platform = process.platform): boolean {
-  if (exited(child)) return true;
-  const pid = child.pid;
-  if (pid === undefined || !groupId(pid)) return false;
-  try { process.kill(pid, 0); }
-  catch (error) { return (error as NodeJS.ErrnoException).code === 'ESRCH'; }
-  if (platform === 'darwin') {
-    try {
-      const ps = spawnSync('ps', ['-o', 'stat=', '-p', String(pid)], {
-        encoding: 'utf8', timeout: 2_000, killSignal: 'SIGKILL',
-      });
-      // Require one valid STAT value, not an error or a partial failed probe.
-      return ps.status === 0 && !ps.error && typeof ps.stdout === 'string'
-        && /^[ZE][+<>LNsXW]*$/.test(ps.stdout.trim());
-    } catch { return false; }
-  }
-  if (platform !== 'linux') return false;
-  try { return procStatExited(readFileSync(`/proc/${pid}/stat`, 'utf8')); }
-  catch { return false; }
 }
 
 // -1 and 0 address every process and our own group: never a session.

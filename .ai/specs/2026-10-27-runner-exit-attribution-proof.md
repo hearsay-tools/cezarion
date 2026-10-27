@@ -149,3 +149,138 @@ These are mocked platform-probe tests on Linux, **not a real macOS execution**.
 The existing native six-runner delayed-exit and live-EOF guards remain in place.
 The prior high-load acceptance exercises the Linux path, which this correction
 leaves unchanged.
+
+
+## Unknown evidence policy (review 4387780376)
+
+Parent approved preparation and verification on 2026-10-27; product merge still
+requires the final user decision. `proof_base` for this round is
+`1d23b3eeae49e97ef9b4a8bc9da6702b61aaea0a`.
+
+The original S33 probe with proc unreadable still found ESRCH after libuv reaped
+the child. That attempt passed all six runners. Denying both proc and the PID
+signal-0 probe produced three false successes (Claude/Codex/Pi), with the other
+three runners preserving failure. A real unreaped Linux zombie accepted TERM
+and KILL while retaining its original exit code 143. Signal acceptance therefore
+cannot establish causation. Raw evidence was published as artifact
+`bd58435c-1f55-44cb-854a-8b49677646d3`.
+
+The approved policy separates positive exited, positive live and unknown evidence.
+Confirmed exit retains the real failure. Positive live evidence permits successful
+automatic teardown. Unknown evidence still starts bounded cleanup but cannot turn
+a nonzero or signal exit into success. Ordinary exit 0 remains successful.
+Explicit end/interrupt retains intentional teardown success until native exit.
+An existing output/startup failure still takes precedence over teardown intent.
+A live sample is not causal proof against an external signal arriving later.
+
+The old live-EOF guarantee is bounded release of execution capacity plus successful
+teardown. Existing proc-unreadable success tests keep every assertion: asynchronous
+ps can supply a positive live sample. New fully unavailable evidence tests require
+failure after bounded cleanup. On Windows, absent Node exit or ESRCH evidence, no
+live-state fallback exists; automatic nonzero/signal cleanup can therefore fail.
+Darwin coverage uses platform probes on Linux; it is not a native macOS claim.
+
+### Intent precedence case table
+
+These rows run for Claude, Codex and Pi. S23/S27 retain explicit teardown coverage
+for all six native runners; S33/S34 retain external-exit coverage for all six.
+
+| Evidence and intent | Ordered effects and result | Coverage |
+| --- | --- | --- |
+| Unknown automatic EOF, no explicit request | Revoke input; existing grace; TERM; original KILL deadline; await native exit; fail signal/nonzero exit | unknown automatic EOF cleanup |
+| Positive live automatic EOF, proc unavailable | Same cleanup; successful teardown | unchanged live-EOF guard |
+| Confirmed exit before cleanup | Preserve actual exit result; no attribution from a signal attempt | S33, Pi self-exit143 |
+| Explicit end before EOF | Record request; close input; existing EOF cleanup; successful teardown | before EOF / end, S23 |
+| Explicit interrupt before EOF | Record intent; existing native cancel and TERM; bounded KILL; success | before EOF / interrupt, S27 |
+| End or interrupt during probe | Retain input closure; record explicit intent; no later than existing cleanup deadline; success | during probe / both methods |
+| End after automatic TERM | Record intent without reopening input or resetting cleanup; original KILL; success | after TERM / end |
+| Interrupt after automatic TERM | Record intent; keep earlier automatic KILL deadline, including Codex; success | after TERM / interrupt |
+| Explicit call after native exit | No change to observed failure | native exit guard; cannot affect an already-settled promise |
+| Output/startup failure plus explicit intent | Cleanup still runs; existing failure takes precedence | S24 and existing startup tests |
+
+### Probe timing and ordered effects
+
+The probe runs only in the final 50 ms of an existing grace. It never waits on ps
+at the signal deadline. It cancels a pending launch and kills an unfinished ps
+when sampled or when native exit arrives. Thus added scheduled TERM/KILL latency
+is zero; maximum ps execution allowance is 50 ms. Host event-loop scheduling still
+applies to all timers. Slow or unavailable ps yields unknown. Strict platform state
+validation rejects malformed, multiple and contradictory evidence. The pre-existing
+leaderExited/signalSession safety behavior is unchanged.
+
+Pi and Claude retain native output finalization, input revocation, the 50 ms EOF
+wait, TERM then their existing KILL grace, native exit wait, timer cleanup, and
+failure/timeout precedence. Explicit intent is separate from a cleanup attempt.
+Claude's automatic cleanup preserves interrupt's side-effect order while choosing
+attribution separately. Codex retains closeInput before stdin.end, its TERM and
+KILL grace periods, native exit wait and failure/timeout precedence. Its internal
+EOF close no longer declares an explicit end request. Probe collection runs inside
+those grace periods. Interrupt during active automatic cleanup retains the earlier
+EOF KILL deadline.
+
+
+### Positive fallback fixture and host-load limit
+
+Squeal revision 26 observed one failure of the original Pi proc-unreadable live
+success guard. Its automatic same-input retry passed. Both outcomes are retained;
+this was not accepted as a fix. Host load sampled afterward was 34.575. A finite
+50 ms ps window cannot guarantee evidence availability under ordinary host load.
+The guard therefore contained a hidden dependency on local process startup speed.
+
+Parent approved splitting the old environmental guarantee on 2026-10-27. The live
+native guard keeps every success/cleanup assertion and real SIGSTOP, EOF, TERM,
+KILL and native exit. It now supplies deterministic positive-live fallback evidence.
+It proves success GIVEN that evidence, not guaranteed availability. A separate real
+ps integration test uses a 2 s test bound; production deadlines remain unchanged.
+Unknown/unavailable evidence and probe-timeout tests retain cleanup and require
+signal failure. Delayed or unavailable probes can therefore turn an otherwise live
+automatic cleanup into failure on an ordinary loaded host, as well as on Windows.
+This candidate behavior remains subject to final human approval before merge.
+
+
+### Final round-two proof ledger
+
+All proof runs used a disposable checkout with its own frozen dependencies.
+No shared stash was used. Original exploratory results remain recorded above.
+
+| Run | Result |
+| --- | --- |
+| Initial round-two native regression, prior source | 6 fail / 21 pass |
+| Same 27 cases, first policy implementation | 27 pass |
+| Native exact KILL-deadline case, prior source | Codex fails; Claude/Pi pass |
+| Same deadline case, fixed source | 3 pass |
+| Held real ps completion, original live-EOF arrangement | 3 fail |
+| Same held scheduling and product source, explicit positive-live fixture | 3 pass |
+| Final S34, unavailable/timeout live cleanup, intent and deadline cases on proof_base | 10 fail / 23 pass |
+
+Final red command:
+
+```sh
+npm test -- packages/cezar/src/core/runner-shutdown-parity.test.ts \
+  -t 'S34|unknown automatic EOF|explicit .* wins|earlier KILL deadline'
+```
+
+The ten red failures are three delayed external exits, six live automatic cleanups
+with unavailable/timed-out evidence, and the Codex interrupt deadline. The other
+23 cases guard preserved behavior. Final source proof additionally selects S33,
+the positive-live guards and original Pi 143 cases.
+
+The Pi and Claude EOF blocks moved into immediate local `cleanupAfterEof` helpers
+to keep the changed output-loop complexity below baseline. The ordered effects
+listed above are unchanged. `leaderExited` and `signalSession` remain byte-identical
+to the prior source. The inherited Codex reader complexity is tracked in
+hearsay-tools/cezarion#1965, alongside hearsay-tools/cezarion#1954 and
+hearsay-tools/cezarion#1955 for Claude/Pi.
+
+
+Final fixed-source command selected the two native suites with
+`S33|S34|unknown automatic EOF|explicit .* wins|earlier KILL deadline|keeps live EOF|143`:
+**46 passed, 99 skipped**, including the original Pi self-exit and explicit teardown
+143 assertions. Squeal revision 29 reports current passes for the affected runner,
+process helper, transport, shutdown and file-length suites. Final local quality
+measurement checked **101/101 functions** and its **217 selected tests passed**.
+The three inherited findings are Claude output loop complexity 135 (baseline 138),
+CRAP 2242.3396; Codex reader complexity 33 (baseline 33), CRAP 40.5258; and Pi output
+loop complexity 122 (baseline 127), CRAP 137.2076. Their follow-up issues are
+hearsay-tools/cezarion#1954, hearsay-tools/cezarion#1965 and hearsay-tools/cezarion#1955.
+New evidence/probe and attribution helpers meet both quality thresholds.

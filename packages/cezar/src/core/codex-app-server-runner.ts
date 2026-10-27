@@ -213,13 +213,11 @@ class CodexSession implements AgentSession {
   private eofKillTimer: NodeJS.Timeout | undefined;
   private spawnFailed: Error | null = null;
   private timedOut = false;
-  /** Set the moment WE signal the child (EOF watchdog, cancel, kill switch).
-   *  codex handles the signal and exits 143, so without this the runner reads
-   *  its own teardown as a codex failure (#703). */
+  /** Explicit teardown or automatic cleanup with positive live evidence. */
   private terminatedByCezar = false;
-  /** "Has the app-server really terminated?" — the question `child.killed`
-   *  does not answer: it flips on signal delivery, so the SIGTERM this runner
-   *  sends would otherwise veto its own SIGKILL escalation (#844). */
+  private explicitEnd = false;
+  private automaticCleanupStarted = false;
+  /** Native termination, independent of signal delivery (`child.killed`). */
   private readonly hasExited: () => boolean;
   /** Protocol v2 emission — additive alongside v1 (`onEvent` keeps flowing
    *  byte-identical); the channel is `opts.onUiEvent` (RunManager wiring
@@ -302,13 +300,11 @@ class CodexSession implements AgentSession {
             if (this.open) this.dispatch(msg);
             continue;
           }
-          // Explicit shutdown suppresses late lifecycle, not passive output.
-          // Natural exit can overtake the final turn frame: retain its outcome
-          // without restoring ACK/ask/input authority on the dead connection.
+          // Drain the final outcome after natural exit without restoring input authority.
           const finalOutcome = this.stdinOpen && hasExited() &&
             (msg.method === 'turn/completed' || msg.method === 'turn/failed');
           if (!this.open && (msg.id !== undefined || (!PASSIVE_OUTPUT_METHODS.has(msg.method ?? '') && !finalOutcome))) continue;
-          // Child turn lifecycle must reach neither channel (#600).
+          // Child turns do not reach either channel.
           if (this.isForeignTurnLifecycle(msg)) continue;
           // The UI mapper must not retire a live approval on an older turn's tail.
           if ((msg.method === 'turn/completed' || msg.method === 'turn/failed') && this.activeTurnId &&
@@ -321,7 +317,7 @@ class CodexSession implements AgentSession {
         }
         if (this.stdinOpen && !hasExited()) {
           if (!this.startupComplete) this.fail(new Error(`Codex startup stdout closed while waiting for ${this.startupPhase}`));
-          else this.end();
+          else this.end(false);
         }
       } catch {
         if (this.stdinOpen && !hasExited()) {
@@ -578,7 +574,11 @@ class CodexSession implements AgentSession {
   holdsHumanInput(): boolean { return this.humanPromptsPending > 0 || this.humanReadyOnTurnStart; }
   heldHumanInputCount(): number { return this.humanPromptsPending + (this.humanReadyOnTurnStart ? 1 : 0); }
 
-  end(): void {
+  end(explicit = true): void {
+    if (explicit && !this.hasExited()) {
+      this.explicitEnd = true;
+      this.terminatedByCezar ||= this.automaticCleanupStarted;
+    }
     if (!this.stdinOpen) return;
     this.closeInput('session ended');
     try {
@@ -588,21 +588,21 @@ class CodexSession implements AgentSession {
           this.eofTermTimer = term;
           this.eofKillTimer = kill;
         },
-        () => {
-          this.terminatedByCezar = true;
+        (state) => {
+          this.automaticCleanupStarted = true;
+          this.terminatedByCezar ||= this.explicitEnd || state === 'live';
         },
       );
-    } catch {
-      // already gone
-    }
+    } catch { /* already gone */ }
   }
 
   interrupt(): void {
     if (this.hardStopStarted || this.hasExited()) return;
     this.hardStopStarted = true;
-    if (this.eofTermTimer) clearTimeout(this.eofTermTimer);
-    if (this.eofKillTimer) clearTimeout(this.eofKillTimer);
-    // Native cancellation is best effort; never wait for its ACK to stop.
+    if (!this.automaticCleanupStarted) {
+      if (this.eofTermTimer) clearTimeout(this.eofTermTimer);
+      if (this.eofKillTimer) clearTimeout(this.eofKillTimer);
+    }
     if (this.stdinOpen && this.threadId && this.activeTurnId) {
       void this.rpc.request('turn/interrupt', { threadId: this.threadId, turnId: this.activeTurnId }).catch(() => undefined);
     }

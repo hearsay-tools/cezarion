@@ -18,7 +18,7 @@ import type {
   ToolGrant,
 } from './agent-runner.js';
 import { isSignalTerminationExit, unknownToolGrant } from './agent-runner.js';
-import { confirmedLeaderExit, signalSession, spawnSessionLeader, waitForEofExit } from './session-process.js';
+import { signalSession, spawnSessionLeader, waitForEofExit } from './session-process.js';
 import { buildChildEnv } from './agent-env.js';
 import { cezarToolNames } from '../ci-wait/tools.js';
 import { readNdjson } from './ndjson.js';
@@ -110,6 +110,8 @@ export class PiRunner implements AgentRunner {
     let open = true;
     let timedOut = false;
     let terminatedByCezar = false;
+    let explicitEnd = false;
+    let automaticCleanupStarted = false;
     let autoEndTimer: NodeJS.Timeout | undefined;
     let killTimer: NodeJS.Timeout | undefined;
     let interruptKillTimer: NodeJS.Timeout | undefined;
@@ -295,6 +297,10 @@ export class PiRunner implements AgentRunner {
       return true;
     };
     const end = (): void => {
+      if (child.exitCode === null && child.signalCode === null) {
+        explicitEnd = true;
+        terminatedByCezar ||= automaticCleanupStarted;
+      }
       if (!open) return;
       open = false;
       rejectAgentAck();
@@ -313,6 +319,7 @@ export class PiRunner implements AgentRunner {
       killTimer.unref?.();
     };
     const interrupt = (): void => {
+      if (child.exitCode === null && child.signalCode === null) terminatedByCezar = true;
       if (!open) return;
       // Mark intent before the abort write: even a synchronous write failure is teardown.
       terminatedByCezar = true;
@@ -349,6 +356,22 @@ export class PiRunner implements AgentRunner {
           }, limitMs)
         : undefined;
     deadline?.unref?.();
+
+    // EOF retains the existing grace and escalation order. Only attribution depends on evidence.
+    const cleanupAfterEof = async (): Promise<void> => {
+      if (child.exitCode === null && child.signalCode === null) {
+        const state = await waitForEofExit(child);
+        if (state !== 'exited') {
+          automaticCleanupStarted = true;
+          terminatedByCezar ||= explicitEnd || state === 'live';
+          signalSession(child, 'SIGTERM');
+          const reap = setTimeout(() => {
+            if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
+          }, KILL_GRACE_MS);
+          reap.unref?.();
+        }
+      }
+    };
 
     const result = (async (): Promise<AgentRunResult> => {
       try {
@@ -519,20 +542,7 @@ export class PiRunner implements AgentRunner {
         rejectAgentAck();
       }
 
-      // Clean stdout EOF is not a read failure, but a still-running child would
-      // leave waitForExit hanging on a timeout-less session. Give the normal
-      // EOF→exit race a tick, then the same SIGTERM→SIGKILL path as a thrown read.
-      if (child.exitCode === null && child.signalCode === null) {
-        await waitForEofExit(child);
-        if (!confirmedLeaderExit(child)) {
-          terminatedByCezar = true;
-          signalSession(child, 'SIGTERM');
-          const reap = setTimeout(() => {
-            if (child.exitCode === null && child.signalCode === null) signalSession(child, 'SIGKILL');
-          }, KILL_GRACE_MS);
-          reap.unref?.();
-        }
-      }
+      await cleanupAfterEof();
 
       flushText();
       emitLatchedProviderError();
