@@ -76,9 +76,29 @@ All attempts are retained under the task's evidence directory until publication:
   construction errors. `push(null)` supplies clean EOF to the admitted native
   transport; the corrected before/after counts are recorded above.
 
-The issue's 20/20 run at observed host load >= 40 is still pending coordinated
-load. Ordinary green runs and delayed-callback proof do not satisfy that criterion.
-No timeout was widened. No host-wide load generator was started by this worker.
+The issue's high-load acceptance passed on source commit
+`5b5fab1db5ab468d8d1b1e8ddcdb7d82c49605e6`. The parent approved a bounded load
+window, but observed one-minute load was already 46.7988 on 24 CPUs, so the
+supervisor started **zero** busy loops. All 20 sequential native self-exit cases
+rejected code 143. Each iteration recorded load 46.8; none was below 40. The
+unchanged interrupt/end assertions also passed, taking 121 ms and 10,125 ms.
+The full acceptance command took 13.379 s; ending load was 49.1777. There were
+22 attempts, zero failures and zero under-threshold self-exit attempts. There
+was no retry. The supervisor logged the same source head before and after.
+
+```sh
+timeout --kill-after=5s 480s python3 .ai/qa/1899-probe/load-window.py
+# At load >=40, the supervisor ran exactly once:
+timeout --kill-after=5s 120s taskset -c 2 node --import tsx \
+  .ai/qa/1899-probe/acceptance.ts
+```
+
+The acceptance script imports the production Pi runner and unchanged native
+SIGTERM fixture. It preserves all original self-exit and interrupt/end
+assertions, and records per-attempt load, outcome, elapsed time and events.
+`acceptance.jsonl`, `load-window.jsonl` and both scripts are in the published
+final evidence archive. No timeout was widened. No load-generator process or
+proof checkout remains.
 
 ## CI clone correction
 
@@ -90,3 +110,15 @@ register exit/close listeners and an unreferenced 50 ms timer; on either exit
 notification or timer, remove both listeners, clear the timer, and resolve.
 The callers still decide attribution after the wait and await the real exit
 status. S33 and the three live-EOF guards cover both timer outcomes.
+
+## Final source verification
+
+After extracting the shared EOF wait, Squeal revision 10 reports current passing
+results for Pi, Claude, shutdown parity (including S33 and live clean EOF with
+unreadable proc) and session-process tests. The delayed native Pi probe again
+rejected 20/20. Server typecheck and the clone gate passed. Quality measured
+44/44 changed functions; only the inherited Claude/Pi output loops remain
+above policy, tracked in hearsay-tools/cezarion#1954 and hearsay-tools/cezarion#1955.
+The 146 tests in the quality collection passed. One earlier collection reported
+incomplete because HEAD changed during measurement; rerunning against the
+unchanged source head produced the complete report.
