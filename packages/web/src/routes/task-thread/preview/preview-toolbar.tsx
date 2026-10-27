@@ -19,7 +19,7 @@ import {
   TabletIcon,
   XIcon,
 } from 'lucide-react'
-import { useEffect, useRef, useState, type ComponentProps, type RefObject } from 'react'
+import { useEffect, useRef, useState, type ComponentProps, type ReactNode, type RefObject } from 'react'
 
 import type { PreviewServer } from '@open-mercato/cezar-api-client'
 import { StatusDot, type StatusDotTone } from '@/components/status-dot'
@@ -198,10 +198,7 @@ function agentEntry(props: PreviewToolbarProps): { agentLive: boolean; agentShow
 }
 
 export function PreviewToolbar(props: PreviewToolbarProps) {
-  const { url, servers, current, adopted, viewport, compact = false, navEnabled, loading = false, stats, status, badge = true } = props
-  const { agentLive, agentShown, agentListed } = agentEntry(props)
-  const switcher = servers.length + (agentListed ? 1 : 0) >= 2
-  const crowded = switcher || adopted
+  const { compact = false, navEnabled, loading = false } = props
   const ownInput = useRef<HTMLInputElement | null>(null)
   const input = props.urlInputRef ?? ownInput
   const focusUrlAfterMenu = useRef(false)
@@ -226,7 +223,53 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
     </Button>
   )
 
-  const switcherMenu = switcher ? (
+  const session = props.onSession ? (
+    <Button variant="outline" size="sm" className="shrink-0 gap-1 max-md:h-11" onClick={props.onSession}>
+      <ChevronLeftIcon aria-hidden="true" />
+      Session
+    </Button>
+  ) : null
+
+  const progress = loading ? (
+    <div
+      role="progressbar"
+      aria-label="Loading the page"
+      className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-transparent"
+    >
+      <div className="preview-progress h-full w-2/5 bg-success" />
+    </div>
+  ) : null
+
+  const address = <ToolbarAddress props={props} input={input} draft={draft} setDraft={setDraft} focused={focused} setFocused={setFocused} />
+  const { agentListed } = agentEntry(props)
+  const switcher = props.servers.length + (agentListed ? 1 : 0) >= 2
+  const crowded = switcher || props.adopted
+  const more = <ToolbarMore props={props} compact={compact} crowded={crowded} />
+  const elements = { back, forward, reload, address, more, session, progress }
+  return compact
+    ? <MobileToolbar props={props} elements={elements} />
+    : <DesktopToolbar props={props} elements={elements} switcher={switcher} crowded={crowded} input={input} focusUrlAfterMenu={focusUrlAfterMenu} />
+}
+
+interface ToolbarElements {
+  back: ReactNode
+  forward: ReactNode
+  reload: ReactNode
+  address: ReactNode
+  more: ReactNode
+  session: ReactNode
+  progress: ReactNode
+}
+
+interface ToolbarInput {
+  input: RefObject<HTMLInputElement | null>
+  focusUrlAfterMenu: RefObject<boolean>
+}
+
+function ToolbarSwitcher({ props, input, focusUrlAfterMenu }: { props: PreviewToolbarProps } & ToolbarInput) {
+  const { servers, current } = props
+  const { agentLive, agentShown, agentListed } = agentEntry(props)
+  return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <SwitcherButton current={current} agentShown={agentShown} />
@@ -266,9 +309,19 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
-  ) : null
+  )
+}
 
-  const address = (
+function ToolbarAddress({ props, input, draft, setDraft, focused, setFocused }: {
+  props: PreviewToolbarProps
+  input: RefObject<HTMLInputElement | null>
+  draft: string | null
+  setDraft(value: string | null): void
+  focused: boolean
+  setFocused(value: boolean): void
+}) {
+  const { url, adopted } = props
+  return (
     <div className="relative flex min-w-[9rem] flex-1 items-center">
       <GlobeIcon className="pointer-events-none absolute left-2.5 size-4 text-muted-foreground" aria-hidden="true" />
       <input
@@ -315,8 +368,11 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
       ) : null}
     </div>
   )
+}
 
-  const viewportMenu = compact ? null : (
+function ToolbarViewport({ props }: { props: PreviewToolbarProps }) {
+  const { viewport } = props
+  return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="sm" className="shrink-0 gap-1.5" aria-label={`Viewport size: ${viewportLabel(viewport)}`}>
@@ -342,8 +398,10 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
       </DropdownMenuContent>
     </DropdownMenu>
   )
+}
 
-  const readout = compact ? null : stats ? (
+function ToolbarReadout({ stats, status, crowded }: Pick<PreviewToolbarProps, 'stats' | 'status'> & { crowded: boolean }) {
+  return stats ? (
     <Stats stats={stats} shrunk={crowded} />
   ) : status ? (
     <span data-slot="preview-status" className="flex shrink-0 items-center gap-1.5 font-mono text-xs whitespace-nowrap text-muted-foreground">
@@ -351,8 +409,11 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
       {status.label}
     </span>
   ) : null
+}
 
-  const more = (
+function ToolbarMore({ props, compact, crowded }: { props: PreviewToolbarProps; compact: boolean; crowded: boolean }) {
+  const { stats, navEnabled, url, current, adopted } = props
+  return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button variant="ghost" size="icon-sm" className={iconButton} aria-label="More">
@@ -402,48 +463,44 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
       </DropdownMenuContent>
     </DropdownMenu>
   )
+}
 
-  const session = props.onSession ? (
-    <Button variant="outline" size="sm" className="shrink-0 gap-1 max-md:h-11" onClick={props.onSession}>
-      <ChevronLeftIcon aria-hidden="true" />
-      Session
-    </Button>
-  ) : null
-
-  const progress = loading ? (
-    <div
-      role="progressbar"
-      aria-label="Loading the page"
-      className="absolute inset-x-0 bottom-0 h-0.5 overflow-hidden bg-transparent"
-    >
-      <div className="preview-progress h-full w-2/5 bg-success" />
-    </div>
-  ) : null
-
-  if (compact) {
-    return (
-      <div data-slot="preview-toolbar" data-compact="" className="relative flex shrink-0 flex-col border-b border-border bg-background">
-        <div className="flex items-center gap-2 px-2 pt-[max(0.25rem,env(safe-area-inset-top))]">
-          {session}
-          <div className="flex min-w-0 flex-1 flex-col items-center leading-tight">
-            <span className="flex max-w-full items-center gap-1.5 text-sm font-semibold text-foreground">
-              {stats ? <StatusDot tone="success" aria-hidden="true" /> : null}
-              <span className="truncate">{shownTitle(current, agentShown)}</span>
-            </span>
-            {badge ? <span className="text-xs text-muted-foreground">Experimental</span> : null}
-          </div>
-          {more}
+function MobileToolbar({ props, elements }: { props: PreviewToolbarProps; elements: ToolbarElements }) {
+  const { stats, current, badge = true } = props
+  const { agentShown } = agentEntry(props)
+  const { back, forward, reload, address, more, session, progress } = elements
+  return (
+    <div data-slot="preview-toolbar" data-compact="" className="relative flex shrink-0 flex-col border-b border-border bg-background">
+      <div className="flex items-center gap-2 px-2 pt-[max(0.25rem,env(safe-area-inset-top))]">
+        {session}
+        <div className="flex min-w-0 flex-1 flex-col items-center leading-tight">
+          <span className="flex max-w-full items-center gap-1.5 text-sm font-semibold text-foreground">
+            {stats ? <StatusDot tone="success" aria-hidden="true" /> : null}
+            <span className="truncate">{shownTitle(current, agentShown)}</span>
+          </span>
+          {badge ? <span className="text-xs text-muted-foreground">Experimental</span> : null}
         </div>
-        <div className="flex items-center gap-1 px-2 py-1">
-          {back}
-          {forward}
-          {reload}
-          {address}
-        </div>
-        {progress}
+        {more}
       </div>
-    )
-  }
+      <div className="flex items-center gap-1 px-2 py-1">
+        {back}
+        {forward}
+        {reload}
+        {address}
+      </div>
+      {progress}
+    </div>
+  )
+}
+
+function DesktopToolbar({ props, elements, switcher, crowded, input, focusUrlAfterMenu }: {
+  props: PreviewToolbarProps
+  elements: ToolbarElements
+  switcher: boolean
+  crowded: boolean
+} & ToolbarInput) {
+  const { badge = true, stats, status } = props
+  const { back, forward, reload, address, more, session, progress } = elements
 
   return (
     <div data-slot="preview-toolbar" className="@container relative flex shrink-0 items-center gap-1.5 border-b border-border bg-background px-2.5 py-2">
@@ -451,10 +508,10 @@ export function PreviewToolbar(props: PreviewToolbarProps) {
       {back}
       {forward}
       {reload}
-      {switcherMenu}
+      {switcher ? <ToolbarSwitcher props={props} input={input} focusUrlAfterMenu={focusUrlAfterMenu} /> : null}
       {address}
-      {viewportMenu}
-      {readout}
+      <ToolbarViewport props={props} />
+      <ToolbarReadout stats={stats} status={status} crowded={crowded} />
       {badge ? <ExperimentalBadge iconOnly={crowded} responsive={!crowded} /> : null}
       <span aria-hidden="true" className="mx-0.5 h-5 w-px shrink-0 bg-border" />
       {more}

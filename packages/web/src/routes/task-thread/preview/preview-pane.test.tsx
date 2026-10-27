@@ -191,6 +191,33 @@ describe('PreviewPane', () => {
     expect(sent().filter(m => m.t === 'ack')).toHaveLength(1)
   })
 
+  it('samples frame rates and round trips, keeps idle time, and resumes the live readout', async () => {
+    vi.useFakeTimers()
+    try {
+      render(<PreviewPane run={run} servers={[web]} request={{ port: 5173 }} onClose={() => undefined} />)
+      transport('open')
+      message({ t: 'state', stage: 'streaming', adopted: false })
+      message({ t: 'pong', ts: Date.now() - 25 })
+      await act(async () => last().handlers.onFrame(new Blob(['x'.repeat(2048)], { type: 'image/jpeg' })))
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(screen.getByRole('img', { name: '1 fps · 2 KB/s · 25 ms' })).toBeTruthy()
+
+      act(() => { vi.advanceTimersByTime(1500) })
+      expect(screen.getByRole('img', { name: 'idle' })).toBeTruthy()
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(screen.getByRole('img', { name: 'idle' })).toBeTruthy()
+
+      await act(async () => last().handlers.onFrame(new Blob(['x'.repeat(1024)], { type: 'image/jpeg' })))
+      act(() => { vi.advanceTimersByTime(500) })
+      expect(screen.getByRole('img', { name: '1 fps · 1 KB/s · 25 ms' })).toBeTruthy()
+      transport('reconnecting', 1)
+      expect(screen.queryByRole('img', { name: '1 fps · 1 KB/s · 25 ms' })).toBeNull()
+    } finally {
+      cleanup()
+      vi.useRealTimers()
+    }
+  })
+
   it('opens on the empty state when nothing was requested and navigates a typed port', () => {
     render(<PreviewPane run={run} servers={[web]} onClose={() => undefined} />)
     transport('open')
