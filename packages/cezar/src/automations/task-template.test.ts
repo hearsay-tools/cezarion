@@ -178,7 +178,7 @@ describe('automation task templates', () => {
     } finally { store.close(); await rm(root, { recursive: true, force: true }); }
   });
 
-  it('backfill skips a manual task with a secondary reference and records its owner once', async () => {
+  it('backfill skips a manual task with a secondary reference and audits each matching event', async () => {
     const root = await mkdtemp(join(tmpdir(), 'cezar-backfill-'));
     const store = RunStore.open(join(root, '.ai/cezar'));
     try {
@@ -204,7 +204,7 @@ describe('automation task templates', () => {
       await scheduler.check(rule);
       expect(startRun).not.toHaveBeenCalled();
       const skips = automations.logs({ automationId: rule.id }).filter((log) => log.githubNumber === 7);
-      expect(skips).toHaveLength(1);
+      expect(skips).toHaveLength(4);
       for (const log of skips) {
         expect(log.runId).toBe(existing.id);
         expect(log.reason).toContain(existing.id);

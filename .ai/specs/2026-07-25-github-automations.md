@@ -24,7 +24,8 @@ per-check caps. The CLI exposes `--include-existing` for GitHub `add`, plus the 
 
 Live and historical scans save an optional `historyScan` position (fixed since/until, source, page, item,
 and label-event offset), retaining the successful cursor until the window drains. Each check
-counts only new matching items against the configured record cap, with a separate 100-item scan
+counts only new matching items against the configured record cap; handled matching events still
+produce duplicate audit rows, including their owning task when available. It uses a separate 100-item scan
 budget and ten-request historical or eleven-request live budget. Mutable label and assignee filters
 run locally, and both sources use creation order: changing either on an earlier item cannot remove
 or reorder a search row and shift the saved offset past an unseen item. The default future-only polling path retains its two-minute

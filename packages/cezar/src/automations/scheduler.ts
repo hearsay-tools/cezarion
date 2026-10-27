@@ -76,7 +76,8 @@ export class ProjectAutomationScheduler {
         throw new Error(`automation is backed off until ${state.backoffUntil}`);
       }
       const { baseline, overlapSince } = pollWindow(definition, state, mode);
-      const accept = candidateAcceptor(definition, baseline, mode, store);
+      const duplicates: GithubCandidate[] = [];
+      const accept = candidateAcceptor(definition, baseline, mode, store, candidate => duplicates.push(candidate));
       const result = await githubRequests.run(() => github.poller.poll(
         github.owner,
         github.repo,
@@ -86,6 +87,7 @@ export class ProjectAutomationScheduler {
       this.assertCurrent(definition);
       const eligible = result.candidates.filter(candidate => afterBaseline(candidate, definition, baseline));
       if (mode === 'execute') await this.launchCandidates(definition, eligible);
+      await this.recordDuplicates(definition, duplicates);
       this.assertCurrent(definition);
       this.recordSuccess(definition, state, result, mode, detectionOnly);
       this.handle.onChange?.(definition.id, definition.revision);
@@ -113,6 +115,24 @@ export class ProjectAutomationScheduler {
     for (const candidate of candidates) {
       this.assertCurrent(definition);
       await this.launch(definition, candidate);
+    }
+  }
+
+  /** Audit handled matches independently of the new-work budget, after selected launches own their receipts. */
+  private async recordDuplicates(definition: GithubAutomationDefinition, candidates: GithubCandidate[]): Promise<void> {
+    if (!candidates.length) return;
+    const owners = new Map([...this.handle.store.latestReceipts().values()]
+      .filter(receipt => receipt.automationId === definition.id && receipt.status !== 'released')
+      .map(receipt => [receipt.candidate ? candidateKey(receipt.candidate) : receipt.eventId, receipt]));
+    for (const candidate of candidates) {
+      this.assertCurrent(definition);
+      const owner = owners.get(candidateKey(candidate));
+      await this.handle.store.appendLog({ automationId: definition.id, revision: definition.revision, event: candidate.event,
+        result: 'duplicate', reason: owner
+          ? `A durable receipt already exists for this automation and item.${owner.runId ? ` Task: ${owner.runId}.` : ''}`
+          : 'Another matching event for this issue was selected in this check.',
+        ...(owner?.runId ? { runId: owner.runId } : {}),
+        githubNumber: candidate.number, githubTitle: candidate.title, githubUrl: candidate.url });
     }
   }
 
@@ -277,7 +297,8 @@ function afterBaseline(candidate: GithubCandidate, definition: GithubAutomationD
 }
 
 function candidateAcceptor(definition: GithubAutomationDefinition, baseline: string | undefined,
-  mode: 'preview' | 'execute', store: AutomationStore): (candidate: GithubCandidate) => boolean {
+  mode: 'preview' | 'execute', store: AutomationStore,
+  duplicate: (candidate: GithubCandidate) => void): (candidate: GithubCandidate) => boolean {
   const handled = new Set([...store.latestReceipts().values()]
     .filter(receipt => receipt.automationId === definition.id && receipt.status !== 'released')
     .map(receipt => receipt.candidate ? candidateKey(receipt.candidate) : receipt.eventId));
@@ -285,7 +306,10 @@ function candidateAcceptor(definition: GithubAutomationDefinition, baseline: str
     if (!afterBaseline(candidate, definition, baseline)) return false;
     if (mode === 'preview') return true;
     const key = candidateKey(candidate);
-    if (handled.has(key)) return false;
+    if (handled.has(key)) {
+      duplicate(candidate);
+      return false;
+    }
     handled.add(key);
     return true;
   };

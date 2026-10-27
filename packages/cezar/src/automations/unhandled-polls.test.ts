@@ -173,3 +173,21 @@ it.each([
   await scheduler(AutomationStore.open(store.dataDir), poller, launched).check(rule);
   expect(launched).toEqual([1, 2, 3]);
 });
+
+it('audits a later matching event for a handled issue without charging the new-work cap', async () => {
+  const { store, rule } = await setup(false, 1);
+  const candidate = { repo: 'acme/demo', nodeId: 'I_1', number: 1, title: 'Issue', url: issue(1).html_url,
+    eventId: 'old-opened', event: 'issue.opened' as const, timestamp: at(10), tieBreaker: 'I_1',
+    author: 'alice', assignees: [], labels: ['bug'] };
+  const receipt = store.reserveReceipt({ automationId: rule.id, revision: rule.revision, eventId: candidate.eventId, candidate })!;
+  store.appendReceipt({ ...receipt, status: 'launched', runId: 'old-run', updatedAt: at(20) });
+  const { poller } = provider([issue(1), issue(2)]);
+  const launched: number[] = [];
+  const reopened = AutomationStore.open(store.dataDir);
+  await scheduler(reopened, poller, launched).check(rule);
+  expect(launched).toEqual([2]);
+  expect(reopened.logs({ automationId: rule.id }).filter(row => row.result === 'duplicate')).toEqual([
+    expect.objectContaining({ event: 'issue.labeled', githubNumber: 1, runId: 'old-run', reason: expect.stringContaining('old-run') }),
+  ]);
+  expect(reopened.latestReceipts().size).toBe(2);
+});
