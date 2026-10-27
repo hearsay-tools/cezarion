@@ -5,6 +5,7 @@ on:
       - '.github/workflows/worker-destroy-macos.yml'
       - 'packages/cezar/src/delegation/workspace*'
       - 'packages/cezar/src/delegation/destroy-holders*'
+      - 'packages/cezar/src/delegation/mount-boundary*'
       - 'packages/cezar/src/delegation/service*'
       - 'packages/cezar/src/delegation/process-liveness*'
       - 'packages/cezar/src/detached-process*'
@@ -27,7 +28,10 @@ jobs:
           node-version: '24.21.0'
       - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
       - run: pnpm install --frozen-lockfile
+      - name: Verify mount boundary enumeration
+        run: npm test -- packages/cezar/src/delegation/mount-boundary.test.ts
       - name: Verify mode-000 owned worktree recovery
+        if: ${{ !cancelled() }}
         run: npm test -- packages/cezar/src/delegation/workspace.test.ts -t 'recovers a leftover with an inaccessible'
       - name: Verify scoped holder termination
         if: always()

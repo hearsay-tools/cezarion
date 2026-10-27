@@ -322,6 +322,20 @@ resumes completion after ACK without inventing a later turn.
 | Unreadable evidence for a known candidate or a failed OS scan | Report the failure and retry; unrelated unreadable processes do not block the scan. |
 | Process starts after the last scan or its PID changes between a POSIX token check and signal | No hard isolation or atomic check-and-signal is claimed. Later attempts scan again. |
 
+Mount boundaries are checked before scoped holder termination, permission repair and
+worktree or scratch deletion. The check is repeated at those boundaries; it does
+not make a subsequent mount by another same-user process atomic with the operation.
+
+| Mount case | Cleanup behavior |
+| --- | --- |
+| Root or descendant is a mount, including a same-device bind mount | Retain the resource and report incomplete; do not signal its holders or traverse it. |
+| Mount is only an ancestor of an ordinary owned root | Continue the normal ownership checks and cleanup. |
+| A mount appears between checks | The next check refuses and retains the remaining resources. |
+| Spaces, delimiters or newlines in a mount path | Keep every plausible mountpoint interpretation; refuse rather than omit ambiguous evidence. |
+| Mount listing unavailable, malformed or unsupported | Report incomplete and retry; an empty or failed scan is not a clear scan. |
+| Windows mapped, substituted or unsupported drive | Retain the resource when its volume boundaries cannot be established. |
+| Owned path is absent | Resolve its trusted ancestor and continue the remaining authenticated cleanup. |
+
 Cancellation requested is not proof of process termination. Add a manager
 termination barrier covering queued, dequeue/startup gaps, workflow checks and
 agent sessions. Wait for runner result/process termination and finalization, not

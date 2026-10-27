@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { MountBoundaryError } from './mount-boundary.ts';
 
 const script = fileURLToPath(new URL('../../scripts/windows-workspace-identity.ps1', import.meta.url));
 
@@ -32,6 +33,11 @@ export function windowsRemoveIdentity(path: string, privateParent = true): void 
 }
 export function windowsMigrateIdentity(path: string, destination: string): void {
   identityOperation({ operation: 'migrate', path, destination });
+}
+
+export function windowsAssertMountBoundary(paths: readonly string[]): void {
+  try { identityOperation({ operation: 'mount-boundary', paths }); }
+  catch (error) { throw new MountBoundaryError(`Mount boundary cannot be verified: ${error instanceof Error ? error.message : String(error)}`); }
 }
 
 /** Process identities are obtained from OS handles, never an app lease. */

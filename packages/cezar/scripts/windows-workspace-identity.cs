@@ -10,6 +10,68 @@ using System.Security.Principal;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 
+// Mounted folders can share a device with their parent; enumerate volume
+// mount paths rather than comparing file IDs or drive letters.
+public static class CezMountBoundary {
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  static extern IntPtr FindFirstVolumeW(StringBuilder volume, uint length);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  static extern bool FindNextVolumeW(IntPtr find, StringBuilder volume, uint length);
+  [DllImport("kernel32.dll", SetLastError = true)] static extern bool FindVolumeClose(IntPtr find);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  static extern bool GetVolumePathNamesForVolumeNameW(string volume, [Out] char[] paths, uint length, out uint required);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  static extern uint GetDriveTypeW(string root);
+  [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  static extern uint QueryDosDeviceW(string device, StringBuilder target, uint length);
+
+  public static void Assert(string[] roots) {
+    var normalized = new List<string>();
+    foreach (string root in roots) {
+      string path = Path.GetFullPath(root).TrimEnd('\\');
+      if (path.Length < 2 || path[1] != ':') throw new IOException("Cannot verify mount boundaries for non-local resource");
+      string drive = path.Substring(0, 2);
+      uint type = GetDriveTypeW(drive + "\\");
+      var target = new StringBuilder(32768);
+      if ((type != 2 && type != 3) || QueryDosDeviceW(drive, target, (uint)target.Capacity) == 0 ||
+          !target.ToString().StartsWith("\\Device\\", StringComparison.OrdinalIgnoreCase) ||
+          target.ToString().StartsWith("\\Device\\Mup", StringComparison.OrdinalIgnoreCase))
+        throw new IOException("Cannot verify mount boundaries for mapped or aliased drive: " + drive);
+      normalized.Add(path);
+    }
+    var volume = new StringBuilder(1024);
+    IntPtr find = FindFirstVolumeW(volume, (uint)volume.Capacity);
+    if (find == new IntPtr(-1)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot enumerate volumes");
+    int count = 0;
+    var covered = new bool[normalized.Count];
+    try {
+      do {
+        uint required; var paths = new char[1024];
+        if (!GetVolumePathNamesForVolumeNameW(volume.ToString(), paths, (uint)paths.Length, out required)) {
+          int error = Marshal.GetLastWin32Error();
+          if (error != 234 || required == 0 || required > 1048576) throw new Win32Exception(error, "Cannot enumerate volume mount paths");
+          paths = new char[required];
+          if (!GetVolumePathNamesForVolumeNameW(volume.ToString(), paths, (uint)paths.Length, out required)) throw new Win32Exception(Marshal.GetLastWin32Error(), "Cannot enumerate volume mount paths");
+        }
+        foreach (string mount in new string(paths).Split(new char[] { '\0' }, StringSplitOptions.RemoveEmptyEntries)) {
+          count++;
+          string path = Path.GetFullPath(mount).TrimEnd('\\');
+          for (int i = 0; i < normalized.Count; i++) {
+            string root = normalized[i];
+            if (String.Equals(path, root, StringComparison.OrdinalIgnoreCase) || path.StartsWith(root + "\\", StringComparison.OrdinalIgnoreCase))
+              throw new IOException("Mounted resource boundary prevents cleanup: " + root);
+            if (root.StartsWith(path + "\\", StringComparison.OrdinalIgnoreCase)) covered[i] = true;
+          }
+        }
+      } while (FindNextVolumeW(find, volume, (uint)volume.Capacity));
+      int last = Marshal.GetLastWin32Error();
+      if (last != 18) throw new Win32Exception(last, "Cannot enumerate volumes");
+      if (count == 0) throw new IOException("Volume mount path evidence is empty");
+      for (int i = 0; i < covered.Length; i++) if (!covered[i]) throw new IOException("Volume mount path evidence does not cover resource: " + normalized[i]);
+    } finally { FindVolumeClose(find); }
+  }
+}
+
 public static class CezWorkspaceIdentity {
   const uint ReadControl = 0x20000, ReadAttributes = 0x80, GenericRead = 0x80000000, GenericWrite = 0x40000000, Delete = 0x10000;
   const uint OpenReparse = 0x200000, BackupSemantics = 0x2000000, ReparsePoint = 0x400, DirectoryAttribute = 0x10;
@@ -293,6 +355,7 @@ public static class CezDestroyHolders {
     return false;
   }
   public static string[] Find(string[] roots, int selectedPid) {
+    CezMountBoundary.Assert(roots);
     int size = 1024 * 1024, needed, status; IntPtr data = IntPtr.Zero;
     try {
       do {

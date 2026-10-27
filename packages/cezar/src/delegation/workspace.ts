@@ -1,6 +1,7 @@
 import { inspectGeneration } from './process-liveness.ts';
+import { assertDarwinMountBoundary, assertLinuxMountBoundary, MountBoundaryError } from './mount-boundary.ts';
 import { waitForTestAppWatcher, withIdleTestApp } from './idle-test-app.ts';
-import { windowsIdentityDirectory, windowsReadIdentity, windowsWriteIdentity } from './windows-workspace-identity.ts';
+import { windowsAssertMountBoundary, windowsIdentityDirectory, windowsReadIdentity, windowsWriteIdentity } from './windows-workspace-identity.ts';
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { constants, lstatSync } from 'node:fs';
@@ -118,6 +119,8 @@ async function exists(path: string): Promise<boolean> {
 
 /** Restore owner access only on real directories; do not chmod symlinks or their targets. */
 async function makeDirectoryWritable(path: string, expected?: { dev: number; ino: number }): Promise<void> {
+  assertLinuxMountBoundary([path]);
+  assertDarwinMountBoundary([path]);
   const info = await lstat(path);
   if (!info.isDirectory() || info.isSymbolicLink() || await realpath(path) !== path ||
       (expected && (info.dev !== expected.dev || info.ino !== expected.ino))) throw new Error(`Unsafe directory: ${path}`);
@@ -413,10 +416,11 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
   let remaining: Array<'worktree' | 'branch'> = ['worktree', 'branch'];
   let provisioned = false; let lockBusy = false; let heldBy: readonly number[] = [];
   const held = (pids: readonly number[]) => { heldBy = pids; report?.held?.(pids); };
-  let stranded: string | undefined; let leftoverError: string | undefined;
+  let stranded: string | undefined; let leftoverError: string | undefined; let mountError: string | undefined;
   const result = (): WorkerDestroyResult => ({ workerId: value.ownerRunId, state: remaining.length ? 'incomplete' : 'complete', remaining,
     ...(remaining.length ? { error: lockBusy ? WORKTREE_LOCK_BUSY_ERROR
       : heldBy.length ? `Owned resources retained: processes ${heldBy.join(', ')} may still hold the worker worktree or scratch; retry destroy after they exit`
+      : mountError ? mountError
       : stranded ? `Owned branch ${value.branch} ${stranded}; keep what you need, delete the branch, then retry destroy`
       : leftoverError ? `Git no longer registers owned worktree ${value.path}; cleanup failed: ${leftoverError}`
       : 'Owned resources remain: resource identity or Git cleanup could not be verified. Check the worker worktree, Git lock and ownership receipt, then retry destroy after correcting the blocker' } : {}),
@@ -533,6 +537,9 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           }
           // Git requires a second force for a locked worktree. Explicit destroy has
           // already authenticated this resource; an owned lock cannot veto it.
+          assertLinuxMountBoundary([workspace.path]);
+          assertDarwinMountBoundary([workspace.path]);
+          if (process.platform === 'win32') windowsAssertMountBoundary([workspace.path]);
           const removal = await mutationGit(repoRoot, ['worktree', 'remove', '--force', ...(reapHolders ? ['--force'] : []), workspace.path]);
           if (!removal.ok) { report?.unexplained?.(); return false; }
           return true;
@@ -580,6 +587,9 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
           if (!await stillOwned()) { report?.unexplained?.(); return false; }
           if (!await reapVerified()) return false;
           if (!unheld()) return false;
+          assertLinuxMountBoundary([workspace.path]);
+          assertDarwinMountBoundary([workspace.path]);
+          if (process.platform === 'win32') windowsAssertMountBoundary([workspace.path]);
           try { await rm(workspace.path, { recursive: true, force: true }); }
           catch (error) { return failedRemoval(error); }
           remaining = ['branch'];
@@ -683,6 +693,7 @@ export async function removeOwnedWorkspace(repoRoot: string, value: WorkerWorksp
     }, { waitMs: 1_000 });
   } catch (error) {
     // Ambiguous ownership and every failed Git/filesystem operation fail closed.
+    if (error instanceof MountBoundaryError) mountError = error.message;
     lockBusy = error instanceof WorktreeMutationLockTimeout;
     if (error instanceof WorkspaceHeldError && error.pids.length) held(error.pids);
     else report?.unexplained?.();

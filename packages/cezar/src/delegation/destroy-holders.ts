@@ -78,7 +78,9 @@ async function reapWindowsHolders(paths: readonly string[], assertCurrent: () =>
   for (;;) {
     await assertCurrent();
     const holders = windowsDestroyHolders(paths).filter(holder => holder.pid !== process.pid);
-    for (const pid of known) if (!holders.some(holder => holder.pid === pid)) windowsDestroyHolders(paths, pid);
+    for (const pid of known) if (!holders.some(holder => holder.pid === pid)) {
+      holders.push(...windowsDestroyHolders(paths, pid).filter(holder => holder.pid !== process.pid));
+    }
     if (!holders.length) return;
     for (const holder of holders) {
       known.add(holder.pid);

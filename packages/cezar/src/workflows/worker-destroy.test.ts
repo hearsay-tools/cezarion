@@ -1,5 +1,6 @@
 import { nonDumpableHolder } from '../delegation/non-dumpable.testkit.ts';
 import { scopeFixtureProcesses } from '../delegation/process-scope.testkit.ts';
+import * as mountBoundary from '../delegation/mount-boundary.ts';
 import { readPid, requirePid, requirePidText } from '../pid-file.testkit.ts';
 import { randomUUID } from 'node:crypto';
 import { execFileSync, spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -739,6 +740,36 @@ describe('worker termination barrier', { timeout: 30_000 }, () => {
         for (const pid of expected) expect(signals.mock.calls.some(([target, signal]) => target === pid && signal === 'SIGTERM')).toBe(true);
         expect(existsSync(workspace(w).path)).toBe(false);
         expect(existsSync(scratch)).toBe(false);
+      } finally { other.dispose(); reopened.flush(); }
+    });
+
+    it.runIf(process.platform === 'linux')('refuses a mounted scratch before signalling its holder and retries after it clears', async () => {
+      const w = await worker();
+      await ensureOwnedWorkspace(root, w);
+      store.commitWorkerExecutionStart(w.id);
+      store.updateRun(w.id, { status: 'failed' }); store.flush();
+      const scratch = agentTmpEnv(join(root, '.ai/cezar'), w.id, { ...process.env, CEZ_AGENT_TMPDIR: '1' }).TMPDIR!;
+      const marker = join(scratch, 'protected'); writeFileSync(marker, 'keep');
+      const holder = await spawnReady(scratch, "process.on('SIGTERM',()=>process.exit(42)); console.log('ready'); setInterval(()=>{},1000)");
+      rmSync(recordPath(w.id)); manager.dispose(); store.close();
+      const reopened = RunStore.open(join(root, '.ai/cezar'), { keepLive: true });
+      const other = new RunManager(reopened, root);
+      const service = new DelegationService(); service.registerProject({ id: 'mount', root, store: reopened, manager: other });
+      const signals = vi.spyOn(process, 'kill');
+      let mounted = true;
+      const escaped = scratch.replace(/\\/g, '\\134').replace(/ /g, '\\040');
+      vi.spyOn(mountBoundary, 'assertLinuxMountBoundary').mockImplementation(paths => mountBoundary.assertMountBoundary(paths,
+        `1 1 0:1 / / rw - ext4 /dev/example rw\n${mounted ? `2 1 0:1 / ${escaped}/mounted rw - ext4 /dev/example rw\n` : ''}`));
+      try {
+        await other.recover();
+        const refused = await service.destroyForHuman('mount', w.id);
+        expect(refused).toMatchObject({ state: 'incomplete', error: expect.stringContaining('Mounted resource boundary') });
+        expect(signals.mock.calls.some(([pid, signal]) => pid === holder.proc.pid && signal !== 0)).toBe(false);
+        expect(readFileSync(marker, 'utf8')).toBe('keep');
+        mounted = false;
+        const retried = await service.destroyForHuman('mount', w.id);
+        expect(retried, JSON.stringify(retried)).toMatchObject({ state: 'complete' });
+        await holder.exited;
       } finally { other.dispose(); reopened.flush(); }
     });
 

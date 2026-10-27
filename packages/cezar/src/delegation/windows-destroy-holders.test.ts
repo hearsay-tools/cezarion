@@ -2,9 +2,18 @@ import { spawn } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, parse } from 'node:path';
 import { expect, it } from 'vitest';
 import { reapDestroyHolders } from './destroy-holders.ts';
+import { windowsAssertMountBoundary } from './windows-workspace-identity.ts';
+
+it.runIf(process.platform === 'win32')('enumerates the mounted drive while allowing an ordinary temporary directory', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'cez-windows-mount-'));
+  try {
+    expect(() => windowsAssertMountBoundary([root])).not.toThrow();
+    expect(() => windowsAssertMountBoundary([parse(root).root])).toThrow('Mount boundary');
+  } finally { await rm(root, { recursive: true, force: true }); }
+}, 60_000);
 
 it.runIf(process.platform === 'win32')('stops a scoped open-file holder and preserves an unrelated process', async () => {
   const root = await mkdtemp(join(tmpdir(), 'cez-windows-holder-'));

@@ -6,6 +6,8 @@ import { join } from 'node:path';
 import { lstatSync } from 'node:fs';
 import { agentTmpDirLocations, agentTmpDirMayExist, agentTmpDirOwnershipProven, removeAgentTmpDir } from '../runs/agent-tmpdir.ts';
 import { reapDestroyHolders } from './destroy-holders.ts';
+import { assertDarwinMountBoundary, assertLinuxMountBoundary } from './mount-boundary.ts';
+import { windowsAssertMountBoundary } from './windows-workspace-identity.ts';
 import { prepareWorkerContext, workerContextTask } from './context.ts';
 import { acceptedWorkerIdentitySchema, workerContextHash, workerWorkflowHash } from './execution-identity.ts';
 import { createHash, randomUUID } from 'node:crypto';
@@ -99,6 +101,11 @@ function assertRecordedProcessesStopped(project: DelegationProject, workerId: st
 /** Authenticate and snapshot before a destroy-only resource reaper can signal. */
 async function prepareAuthoritativeReaper(project: DelegationProject, workerId: string, workspace: Extract<NonNullable<RunRecord['delegation']>, { role: 'worker' }>['workspace'],
   check: () => RunRecord, assertAttached: () => void): Promise<() => Promise<void>> {
+  const dataDir = join(project.root, '.ai/cezar');
+  const initialPaths = [workspace.path, ...agentTmpDirLocations(dataDir, workerId)];
+  assertLinuxMountBoundary(initialPaths);
+  assertDarwinMountBoundary(initialPaths);
+  if (process.platform === 'win32') windowsAssertMountBoundary(initialPaths);
   let rootPresent = true;
   try { lstatSync(workspace.path); } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -111,13 +118,14 @@ async function prepareAuthoritativeReaper(project: DelegationProject, workerId: 
     }
     throw new Error('Worker workspace appeared during scratch cleanup');
   };
-  const dataDir = join(project.root, '.ai/cezar');
   if (!agentTmpDirOwnershipProven(dataDir, workerId)) throw new Error('Worker scratch ownership cannot be verified');
   const generation = project.store.readWorkerExecution(workerId)?.generation;
   const initial = check();
   const requestedAt = initial.delegation?.role === 'worker' ? initial.delegation.destroy?.requestedAt : undefined;
   if (!requestedAt) throw new Error('Worker destroy intent is missing');
   const current = async () => {
+    assertLinuxMountBoundary([workspace.path, ...agentTmpDirLocations(dataDir, workerId)]);
+    assertDarwinMountBoundary([workspace.path, ...agentTmpDirLocations(dataDir, workerId)]);
     assertAttached(); await rootCurrent(); assertAttached();
     const run = check();
     if (run.delegation?.role !== 'worker' || run.delegation.destroy?.requestedAt !== requestedAt || JSON.stringify(run.delegation.workspace) !== JSON.stringify(workspace) ||
@@ -892,6 +900,9 @@ export class DelegationService {
           assertCurrent();
           const dataDir = join(project.root, '.ai/cezar');
           if (!agentTmpDirOwnershipProven(dataDir, workerId)) throw new Error('Worker scratch ownership cannot be verified');
+          assertLinuxMountBoundary(agentTmpDirLocations(dataDir, workerId));
+          assertDarwinMountBoundary(agentTmpDirLocations(dataDir, workerId));
+          if (process.platform === 'win32') windowsAssertMountBoundary(agentTmpDirLocations(dataDir, workerId));
           removeAgentTmpDir(dataDir, workerId);
           if (agentTmpDirMayExist(dataDir, workerId)) {
             explained = false;

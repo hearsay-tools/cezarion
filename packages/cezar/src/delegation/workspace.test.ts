@@ -6,6 +6,7 @@ import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { processStartToken } from '../detached-process.ts';
 import { reapDestroyHolders } from './destroy-holders.ts';
+import * as mountBoundary from './mount-boundary.ts';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import fsPromises from 'node:fs/promises';
@@ -422,6 +423,21 @@ describe('owned workspace continuation and queued recovery', { timeout: WORKSPAC
 
 
 describe('removeOwnedWorkspace verified retryable destruction', { timeout: WORKSPACE_TEST_TIMEOUT_MS }, () => {
+  it.runIf(process.platform === 'linux')('retains the checkout when a mount appears before permission repair, then retries', async () => {
+    const { root, first } = await fixture();
+    const workspace = await createOwnedWorkspace(root, randomUUID(), first);
+    const marker = join(workspace.path, 'protected-marker');
+    await writeFile(marker, 'preserve');
+    let mounted = false;
+    const escaped = workspace.path.replace(/\\/g, '\\134').replace(/ /g, '\\040');
+    const mountinfo = () => `1 1 0:1 / / rw - ext4 /dev/example rw\n${mounted ? `2 1 0:1 / ${escaped}/nested rw - ext4 /dev/example rw\n` : ''}`;
+    vi.spyOn(mountBoundary, 'assertLinuxMountBoundary').mockImplementation(paths => mountBoundary.assertMountBoundary(paths, mountinfo()));
+    const refused = await removeOwnedWorkspace(root, workspace, undefined, async () => { mounted = true; }, undefined, undefined, async () => {});
+    expect(refused).toMatchObject({ state: 'incomplete', remaining: ['worktree', 'branch'], error: expect.stringContaining('Mounted resource boundary') });
+    expect(await readFile(marker, 'utf8')).toBe('preserve');
+    mounted = false;
+    expect(await removeOwnedWorkspace(root, workspace, undefined, undefined, undefined, undefined, async () => {})).toMatchObject({ state: 'complete' });
+  });
   it.skipIf(process.platform === 'win32')('retries a partially failed Git removal with read-only directories (hearsay-tools/cezarion#954)', async () => {
     const { root, first } = await fixture();
     const workspace = await createOwnedWorkspace(root, randomUUID(), first);

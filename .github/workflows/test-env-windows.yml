@@ -11,6 +11,7 @@ on:
       - 'packages/cezar/src/delegation/windows-workspace*'
       - 'packages/cezar/src/delegation/windows-destroy-holders*'
       - 'packages/cezar/src/delegation/destroy-holders*'
+      - 'packages/cezar/src/delegation/mount-boundary*'
       - 'packages/cezar/src/delegation/service*'
       - 'packages/cezar/src/runs/store.ts'
       - 'packages/cezar/src/runs/worker-execution.ts'
