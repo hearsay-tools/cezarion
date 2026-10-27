@@ -2240,7 +2240,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
             const [ordinary, restricted] = launches;
             if (backend === 'claude' || backend === 'pi') {
               const flag = backend === 'claude' ? '--disallowedTools' : '--exclude-tools';
-              const names = backend === 'claude' ? 'Agent,Task,Workflow' : 'subagent';
+              const names = backend === 'claude' ? 'Agent,Task,Workflow,SendMessage,ListAgents' : 'subagent';
               const args = restricted![0] as string[];
               const index = args.indexOf(flag);
               expect(index).toBeGreaterThanOrEqual(0);
@@ -2376,7 +2376,7 @@ export function describeHarnessParity(scope: RunnerId | 'once'): void {
           expect(exempt.kind).toBe('capability-absent');
           const args = JSON.parse(readFileSync(argsFile, 'utf8').trim().split('\n')[0]!) as string[];
           expect(args).toContain('--disallowedTools');
-          expect(args[args.indexOf('--disallowedTools') + 1]).toBe('Agent,Task,Workflow');
+          expect(args[args.indexOf('--disallowedTools') + 1]).toBe('Agent,Task,Workflow,SendMessage,ListAgents');
           const skill = items.find(item => item.kind === 'tool' && item.name === 'Skill');
           expect(skill).toBeDefined();
           expect(new Set(nested.map(item => item.parentItemId))).toEqual(new Set([skill!.id]));
