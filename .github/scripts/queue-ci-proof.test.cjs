@@ -41,6 +41,7 @@ for (const [label, change] of Object.entries({
   'wrong queue': s => { s.run.head_branch = 'gh-readonly-queue/release/pr-7'; },
   'failed latest attempt': s => { s.run.run_attempt = 2; s.run.conclusion = 'failure'; },
   'skipped aggregate': s => { s.jobs.find(j => j.name === 'Unit, build, E2E, and package').conclusion = 'skipped'; },
+  'missing typecheck': s => { s.jobs = s.jobs.filter(j => j.name !== 'Typecheck'); },
   'missing browser shard': s => { s.jobs = s.jobs.filter(j => j.name !== 'Cockpit browser E2E shard 4/4'); },
   'duplicate required job': s => { s.jobs.push({ ...s.jobs[0], id: 999 }); },
   'missing history': s => { s.runs = []; },

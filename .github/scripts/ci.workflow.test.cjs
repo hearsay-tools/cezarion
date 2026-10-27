@@ -20,7 +20,7 @@ function stepsText(job) {
 test('dispatched verification checks out the attributed SHA even after its branch moves', () => {
   const { runInNewContext } = require('node:vm');
   const ci = workflow();
-  for (const name of ['build-and-package', 'vitest', 'cockpit-browser']) {
+  for (const name of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) {
     const checkout = ci.jobs[name].steps.find((s) => s.uses?.startsWith('actions/checkout@'));
     const expression = checkout.with.ref.slice(3, -2).trim();
     const ref = runInNewContext(expression, { github: {
@@ -36,7 +36,7 @@ function runShell(command, env = {}) {
   return spawnSync('bash', ['-e', '-c', command], {
     cwd: repoRoot,
     encoding: 'utf8',
-    env: { ...process.env, CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', CLONE_GATE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success', EVENT_NAME: 'pull_request_target', ...env },
+    env: { ...process.env, TYPECHECK_RESULT: 'success', CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', CLONE_GATE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success', EVENT_NAME: 'pull_request_target', ...env },
   });
 }
 
@@ -140,7 +140,7 @@ test('CI classifies pull request changes from a trusted base checkout', () => {
 
 test('PR jobs check out the merge ref when CI runs from the trusted target workflow', () => {
   const ci = workflow();
-  for (const name of ['build-and-package', 'vitest', 'cockpit-browser']) {
+  for (const name of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) {
     const checkout = ci.jobs[name].steps.find((step) => step.uses?.startsWith('actions/checkout@'));
     assert.match(checkout?.with?.ref || '', /format\('refs\/pull\/\{0\}\/merge', github\.event\.pull_request\.number \|\| inputs\.pr_number\)/);
     assert.equal(checkout?.with?.['allow-unsafe-pr-checkout'], true, `${name} must opt in to fork PR merge checkout explicitly`);
@@ -406,7 +406,8 @@ test('build and package verifies the engines minimum without a second full unit 
   for (const setup of setups) assert.equal(setup.with['node-version'], floor.slice(2));
   const runs = Object.entries(ci.jobs).filter(([id]) => ci.jobs.verify.needs.includes(id))
     .flatMap(([id, job]) => (job.steps ?? []).map(step => ({ id, run: step.run })));
-  for (const command of ['npm run typecheck', 'npm run test:unit', 'npm run build', 'npm run test:package']) {
+  assert.deepEqual(runs.filter(s => s.run === 'npm run typecheck').map(s => s.id), ['typecheck']);
+  for (const command of ['npm run test:unit', 'npm run build', 'npm run test:package']) {
     assert.deepEqual(runs.filter(s => s.run === command).map(s => s.id), ['build-and-package'], command);
   }
   assert.deepEqual(runs.filter(s => s.run?.startsWith('npm test --')).map(s => s.id), ['vitest']);
@@ -504,7 +505,7 @@ test('PR dispatch and PR event share concurrency and verification merge refs', (
   const group = ctx => config.concurrency.group.replace(/\$\{\{(.*?)\}\}/g, (_, expression) => runInNewContext(expression, ctx));
   assert.equal(group(context(42, '')), group(context(undefined, '42')));
   assert.notEqual(group(context(42, '')), group(context(undefined, '43')));
-  for (const name of ['build-and-package', 'vitest', 'cockpit-browser']) {
+  for (const name of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) {
     const ref = config.jobs[name].steps.find(s => s.uses?.startsWith('actions/checkout@')).with.ref;
     assert.equal(evaluate(ref, context(undefined, '42')), 'refs/pull/42/merge');
     assert.equal(evaluate(ref, context(42, '')), 'refs/pull/42/merge');

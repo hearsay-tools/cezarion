@@ -33,14 +33,14 @@ function evaluate(expression, ctx) {
 function shell(command, env = {}) {
   return spawnSync('bash', ['-eu', '-c', command], { encoding: 'utf8', env: { PATH: process.env.PATH,
     EVENT_NAME: 'merge_group', CLASSIFY_RESULT: 'success', SURFACE_RESULT: 'success', COMPLEXITY_GATE_RESULT: 'success', CLONE_GATE_RESULT: 'success',
-    BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success',
+    TYPECHECK_RESULT: 'success', BUILD_AND_PACKAGE_RESULT: 'success', VITEST_RESULT: 'success',
     COCKPIT_BROWSER_RESULT: 'success', CHANGE_SURFACE: 'full-matrix', BUMP_PR: 'false',
     VERIFIED_SHA: 'a'.repeat(40), PROOF_RESULT: 'success', PROOF_VERIFIED: 'false', PROOF_SOURCE: '', GITHUB_STEP_SUMMARY: '/dev/null', ...env } });
 }
 test('proof roster expands every verification matrix and queue admission', () => {
   const { REQUIRED_QUEUE_JOBS } = require('./queue-ci-proof.cjs');
   const ci = workflow();
-  const names = ['change-surface', 'classify-pr', 'complexity-gate', 'clone-gate', 'build-and-package', 'vitest', 'cockpit-browser', 'verify', 'queue-admission']
+  const names = ['change-surface', 'classify-pr', 'complexity-gate', 'clone-gate', 'typecheck', 'build-and-package', 'vitest', 'cockpit-browser', 'verify', 'queue-admission']
     .flatMap(id => {
       const j = ci.jobs[id];
       return j.strategy ? j.strategy.matrix.shard.map(n => j.name.replace('${{ matrix.shard }}', String(n))) : [j.name];
@@ -50,7 +50,7 @@ test('proof roster expands every verification matrix and queue admission', () =>
 });
 test('queue always runs the complete immutable combined revision and no paid review or publication', () => {
   const ci = workflow(), ctx = context();
-  for (const id of ['build-and-package', 'vitest', 'cockpit-browser']) {
+  for (const id of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) {
     assert.equal(evaluate(ci.jobs[id].if, ctx), true, id);
     const checkout = ci.jobs[id].steps.find(s => s.uses?.startsWith('actions/checkout@'));
     assert.equal(evaluate(checkout.with.ref, ctx), ctx.github.sha);
@@ -77,12 +77,12 @@ test('failed probe or absent proof runs full main fallback then permits successf
   for (const result of ['failure', 'success', 'skipped', 'cancelled']) for (const verified of ['', 'false', 'true']) {
     const ctx = context('push'); ctx.needs['queue-proof'] = { result, outputs: { verified } };
     const reuse = result === 'success' && verified === 'true';
-    for (const id of ['build-and-package', 'vitest', 'cockpit-browser']) {
+    for (const id of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) {
       assert.equal(evaluate(ci.jobs[id].if, ctx), !reuse, `${id} ${result} ${verified}`);
       ctx.needs[id] = { result: reuse ? 'skipped' : 'success' };
     }
     const gate = shell(ci.jobs.verify.steps[0].run, { EVENT_NAME: 'push', PROOF_RESULT: result, PROOF_VERIFIED: verified,
-      ...Object.fromEntries(['BUILD_AND_PACKAGE_RESULT', 'VITEST_RESULT', 'COCKPIT_BROWSER_RESULT'].map(k => [k, reuse ? 'skipped' : 'success'])) });
+      ...Object.fromEntries(['TYPECHECK_RESULT', 'BUILD_AND_PACKAGE_RESULT', 'VITEST_RESULT', 'COCKPIT_BROWSER_RESULT'].map(k => [k, reuse ? 'skipped' : 'success'])) });
     assert.equal(gate.status, 0, gate.stderr);
     assert.equal(evaluate(ci.jobs['publish-snapshot'].if, ctx), true, `${result} ${verified}`);
     assert.equal(evaluate(ci.jobs['publish-snapshot'].steps[0].with.ref, ctx), ctx.github.sha);
@@ -90,7 +90,7 @@ test('failed probe or absent proof runs full main fallback then permits successf
 });
 test('queue aggregate rejects failures and skips even if classifier offers exemptions', () => {
   const command = workflow().jobs.verify.steps[0].run;
-  for (const key of ['BUILD_AND_PACKAGE_RESULT', 'VITEST_RESULT', 'COCKPIT_BROWSER_RESULT', 'CLASSIFY_RESULT', 'SURFACE_RESULT']) {
+  for (const key of ['TYPECHECK_RESULT', 'BUILD_AND_PACKAGE_RESULT', 'VITEST_RESULT', 'COCKPIT_BROWSER_RESULT', 'CLASSIFY_RESULT', 'SURFACE_RESULT']) {
     for (const result of ['failure', 'skipped', 'cancelled']) {
       assert.notEqual(shell(command, { [key]: result, CHANGE_SURFACE: 'docs-only', BUMP_PR: 'true' }).status, 0, `${key} ${result}`);
     }
@@ -107,7 +107,7 @@ test('required review name cannot pass from a skipped model call on a queue even
 });
 test('dispatch remains full verification and cancellation prevents publishing', () => {
   const ci = workflow(); const ctx = context('workflow_dispatch');
-  for (const id of ['build-and-package', 'vitest', 'cockpit-browser']) assert.equal(evaluate(ci.jobs[id].if, ctx), true);
+  for (const id of ['typecheck', 'build-and-package', 'vitest', 'cockpit-browser']) assert.equal(evaluate(ci.jobs[id].if, ctx), true);
   for (const id of ['review', 'queue-admission', 'review-result', 'publish-snapshot', 'prepare-pr-snapshot']) assert.equal(evaluate(ci.jobs[id].if, ctx), false, id);
   ctx.github.event_name = 'push'; ctx.cancelled = () => true;
   assert.equal(evaluate(ci.jobs['publish-snapshot'].if, ctx), false);
