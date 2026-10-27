@@ -1,6 +1,6 @@
 import type { WorkerWait } from './delegation.ts';
 import type { RunIndexEntry, RunRecord, RunSummary } from './runs.ts';
-import { hasResolvedWait, resolveWaitingOn } from './waits.ts';
+import { hasResolvedWait, resolveWaitingOn, type WaitingOn } from './waits.ts';
 
 /**
  * Canonical Node-free attention classification for browser and CLI. Map run facts to bucket,
@@ -115,99 +115,104 @@ export function workerWaitLabel(role: 'root' | 'worker', wait: Pick<WorkerWait, 
   return workers ? `waiting on ${workers} worker${workers === 1 ? '' : 's'}` : 'waiting on workers';
 }
 
-const CAPACITY: Attention = { rung: 'waiting-for-capacity', bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' };
+/** Presentation is exhaustive over rung ids; only worker waits need a dynamic label or shape. */
+const PRESENTATION_OF_RUNG: Record<AttentionRung, Omit<Attention, 'rung'>> = {
+  'needs-permission': { bucket: 'permission', tone: 'info', shape: 'filled', pulse: true, label: 'needs permission' },
+  failed: { bucket: 'error', tone: 'danger', shape: 'filled', pulse: false, label: 'failed' },
+  'needs-you': { bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' },
+  'needs-review': { bucket: 'waiting', tone: 'info', shape: 'filled', pulse: true, label: 'needs review' },
+  running: { bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running' },
+  'usage-limit': { bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'usage limit' },
+  'waiting-on-workers': { bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on workers' },
+  'waiting-for-ci': { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for CI' },
+  'waiting-for-merge': { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for merge' },
+  'waiting-for-command': { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for a command' },
+  monitoring: { bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' },
+  'waiting-for-capacity': { bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting for capacity' },
+  queued: { bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'queued' },
+  done: { bucket: 'none', tone: 'success', shape: 'filled', pulse: false, label: 'done' },
+  cancelled: { bucket: 'none', tone: 'neutral', shape: 'filled', pulse: false, label: 'cancelled' },
+  unseen: { bucket: 'unseen', tone: 'accent', shape: 'filled', pulse: false, label: 'unseen' },
+};
+
+const CAPACITY: Attention = { rung: 'waiting-for-capacity', ...PRESENTATION_OF_RUNG['waiting-for-capacity'] };
+
+function attentionOfRung(rung: AttentionRung): Attention {
+  return rung === 'waiting-for-capacity' ? CAPACITY : { rung, ...PRESENTATION_OF_RUNG[rung] };
+}
 
 /** A worker wait owes its wake as a resolved list entry (hearsay-tools/cezarion#1235, #1301). */
 function owesWorkerWake(run: AttentionInput): boolean {
   return Array.isArray(run.waits) && run.waits.some((wait) => wait?.kind === 'worker' && wait.phase === 'resolved');
 }
 
+/** Worker waits in the list include Cezar's completion wait (hearsay-tools/cezarion#1301).
+ * A worker waits outside itself on its parent (ring); a root waits on its own workers (robot). */
+function workerAttention(run: AttentionInput, waitingOn: Extract<WaitingOn, { kind: 'workers' }>): Attention {
+  const attention = attentionOfRung('waiting-on-workers');
+  if (run.delegation?.role === 'worker') return { ...attention, shape: 'ring', label: 'waiting on parent reply' };
+  if (waitingOn.replies) return { ...attention, label: 'waiting on worker replies' };
+  const count = waitingOn.count;
+  return { ...attention, label: count ? `waiting on ${count} worker${count === 1 ? '' : 's'}` : attention.label };
+}
+
+/** The parked portion of the ladder, after human, review and running attention. */
+function parkedRung(run: AttentionInput, waitingOn: WaitingOn | undefined): AttentionRung | undefined {
+  if (run.status !== 'waiting' && run.status !== 'queued') return undefined;
+  // A usage-limit hold waits for its appointment, not for a slot (phase 4a).
+  if (waitingOn?.kind === 'usage-limit') return 'usage-limit';
+  // Workers' owed wake outranks their retained CI and timer waits (hearsay-tools/cezarion#1233).
+  // This includes a queued leftover after restart or Continue.
+  if (run.delegation?.role !== 'invalid' && owesWorkerWake(run)) return 'waiting-for-capacity';
+  if (run.status !== 'waiting') return undefined;
+  switch (waitingOn?.kind) {
+    case 'workers': return 'waiting-on-workers';
+    case 'pr': return waitingOn.until === 'merge' ? 'waiting-for-merge' : 'waiting-for-ci';
+    case 'process': return 'waiting-for-command';
+    case 'timer': return 'monitoring';
+  }
+  // A resolved CI or timer wait owes a wake, never a human gate.
+  if (waitingOn === undefined && hasResolvedWait(run)) return 'waiting-for-capacity';
+  // Nothing open and nothing owed: the turn ended on the user.
+  return 'needs-you';
+}
+
+type RungDecision = (run: AttentionInput, waitingOn: WaitingOn | undefined) => AttentionRung | undefined;
+
+/** Permission and failure short-circuit before reading waits. The remaining decisions stay
+ * in ladder order, with cancelled as the final fallback. */
+const ATTENTION_LADDER: readonly RungDecision[] = [
+  // A shown question wins at any live status; an unshown one wins only after the turn parks.
+  (run, waitingOn) => waitingOn?.kind === 'human' && (waitingOn.shown || run.status === 'waiting') ? 'needs-you' : undefined,
+  (run) => run.status === 'review' ? 'needs-review' : undefined,
+  (run) => run.status === 'running' ? 'running' : undefined,
+  parkedRung,
+  (run) => isUnseen(run) ? 'unseen' : undefined,
+  (run) => run.status === 'queued' ? 'queued' : undefined,
+  (run) => run.status === 'done' ? 'done' : undefined,
+];
+
+function attentionRung(run: AttentionInput, waitingOn: WaitingOn | undefined): AttentionRung {
+  for (const decide of ATTENTION_LADDER) {
+    const rung = decide(run, waitingOn);
+    if (rung !== undefined) return rung;
+  }
+  return 'cancelled';
+}
+
 /**
  * `RunRecord` → attention: the spec's ladder (2026-10-17-unified-waits, "Status and display"),
  * read from the wait list alone since phase 4b (hearsay-tools/cezarion#1236).
- *
- * The chain below *is* the priority order — first match wins, so `error` can never be masked by a
- * lower rung. Tones follow the cockpit mockups (`mockups/tasks-home.html`):
- *
- *  - Needs you → amber/pending: the agent stopped and is asking you something.
- *  - `review`/permission → blue `--info`: there is work to look at (was brand teal until #617).
- *  - `running` → the violet family (`--status-running`), pulsing and filled; a CI or timer park is
- *    the same hue as a ring, and a parked parent is the same hue as the robot (#617 status key).
- *  - `queued`/usage limit → neutral ring, still: parked, not transitioning. `cancelled` shares the
- *    neutral hue but is filled — it has ended.
- *  - `done`/`failed` → the green/red outcome, still.
+ * First match wins. Presentation comes from one rung table, with worker wording built separately.
  */
 export function deriveAttention(run: AttentionInput): Attention {
-  if (hasPendingPermission(run)) {
-    return { rung: 'needs-permission', bucket: 'permission', tone: 'info', shape: 'filled', pulse: true, label: 'needs permission' };
-  }
-  if (run.status === 'failed') {
-    return { rung: 'failed', bucket: 'error', tone: 'danger', shape: 'filled', pulse: false, label: 'failed' };
-  }
+  if (hasPendingPermission(run)) return attentionOfRung('needs-permission');
+  if (run.status === 'failed') return attentionOfRung('failed');
   const live = run.status === 'waiting' || run.status === 'queued' || run.status === 'running';
   const waitingOn = live ? resolveWaitingOn(run) : undefined;
-  // Rung 3: a question the user sees waits on them at any live status, a wake turn's included. One
-  // registered mid-turn and not shown yet reads as the turn it is in until its turn end shows it.
-  if (waitingOn?.kind === 'human' && (waitingOn.shown || run.status === 'waiting')) {
-    return { rung: 'needs-you', bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' };
-  }
-  if (run.status === 'review') {
-    return { rung: 'needs-review', bucket: 'waiting', tone: 'info', shape: 'filled', pulse: true, label: 'needs review' };
-  }
-  if (run.status === 'running') {
-    return { rung: 'running', bucket: 'running', tone: 'running', shape: 'filled', pulse: true, label: 'running' };
-  }
-  if (run.status === 'waiting' || run.status === 'queued') {
-    // A usage-limit hold waits for its appointment, not for a slot (phase 4a). `waitingOn` names
-    // it only for `isUsageLimitHold`, and a summary carries it without the resume time.
-    if (waitingOn?.kind === 'usage-limit') {
-      return { rung: 'usage-limit', bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'usage limit' };
-    }
-    // A queued automatic wake is a scheduler/capacity wait, not a human gate (#971). Covers both
-    // the parked session still open (`waiting`) and a leftover after restart / Continue
-    // (`queued`). Workers already settled. Ahead of the CI and timer rungs: workers outrank them,
-    // and a worker park keeps its open waits (hearsay-tools/cezarion#1233).
-    if (run.delegation?.role !== 'invalid' && owesWorkerWake(run)) return CAPACITY;
-  }
-  if (run.status === 'waiting') {
-    if (waitingOn?.kind === 'workers') {
-      // Worker waits in the list (hearsay-tools/cezarion#1235), Cezar's completion wait included
-      // (hearsay-tools/cezarion#1301). Its own workers → the robot; a worker waiting on its parent
-      // is waiting on something outside it → a ring. Both violet: still in motion, just not on
-      // this turn. A root with only request waits waits on replies.
-      if (run.delegation?.role === 'worker') return { rung: 'waiting-on-workers', bucket: 'none', tone: 'running', shape: 'ring', pulse: false, label: 'waiting on parent reply' };
-      if (waitingOn.replies) return { rung: 'waiting-on-workers', bucket: 'none', tone: 'running', shape: 'workers', pulse: false, label: 'waiting on worker replies' };
-      const count = waitingOn.count;
-      return {
-        rung: 'waiting-on-workers', bucket: 'none', tone: 'running', shape: 'workers', pulse: false,
-        label: count ? `waiting on ${count} worker${count === 1 ? '' : 's'}` : 'waiting on workers',
-      };
-    }
-    // A CI or timer park is `waiting` on its own downstream work, not on you: it keeps the
-    // running bucket and ring the monitoring activity gave it before the wait list.
-    if (waitingOn?.kind === 'pr') {
-      return waitingOn.until === 'merge'
-        ? { rung: 'waiting-for-merge', bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for merge' }
-        : { rung: 'waiting-for-ci', bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for CI' };
-    }
-    if (waitingOn?.kind === 'process') return { rung: 'waiting-for-command', bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'waiting for a command' };
-    if (waitingOn?.kind === 'timer') return { rung: 'monitoring', bucket: 'running', tone: 'running', shape: 'ring', pulse: true, label: 'monitoring' };
-    // A resolved CI or timer wait owes the agent a wake that has not started: the same scheduler
-    // wait as the worker wake above, never a human gate (rung 10).
-    if (waitingOn === undefined && hasResolvedWait(run)) return CAPACITY;
-    // Nothing open and nothing owed: the turn ended on the user.
-    return { rung: 'needs-you', bucket: 'waiting', tone: 'pending', shape: 'filled', pulse: true, label: 'needs you' };
-  }
-  if (isUnseen(run)) {
-    return { rung: 'unseen', bucket: 'unseen', tone: 'accent', shape: 'filled', pulse: false, label: 'unseen' };
-  }
-  if (run.status === 'queued') {
-    return { rung: 'queued', bucket: 'none', tone: 'neutral', shape: 'ring', pulse: false, label: 'queued' };
-  }
-  if (run.status === 'done') {
-    return { rung: 'done', bucket: 'none', tone: 'success', shape: 'filled', pulse: false, label: 'done' };
-  }
-  return { rung: 'cancelled', bucket: 'none', tone: 'neutral', shape: 'filled', pulse: false, label: 'cancelled' };
+  const rung = attentionRung(run, waitingOn);
+  if (rung === 'waiting-on-workers' && waitingOn?.kind === 'workers') return workerAttention(run, waitingOn);
+  return attentionOfRung(rung);
 }
 
 /**

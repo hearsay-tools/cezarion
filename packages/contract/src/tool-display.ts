@@ -86,21 +86,21 @@ function titled(verb: string, label: string | undefined): string {
   return label ? `${verb} ${label}` : verb;
 }
 
-export function toolDisplay(name: string, input?: unknown): ToolDisplay {
-  const key = typeof name === 'string' ? name.toLowerCase() : '';
+/** Every known backend spelling maps to its display family. A Map keeps prototype names unknown. */
+const TOOL_KINDS = new Map<string, ToolKind>([
+  ['bash', 'execute'], ['commandexecution', 'execute'],
+  ['edit', 'edit'], ['multiedit', 'edit'], ['write', 'edit'], ['notebookedit', 'edit'], ['filechange', 'edit'],
+  ['read', 'read'], ['imageview', 'read'],
+  ['glob', 'search'], ['grep', 'search'],
+  ['webfetch', 'fetch'], ['websearch', 'fetch'],
+  ['task', 'task'], ['agent', 'task'], ['skill', 'task'],
+  ['todowrite', 'plan'], ['todolist', 'plan'], ['plan', 'plan'],
+  ['taskcreate', 'plan'], ['taskupdate', 'plan'], ['tasklist', 'plan'],
+  ['contextcompaction', 'other'], ['mcptoolcall', 'other'],
+]);
 
+function editDisplay(key: string, input: unknown): ToolDisplay {
   switch (key) {
-    case 'bash':
-    case 'commandexecution':
-      return {
-        toolKind: 'execute',
-        title: titled('Ran', commandText(input)),
-        subtitle: field(input, 'description'),
-      };
-
-    case 'edit':
-    case 'multiedit':
-      return { toolKind: 'edit', title: titled('Edit', field(input, 'file_path', 'filePath', 'path')) };
     case 'write':
       return { toolKind: 'edit', title: titled('Write', field(input, 'file_path', 'filePath', 'path')) };
     case 'notebookedit':
@@ -113,69 +113,54 @@ export function toolDisplay(name: string, input?: unknown): ToolDisplay {
       const label = paths.length === 1 ? paths[0] : paths.length > 1 ? `${paths.length} files` : undefined;
       return { toolKind: 'edit', title: titled('Edit', label) };
     }
+    default:
+      return { toolKind: 'edit', title: titled('Edit', field(input, 'file_path', 'filePath', 'path')) };
+  }
+}
 
-    case 'read':
-      return { toolKind: 'read', title: titled('Read', field(input, 'file_path', 'filePath', 'path')) };
-    case 'imageview':
-      return { toolKind: 'read', title: titled('View image', field(input, 'path')) };
-    case 'glob':
-    case 'grep':
-      return {
-        toolKind: 'search',
-        title: titled('Search', field(input, 'pattern', 'query')),
-        subtitle: field(input, 'path'),
-      };
+function readDisplay(key: string, input: unknown): ToolDisplay {
+  return key === 'imageview'
+    ? { toolKind: 'read', title: titled('View image', field(input, 'path')) }
+    : { toolKind: 'read', title: titled('Read', field(input, 'file_path', 'filePath', 'path')) };
+}
 
-    case 'webfetch':
-      return { toolKind: 'fetch', title: titled('Fetch', field(input, 'url')) };
-    case 'websearch':
-      return { toolKind: 'fetch', title: titled('Web search', field(input, 'query')) };
+function fetchDisplay(key: string, input: unknown): ToolDisplay {
+  return key === 'webfetch'
+    ? { toolKind: 'fetch', title: titled('Fetch', field(input, 'url')) }
+    : { toolKind: 'fetch', title: titled('Web search', field(input, 'query')) };
+}
 
-    // Sub-agent spawns. claude dispatches these through `Agent` today and
-    // `Task` historically (opencode uses `task`) — both spellings resolve, and
-    // the row says which agent, falling back to the subagent type when the
-    // call carried no description.
-    case 'task':
-    case 'agent': {
-      const verb = key === 'agent' ? 'Agent' : 'Task';
-      const subagent = field(input, 'subagent_type', 'subagentType');
-      const label = field(input, 'description', 'prompt') ?? subagent;
-      return {
-        toolKind: 'task',
-        title: label ? `${verb}: ${label}` : verb,
-        // Don't repeat the subagent type when it is already the title.
-        subtitle: label === subagent ? undefined : subagent,
-      };
-    }
+function taskDisplay(key: string, input: unknown): ToolDisplay {
+  // claude's `Skill` invocation: `{skill, args?}` — the skill name is the whole title.
+  if (key === 'skill') {
+    const skill = field(input, 'skill', 'name', 'command');
+    return {
+      toolKind: 'task',
+      title: skill ? `Skill: ${skill}` : 'Skill',
+      subtitle: field(input, 'args', 'description'),
+    };
+  }
 
-    // claude's `Skill` invocation: `{skill, args?}` — the skill name is the
-    // whole point of the row, so it goes in the title.
-    case 'skill': {
-      const skill = field(input, 'skill', 'name', 'command');
-      return {
-        toolKind: 'task',
-        title: skill ? `Skill: ${skill}` : 'Skill',
-        subtitle: field(input, 'args', 'description'),
-      };
-    }
+  // claude dispatches sub-agents through `Agent` today and `Task` historically;
+  // opencode uses `task`. Fall back to the subagent type when no description is usable.
+  const verb = key === 'agent' ? 'Agent' : 'Task';
+  const subagent = field(input, 'subagent_type', 'subagentType');
+  const label = field(input, 'description', 'prompt') ?? subagent;
+  return {
+    toolKind: 'task',
+    title: label ? `${verb}: ${label}` : verb,
+    // Don't repeat the subagent type when it is already the title.
+    subtitle: label === subagent ? undefined : subagent,
+  };
+}
 
-    case 'todowrite':
-    case 'todolist':
-    case 'plan':
-    case 'taskcreate':
-    case 'taskupdate':
-    case 'tasklist':
-      return { toolKind: 'plan', title: 'Update plan' };
-
-    case 'contextcompaction':
-      return { toolKind: 'other', title: 'Compacted context' };
-
-    case 'mcptoolcall': {
-      const server = field(input, 'server');
-      const tool = field(input, 'tool');
-      if (server && tool) return { toolKind: 'other', title: `${server}.${tool}` };
-      return { toolKind: 'other', title: 'MCP tool', subtitle: heuristicLabel(input) };
-    }
+function otherDisplay(name: string, key: string, input: unknown): ToolDisplay {
+  if (key === 'contextcompaction') return { toolKind: 'other', title: 'Compacted context' };
+  if (key === 'mcptoolcall') {
+    const server = field(input, 'server');
+    const tool = field(input, 'tool');
+    if (server && tool) return { toolKind: 'other', title: `${server}.${tool}` };
+    return { toolKind: 'other', title: 'MCP tool', subtitle: heuristicLabel(input) };
   }
 
   // claude/opencode MCP tools are named `mcp__server__tool` → "server.tool".
@@ -192,4 +177,34 @@ export function toolDisplay(name: string, input?: unknown): ToolDisplay {
     title: typeof name === 'string' && name.trim() !== '' ? oneLine(name) : 'Tool',
     subtitle: heuristicLabel(input),
   };
+}
+
+export function toolDisplay(name: string, input?: unknown): ToolDisplay {
+  const key = typeof name === 'string' ? name.toLowerCase() : '';
+  switch (TOOL_KINDS.get(key)) {
+    case 'execute':
+      return {
+        toolKind: 'execute',
+        title: titled('Ran', commandText(input)),
+        subtitle: field(input, 'description'),
+      };
+    case 'edit':
+      return editDisplay(key, input);
+    case 'read':
+      return readDisplay(key, input);
+    case 'search':
+      return {
+        toolKind: 'search',
+        title: titled('Search', field(input, 'pattern', 'query')),
+        subtitle: field(input, 'path'),
+      };
+    case 'fetch':
+      return fetchDisplay(key, input);
+    case 'task':
+      return taskDisplay(key, input);
+    case 'plan':
+      return { toolKind: 'plan', title: 'Update plan' };
+    default:
+      return otherDisplay(name, key, input);
+  }
 }
