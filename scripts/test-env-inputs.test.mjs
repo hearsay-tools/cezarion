@@ -6,16 +6,16 @@ import { join, resolve } from 'node:path';
 import { afterEach, test } from 'node:test';
 import {
   TEST_ENV_INPUTS, agentBrowserVersion, readTestEnvDescriptor, readTestEnvInputs, testEnvInputsMismatch,
-} from '../../../../.ai/scripts/test-env-inputs.mjs';
+} from '../.ai/scripts/test-env-inputs.mjs';
 
 // hearsay-tools/cezarion#1977: the browser test environment's settings live in a tracked inputs
 // file, and its runtime state in a descriptor Squeal ignores for browser specs.
-const repoRoot = resolve(import.meta.dirname, '../../../..');
+const repoRoot = resolve(import.meta.dirname, '..');
 const module = join(repoRoot, '.ai/scripts/test-env-inputs.mjs');
-const roots: string[] = [];
+const roots = [];
 afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }); });
 
-function checkout(inputs: unknown, descriptor?: unknown): string {
+function checkout(inputs, descriptor) {
   const root = mkdtempSync(join(tmpdir(), 'cez-test-env-inputs-'));
   roots.push(root);
   mkdirSync(join(root, '.ai/scripts'), { recursive: true });
@@ -47,7 +47,7 @@ for (const [name, inputs, message] of [
   ['a value with whitespace', { ...valid, server: { env: ['CEZ_X=a b'] } }, /is not CEZ_NAME=value/],
   ['a floating browser release', { ...valid, browser: { agentBrowserVersion: 'latest' } }, /must be a release version/],
   ['invalid JSON', '{', /test-env\.inputs\.json: /],
-] as const) {
+]) {
   test(`inputs with ${name} are refused`, () => {
     assert.throws(() => readTestEnvInputs(checkout(inputs)), message);
   });
@@ -67,7 +67,7 @@ test('the browser seam reads the descriptor only when it matches the current inp
   assert.throws(() => readTestEnvDescriptor(root), /cannot read .*test-env\.json\. Run `npm run test:e2e`/);
   const { sha256 } = readTestEnvInputs(root);
   writeFileSync(join(root, '.ai/qa/test-env.json'), JSON.stringify({ baseUrl: 'http://127.0.0.1:1', inputs: { sha256 } }));
-  assert.equal((readTestEnvDescriptor(root) as { baseUrl: string }).baseUrl, 'http://127.0.0.1:1');
+  assert.equal(readTestEnvDescriptor(root).baseUrl, 'http://127.0.0.1:1');
   writeFileSync(join(root, TEST_ENV_INPUTS), JSON.stringify({ ...valid, browser: { agentBrowserVersion: '1.2.4' } }));
   assert.throws(() => readTestEnvDescriptor(root), /booted from other settings .* Run \.ai\/scripts\/test-env-up\.sh again/);
 });
@@ -95,11 +95,7 @@ test('the CLI describes the inputs for test-env-up.sh and refuses a malformed fi
 // Squeal's side of the split: the descriptor is a runtime file for browser specs, and the inputs
 // are declared, so a restart re-keys nothing and an input change re-keys every browser spec.
 test('squeal.config.json ignores the descriptor for browser specs and declares the inputs', () => {
-  const config = JSON.parse(readFileSync(join(repoRoot, 'squeal.config.json'), 'utf8')) as {
-    inputs: Record<string, string[]>;
-    runtimeFiles: { project: string; tests: string[]; paths: string[] }[];
-    slow: { include: string[] };
-  };
+  const config = JSON.parse(readFileSync(join(repoRoot, 'squeal.config.json'), 'utf8'));
   assert.deepEqual(config.runtimeFiles, [{ project: 'e2e', tests: config.slow.include, paths: ['.ai/qa/test-env.json'] }]);
   const e2eInputs = config.inputs['packages/web/e2e/*.e2e.ts'] ?? [];
   for (const declared of [TEST_ENV_INPUTS, '.ai/scripts/test-env-inputs.mjs', '.ai/scripts/test-env-up.sh']) {
