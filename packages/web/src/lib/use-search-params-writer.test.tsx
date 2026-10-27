@@ -70,7 +70,7 @@ describe('useSearchParamsWriter (hearsay-tools/cezarion#1616)', () => {
   // In the test environment React Router batches both navigate calls into one render, so the
   // exact timing race only manifests in the browser's async concurrent-mode scheduler; the
   // browser-driven regression is mobile-task-controls.e2e.ts:176. This test pins the intended
-  // composition guarantee that the inflight queue is designed to preserve.
+  // composition guarantee that the session+seq tracking is designed to preserve.
   it('a debounced clear after switching tabs preserves the tab switch (hearsay-tools/cezarion#1790)', () => {
     const probe = renderWriter('/p/x/')
     // Simulate: debounce timer for 'done' fires (A), tab click fires (B) before A renders.
@@ -90,5 +90,21 @@ describe('useSearchParamsWriter (hearsay-tools/cezarion#1616)', () => {
     act(() => probe.externalNavigate!('?q=external'))
     act(() => probe.write!(set('origin', 'direct')))
     expect(new URLSearchParams(probe.search)).toEqual(new URLSearchParams('q=external&origin=direct'))
+  })
+
+  // When ?q=x and ?q=y are both queued and an external navigation to ?q=x occurs, a URL-content
+  // check would falsely match the inflight ?q=x entry. The session+seq approach avoids this:
+  // the external navigation carries no writer state, so it is identified as external and resets
+  // `next` to ?q=x. A subsequent write must compose on ?q=x, not on the stale ?q=y.
+  it('resets to an external URL even when that URL matches an earlier queued write', () => {
+    const probe = renderWriter('/p/x/')
+    act(() => {
+      probe.write!(set('q', 'x'))  // A: ?q=x
+      probe.write!(set('q', 'y'))  // B: ?q=y (composes on A's target)
+    })
+    // External navigation to ?q=x — should reset, not match A's inflight entry.
+    act(() => probe.externalNavigate!('?q=x'))
+    act(() => probe.write!(set('origin', 'direct')))
+    expect(new URLSearchParams(probe.search)).toEqual(new URLSearchParams('q=x&origin=direct'))
   })
 })
