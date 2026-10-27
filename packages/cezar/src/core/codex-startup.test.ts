@@ -754,7 +754,7 @@ describe('Codex native output reader (hearsay-tools/cezarion#1965)', () => {
     await running();
     fake.frame({ method: 'turn/started', params: { threadId: 'child', turn: { id: 'turn_child', status: 'inProgress', items: [] } } });
     fake.frame({ method: 'turn/completed', params: { threadId: 'child', turn: { id: 'turn_child', status: 'completed' } } });
-    fake.frame({ method: 'turn/failed', params: { threadId: 'thread_1', turn: { id: 'old', status: 'failed' } } });
+    fake.frame({ method: 'turn/failed', params: { threadId: 'thread_1', turn: { id: 'old' } } });
     fake.frame({ method: 'error', params: { threadId: 'thread_1', turnId: 'old', willRetry: true, error: { message: 'old' } } });
     fake.frame({ method: 'error', params: { threadId: 'child', turnId: 'turn_1', willRetry: true, error: { message: 'child' } } });
     await flush();
