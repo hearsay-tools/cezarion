@@ -39,7 +39,7 @@ jobs:
             $output = npm test -- packages/cezar/src/delegation/windows-workspace-security.test.ts -t 'Restricted process execution policy' 2>&1 | Out-String
             $failed = $LASTEXITCODE -ne 0
             Write-Output $output
-            if (!$failed -or $output -notmatch 'running scripts is disabled') {
+            if (!$failed -or $output -notmatch 'running\s+scripts is disabled') {
               throw 'Expected the pre-fix execution policy refusal'
             }
           } finally {
