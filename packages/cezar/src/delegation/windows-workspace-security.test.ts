@@ -49,3 +49,15 @@ it.runIf(process.platform === 'win32')('reuses private receipts and retries an i
   expect(await readFile(f.receipt, 'utf8')).toBe(receipt);
   expect(await removeOwnedWorkspace(f.root, f.workspace)).toMatchObject({ state: 'complete' });
 }, 120_000);
+
+it.runIf(process.platform === 'win32')('provisions and removes a worker under Restricted process execution policy', async () => {
+  const previous = process.env.PSExecutionPolicyPreference;
+  process.env.PSExecutionPolicyPreference = 'Restricted';
+  try {
+    const f = await fixture();
+    expect(await removeOwnedWorkspace(f.root, f.workspace)).toMatchObject({ state: 'complete' });
+  } finally {
+    if (previous === undefined) delete process.env.PSExecutionPolicyPreference;
+    else process.env.PSExecutionPolicyPreference = previous;
+  }
+}, 120_000);

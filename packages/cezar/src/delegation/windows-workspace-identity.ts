@@ -5,7 +5,7 @@ const script = fileURLToPath(new URL('../../scripts/windows-workspace-identity.p
 
 /** A short native operation owns its handles until validation and I/O finish. */
 function identityOperation(request: Record<string, unknown>): string {
-  return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File', script], {
+  return execFileSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script], {
     input: JSON.stringify(request), encoding: 'utf8', windowsHide: true, timeout: 30_000, maxBuffer: 128 * 1024,
   }).trim();
 }
