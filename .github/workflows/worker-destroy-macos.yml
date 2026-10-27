@@ -3,6 +3,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/worker-destroy-macos.yml'
+      - '.github/scripts/macos-event-descriptor-probe.c'
       - 'packages/cezar/src/delegation/workspace*'
       - 'packages/cezar/src/delegation/destroy-holders*'
       - 'packages/cezar/src/delegation/darwin-open-flags.test.ts'
@@ -30,7 +31,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Diagnose native directory descriptors
         run: npm test -- packages/cezar/src/delegation/darwin-open-flags.test.ts
+      - name: Verify event-only descriptor inode binding
+        if: always()
+        run: |
+          cc -Wall -Wextra .github/scripts/macos-event-descriptor-probe.c -o "$RUNNER_TEMP/event-probe"
+          "$RUNNER_TEMP/event-probe"
       - name: Probe event-only process policy
+        if: always()
         run: |
           probe=$(mktemp -d)
           chmod 000 "$probe"
