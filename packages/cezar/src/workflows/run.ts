@@ -31,12 +31,15 @@ export { stepLabel } from './run/steps.ts';
 export { makeRunTitle } from '../runs/run-title.ts';
 import { pendingConversationBatch, reservesAutomaticWake, formatAgentInput, agentInputOutcomeText } from './run/input-batch.ts';
 import { clearUnreadInputTimer, clearHeldHumanInputTimer, harnessOwesInput, harnessHoldsHumanInput, clearNoWaitNudgeReplyTimer, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
+import * as wakeLedger from './run/wake-ledger.ts';
+import * as pendingAskFacts from './run/pending-ask-facts.ts';
+import * as workflowPosition from './run/workflow-position.ts';
 import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
 import { nextLineEntry } from './line-order.ts';
 import { accountHeldFor, formatWakeInstant, resumeInFlight, runAccountKey, queuedRecoveryInput, queuedStartAt, sessionlessWakePrompt } from './run-scheduling.ts';
 export { runAccountKey } from './run-scheduling.ts';
 import { executionAccount } from './execution-account.ts';
-import { CANCEL_MESSAGES, chargesBudget, chargesBudgetMessage, ciWatchRequest, hasPrWait, holdsOwedResults, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitAnswerKind, waitInputId, waitNamedInputIds, waitResultText } from './waits.ts';
+import { CANCEL_MESSAGES, chargesBudget, chargesBudgetMessage, ciWatchRequest, hasPrWait, holdsOwedResults, identicalWait, identicalWorkerWait, isCezarHumanWait, isMonitoringTimer, normalizePrUrl, openWaitList, openWaits, openWaitsFooter, resolvedWaits, waitAnswerKind, waitInputId, waitResultText } from './waits.ts';
 import { assertOwnedWorkerWaitScope, assertRequestWaitScope, delegationWaitRefusal, isDelegationWait, peerWaitEntry, peerWaitOf, peerWaitResult, runsAwaitingPeer, workerListTarget, workerWaitTarget } from './wait-scope.ts';
 import { previewToolEnabled } from '../ci-wait/tools.ts';
 import { previewCdpSession, previewRunContext, previewStopResult, previewResult, validateRegistration, type PreviewHostLike } from '../preview/registration.ts';
@@ -146,7 +149,7 @@ import { workerQuestionFallback } from './question-routing.ts';
 import { messagedParentSince, parkNoticeIdInUse, parkNoticeMessage, parkNoticeWait, parkingTurn } from '../delegation/park-notice.ts';
 import { workerOutcome } from '../runs/delegation-state.ts';
 import { loadWorkflows } from './load.ts';
-import { applyOutcomes, type RunOutcome } from '../runs/outcome-commit.ts';
+import type { RunOutcome } from '../runs/outcome-commit.ts';
 import { acknowledgedBatch, answerOutcomes, chargedIf, retryDeliveryCheckpoint } from './outcome-batches.ts';
 import { analyseAcknowledgedInput, type AcknowledgedInput } from './input-acknowledgement.ts';
 import { RUN_IN_USE_ELSEWHERE, type CommitSource, type QueuedMessage, type RunRecord, type RunStore, type StepState } from '../runs/store.ts';
@@ -1991,12 +1994,8 @@ export class RunManager {
     return 'park';
   }
 
-  /** The closing session leaves something undelivered: a resolved wait, or a wake of messages
-   *  alone (`owesWake`), which reopens the run as a resolved wait does and so counts against the
-   *  same bound (hearsay-tools/cezarion#1235). */
   private owesDelivery(runId: string): boolean {
-    const run = this.store.getRun(runId);
-    return !!run && (resolvedWaits(run).length > 0 || this.owesWake(run));
+    return wakeLedger.owesDelivery(this.store, runId, run => this.owesWake(run));
   }
 
   /** A delivery, a human or a terminal path ends a run of failed deliveries and its backoff. */
@@ -2026,22 +2025,8 @@ export class RunManager {
     this.move(runId, 'resume');
   }
 
-  /** `outcomes`, clearing the failure count when they deliver a wait result (`cleared`) or leave one
-   *  of `ids` a message the agent received (hearsay-tools/cezarion#1235). The opening prompt of a wake
-   *  continuation is not one: a session that reads it and fails has delivered nothing it owed, nor
-   *  has a read reported for a message whose submission was never acknowledged. */
   private withFailuresCleared(runId: string, outcomes: RunOutcome[], ids: readonly string[], cleared = false): RunOutcome[] {
-    const run = this.store.getRun(runId);
-    const next = run && applyOutcomes(run, outcomes).next;
-    const received = !!next?.agentInputs?.some(input => ids.includes(input.id) && !!input.deliveredAt && !input.awaitingRead && (!!input.conversation || this.isUnnamedLifecycleInput(next, input)));
-    return cleared || received ? [...outcomes, { kind: 'counted', waitDeliveryFailures: undefined }] : outcomes;
-  }
-
-  /** A lifecycle input no wait names is a wake of its own, a queued refusal among them
-   *  (hearsay-tools/cezarion#1301): `owesDelivery` counts it as owed, so its delivery ends the run
-   *  of failed deliveries, as a message's does. */
-  private isUnnamedLifecycleInput(run: RunRecord, input: AgentInput): boolean {
-    return input.source === 'lifecycle' && !waitNamedInputIds(run).has(input.id);
+    return wakeLedger.withFailuresCleared(this.store, runId, outcomes, ids, cleared);
   }
 
   /** The failure count is on the run record, so a restart keeps it (hearsay-tools/cezarion#1234). */
@@ -2049,15 +2034,8 @@ export class RunManager {
     this.store.commitOutcome(runId, { kind: 'counted', waitDeliveryFailures: undefined }, {}, { bestEffort: true });
   }
 
-  /**
-   * Automatic wakes spent since the user last wrote: timer wakes and autonomous nudges, against
-   * one budget of `MAX_AUTO_CONTINUES` (hearsay-tools/cezarion#1234). The count is on the run
-   * record, so a restart, a scheduler continuation and a usage-limit resume keep it. A timer batch
-   * still awaiting its acknowledgement counts the unit it reserved.
-   */
   private automaticWakes(runId: string, beforeHumanReset?: HumanAnswerBudget): number {
-    const reserved = this.active.get(runId)?.agentInputFlight?.wakeReserved ? 1 : 0;
-    return (beforeHumanReset?.spent ?? this.store.getRun(runId)?.automaticWakes ?? 0) + reserved;
+    return wakeLedger.automaticWakes(this.store, this.active, runId, beforeHumanReset);
   }
 
   /** Spend one automatic wake on the record; returns the count after it. */
@@ -2226,27 +2204,8 @@ export class RunManager {
     }
   }
 
-  /**
-   * Messages are not waits (hearsay-tools/cezarion#1235): every conversation input the run has not
-   * received is an owed wake in its own right, beside its waits and beside a pending question. Not
-   * one claimed by an inbox read, one a provider flight or opening already carries, one a resolved
-   * wait carries as its wake, or the parent's answer to a routed question, which goes through the
-   * answer seam (`answerRoutedQuestion`). A lifecycle input no wait carries any more counts as one:
-   * the wake a legacy cancelled worker wait queued before the upgrade, which the wait list keeps as
-   * a cancelled entry and delivers as ordinary input, and a refusal queued for a closed session
-   * (hearsay-tools/cezarion#1301). One a listed wait or a delivered one names is that wait's, never
-   * owed again.
-   */
   private pendingConversationWakes(run: RunRecord, beforeHumanReset?: HumanAnswerBudget): AgentInput[] {
-    const owed = new Set(resolvedWaits(run).map(waitInputId));
-    const named = waitNamedInputIds(run);
-    const answer = this.routedAnswer(run.id);
-    // Past the automatic-wake budget a peer message wakes nothing: it stays queued for the next
-    // turn (spec 2026-10-27-task-communication-protocol § 8, `holdPeerWakesAtCap`).
-    const spent = this.automaticWakes(run.id, beforeHumanReset) >= MAX_AUTO_CONTINUES;
-    return (run.agentInputs ?? []).filter(input => { return (!!input.conversation || (input.source === 'lifecycle' && !named.has(input.id))) &&
-      !input.deliveredAt && !hasLiveInboxClaim(input) && !(spent && chargesBudgetMessage(input)) &&
-      !owed.has(input.id) && input.id !== answer?.id && !this.providerOwnsInboxInput(run.id, input.id); });
+    return wakeLedger.pendingConversationWakes(run, { routedAnswer: id => this.routedAnswer(id), countAutomaticWakes: (id, budget) => this.automaticWakes(id, budget), providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId) }, MAX_AUTO_CONTINUES, beforeHumanReset);
   }
 
   /** Peer messages the spent budget keeps from waking the run (spec § 8). A turn in progress takes
@@ -2267,20 +2226,12 @@ export class RunManager {
     return routed && this.store.getRun(runId)?.agentInputs?.find(input => !input.deliveredAt && answersQuestion(routed.message, input));
   }
 
-  /** A wake is owed: a resolved wait, a message, or a parent's answer the run has not received. */
   private owesWake(run: RunRecord, beforeHumanReset?: HumanAnswerBudget): boolean {
-    // A pending native question takes nothing but its answer: results and messages wait for the
-    // answer's turn end, and a run with no session is not reopened for them, where its provider
-    // would ask again (hearsay-tools/cezarion#1235, parent spec § Wakes beside questions).
-    if (openWaits(run).some(wait => wait.kind === 'human' && wait.via === 'native-ask')) return this.routedAnswer(run.id) !== undefined;
-    if (resolvedWaits(run).length) return true;
-    return this.pendingConversationWakes(run, beforeHumanReset).length > 0 || this.routedAnswer(run.id) !== undefined;
+    return wakeLedger.owesWake(run, { routedAnswer: id => this.routedAnswer(id), pendingConversationWakes: (record, budget) => this.pendingConversationWakes(record, budget) }, beforeHumanReset);
   }
 
-  /** A live session takes a wake at its turn boundary. A native question is mid-turn and takes one
-   *  input there: the parent's answer to it, through the answer seam (#505). */
   private takesWake(runId: string, state: ActiveRun): boolean {
-    return state.atTurnBoundary === state.session || (!!state.pendingHumanAsk && this.routedAnswer(runId) !== undefined);
+    return wakeLedger.takesWake(runId, state, id => this.routedAnswer(id));
   }
 
   /** An admitted wake goes to the agent: a parent's answer through the answer seam, everything
@@ -4456,13 +4407,8 @@ export class RunManager {
     }
   }
 
-  /** An answer already executing in this generation is not an unanswered question.
-   * Keep the durable checkpoint at turn-end for crash recovery, and match its exact
-   * sequence so it can never hide a newer question. */
   private hasUnansweredHumanAsk(runId: string): boolean {
-    const seq = this.pendingHumanAskSeq(runId);
-    const state = this.active.get(runId);
-    return seq !== undefined && !(state?.session?.open && !state.cancelled && state.openingAnswerAskSeq === seq);
+    return pendingAskFacts.hasUnansweredHumanAsk(runId, this.active, id => this.pendingHumanAskSeq(id));
   }
 
   /** Both roles can select their own requests without acquiring worker-management authority.
@@ -5156,12 +5102,8 @@ export class RunManager {
     return this.store.getRun(runId)?.agentInputs?.find(entry => entry.id === input.id)?.deliveredAt ? 'delivered' : 'queued';
   }
 
-  /** Transcript bubbles include refused sends. Only a successful delivery
-   * checkpoint can answer the specific ask observed before that send. */
   private pendingHumanAskSeq(runId: string): number | undefined {
-    // Fallback human gates use the same exact successful-delivery receipt as asks,
-    // without inventing a structured question card or changing its summary. Indexed (#880).
-    return this.store.transcriptFacts(runId).pendingGateSeq;
+    return pendingAskFacts.pendingHumanAskSeq(this.store, runId);
   }
 
   /** An unanswered `ask.requested` with no open human wait (a row written before every ask opened
@@ -5201,7 +5143,7 @@ export class RunManager {
   }
 
   private hasPendingHumanAsk(runId: string): boolean {
-    return this.pendingHumanAskSeq(runId) !== undefined;
+    return pendingAskFacts.hasPendingHumanAsk(runId, id => this.pendingHumanAskSeq(id));
   }
 
   /** Accepted input may be temporarily refused while a backend HTTP ack is
@@ -5863,19 +5805,8 @@ export class RunManager {
     if (askSeq !== undefined) this.store.appendEvent(runId, { type: 'human-ask-closed', askSeq, reason: 'finish' });
   }
 
-  /** A synthetic continuation can settle only the resumed agent turn. If the
-   * original workflow still has steps after the waiting one, that would skip
-   * those steps rather than resume the workflow engine. */
   private waitingBeforeFinalWorkflowStep(run: RunRecord): boolean {
-    const steps = run.workflowDef?.steps ?? run.steps.filter(step => !isSyntheticContinuation(run, step));
-    if (!steps.length || !run.currentStepId) return true;
-    const currentStep = run.steps.find(step => step.id === run.currentStepId);
-    if (currentStep && isSyntheticContinuation(run, currentStep)) {
-      const waiting = this.waitingWorkflowStepIndex(run);
-      return waiting >= 0 && waiting < steps.length - 1;
-    }
-    const current = steps.findIndex((step) => step.id === run.currentStepId);
-    return current < 0 || current < steps.length - 1;
+    return workflowPosition.waitingBeforeFinalWorkflowStep(run, isSyntheticContinuation, record => this.waitingWorkflowStepIndex(record));
   }
 
   /** A clean process exit cannot complete a workflow still blocked on a question.
@@ -5889,27 +5820,8 @@ export class RunManager {
       this.waitingBeforeFinalWorkflowStep(run);
   }
 
-  /** Locate the original workflow step whose closed session a synthetic Continue is resuming. */
   private waitingWorkflowStepIndex(run: RunRecord): number {
-    const steps = run.workflowDef?.steps ?? run.steps.filter(step => !isSyntheticContinuation(run, step));
-    if (!steps.length) return -1;
-    // CI recovery can resume a failed attempt. Its cursor must survive both the
-    // synthetic continuation replacing currentStepId and wait delivery retiring the wait.
-    const ciSource = this.ciWorkflowResumeStepIndex(run);
-    if (ciSource >= 0) return ciSource;
-    const interrupted = steps.findIndex((step) => {
-      const persisted = run.steps.find((candidate) => candidate.id === step.id);
-      return stepKind(step) === 'agent' && persisted?.status === 'failed' && persisted.error === 'interrupted — cezar process exited during the run';
-    });
-    if (interrupted >= 0) return interrupted;
-    for (let index = steps.length - 1; index >= 0; index--) {
-      const persisted = run.steps.find((step) => step.id === steps[index]!.id);
-      // Startup recovery records an interrupted live step as failed before it
-      // constructs the synthetic continuation. Later workflow steps are still
-      // pending, so that failed step remains the continuation's source.
-      if (persisted?.status === 'waiting' || persisted?.status === 'running') return index;
-    }
-    return -1;
+    return workflowPosition.waitingWorkflowStepIndex(run, isSyntheticContinuation, record => this.ciWorkflowResumeStepIndex(record));
   }
 
   /** The workflow step after the one a continuation resumes, when that one is not the last: the
@@ -5932,41 +5844,15 @@ export class RunManager {
   }
 
   private continuationNextStep(runId: string): WorkflowStepDef | undefined {
-    const run = this.store.getRun(runId);
-    const index = run?.workflowDef ? this.waitingWorkflowStepIndex(run) : -1;
-    return index >= 0 ? run!.workflowDef!.steps[index + 1] : undefined;
+    return workflowPosition.continuationNextStep(this.store, runId, record => this.waitingWorkflowStepIndex(record));
   }
 
   private ciWorkflowResumeStepIndex(run: RunRecord): number {
-    if (!run.workflowResumeStepId) return -1;
-    return run.workflowDef?.steps.findIndex(step => step.id === run.workflowResumeStepId &&
-      stepKind(step) === 'agent' && run.steps.find(persisted => persisted.id === step.id)?.status === 'failed') ?? -1;
+    return workflowPosition.ciWorkflowResumeStepIndex(run);
   }
 
-  /**
-   * Session ids Cursor will accept on `session/load`. A launch UUID written
-   * before `session.started` is only for the step rail (#583).
-   */
   private resumableSessionId(runId: string, sessionStep: StepState | undefined): string | undefined {
-    if (!sessionStep?.sessionId) return undefined;
-    if ((sessionStep.backend ?? this.store.getRun(runId)?.runner) === 'cursor') {
-      const run = this.store.getRun(runId);
-      const sessionStepIndex = run?.steps.findIndex((step) => step.id === sessionStep.id) ?? -1;
-      // A Continue records the existing ID before the resumed process emits its
-      // own session event. After a crash, its original owning step still holds
-      // the print-session proof; later steps cannot establish that proof.
-      const printEvidenceSteps = new Set(run?.steps.slice(0, sessionStepIndex + 1)
-        .filter((step) => step.sessionId === sessionStep.sessionId && step.sessionTransport === 'cursor-print')
-        .map((step) => step.id));
-      const confirmed = this.store.readEvents(runId).some(
-        (event) => event.type === 'session' && event.sessionId === sessionStep.sessionId &&
-          (sessionStep.sessionTransport !== 'cursor-print' ||
-            (event.stepId !== undefined && printEvidenceSteps.has(event.stepId) &&
-              event.sessionTransport === 'cursor-print')),
-      );
-      if (!confirmed) return undefined;
-    }
-    return sessionStep.sessionId;
+    return workflowPosition.resumableSessionId(this.store, runId, sessionStep);
   }
 
   /**
