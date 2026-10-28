@@ -217,13 +217,18 @@ def invoke(node, row, action, target, sibling, uid, gid, proof=False, gate=None,
     data = (json.dumps(request) + '\n').encode()
     if len(data) > LIMIT: raise RuntimeError('row exceeds bound')
     code, stdout, stderr = bounded_output([node, '--experimental-transform-types', str(DRIVER)], data, uid, gid, 15, gate=gate, gate_fds=gate_fds)
+    details = {'exit': code, 'stdout': stdout[:4096].decode(errors='replace'),
+               'stderr': stderr[:4096].decode(errors='replace'),
+               'stdoutBytes': len(stdout), 'stderrBytes': len(stderr)}
+    def fail(reason):
+        raise RuntimeError(reason + ': ' + json.dumps(details))
     if not stdout.endswith(b'\n') or stdout.count(b'\n') != 1:
-        details = {'exit': code, 'stdout': stdout[:4096].decode(errors='replace'),
-                   'stderr': stderr[:4096].decode(errors='replace'),
-                   'stdoutBytes': len(stdout), 'stderrBytes': len(stderr)}
-        raise RuntimeError('invalid reaper output framing: ' + json.dumps(details))
+        fail('invalid reaper output framing')
+    try: response = json.loads(stdout)
+    except (UnicodeDecodeError, json.JSONDecodeError): fail('invalid reaper response JSON')
+    if len(stdout) <= 4096: details['response'] = response
+    if not isinstance(response, dict): fail('invalid reaper response')
     if code == 42 and action == 'stop':
-        response = json.loads(stdout)
         if (response.get('version') == 1 and response.get('status') == 'regression'
                 and response.get('action') == action and response.get('case') == row['case']
                 and response.get('resourceKind') == row['resourceKind'] and response.get('code') == 'holder-survived-reap'):
@@ -232,17 +237,17 @@ def invoke(node, row, action, target, sibling, uid, gid, proof=False, gate=None,
                               'stderr': stderr.decode(errors='replace')}), flush=True)
             if proof: return response
     if code:
-        raise RuntimeError('reaper row failed: ' + stderr[-4096:].decode(errors='replace'))
-    response = json.loads(stdout)
+        fail('reaper row failed')
     if (response.get('version') != 1 or response.get('status') != 'passed' or response.get('case') != row['case']
             or response.get('action') != action or response.get('resourceKind') != row['resourceKind']
             or not isinstance(response.get('code'), str) or not isinstance(response.get('allowDelete'), bool)
             or not isinstance(response.get('checkpointRetained'), bool)
             or not isinstance(response.get('elapsedMs'), (int, float)) or response['elapsedMs'] < 0):
-        raise RuntimeError('invalid reaper response')
+        fail('invalid reaper response')
     for key in ('target', 'sibling'):
-        if any(response.get(key, {}).get(name) != request[key][name] for name in ('pid', 'outerPid', 'startToken')):
-            raise RuntimeError('reaper returned a different process identity')
+        process = response.get(key)
+        if not isinstance(process, dict) or any(process.get(name) != request[key][name] for name in ('pid', 'outerPid', 'startToken')):
+            fail('reaper returned a different process identity')
     return response
 
 
