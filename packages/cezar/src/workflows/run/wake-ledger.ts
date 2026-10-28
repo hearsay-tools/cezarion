@@ -7,7 +7,7 @@ import { chargesBudgetMessage, openWaits, resolvedWaits, waitInputId, waitNamedI
 
 interface ConversationWakeReads {
   routedAnswer(runId: string): AgentInput | undefined;
-  automaticWakes(runId: string, beforeHumanReset?: { spent: number }): number;
+  countAutomaticWakes(runId: string, beforeHumanReset?: { spent: number }): number;
   providerOwnsInboxInput(runId: string, inputId: string): boolean;
 }
 
@@ -70,7 +70,7 @@ export function pendingConversationWakes(run: RunRecord, reads: ConversationWake
   const answer = reads.routedAnswer(run.id);
   // Past the automatic-wake budget a peer message wakes nothing: it stays queued for the next
   // turn (spec 2026-10-27-task-communication-protocol § 8, `holdPeerWakesAtCap`).
-  const spent = reads.automaticWakes(run.id, beforeHumanReset) >= MAX_AUTO_CONTINUES;
+  const spent = reads.countAutomaticWakes(run.id, beforeHumanReset) >= MAX_AUTO_CONTINUES;
   return (run.agentInputs ?? []).filter(input => { return (!!input.conversation || (input.source === 'lifecycle' && !named.has(input.id))) &&
     !input.deliveredAt && !hasLiveInboxClaim(input) && !(spent && chargesBudgetMessage(input)) &&
     !owed.has(input.id) && input.id !== answer?.id && !reads.providerOwnsInboxInput(run.id, input.id); });

@@ -2205,7 +2205,7 @@ export class RunManager {
   }
 
   private pendingConversationWakes(run: RunRecord, beforeHumanReset?: HumanAnswerBudget): AgentInput[] {
-    return wakeLedger.pendingConversationWakes(run, { routedAnswer: id => this.routedAnswer(id), automaticWakes: (id, budget) => this.automaticWakes(id, budget), providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId) }, MAX_AUTO_CONTINUES, beforeHumanReset);
+    return wakeLedger.pendingConversationWakes(run, { routedAnswer: id => this.routedAnswer(id), countAutomaticWakes: (id, budget) => this.automaticWakes(id, budget), providerOwnsInboxInput: (id, inputId) => this.providerOwnsInboxInput(id, inputId) }, MAX_AUTO_CONTINUES, beforeHumanReset);
   }
 
   /** Peer messages the spent budget keeps from waking the run (spec § 8). A turn in progress takes
