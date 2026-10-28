@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
 """Observe proc paths in a disposable Linux user and mount namespace."""
 import json
-import mmap
+import ctypes
 import os
 import pathlib
 import selectors
 import subprocess
 import sys
 import tempfile
+import shutil
+import signal
+import threading
+import time
 
 LIMIT = 4 * 1024 * 1024
 
@@ -52,7 +56,47 @@ def mount(*args):
     subprocess.run(['mount', *args], check=True, timeout=10, stdout=subprocess.DEVNULL)
 
 
-def child(fixture):
+def map_file(path):
+    # libc mmap does not duplicate the descriptor (unlike Python mmap).
+    libc = ctypes.CDLL(None, use_errno=True)
+    libc.mmap.restype = ctypes.c_void_p
+    libc.mmap.argtypes = (ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_long)
+    libc.munmap.argtypes = (ctypes.c_void_p, ctypes.c_size_t)
+    fd = os.open(path, os.O_RDONLY)
+    try:
+        identity = os.fstat(fd)
+        address = libc.mmap(None, 4096, 1, 2, fd, 0)  # PROT_READ, MAP_PRIVATE
+        if address == ctypes.c_void_p(-1).value:
+            raise OSError(ctypes.get_errno(), 'mmap failed')
+    finally:
+        os.close(fd)
+    return libc, address, (identity.st_dev, identity.st_ino)
+
+
+def assert_fd_free(identity, directory=None):
+    fd_dir = os.open('fd' if directory is not None else '/proc/self/fd',
+                     os.O_RDONLY | os.O_DIRECTORY, dir_fd=directory)
+    try:
+        for name in os.listdir(fd_dir):
+            try:
+                info = os.stat(name, dir_fd=fd_dir)
+            except FileNotFoundError:
+                continue
+            if (info.st_dev, info.st_ino) == identity:
+                raise RuntimeError('mapped fixture descriptor remains open')
+    finally:
+        os.close(fd_dir)
+
+
+def child(fixture, lifeline):
+    def watch_parent():
+        try:
+            while os.read(lifeline, 1):
+                pass
+        finally:
+            os._exit(125)  # PID namespace init exit tears down every descendant.
+    threading.Thread(target=watch_parent, daemon=True).start()
+
     root = pathlib.Path(fixture)
     owned, alias, other = (root / name for name in ('owned', 'alias', 'other'))
     for path in (owned, alias, other, owned / 'nested', other / 'nested'):
@@ -61,12 +105,24 @@ def child(fixture):
     (other / 'nested' / 'other').write_bytes(b'y' * 4096)
     mount('--make-rprivate', '/')
     mount('--bind', str(owned), str(alias))
-    with open(alias / 'mapped', 'rb') as descriptor:
-        mapped = mmap.mmap(descriptor.fileno(), 4096, access=mmap.ACCESS_READ)
+    libc, mapped, identity = map_file(alias / 'mapped')
+    assert_fd_free(identity)
     os.chdir('/')
 
     def event(case, proc_dir=None):
-        print(json.dumps({'case': case, 'pid': os.getpid(), 'inside': snapshot('self', fixture, proc_dir)}), flush=True)
+        # /proc is inherited from the host PID namespace. os.getpid() is namespace-local.
+        status = read_bounded('status', proc_dir) if proc_dir is not None else read_bounded('/proc/self/status')
+        host_pid = int(next(line for line in status.splitlines() if line.startswith('NSpid:')).split()[1])
+        inside = snapshot('self', fixture, proc_dir)
+        print(json.dumps({'case': case, 'pid': host_pid, 'inside': inside}), flush=True)
+        if case in ('private-bind-closed-fd', 'same-namespace-cwd', 'changed-root'):
+            assert_fd_free(identity, proc_dir)
+            if not any('/mapped' in line and str(identity[1]) in line.split() for line in inside['maps']):
+                raise RuntimeError('expected mapping missing')
+        if case in ('nested-overmount', 'changed-root'):
+            assert_fd_free(identity, proc_dir); assert_fd_free(nested_identity, proc_dir)
+            if not any('/mapped-nested' in line and str(nested_identity[1]) in line.split() for line in inside['maps']):
+                raise RuntimeError('expected nested mapping missing')
         if sys.stdin.readline().strip() != 'continue':
             raise RuntimeError('reader did not acknowledge snapshot')
 
@@ -77,9 +133,10 @@ def child(fixture):
     with open(alias / 'mapped', 'rb'):
         event('same-namespace-open-fd')
     (owned / 'nested' / 'mapped-nested').write_bytes(b'z' * 4096)
-    with open(alias / 'nested' / 'mapped-nested', 'rb') as nested_fd:
-        nested = mmap.mmap(nested_fd.fileno(), 4096, access=mmap.ACCESS_READ)
+    _, nested, nested_identity = map_file(alias / 'nested' / 'mapped-nested')
+    assert_fd_free(identity); assert_fd_free(nested_identity)
     mount('--bind', str(other / 'nested'), str(alias / 'nested'))
+    assert_fd_free(identity); assert_fd_free(nested_identity)
     event('nested-overmount')
     pid = os.fork()
     if pid == 0:
@@ -95,51 +152,101 @@ def child(fixture):
     _, status = os.waitpid(pid, 0)
     if os.waitstatus_to_exitcode(status) != 0:
         raise RuntimeError('changed-root child failed')
-    nested.close(); mapped.close()
+    if libc.munmap(nested, 4096) or libc.munmap(mapped, 4096):
+        raise OSError(ctypes.get_errno(), 'munmap failed')
+
+
+def parent_death(expected_parent):
+    libc = ctypes.CDLL(None, use_errno=True)
+    if libc.prctl(1, signal.SIGKILL, 0, 0, 0) != 0:  # PR_SET_PDEATHSIG
+        raise OSError(ctypes.get_errno(), 'prctl failed')
+    if os.getppid() != expected_parent:
+        os._exit(125)
+
+
+def run_probe(fixture):
+    read_end, write_end = os.pipe()
+    os.set_inheritable(read_end, True)
+    command = ['unshare', '--user', '--map-root-user', '--mount', '--pid', '--fork',
+               sys.executable, __file__, '--child', fixture, str(read_end)]
+    print(json.dumps({'command': command, 'scope': 'disposable user, mount and PID namespaces'}), flush=True)
+    parent_pid = os.getpid()
+    proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            pass_fds=(read_end,), preexec_fn=lambda: parent_death(parent_pid))
+    os.close(read_end)
+    selector = selectors.DefaultSelector()
+    selector.register(proc.stdout, selectors.EVENT_READ, 'stdout')
+    selector.register(proc.stderr, selectors.EVENT_READ, 'stderr')
+    deadline = time.monotonic() + 30
+    buffers = {'stdout': b'', 'stderr': b''}
+    total = 0
+    cases = []
+    try:
+        while selector.get_map():
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                raise TimeoutError('namespace probe timed out')
+            for key, _ in selector.select(remaining):
+                data = os.read(key.fileobj.fileno(), 65536)
+                if not data:
+                    selector.unregister(key.fileobj)
+                    continue
+                total += len(data)
+                if total > LIMIT:
+                    raise RuntimeError('probe output exceeded byte limit')
+                name = key.data
+                buffers[name] += data
+                if name != 'stdout':
+                    continue
+                while b'\n' in buffers[name]:
+                    line, buffers[name] = buffers[name].split(b'\n', 1)
+                    if not line:
+                        raise RuntimeError('empty handshake')
+                    record = json.loads(line)
+                    if 'pid' in record:
+                        record['outside'] = snapshot(record['pid'], fixture)
+                        cases.append(record['case'])
+                        proc.stdin.write(b'continue\n'); proc.stdin.flush()
+                    print(json.dumps(record), flush=True)
+        if buffers['stdout']:
+            raise RuntimeError('incomplete handshake')
+        status = proc.wait(timeout=max(0.1, deadline - time.monotonic()))
+        stderr = buffers['stderr'].decode('utf-8', errors='replace')
+        if status:
+            unavailable = not cases and ('Operation not permitted' in stderr or 'Permission denied' in stderr)
+            print(json.dumps({'capability': 'unavailable' if unavailable else 'failed', 'status': status, 'stderr': stderr}), flush=True)
+            if not unavailable:
+                raise RuntimeError('namespace probe failed')
+        else:
+            required = {'private-bind-closed-fd', 'same-namespace-cwd', 'same-namespace-open-fd', 'nested-overmount'}
+            if not required.issubset(cases):
+                raise RuntimeError('required probe case missing')
+            print(json.dumps({'capability': 'available', 'observed_cases': cases, 'stderr': stderr}), flush=True)
+    finally:
+        # EOF causes namespace init to exit. Wait for unshare to reap init;
+        # PID namespace exit has completed before fixture deletion is allowed.
+        os.close(write_end)
+        proc.stdin.close()
+        selector.close()
+        try:
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError('namespace teardown not verified; fixture retained')
+        for stream in (proc.stdout, proc.stderr):
+            stream.close()
 
 
 def main():
-    if len(sys.argv) == 3 and sys.argv[1] == '--child':
-        child(sys.argv[2]); return
-    with tempfile.TemporaryDirectory(prefix='cez-mount-probe-') as fixture:
-        command = ['unshare', '--user', '--map-root-user', '--mount', '--fork', '--kill-child',
-                   sys.executable, __file__, '--child', fixture]
-        print(json.dumps({'command': command, 'scope': 'disposable user and mount namespaces'}), flush=True)
-        try:
-            proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                                    text=True, bufsize=1)
-        except OSError as error:
-            print(json.dumps({'capability': 'unavailable', 'error': str(error)})); return
-        selector = selectors.DefaultSelector(); selector.register(proc.stdout, selectors.EVENT_READ)
-        cases = []
-        try:
-            while True:
-                if not selector.select(timeout=20):
-                    raise TimeoutError('namespace probe timed out')
-                line = proc.stdout.readline()
-                if not line:
-                    break
-                record = json.loads(line)
-                if 'pid' in record:
-                    record['outside'] = snapshot(record['pid'], fixture)
-                    cases.append(record['case'])
-                    proc.stdin.write('continue\n'); proc.stdin.flush()
-                print(json.dumps(record), flush=True)
-            stderr = proc.stderr.read(LIMIT)
-            status = proc.wait(timeout=10)
-            if status:
-                unavailable = not cases and ('Operation not permitted' in stderr or 'Permission denied' in stderr)
-                print(json.dumps({'capability': 'unavailable' if unavailable else 'failed', 'status': status, 'stderr': stderr}), flush=True)
-                if not unavailable: raise RuntimeError('namespace probe failed')
-            else:
-                print(json.dumps({'capability': 'available', 'observed_cases': cases, 'stderr': stderr}), flush=True)
-        finally:
-            selector.close()
-            if proc.poll() is None:
-                proc.terminate()
-                try: proc.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    proc.kill(); proc.wait(timeout=5)
+    if len(sys.argv) == 4 and sys.argv[1] == '--child':
+        child(sys.argv[2], int(sys.argv[3])); return
+    fixture = tempfile.mkdtemp(prefix='cez-mount-probe-')
+    try:
+        run_probe(fixture)
+    except BaseException:
+        print(json.dumps({'fixture_retained': fixture}), flush=True)
+        raise
+    else:
+        shutil.rmtree(fixture)
 
 
 if __name__ == '__main__':
