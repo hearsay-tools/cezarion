@@ -1582,9 +1582,10 @@ function useTasksUrlState() {
     clearTimeout(timer.current)
     const trimmed = query.trim()
     timer.current = setTimeout(() => write((current) => {
+      const previousQuery = current.get('q')
       const next = setParam('q', trimmed === '' ? null : trimmed)(current)
       // The writer navigates exactly when the params change, so this is a write the URL will show.
-      if (next.get('q') !== current.get('q')) written(trimmed)
+      if (next.get('q') !== previousQuery) written(trimmed)
       return next
     }), QUERY_DEBOUNCE_MS)
   }, [write])
