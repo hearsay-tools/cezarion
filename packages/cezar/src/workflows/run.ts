@@ -12,6 +12,7 @@ import { ciWaitResultSchema, type CiWaitResult } from '@open-mercato/cezar-contr
 import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResult, previewServeRequestSchema, type PreviewServeRequest, type PreviewServeResult } from '@open-mercato/cezar-contract/preview';
 import { AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
+import { releaseActiveResources } from './drop-active.ts';
 import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
 import { nextLineEntry } from './line-order.ts';
 import { accountHeldFor, formatWakeInstant, resumeInFlight, runAccountKey, queuedRecoveryInput, queuedStartAt, sessionlessWakePrompt } from './run-scheduling.ts';
@@ -3904,12 +3905,8 @@ export class RunManager {
   /** Remove a run from the live registries — keeps `waiting ⊆ active`. */
   private dropActive(runId: string): void {
     const state = this.active.get(runId);
-    state?.pendingPermissions?.clear();
-    if (this.store.getRun(runId)?.hasPendingPermission) this.store.updateRun(runId, { hasPendingPermission: false });
-    state?.releaseRepoRoot?.();
-    state?.revokeCiTools?.();
+    releaseActiveResources(this.store, runId, state);
     if (state) {
-      state.releaseRepoRoot = undefined;
       this.clearIdleTimer(state);
       this.clearAutosaveTimer(state);
       this.clearHeldHumanInputTimer(state);
