@@ -20,5 +20,5 @@ export function instrumentAliasBudget(source: string): string {
             }
             throw new AliasBudgetExceeded();
         }`;
-  return 'let cezBudgetReported = false;\n' + source.replace(marker, replacement);
+  return "import { snapshot as cezSnapshot } from './cez-alias-aggregate.js';\nlet cezBudgetReported = false;\n" + source.replace(marker, replacement).replace('charge: amount, frames', 'charge: amount, frames, aggregate: cezSnapshot()');
 }

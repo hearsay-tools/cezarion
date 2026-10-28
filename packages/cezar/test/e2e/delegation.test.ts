@@ -13,6 +13,7 @@ import { promisify } from 'node:util';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
 import { instrumentAliasBudget } from './alias-budget-diagnostic.ts';
+import { instrumentAggregate } from './alias-aggregate-diagnostic.ts';
 
 const execFile = promisify(execFileCallback);
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -114,8 +115,11 @@ test('installed CLI completes owned-worker lifecycle with lost spawn reply and o
     await execFile('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock', join(pack, tarball)], { cwd: consumer });
     const installed = join(consumer, 'node_modules/@wjarka/cezarion');
     if (process.env.CZR_PACKAGED_REFUSAL_DIAGNOSTIC === '1') {
-      const budgetPath = join(installed, 'dist/delegation/linux-alias-model.js');
-      await writeFile(budgetPath, instrumentAliasBudget(await readFile(budgetPath, 'utf8')));
+      const files = ['linux-alias-model.js', 'linux-mapped-holders.js', 'linux-alias-scan.js', 'linux-proc-evidence.js', 'destroy-holders.js'];
+      const directory = join(installed, 'dist/delegation');
+      const originals = Object.fromEntries(await Promise.all(files.map(async file => [file, await readFile(join(directory, file), 'utf8')] as const)));
+      const patched = instrumentAggregate(originals);
+      patched['linux-alias-model.js'] = instrumentAliasBudget(patched['linux-alias-model.js']!);
       // A separate CI diagnostic run instruments only its disposable installed copy.
       // It does not replace the unmodified package verdict or alter the refusal.
       const path = join(installed, 'dist/delegation/workspace.js');
@@ -128,7 +132,8 @@ test('installed CLI completes owned-worker lifecycle with lost spawn reply and o
           /permission/i.test(message) ? 'permission' : /identity|ownership/i.test(message) ? 'identity' : 'other';
         const name = ['Error', 'TypeError', 'AliasBudgetExceeded', 'MountBoundaryError', 'PermissionRepairError'].includes(error?.constructor?.name) ? error.constructor.name : 'other';
         console.error('[packaged-refusal-diagnostic]', JSON.stringify({ name, category }));`;
-      await writeFile(path, source.replace(marker, diagnostic + '\n        ' + marker));
+      const workspacePatch = source.replace(marker, diagnostic + '\n        ' + marker);
+      await Promise.all([...Object.entries(patched).map(([file, contents]) => writeFile(join(directory, file), contents)), writeFile(path, workspacePatch)]);
     }
     const load = (file: string) => import(pathToFileURL(join(installed, 'dist', file)).href);
     const { RunStore } = await load('runs/store.js') as typeof import('../../src/runs/store.ts');
