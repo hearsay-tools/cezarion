@@ -16,6 +16,7 @@ import signal
 import stat
 import threading
 import time
+from linux_detach import check_mappings, detach_alias
 
 LIMIT = 4 * 1024 * 1024
 
@@ -229,7 +230,22 @@ def child(fixture, lifeline, parent_mount_ns, notify_fd, release_fd, production_
     if os.waitstatus_to_exitcode(status) != 0:
         raise RuntimeError('changed-root child failed')
     subprocess.run(['umount', str(alias / 'nested')], check=True, timeout=10)
-    subprocess.run(['umount', str(alias)], check=True, timeout=10)
+    root_identity = os.stat(owned)
+    def verify_detached():
+        current = os.stat(owned)
+        if (current.st_dev, current.st_ino) != (root_identity.st_dev, root_identity.st_ino): raise RuntimeError('owned root changed')
+        for path, expected in ((owned / 'mapped', identity), (owned / 'nested' / 'mapped-nested', nested_identity)):
+            info = os.stat(path)
+            if (info.st_dev, info.st_ino) != expected: raise RuntimeError('mapped resource identity changed')
+        assert_fd_free(identity); assert_fd_free(nested_identity)
+        maps = read_bounded('/proc/self/maps')
+        if not isinstance(maps, str): raise RuntimeError('mapping evidence unavailable')
+        check_mappings(maps, [identity, nested_identity])
+    def read_mounts():
+        mounts = read_bounded('/proc/self/mountinfo')
+        if not isinstance(mounts, str): raise RuntimeError('mount evidence unavailable')
+        return mounts
+    detach_alias(str(alias), lambda *args: subprocess.run(args, check=True, timeout=10), read_mounts, verify_detached)
     event('alias-unmounted-after-map')
     if libc.munmap(nested, 4096) or libc.munmap(mapped, 4096):
         raise OSError(ctypes.get_errno(), 'munmap failed')

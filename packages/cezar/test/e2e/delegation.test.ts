@@ -112,6 +112,21 @@ test('installed CLI completes owned-worker lifecycle with lost spawn reply and o
     await writeFile(join(consumer, 'package.json'), '{"private":true}');
     await execFile('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock', join(pack, tarball)], { cwd: consumer });
     const installed = join(consumer, 'node_modules/@wjarka/cezarion');
+    if (process.env.CZR_PACKAGED_REFUSAL_DIAGNOSTIC === '1') {
+      // A separate CI diagnostic run instruments only its disposable installed copy.
+      // It does not replace the unmodified package verdict or alter the refusal.
+      const path = join(installed, 'dist/delegation/workspace.js');
+      const source = await readFile(path, 'utf8');
+      const marker = '// Ambiguous ownership and every failed Git/filesystem operation fail closed.';
+      assert.equal(source.split(marker).length, 2, 'diagnostic catch marker changed');
+      const diagnostic = `const message = String(error?.message ?? '');
+        const category = /alias scan work exceeds bounds/.test(message) ? 'alias-work-budget' :
+          /mount/i.test(message) ? 'mount' : /checkpoint|retention/i.test(message) ? 'checkpoint' :
+          /permission/i.test(message) ? 'permission' : /identity|ownership/i.test(message) ? 'identity' : 'other';
+        const name = ['Error', 'TypeError', 'AliasBudgetExceeded', 'MountBoundaryError', 'PermissionRepairError'].includes(error?.constructor?.name) ? error.constructor.name : 'other';
+        console.error('[packaged-refusal-diagnostic]', JSON.stringify({ name, category }));`;
+      await writeFile(path, source.replace(marker, diagnostic + '\n        ' + marker));
+    }
     const load = (file: string) => import(pathToFileURL(join(installed, 'dist', file)).href);
     const { RunStore } = await load('runs/store.js') as typeof import('../../src/runs/store.ts');
     const { RunManager } = await load('workflows/run.js') as typeof import('../../src/workflows/run.ts');

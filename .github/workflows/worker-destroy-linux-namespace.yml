@@ -7,6 +7,8 @@ on:
       - '.github/scripts/linux-mount-alias-lifecycle.py'
       - '.github/scripts/linux-mount-alias-observer.mjs'
       - '.github/scripts/linux_reaper_fixture.py'
+      - '.github/scripts/linux_detach.py'
+      - '.github/scripts/linux-detach-test.py'
       - '.github/scripts/linux-reaper-fixture-test.py'
       - '.github/scripts/linux-reaper-regression.mjs'
       - '.github/scripts/linux-reaper-protocol*.mjs'
@@ -38,6 +40,7 @@ jobs:
       - name: Check fixture protocol guards
         run: |
           python3 .github/scripts/linux-reaper-fixture-test.py
+          python3 .github/scripts/linux-detach-test.py
           node .github/scripts/linux-reaper-protocol-check.mjs
       - name: Observe private mount namespace aliases
         run: sudo -n -- python3 .github/scripts/linux-mount-alias-probe.py --observer "$(command -v node)"
@@ -55,8 +58,8 @@ jobs:
           persist-credentials: false
       - name: Install proof dependencies and transplant fixture
         run: |
-          cp .github/scripts/linux-mount-alias-probe.py .github/scripts/linux_reaper_fixture.py .github/scripts/linux-reaper-regression.mjs .github/scripts/linux-reaper-protocol.mjs .github/scripts/linux-reaper-native-guard.mjs proof-base/.github/scripts/
-          sha256sum .github/scripts/linux-mount-alias-probe.py .github/scripts/linux_reaper_fixture.py .github/scripts/linux-reaper-regression.mjs .github/scripts/linux-reaper-protocol.mjs .github/scripts/linux-reaper-native-guard.mjs > "$RUNNER_TEMP/native-fixtures.sha256"
+          cp .github/scripts/linux-mount-alias-probe.py .github/scripts/linux_reaper_fixture.py .github/scripts/linux_detach.py .github/scripts/linux-reaper-regression.mjs .github/scripts/linux-reaper-protocol.mjs .github/scripts/linux-reaper-native-guard.mjs proof-base/.github/scripts/
+          sha256sum .github/scripts/linux-mount-alias-probe.py .github/scripts/linux_reaper_fixture.py .github/scripts/linux_detach.py .github/scripts/linux-reaper-regression.mjs .github/scripts/linux-reaper-protocol.mjs .github/scripts/linux-reaper-native-guard.mjs > "$RUNNER_TEMP/native-fixtures.sha256"
           cd proof-base
           git rev-parse HEAD > "$RUNNER_TEMP/proof-base.txt"
           pnpm install --frozen-lockfile

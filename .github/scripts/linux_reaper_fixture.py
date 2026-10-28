@@ -12,6 +12,7 @@ import stat
 import subprocess
 import time
 import uuid
+from linux_detach import check_detached_mounts, check_mappings, detach_alias, read_bounded
 
 LIMIT = 65536
 DRIVER = pathlib.Path(__file__).with_name('linux-reaper-regression.mjs')
@@ -150,6 +151,23 @@ def finish(child):
     for key in ('handle', 'control', 'ready'): os.close(child[key])
 
 
+def verify_detached_target(target, alias, resource, resource_id, expected, original_token):
+    pid = target['pid']
+    if not alive(target['handle']) or token(pid) != original_token: raise RuntimeError('target incarnation changed')
+    current = os.stat(resource)
+    if (current.st_dev, current.st_ino) != (resource_id.st_dev, resource_id.st_ino): raise RuntimeError('resource identity changed')
+    mapped = os.stat(resource / 'mapped')
+    if (mapped.st_dev, mapped.st_ino) != expected: raise RuntimeError('mapped resource identity changed')
+    check_detached_mounts(read_bounded(f'/proc/{pid}/mountinfo'), str(alias))
+    check_mappings(read_bounded(f'/proc/{pid}/maps'), [expected])
+    descriptors = os.listdir(f'/proc/{pid}/fd')
+    if len(descriptors) > 1024: raise RuntimeError('descriptor evidence exceeds bound')
+    for name in descriptors:
+        info = os.stat(f'/proc/{pid}/fd/{name}')
+        if (info.st_dev, info.st_ino) == expected: raise RuntimeError('mapped descriptor remains open')
+    if not alive(target['handle']) or token(pid) != original_token: raise RuntimeError('target incarnation changed')
+
+
 def bounded_output(command_line, data, uid, gid, timeout, env=None, gate=None, gate_fds=()):
     def prepare():
         if gate: gate()
@@ -254,7 +272,11 @@ def row_case(root, node, outer_proc, outer_pid_ns, outer_mount_ns, case, resourc
         actions = ('stop',) if proof else (('seed', 'retain', 'retain', 'release') if case == 'detached-alias' else ('observe', 'stop'))
         for action in actions:
             if action == 'retain' and not detached:
-                command('umount', str(alias)); detached = True
+                original_token = token(target['pid'])
+                detach_alias(str(alias), command, lambda: read_bounded('/proc/self/mountinfo'),
+                    lambda: verify_detached_target(target, alias, resource, resource_id,
+                        (owned_file.st_dev, owned_file.st_ino), original_token))
+                detached = True
             if action == 'release':
                 os.write(target['control'], b'r')
                 if bounded_line(target['ready']).get('released') is not True: raise RuntimeError('release unverified')

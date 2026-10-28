@@ -589,7 +589,24 @@ jobs:
         run: npm run build
 
       - name: Run packaged CLI E2E tests
+        id: packaged_cli
         run: npm run test:package
+
+      - name: Diagnose packaged worker refusal in a disposable installed copy
+        if: failure() && steps.packaged_cli.outcome == 'failure'
+        continue-on-error: true
+        run: |
+          set -o pipefail
+          cd packages/cezar
+          CZR_PACKAGED_REFUSAL_DIAGNOSTIC=1 node --import ../../scripts/test-git-env.mjs --import tsx --test --test-name-pattern='installed CLI completes owned-worker lifecycle' test/e2e/delegation.test.ts 2>&1 | tee "$RUNNER_TEMP/packaged-refusal-diagnostic.log"
+
+      - name: Save packaged refusal diagnostic
+        if: failure() && steps.packaged_cli.outcome == 'failure'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: packaged-refusal-diagnostic
+          path: ${{ runner.temp }}/packaged-refusal-diagnostic.log
+          if-no-files-found: warn
 
       # Every package the release publishes must be packable — the workspace root is `private`
       # and publishes nothing, so packing THERE just errors ("must have name and version").
