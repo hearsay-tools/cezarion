@@ -146,14 +146,15 @@ export function notDeliveredInstruction(pair: { relationship: 'family' | 'peer';
 }
 
 /** The ledger's 1,024 messages, where every open request holds room for its reply and a new
- *  request needs room for its own, its 32 open requests, and the recipient's 32 undelivered inputs
- *  (an answer to a question may pass that last bound, hearsay-tools/cezarion#505). */
-export function assertConversationCapacity(state: ConversationState, recipient: RunRecord, kind: ConversationSendRequest['kind'], enqueue: boolean, answering: boolean, replying: boolean): void {
+ *  request needs room for its own, its 32 open requests, and the recipient's 32 undelivered inputs.
+ *  A first reply to an open request passes that last bound, as an answer to a question always did
+ *  (hearsay-tools/cezarion#505): at most 32 requests are open, so at most 32 replies pass it. */
+export function assertConversationCapacity(state: ConversationState, recipient: RunRecord, kind: ConversationSendRequest['kind'], enqueue: boolean, replying: boolean): void {
   const reservedMessages = reservedReplies(state) - (replying ? 1 : 0) + (enqueue && kind === 'request' ? 1 : 0);
   const openRequests = () => state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length;
   const undelivered = () => { return (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length; };
   if (state.messages.length + reservedMessages >= 1024 || (enqueue && kind === 'request' && openRequests() >= 32) ||
-    (enqueue && !answering && undelivered() >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
+    (enqueue && !replying && undelivered() >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
 }
 
 /** A reply settles its request, or amends a deadline expiry to `replied-late`. Cancellation,
