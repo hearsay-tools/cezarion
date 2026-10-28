@@ -1,10 +1,12 @@
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { parseAskMarker } from './ask.ts';
-import type { AgentEvent, AgentInputOptions, AgentToolCallRecord, ContentBlock, SessionOptions } from './agent-runner.js';
+import type { AgentEvent, AgentInputOptions, AgentRunResult, AgentToolCallRecord, ContentBlock, SessionOptions } from './agent-runner.js';
+import { isSignalTerminationExit } from './agent-runner.js';
 import { InputSubmissions } from './input-submissions.ts';
-import { contentText, emitImages, isRecord, string } from './pi-rpc-wire.ts';
+import { contentText, emitImages, isRecord, piMessageText, string } from './pi-rpc-wire.ts';
 import { AUTO_END_DELAY_MS } from './runner-runtime.js';
 import { signalSession } from './session-process.js';
+import type { UiEvent } from './ui-events.js';
 import { V1TextCoalescer } from './v1-text-coalescer.js';
 
 /**
@@ -112,7 +114,6 @@ export interface PiRpcInputHost {
   humanAcksPending(): boolean;
   end(): void;
   flushText(): void;
-  emitLatchedProviderError(): void;
 }
 
 /**
@@ -137,6 +138,7 @@ export class PiRpcInput {
   // Submissions already queued when a turn began: that turn reads them.
   private carried = new Set<string>();
   private turnFailed = false;
+  private latchedProviderError: string | undefined;
   private autoEndTimer: NodeJS.Timeout | undefined;
 
   constructor(private readonly host: PiRpcInputHost) {}
@@ -216,6 +218,36 @@ export class PiRpcInput {
     this.turnFailed = false;
   }
 
+  /** A user `message_start`: the model received this prompt now (hearsay-tools/cezarion#505).
+   *  An agent submission with its text is read and reported; otherwise the text is returned, so
+   *  the runner can settle the human prompt it holds. */
+  readUserMessage(message: Record<string, unknown>): string | undefined {
+    const text = piMessageText(message);
+    const ids = this.submissions.consumeOldestByText(text);
+    if (!ids.length) return text;
+    this.host.opts.onAgentInputConsumed?.(ids);
+    return undefined;
+  }
+
+  /** An assistant `message_end`. A provider error is latched until the turn ends and cleared by a
+   *  later success: the CLI retries past provider flakes, and a recovered retry must stay silent
+   *  (#256, #316). A latched error also fails the turn. */
+  endAssistantMessage(message: Record<string, unknown>, providerErrorMessage: (message: Record<string, unknown>) => string): void {
+    if (string(message.stopReason) === 'error') {
+      this.turnFailed = true;
+      this.latchedProviderError = providerErrorMessage(message);
+    } else {
+      this.latchedProviderError = undefined;
+    }
+  }
+
+  /** Reports the latched provider error once: at the turn end, or when the stream ends inside a turn. */
+  emitLatchedProviderError(): void {
+    if (!this.latchedProviderError) return;
+    this.host.onEvent?.({ type: 'error', message: this.latchedProviderError });
+    this.latchedProviderError = undefined;
+  }
+
   /** The turn failed, so it may never have reached the model. */
   failTurn(): void {
     this.turnFailed = true;
@@ -226,7 +258,7 @@ export class PiRpcInput {
   settleTurn(): void {
     const { host } = this;
     host.flushText();
-    host.emitLatchedProviderError();
+    this.emitLatchedProviderError();
     this.pendingMarkerAsk = parseAskMarker(host.textChunks.slice(this.turnTextStart).join('\n')) !== null;
     this.agentInputReady = true;
     // Input queued before this turn began was processed by it, even without a user
@@ -295,4 +327,131 @@ export function armEndWatchdog(
   }, graceMs);
   timer.unref?.();
   return { clear: () => clearTimeout(timer) };
+}
+
+/** A `get_state` response's session id: a new one is adopted, then reported as a `session` event. */
+export function adoptRpcSessionId(
+  data: Record<string, unknown>,
+  current: string | undefined,
+  adopt: (sessionId: string) => void,
+  onEvent?: (event: AgentEvent) => void,
+): void {
+  const discovered = string(data.sessionId);
+  if (discovered && discovered !== current) {
+    adopt(discovered);
+    onEvent?.({ type: 'session', sessionId: discovered });
+  }
+}
+
+/** The handlers of the native messages pi and omp read the same way. */
+export interface PiTurnMessages {
+  input: PiRpcInput;
+  textBlocks: PiTextBlocks;
+  toolCalls: AgentToolCallRecord[];
+  onEvent?: ((event: AgentEvent) => void) | undefined;
+  flushText(): void;
+  /** The runner's own work on an assistant `message_end`, after the text flush and before the
+   *  provider-error latch: pi counts usage here; omp reports usage for every message elsewhere. */
+  assistantMessageEnded?: ((message: Record<string, unknown>) => void) | undefined;
+  /** The runner's wording of a provider failure. */
+  providerErrorMessage(message: Record<string, unknown>): string;
+  /** A user message whose text matched no agent submission: the runner settles the human prompt
+   *  it holds with that text, as its own tracking requires. */
+  humanPromptRead(text: string): void;
+}
+
+/**
+ * Text updates, assistant and user messages, agent starts and tool executions. Any other type
+ * is the runner's, and does nothing here. A message whose guard does not match (a non-object
+ * `message_update` event, a `message_end` that is not an assistant's, a `message_start` that is
+ * not a user's) does nothing, as it did when each runner read these in its own chain: no other
+ * branch reads the same type.
+ */
+export function dispatchPiTurnMessage(value: Record<string, unknown>, turn: PiTurnMessages): void {
+  switch (value.type) {
+    case 'message_update': if (isRecord(value.assistantMessageEvent)) turn.textBlocks.update(value.assistantMessageEvent); break;
+    case 'message_end':
+      if (isRecord(value.message) && value.message.role === 'assistant') {
+        turn.flushText();
+        turn.assistantMessageEnded?.(value.message);
+        turn.input.endAssistantMessage(value.message, turn.providerErrorMessage);
+      }
+      break;
+    case 'agent_start': turn.input.startTurn(); break;
+    case 'message_start':
+      if (isRecord(value.message) && value.message.role === 'user') {
+        const text = turn.input.readUserMessage(value.message);
+        if (text !== undefined) turn.humanPromptRead(text);
+      }
+      break;
+    case 'tool_execution_start': turn.flushText(); recordPiToolCall(value, turn.toolCalls, turn.onEvent); break;
+    case 'tool_execution_end': emitPiToolResult(value, turn.onEvent); break;
+  }
+}
+
+/** How a Pi-family process ended, read when the output loop and the exit wait are done. */
+export interface PiFamilyExit {
+  cli: 'pi' | 'omp';
+  /** The native event that settles a turn, named when the stream ends inside one. */
+  settleEvent: 'agent_settled' | 'session_settled';
+  exitCode: number | null;
+  signalCode: NodeJS.Signals | null;
+  terminatedByCezar: boolean;
+  timedOut: boolean;
+  limitMs: number;
+  stderr: readonly string[];
+  /** The stderr line the exit error carries. */
+  stderrDetail(stderr: string): string;
+  turnOpen: boolean;
+  tokensUsed: number;
+  stopReason: Extract<UiEvent, { type: 'session.ended' }>['reason'];
+  emitUi(event: UiEvent): void;
+  onEvent?: ((event: AgentEvent) => void) | undefined;
+  result(): AgentRunResult;
+}
+
+/** The run's result after the process exited: a timeout, a teardown, a failure or a clean end. */
+export function settlePiFamilyExit(exit: PiFamilyExit): AgentRunResult {
+  const { cli, onEvent } = exit;
+  if (exit.timedOut) {
+    const message = `${cli} CLI timed out after ${Math.round((exit.limitMs / 60_000) * 10) / 10}m and was killed`;
+    onEvent?.({ type: 'error', message });
+    onEvent?.({ type: 'done' });
+    return exit.result();
+  }
+  reportPiFamilyExit(exit);
+  if (exit.turnOpen) onEvent?.({ type: 'note', message: `${cli} RPC session ended before ${exit.settleEvent}` });
+  if (exit.tokensUsed === 0) onEvent?.({ type: 'note', message: `token usage not reported by ${cli} CLI` });
+  exit.emitUi({ type: 'session.ended', reason: exit.stopReason });
+  onEvent?.({ type: 'done' });
+  return exit.result();
+}
+
+/**
+ * A signal cezar sent is teardown, not a second agent failure (#73). A signal from outside (the
+ * OOM killer, a stray kill) is a truncated run, never a success; so is a non-zero exit.
+ */
+function reportPiFamilyExit(exit: PiFamilyExit): void {
+  const { cli, exitCode, signalCode, onEvent } = exit;
+  if (exit.terminatedByCezar && (isSignalTerminationExit(exitCode) || (exitCode === null && signalCode !== null))) {
+    onEvent?.({
+      type: 'note',
+      message: `${cli} CLI did not exit on its own after close; terminated by cezar (${exitCode === null ? signalCode : `code ${exitCode}`})`,
+    });
+  } else if (exitCode === null && signalCode !== null) {
+    const message = `${cli} CLI was killed by signal ${signalCode}`;
+    onEvent?.({ type: 'error', message });
+    throw new Error(message);
+  } else if (exitCode !== 0 && exitCode !== null) {
+    throw piFamilyExitFailure(exit, exitCode);
+  }
+}
+
+function piFamilyExitFailure(exit: PiFamilyExit, exitCode: number): Error {
+  const diagnostic = exit.stderr.join('');
+  if (diagnostic.trim()) exit.onEvent?.({ type: 'note', message: `${exit.cli} CLI stderr:\n${diagnostic}` });
+  const detail = exit.stderrDetail(diagnostic);
+  const message = `${exit.cli} CLI exited with code ${exitCode}${detail ? ` — ${detail}` : ''}`;
+  exit.onEvent?.({ type: 'error', message });
+  return new Error(message);
 }
