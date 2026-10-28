@@ -4,6 +4,8 @@ on:
     paths:
       - '.github/workflows/worker-destroy-linux-namespace.yml'
       - '.github/scripts/linux-mount-alias-probe.py'
+      - '.github/scripts/capacity-attribution-eligible.py'
+      - '.github/scripts/capacity-attribution-eligible-test.py'
       - '.github/scripts/linux-mount-alias-lifecycle.py'
       - '.github/scripts/linux-mount-alias-observer.mjs'
       - '.github/scripts/linux_reaper_fixture.py'
@@ -39,6 +41,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - name: Check fixture protocol guards
         run: |
+          python3 .github/scripts/capacity-attribution-eligible-test.py
           python3 .github/scripts/linux-reaper-fixture-test.py
           python3 .github/scripts/linux-detach-test.py
           node .github/scripts/linux-reaper-protocol-check.mjs
@@ -54,7 +57,9 @@ jobs:
         if: failure()
         run: |
           set -euo pipefail
-          if ! test -f "$RUNNER_TEMP/candidate-native.log" || ! grep -q 'capacity result:.*alias scan work exceeds bounds' "$RUNNER_TEMP/candidate-native.log"; then
+          decision=$(python3 .github/scripts/capacity-attribution-eligible.py "$RUNNER_TEMP/candidate-native.log")
+          printf "Capacity attribution eligibility: %s\n" "$decision"
+          if [[ "$decision" != eligible ]]; then
             exit 0
           fi
           copy="$RUNNER_TEMP/capacity-attribution-copy"
