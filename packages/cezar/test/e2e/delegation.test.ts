@@ -88,6 +88,20 @@ test('installed CLI completes owned-worker lifecycle with lost spawn reply and o
       await new Promise(done => setTimeout(done, 20));
     }
   }
+  async function cleanup() {
+    if (manager && store) {
+      for (const run of store.listRuns()) {
+        await writeFile(join(root, 'wire', run.id + '.release'), 'teardown');
+        manager.cancel(run.id);
+      }
+      for (const run of store.listRuns()) if (run.delegation?.role === 'worker') assert.equal(await manager.awaitRunTermination(run.id, 15_000), true);
+      await Promise.all(executions); await Promise.all(turns);
+      manager.dispose(); store.flush();
+    }
+    await controller?.close();
+    process.env = saved;
+    await rm(root, { recursive: true, force: true });
+  }
   try {
     const pack = join(root, 'pack'); const consumer = join(root, "installation's directory");
     await mkdir(pack); await mkdir(consumer);
@@ -260,17 +274,6 @@ rl.on('close', () => queue.then(() => process.exit(0)));
     const publicState = JSON.stringify([store.listRuns(), ...store.listRuns().map(run => store!.readEvents(run.id))]);
     for (const env of environments.values()) assert.equal(publicState.includes(env.CEZ_DELEGATION_TOKEN!), false);
   } finally {
-    if (manager && store) {
-      for (const run of store.listRuns()) {
-        await writeFile(join(root, 'wire', run.id + '.release'), 'teardown');
-        manager.cancel(run.id);
-      }
-      for (const run of store.listRuns()) if (run.delegation?.role === 'worker') assert.equal(await manager.awaitRunTermination(run.id, 15_000), true);
-      await Promise.all(executions); await Promise.all(turns);
-      manager.dispose(); store.flush();
-    }
-    await controller?.close();
-    process.env = saved;
-    await rm(root, { recursive: true, force: true });
+    await cleanup();
   }
 });
