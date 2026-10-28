@@ -864,27 +864,21 @@ export class DelegationService {
       this.observeAttempt(project, workerId, result.state === 'complete' || !explained ? undefined : { key, holders: recordHolders(holders) });
       return result;
     };
-    persist('requested', worker.delegation.destroy?.remaining ?? ['process', 'worktree', 'branch']);
-    try {
-      persist('terminating', ['process', ...resources]);
-      project.manager.requestWorkerStop(workerId);
-      let result: WorkerDestroyResult;
-      const terminated = await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true });
-      assertAttached();
-      key = observe();
-      if (!terminated) {
-        // #469: name what blocks a crashed generation; other causes keep the generic message.
-        const taken = project.manager.takeWorkerTerminationBlocker(workerId);
-        const reason = taken && (taken.blocker.kind === 'unreadable' ? 'worker process record is unreadable; termination cannot be proven'
-          : taken.blocker.kind === 'controller' ? `the worker is still controlled by a live cezar (pid ${taken.blocker.pid})`
-          : `${taken.blocker.pids.length === 1 ? 'process' : 'processes'} ${taken.blocker.pids.join(', ')} still ${taken.blocker.pids.length === 1 ? 'holds' : 'hold'} the worker's worktree or scratch`);
-        if (taken?.changed) project.store.appendEvent(workerId, { type: 'lifecycle', message: `destroy blocked: ${reason}` });
-        result = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: !taken ? 'Worker termination is not proven; retry cleanup later'
-          : taken.blocker.kind === 'unreadable' ? reason! : `Worker termination is not proven: ${reason}; retry cleanup later` };
-        persist(result.state, result.remaining, result.error);
-        return observed(result, taken?.blocker.kind === 'processes' ? taken.blocker.pids : taken?.blocker.kind === 'controller' ? [taken.blocker.pid] : [], !!taken);
-      }
+    const terminationFailure = (): WorkerDestroyResult => {
+      // #469: name what blocks a crashed generation; other causes keep the generic message.
+      const taken = project.manager.takeWorkerTerminationBlocker(workerId);
+      const reason = taken && (taken.blocker.kind === 'unreadable' ? 'worker process record is unreadable; termination cannot be proven'
+        : taken.blocker.kind === 'controller' ? `the worker is still controlled by a live cezar (pid ${taken.blocker.pid})`
+        : `${taken.blocker.pids.length === 1 ? 'process' : 'processes'} ${taken.blocker.pids.join(', ')} still ${taken.blocker.pids.length === 1 ? 'holds' : 'hold'} the worker's worktree or scratch`);
+      if (taken?.changed) project.store.appendEvent(workerId, { type: 'lifecycle', message: `destroy blocked: ${reason}` });
+      const result: WorkerDestroyResult = { workerId, state: 'incomplete', remaining: ['process', ...resources], error: !taken ? 'Worker termination is not proven; retry cleanup later'
+        : taken.blocker.kind === 'unreadable' ? reason! : `Worker termination is not proven: ${reason}; retry cleanup later` };
+      persist(result.state, result.remaining, result.error);
+      return observed(result, taken?.blocker.kind === 'processes' ? taken.blocker.pids : taken?.blocker.kind === 'controller' ? [taken.blocker.pid] : [], !!taken);
+    };
+    const cleanWorkspace = async (): Promise<WorkerDestroyResult> => {
       persist('cleaning', resources);
+      let result: WorkerDestroyResult;
       const snapshot = structuredClone(check());
       const proof = project.store.readWorkerExecution(workerId);
       const evidence = await collectWorkerEvidence(project.root, project.store, snapshot);
@@ -945,7 +939,8 @@ export class DelegationService {
       }, evidence.diffSnapshot);
       project.manager.reconcileWorkerWaits(evidence.result.parentRunId);
       return observed(result, holders, explained);
-    } catch (error) {
+    };
+    const recordFailure = (error: unknown) => {
       // hearsay-tools/cezarion#879: an attempt that throws says why, instead of leaving an
       // in-progress phase with no error, as long as this is still the same pending destroy. A
       // throw explains nothing a tick could see clear, so the next tick attempts in full.
@@ -956,6 +951,18 @@ export class DelegationService {
           persist('incomplete', current.delegation.destroy.remaining, error instanceof Error ? error.message : String(error));
         }
       } catch { /* the attempt's own error is the one to report */ }
+    };
+    persist('requested', worker.delegation.destroy?.remaining ?? ['process', 'worktree', 'branch']);
+    try {
+      persist('terminating', ['process', ...resources]);
+      project.manager.requestWorkerStop(workerId);
+      const terminated = await project.manager.awaitRunTermination(workerId, this.terminationTimeoutMs, { reapOrphans: true });
+      assertAttached();
+      key = observe();
+      if (!terminated) return terminationFailure();
+      return await cleanWorkspace();
+    } catch (error) {
+      recordFailure(error);
       throw error;
     }
   }
