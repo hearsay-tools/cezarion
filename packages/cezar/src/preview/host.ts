@@ -1,13 +1,12 @@
 import { randomBytes } from 'node:crypto';
-import { readFileSync, rmSync } from 'node:fs';
+import { rmSync } from 'node:fs';
 import { join } from 'node:path';
-import type { PreviewStopRequest, PreviewStopResult, PreviewClientMessage, PreviewServer, PreviewServerMessage, PreviewStateMessage } from '@open-mercato/cezar-contract';
-import { z } from 'zod';
+import type { PreviewStopRequest, PreviewStopResult, PreviewClientMessage, PreviewQuality, PreviewServer, PreviewServerMessage, PreviewStateMessage } from '@open-mercato/cezar-contract';
 import type { RunStore } from '../runs/store.ts';
-import type { Cdp, CdpConnection } from './cdp.ts';
 import { recordAgentBrowser } from './agent-marker.ts';
+import { attachedSchema, ChromiumMissingError, launchBrowser, readOsRelease, waitForExit, type BrowserExit, type BrowserHandle } from './browser-launch.ts';
 import { AgentCdpLink, type AgentClient } from './cdp-proxy.ts';
-import { ChromiumError, downloadChromium, downloadTarget, installCommand, launchChromium, resolveChromium } from './chromium.ts';
+import { ChromiumError, downloadChromium, downloadTarget, installCommand } from './chromium.ts';
 import { DevServer, probePort, type DevServerState } from './dev-server.ts';
 import { previewStopResult, type PreviewHostLike } from './registration.ts';
 import { PreviewSession, type Viewer } from './session.ts';
@@ -22,9 +21,7 @@ import { normalizePreviewUrl } from './url.ts';
 
 export const PREVIEW_SERVER_IDLE_MS = 15 * 60_000;
 export const PREVIEW_BROWSER_IDLE_MS = 2 * 60_000;
-const PROFILE_RELEASE_WAIT_MS = 5_000;
 const PROGRESS_EVERY_MS = 250;
-const STDERR_TAIL_CHARS = 4096;
 
 export type RunContext = {
   runId: string;
@@ -36,10 +33,7 @@ export type RunContext = {
 
 export type PreviewTarget = { port: number } | { url: string } | { agent: true };
 
-export type BrowserExit = { signal?: string; exitCode?: number; stderrTail: string };
-/** A launched Chromium: its page's CDP session, and the browser connection the agent's proxy
- *  opens its own sessions on (hearsay-tools/cezarion#784). `exited` settles when the process is gone. */
-export type BrowserHandle = { cdp: Cdp; connection: CdpConnection; pageTargetId?: string | undefined; exited: Promise<BrowserExit>; close(): void };
+export { ChromiumMissingError, type BrowserExit, type BrowserHandle };
 
 /**
  * One agent session's right to drive its run's browser (hearsay-tools/cezarion#784). The token is
@@ -69,9 +63,6 @@ export type PreviewHostDeps = {
   osRelease?: () => string;
 };
 
-/** No Chromium anywhere `resolveChromium` looks: the pane offers the download or the OS command. */
-export class ChromiumMissingError extends Error {}
-
 type ServerEntry = DevServerLike | 'adopted';
 
 type RunEntry = {
@@ -94,6 +85,8 @@ type RunEntry = {
   viewerId?: string | undefined;
   /** The registered port the viewer is looking at; undefined for a typed URL. */
   port?: number | undefined;
+  /** The stream mode the viewer chose (hearsay-tools/cezarion#2066). Every session of the run reads it at each start. */
+  quality: PreviewQuality;
   lastUrl?: string | undefined;
   adopted: boolean;
   idleTimers: { server?: NodeJS.Timeout | undefined; browser?: NodeJS.Timeout | undefined };
@@ -123,51 +116,6 @@ function sameOrigin(a: string, b: string): boolean {
   }
 }
 
-const targetsSchema = z.object({ targetInfos: z.array(z.object({ type: z.string(), targetId: z.string() }).passthrough()) });
-const attachedSchema = z.object({ sessionId: z.string() });
-
-/** A closed browser's exit, bounded: a profile is deleted only once Chromium let go of it. */
-async function waitForExit(browser: BrowserHandle): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  await Promise.race([browser.exited, new Promise<void>(resolve => (timer = setTimeout(resolve, PROFILE_RELEASE_WAIT_MS)))]);
-  clearTimeout(timer);
-}
-
-/** resolve → launch → a flat session on the page target. */
-async function launchBrowser(profileDir: string, env: NodeJS.ProcessEnv): Promise<BrowserHandle> {
-  const bin = resolveChromium(undefined, env);
-  if (!bin) throw new ChromiumMissingError('No Chromium found');
-  const { proc, browser: connection } = await launchChromium(bin, profileDir, env);
-  let tail = '';
-  proc.stderr?.on('data', (chunk: Buffer) => {
-    tail = (tail + chunk.toString('utf8')).slice(-STDERR_TAIL_CHARS);
-  });
-  const exited = new Promise<BrowserExit>(resolve =>
-    proc.once('exit', (code, signal) => resolve({ ...(signal ? { signal } : code !== null ? { exitCode: code } : {}), stderrTail: tail })),
-  );
-  try {
-    const root = connection.session(undefined);
-    const { targetInfos } = targetsSchema.parse(await root.send('Target.getTargets'));
-    const page = targetInfos.find(target => target.type === 'page');
-    if (!page) throw new ChromiumError('exited', tail, 'Chromium opened no page');
-    const { sessionId } = attachedSchema.parse(await root.send('Target.attachToTarget', { targetId: page.targetId, flatten: true }));
-    const cdp = connection.session(sessionId);
-    return { cdp, connection, pageTargetId: page.targetId, exited, close: () => { connection.close(); proc.kill(); } };
-  } catch (error) {
-    connection.close();
-    proc.kill('SIGKILL');
-    throw error;
-  }
-}
-
-function readOsRelease(): string {
-  try {
-    return readFileSync('/etc/os-release', 'utf8');
-  } catch {
-    return '';
-  }
-}
-
 export class PreviewHost implements PreviewHostLike {
   private readonly stopping = new Map<DevServerLike, Promise<void>>();
   private readonly entries = new Map<string, RunEntry>();
@@ -194,7 +142,7 @@ export class PreviewHost implements PreviewHostLike {
    * A pane asks for a server or a URL. A registered port is probed again now: answering is
    * adopted and streamed, silent asks for approval. Nothing here spawns a command.
    */
-  async open(ctx: RunContext, viewer: Viewer, target: PreviewTarget, options: { viewerId?: string | undefined; resume?: boolean | undefined } = {}): Promise<void> {
+  async open(ctx: RunContext, viewer: Viewer, target: PreviewTarget, options: { viewerId?: string | undefined; resume?: boolean | undefined; quality?: PreviewQuality | undefined } = {}): Promise<void> {
     const entry = this.entryFor(ctx);
     if (entry.released) return;
     if (options.resume && this.heldByAnotherTab(entry, viewer, options.viewerId)) {
@@ -203,7 +151,10 @@ export class PreviewHost implements PreviewHostLike {
       return;
     }
     entry.viewerId = options.viewerId;
+    entry.quality = options.quality ?? 'normal';
     this.claim(entry, viewer);
+    // The viewer that was already attached keeps its stream: only a changed mode restarts it.
+    void entry.session?.refreshQuality().catch(() => {});
     // Whatever this open shows, a show still waiting on Chromium for an older target is stale.
     entry.targetGen += 1;
     if ('agent' in target) {
@@ -388,6 +339,10 @@ export class PreviewHost implements PreviewHostLike {
       case 'download': return this.startDownload(entry);
       case 'cancelDownload': this.download?.controller.abort(); return;
       case 'ping': viewer.send({ t: 'pong', ts: msg.ts }); return;
+      case 'quality':
+        entry.quality = msg.quality;
+        await entry.session?.refreshQuality().catch(() => {});
+        return;
       default:
         // A refused URL or a CDP call on a page that just went away changes nothing for the pane.
         await entry.session?.handle(msg).catch(() => {});
@@ -568,7 +523,7 @@ export class PreviewHost implements PreviewHostLike {
     if (!browser || !entry.followAgent) return;
     if (!target || target === browser.pageTargetId) return this.showHome(entry);
     if (entry.followed?.targetId === target) return this.streamFrom(entry, entry.followed.session);
-    const opened = await this.openPageSession(browser, target);
+    const opened = await this.openPageSession(entry, browser, target);
     if (!opened) return this.agentPageGone(entry, browser, target);
     const { session, sessionId } = opened;
     if (entry.browser !== browser || entry.agentTarget !== target || !entry.followAgent || entry.released || entry.followed?.targetId === target) {
@@ -600,7 +555,7 @@ export class PreviewHost implements PreviewHostLike {
   }
 
   /** A session of cezar's own on `targetId`, carrying the page's current URL. */
-  private async openPageSession(browser: BrowserHandle, targetId: string): Promise<{ session: PreviewSession; sessionId: string } | undefined> {
+  private async openPageSession(entry: RunEntry, browser: BrowserHandle, targetId: string): Promise<{ session: PreviewSession; sessionId: string } | undefined> {
     const attached = await browser.connection.call('Target.attachToTarget', { targetId, flatten: true }, undefined);
     const sessionId = attachedSchema.safeParse(attached.result).data?.sessionId;
     if (!sessionId) return undefined;
@@ -608,6 +563,7 @@ export class PreviewHost implements PreviewHostLike {
     try {
       session = await PreviewSession.create(browser.connection.session(sessionId), {
         onFirstFrame: viewer => viewer.send({ t: 'state', stage: 'streaming', adopted: false }),
+        quality: () => entry.quality,
       });
     } catch {
       browser.connection.request('Target.detachFromTarget', { sessionId }, undefined, () => {});
@@ -664,7 +620,7 @@ export class PreviewHost implements PreviewHostLike {
       existing.ctx = ctx;
       return existing;
     }
-    const entry: RunEntry = { ctx, servers: new Map(), startedAt: new Map(), approvals: new Map(), browserGen: 0, targetGen: 0, adopted: false, idleTimers: {}, released: false, agents: new Set(), followAgent: false };
+    const entry: RunEntry = { ctx, servers: new Map(), startedAt: new Map(), approvals: new Map(), browserGen: 0, targetGen: 0, quality: 'normal', adopted: false, idleTimers: {}, released: false, agents: new Set(), followAgent: false };
     this.entries.set(ctx.runId, entry);
     return entry;
   }
@@ -819,6 +775,7 @@ export class PreviewHost implements PreviewHostLike {
     try {
       session = await PreviewSession.create(browser.cdp, {
         onFirstFrame: viewer => viewer.send({ t: 'state', stage: 'streaming', adopted: entry.adopted }),
+        quality: () => entry.quality,
       });
     } catch (error) {
       browser.close();

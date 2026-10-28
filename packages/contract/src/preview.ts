@@ -96,6 +96,13 @@ export type PreviewAgentBrowserEvent = z.infer<typeof previewAgentBrowserEventSc
 const port = z.number().int().min(1).max(65535);
 const clampViewport = (value: number) => Math.min(4000, Math.max(100, Math.round(value)));
 
+/**
+ * The stream's JPEG quality (hearsay-tools/cezarion#2066). `normal` is the original quality 60;
+ * `high` is quality 100, still lossy JPEG. Neither changes the page's pixel density.
+ */
+export const previewQualitySchema = z.enum(['normal', 'high']);
+export type PreviewQuality = z.infer<typeof previewQualitySchema>;
+
 /** Mouse and key vocabularies are the prototype's: CDP's own names, nothing else gets through. */
 export const previewMouseTypeSchema = z.enum(['mousePressed', 'mouseReleased', 'mouseMoved', 'mouseWheel']);
 export const previewMouseButtonSchema = z.enum(['left', 'middle', 'right', 'none']);
@@ -111,7 +118,11 @@ export const previewClientMessageSchema = z.discriminatedUnion('t', [
     resume: z.boolean().optional(),
     /** `agent`: the page an agent drives through cezar's CDP proxy, shown as it is, never navigated (hearsay-tools/cezarion#784). */
     target: z.union([z.object({ port }), z.object({ url: z.string().min(1).max(2048) }), z.object({ agent: z.literal(true) })]),
+    /** Absent from an older cockpit, which streams `normal`. */
+    quality: previewQualitySchema.optional(),
   }),
+  /** The owner switched the mode: the stream restarts at it, the page stays as it is. */
+  z.object({ t: z.literal('quality'), quality: previewQualitySchema }),
   /** The owner's explicit approval; the only message that runs a registered command. */
   z.object({ t: z.literal('run'), port }),
   z.object({ t: z.literal('stop'), port }),

@@ -2,7 +2,7 @@ import { usePageActive, pageIsActive } from '@/api/live-visibility'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 
 import { connectPreview, type PreviewConnection, type PreviewTransport } from '@/api/preview-socket'
-import type { PreviewClientMessage, PreviewServer, PreviewServerMessage, PreviewStateMessage } from '@open-mercato/cezar-api-client'
+import type { PreviewClientMessage, PreviewQuality, PreviewServer, PreviewServerMessage, PreviewStateMessage } from '@open-mercato/cezar-api-client'
 import { toast } from '@/components/ui/toaster'
 import { useActiveProjectId } from '@/lib/project-router'
 
@@ -10,6 +10,7 @@ import type { PreviewPaneProps } from './preview-pane'
 import { PREVIEW_PHONE_QUERY, useMediaQuery } from './use-media-query'
 import type { PreviewStateActions } from './preview-states'
 import type { PreviewStageHandle, StageSize } from './preview-stage'
+import { readStoredPreviewQuality, writeStoredPreviewQuality } from './preview-quality'
 import type { PreviewOpenRequest } from './preview-state'
 import type { PreviewStatsValue, PreviewViewport } from './preview-toolbar'
 import { resolveAddress } from './preview-url'
@@ -78,6 +79,7 @@ export function usePreviewPaneTransport({ run, servers, request, onPort, onLive,
   const [dialog, setDialog] = useState<DialogMessage | undefined>(undefined)
   const [stats, setStats] = useState<PreviewStatsValue | undefined>(undefined)
   const [viewport, setViewport] = useState<PreviewViewport>('fit')
+  const [quality, setQuality] = useState<PreviewQuality>(readStoredPreviewQuality)
   const [stageSize, setStageSize] = useState<StageSize | null>(null)
   const [addressError, setAddressError] = useState<string | undefined>(undefined)
   const [stageNonce, setStageNonce] = useState(0)
@@ -89,6 +91,9 @@ export function usePreviewPaneTransport({ run, servers, request, onPort, onLive,
   const target = useRef<Target | undefined>(undefined)
   /** A port whose approval the owner already gave on a card: the next approval stage sends `run`. */
   const autoRun = useRef<number | undefined>(undefined)
+  /** Every `open` carries the mode, so a reconnect or a new target streams it from the first frame. */
+  const qualityRef = useRef(quality)
+  qualityRef.current = quality
   const latest = useRef({ port, stage, agent })
   latest.current = { port, stage, agent }
   const frames = useRef<Array<{ at: number; bytes: number }>>([])
@@ -160,7 +165,7 @@ export function usePreviewPaneTransport({ run, servers, request, onPort, onLive,
           if (state !== 'open') return
           setEverOpened(true)
           if (target.current) {
-            conn?.send({ t: 'open', target: target.current, viewerId: viewerId.current, resume: opened.current })
+            conn?.send({ t: 'open', target: target.current, viewerId: viewerId.current, resume: opened.current, quality: qualityRef.current })
             opened.current = true
           }
         },
@@ -238,7 +243,7 @@ export function usePreviewPaneTransport({ run, servers, request, onPort, onLive,
       setUrl(shownUrl)
       setPort('port' in next ? next.port : undefined)
       setAgent('agent' in next)
-      send({ t: 'open', target: next, viewerId: viewerId.current })
+      send({ t: 'open', target: next, viewerId: viewerId.current, quality: qualityRef.current })
       opened.current = socketOpen.current
     },
     [send],
@@ -297,6 +302,17 @@ export function usePreviewPaneTransport({ run, servers, request, onPort, onLive,
     openTarget({ url: address.url }, address.url)
   }
 
+  // The page stays as it is: the server restarts only its stream at the new mode.
+  const chooseQuality = useCallback(
+    (next: PreviewQuality) => {
+      qualityRef.current = next
+      setQuality(next)
+      writeStoredPreviewQuality(next)
+      send({ t: 'quality', quality: next })
+    },
+    [send],
+  )
+
   const reconnect = () => {
     // An explicit owner action may reclaim; automatic visibility resumes may not.
     opened.current = false
@@ -323,7 +339,7 @@ export function usePreviewPaneTransport({ run, servers, request, onPort, onLive,
 
   return {
     compact, transport, everOpened, takenOver, stage, url, port, agent, hasFrame,
-    cursor, dialog, setDialog, stats, viewport, setViewport, setStageSize, addressError,
+    cursor, dialog, setDialog, stats, viewport, setViewport, quality, chooseQuality, setStageSize, addressError,
     stageHandle, urlInput, send, connected, streaming, openServer, openAgent, empty,
     navigate, reconnect, actions,
   }

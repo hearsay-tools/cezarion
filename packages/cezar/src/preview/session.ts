@@ -1,4 +1,4 @@
-import type { PreviewClientMessage, PreviewServerMessage } from '@open-mercato/cezar-contract';
+import type { PreviewClientMessage, PreviewQuality, PreviewServerMessage } from '@open-mercato/cezar-contract';
 import type { Cdp } from './cdp.ts';
 import { normalizePreviewUrl } from './url.ts';
 
@@ -17,7 +17,8 @@ export type Viewer = {
   userAgent: string;
 };
 
-const QUALITY = 60;
+/** JPEG quality per mode (hearsay-tools/cezarion#2066): Normal is the original 60, High the most Chromium takes. */
+const JPEG_QUALITY: Record<PreviewQuality, number> = { normal: 60, high: 100 };
 const DEFAULT_VIEWPORT = { w: 1280, h: 800 };
 /** A started stream with no frame after this long is restarted: Chromium can stay silent after back-to-back restarts on a page that no longer changes. */
 const FIRST_FRAME_WAIT_MS = 500;
@@ -72,6 +73,12 @@ export const INJECT = `(() => {
   }, true);
 })();`;
 
+type SessionOptions = {
+  onFirstFrame?: (viewer: Viewer) => void;
+  /** The mode the viewer chose, read at every start. The host owns it; absent streams `normal`. */
+  quality?: () => PreviewQuality;
+};
+
 type ScreencastFrame = { data: string; sessionId: number };
 type DialogOpening = { type: 'alert' | 'confirm' | 'prompt' | 'beforeunload'; message: string; url?: string; defaultPrompt?: string };
 
@@ -96,8 +103,8 @@ export class PreviewSession {
   private viewport = DEFAULT_VIEWPORT;
   /** Viewport changes and screencast stops run one at a time: overlapping stop/start pairs can leave Chromium without a first frame. */
   private queue: Promise<void> = Promise.resolve();
-  /** The size the running screencast was started at; unset while stopped. */
-  private streaming?: { w: number; h: number } | undefined;
+  /** The size and mode the running screencast was started at; unset while stopped. */
+  private streaming?: { w: number; h: number; quality: PreviewQuality } | undefined;
   private watchdog?: ReturnType<typeof setTimeout> | undefined;
   private silentStarts = 0;
   /** Chromium refused the last start, so no stream runs and no watchdog will start one. */
@@ -107,7 +114,7 @@ export class PreviewSession {
 
   private constructor(
     private readonly cdp: Cdp,
-    private readonly opts: { onFirstFrame?: (viewer: Viewer) => void },
+    private readonly opts: SessionOptions,
   ) {
     cdp.on<ScreencastFrame>('Page.screencastFrame', frame => this.onFrame(frame));
     cdp.on<{ frame: { id?: string; url: string; parentId?: string } }>('Page.frameNavigated', ({ frame }) => {
@@ -142,7 +149,7 @@ export class PreviewSession {
   }
 
   /** Prepares the page: events, the cursor binding and the injected script, as the prototype did. */
-  static async create(cdp: Cdp, opts: { onFirstFrame?: (viewer: Viewer) => void } = {}): Promise<PreviewSession> {
+  static async create(cdp: Cdp, opts: SessionOptions = {}): Promise<PreviewSession> {
     const session = new PreviewSession(cdp, opts);
     await cdp.send('Page.enable');
     await cdp.send('Page.setLifecycleEventsEnabled', { enabled: true });
@@ -170,6 +177,19 @@ export class PreviewSession {
     this.disarmWatchdog();
     this.enqueue(async () => {
       await this.cdp.send('Page.stopScreencast').catch(() => {});
+    });
+  }
+
+  /**
+   * The chosen mode changed: a running stream restarts at it, at the same size. The page is not
+   * touched (no navigation, no new viewport), so its URL, form state and scroll stay. A stream that
+   * is not running picks the mode up at its next start.
+   */
+  refreshQuality(): Promise<void> {
+    return this.enqueue(async () => {
+      const streaming = this.streaming;
+      if (!this.viewer || !streaming || streaming.quality === this.quality()) return;
+      await this.restartScreencast(streaming.w, streaming.h);
     });
   }
 
@@ -264,20 +284,29 @@ export class PreviewSession {
     return this.enqueue(() => this.applyViewport(w, h));
   }
 
+  private quality(): PreviewQuality {
+    return this.opts.quality?.() ?? 'normal';
+  }
+
   private async applyViewport(w: number, h: number): Promise<void> {
     // The pane repeats its size at every loading step; a stream already at this size has nothing to redo.
-    if (this.streaming?.w === w && this.streaming.h === h) return;
+    if (this.streaming?.w === w && this.streaming.h === h && this.streaming.quality === this.quality()) return;
     await this.cdp.send('Emulation.setDeviceMetricsOverride', { width: w, height: h, deviceScaleFactor: 1, mobile: false });
     if (!this.viewer) return;
+    await this.restartScreencast(w, h);
+  }
+
+  private async restartScreencast(w: number, h: number): Promise<void> {
     this.streaming = undefined;
     await this.cdp.send('Page.stopScreencast').catch(() => {});
     // A restarted screencast numbers its frames afresh; the old in-flight frame will never be acked.
     this.pending = undefined;
     this.held = undefined;
     // Set before the start: its first frame can beat the command's reply, and is judged against this size.
-    this.streaming = { w, h };
+    const quality = this.quality();
+    this.streaming = { w, h, quality };
     try {
-      await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: QUALITY, maxWidth: w, maxHeight: h, everyNthFrame: 1 });
+      await this.cdp.send('Page.startScreencast', { format: 'jpeg', quality: JPEG_QUALITY[quality], maxWidth: w, maxHeight: h, everyNthFrame: 1 });
     } catch (error) {
       this.streaming = undefined;
       this.startRefused = true;
