@@ -1,6 +1,6 @@
-import { RUN_STATUS, STEP_KIND } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, STEP_KIND, WAIT_PHASE } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { randomUUID } from 'node:crypto';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { cezarDoneAnswerSchema } from '@open-mercato/cezar-contract/waits';
 import { manager, parent, store, until, useWorkerWaitFixture } from './worker-wait.testkit.ts';
 import { HARNESS_ADAPTERS } from '../core/harness-parity.testkit.ts';
@@ -51,6 +51,29 @@ describe('root request completion without a live session', () => {
     const delegation = store.getRun(sender.id)?.delegation;
     expect(delegation?.role === 'root' && delegation.conversation?.outcomes).toEqual([
       expect.objectContaining({ requestId: request.id, status: 'sender-closed' }),
+    ]);
+  });
+  it.each(['waiting', 'review'] as const)('no-session Finish at %s settles incoming requests and delivers the sender wait', async status => {
+    const sender = await parent(); const recipient = rootTask();
+    const request = obligation(sender.id, recipient.id);
+    store.commitConversation(sender.id, { messages: [request], outcomes: [] });
+    const wait = manager.registerWorkerListWait(sender.id, { requestIds: [request.id], timeoutSeconds: 600 }, 'cezar_wait');
+    const terminalPasses: string[] = [];
+    const reconcile = manager.reconcileWorkerWaits.bind(manager);
+    const observer = vi.spyOn(manager, 'reconcileWorkerWaits').mockImplementation(id => {
+      const recipientStatus = store.getRun(recipient.id)?.status;
+      if (id === sender.id && (recipientStatus === RUN_STATUS.done || recipientStatus === RUN_STATUS.review)) terminalPasses.push(id);
+      return reconcile(id);
+    });
+    store.updateRun(recipient.id, { status });
+    expect(manager.finish(recipient.id)).toBe(true);
+    await until(() => store.getRun(sender.id)?.lastWaits?.some(entry => entry.id === wait.id && entry.phase === WAIT_PHASE.delivered) === true);
+    expect(store.getRun(recipient.id)?.status).toBe('done');
+    expect(terminalPasses).toContain(sender.id);
+    observer.mockRestore();
+    const delegation = store.getRun(sender.id)?.delegation;
+    expect(delegation?.role === 'root' && delegation.conversation?.outcomes).toEqual([
+      expect.objectContaining({ requestId: request.id, status: 'completed-without-reply' }),
     ]);
   });
   it('live-session Finish closes sent requests and retires its intent at completion', async () => {
