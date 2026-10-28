@@ -115,7 +115,9 @@ export function PreviewSplit({ run, state, children }: { run: ApiRun | undefined
           <aside data-slot="preview-pane" data-phone={phone ? '' : undefined} hidden={paneHidden} className="preview-pane">
             <PreviewErrorBoundary onClose={state.closePane}>
               <Suspense fallback={<p role="status" className="p-6 text-sm text-muted-foreground">Opening the preview…</p>}>
+                {/* One mount per task: a pane carried over from another task would reopen its target here. */}
                 <PreviewPane
+                  key={run.id}
                   run={run}
                   servers={run.previewServers ?? []}
                   request={state.request}
