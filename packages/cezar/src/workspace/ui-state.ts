@@ -23,7 +23,7 @@ import { atomicWriteJsonSync } from './config.ts';
  *  Typed by the CONTRACT (`WorkspaceUiState`) for the same reason as its per-repo twin in
  *  `src/ui-state.ts`: `GET /api/v1/workspace/ui-state` answers this value verbatim, so a loose
  *  record left the route naming no key. The schema is a `z.looseObject`, so unknown prefs keep
- *  round-tripping (BACKWARD_COMPATIBILITY.md §3) — the type only adds the known names. */
+ *  round-tripping (BACKWARD_COMPATIBILITY.md) — the type only adds the known names. */
 export async function readWorkspaceUiState(
   path: string = workspaceUiStatePath(),
 ): Promise<WorkspaceUiState> {
