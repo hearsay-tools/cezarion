@@ -12,6 +12,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import { randomUUID } from 'node:crypto';
+import { instrumentAliasBudget } from './alias-budget-diagnostic.ts';
 
 const execFile = promisify(execFileCallback);
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
@@ -113,6 +114,8 @@ test('installed CLI completes owned-worker lifecycle with lost spawn reply and o
     await execFile('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--no-package-lock', join(pack, tarball)], { cwd: consumer });
     const installed = join(consumer, 'node_modules/@wjarka/cezarion');
     if (process.env.CZR_PACKAGED_REFUSAL_DIAGNOSTIC === '1') {
+      const budgetPath = join(installed, 'dist/delegation/linux-alias-model.js');
+      await writeFile(budgetPath, instrumentAliasBudget(await readFile(budgetPath, 'utf8')));
       // A separate CI diagnostic run instruments only its disposable installed copy.
       // It does not replace the unmodified package verdict or alter the refusal.
       const path = join(installed, 'dist/delegation/workspace.js');
