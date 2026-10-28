@@ -10,6 +10,12 @@ function relevant(pid: number, scope: AliasMappingScope, result: AliasScanResult
   return scope.has(pid) || result.outcome === 'held' || !!result.scoped;
 }
 
+function refuseLostEvidence(pid: number, scope: AliasMappingScope, result: AliasScanResult, uncertain: boolean): void {
+  if ((uncertain && result.outcome !== 'held') || (result.outcome === 'unknown' && !relevant(pid, scope, result))) {
+    throw new Error(`Cannot verify alias evidence for destroy holder ${pid}`);
+  }
+}
+
 /** No signal is possible until the entire candidate list has been examined. */
 export async function discoverAliasHolders(pids: readonly number[], scope: AliasMappingScope, budget: AliasWorkBudget,
   token: (pid: number) => string | undefined, scan: (pid: number, token: string | undefined) => AliasScanResult,
@@ -39,9 +45,7 @@ export async function discoverAliasHolders(pids: readonly number[], scope: Alias
       }
       result = scan(pid, start);
       verify();
-      if ((uncertain && result.outcome !== 'held') || (result.outcome === 'unknown' && !relevant(pid, scope, result))) {
-        throw new Error(`Cannot verify alias evidence for destroy holder ${pid}`);
-      }
+      refuseLostEvidence(pid, scope, result, uncertain);
     }
     if (!start) {
       if (scope.has(pid) || result.scoped) throw new Error(`Cannot verify alias process ${pid}`);

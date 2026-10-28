@@ -63,6 +63,10 @@ function checkScopedHolders(scoped: Map<number, string>, live: { pid: number; to
   }
 }
 
+function assertNoPendingAliasScan(aliases: AliasContext | undefined): void {
+  if (aliases?.reconcile(processStartToken, processGone)) throw new Error('Pending alias scan cannot be verified');
+}
+
 /** Destroy-only evidence. Admission and retention keep their existing liveness policy. */
 function holds(pid: number, paths: readonly string[], budget?: AliasWorkBudget): boolean {
   if (process.platform === 'darwin') return findDarwinHolders(paths, pid).includes(pid);
@@ -124,7 +128,7 @@ export async function reapDestroyHolders(paths: readonly string[], assertCurrent
     }
     if (process.platform === 'linux') checkScopedHolders(scoped, live, roots, budget);
     if (!live.length) {
-      if (aliases?.reconcile(processStartToken, processGone)) throw new Error('Pending alias scan cannot be verified');
+      assertNoPendingAliasScan(aliases);
       return;
     }
     for (const { pid, token } of live) {
