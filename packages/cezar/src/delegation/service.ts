@@ -149,6 +149,17 @@ function stepIdentityFields({ settings, grants }: ResolvedSpawnStep) {
 }
 export const delegationEnabled = () => process.env.CEZ_DELEGATION === '1';
 
+function removeWorkerScratch(root: string, workerId: string): WorkerDestroyResult | undefined {
+  const dataDir = join(root, '.ai/cezar');
+  if (!agentTmpDirOwnershipProven(dataDir, workerId)) throw new Error('Worker scratch ownership cannot be verified');
+  assertLinuxMountBoundary(agentTmpDirLocations(dataDir, workerId));
+  assertDarwinMountBoundary(agentTmpDirLocations(dataDir, workerId));
+  if (process.platform === 'win32') windowsAssertMountBoundary(agentTmpDirLocations(dataDir, workerId));
+  removeAgentTmpDir(dataDir, workerId);
+  if (agentTmpDirMayExist(dataDir, workerId)) return { workerId, state: 'incomplete', remaining: ['process'],
+    error: `Worker scratch remains or cannot be verified: ${agentTmpDirLocations(dataDir, workerId).join(', ')}` };
+}
+
 /** A single controller's shared policy adapter; managers retain scheduling and lifecycle ownership. */
 export class DelegationService {
   private discovery?: HostDiscovery;
@@ -899,16 +910,10 @@ export class DelegationService {
           assertCurrent, assertSafe, { held: pids => { holders = pids; }, unexplained: () => { explained = false; } }, reapHolders);
         if (result.state === 'complete') {
           assertCurrent();
-          const dataDir = join(project.root, '.ai/cezar');
-          if (!agentTmpDirOwnershipProven(dataDir, workerId)) throw new Error('Worker scratch ownership cannot be verified');
-          assertLinuxMountBoundary(agentTmpDirLocations(dataDir, workerId));
-          assertDarwinMountBoundary(agentTmpDirLocations(dataDir, workerId));
-          if (process.platform === 'win32') windowsAssertMountBoundary(agentTmpDirLocations(dataDir, workerId));
-          removeAgentTmpDir(dataDir, workerId);
-          if (agentTmpDirMayExist(dataDir, workerId)) {
+          const scratchFailure = removeWorkerScratch(project.root, workerId);
+          if (scratchFailure) {
             explained = false;
-            result = { workerId, state: 'incomplete', remaining: ['process'],
-              error: `Worker scratch remains or cannot be verified: ${agentTmpDirLocations(dataDir, workerId).join(', ')}` };
+            result = scratchFailure;
           }
         }
       } catch (error) {
