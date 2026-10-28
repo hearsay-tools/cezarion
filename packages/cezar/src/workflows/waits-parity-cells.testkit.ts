@@ -4,7 +4,7 @@ import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { deriveAttention } from '@open-mercato/cezar-contract/attention';
-import { RUN_STATUS, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { RUN_STATUS, WAIT_KIND, WAIT_PHASE, WAIT_SOURCE, WAIT_VIA } from '@open-mercato/cezar-contract/test-factories.testkit';
 import { toRunSummary } from '@open-mercato/cezar-contract/runs';
 import type { AgentInput, CiWaitResult, ConversationMessage, HumanWaitEntry, ProcessWaitResult, RunRecord, Wait, WorkerWaitEntry } from '@open-mercato/cezar-contract';
 import { RUNNER_IDS, type AgentSession, type RunnerId } from '../core/agent-runner.ts';
@@ -1468,11 +1468,11 @@ function baseCells(runners: RunnerId[]): void {
       await until(() => pendingQuestion(run.id) && humanOpen(run.id)[0]?.askSeq !== undefined && store.getRun(run.id)?.status === 'waiting');
       const [human] = humanOpen(run.id);
       const tools = manager.cezarToolHandlers(run.id, engine().active.get(run.id)!.ciGeneration);
-      const registered = await tools.registerWait({ kind: 'timer', seconds: 60, note: 'answer cap guard' }, 'cezar_wait', new AbortController().signal);
+      const registered = await tools.registerWait({ kind: WAIT_KIND.timer, seconds: 60, note: 'answer cap guard' }, 'cezar_wait', new AbortController().signal);
       if (!('wait' in registered) || registered.wait.kind !== 'timer') throw Error('registration refused');
       // A result already resolved below the cap may still be owed when the budget reaches it.
       // Hold it at the parked boundary, without asking the scheduler to send it before the answer.
-      const timer = { ...registered.wait, phase: 'resolved' as const, resolvedAt: new Date().toISOString() };
+      const timer = { ...registered.wait, phase: WAIT_PHASE.resolved, resolvedAt: new Date().toISOString() };
       store.commitWait(run.id, timer, { id: timer.id, parentRunId: run.id, source: 'lifecycle', createdAt: timer.resolvedAt, text: 'answer cap guard' });
       const admitted = (manager as unknown as { waitWakeAdmitted: Set<string> }).waitWakeAdmitted;
       admitted.add(run.id);
