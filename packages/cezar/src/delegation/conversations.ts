@@ -144,7 +144,7 @@ export function notDeliveredInstruction(pair: { relationship: 'family' | 'peer';
 export function assertConversationCapacity(state: ConversationState, recipient: RunRecord, kind: ConversationSendRequest['kind'], enqueue: boolean, answering: boolean): void {
   const reservedMessages = openQuestions(state).length - (answering ? 1 : 0);
   const openRequests = () => state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length;
-  const undelivered = () => (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length;
+  const undelivered = () => { return (recipient.agentInputs ?? []).filter(input => !input.deliveredAt).length; };
   if (state.messages.length + reservedMessages >= 1024 || (enqueue && kind === 'request' && openRequests() >= 32) ||
     (enqueue && !answering && undelivered() >= 32)) throw new DelegationPolicyError('capacity_limit', 'Conversation capacity limit reached');
 }

@@ -449,7 +449,7 @@ export class DelegationService {
   async conversation(caller: Caller, value: ConversationInspectRequest): Promise<ConversationInspectResult> {
     const request = conversationInspectRequestSchema.parse(value);
     const { project, ledgers, self, other } = this.historyLedgers(caller, request.recipientRunId);
-    const between = (message: ConversationMessage) => (message.senderRunId === self && message.recipientRunId === other) || (message.senderRunId === other && message.recipientRunId === self);
+    const between = (message: ConversationMessage) => { return (message.senderRunId === self && message.recipientRunId === other) || (message.senderRunId === other && message.recipientRunId === self); };
     const states = ledgers.map(ledger => {
       const state = this.currentConversation(project, ledger);
       projectConversationEvents(project.store, project.store.getRun(ledger.id) ?? ledger);

@@ -2831,9 +2831,9 @@ export class RunManager {
     // Past the automatic-wake budget a peer message wakes nothing: it stays queued for the next
     // turn (spec 2026-10-27-task-communication-protocol § 8, `holdPeerWakesAtCap`).
     const spent = this.automaticWakes(run.id) >= MAX_AUTO_CONTINUES;
-    return (run.agentInputs ?? []).filter(input => (input.conversation || (input.source === 'lifecycle' && !named.has(input.id))) &&
+    return (run.agentInputs ?? []).filter(input => { return (!!input.conversation || (input.source === 'lifecycle' && !named.has(input.id))) &&
       !input.deliveredAt && !hasLiveInboxClaim(input) && !(spent && chargesBudgetMessage(input)) &&
-      !owed.has(input.id) && input.id !== answer?.id && !this.providerOwnsInboxInput(run.id, input.id));
+      !owed.has(input.id) && input.id !== answer?.id && !this.providerOwnsInboxInput(run.id, input.id); });
   }
 
   /** Peer messages the spent budget keeps from waking the run (spec § 8). A turn in progress takes
