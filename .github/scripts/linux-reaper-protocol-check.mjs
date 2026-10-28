@@ -1,6 +1,6 @@
 // Safe local replay: pure protocol/evidence assertions; no native module import.
 import assert from 'node:assert/strict';
-import { parseRequest, parseMaps, validateEvidence, verdict, WIRE_LIMIT } from './linux-reaper-protocol.mjs';
+import { auditSignal, parseRequest, parseMaps, validateEvidence, verdict, WIRE_LIMIT } from './linux-reaper-protocol.mjs';
 
 let checked = 0;
 function check(name, fn) { fn(); checked++; console.log(`PASS ${name}`); }
@@ -16,6 +16,18 @@ const request = {
 const parse = value => parseRequest(JSON.stringify(value));
 const state = { targetAlive: false, siblingAlive: true, retained: false, signals: 1 };
 const empty = { maps: 0, fds: 0, cwd: false };
+
+check('non-stop signal attempts are recorded but never forwarded', () => {
+  for (const action of ['observe', 'seed', 'retain', 'release']) {
+    const attempts = []; let forwarded = 0;
+    assert.throws(() => auditSignal({ ...request, action }, attempts, request.target.pid, 'SIGTERM', () => {}, () => { forwarded++; }));
+    assert.deepEqual(attempts, [{ pid: request.target.pid, signal: 'SIGTERM' }]);
+    assert.equal(forwarded, 0);
+  }
+  const attempts = []; let forwarded = 0;
+  auditSignal(request, attempts, request.target.pid, 'SIGTERM', () => {}, () => { forwarded++; });
+  assert.equal(forwarded, 1);
+});
 
 check('local and external process attribution stay separate', () => {
   const value = parse(request);

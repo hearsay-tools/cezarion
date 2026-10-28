@@ -2,11 +2,12 @@
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { performance } from 'node:perf_hooks';
-import { parseRequest, verdict, WIRE_LIMIT } from './linux-reaper-protocol.mjs';
+import { auditSignal, parseRequest, verdict, WIRE_LIMIT } from './linux-reaper-protocol.mjs';
 import { assertFixtureEvidence, assertProcess, guard, processState } from './linux-reaper-native-guard.mjs';
 
 const started = performance.now();
 let request;
+const signals = [];
 let finished = false;
 let timedOut = false;
 function finish(value, exitCode) {
@@ -99,19 +100,12 @@ async function run() {
   };
   const evidence = assertFixtureEvidence(request);
   const state = await checkpoint(request, assertCurrent);
-  const signals = [];
   const kill = process.kill;
   let error, observation;
   // This audit forwards every permitted signal to the real OS. It is a last
   // fixture guard, not namespace isolation and not a replacement reaper.
-  process.kill = (pid, signal) => {
-    assert(signals.length < 16, 'reaper signal audit exceeded bound');
-    signals.push({ pid, signal });
-    assert.equal(pid, request.target.pid, 'reaper attempted signal outside explicit target');
-    assert(['SIGTERM', 'SIGKILL'].includes(signal), 'unexpected reaper signal');
-    assertCurrent(); assertProcess(request.target);
-    return kill.call(process, pid, signal);
-  };
+  process.kill = (pid, signal) => auditSignal(request, signals, pid, signal,
+    () => { assertCurrent(); assertProcess(request.target); }, (target, name) => kill.call(process, target, name));
   try {
     if (request.action === 'observe') observation = await observe(request);
     else {
@@ -139,5 +133,5 @@ async function run() {
 
 try { await run(); }
 catch (error) {
-  finish({ status: 'failed', code: 'fixture-or-reaper-failure', error: String(error).slice(0, 4096) }, 1);
+  finish({ status: 'failed', code: 'fixture-or-reaper-failure', error: String(error).slice(0, 4096), signals }, 1);
 } finally { clearTimeout(deadline); }

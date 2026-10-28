@@ -80,6 +80,17 @@ export function validateEvidence(request, target, sibling) {
   assert.equal(target.fds, fdOnly ? 1 : 0, 'unexpected owned descriptor');
 }
 
+// Record attempts before refusing them; only stop may forward a signal.
+export function auditSignal(request, signals, pid, signal, verify, forward) {
+  assert(signals.length < 16, 'reaper signal audit exceeded bound');
+  signals.push({ pid, signal });
+  assert.equal(request.action, 'stop', 'non-stop action attempted a signal');
+  assert.equal(pid, request.target.pid, 'reaper attempted signal outside explicit target');
+  assert(['SIGTERM', 'SIGKILL'].includes(signal), 'unexpected reaper signal');
+  verify();
+  return forward(pid, signal);
+}
+
 // A successful return alone never proves stop-before-delete.
 export function verdict(action, { error, targetAlive, siblingAlive, retained, signals }) {
   assert(siblingAlive, 'unrelated sibling did not survive');

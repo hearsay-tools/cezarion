@@ -69,6 +69,32 @@ it('keeps an interrupted scan across reopen until the incarnation exits or chang
   expect(saved).toBeUndefined();
 });
 
+it('clears a verified same-token zombie and retains uncertain or changed observations', () => {
+  const proof: WorkerExecution = { generation, phase: 'complete' };
+  let saved: WorkerAliasRetention | undefined;
+  const adapter = aliasRetentionAdapter(proof, resource, boot, attempt, value => { saved = value; }, () => {});
+  adapter.begin(123, boot + ':100');
+  expect(adapter.reconcile(() => undefined, () => false)).toBe(true);
+  let reads = 0;
+  expect(adapter.reconcile(() => ++reads === 1 ? boot + ':100' : undefined, () => true)).toBe(true);
+  expect(() => adapter.reconcile(() => 'fallback:100', () => true)).toThrow('Unscoped');
+  expect(saved?.pending).toHaveLength(1);
+  expect(adapter.reconcile(() => boot + ':100', () => true)).toBe(false);
+  expect(saved).toBeUndefined();
+});
+
+it('refuses a 65th distinct pending incarnation before publication', () => {
+  const proof: WorkerExecution = { generation, phase: 'complete' };
+  let saved: WorkerAliasRetention | undefined;
+  const adapter = aliasRetentionAdapter(proof, resource, boot, attempt, value => { saved = value; }, () => {});
+  for (let pid = 1; pid <= 64; pid++) adapter.scope.remember(pid, boot + ':100', [{ dev: '8:1', ino: BigInt(pid) }]);
+  adapter.publish(adapter.scope.snapshot());
+  expect(adapter.begin(1, boot + ':100')).toBe(true);
+  const before = JSON.stringify(saved);
+  expect(() => adapter.begin(65, boot + ':100')).toThrow();
+  expect(JSON.stringify(saved)).toBe(before);
+});
+
 it('persists the marker before overflow or write failure can lose evidence', () => {
   const proof: WorkerExecution = { generation, phase: 'complete' };
   let saved: WorkerAliasRetention | undefined;

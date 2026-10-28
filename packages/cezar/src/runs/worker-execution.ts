@@ -13,7 +13,8 @@ export const workerAliasRetentionSchema = z.object({
   processes: z.array(z.object({ pid: z.number().int().positive(), start: decimalIdentity,
     identities: z.array(aliasObjectIdentity).min(1).max(64) }).strict()).max(64),
   pending: z.array(z.object({ pid: z.number().int().positive(), start: decimalIdentity }).strict()).max(64).optional(),
-}).strict().refine(value => value.processes.length > 0 || !!value.pending?.length);
+}).strict().refine(value => value.processes.length > 0 || !!value.pending?.length)
+  .refine(value => new Set([...value.processes, ...(value.pending ?? [])].map(item => `${item.pid}:${item.start}`)).size <= 64);
 export type WorkerAliasRetention = z.infer<typeof workerAliasRetentionSchema>;
 
 /** Terminal task intent survives loss/quarantine of the public run index. Starting a new

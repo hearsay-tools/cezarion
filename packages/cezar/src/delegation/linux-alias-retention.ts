@@ -74,7 +74,9 @@ export function aliasRetentionAdapter(proof: WorkerExecution | undefined, resour
     const next = pending.filter(item => {
       const current = token(item.pid);
       if (current && !current.startsWith(bootId + ':')) throw new Error('Unscoped process incarnation');
-      return current === bootId + ':' + item.start || (!current && !gone(item.pid));
+      if (current && current !== bootId + ':' + item.start) return false;
+      if (!gone(item.pid)) return true;
+      return token(item.pid) !== current;
     });
     if (next.length !== pending.length) { verify(); persist(scope.snapshot(), next); pending = next; }
     return pending.length > 0;
