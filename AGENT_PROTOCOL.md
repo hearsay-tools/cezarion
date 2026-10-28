@@ -321,6 +321,7 @@ resumed request pending after 45 minutes within a one-hour bound and delivery of
 a reply after expiry as `replied-late` on those native wires (hearsay-tools/cezarion#1241).
 
 Root completion also checks accepted requests without outcomes (hearsay-tools/cezarion#1996).
+The done answer adds `requests_outstanding` and `requests_unanswered` refusal codes.
 A first done with sent requests gets a refusal naming each request, recipient and deadline.
 The next done parks on a Cezar completion request wait with no wait deadline; each request's
 own deadline still settles it. Use `cez message wait --request` or `cez message cancel-request`.
@@ -328,8 +329,12 @@ Incoming requests get one refusal to reply or repeat done. Repeating done permit
 peer requests settle `completed-without-reply` at done or review. Incoming refusal text lists up to
 40 request/sender pairs and gives the omitted count; completion settles every request. Workers keep their existing
 completion policy. Human Finish ignores request blockers and settles sent requests `sender-closed`.
-If the provider then fails, the failure write retires the accepted Finish intent.
-Restart also retires an old failed run's intent; the failure stays available for Continue.
+If the provider then fails, the failure write retires the accepted Finish intent, including
+a root with no peer or conversation. Recovery rewrites an older stored root record only when
+its status is `failed` and its delegation still has `finishRequestedAt`: it removes that field
+and keeps the failure and other delegation fields. An older cezar reads the repaired record
+with the same schema and no stale Finish blocker; it cannot recover the removed intent.
+Continue remains available. No schema migration or new stored field is needed.
 
 Messages are bounded to 100,000 characters, 32 undelivered inputs per recipient,
 1,024 messages per family, and 32 pending obligations. Requests and waits expire
