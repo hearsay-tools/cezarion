@@ -1,7 +1,7 @@
 import type {
   DelegationExecutionSettings, StartRunInput, PendingContinuation, ExecutionEmit,
   Execution, ExecutionLaunch, StepLoop, SessionTurn, LaunchDelegation,
-  LaunchCiTools, LaunchOpening, StepProfile, StepModel, StepSessionLaunch,
+  LaunchCiTools, LaunchOpening, StepProfile, StepSessionLaunch,
   WorkerDelegationRecord, ContinuationOpening, OpeningAnswer, ContinuationSettings, ContinuationSkills,
   ContinuationSessionLaunch, ContinuationClose, WorkerTerminationBlocker, AutomationToolService,
 } from './run/types.ts';
@@ -21,6 +21,9 @@ import { claudeScheduleWakeupDelay, isRunnerActivity, appendTurnText, appendComp
 export { claudeScheduleWakeupDelay, appendTurnText, trackTurnTail, classifyTurnEnd } from './run/turn-markers.ts';
 import { canProceedWithRun, executionBlockedByRootFinish, historyDeletionPending, rootFinishRequested } from './run/run-guards.ts';
 import { beginUsageInvocation, recordReportedCost, recordUsageUiEvent, recordUsagePeaks } from './run/usage-accounting.ts';
+import { continuationModel, continuationEffort, continuationRunner, taskModelIdentity, stepModel } from './run/launch-settings.ts';
+import { executionBaseRef, openExecutionWorktree, ownedContinuationWorkspace, executionSeedFiles, REPOSITORY_ROOT_LOCK_DISABLED_NOTE } from './run/run-workspace.ts';
+import { continuationOpening, openingInputs } from './run/opening.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
 import { applyTemplate, composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt, withResumeContext } from './run/prompts.ts';
 import { delegationExecutionSettings, selectDelegationExecutionSettings } from '../delegation/execution-settings.ts';
@@ -29,7 +32,7 @@ import { makeRunTitle } from '../runs/run-title.ts';
 export { composeSystemPrompt, expandRegistrySlashSkill, expandRegistrySlashSkillText, leadingSlashSkillName, resolveExtraSystemPrompt, skillSystemPrompt } from './run/prompts.ts';
 export { stepLabel } from './run/steps.ts';
 export { makeRunTitle } from '../runs/run-title.ts';
-import { pendingConversationBatch, reservesAutomaticWake, formatAgentInput, agentInputOutcomeText } from './run/input-batch.ts';
+import { pendingConversationBatch, reservesAutomaticWake, formatAgentInput } from './run/input-batch.ts';
 import { clearUnreadInputTimer, clearHeldHumanInputTimer, harnessOwesInput, harnessHoldsHumanInput, clearNoWaitNudgeReplyTimer, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
 import * as wakeLedger from './run/wake-ledger.ts';
 import * as pendingAskFacts from './run/pending-ask-facts.ts';
@@ -70,12 +73,7 @@ import { parseUsageLimit } from '../core/usage-limit.ts';
 import { startManagedSession } from '../core/managed-session.ts';
 import { createRunner } from '../core/runner-factory.ts';
 import type { RunnerId } from '../core/agent-runner.ts';
-import { AGENT_MODELS_LOCKED_ERROR, agentModelsLocked } from '../core/agent-model-policy.ts';
-import {
-  ModelIdentityError,
-  formatModelIdentity,
-  normalizeModelForBackend,
-} from '../core/model-identity.ts';
+import { agentModelsLocked } from '../core/agent-model-policy.ts';
 import {
   handoffInstructions,
   handoffPath,
@@ -121,9 +119,9 @@ import { createAutomationSkill } from '../automations/builtin-skill.ts';
 import { getTeamSkillsCached, materializeSkillToCache, TEAM_SKILL_AGENT_DIRS, waitForCachedTeamSkills, waitForTeamSkills } from '../skills-remote.ts';
 import { MAX_SKILL_CLOSURE, namesSkillCommand, provisionSkills } from '../skills-provision.ts';
 import { seedAgentConfigLocalLayer } from '../agent-config/seed.ts';
-import { readAgentModelSettings, readAgentModelProvider } from '../agent-config/models.ts';
+import { readAgentModelSettings } from '../agent-config/models.ts';
 import { loadConfig, resolveWorktreeRetention } from '../config.ts';
-import { autosaveCommit, type AutosaveOutcome, type AutosaveReason, createWorktree, resolveBaseRef, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
+import { autosaveCommit, type AutosaveOutcome, type AutosaveReason, worktreeDiff, worktreeShortstat } from '../git-worktree.ts';
 import { runGroupedCommand } from './grouped-command.ts';
 import {
   resolveWorktreeSetup,
@@ -136,11 +134,8 @@ import {
   type WorktreeSetupOutcome,
 } from '../worktree-setup.ts';
 import { getHeadCommit, getRepoInfo } from '../server/git.ts';
-import { ensureOwnedWorkspace, verifyOwnedWorkspace } from '../delegation/workspace.ts';
-import { placeWorkerAttachments, verifyWorkerContext } from '../delegation/context.ts';
 import { enqueueAgentInput, agentInputBatch, hasLiveInboxClaim } from '../delegation/input.ts';
 import { resolvedWaitInputBatch } from './run/resolved-wait-input-batch.ts';
-import { parseDelegationEffort } from '../delegation/effort.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { reconcileWorkerEntry } from '../delegation/wait.ts';
 import { commitNewMessage, inboxSlotsUsed, reconcileConversationState, projectConversationEvents, rootsAwaitingPeer, settledRunFamilies } from '../delegation/conversations.ts';
@@ -182,12 +177,6 @@ import {
   type WorkflowStepDef,
 } from './types.ts';
 const CHECK_OUTPUT_CAP = 20_000;
-async function configuredModelProvider(
-  backend: RunnerId,
-  repoRoot: string,
-): Promise<string | undefined> {
-  return readAgentModelProvider(backend, repoRoot).catch(() => undefined);
-}
 /** An interactive session that hears nothing from the user closes itself. */
 export const IDLE_TIMEOUT_MS = 15 * 60_000;
 import { PROSE_HUMAN_GATE, workerOutcomeKey } from '../runs/transcript-facts.ts';
@@ -233,8 +222,6 @@ function autosaveReportLine(reason: AutosaveReason, outcome: AutosaveOutcome, ta
 export function repositoryRootLockDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
   return env.CEZ_DISABLE_REPO_LOCK === '1';
 }
-const REPOSITORY_ROOT_LOCK_DISABLED_NOTE =
-  'repository-root lock disabled by CEZ_DISABLE_REPO_LOCK=1 (shared checkout is unsafe)';
 
 /** What a turn end said, as the entry that settles it reads it (hearsay-tools/cezarion#1525). The
  *  turn end reads it from the turn; a later entry from what `parkAfterAck` kept (`boundaryTurn`). */
@@ -6088,7 +6075,10 @@ export class RunManager {
     await this.loadRunSkills(state, 'ignore');
 
     this.startContinuationStep(runId, stepId, record, sessionId, backend);
-    const opening = this.continuationOpening(runId, stepId, state, record, { prompt, images, persistedImages, persistedAttachments });
+    const opening = continuationOpening(this.store, {
+      routedAsk: (id) => this.routedAsk(id),
+      readPersistedAttachments: (id, urls, kind) => this.readPersistedAttachments(id, urls, kind),
+    }, runId, stepId, state, record, { prompt, images, persistedImages, persistedAttachments });
     prompt = opening.prompt;
     const answer = this.openingAnswer(runId, state, opening);
     state.pendingHumanAsk = answer.askSeq === undefined && this.hasPendingHumanAsk(runId);
@@ -6154,7 +6144,7 @@ export class RunManager {
     if (state.cancelled) { this.settleContinuationPrelaunchCancel(runId, stepId, state); return; }
     if (this.holdContinuationForRootFinish(runId, { stepId, sessionId, backend, prompt, images, lineJoinedAt: Date.now() }, state)) return;
     this.applyContinuationSettings(runId, stepId, state, backend, settings);
-    const { runner, skipSkillOnResume } = this.continuationRunner(backend, sessionId, settings.owningStep);
+    const { runner, skipSkillOnResume } = continuationRunner(backend, sessionId, settings.owningStep);
     // Re-expand the continued step's skill from the current registry (#790) BEFORE
     // provisionSession. Materializing the skill used to sit after the pre-launch
     // revalidation, so Stop during that await still launched with revoked tools.
@@ -6219,11 +6209,7 @@ export class RunManager {
     delegation: WorkerDelegationRecord,
   ): Promise<string | undefined> {
     try {
-      if (delegation.destroy) throw new Error('Worker destruction has begun');
-      const cwd = (await verifyOwnedWorkspace(this.repoRoot, record)).path;
-      await verifyWorkerContext({ dataDir: this.dataDir, parentId: delegation.parentRunId, workspace: delegation.workspace, context: delegation.context,
-        parentCwd: this.store.getRun(delegation.parentRunId)?.worktreePath ?? this.repoRoot });
-      return cwd;
+      return await ownedContinuationWorkspace(this.store, this.repoRoot, this.dataDir, record, delegation);
     } catch (error) {
       if (this.settleStoppedContinuation(runId)) return undefined;
       const message = `owned workspace unavailable: ${error instanceof Error ? error.message : String(error)}`;
@@ -6324,57 +6310,6 @@ export class RunManager {
     this.store.appendEvent(runId, { type: 'step-start', stepId, name: 'Continue', kind: 'agent', iteration: 1 });
   }
 
-  /** A Continue's opening message: the checkpoint's agent input with its outcome, its images and
-   *  attachments, and the `user-message` event that shows it. */
-  private continuationOpening(
-    runId: string,
-    stepId: string,
-    state: ActiveRun,
-    record: RunRecord | undefined,
-    input: { prompt: string; images: PastedContent[]; persistedImages: ContentBlock[]; persistedAttachments: PersistedAttachment[] },
-  ): ContinuationOpening {
-    const checkpoint = record?.continuationMessage;
-    state.openingAgentInputId = checkpoint?.agentInputId;
-    const openingInput = record?.agentInputs?.find(input => input.id === checkpoint?.agentInputId);
-    // Hydration has already included later human updates and task edits. Append
-    // the current obligation outcome without replacing that composed prompt.
-    // A parent's answer to a routed question (#505) is shown as its conversation reply, not
-    // as a human message, and its own reply outcome is not news to the worker.
-    const parentAnswer = openingInput?.conversation?.kind === 'reply' && this.routedAsk(runId) !== undefined;
-    let prompt = input.prompt;
-    if (openingInput && !parentAnswer) prompt += agentInputOutcomeText(openingInput, this.store.getRun(openingInput.parentRunId));
-    const { openingImages, attachments } = this.continuationImages(runId, stepId, checkpoint, input);
-    if (checkpoint?.origin !== 'lifecycle' && !parentAnswer) this.store.appendEvent(runId, {
-      type: 'user-message',
-      stepId,
-      text: prompt,
-      imageCount: openingImages.filter((b) => b.type === 'image').length,
-      ...(attachments.length ? { images: attachments.map((saved) => saved.url) } : {}),
-    });
-    return { prompt, checkpoint, parentAnswer, openingImages, attachments };
-  }
-
-  /** A Continue's opening images and attachments. */
-  private continuationImages(
-    runId: string,
-    stepId: string,
-    checkpoint: RunRecord['continuationMessage'],
-    input: { images: PastedContent[]; persistedImages: ContentBlock[]; persistedAttachments: PersistedAttachment[] },
-  ): { openingImages: ContentBlock[]; attachments: PersistedAttachment[] } {
-    // Attachments pasted into the follow-up composer, on the same terms as a live-session
-    // message (#357): persisted to the run's own attachment store so the thread renders the
-    // bubble's images rather than a bare count, and handed to the agent as absolute paths
-    // appended to the prompt (so it can operate on them — and because codex/opencode drop image
-    // blocks before they reach the model). An image ALSO rides along as a base64 block so the
-    // model can view it; a file (#950) has nothing to view and travels as its path alone.
-    const saved = this.readPersistedAttachments(
-      runId, checkpoint?.id === stepId ? checkpoint.images ?? [] : [], 'continuation',
-    );
-    const openingImages = [...(input.images.length ? contentBlocksOf(input.images) : saved.blocks), ...input.persistedImages];
-    const attachments = [...saved.attachments, ...input.persistedAttachments];
-    return { openingImages, attachments };
-  }
-
   /** The human ask a human Continue answers, and the human waits that answer settles. */
   private openingAnswer(runId: string, state: ActiveRun, opening: ContinuationOpening): OpeningAnswer {
     const askSeq = opening.checkpoint?.origin === 'human' ? this.pendingHumanAskSeq(runId) : undefined;
@@ -6456,9 +6391,9 @@ export class RunManager {
     // agent step. A legacy record without `workflowDef` (#367), or a session no step owns,
     // keeps today's defaults.
     const toolGrant = stepToolGrant(stepIdentity?.grants, toolsStep, backend);
-    const model = await this.continuationModel(runId, state, record, toolsStep, stepIdentity, backend);
+    const model = await continuationModel(this.store, this.repoRoot, runId, state, record, toolsStep, stepIdentity, backend);
     if (typeof model === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, model); return undefined; }
-    const effort = this.continuationEffort(record, toolsStep, stepIdentity);
+    const effort = continuationEffort(this.repoRoot, record, toolsStep, stepIdentity);
     if (typeof effort === 'string') { this.failContinuationBeforeSpawn(runId, stepId, sink, effort); return undefined; }
     // The temp-directory preflight (#785) rides along with the account resolution: a resumed
     // turn hits the same broken `/tmp` a fresh one would, and an agent whose shell silently
@@ -6497,66 +6432,6 @@ export class RunManager {
     this.dropActive(runId);
   }
 
-  /**
-   * The model a Continue runs with, or the model identity error's message.
-   * Apply the SAME canonical-identity gate the first spawn applies (#405, review M1).
-   * A follow-up may switch both runner and model (#401), so without this the record keeps
-   * asserting the identity the run STARTED with while a different model serves the turn —
-   * the exact defect that PR existed to remove — and the raw record string reaches the CLI
-   * in the un-normalised wire form the first step already converted away (`anthropic/opus`
-   * instead of `opus`). Fail loud here too rather than let the backend pick a default.
-   */
-  private async continuationModel(
-    runId: string,
-    state: ActiveRun,
-    record: RunRecord | undefined,
-    toolsStep: WorkflowStepDef | undefined,
-    stepIdentity: WorkerStepIdentity | undefined,
-    backend: RunnerId,
-  ): Promise<{ backendModel: string | undefined } | string> {
-    // The owning step's authored `model` wins over the run-level pin, exactly as the first
-    // spawn resolved `step.model ?? input.model` (#464 review): a catalog worker keeps the
-    // parent's inherited model at run level, so reading only the record silently switched a
-    // step authored for another model on Continue.
-    try {
-      const normalized = normalizeModelForBackend(
-        backend,
-        agentModelsLocked(this.repoRoot) ? undefined : stepIdentity ? stepIdentity.model : toolsStep?.model ?? record?.model,
-        { configuredProvider: await configuredModelProvider(backend, state.cwd) },
-      );
-      this.store.updateRun(runId, {
-        modelIdentity: normalized ? formatModelIdentity(normalized.identity) : undefined,
-      });
-      return { backendModel: normalized?.backendModel };
-    } catch (err) {
-      if (!(err instanceof ModelIdentityError)) throw err;
-      return err.message;
-    }
-  }
-
-  /** The effort a Continue runs at, or the message of the error that refuses it: an owned worker's
-   *  pinned effort, else the continued step's authored one, else the run's; unset when the project
-   *  locks agent models. */
-  private continuationEffort(
-    record: RunRecord | undefined,
-    toolsStep: WorkflowStepDef | undefined,
-    stepIdentity: WorkerStepIdentity | undefined,
-  ): { effort: string | undefined } | string {
-    try {
-      const modelsLocked = agentModelsLocked(this.repoRoot);
-      const authoredStepEffort = toolsStep?.effort !== undefined;
-      if (modelsLocked && toolsStep?.effort?.trim()) throw new Error(AGENT_MODELS_LOCKED_ERROR);
-      const stepEffort = parseDelegationEffort(toolsStep?.effort);
-      return {
-        effort: modelsLocked
-          ? undefined
-          : stepIdentity ? stepIdentity.effort : authoredStepEffort ? stepEffort : record?.effort,
-      };
-    } catch (err) {
-      return err instanceof Error ? err.message : String(err);
-    }
-  }
-
   /** Record the Continue's account on its step and the settings its workers inherit. */
   private applyContinuationSettings(
     runId: string,
@@ -6569,20 +6444,6 @@ export class RunManager {
     state.delegationSettings = { cwd: state.cwd, runner: backend, model: settings.backendModel,
       effort: settings.effort, agentProfile: settings.profile.profileId, accountBinding: settings.profile.accountBinding,
       systemPrompt: settings.extraSystemPrompt, ...toolGrantLists(settings.toolGrant) };
-  }
-
-  /** The Continue's runner, and whether it resumes into a thread that already holds the skill
-   *  playbook. A resumed Cursor session keeps the transport it was opened with. */
-  private continuationRunner(
-    backend: RunnerId,
-    sessionId: string | undefined,
-    owningStep: RunRecord['steps'][number] | undefined,
-  ): { runner: ReturnType<typeof createRunner>; skipSkillOnResume: boolean } {
-    const sessionTransport = sessionId !== undefined && backend === 'cursor'
-      ? owningStep?.sessionTransport ?? 'cursor-acp'
-      : undefined;
-    const runner = createRunner(backend, sessionTransport ? { sessionTransport } : {});
-    return { runner, skipSkillOnResume: sessionId !== undefined && runner.systemPromptOnResume === 'in-thread' };
   }
 
   /** The continued step's skill files and playbook, when the step names a skill or the prompt
@@ -7043,7 +6904,7 @@ export class RunManager {
     // Every entry path loads the registry — `runContinuation` loads its own, and the one that
     // skipped this leaked raw `/skill` text to the backend (open-mercato/cezar#811). A failed discovery fails the run.
     await this.loadRunSkills(state, 'throw');
-    const loop = await this.runWorkflowSteps(execution, launch, { ...this.openingInputs(execution), setupNote });
+    const loop = await this.runWorkflowSteps(execution, launch, { ...openingInputs(this.store, this.dataDir, execution), setupNote });
     if (loop) await this.settleExecution(runId, state, loop);
   }
 
@@ -7073,7 +6934,7 @@ export class RunManager {
     const extraSystemPrompt = this.store.getRun(runId)?.delegation?.role === 'worker'
       ? input.systemPrompt
       : resolveExtraSystemPrompt(input.systemPrompt, config.systemPrompt);
-    const modelIdentity = await this.taskModelIdentity(taskBackend, input);
+    const modelIdentity = await taskModelIdentity(this.repoRoot, taskBackend, input);
     if (state.cancelled) {
       this.move(runId, 'cancel', { finishedAt: new Date().toISOString() });
       this.dropActive(runId);
@@ -7094,27 +6955,6 @@ export class RunManager {
     });
     emit({ type: 'lifecycle', message: `run started — workflow "${workflow.name}" (runner: ${taskBackend})` });
     return { config, taskBackend, extraSystemPrompt, ownedRun, owned };
-  }
-
-  /**
-   * Canonical provider/model identity (#405) — the normalised `provider/model`
-   * the task ran with, persisted for cost attribution / reproducible replay
-   * beside the free-text `model`. Best-effort here (a per-step `runner`/`model`
-   * can still override it); the authoritative fail-loud gate is at spawn.
-   */
-  private async taskModelIdentity(taskBackend: RunnerId, input: StartRunInput): Promise<string | undefined> {
-    try {
-      const normalized = normalizeModelForBackend(
-        taskBackend,
-        agentModelsLocked(this.repoRoot) ? undefined : input.model,
-        { configuredProvider: await configuredModelProvider(taskBackend, this.repoRoot) },
-      );
-      return normalized ? formatModelIdentity(normalized.identity) : undefined;
-    } catch {
-      // An unresolvable task-level model surfaces loudly at the step; the
-      // metadata echo stays absent rather than guessing.
-      return undefined;
-    }
   }
 
   /**
@@ -7141,45 +6981,12 @@ export class RunManager {
         type: 'note',
         message: `worktree on — using an isolated task worktree (${input.worktree === true ? 'explicit request' : 'default'})`,
       });
-      const base = await this.executionBaseRef(execution, repo, launch);
+      const base = await executionBaseRef(this.store, this.repoRoot, execution, repo, launch);
       return this.createExecutionWorktree(execution, launch, base);
     } else {
       emit({ type: 'note', message: 'not a git repository — running in place, one task at a time' });
     }
     return true;
-  }
-
-  /**
-   * Fork from the configured base branch (config.json `baseBranch`, e.g.
-   * `develop`) — also the target of the eventual draft PR. Unresolvable
-   * (typo, not fetched) → note + the currently checked-out branch.
-   *
-   * A task that already recorded a fork point keeps it: its worktree is
-   * reused as-is, and re-resolving against a since-changed config would
-   * silently re-anchor the `merge-base` every diff/shortstat is measured
-   * from, shifting "what did this task change" under an existing task.
-   */
-  private async executionBaseRef(
-    execution: Execution,
-    repo: Awaited<ReturnType<typeof getRepoInfo>>,
-    launch: ExecutionLaunch,
-  ): Promise<string> {
-    const { runId, emit } = execution;
-    const recorded = launch.owned?.baselineSha ?? this.store.getRun(runId)?.baseBranch;
-    let base = recorded ?? repo?.branch ?? 'HEAD';
-    const configured = recorded ? undefined : launch.config.baseBranch;
-    if (configured) {
-      const resolved = await resolveBaseRef(this.repoRoot, configured);
-      if (resolved) {
-        base = resolved;
-      } else {
-        emit({
-          type: 'note',
-          message: `configured base branch "${configured}" not found (locally or on origin) — using "${base}"`,
-        });
-      }
-    }
-    return base;
   }
 
   /** Opens the task's worktree and prepares it for the first step. False when the worker stopped
@@ -7189,7 +6996,7 @@ export class RunManager {
     const { owned, ownedRun } = launch;
     try {
       if (this.workerExecutionStopped(runId)) { this.dropActive(runId); return false; }
-      const wt = await this.openExecutionWorktree(execution, launch, base);
+      const wt = await openExecutionWorktree(this.store, this.repoRoot, this.dataDir, execution, launch, base);
       state.cwd = wt.path;
       this.store.updateRun(runId, {
         worktreePath: wt.path,
@@ -7201,9 +7008,7 @@ export class RunManager {
       // Seed from this manager's project root: each multi-project context has
       // its own manager/repoRoot and must never copy another project's layer.
       // A worker's explicit `--attach` files win over the main checkout's copy (hearsay-tools/cezarion#1149).
-      const attached = new Set(ownedRun?.delegation?.role === 'worker'
-        ? (ownedRun.delegation.context?.inputs ?? []).flatMap(input => input.source.kind === 'parent-file' ? [input.source.path] : [])
-        : []);
+      const attached = executionSeedFiles(ownedRun);
       const seededConfig = await seedAgentConfigLocalLayer(this.repoRoot, state.cwd, process.env, attached).catch(() => []);
       if (seededConfig.length > 0) {
         emit({ type: 'note', message: `seeded personal agent config: ${seededConfig.join(', ')}` });
@@ -7223,76 +7028,6 @@ export class RunManager {
       this.dropActive(runId);
       return false;
     }
-  }
-
-  /** The task's worktree: an owned worker's verified workspace, or a new worktree forked from `base`. */
-  private async openExecutionWorktree(
-    execution: Execution,
-    launch: ExecutionLaunch,
-    base: string,
-  ): Promise<{ path: string; branch: string; baseBranch: string }> {
-    const { runId, startAt } = execution;
-    const { owned, ownedRun } = launch;
-    const ownedWorkspace = owned && ownedRun ? await ensureOwnedWorkspace(this.repoRoot, ownedRun) : undefined;
-    if (ownedRun?.delegation?.role === 'worker') await verifyWorkerContext({ dataDir: this.dataDir, parentId: ownedRun.delegation.parentRunId, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context,
-      parentCwd: this.store.getRun(ownedRun.delegation.parentRunId)?.worktreePath ?? this.repoRoot });
-    // First launch only (hearsay-tools/cezarion#1149): a worker re-queued past its first step and
-    // runContinuation never re-place attachments the worker may have edited or deleted.
-    if (ownedRun?.delegation?.role === 'worker' && startAt === 0) await placeWorkerAttachments({ dataDir: this.dataDir, workspace: ownedRun.delegation.workspace, context: ownedRun.delegation.context });
-    return ownedWorkspace
-      ? { path: ownedWorkspace.path, branch: ownedWorkspace.branch, baseBranch: ownedWorkspace.baselineSha }
-      : await createWorktree(this.repoRoot, runId, base);
-  }
-
-  /**
-   * The task's attachments for the first agent step's opening message, and its image blocks.
-   * Both are empty once an agent step of this workflow has run.
-   */
-  private openingInputs(execution: Execution): { attachments: PersistedAttachment[]; images: ContentBlock[] | undefined } {
-    const { runId, workflow, input } = execution;
-    // `startRun` already persisted the task's attachments so a queued bubble can render them
-    // (#612). Reuse those files for the agent-facing path note instead of minting
-    // duplicate pasted files when execution finally begins.
-    //
-    // The STACK's attachments (#472) are listed here too: they were persisted when they were
-    // enqueued, and their paths are the only thing an agent ever gets for a non-image one — a
-    // note that covered the initial prompt alone would hand it a task about a file it was never
-    // told the path of (#950).
-    const startRecord = this.store.getRun(runId);
-    const openingAlreadyDelivered = workflow.steps.some(definition =>
-      stepKind(definition) === 'agent' &&
-      (startRecord?.steps.find(step => step.id === definition.id)?.iterations ?? 0) > 0,
-    );
-    const attachments: PersistedAttachment[] = openingAlreadyDelivered ? [] : [
-      ...(startRecord?.taskImages ?? []),
-      ...(startRecord?.queuedMessages ?? []).flatMap((m) => m.images ?? []),
-    ]
-      .map((url): PersistedAttachment | null => {
-        const name = url.split('/').pop();
-        if (!name || name.includes('..') || name.includes('/') || name.includes('\\')) return null;
-        const path = resolveAttachmentPath(this.dataDir, runId, name);
-        if (!path) {
-          this.store.appendEvent(runId, {
-            type: 'note',
-            message: `task attachment ${name} could not be read — starting without it`,
-          });
-          return null;
-        }
-        return { name, url, path };
-      })
-      .filter((saved): saved is PersistedAttachment => saved !== null);
-    // Task screenshots go with the FIRST agent step's opening message only —
-    // later steps and retry loops run in fresh sessions without them. Stacked
-    // attachments (#472) ride along too, but are NOT re-persisted above: they
-    // already live on disk, and adding them to `taskImages` would both duplicate
-    // the files and make the task bubble claim the stack's images as its own.
-    // File blocks are dropped here — a session only ever sees viewable blocks (#950). An empty
-    // result stays `undefined` rather than `[]`, so a task carrying only files hands the runner
-    // seam exactly the shape a task carrying nothing always did.
-    const blocks = openingAlreadyDelivered
-      ? []
-      : contentBlocksOf([...(input.images ?? []), ...(input.stackedImages ?? [])]);
-    return { attachments, images: blocks.length ? blocks : undefined };
   }
 
   /**
@@ -7646,7 +7381,7 @@ export class RunManager {
     // account and grants alike. The bound `workflowDef` carries the same values; the private
     // evidence is the authority.
     const stepIdentity = this.workerStep(runId, step.id);
-    const model = await this.stepModel(runId, state, step, input, stepBackend, stepIdentity);
+    const model = await stepModel(this.store, this.repoRoot, runId, state, step, input, stepBackend, stepIdentity);
     if (typeof model === 'string') return model;
     // Which agent account this step spawns under, and — recorded on the step before the spawn —
     // which one its session belongs to. `sessionId` and `profileId` are a pair: a resume that
@@ -7781,60 +7516,6 @@ export class RunManager {
     state.waitWakeTurn = undefined;
     state.atTurnBoundary = state.session;
     state.ciTurnId = randomUUID();
-  }
-
-  /**
-   * The model and effort a fresh step runs with. Normalise the selected model to canonical
-   * `provider/model` and back to the backend's own wire form via the ONE shared mapper (#405).
-   * Fail-loud: an unresolvable model (e.g. a bare id on opencode) returns the step error
-   * instead of letting the backend silently substitute its default.
-   */
-  private async stepModel(
-    runId: string,
-    state: ActiveRun,
-    step: WorkflowStepDef,
-    input: StartRunInput,
-    stepBackend: RunnerId,
-    stepIdentity: WorkerStepIdentity | undefined,
-  ): Promise<StepModel | string> {
-    try {
-      const modelsLocked = agentModelsLocked(this.repoRoot);
-      if (modelsLocked && step.effort?.trim()) return AGENT_MODELS_LOCKED_ERROR;
-      const effectiveEffort = this.stepEffort(runId, step, input, stepIdentity, modelsLocked);
-      const normalized = normalizeModelForBackend(
-        stepBackend,
-        modelsLocked ? undefined : stepIdentity ? stepIdentity.model : step.model ?? input.model,
-        { configuredProvider: await configuredModelProvider(stepBackend, state.cwd) },
-      );
-      // Persist the identity of what ACTUALLY runs (#405, review M1). The run-start echo
-      // (line ~993) is best-effort from `taskBackend`/`input.model`; a per-step `runner`/`model`
-      // override makes it assert a model that never ran. Re-write it here, from the resolved
-      // step identity, so the record — the product of this PR — is always one that ran.
-      this.store.updateRun(runId, {
-        modelIdentity: normalized ? formatModelIdentity(normalized.identity) : undefined,
-      });
-      return { backendModel: normalized?.backendModel, effectiveEffort };
-    } catch (err) {
-      if (err instanceof ModelIdentityError || err instanceof DelegationPolicyError) return err.message;
-      throw err;
-    }
-  }
-
-  /** The effort a fresh step runs at: an owned worker's pinned effort, else the step's authored one,
-   *  else the run's; unset when the project locks agent models. An invalid authored effort throws
-   *  `DelegationPolicyError`. */
-  private stepEffort(
-    runId: string,
-    step: WorkflowStepDef,
-    input: StartRunInput,
-    stepIdentity: WorkerStepIdentity | undefined,
-    modelsLocked: boolean,
-  ): string | undefined {
-    const authoredStepEffort = step.effort !== undefined;
-    const stepEffort = parseDelegationEffort(step.effort);
-    return modelsLocked
-      ? undefined
-      : stepIdentity ? stepIdentity.effort : authoredStepEffort ? stepEffort : this.store.getRun(runId)?.effort ?? input.effort;
   }
 
   /**
