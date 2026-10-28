@@ -1,17 +1,25 @@
 import { readFileSync } from 'node:fs';
 import { expect, it } from 'vitest';
+import { preChmodRaceFixture } from './darwin-race-fixture.testkit.ts';
 
-it('reports each fixture syscall failure before its next native call', () => {
-  const unit = readFileSync(new URL('./darwin-destroy-chmod.test.ts', import.meta.url), 'utf8');
+it('pins the private race fixture sequence and each immediate native failure', () => {
+  const source = readFileSync(new URL('../../scripts/darwin-destroy-chmod.js', import.meta.url), 'utf8');
+  const replacement = "if ($.mkdirat(fd, name, 0) !== 0) failure('fixture mkdirat');";
+  const patched = preChmodRaceFixture(source, 'saved', replacement);
+  const steps = ['directory identity mismatch\');', "failure('fixture grant fchmodat')", "failure('fixture openat')",
+    "failure('fixture fstat granted')", "failure('fixture renameat')", "failure('fixture restore fchmod')",
+    "failure('fixture fstat restored')", "failure('fixture saved fstatat')", replacement,
+    "failure('fixture boundary fstatat')", "failure('fchmodat')", "failure('reopen')", 'directory identity mismatch after chmod'];
+  let last = -1;
+  for (const step of steps) { const position = patched.indexOf(step); expect(position, step).toBeGreaterThan(last); last = position; }
+  expect(patched).toContain('$.openat(fd, name, 0x20100000, 0)');
+  expect(patched).toContain("$.fchmodat(fd, name, (before.mode & 0o7777) | 0o700, 0x800)");
+  expect(() => preChmodRaceFixture(source + source, 'saved', replacement)).toThrow('fixture marker changed');
   const service = readFileSync(new URL('./service.test.ts', import.meta.url), 'utf8');
-  expect(unit).toContain("if ($.renameat(fd, name, fd, $('saved').UTF8String) !== 0) failure('fixture renameat'); ${mutate}");
-  expect(unit).toContain("if ($.mkdirat(fd, name, 0) !== 0) failure('fixture mkdirat');");
-  expect(unit).toContain("if ($.symlinkat($('victim').UTF8String, fd, name) !== 0) failure('fixture symlinkat');");
-  expect(unit).toContain("if ($.renameat(fd, name, fd, $('saved').UTF8String) !== 0) failure('fixture renameat'); if ($.mkdirat(fd, name, 448) !== 0) failure('fixture mkdirat');");
-  expect(unit).toContain("if (other < 0) failure('fixture parent open'); if ($.mkdirat(other, name, 0) !== 0) failure('fixture child mkdirat'); $.close(other);");
-  expect(service).toContain("if ($.renameat(fd, name, fd, $('.ai-saved').UTF8String) !== 0) failure('fixture renameat'); if ($.mkdirat(fd, name, 0) !== 0) failure('fixture mkdirat');");
-  expect(unit).toContain(".replace('if ($.fchmodat(fd, name,', hook + 'if ($.fchmodat(fd, name,')");
+  const unit = readFileSync(new URL('./darwin-destroy-chmod.test.ts', import.meta.url), 'utf8');
   expect(service).toContain("error: expect.stringContaining('directory identity mismatch')");
   expect(unit).toContain("'directory identity mismatch after chmod' : 'fchmodat'");
-  expect(unit).toContain('expect(lstatSync(victim).mode & 0o777).toBe(0o750)');
+  expect(unit).toContain("failure('fixture symlinkat')");
+  expect(unit).toContain('expect(victimAfter.ino).toBe(victimInfo.ino)');
+  expect(unit).toContain('expect(replacementInfo.isSymbolicLink()).toBe(true)');
 });

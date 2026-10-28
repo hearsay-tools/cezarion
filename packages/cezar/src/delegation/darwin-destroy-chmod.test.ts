@@ -1,3 +1,4 @@
+import { preChmodRaceFixture } from './darwin-race-fixture.testkit.ts';
 import childProcess, { execFileSync } from 'node:child_process';
 import { syncBuiltinESMExports } from 'node:module';
 import { chmodSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
@@ -27,12 +28,9 @@ describe.runIf(process.platform === 'darwin')('explicit destroy macOS permission
     const info = lstatSync(target, { bigint: true }); const dev = Buffer.alloc(4), ino = Buffer.alloc(8);
     dev.writeUInt32LE(Number(BigInt.asUintN(32, info.dev))); ino.writeBigUInt64LE(info.ino);
     const fixture = join(root, 'fixture.js');
-    const binding = "ObjC.bindFunction('renameat', ['int', ['int', 'char *', 'int', 'char *']]);\nObjC.bindFunction('mkdirat', ['int', ['int', 'char *', 'int']]);\nObjC.bindFunction('symlinkat', ['int', ['char *', 'int', 'char *']]);\n";
+    const victimInfo = lstatSync(victim, { bigint: true });
     const mutate = kind === 'directory' ? "if ($.mkdirat(fd, name, 0) !== 0) failure('fixture mkdirat');" : "if ($.symlinkat($('victim').UTF8String, fd, name) !== 0) failure('fixture symlinkat');";
-    const hook = `if ($.renameat(fd, name, fd, $('saved').UTF8String) !== 0) failure('fixture renameat'); ${mutate}\n    `;
-    const original = readFileSync(source, 'utf8');
-    expect(original.split('if ($.fchmodat(fd, name,')).toHaveLength(2);
-    const script = original.replace('function run(args) {', binding + 'function run(args) {').replace('if ($.fchmodat(fd, name,', hook + 'if ($.fchmodat(fd, name,');
+    const script = preChmodRaceFixture(readFileSync(source, 'utf8'), 'saved', mutate);
     writeFileSync(fixture, script);
     try {
       let stderr = ''; let failure: unknown;
@@ -41,9 +39,14 @@ describe.runIf(process.platform === 'darwin')('explicit destroy macOS permission
       expect(failure, `osascript unexpectedly succeeded: ${stderr}`).toBeDefined();
       expect(existsSync(saved), `race hook did not save original; osascript stderr: ${stderr}`).toBe(true);
       expect(stderr).toContain(kind === 'directory' ? 'directory identity mismatch after chmod' : 'fchmodat');
-      expect(lstatSync(saved).mode & 0o777).toBe(0);
-      expect(lstatSync(victim).mode & 0o777).toBe(0o750);
-      if (kind === 'directory') expect(lstatSync(target).mode & 0o777).toBe(0o700);
+      const savedInfo = lstatSync(saved, { bigint: true });
+      const replacementInfo = lstatSync(target, { bigint: true });
+      const victimAfter = lstatSync(victim, { bigint: true });
+      expect(savedInfo.dev).toBe(info.dev); expect(savedInfo.ino).toBe(info.ino); expect(Number(savedInfo.mode & 0o7777n)).toBe(0);
+      expect(replacementInfo.dev === info.dev && replacementInfo.ino === info.ino).toBe(false);
+      expect(victimAfter.dev).toBe(victimInfo.dev); expect(victimAfter.ino).toBe(victimInfo.ino); expect(Number(victimAfter.mode & 0o7777n)).toBe(0o750);
+      if (kind === 'directory') expect(Number(replacementInfo.mode & 0o777n)).toBe(0o700);
+      else expect(replacementInfo.isSymbolicLink()).toBe(true);
     } finally { if (existsSync(saved)) chmodSync(saved, 0o700); if (existsSync(target) && lstatSync(target).isDirectory()) chmodSync(target, 0o700); rmSync(root, { recursive: true, force: true }); }
   });
   it('refuses an existing symlink and a symlink ancestor', async () => {

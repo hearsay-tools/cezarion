@@ -1,3 +1,4 @@
+import { preChmodRaceFixture } from './darwin-race-fixture.testkit.ts';
 import { scopeFixtureProcesses } from './process-scope.testkit.ts';
 import { runIds } from '../runs/run-store.testkit.ts';
 import { syncBuiltinESMExports } from 'node:module';
@@ -771,10 +772,9 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
     mkdirSync(ai, { recursive: true }); chmodSync(ai, 0);
     const fixtureScript = join(f.root, 'destroy-race-fixture.js');
     const source = readFileSync(fileURLToPath(new URL('../../scripts/darwin-destroy-chmod.js', import.meta.url)), 'utf8');
-    const binding = "ObjC.bindFunction('renameat', ['int', ['int', 'char *', 'int', 'char *']]);\nObjC.bindFunction('mkdirat', ['int', ['int', 'char *', 'int']]);\n";
-    const hook = "if ($.renameat(fd, name, fd, $('.ai-saved').UTF8String) !== 0) failure('fixture renameat'); if ($.mkdirat(fd, name, 0) !== 0) failure('fixture mkdirat');\n    ";
-    expect(source.split('if ($.fchmodat(fd, name,')).toHaveLength(2);
-    writeFileSync(fixtureScript, source.replace('function run(args) {', binding + 'function run(args) {').replace('if ($.fchmodat(fd, name,', hook + 'if ($.fchmodat(fd, name,'));
+    const original = fs.lstatSync(ai, { bigint: true });
+    const replacement = "if ($.mkdirat(fd, name, 0) !== 0) failure('fixture mkdirat');";
+    writeFileSync(fixtureScript, preChmodRaceFixture(source, '.ai-saved', replacement));
     const exec = childProcess.execFile;
     // The Darwin fixture already spies on execFile to scope process enumeration. Capture its
     // implementation, not the mutable spy: installing another implementation changes that spy.
@@ -791,8 +791,10 @@ describe('destroy backoff (hearsay-tools/cezarion#879)', { timeout: 30_000 }, ()
       expect(result).toMatchObject({ state: 'incomplete', error: expect.stringContaining('directory identity mismatch') });
       expect(existsSync(workspace.path)).toBe(true);
       expect(existsSync(saved)).toBe(true);
-      expect(fs.lstatSync(saved).mode & 0o777).toBe(0);
-      expect(fs.lstatSync(ai).mode & 0o777).toBe(0o700);
+      const savedInfo = fs.lstatSync(saved, { bigint: true }), replacementInfo = fs.lstatSync(ai, { bigint: true });
+      expect(savedInfo.dev).toBe(original.dev); expect(savedInfo.ino).toBe(original.ino); expect(Number(savedInfo.mode & 0o7777n)).toBe(0);
+      expect(replacementInfo.dev === original.dev && replacementInfo.ino === original.ino).toBe(false);
+      expect(Number(replacementInfo.mode & 0o777n)).toBe(0o700);
       expect(execFileSync('git', ['branch', '--list', workspace.branch], { cwd: f.root, encoding: 'utf8' })).toContain(workspace.branch);
     } finally { spy.mockRestore(); syncBuiltinESMExports(); if (existsSync(saved)) chmodSync(saved, 0o700); if (existsSync(ai)) chmodSync(ai, 0o700); }
   }, 120_000);

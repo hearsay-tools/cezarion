@@ -120,7 +120,7 @@ export function scanAliases(pid: number, token: string | undefined, attempt: Ali
       }
       scoped = true;
     };
-    const index = indexAliasMounts(mounts, budget, rootPath);
+    const index = indexAliasMounts(mounts, budget, rootPath, owned);
     const candidates = mappedAliasCandidates(maps, rootPath, mounts, owned, budget, noteCandidate, index);
     const observedLinks = readAliasLinks(procFd, budget);
     const links = linkAliasCandidates(observedLinks, rootPath, mounts, owned, budget, noteCandidate, index);

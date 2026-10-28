@@ -17,7 +17,7 @@ it('keeps a marker across detach and reopen when indexed gathering exhausts', ()
   let saved: WorkerAliasRetention | undefined;
   const adapter = aliasRetentionAdapter(proof, resource, boot, attempt, value => { saved = value; }, () => {});
   const mounts = Array.from({ length: 100 }, () => ({ dev: '8:1', root: '/owned', point: '/alias' }));
-  const index = indexAliasMounts(mounts, new AliasWorkBudget());
+  const index = indexAliasMounts(mounts, new AliasWorkBudget(), '/', [{ path: '/owned', dev: '8:1', fsPath: '/owned' }]);
   expect(() => aliasCandidates('/alias/file', '/', '08:01', mounts, [{ path: '/owned', dev: '8:1', fsPath: '/owned' }],
     new AliasWorkBudget(50), index, () => { adapter.begin(123, boot + ':100'); })).toThrow('work exceeds');
   expect(saved?.pending).toEqual([{ pid: 123, start: '100' }]);
@@ -157,4 +157,16 @@ it('keeps a committed marker when publishing a match or clearing the marker fail
   expect(reopened.reconcile(() => boot + ':100', () => false)).toBe(true);
   expect(reopened.reconcile(() => undefined, () => true)).toBe(false);
   expect(saved).toBeUndefined();
+});
+
+it('keeps a prior pending marker when intersection preprocessing exhausts', () => {
+  const proof: WorkerExecution = { generation, phase: 'complete' };
+  let saved: WorkerAliasRetention | undefined;
+  const first = aliasRetentionAdapter(proof, resource, boot, attempt, value => { saved = value; }, () => {});
+  first.begin(123, boot + ':100');
+  const mounts = Array.from({ length: 20 }, () => ({ dev: '8:1', root: '/owned', point: '/alias' }));
+  expect(() => indexAliasMounts(mounts, new AliasWorkBudget(2), '/', [{ path: '/owned', dev: '8:1', fsPath: '/owned' }])).toThrow('work exceeds');
+  const reopened = aliasRetentionAdapter({ ...proof, aliasRetention: saved! }, resource, boot, attempt, value => { saved = value; }, () => {});
+  expect(reopened.reconcile(() => boot + ':100', () => false)).toBe(true);
+  expect(saved?.pending).toEqual([{ pid: 123, start: '100' }]);
 });

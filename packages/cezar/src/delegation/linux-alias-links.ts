@@ -25,7 +25,7 @@ export interface ObservedLink extends ScopedLink { path: string }
 
 export function linkAliasCandidates(links: readonly ObservedLink[], targetRoot: string, mounts: readonly AliasMount[],
   roots: readonly OwnedMountRoot[], budget: AliasWorkBudget, onCandidate?: () => void,
-  index: AliasMountIndex = indexAliasMounts(mounts, budget, targetRoot)): { link: ObservedLink; candidate: MappedAliasCandidate }[] {
+  index: AliasMountIndex = indexAliasMounts(mounts, budget, targetRoot, roots)): { link: ObservedLink; candidate: MappedAliasCandidate }[] {
   const result: { link: ObservedLink; candidate: MappedAliasCandidate }[] = [];
   if (links.length > MAX_LINKS) throw new Error('descriptor evidence exceeds bounds');
   for (const link of links) {
