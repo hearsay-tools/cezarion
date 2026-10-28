@@ -42,6 +42,21 @@ describe('bounded peer discovery pages', () => {
     } finally { db.close(); }
   });
 
+  it('skips malformed cold JSON without losing readable peers', async () => {
+    const db = RunDatabase.open(join(f.root, '.ai/cezar/runs.db'));
+    try {
+      const broken = makeRunRecord({ id: randomUUID(), status: RUN_STATUS.done });
+      const healthy = makeRunRecord({ id: randomUUID(), status: RUN_STATUS.done });
+      db.transaction({ upserts: [encodeRunRow(broken, '{broken'), encodeRunRow(healthy)], deletes: [] });
+      for (const all of [false, true]) {
+        const page = await tasks(all);
+        expect(page.tasks.map(run => run.id)).toContain(healthy.id);
+        expect(page.tasks.map(run => run.id)).not.toContain(broken.id);
+        expect(page.nextOffset).toBeUndefined();
+      }
+    } finally { db.close(); }
+  });
+
   it('keeps held roots in their proper rank without duplicating their stored rows', async () => {
     const db = RunDatabase.open(join(f.root, '.ai/cezar/runs.db'));
     try {
