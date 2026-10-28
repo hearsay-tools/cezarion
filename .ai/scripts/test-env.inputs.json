@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "server": {
+    "env": []
+  },
+  "browser": {
+    "agentBrowserVersion": "0.39.4"
+  }
+}
