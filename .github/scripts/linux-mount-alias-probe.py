@@ -88,7 +88,16 @@ def assert_fd_free(identity, directory=None):
         os.close(fd_dir)
 
 
-def child(fixture, lifeline):
+def verify_private_fixture(fixture, parent_mount_ns):
+    root = pathlib.Path(fixture)
+    info = os.lstat(root)
+    if (os.geteuid() != 0 or os.getpid() != 1 or os.readlink('/proc/self/ns/mnt') == parent_mount_ns
+            or info.st_uid != 0 or info.st_mode & 0o777 != 0o700 or not root.is_dir() or root.is_symlink()):
+        raise RuntimeError('private namespace or fixture ownership not verified')
+    return root
+
+
+def child(fixture, lifeline, parent_mount_ns):
     def watch_parent():
         try:
             while os.read(lifeline, 1):
@@ -97,7 +106,7 @@ def child(fixture, lifeline):
             os._exit(125)  # PID namespace init exit tears down every descendant.
     threading.Thread(target=watch_parent, daemon=True).start()
 
-    root = pathlib.Path(fixture)
+    root = verify_private_fixture(fixture, parent_mount_ns)
     owned, alias, other = (root / name for name in ('owned', 'alias', 'other'))
     for path in (owned, alias, other, owned / 'nested', other / 'nested'):
         path.mkdir(exist_ok=True)
@@ -167,8 +176,9 @@ def parent_death(expected_parent):
 def run_probe(fixture):
     read_end, write_end = os.pipe()
     os.set_inheritable(read_end, True)
-    command = ['unshare', '--user', '--map-root-user', '--mount', '--pid', '--fork',
-               sys.executable, __file__, '--child', fixture, str(read_end)]
+    parent_mount_ns = os.readlink('/proc/self/ns/mnt')
+    command = ['unshare', '--mount', '--pid', '--fork',
+               sys.executable, __file__, '--child', fixture, str(read_end), parent_mount_ns]
     print(json.dumps({'command': command, 'scope': 'disposable user, mount and PID namespaces'}), flush=True)
     parent_pid = os.getpid()
     proc = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -215,8 +225,7 @@ def run_probe(fixture):
         if status:
             unavailable = not cases and ('Operation not permitted' in stderr or 'Permission denied' in stderr)
             print(json.dumps({'capability': 'unavailable' if unavailable else 'failed', 'status': status, 'stderr': stderr}), flush=True)
-            if not unavailable:
-                raise RuntimeError('namespace probe failed')
+            raise RuntimeError('namespace capability unavailable' if unavailable else 'namespace probe failed')
         else:
             required = {'private-bind-closed-fd', 'same-namespace-cwd', 'same-namespace-open-fd', 'nested-overmount'}
             if not required.issubset(cases):
@@ -237,8 +246,8 @@ def run_probe(fixture):
 
 
 def main():
-    if len(sys.argv) == 4 and sys.argv[1] == '--child':
-        child(sys.argv[2], int(sys.argv[3])); return
+    if len(sys.argv) == 5 and sys.argv[1] == '--child':
+        child(sys.argv[2], int(sys.argv[3]), sys.argv[4]); return
     fixture = tempfile.mkdtemp(prefix='cez-mount-probe-')
     try:
         run_probe(fixture)

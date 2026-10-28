@@ -18,4 +18,4 @@ jobs:
         with:
           persist-credentials: false
       - name: Observe private mount namespace aliases
-        run: python3 .github/scripts/linux-mount-alias-probe.py
+        run: sudo -n -- python3 .github/scripts/linux-mount-alias-probe.py
