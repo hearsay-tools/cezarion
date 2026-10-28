@@ -120,7 +120,7 @@ import { enqueueAgentInput, agentInputBatch, hasLiveInboxClaim } from '../delega
 import { parseDelegationEffort } from '../delegation/effort.ts';
 import { DelegationPolicyError } from '../delegation/policy.ts';
 import { reconcileWorkerEntry } from '../delegation/wait.ts';
-import { commitNewMessage, reconcileConversationState, projectConversationEvents, rootsAwaitingPeer, settledRunFamilies } from '../delegation/conversations.ts';
+import { commitNewMessage, inboxSlotsUsed, reconcileConversationState, projectConversationEvents, rootsAwaitingPeer, settledRunFamilies } from '../delegation/conversations.ts';
 import { parentReadiness } from '../delegation/readiness.ts';
 import { answersQuestion, questionMessage, reservedReplies } from '../delegation/questions.ts';
 import { workerQuestionFallback } from './question-routing.ts';
@@ -5320,7 +5320,7 @@ export class RunManager {
   /** The ledger and the parent's inbox keep room as `service.send` counts it, beside open
    *  questions' replies. When either is full, the worker's log says so once per wait. */
   private parkNoticeAtCapacity(workerId: string, waitId: string, root: RunRecord, state: ConversationState): boolean {
-    if (state.messages.length + reservedReplies(state) < 1024 && (root.agentInputs ?? []).filter(input => !input.deliveredAt).length < 32) return false;
+    if (state.messages.length + reservedReplies(state) < 1024 && inboxSlotsUsed(root) < 32) return false;
     const projectionId = `park-notice-skipped:${waitId}`;
     if (!this.store.hasProjection(workerId, projectionId)) {
       this.store.appendEvent(workerId, { type: 'note', tone: 'warning', projectionId, message: 'Parked, but the parent conversation is at capacity: no park notice was sent.' });

@@ -20,6 +20,7 @@ import type { RunOutcome } from '../runs/outcome-commit.ts';
 import type { RunRecord } from '../runs/store.ts';
 import { monitoringWakeOf } from './waits.testkit.ts';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 
 /** #505 PR B: a worker's question goes to its owning parent, not to the human. */
 describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () => {
@@ -52,6 +53,30 @@ describe('worker questions route to the parent (#505)', { timeout: 45_000 }, () 
     expect(message?.deadline).toBeUndefined();
     expect(store.getRun(p.id)?.agentInputs?.some(input => input.id === message!.id)).toBe(true);
     await until(() => store.getRun(w.id)?.status === 'waiting');
+  });
+
+  /** A parent whose last free inbox slot an open peer request holds: 31 undelivered plain inputs
+   *  (nothing wakes it) and one request to another root task (hearsay-tools/cezarion#1990). */
+  async function parentAtLastSlot(service: DelegationService, callerFor: (id: string) => import('../delegation/credentials.ts').Caller, parentId: string) {
+    const now = new Date().toISOString();
+    fixtureUpdateRun(parentId, { agentInputs: Array.from({ length: 31 }, () => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: parentId, text: 'queued', createdAt: now })) });
+    const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
+    store.updateRun(peer.id, { status: RUN_STATUS.running, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    const request = await service.send(callerFor(parentId), { id: randomUUID(), recipientRunId: peer.id, kind: 'request', text: 'Which versions?', timeoutSeconds: 600 });
+    const reply = () => service.send(callerFor(peer.id), { id: randomUUID(), recipientRunId: parentId, kind: 'reply', requestId: request.message.id, text: 'zod 4', timeoutSeconds: 600 });
+    return { reply, undelivered: () => store.getRun(parentId)?.agentInputs?.filter(input => !input.deliveredAt).length ?? 0 };
+  }
+
+  it('leaves the question with the human when an open peer request holds the parent\'s last inbox slot, and the reply still fits', async () => {
+    const { p, service, callerFor } = await delegatingParent({ permissions: ['spawn', 'wait', 'steer'] });
+    await until(() => store.getRun(p.id)?.status === 'waiting');
+    const slot = await parentAtLastSlot(service, callerFor, p.id);
+    const w = await worker(p.id, 'mock:ask'); manager.enqueueOwnedRun(w.id);
+    await until(() => eventsOf(w.id, 'worker-question-fallback').length === 1);
+    expect(eventsOf(w.id, 'worker-question-routed')).toEqual([]);
+    expect(slot.undelivered()).toBe(31);
+    expect((await slot.reply()).outcome).toMatchObject({ status: 'replied' });
+    expect(slot.undelivered()).toBe(32);
   });
 
   // hearsay-tools/cezarion#1990 review: a peer that sends first under the question's deterministic ID

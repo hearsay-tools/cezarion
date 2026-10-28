@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { ConversationMessage } from '@open-mercato/cezar-contract';
 import { RUN_STATUS } from '@open-mercato/cezar-contract/test-factories.testkit';
+import { agentInputSchema } from '@open-mercato/cezar-contract/delegation';
 import { parkNoticeId } from '../delegation/park-notice.ts';
 import { messagesPrompt } from './monitoring-turn.testkit.ts';
 import { delegatingParent, eventCheckpoint, fixtureUpdateRun, manager, register, restart, root, spendWorkerBudget, store, timeline, until, useWorkerWaitFixture, worker } from './worker-wait.testkit.ts';
@@ -127,6 +128,22 @@ describe('a parked worker tells its waiting parent why (hearsay-tools/cezarion#1
     expect(store.readEvents(w.id).filter(event => event.type === 'note' && String(event.message).includes('park notice ID is already in use'))).toHaveLength(1);
     expect(store.getRun(p.id)?.agentInputs?.filter(input => input.id === id)).toEqual([
       expect.objectContaining({ text: 'Peer progress first', conversation: expect.objectContaining({ senderRunId: peer.id, relationship: 'peer' }) })]);
+  });
+
+  it('an open peer request holding the parent\'s last inbox slot sends no notice, and the peer\'s reply still fits', async () => {
+    const { p, service, callerOf } = await family();
+    const now = new Date().toISOString();
+    fixtureUpdateRun(p.id, { agentInputs: Array.from({ length: 31 }, () => ({ id: randomUUID(), source: agentInputSchema.shape.source.enum.agent, parentRunId: p.id, text: 'queued', createdAt: now })) });
+    const peer = store.createRun({ title: 'peer', task: 'peer', workflow: 'quick-task', runner: 'claude', steps: [] });
+    store.updateRun(peer.id, { status: RUN_STATUS.running, delegation: { role: 'root', permissions: ['spawn'], receipts: [] } });
+    const request = await service.send(callerOf(p.id), { id: randomUUID(), recipientRunId: peer.id, kind: 'request', text: 'Which versions?', timeoutSeconds: 600 });
+    const w = await parkedWorker(p.id, 'Parked beside a held slot.');
+    register(p.id, [w.id]);
+    expect(notices(p.id, w.id)).toEqual([]);
+    expect(store.readEvents(w.id).filter(event => event.type === 'note' && String(event.message).includes('no park notice was sent'))).toHaveLength(1);
+    const reply = await service.send(callerOf(peer.id), { id: randomUUID(), recipientRunId: p.id, kind: 'reply', requestId: request.message.id, text: 'zod 4', timeoutSeconds: 600 });
+    expect(reply.outcome).toMatchObject({ status: 'replied' });
+    expect(store.getRun(p.id)?.agentInputs?.filter(input => !input.deliveredAt)).toHaveLength(32);
   });
 
   it('a full parent inbox sends no notice and notes it on the worker once', async () => {
