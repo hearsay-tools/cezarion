@@ -982,7 +982,7 @@ export const PARITY_EXEMPTIONS: readonly ParityExemption[] = [
   // defaults. Each reason was checked against the installed CLI on 2026-10-27.
   ...([
     ['codex', 'Codex 0.164.0 multi-agent tools reach only agents of the same session; the cross-thread agent_message_board feature is under development and off by default, so cezar sends no flag for an unstable key.'],
-    ['opencode', 'OpenCode 1.19.4 has no messaging tool and no inbound channel; task with task_id resumes a session by ID, but a deny on task removes native subagents, and only the shell finds another session\'s ID.'],
+    ['opencode', 'OpenCode 1.19.4 has no messaging tool and no inbound channel. Its task tool resumes any session by task_id with no parent check, and the task permission pattern matches only subagent_type, so no session rule blocks a foreign task_id while subagents keep working. Only the shell finds another session\'s ID, and the shell reaches that session directly (opencode run --session); the same-user shell is outside hard isolation.'],
     ['pi', 'pi 1.4.0 has no built-in messaging tool; an extension may add one, and its name cannot be discovered as messaging.'],
     ['cursor', 'Cursor 2026.10.22-27dcf5f defines send_message (to cloud agents) in its protocol, but the CLI never sets sendMessageEnabled and has no handler for it.'],
     ['omp', 'OMP 18.13.1 get_state.dumpTools default set holds no messaging tool; vibe_* and irc are opt-in in the user\'s own config.'],
