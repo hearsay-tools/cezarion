@@ -26,6 +26,7 @@ import type {
   UiToolItem,
 } from './ui-events.js';
 import { toolDisplay } from '@open-mercato/cezar-contract/tool-display';
+import { contentText, isRecord, number, ompRpcError as rpcError, string } from './pi-rpc-wire.ts';
 
 /** One stream of text/reasoning blocks: the parent turn's, or one sub-agent's. */
 interface OmpTextLane {
@@ -991,33 +992,4 @@ function usageEvent(value: unknown): Extract<UiEvent, { type: 'usage.updated' }>
     },
     ...(cost !== undefined && cost >= 0 ? { costUsd: cost } : {}),
   };
-}
-
-/** OMP's failure response carries `error` as a string (rpc.md § Responses). */
-function rpcError(value: Record<string, unknown>): string {
-  if (typeof value.error === 'string') return value.error;
-  const error = isRecord(value.error) ? value.error : undefined;
-  return string(error?.message) ?? string(value.message) ?? `omp RPC command ${string(value.command) ?? 'unknown'} failed`;
-}
-
-/** Same as pi-ui-mapper.ts `contentText`. */
-function contentText(value: unknown): string | undefined {
-  if (typeof value === 'string') return value;
-  if (!Array.isArray(value)) return undefined;
-  const parts = value
-    .map((part) => (isRecord(part) && part.type === 'text' ? string(part.text) : undefined))
-    .filter((part): part is string => part !== undefined);
-  return parts.length > 0 ? parts.join('\n') : undefined;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
-
-function string(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined;
-}
-
-function number(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
