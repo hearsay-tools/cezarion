@@ -75,7 +75,7 @@ describe('bounded peer discovery pages', () => {
         if (page.nextOffset === undefined) break;
         offset = page.nextOffset;
       }
-      expect(actual).toEqual(records.toReversed().filter(run => !invalid.has(run.id)).map(run => run.id));
+      expect(actual).toEqual([...records].reverse().filter(run => !invalid.has(run.id)).map(run => run.id));
       expect(new Set(actual).size).toBe(70);
     } finally { db.close(); }
   });
