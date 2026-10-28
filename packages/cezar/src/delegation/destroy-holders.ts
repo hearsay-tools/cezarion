@@ -83,14 +83,14 @@ function readableMapping(pid: number, roots: readonly string[], budget?: AliasWo
 
 /** Signal only a live incarnation that still holds an authenticated resource. */
 export async function reapDestroyHolders(paths: readonly string[], assertCurrent: () => void | Promise<void>, timeoutMs = 3_000,
-  retention?: DestroyAliasRetention): Promise<void> {
+  retention?: DestroyAliasRetention, attemptBudget?: AliasWorkBudget): Promise<void> {
   const roots = paths.map(canonicalResourceRoot);
   if (process.platform === 'win32') return reapWindowsHolders(roots, assertCurrent, Math.max(timeoutMs, 30_000));
   if (process.platform !== 'linux' && process.platform !== 'darwin') throw new Error(`Destroy holder scan is unavailable on ${process.platform}`);
   const deadline = Date.now() + timeoutMs;
   const sent = new Map<number, { token: string; at: number }>();
   const scoped = new Map<number, string>();
-  const budget = process.platform === 'linux' && retention ? new AliasWorkBudget() : undefined;
+  const budget = process.platform === 'linux' && retention ? attemptBudget ?? new AliasWorkBudget() : undefined;
   for (;;) {
     await assertCurrent();
     const aliases = aliasContext(roots, retention, budget);

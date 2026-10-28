@@ -36,6 +36,7 @@ vi.mock('./linux-alias-retention.ts', async () => {
 });
 
 import { reapDestroyHolders } from './destroy-holders.ts';
+import { AliasWorkBudget } from './linux-alias-model.ts';
 
 afterEach(() => vi.restoreAllMocks());
 
@@ -104,4 +105,18 @@ it('does not signal a legacy path match without fresh authenticated alias identi
       { resourceId: 'test', read: () => undefined, write: () => {} })).rejects.toThrow('Destroy holders remain');
     expect(kill).not.toHaveBeenCalled();
   } finally { state.legacyHeld = false; state.released = false; }
+});
+
+it('shares one destroy budget across separate reaper calls', async () => {
+  state.calls = 0; state.failAt = 0; state.completed = false; state.legacyFail = false; state.single = true; state.released = false;
+  state.scanCost = 50_000;
+  const kill = vi.spyOn(process, 'kill').mockImplementation(() => { state.completed = true; return true; });
+  const retention = { resourceId: 'test', read: () => undefined, write: () => {} };
+  const budget = new AliasWorkBudget();
+  try {
+    await reapDestroyHolders(['/owned'], () => {}, 3000, retention, budget);
+    state.completed = false;
+    await expect(reapDestroyHolders(['/owned'], () => {}, 3000, retention, budget)).rejects.toThrow('work exceeds');
+    expect(kill).toHaveBeenCalledTimes(1);
+  } finally { state.scanCost = 0; }
 });

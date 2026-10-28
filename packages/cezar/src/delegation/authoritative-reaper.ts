@@ -6,6 +6,7 @@ import type { RunManager } from '../workflows/run.ts';
 import { agentTmpDirLocations, agentTmpDirOwnershipProven } from '../runs/agent-tmpdir.ts';
 import type { DelegationProject } from './service.ts';
 import { reapDestroyHolders } from './destroy-holders.ts';
+import { AliasWorkBudget } from './linux-alias-model.ts';
 import { assertDarwinMountBoundary, assertLinuxMountBoundary } from './mount-boundary.ts';
 import { isCurrentProcess, recordedProcessLive } from './process-liveness.ts';
 import { collectWorkerEvidence } from './results.ts';
@@ -85,6 +86,7 @@ export async function prepareAuthoritativeReaper(project: DelegationProject, wor
   const evidence = await collectWorkerEvidence(project.root, project.store, snapshot);
   await current();
   project.store.commitWorkerResult(evidence.result.parentRunId, evidence.result, evidence.diffSnapshot, { ignoreCleanup: true });
+  const budget = process.platform === 'linux' ? new AliasWorkBudget() : undefined;
   return async () => {
     await current();
     const paths = [...(rootPresent ? [workspace.path] : []), ...agentTmpDirLocations(dataDir, workerId)];
@@ -96,6 +98,6 @@ export async function prepareAuthoritativeReaper(project: DelegationProject, wor
         project.store.commitWorkerAliasRetention(workerId, generation, workspace.resourceId, value);
       },
     } : undefined;
-    await reapDestroyHolders(paths, current, undefined, retention);
+    await reapDestroyHolders(paths, current, undefined, retention, budget);
   };
 }
