@@ -169,17 +169,27 @@ function reconcileRunLists(queryClient: QueryClient): Promise<void>[] {
 
 /** How long run events gather before one branch rescan (hearsay-tools/cezarion#2029). */
 export const REPO_BRANCHES_COALESCE_MS = 1_000
-const repoBranchesTimers = new WeakMap<QueryClient, ReturnType<typeof setTimeout>>()
+/** Per client: the branch keys run events asked to refresh in the open window, by their JSON. */
+const repoBranchesPending = new WeakMap<QueryClient, Map<string, readonly unknown[]>>()
 
 /** Invalidate the branch classification once per window, however many run events arrive in it: each
  *  invalidation is a full branch scan on the server, and a burst of task transitions would
- *  otherwise ask for one per event (hearsay-tools/cezarion#2029). */
+ *  otherwise ask for one per event (hearsay-tools/cezarion#2029). The key is read when the event
+ *  arrives, not when the window closes, so a project switch inside the window still refreshes the
+ *  project the event was for. */
 function invalidateRepoBranchesSoon(queryClient: QueryClient): void {
-  if (repoBranchesTimers.has(queryClient)) return
-  repoBranchesTimers.set(queryClient, setTimeout(() => {
-    repoBranchesTimers.delete(queryClient)
-    void queryClient.invalidateQueries({ queryKey: queryKeys.repoBranches })
-  }, REPO_BRANCHES_COALESCE_MS))
+  const key = queryKeys.repoBranches
+  const pending = repoBranchesPending.get(queryClient)
+  if (pending) {
+    pending.set(JSON.stringify(key), key)
+    return
+  }
+  repoBranchesPending.set(queryClient, new Map([[JSON.stringify(key), key]]))
+  setTimeout(() => {
+    const keys = repoBranchesPending.get(queryClient)
+    repoBranchesPending.delete(queryClient)
+    for (const queryKey of keys?.values() ?? []) void queryClient.invalidateQueries({ queryKey })
+  }, REPO_BRANCHES_COALESCE_MS)
 }
 
 function reconcile(queryClient: QueryClient, signal?: AbortSignal, periodic = false): Promise<void> {

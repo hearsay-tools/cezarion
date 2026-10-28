@@ -11,7 +11,7 @@
       "file": "packages/web/src/api/global-events.test.tsx",
       "rule": "test-enum-literal-tsx",
       "site": "status: 'done'",
-      "count": 29
+      "count": 28
     },
     {
       "file": "packages/web/src/api/global-events.test.tsx",
