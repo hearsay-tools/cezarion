@@ -94,6 +94,10 @@ def mapped(path):
 def child_process(kind, case, row, uid, gid, outer_proc, control, ready, gate=None):
     try:
         if gate: gate()
+        if kind == 'target' and case == 'private-bind-closed-fd':
+            if ctypes.CDLL(None, use_errno=True).unshare(0x00020000): raise OSError(ctypes.get_errno(), 'unshare mount namespace failed')
+            command('mount', '--make-rprivate', '/')
+            command('mount', '--bind', str(row / ('owned' if (row / 'owned').exists() else 'scratch')), str(row / 'alias'))
         drop(uid, gid)
         handle = None; mapping = None
         alias = row / 'alias'
@@ -227,12 +231,20 @@ def row_case(root, node, outer_proc, outer_pid_ns, outer_mount_ns, case, resourc
         for path in [row, *row.rglob('*')]: os.chown(path, uid, gid)
     row_id = os.stat(row)
     resource_id = os.stat(resource)
-    command('mount', '--bind', str(resource), str(alias))
+    private_alias = case == 'private-bind-closed-fd'
+    if not private_alias: command('mount', '--bind', str(resource), str(alias))
     target = sibling = None
     detached = False; nested = False
     try:
         target = spawn_child('target', case, row, uid, gid, outer_proc, (lambda: gate('production-target-before-setup', outer_proc)) if gate else None)
         sibling = spawn_child('sibling', case, row, uid, gid, outer_proc, (lambda: gate('production-sibling-before-setup', outer_proc)) if gate else None)
+        if private_alias and os.readlink(f'/proc/{target["pid"]}/ns/mnt') == os.readlink('/proc/self/ns/mnt'):
+            raise RuntimeError('target mount namespace did not separate')
+        if private_alias:
+            reader_mounts = pathlib.Path('/proc/self/mountinfo').read_text().splitlines()
+            target_mounts = pathlib.Path(f'/proc/{target["pid"]}/mountinfo').read_text().splitlines()
+            if any(line.split()[4] == str(alias) for line in reader_mounts) or not any(line.split()[4] == str(alias) for line in target_mounts):
+                raise RuntimeError('private alias mount view is invalid')
         if case == 'nested-overmount':
             command('mount', '--bind', str(other / 'nested'), str(alias / 'nested')); nested = True
         request = {'version': 1, 'case': case, 'resourceKind': resource_kind, 'fixtureRoot': str(row),
@@ -269,7 +281,7 @@ def row_case(root, node, outer_proc, outer_pid_ns, outer_mount_ns, case, resourc
         finish(target); target = None
         finish(sibling); sibling = None
         if nested: command('umount', str(alias / 'nested')); nested = False
-        if not detached: command('umount', str(alias)); detached = True
+        if not detached and not private_alias: command('umount', str(alias)); detached = True
         current = os.lstat(row)
         if not stat.S_ISDIR(current.st_mode) or (current.st_dev, current.st_ino) != (row_id.st_dev, row_id.st_ino):
             raise RuntimeError('row identity changed')
