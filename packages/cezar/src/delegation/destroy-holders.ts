@@ -49,22 +49,22 @@ export async function reapDestroyHolders(paths: readonly string[], assertCurrent
   if (process.platform !== 'linux' && process.platform !== 'darwin') throw new Error(`Destroy holder scan is unavailable on ${process.platform}`);
   const deadline = Date.now() + timeoutMs;
   const sent = new Map<number, { token: string; at: number }>();
-  const scoped = new Map<number, { token: string; mapped: boolean }>();
+  const scoped = new Map<number, string>();
   for (;;) {
     await assertCurrent();
     const live = findHolders(roots);
-    if (process.platform === 'linux') for (const [pid, evidence] of scoped) {
+    if (process.platform === 'linux') for (const [pid, token] of scoped) {
       if (live.some(holder => holder.pid === pid)) continue;
-      if (processStartToken(pid) !== evidence.token) { scoped.delete(pid); continue; }
+      if (processStartToken(pid) !== token) { scoped.delete(pid); continue; }
       const mapped = mappedHolder(pid, roots);
-      if (mapped === 'unreadable' || (!evidence.mapped && unreadableHolderEvidence(pid))) {
+      if (mapped === 'unreadable' || unreadableHolderEvidence(pid)) {
         throw new Error(`Cannot read evidence for destroy holder ${pid}`);
       }
       scoped.delete(pid);
     }
     if (!live.length) return;
     for (const { pid, token } of live) {
-      scoped.set(pid, { token, mapped: process.platform === 'linux' && mappedHolder(pid, roots) === 'held' });
+      scoped.set(pid, token);
       await signalHolder(pid, token, roots, sent, assertCurrent);
     }
     if (Date.now() >= deadline) throw new Error(`Destroy holders remain: ${live.map(holder => holder.pid).join(', ')}`);

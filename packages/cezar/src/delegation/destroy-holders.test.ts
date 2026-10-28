@@ -153,7 +153,7 @@ it.runIf(process.platform === 'linux' && spawnSync('cc', ['--version'], { stdio:
     }
   }, 30_000);
 
-it.runIf(process.platform === 'linux' && spawnSync('cc', ['--version'], { stdio: 'ignore' }).status === 0).each(['released', 'unreadable', 'replaced'] as const)(
+it.runIf(process.platform === 'linux' && spawnSync('cc', ['--version'], { stdio: 'ignore' }).status === 0).each(['released', 'unreadable', 'replaced', 'mixed'] as const)(
   'rechecks a mapped holder that becomes %s before signalling', async change => {
     const unscope = scopeFixtureProcesses();
     const root = await mkdtemp(join(tmpdir(), 'cez-mapped-race-'));
@@ -161,7 +161,7 @@ it.runIf(process.platform === 'linux' && spawnSync('cc', ['--version'], { stdio:
     const { mkdir } = await import('node:fs/promises'); await mkdir(owned);
     const file = join(owned, 'mapped'); await writeFile(file, Buffer.alloc(4096));
     expect(spawnSync('cc', [new URL('./fixtures/mmap-holder.c', import.meta.url).pathname, '-o', binary]).status).toBe(0);
-    const child = spawn(binary, [file, ready], { cwd: tmpdir(), stdio: 'ignore' });
+    const child = spawn(binary, [file, ready], { cwd: change === 'mixed' ? owned : tmpdir(), stdio: 'ignore' });
     const exited = once(child, 'exit');
     try {
       await vi.waitFor(async () => expect(Number(await readFile(ready, 'utf8'))).toBe(child.pid), { timeout: 10_000 });
@@ -175,9 +175,10 @@ it.runIf(process.platform === 'linux' && spawnSync('cc', ['--version'], { stdio:
         else {
           child.kill('SIGUSR1');
           await vi.waitFor(async () => expect(await readFile(`/proc/${child.pid}/maps`, 'utf8')).not.toContain(file), { timeout: 10_000 });
+          if (change === 'mixed') { readFault.pids = [child.pid!]; readFault.enabled = true; }
         }
       });
-      if (change === 'unreadable') await expect(outcome).rejects.toThrow('Cannot read evidence');
+      if (change === 'unreadable' || change === 'mixed') await expect(outcome).rejects.toThrow('Cannot read evidence');
       else if (change === 'replaced') await expect(outcome).rejects.toThrow('stop after replacement');
       else await expect(outcome).resolves.toBeUndefined();
       expect(child.exitCode).toBeNull(); expect(child.signalCode).toBeNull();
