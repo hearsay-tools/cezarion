@@ -8,7 +8,7 @@
 
 /** `{ [runId]: entry }`. Namespaced `cez-` like `cez-preview-quality`. */
 export const PREVIEW_MEMORY_STORAGE_KEY = 'cez-preview-tasks'
-/** The width last set on any task: what a task with no width of its own starts at. Kept from before #2077. */
+/** The width last set on any task: what a task with no width of its own starts at. Kept from before hearsay-tools/cezarion#2077. */
 export const PANE_WIDTH_STORAGE_KEY = 'cez.preview.pane-width'
 /** Enough for every task an owner moves between; the oldest entry goes first. */
 export const PREVIEW_MEMORY_LIMIT = 100
