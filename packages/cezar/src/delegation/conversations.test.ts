@@ -19,6 +19,16 @@ describe('conversation settlement', () => {
     expect(reconcileConversationState(root, lookupOf([root, worker]), now, () => false)?.outcomes).toEqual([]);
     expect(reconcileConversationState(root, lookupOf([root, worker]), now, () => true)?.outcomes).toEqual([{ requestId: request.id, status: expected, observedAt: now }]);
   });
+  it.each(['done', 'review'] as const)('human Finish closes sent requests at %s after accepted intent', status => {
+    const { root, worker, request } = records();
+    root.status = status;
+    if (root.delegation?.role !== 'root') throw Error('fixture');
+    root.delegation.finishRequestedAt = now;
+    const lookup = lookupOf([root, worker]);
+    expect(reconcileConversationState(root, lookup, now, () => false)?.outcomes).toEqual([{ requestId: request.id, status: 'sender-closed', observedAt: now }]);
+    expect(reconcileConversationState(root, lookup, now, () => true)?.outcomes).toEqual([{ requestId: request.id, status: 'sender-closed', observedAt: now }]);
+  });
+
   it('review does not settle; deadline does, and the first recorded result survives later lifecycle changes', () => {
     const { root, worker } = records(); worker.status = 'review';
     expect(reconcileConversationState(root, lookupOf([root, worker]), now, () => true)?.outcomes).toEqual([]);

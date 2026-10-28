@@ -257,8 +257,8 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
 
   it('cezar_done is not refused by an agent worker wait and cancels it', async () => {
     const { run: p, release } = await heldParent();
-    // A reviewing, collected worker blocks no finish; a request to it stays unanswered, so the wait
-    // on its reply stays open.
+    // The wait alone must not block done. Cancel its request before done so the root's new
+    // request-obligation gate is independent of this wait-cancellation guarantee.
     const w = await worker(p.id);
     fixtureUpdateRun(w.id, { status: 'review' });
     await collect(w.id);
@@ -267,6 +267,7 @@ describe('worker waits in the wait list', { timeout: 30_000 }, () => {
     store.commitConversation(p.id, { messages: [request], outcomes: [] });
     const entry = manager.registerWorkerListWait(p.id, { requestIds: [request.id], timeoutSeconds: 600 }, 'cezar_wait');
     expect(entryOf(p.id, entry.id)?.phase).toBe('open');
+    store.commitConversation(p.id, { messages: [request], outcomes: [{ requestId: request.id, status: RUN_STATUS.cancelled, observedAt: new Date().toISOString() }] });
     expect(await handlers(p.id).finishTurn({}, new AbortController().signal)).toMatchObject({ ok: true, finishes: 'at_turn_end' });
     release();
     await until(() => !manager.isActive(p.id));

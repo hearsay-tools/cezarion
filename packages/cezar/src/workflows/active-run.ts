@@ -104,6 +104,9 @@ export interface ActiveRun {
   noWaitNudged?: AgentSession | undefined;
   /** Session that received a refusal nudge for a blocked done (hearsay-tools/cezarion#1301); the
    *  next turn end on it reads and clears it. */
+  /** Request refusals already shown in this completion cycle, including tool answers. */
+  incomingRequestRefused?: boolean | undefined;
+  sentRequestRefused?: boolean | undefined;
   completionNudged?: AgentSession | undefined;
   /** Session whose turn that just ended answered a refusal nudge (hearsay-tools/cezarion#1301): a
    *  blocked done at this turn end takes the second step. Every turn end sets or clears it. */
