@@ -147,7 +147,7 @@ def gate(label, notify_fd, release_fd):
         raise RuntimeError('invalid gate release')
 
 
-def child(fixture, lifeline, parent_mount_ns, notify_fd, release_fd):
+def child(fixture, lifeline, parent_mount_ns, notify_fd, release_fd, production_node=None, parent_pid_ns=None):
     # A closed lifeline must be observed before any mount or fork. No child
     # receives a writer, so later controller death also produces EOF.
     if select.select([lifeline], [], [], 0)[0]:
@@ -167,6 +167,10 @@ def child(fixture, lifeline, parent_mount_ns, notify_fd, release_fd):
 
     root = verify_private_fixture(fixture, parent_mount_ns)
     gate('init-before-mount', notify_fd, release_fd)
+    if production_node:
+        from linux_reaper_fixture import production_rows
+        production_rows(root, production_node, parent_pid_ns, parent_mount_ns)
+        return
     owned, alias, other = (root / name for name in ('owned', 'alias', 'other'))
     for path in (owned, alias, other, owned / 'nested', other / 'nested'):
         path.mkdir(exist_ok=True)
@@ -254,13 +258,16 @@ def credential_safe_executable(name):
     return path
 
 
-def run_probe(fixture, notify_fd=-1, release_fd=-1, observer=None):
+def run_probe(fixture, notify_fd=-1, release_fd=-1, observer=None, production_node=None):
     credential_safe_executable(sys.executable)
     read_end, write_end = os.pipe()
     os.set_inheritable(read_end, True)
     parent_mount_ns = os.readlink('/proc/self/ns/mnt')
+    parent_pid_ns = os.readlink('/proc/self/ns/pid')
     command = [sys.executable, __file__, '--bootstrap', fixture, str(read_end), parent_mount_ns,
                str(os.getpid()), str(notify_fd), str(release_fd)]
+    if production_node:
+        command += [production_node, parent_pid_ns]
     print(json.dumps({'command': command, 'scope': 'existing user namespace; disposable mount and PID namespaces'}), flush=True)
     parent_pid = os.getpid()
     gate_fds = (notify_fd, release_fd) if notify_fd >= 0 and release_fd >= 0 else ()
@@ -270,10 +277,11 @@ def run_probe(fixture, notify_fd=-1, release_fd=-1, observer=None):
     selector = selectors.DefaultSelector()
     selector.register(proc.stdout, selectors.EVENT_READ, 'stdout')
     selector.register(proc.stderr, selectors.EVENT_READ, 'stderr')
-    deadline = time.monotonic() + 30
+    deadline = time.monotonic() + (240 if production_node else 30)
     buffers = {'stdout': b'', 'stderr': b''}
     total = 0
     cases = []
+    production_complete = False
     try:
         while selector.get_map():
             remaining = deadline - time.monotonic()
@@ -296,6 +304,8 @@ def run_probe(fixture, notify_fd=-1, release_fd=-1, observer=None):
                     if not line:
                         raise RuntimeError('empty handshake')
                     record = json.loads(line)
+                    if record.get('productionComplete') is True:
+                        production_complete = True
                     if 'pid' in record:
                         record['outside'] = snapshot(record['pid'], fixture)
                         if observer:
@@ -319,8 +329,10 @@ def run_probe(fixture, notify_fd=-1, release_fd=-1, observer=None):
             raise RuntimeError('namespace capability unavailable' if unavailable else 'namespace probe failed')
         else:
             required = {'private-bind-closed-fd', 'same-namespace-cwd', 'same-namespace-open-fd', 'nested-overmount', 'alias-unmounted-after-map'}
-            if not required.issubset(cases):
+            if not production_node and not required.issubset(cases):
                 raise RuntimeError('required probe case missing')
+            if production_node and not production_complete:
+                raise RuntimeError('production rows incomplete')
             print(json.dumps({'capability': 'available', 'observed_cases': cases, 'stderr': stderr}), flush=True)
     finally:
         # EOF causes namespace init to exit. Wait for unshare to reap init;
@@ -337,19 +349,22 @@ def run_probe(fixture, notify_fd=-1, release_fd=-1, observer=None):
 
 
 def main():
-    if len(sys.argv) == 8 and sys.argv[1] == '--bootstrap':
-        fixture, lifeline, mount_ns, parent, notify, release = sys.argv[2:]
+    if len(sys.argv) in (8, 10) and sys.argv[1] == '--bootstrap':
+        fixture, lifeline, mount_ns, parent, notify, release = sys.argv[2:8]
+        extra = sys.argv[8:]
         parent_death(int(parent))
         gate('wrapper-before-exec-unshare', int(notify), int(release))
         executable = credential_safe_executable('unshare')
         for fd in (int(lifeline), int(notify), int(release)):
             if fd >= 0: os.set_inheritable(fd, True)
         os.execv(executable, [executable, '--mount', '--pid', '--fork', sys.executable, __file__,
-                              '--child', fixture, lifeline, mount_ns, notify, release])
-    if len(sys.argv) == 7 and sys.argv[1] == '--child':
-        child(sys.argv[2], int(sys.argv[3]), sys.argv[4], int(sys.argv[5]), int(sys.argv[6])); return
+                              '--child', fixture, lifeline, mount_ns, notify, release, *extra])
+    if len(sys.argv) in (7, 9) and sys.argv[1] == '--child':
+        child(sys.argv[2], int(sys.argv[3]), sys.argv[4], int(sys.argv[5]), int(sys.argv[6]),
+              *(sys.argv[7:] if len(sys.argv) == 9 else ())); return
     observer = sys.argv[2] if len(sys.argv) == 3 and sys.argv[1] == '--observer' else None
-    if (len(sys.argv) not in (1, 4) and observer is None) or (len(sys.argv) == 4 and sys.argv[1] != '--gated'):
+    production_node = sys.argv[2] if len(sys.argv) == 3 and sys.argv[1] == '--production' else None
+    if (len(sys.argv) not in (1, 4) and observer is None and production_node is None) or (len(sys.argv) == 4 and sys.argv[1] != '--gated'):
         raise RuntimeError('invalid probe arguments')
     notify_fd, release_fd = (int(sys.argv[2]), int(sys.argv[3])) if len(sys.argv) == 4 else (-1, -1)
     if (notify_fd < 0) != (release_fd < 0):
@@ -358,7 +373,7 @@ def main():
     fixture = tempfile.mkdtemp(prefix='cez-mount-probe-')
     print(json.dumps({'fixture': fixture}), flush=True)
     try:
-        run_probe(fixture, notify_fd, release_fd, observer)
+        run_probe(fixture, notify_fd, release_fd, observer, production_node)
     except BaseException:
         print(json.dumps({'fixture_retained': fixture}), flush=True)
         raise
