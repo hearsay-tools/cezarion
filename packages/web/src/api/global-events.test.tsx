@@ -6,8 +6,9 @@ import { MemoryRouter } from 'react-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { createUsageStore, type UsageStore } from './events'
-import { GlobalEventsProvider, useGlobalEvents, useRunUsage, useUsage } from './global-events'
+import { GlobalEventsProvider, REPO_BRANCHES_COALESCE_MS, useGlobalEvents, useRunUsage, useUsage } from './global-events'
 import { setApiScope } from '@open-mercato/cezar-api-client/utils/project-scope'
+import { RUN_STATUS } from '@open-mercato/cezar-api-client/contract/test-factories.testkit'
 import { toRunSummary } from '@open-mercato/cezar-api-client/contract/runs'
 import { createQueryClient } from './query-client'
 import { queryKeys, useHealth, useRunnerModels, useRun, useRuns, useProjectRuns, useProviderStatus, workspaceQueryKeys } from './queries'
@@ -1606,14 +1607,59 @@ describe('useGlobalEvents — reconcile doctrine', () => {
   }
 
   it('invalidates the Git view branch classes on run and run-deleted events (issue 08)', () => {
+    vi.useFakeTimers()
     const { source } = mount()
     source.open()
     const invalidate = vi.spyOn(client, 'invalidateQueries')
-    source.emit('run', stampedRun({ ...runRecord('r1'), status: 'done' }))
-    expect(invalidatedKeys(invalidate)).toContainEqual(queryKeys.repoBranches)
-    invalidate.mockClear()
+    const branchScans = () => invalidatedKeys(invalidate).filter((key) => JSON.stringify(key) === JSON.stringify(queryKeys.repoBranches)).length
+    source.emit('run', stampedRun({ ...runRecord('r1'), status: RUN_STATUS.done }))
+    act(() => vi.advanceTimersByTime(REPO_BRANCHES_COALESCE_MS))
+    expect(branchScans()).toBe(1)
     source.emit('run-deleted', JSON.stringify({ id: 'r1', project: BOOT }))
-    expect(invalidatedKeys(invalidate)).toContainEqual(queryKeys.repoBranches)
+    act(() => vi.advanceTimersByTime(REPO_BRANCHES_COALESCE_MS))
+    expect(branchScans()).toBe(2)
+  })
+
+  it('coalesces a burst of run events into one branch rescan (hearsay-tools/cezarion#2029)', () => {
+    vi.useFakeTimers()
+    const { source } = mount()
+    source.open()
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const branchScans = () => invalidatedKeys(invalidate).filter((key) => JSON.stringify(key) === JSON.stringify(queryKeys.repoBranches)).length
+    for (let i = 0; i < 20; i++) source.emit('run', stampedRun({ ...runRecord(`r${i}`), status: i % 2 ? RUN_STATUS.done : RUN_STATUS.running }))
+    source.emit('run-deleted', JSON.stringify({ id: 'r1', project: BOOT }))
+    expect(branchScans()).toBe(0)
+    act(() => vi.advanceTimersByTime(REPO_BRANCHES_COALESCE_MS))
+    expect(branchScans()).toBe(1)
+  })
+
+  it('refreshes the branches of the project each event came from when the scope switches inside the window (hearsay-tools/cezarion#2029)', () => {
+    vi.useFakeTimers()
+    const { source } = mount()
+    source.open()
+    for (const scope of ['default', 'other-project']) {
+      client.setQueryData([scope, 'repo', 'branches', 'counts'], { counts: { notLanded: 1, cleanup: 0 } })
+    }
+    const invalidate = vi.spyOn(client, 'invalidateQueries')
+    const branchKeys = () => invalidatedKeys(invalidate).filter((key) => JSON.stringify(key).includes('"branches"'))
+
+    // An event for the boot project, then a switch before the window closes and nothing else.
+    source.emit('run', stampedRun({ ...runRecord('r1'), status: RUN_STATUS.done }))
+    setApiScope('other-project')
+    act(() => vi.advanceTimersByTime(REPO_BRANCHES_COALESCE_MS))
+    expect(branchKeys()).toEqual([['default', 'repo', 'branches']])
+    expect(client.getQueryState(['default', 'repo', 'branches', 'counts'])?.isInvalidated).toBe(true)
+    expect(client.getQueryState(['other-project', 'repo', 'branches', 'counts'])?.isInvalidated).toBe(false)
+
+    // Events for both projects in one window: each project refreshes once.
+    invalidate.mockClear()
+    setApiScope(null)
+    source.emit('run', stampedRun({ ...runRecord('r2'), status: RUN_STATUS.done }))
+    source.emit('run', stampedRun({ ...runRecord('r3'), status: RUN_STATUS.done }))
+    setApiScope('other-project')
+    source.emit('run', stampedRun({ ...runRecord('r4'), status: RUN_STATUS.done }, 'other-project'))
+    act(() => vi.advanceTimersByTime(REPO_BRANCHES_COALESCE_MS))
+    expect(branchKeys()).toEqual([['default', 'repo', 'branches'], ['other-project', 'repo', 'branches']])
   })
 
   it('reconciles background discovery on first open', async () => {

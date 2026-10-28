@@ -190,7 +190,7 @@ import { worktreeDiff, worktreeSizeBytes } from '../git-worktree.ts';
 import { releaseThenRemoveWorktree } from '../git-worktree-release.ts';
 import { isReclaimable, reclaimWorktree, reclaimWorktrees, rematerializeReclaimedWorktree, selectReclaimableWorktrees } from '../runs/retention.ts';
 import { getBranches, getCommit, getDiff, getLogWithParents, getBranchHead, getRepoInfo, getStatus, getTracking } from './git.ts';
-import { attributeLog, deleteBranches, forgetRepoBranches, githubBranchForge, readRepoBranches, type BranchForge, type ClassifyInput } from './repo-branches.ts';
+import { attributeLog, classifyInputFor, deleteBranches, forgetRepoBranches, githubBranchForge, readRepoBranchCounts, readRepoBranches, type BranchForge, type ClassifyProject } from './repo-branches.ts';
 import { claimRepoGitMutation, localPullBranches, pullRepoCheckout } from './repo-pull.ts';
 import {
   collectChanges,
@@ -4774,24 +4774,7 @@ export function createApp(deps: ServerDeps) {
     number: z.coerce.number().int().positive(),
   });
 
-  /** What the branch classifier reads for one project, or null outside a repository. */
-  const branchClassifyInput = async (
-    project: { root: string; store: RunStore; manager: RunManager },
-  ): Promise<ClassifyInput | null> => {
-    const info = await getRepoInfo(project.root);
-    if (!info) return null;
-    const config = await loadConfig(project.root);
-    return {
-      root: info.root,
-      runs: project.store.listBranchOwners(),
-      isActive: (id) => project.manager.isActive(id),
-      configuredBase: config.baseBranch,
-      currentBranch: info.branch,
-      hasRemote: Boolean(info.remote),
-      forge: deps.branchForge ?? githubBranchForge,
-      claimRuns: (ids) => project.manager.claimForBranchCleanup(ids),
-    };
-  };
+  const branchClassifyInput = (project: ClassifyProject) => classifyInputFor(project, deps.branchForge ?? githubBranchForge);
 
   // ---- chained family: repo / git (project-scoped) ----
   const repoRoutes = new Hono<ProjectApiEnv>()
@@ -4838,6 +4821,14 @@ export function createApp(deps: ServerDeps) {
       const input = await branchClassifyInput(c.get('project'));
       if (!input) return c.json({ base: '', prStateKnown: false, branches: [], counts: { notLanded: 0, cleanup: 0 } });
       return c.json(await readRepoBranches(input));
+    })
+
+    // The same classification's counts alone (hearsay-tools/cezarion#2029): the always-mounted Git
+    // sidebar reads these, so it never pays for a diff stat per branch.
+    .get('/repo/branches/counts', async (c) => {
+      const input = await branchClassifyInput(c.get('project'));
+      if (!input) return c.json({ base: '', prStateKnown: false, counts: { notLanded: 0, cleanup: 0 }, allBranches: 0 });
+      return c.json(await readRepoBranchCounts(input));
     })
 
     // Delete local branches (issue 08 §B3). The server re-classifies and never trusts the
