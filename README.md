@@ -805,7 +805,7 @@ Stop requests cancellation; `stopping` does not prove termination. Destroy check
 
 Provisioned sessions prefer Cezarion workers and suppress verified native delegation entry points through per-run adapter controls: Claude `Agent`, legacy `Task` and `Workflow` denies, Codex multi-agent feature overrides, OpenCode session `task` denies, and pi's known `subagent` extension exclusion. Claude skills and commands with `context: fork` are not blocked: Claude starts their subagent without checking those denies, and no setting turns forking off. See [the backend capability table](AGENT_PROTOCOL.md#governed-delegation-controls-d1) for tested versions and exemptions. Native workers are not tracked by Cezarion. Pi has no native delegation primitive or universal identifier for arbitrary custom delegation extensions; guidance does not enforce those cases. With delegation disabled or unavailable, ordinary tools/settings stay unchanged. The listener binds to `127.0.0.1`, including hosted cockpit mode. Its credentials authorize only the parent's own workers through that listener. This is cooperative local-agent supervision; same-user unrestricted shell and custom tools are not hard isolation. Workers cannot delegate or message peers through Cezarion. Review remains a human gate with no automatic acceptance. Never read, echo, forward, or persist the generated token.
 
-## From the terminal: `cez task`
+## From the terminal: `cez task` and `cez message`
 
 `cez task` starts, watches and steers tasks **in the running cockpit** from a shell — for you, or
 for a bot driving one. Every command prints one JSON object and exits with a code the caller can
@@ -822,6 +822,10 @@ The shared `--url`, `--repo` and `--help`/`-h` flags also work before the operat
 before the operation or on both sides is a usage error. Operation flags stay after the
 operation. `cez task --help <operation>` shows that operation's help without discovery.
 An explicit `--url` wins over `CEZ_URL`; `--repo` selects the checkout to discover.
+
+`cez task send` is human input. It can answer a pending human question. It refuses
+inside a task (`CEZ_TASK_ID` is set). Agents use `cez message` for task messages,
+including peer and parent/worker conversations; see [Owned workers](#owned-workers-opt-in).
 
 ```bash
 id=$(cez task start --task-file - <<'EOF' | jq -r .id

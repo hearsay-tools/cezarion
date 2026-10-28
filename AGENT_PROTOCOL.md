@@ -262,6 +262,11 @@ resumes a settled owned worker with a request. Removed worker message verbs, inc
 `wait --request`, exit 64 and name the message command. `cez message request --resume`
 exits 64 and points to worker resume. There are no compatibility aliases.
 
+The delegation CLI (`cez worker` and `cez message`) is agent-facing and has no
+compatibility window (hearsay-tools/cezarion#1933). New sessions receive the current
+commands in their instructions. This policy does not change human input through
+`cez task send` outside a task.
+
 Parent/worker conversations use the same `sendAgentInput` seam in both directions.
 The root's durable conversation ledger is authoritative; `conversation-message`
 `{message, delivery, deliveredAt?}` and `request-outcome` `{outcome}` events are replayable projections in
@@ -305,9 +310,24 @@ including beside an open question. The card names the peer by title and links it
 reads the peer from the server when the run list does not carry it, and a deleted or unreadable
 peer shows "Deleted task" or "Task unavailable" with no link. The `deleted` outcome reads
 "Recipient deleted" on the request card. A peer request is never batched with a worker request.
-An older cockpit shows a peer message as a worker card with its raw outcome. Older cezar
-versions reject peer inputs, peer messages and `deleted` outcomes because their strict schemas
-do not know the added fields and outcome (hearsay-tools/cezarion#1993).
+An older cockpit shows a peer message as a worker card with its raw outcome.
+Versions from before hearsay-tools/cezarion#1990 have these stored-record downgrade effects
+(hearsay-tools/cezarion#1993):
+
+| Stored value | Effect in the older reader |
+| --- | --- |
+| `relationship` on a ledger message | The strict message schema rejects the field, including explicit `family`. The store keeps the run but quarantines its delegation metadata as `role: 'invalid'`, disabling delegation authority and conversation access. |
+| Request outcome `deleted` | The older outcome enum rejects it. The store quarantines delegation metadata in the same way. |
+| `relationship` on input attribution | The strict attribution schema rejects it. The containing run row is unreadable. |
+| `requestHash` and `deadline` on a peer agent input | The strict input schema rejects either field, even without peer attribution. The containing run row is unreadable. These fields already existed on ledger messages; only inputs gain them. |
+
+An absent `relationship` stays readable as family. The SQLite loader skips an
+unreadable row and leaves its stored JSON in place; readable sibling rows remain
+available. Neither rejection converts peer input into family or human input. Use a
+current cezar to read the row. `runs/conversation-downgrade.test.ts` pins the
+pre-change schemas through `parseRunRecords` and `decodeRunRow`, including a
+readable family record. The peer-wait downgrade is documented with the wait
+contract below.
 
 Kinds are `request`, `progress`, `follow-up`, and `reply`. A request's message ID is
 its obligation ID; follow-ups and replies name `requestId`. Exact message retries
