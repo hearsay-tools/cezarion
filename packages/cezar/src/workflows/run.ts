@@ -9992,16 +9992,12 @@ export class RunManager {
     return this.parkedOutcome(runId);
   }
 
-  /** The completion cause's nudge: the refusal message, which names the worker wait when live
-   *  workers block the done. A nudge that cannot go parks for the user. */
+  /** Send the refusal nudge, or park retaining DONE for transport readiness when permitted. */
   private carryOutCompletionNudge({ runId, state, session, stepId, refused, noteRefusal }: TurnEndCarry): TurnEndOutcome {
     const text = refused!.liveWorkerIds.length ? `${refused!.message} ${COMPLETION_WILL_WAIT}` : refused!.message;
     state.noWaitNudgeSawContent = false;
-    const canNudge = session && this.canAutoContinue(runId, state);
-    if (!canNudge || !this.submitAgentInput(runId, state, [{ type: 'text', text }])) {
-      // A human prompt's HTTP acknowledgement may trail its SSE turn end. Keep DONE at
-      // this boundary so transport readiness retries the refused nudge, without a new turn.
-      if (canNudge && !state.agentInputError) state.doneAtBoundary = session;
+    if (!session || !this.canAutoContinue(runId, state) || !this.submitAgentInput(runId, state, [{ type: 'text', text }])) {
+      if (session && this.canAutoContinue(runId, state)) state.doneAtBoundary = session;
       noteRefusal();
       this.parkForUser(runId, state, stepId);
       return this.parkedOutcome(runId);
