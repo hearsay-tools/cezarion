@@ -449,6 +449,75 @@ function diffStatReader(root: string, baseSha: string | null): (tip: string) => 
   };
 }
 
+interface Draft { head: HeadRow; run?: BranchOwner; cls: BranchClass | null; ahead: number }
+
+const settled = (state: BranchPrState | undefined) => state === 'merged' || state === 'closed';
+
+async function recordedPrs(input: ClassifyInput, taskRows: Draft[]) {
+  const created = new Map<number, { url: string; branch: string }>();
+  const needList: Draft[] = [];
+  for (const d of taskRows) {
+    const url = d.run?.pullRequestUrl;
+    const n = url ? refNumberFromUrl(url) : null;
+    if (url && n !== null) created.set(n, { url, branch: d.head.name });
+    else needList.push(d);
+  }
+  const states = created.size > 0
+    ? await input.forge.prStates(input.root, [...created.keys()])
+    : { available: true, states: {} as Record<number, BranchPrState> };
+  const prByBranch = new Map<string, RepoBranchEntry['pr']>();
+  for (const [n, { url, branch }] of created) {
+    const state = states.states[n];
+    if (state) prByBranch.set(branch, { number: n, url, state });
+  }
+  return { created, needList, prByBranch, available: states.available };
+}
+
+function selectDisplayedPrs(rows: Draft[], byHead: Map<string, ForgePr[]>, prByBranch: Map<string, RepoBranchEntry['pr']>) {
+  for (const d of rows) {
+    const pr = pickPr(byHead.get(d.head.name) ?? [], d.head.sha);
+    const recorded = prByBranch.get(d.head.name);
+    // A recorded PR is replaced only by one that is open, or that sits at the current tip.
+    if (!pr || (recorded && pr.number !== recorded.number && pr.headRefOid !== d.head.sha && settled(pr.state))) continue;
+    prByBranch.set(d.head.name, { number: pr.number, url: pr.url, state: pr.state });
+  }
+}
+
+async function mergedPrBranches(root: string, base: string, baseSha: string | null, pending: Draft[], byHead: Map<string, ForgePr[]>) {
+  const merged = new Set<string>();
+  const onBase = async (sha: string | null) =>
+    !!sha && !!baseSha && FULL_SHA.test(sha) && (await git(root, ['merge-base', '--is-ancestor', sha, baseSha])).ok;
+  for (const d of pending) {
+    for (const pr of byHead.get(d.head.name) ?? []) {
+      if (pr.state !== 'merged' || pr.baseRefName !== base.replace(/^origin\//, '') || pr.headRefOid !== d.head.sha) continue;
+      if (await onBase(pr.mergeCommitOid)) {
+        merged.add(d.head.name);
+        break;
+      }
+    }
+  }
+  return merged;
+}
+
+async function branchPrState(input: ClassifyInput, drafts: Draft[], pending: Draft[], base: string, baseSha: string | null) {
+  const empty = { prByBranch: new Map<string, RepoBranchEntry['pr']>(), mergedByPr: new Set<string>() };
+  if (pending.length === 0) return { ...empty, prStateKnown: true };
+  if (!input.hasRemote) return { ...empty, prStateKnown: false };
+  const taskRows = drafts.filter((d) => d.head.name.startsWith(TASK_PREFIX));
+  const { created, needList, prByBranch, available } = await recordedPrs(input, taskRows);
+  // Settled recorded PRs need the list for both the merge verdict and replacement display.
+  const recordedSettled = pending.filter((d) => created.size > 0 && settled(prByBranch.get(d.head.name)?.state));
+  const list = needList.length > 0 || recordedSettled.length > 0
+    ? await input.forge.listPrs(input.root)
+    : { available: true, prs: [] as ForgePr[] };
+  const byHead = new Map<string, ForgePr[]>();
+  for (const pr of list.prs) byHead.set(pr.headRefName, [...(byHead.get(pr.headRefName) ?? []), pr]);
+  selectDisplayedPrs([...needList, ...recordedSettled], byHead, prByBranch);
+  // A merged PR must target this base and tip, and its merge commit must be on the base.
+  const mergedByPr = await mergedPrBranches(input.root, base, baseSha, pending, byHead);
+  return { prByBranch, mergedByPr, prStateKnown: available && list.available };
+}
+
 export interface ClassifyOptions {
   /** Compute each not-landed row's diff stat (the default). Off for the counts and for a delete,
    *  which read none. */
@@ -477,7 +546,6 @@ export async function classifyBranches(input: ClassifyInput, options?: ClassifyO
   const representative = (runs: BranchOwner[] | undefined): BranchOwner | undefined =>
     runs?.find(liveRun) ?? runs?.slice().sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1))[0];
 
-  interface Draft { head: HeadRow; run?: BranchOwner; cls: BranchClass | null; ahead: number }
   const drafts: Draft[] = heads.map((head) => {
     const runs = runsByBranch.get(head.name);
     const run = representative(runs);
@@ -510,66 +578,7 @@ export async function classifyBranches(input: ClassifyInput, options?: ClassifyO
 
   // PR state only decides the rows ancestry left open; everything else is display.
   const pending = drafts.filter((d) => d.cls === null);
-  const prByBranch = new Map<string, RepoBranchEntry['pr']>();
-  let prStateKnown = true;
-  const mergedByPr = new Set<string>();
-  const taskRows = drafts.filter((d) => d.head.name.startsWith(TASK_PREFIX));
-  if (pending.length > 0) {
-    if (!input.hasRemote) {
-      prStateKnown = false;
-    } else {
-      const created = new Map<number, { url: string; branch: string }>();
-      const needList: Draft[] = [];
-      for (const d of taskRows) {
-        const url = d.run?.pullRequestUrl;
-        const n = url ? refNumberFromUrl(url) : null;
-        if (url && n !== null) created.set(n, { url, branch: d.head.name });
-        else needList.push(d);
-      }
-      const states = created.size > 0
-        ? await input.forge.prStates(root, [...created.keys()])
-        : { available: true, states: {} as Record<number, BranchPrState> };
-      if (!states.available) prStateKnown = false;
-      for (const [n, { url, branch }] of created) {
-        const state = states.states[n];
-        if (state) prByBranch.set(branch, { number: n, url, state });
-      }
-      // A merged state alone proves nothing (below), so the list is also needed whenever a
-      // created PR reports merged — it carries the base and head the verdict is checked against.
-      // A SETTLED recorded PR can also be obsolete: the branch was reused and a newer PR carries
-      // its current work, so the list is read for those rows' display as well.
-      const settled = (state: BranchPrState | undefined) => state === 'merged' || state === 'closed';
-      const recordedSettled = pending.filter((d) => created.size > 0 && settled(prByBranch.get(d.head.name)?.state));
-      const list = needList.length > 0 || recordedSettled.length > 0
-        ? await input.forge.listPrs(root)
-        : { available: true, prs: [] as ForgePr[] };
-      if (!list.available) prStateKnown = false;
-      const byHead = new Map<string, ForgePr[]>();
-      for (const pr of list.prs) byHead.set(pr.headRefName, [...(byHead.get(pr.headRefName) ?? []), pr]);
-      for (const d of [...needList, ...recordedSettled]) {
-        const pr = pickPr(byHead.get(d.head.name) ?? [], d.head.sha);
-        const recorded = prByBranch.get(d.head.name);
-        // A recorded PR is replaced only by one that is open, or that sits at the current tip.
-        if (!pr || (recorded && pr.number !== recorded.number && pr.headRefOid !== d.head.sha && settled(pr.state))) continue;
-        prByBranch.set(d.head.name, { number: pr.number, url: pr.url, state: pr.state });
-      }
-      // A merged PR lands the tip only when it targeted this base, merged this very commit, AND its
-      // merge is on the base as this classification reads it: one into another branch, a branch
-      // that gained commits after its PR merged, or a base reset (or never fetched) past the merge
-      // all leave work the base lacks, and `merged` would make that work bulk-deletable.
-      const onBase = async (sha: string | null) =>
-        !!sha && !!baseSha && FULL_SHA.test(sha) && (await git(root, ['merge-base', '--is-ancestor', sha, baseSha])).ok;
-      for (const d of pending) {
-        for (const pr of byHead.get(d.head.name) ?? []) {
-          if (pr.state !== 'merged' || pr.baseRefName !== base.replace(/^origin\//, '') || pr.headRefOid !== d.head.sha) continue;
-          if (await onBase(pr.mergeCommitOid)) {
-            mergedByPr.add(d.head.name);
-            break;
-          }
-        }
-      }
-    }
-  }
+  const { prByBranch, mergedByPr, prStateKnown } = await branchPrState(input, drafts, pending, base, baseSha);
   for (const d of pending) {
     if (mergedByPr.has(d.head.name)) d.cls = 'merged';
     else d.cls = d.run ? 'not-landed' : 'orphan';
