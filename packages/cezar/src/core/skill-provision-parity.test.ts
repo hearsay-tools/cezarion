@@ -183,7 +183,7 @@ describe('harness parity — skill provisioning (#1408)', () => {
 
     it(`${backend} R95 delivers a live /name, then one input naming what was installed`, async () => {
       await withProvisionRun(backend, async (fixture) => {
-        expect(fixture.manager.sendMessage(fixture.runId, [{ type: 'text', text: `/${LIVE} go` }])).toBe(true);
+        expect(fixture.manager.sendMessage(fixture.runId, [{ type: 'text', text: `/${LIVE} go${backend === 'codex' ? ' mock:steer-race' : ''}` }])).toBe(true);
         await liveProvisioning(fixture);
         expect(installed(fixture.worktree, EXTRA)).toBe(true);
         // A fast mock turn can park on a new question first; the input then waits for its answer,
@@ -192,7 +192,22 @@ describe('harness parity — skill provisioning (#1408)', () => {
         await liveProvisioning(fixture);
         await waitFor(() => fixture.wire().includes(LIVE_NOTE) && fixture.wire().includes('again'), 30_000);
         await waitFor(() => parked(fixture), 30_000);
-        expect(fixture.wire().split(LIVE_NOTE).length - 1).toBe(1);
+        const notes = fixture.store.getRun(fixture.runId)?.agentInputs?.filter(input => input.text === LIVE_NOTE);
+        expect(notes).toHaveLength(1);
+        expect(notes![0]!.deliveredAt).toBeDefined();
+        if (backend === 'codex') {
+          // A refused steer is retried as turn/start with the SAME client id. Counting RPC
+          // text counts that unread attempt twice. Keep one durable input and one wire identity.
+          // hearsay-tools/cezarion#2071: proof_base=f389b6838; mock:steer-race gives
+          // 1 failed / 4 skipped before this fix, 1 passed / 4 skipped after it.
+          const requests = fixture.wire().trim().split('\n').map(line => JSON.parse(line))
+            .filter(request => request.params?.input?.some((part: { text?: string }) => part.text === LIVE_NOTE));
+          expect(requests[0].params.clientUserMessageId).toBeTruthy();
+          expect(new Set(requests.map(request => request.params.clientUserMessageId)).size).toBe(1);
+          expect(notes![0]!.consumedAt).toBeDefined();
+        } else {
+          expect(fixture.wire().split(LIVE_NOTE).length - 1).toBe(1);
+        }
       });
     }, 90_000);
 

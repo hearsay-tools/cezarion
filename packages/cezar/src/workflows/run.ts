@@ -20,6 +20,8 @@ import { previewStopRequestSchema, type PreviewStopRequest, type PreviewStopResu
 import { AUTONOMOUS_NUDGE, decideTurnEnd, stepScopedNudge, type TurnEndDecision, type TurnEndFacts, type TurnEndOutcome } from './turn-end.ts';
 import { createActiveRun, type ActiveRun } from './active-run.ts';
 import { releaseActiveResources } from './run/drop-active.ts';
+import { pendingConversationBatch, reservesAutomaticWake, formatAgentInput, agentInputOutcomeText } from './run/input-batch.ts';
+import { clearUnreadInputTimer, clearHeldHumanInputTimer, harnessOwesInput, harnessHoldsHumanInput, clearNoWaitNudgeReplyTimer, clearIdleTimer, clearAutosaveTimer } from './run/input-timers.ts';
 import { RUN_EXITS, transition, transitionVia, type RunExitId } from './run-states.ts';
 import { nextLineEntry } from './line-order.ts';
 import { accountHeldFor, formatWakeInstant, resumeInFlight, runAccountKey, queuedRecoveryInput, queuedStartAt, sessionlessWakePrompt } from './run-scheduling.ts';
@@ -3744,7 +3746,7 @@ export class RunManager {
     if (state) {
       this.clearIdleTimer(state);
       this.clearAutosaveTimer(state);
-      this.clearHeldHumanInputTimer(state);
+      clearHeldHumanInputTimer(state);
     }
     this.waiting.delete(runId);
     this.monitoring.delete(runId);
@@ -5207,7 +5209,7 @@ export class RunManager {
       this.queueWaitWake(runId);
       return;
     }
-    const bundle = state.atTurnBoundary === state.session ? this.pendingConversationBatch(runId, state, reply.id) : undefined;
+    const bundle = state.atTurnBoundary === state.session ? pendingConversationBatch(this.store.getRun(runId), state, input => formatAgentInput(input, id => this.store.getRun(id)), reply.id) : undefined;
     if (!state.session.sendMessage([{ type: 'text', text }, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : [])])) return;
     this.store.appendEvent(runId, { type: 'human-input-delivered', askSeq: routed.askSeq, source: 'parent' });
     this.commitRoutedAnswer(runId, state, [reply.id, ...(bundle?.inputs.map(input => input.id) ?? [])], fallback);
@@ -5638,7 +5640,7 @@ export class RunManager {
     const run = this.store.getRun(runId);
     return !!run && ['queued', 'running', 'waiting'].includes(run.status) &&
       !(run.delegation?.role === 'worker' && run.delegation.destroy) &&
-      (!!run.agentInputs?.some(input => !input.deliveredAt && !except.includes(input.id)) || this.harnessOwesInput(this.active.get(runId)));
+      (!!run.agentInputs?.some(input => !input.deliveredAt && !except.includes(input.id)) || harnessOwesInput(this.active.get(runId)));
   }
 
   /** Only the current session's observation writes consumedAt (#505). An ID reported
@@ -5649,7 +5651,7 @@ export class RunManager {
     for (const id of ids) if (inFlight.includes(id)) state.consumedBeforeAck?.add(id);
     const read = ids.filter(id => !inFlight.includes(id));
     for (const id of read) state.unreadInputIds?.delete(id);
-    if (!this.harnessOwesInput(state)) this.clearUnreadInputTimer(state);
+    if (!harnessOwesInput(state)) clearUnreadInputTimer(state);
     try {
       if (!read.length) return;
       // The read and the failure count it ends are one commit (hearsay-tools/cezarion#1805).
@@ -5693,18 +5695,6 @@ export class RunManager {
     const deliveredAt = new Date().toISOString();
     try { this.store.commitOutcome(runId, { kind: 'delivered', inputIds: [id], at: deliveredAt }); }
     catch (error) { console.warn(`[cez] opening input acceptance checkpoint failed: ${error instanceof Error ? error.message : String(error)}`); }
-  }
-
-  /** The conversation messages the next submission would carry, if nothing but
-   * conversation input leads the queue (lifecycle input stays a barrier). */
-  private pendingConversationBatch(runId: string, state: ActiveRun, answerId?: string): { inputs: AgentInput[]; text: string } | undefined {
-    const run = this.store.getRun(runId);
-    // The answer this batch rides on settles every human wait, so only a CI or timer wait holds it
-    // (hearsay-tools/cezarion#1234).
-    if (!run || run.waits?.some(wait => wait.kind !== 'human') || state.agentInputFlight) return undefined;
-    const batch = agentInputBatch((run.agentInputs ?? []).filter(input => input.id !== state.openingAgentInputId && input.id !== answerId),
-      input => this.formatAgentInput(input));
-    return batch?.inputs.every(input => input.conversation) ? batch : undefined;
   }
 
   /** Bundled messages and answer outcomes commit together. A refused write retries its
@@ -5756,8 +5746,8 @@ export class RunManager {
   /** #505: the session closed without reporting it read (failure, stop, exit): the input
    * goes back to the queue so a later session delivers it; never shown as delivered. */
   private requeueUnreadAtClose(runId: string, state: ActiveRun, session: AgentSession | undefined): void {
-    this.clearUnreadInputTimer(state);
-    this.clearHeldHumanInputTimer(state);
+    clearUnreadInputTimer(state);
+    clearHeldHumanInputTimer(state);
     // Everything this session accepted but never saw read: steered input, messages bundled
     // behind a human answer, and an opening instruction whose turn never succeeded.
     const opening = state.openingAgentInputId && this.store.getRun(runId)?.agentInputs?.some(input =>
@@ -5775,7 +5765,7 @@ export class RunManager {
    * turn ended and by the unread-input grace timer (#505). */
   private settleIdleBoundary(runId: string, state: ActiveRun, session: AgentSession): void {
     // An in-flight acknowledgement still owns this boundary; its .then re-settles.
-    if (this.harnessHoldsHumanInput(state) || state.agentInputFlight) return;
+    if (harnessHoldsHumanInput(state) || state.agentInputFlight) return;
     const proseGate = state.parkAfterAck?.session === session && state.parkAfterAck.humanGate;
     // A wake beside a pending question can be acknowledged after its turn ended, and its
     // checkpoint takes the run out of the question's park: park for the question again
@@ -5801,13 +5791,13 @@ export class RunManager {
    * another turn must not hold the run and its slot forever. After a quiet grace window the
    * input is resubmitted once; after a second it is left delivered but unconfirmed. */
   private armUnreadInputTimer(runId: string, state: ActiveRun): void {
-    this.clearUnreadInputTimer(state);
+    clearUnreadInputTimer(state);
     const session = state.session;
-    if (!session?.open || state.pendingHumanAsk || !this.harnessOwesInput(state) || state.agentInputFlight) return;
+    if (!session?.open || state.pendingHumanAsk || !harnessOwesInput(state) || state.agentInputFlight) return;
     const timer = setTimeout(() => {
       state.unreadInputTimer = undefined;
       if (this.disposed || this.active.get(runId) !== state || state.session !== session || !session.open || state.cancelled ||
-        state.pendingHumanAsk || state.agentInputFlight || !this.harnessOwesInput(state)) return;
+        state.pendingHumanAsk || state.agentInputFlight || !harnessOwesInput(state)) return;
       const ids = [...state.unreadInputIds!];
       const retried = ids.filter(id => state.unreadRetried?.has(id));
       const fresh = ids.filter(id => !state.unreadRetried?.has(id));
@@ -5822,7 +5812,7 @@ export class RunManager {
         this.retireUnreadInputs(runId, state, fresh, true);
       }
       // No content since the last turn ended: the harness is idle, whatever turn it announced.
-      if (!this.harnessOwesInput(state) && !state.agentInputFlight) {
+      if (!harnessOwesInput(state) && !state.agentInputFlight) {
         state.atTurnBoundary = session;
         if (state.parkAfterAck?.session !== session) state.parkAfterAck = { session, monitoring: false };
         this.settleIdleBoundary(runId, state, session);
@@ -5832,16 +5822,16 @@ export class RunManager {
     state.unreadInputTimer = timer;
   }
 
-  private clearUnreadInputTimer(state: ActiveRun): void {
-    if (state.unreadInputTimer) clearTimeout(state.unreadInputTimer);
-    state.unreadInputTimer = undefined;
-  }
+  // Keep both launch paths' session-event handlers unchanged until Phase 3's
+  // run/session-events.ts merges them (epic hearsay-tools/cezarion#2051).
+  private clearUnreadInputTimer(state: ActiveRun): void { clearUnreadInputTimer(state); }
+  private clearHeldHumanInputTimer(state: ActiveRun, resetClock = true): void { clearHeldHumanInputTimer(state, resetClock); }
 
   /** #486: a turn-end deferred close/park only because the harness still held a human follow-up. */
   private armHeldHumanInputTimer(runId: string, state: ActiveRun): void {
-    this.clearHeldHumanInputTimer(state, false);
+    clearHeldHumanInputTimer(state, false);
     const session = state.session;
-    if (!session?.open || !this.harnessHoldsHumanInput(state)) {
+    if (!session?.open || !harnessHoldsHumanInput(state)) {
       state.heldHumanInputSince = undefined;
       return;
     }
@@ -5850,7 +5840,7 @@ export class RunManager {
       state.heldHumanInputTimer = undefined;
       if (this.disposed || this.active.get(runId) !== state || state.session !== session || !session.open ||
         state.cancelled || state.idleClosed || state.atTurnBoundary !== session) return;
-      if (this.harnessHoldsHumanInput(state)) {
+      if (harnessHoldsHumanInput(state)) {
         // An in-flight ACK still owns this boundary; its .then re-settles.
         if (state.agentInputFlight) {
           this.armHeldHumanInputTimer(runId, state);
@@ -5877,25 +5867,6 @@ export class RunManager {
     state.heldHumanInputTimer = timer;
   }
 
-  private clearHeldHumanInputTimer(state: ActiveRun, resetClock = true): void {
-    if (state.heldHumanInputTimer) clearTimeout(state.heldHumanInputTimer);
-    state.heldHumanInputTimer = undefined;
-    if (resetClock) {
-      state.heldHumanInputSince = undefined;
-      state.heldHumanInputExpired = undefined;
-    }
-  }
-
-  /** #505: the harness accepted input this session has not reported reading yet. */
-  private harnessOwesInput(state: ActiveRun | undefined): boolean {
-    return !!state?.unreadInputIds?.size;
-  }
-
-  /** #486: a human follow-up is still queued in the live session and will still be delivered. */
-  private harnessHoldsHumanInput(state: ActiveRun): boolean {
-    return !state.heldHumanInputExpired && !!state.session?.open && state.session.holdsHumanInput();
-  }
-
   /** A callback from an old/replaced/disposed session carries no authority. */
   private handleAgentInputReady(runId: string, state: ActiveRun, session: AgentSession | undefined): void {
     if (!session || this.disposed || this.active.get(runId) !== state || state.session !== session ||
@@ -5906,8 +5877,8 @@ export class RunManager {
     // #486: held human input drained at this still-current boundary with no new turn.
     // Runners fire onAgentInputReady from the transport ACK finally/callback while
     // agentInputFlight is still set; settling here parks before the ACK .then can nudge.
-    const idle = state.atTurnBoundary === session && !this.harnessHoldsHumanInput(state) &&
-      !state.agentInputFlight && !this.harnessOwesInput(state);
+    const idle = state.atTurnBoundary === session && !harnessHoldsHumanInput(state) &&
+      !state.agentInputFlight && !harnessOwesInput(state);
     // The refused autonomous nudge retries at the boundary it waited at: the turn-end rule decides it
     // again (hearsay-tools/cezarion#1525).
     // It keeps tryAutonomousNudge's own guards: a run that may not continue on its own keeps the
@@ -5933,7 +5904,7 @@ export class RunManager {
     const flight: NonNullable<ActiveRun['agentInputFlight']> = { session, inputIds,
       ...(this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === session ? { admittedWake: true } : {}) };
     // A batch with timer results is an automatic wake: it reserves one unit of the budget now, so a timer that comes due before this acknowledgement counts it, and gives it back if the batch is refused or its acknowledgement rejects (hearsay-tools/cezarion#1233).
-    if (this.reservesAutomaticWake(runId, flight, inputIds, beforeHumanReset)) flight.wakeReserved = true;
+    if (reservesAutomaticWake(this.store.getRun(runId), flight, inputIds, () => this.automaticWakes(runId, beforeHumanReset), MAX_AUTO_CONTINUES)) flight.wakeReserved = true;
     state.agentInputFlight = flight;
     const settled = this.sendAgentInput(runId, state, flight, content, refusal);
     if (!settled) return false;
@@ -6008,17 +5979,6 @@ export class RunManager {
       try { fail(error, true); } finally { if (state.agentInputFlight === flight) state.agentInputFlight = undefined; }
     });
     return flight.settled;
-  }
-
-
-  /** A batch with timer results is an automatic wake, and so is an admitted wake turn a peer message
-   *  opens (spec 2026-10-27-task-communication-protocol § 8). Past the budget a peer message opens
-   *  no turn (`pendingConversationWakes`), so one carried by another wake is free. */
-  private reservesAutomaticWake(runId: string, flight: NonNullable<ActiveRun['agentInputFlight']>, inputIds: readonly string[], beforeHumanReset?: HumanAnswerBudget): boolean {
-    const run = this.store.getRun(runId);
-    if (resolvedWaits(run ?? {}).some(wait => chargesBudget(wait) && inputIds.includes(wait.id))) return true;
-    return !!flight.admittedWake && this.automaticWakes(runId, beforeHumanReset) < MAX_AUTO_CONTINUES &&
-      !!run?.agentInputs?.some(input => inputIds.includes(input.id) && chargesBudgetMessage(input));
   }
 
   /** Apply the acknowledgement's effects only after its outcome commit succeeds. */
@@ -6103,7 +6063,7 @@ export class RunManager {
       (!askPending || beside.has(input.id)) && (boundary || input.purpose !== 'completion-refusal'));
     const admitted = this.waitWakeAdmitted.has(runId) && state.atTurnBoundary === state.session;
     if (resolved.length && admitted) {
-      const batch = resolvedWaitInputBatch(run, resolved, queue, input => this.formatAgentInput(input), { tools: !state.toolless, workerStatus: this.workerStatus });
+      const batch = resolvedWaitInputBatch(run, resolved, queue, input => formatAgentInput(input, id => this.store.getRun(id)), { tools: !state.toolless, workerStatus: this.workerStatus });
       if (!batch) return false;
       return this.submitAgentInput(runId, state, [{ type: 'text', text: batch.text }], batch.inputIds, beforeHumanReset);
     }
@@ -6112,23 +6072,10 @@ export class RunManager {
     // An open or owed CI wait holds conversation input for its own admitted wake (#476); a message
     // is a wake of its own, so an admitted one goes beside it (hearsay-tools/cezarion#1235).
     if (!admitted && (hasPrWait(run) || (resolved.length && !queue.some(input => !input.deliveredAt)))) return false;
-    const batch = agentInputBatch(queue, input => this.formatAgentInput(input));
+    const batch = agentInputBatch(queue, input => formatAgentInput(input, id => this.store.getRun(id)));
     if (!batch) return false;
-    const text = batch.inputs.map(input => this.formatAgentInput(input)).join('\n\n');
+    const text = batch.inputs.map(input => formatAgentInput(input, id => this.store.getRun(id))).join('\n\n');
     return this.submitAgentInput(runId, state, [{ type: 'text', text }], batch.inputs.map(input => input.id), beforeHumanReset);
-  }
-
-  private formatAgentInput(input: AgentInput): string {
-    const attribution = input.conversation;
-    const text = attribution ? `Agent conversation ${JSON.stringify({ id: input.id, ...attribution })}\n${input.text}` : input.text;
-    return text + this.agentInputOutcomeText(input);
-  }
-
-  private agentInputOutcomeText(input: AgentInput): string {
-    const root = this.store.getRun(input.parentRunId);
-    const outcome = input.conversation && root?.delegation?.role === 'root' ? root.delegation.conversation?.outcomes.find(entry =>
-      entry.requestId === (input.conversation?.requestId ?? input.id)) : undefined;
-    return outcome ? `\nRequest outcome: ${outcome.status}. This delivery does not reopen the settled request.` : '';
   }
 
   /** Deliver anything `deferMessage` buffered, once the session is live. */
@@ -6177,7 +6124,7 @@ export class RunManager {
   /** Restore active lifecycle/accounting when either Cezar or the backend
    * resumes work in a parked session. */
   private resumeParkedRun(runId: string, state: ActiveRun, beforeHumanReset?: HumanAnswerBudget): void {
-    this.clearHeldHumanInputTimer(state);
+    clearHeldHumanInputTimer(state);
     state.autonomousNudgePending = undefined;
     state.atTurnBoundary = undefined;
     state.doneAtBoundary = undefined;
@@ -6249,7 +6196,7 @@ export class RunManager {
     const answeringAskSeq = userAuthored ? this.pendingHumanAskSeq(runId) : undefined;
     // An answer opening a turn carries held conversation messages after the answer.
     const bundle = userAuthored && answeringAskSeq !== undefined && state.atTurnBoundary === state.session
-      ? this.pendingConversationBatch(runId, state) : undefined;
+      ? pendingConversationBatch(this.store.getRun(runId), state, input => formatAgentInput(input, id => this.store.getRun(id))) : undefined;
     // Human input answers all human waits. Agent input gets its footer in submitAgentInput.
     const footer = userAuthored ? openWaitsFooter((this.store.getRun(runId)?.waits ?? []).filter(wait => wait.kind !== 'human'), { tools: !state.toolless }) : undefined;
     const deliverable = userAuthored ? [...attached, ...(bundle ? [{ type: 'text' as const, text: bundle.text }] : []),
@@ -6940,7 +6887,7 @@ export class RunManager {
     // as a human message, and its own reply outcome is not news to the worker.
     const parentAnswer = openingInput?.conversation?.kind === 'reply' && this.routedAsk(runId) !== undefined;
     let prompt = input.prompt;
-    if (openingInput && !parentAnswer) prompt += this.agentInputOutcomeText(openingInput);
+    if (openingInput && !parentAnswer) prompt += agentInputOutcomeText(openingInput, this.store.getRun(openingInput.parentRunId));
     const { openingImages, attachments } = this.continuationImages(runId, stepId, checkpoint, input);
     if (checkpoint?.origin !== 'lifecycle' && !parentAnswer) this.store.appendEvent(runId, {
       type: 'user-message',
@@ -8683,8 +8630,8 @@ export class RunManager {
     this.store.appendEvent(runId, { type: 'note', stepId: state.currentStepId,
       code: PROSE_HUMAN_GATE, message: 'waiting for a human response to the assistant’s request' });
     this.prepareHumanAsk(state);
-    this.clearUnreadInputTimer(state);
-    this.clearHeldHumanInputTimer(state);
+    clearUnreadInputTimer(state);
+    clearHeldHumanInputTimer(state);
   }
 
   /** The open human wait nobody has shown the user yet (hearsay-tools/cezarion#1234): one this
@@ -8824,7 +8771,7 @@ export class RunManager {
     this.noteNoWaitNudgeContent(runId, state, event);
     if (isRunnerActivity(event)) {
       if (state.autonomousNudgePending) { state.autonomousNudgePending = undefined; this.clearIdleTimer(state); }
-      this.clearHeldHumanInputTimer(state);
+      clearHeldHumanInputTimer(state);
       state.atTurnBoundary = undefined; state.doneAtBoundary = undefined; state.parkAfterAck = undefined;
     }
     if (event.type === 'permission.requested') {
@@ -8855,8 +8802,8 @@ export class RunManager {
     this.prepareHumanAsk(state);
     state.session?.discardQueuedMessages();
     this.clearIdleTimer(state);
-    this.clearUnreadInputTimer(state);
-    this.clearHeldHumanInputTimer(state);
+    clearUnreadInputTimer(state);
+    clearHeldHumanInputTimer(state);
     this.monitoring.delete(runId); // released below; its waits stay open
     this.waiting.add(runId);
     this.move(runId, 'park', { hasPendingPermission: true });
@@ -9452,7 +9399,7 @@ export class RunManager {
     return !!run && !this.disposed && !run.stopping && !state.cancelled && !state.finishRequested &&
       !state.agentInputError && !state.pendingHumanAsk && !this.hasPendingHumanAsk(runId) && !!state.session?.open &&
       !this.workerExecutionStopped(runId) && !this.executionBlockedByRootFinish(run) && !run.waits?.length &&
-      !state.agentInputFlight && !this.harnessOwesInput(state) && !this.hasQueuedAgentInputs(runId);
+      !state.agentInputFlight && !harnessOwesInput(state) && !this.hasQueuedAgentInputs(runId);
   }
 
   /**
@@ -9626,7 +9573,7 @@ export class RunManager {
   private settleHeldTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn): boolean {
     if (entry === 'turn-end') {
       this.recordDoneAtBoundary(state, true, turn.doneRequest);
-      this.clearHeldHumanInputTimer(state);
+      clearHeldHumanInputTimer(state);
       if (state.agentInputError) return false;
     }
     this.settledTurnOutcome(runId, entry, { kind: 'park', keepsSlot: this.monitoring.has(runId) });
@@ -9637,7 +9584,7 @@ export class RunManager {
    *  next one. False when the input checkpoint failed. */
   private settleAskNudgedTurn(runId: string, state: ActiveRun, entry: 'turn-end' | 'ack' | 'ready' | 'gate', turn: SettledTurn): boolean {
     this.recordDoneAtBoundary(state, false, turn.doneRequest);
-    this.clearHeldHumanInputTimer(state);
+    clearHeldHumanInputTimer(state);
     if (state.agentInputError) return false;
     this.settledTurnOutcome(runId, entry, { kind: 'nudge', cause: 'no-wait', autonomous: true });
     return true;
@@ -9707,16 +9654,16 @@ export class RunManager {
    *  #505: input the harness accepted but has not read yet runs as its next turn. An in-flight
    *  submission is settled by its acknowledgement (parkAfterAck), not here. */
   private takeOwedInput(runId: string, state: ActiveRun, turn: SettledTurn): boolean {
-    return this.flushAgentInputs(runId) || (!turn.humanGate && this.harnessOwesInput(state)) ||
-      !!state.agentInputFlight || this.harnessHoldsHumanInput(state);
+    return this.flushAgentInputs(runId) || (!turn.humanGate && harnessOwesInput(state)) ||
+      !!state.agentInputFlight || harnessHoldsHumanInput(state);
   }
 
   /** A turn end's own steps after the rule decided (`settleTurn`): the unread and held input timers,
    *  then the `CEZ:ASK` card. False when the input checkpoint failed. */
   private settleTurnEndInput(runId: string, state: ActiveRun, turn: SettledTurn, tried: boolean, decision: TurnEndDecision): boolean {
     if (tried) this.armUnreadInputTimer(runId, state);
-    if (tried && this.harnessHoldsHumanInput(state)) this.armHeldHumanInputTimer(runId, state);
-    else this.clearHeldHumanInputTimer(state);
+    if (tried && harnessHoldsHumanInput(state)) this.armHeldHumanInputTimer(runId, state);
+    else clearHeldHumanInputTimer(state);
     if (state.agentInputError) return false;
     // `CEZ:ASK` surfaces the structured question as an ask card (#473) before the rule parks on it.
     if (turn.ask && turn.sink && decision.kind !== 'closed' && decision.kind !== 'input' && !this.humanWaitShown(runId, turn.humanWait)) {
@@ -9984,7 +9931,7 @@ export class RunManager {
   private noteNoWaitNudgeContent(runId: string, state: ActiveRun, event: { type: string; item?: { parentItemId?: string } }): void {
     if (!this.isNoWaitNudgeReply(state, event)) return;
     state.noWaitNudgeSawContent = true;
-    this.clearNoWaitNudgeReplyTimer(state);
+    clearNoWaitNudgeReplyTimer(state);
     if (state.noWaitNudgeParked !== state.session || !this.waiting.has(runId)) return;
     if (state.pendingHumanAsk || this.hasPendingHumanAsk(runId)) return;
     this.resumeParkedRun(runId, state);
@@ -9995,7 +9942,7 @@ export class RunManager {
    *  session alive without a turn): at the bound Cezar opens the no-wait human wait and the run
    *  waits for the user. A reply that arrives after it runs, and the run stays on that question. */
   private armNoWaitNudgeReplyTimer(runId: string, state: ActiveRun): void {
-    this.clearNoWaitNudgeReplyTimer(state);
+    clearNoWaitNudgeReplyTimer(state);
     if (state.noWaitNudgeSawContent) return;
     const session = state.session;
     if (!session?.open) return;
@@ -10010,13 +9957,6 @@ export class RunManager {
     }, this.noWaitNudgeReplyMs);
     timer.unref?.();
     state.noWaitNudgeReplyTimer = timer;
-  }
-
-  private clearNoWaitNudgeReplyTimer(state: ActiveRun): void {
-    if (state.noWaitNudgeReplyTimer) {
-      clearTimeout(state.noWaitNudgeReplyTimer);
-      state.noWaitNudgeReplyTimer = undefined;
-    }
   }
 
   /** Every run status `run.ts` writes comes from the run state table (hearsay-tools/cezarion#1804). */
@@ -10042,11 +9982,7 @@ export class RunManager {
   }
 
   private clearIdleTimer(state: ActiveRun): void {
-    if (state.idleTimer) {
-      clearTimeout(state.idleTimer);
-      state.idleTimer = undefined;
-    }
-    this.clearNoWaitNudgeReplyTimer(state);
+    clearIdleTimer(state);
   }
 
 
@@ -10217,10 +10153,7 @@ export class RunManager {
   }
 
   private clearAutosaveTimer(state: ActiveRun): void {
-    if (state.autosaveTimer) {
-      clearInterval(state.autosaveTimer);
-      state.autosaveTimer = undefined;
-    }
+    clearAutosaveTimer(state);
   }
 
   /**
