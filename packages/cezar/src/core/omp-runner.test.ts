@@ -27,6 +27,7 @@ import type { AgentEvent, AgentRunSpec, AgentSession } from './agent-runner.js';
 import type { UiEvent } from './ui-events.js';
 import { sessionGroupOf } from './session-process.js';
 import { buildOmpArgs, OMP_BUILTIN_TOOL_NAMES, OMP_SPEC_SUPPORT, OmpRunner, ompTools } from './omp-runner.js';
+import { ompProviderErrorMessage } from './omp-ui-mapper.js';
 import { createRunner } from './runner-factory.js';
 import { allowedToolsForStep, DEFAULT_ALLOWED_TOOLS } from '../workflows/types.js';
 import { readPids } from '../pid-file.testkit.js';
@@ -454,8 +455,12 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     expect(events.filter(event => event.type === 'error')).toEqual([]);
   });
 
-  /** A mock whose first prompt runs `turn`, then settles; it answers every `set_` command. */
-  const writeTurnMock = (name: string, turn: string): string => {
+  /** A mock whose first prompt runs `turn`, then settles; `setAnswer` answers every `set_` command. */
+  const writeTurnMock = (
+    name: string,
+    turn: string,
+    setAnswer = "send({ id: command.id, type: 'response', command: command.type, success: true });",
+  ): string => {
     const bin = join(cwd, name);
     writeFileSync(bin, `#!/usr/bin/env node
 import readline from 'node:readline';
@@ -469,7 +474,7 @@ for await (const line of readline.createInterface({ input: process.stdin })) {
     prompts += 1;
     send({ id: command.id, type: 'response', command: 'prompt', success: true });
 ${turn}
-  } else if (command.type.startsWith('set_')) send({ id: command.id, type: 'response', command: command.type, success: true });
+  } else if (command.type.startsWith('set_')) ${setAnswer}
 }
 `, { mode: 0o755 });
     return bin;
@@ -533,6 +538,79 @@ ${settleTurn(stopReason)}
     await expect(acknowledged).resolves.toBeUndefined();
     expect(consumed).toEqual(expected);
     expect(turnEnds(events)).toBe(1);
+  });
+
+  it('notes each refused set_ command, and reports any other failed command as an error', async () => {
+    const bin = writeTurnMock(
+      'mock-omp-refusals.mjs',
+      `    send({ type: 'agent_start' });
+    send({ type: 'response', command: 'compact', success: false, error: 'compact refused' });
+${settleTurn()}`,
+      "send({ id: command.id, type: 'response', command: command.type, success: false, error: 'not supported' });",
+    );
+    const { events } = await runSession(spec('refusals'), undefined, bin);
+    expect(events.filter(event => event.type === 'note' && event.message.endsWith('failed: not supported')).map(event => event.type === 'note' && event.message)).toEqual([
+      'omp: set_steering_mode failed: not supported',
+      'omp: set_subagent_subscription failed: not supported',
+      'omp: set_event_filter failed: not supported',
+    ]);
+    expect(events.filter(event => event.type === 'error')).toEqual([{ type: 'error', message: 'compact refused' }]);
+    expect(turnEnds(events)).toBe(1);
+  });
+
+  it('skips a non-object line, and notes extension errors and notices with their fallbacks', async () => {
+    const bin = writeTurnMock('mock-omp-notes.mjs', `    send({ type: 'agent_start' });
+    process.stdout.write('[1,2]\\n');
+    send({ type: 'extension_error', error: 'extension exploded' });
+    send({ type: 'extension_error', message: 'from the message field' });
+    send({ type: 'extension_error' });
+    send({ type: 'notice', message: 'heads up' });
+    send({ type: 'notice' });
+${settleTurn()}`);
+    const { events } = await runSession(spec('notes'), undefined, bin);
+    const notes = events.filter(event => event.type === 'note').map(event => event.type === 'note' && event.message);
+    expect(notes).toEqual(expect.arrayContaining(['extension exploded', 'from the message field', 'omp extension error', 'omp: heads up']));
+    expect(notes.filter(note => typeof note === 'string' && note.startsWith('omp: ') && !note.includes('failed'))).toEqual(['omp: heads up']);
+    expect(events.filter(event => event.type === 'error')).toEqual([]);
+    expect(turnEnds(events)).toBe(1);
+  });
+
+  it('a local prompt failure whose error is not an object still ends the turn with one v1 error', async () => {
+    const bin = writeTurnMock('mock-omp-local-error.mjs', `    send({ type: 'prompt_result', id: command.id, agentInvoked: false, status: 'error', error: 'plain text', sessionSettled: true });`);
+    const { events } = await runSession(spec('local error'), undefined, bin);
+    expect(events.filter(event => event.type === 'error')).toEqual([
+      { type: 'error', message: ompProviderErrorMessage({ provider: undefined, model: undefined, errorMessage: undefined }) },
+    ]);
+    expect(turnEnds(events)).toBe(1);
+  });
+
+  it('skips a tool result without an id, and reads a non-object result as empty text', async () => {
+    const bin = writeTurnMock('mock-omp-tool-results.mjs', `    send({ type: 'agent_start' });
+    send({ type: 'tool_execution_end', isError: false, result: { content: [{ type: 'text', text: 'orphan' }] } });
+    send({ type: 'tool_execution_end', toolCallId: 'call-2', isError: true, result: 'not a record' });
+${settleTurn()}`);
+    const { events } = await runSession(spec('tool results'), undefined, bin);
+    expect(events.filter(event => event.type === 'tool-result' || event.type === 'image')).toEqual([
+      { type: 'tool-result', toolCallId: 'call-2', result: '', isError: true },
+    ]);
+  });
+
+  it('a human steer read while its turn is open is no longer held when the turn ends', async () => {
+    // The steer's ack marks it read; its user message_start in the open turn drops it.
+    const bin = writeTurnMock('mock-omp-human-steer.mjs', `    if (prompts === 1) {
+      send({ type: 'agent_start' });
+      send({ type: 'tool_execution_start', toolCallId: 'call-1', toolName: 'read', args: {} });
+    } else {
+      send({ type: 'message_start', message: { role: 'user', content: command.message } });
+${settleTurn()}
+    }`);
+    let heldAtTurnEnd: number | undefined;
+    const { events } = await runSession(spec('steer'), (event, session) => {
+      if (event.type === 'tool-call') session.sendMessage([{ type: 'text', text: 'human steer' }]);
+      if (event.type === 'turn-end') heldAtTurnEnd = session.heldHumanInputCount?.();
+    }, bin);
+    expect(turnEnds(events)).toBe(1);
+    expect(heldAtTurnEnd).toBe(0);
   });
 
   it.each(['mock:local-command', 'mock:local-result'])('agentInvoked false ends the turn without session_settled (%s)', async (prompt) => {
