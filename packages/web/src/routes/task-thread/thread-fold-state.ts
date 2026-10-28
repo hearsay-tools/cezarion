@@ -193,6 +193,8 @@ export interface ConversationUpsert {
   recipientRunId: string
   kind: ConversationMessage['kind']
   requestId?: string | undefined
+  /** `peer` for a message between two root tasks; absent reads as `family`. */
+  relationship?: ConversationMessage['relationship'] | undefined
   state?: ConversationMessage['state'] | undefined
   createdAt?: string
   requestHash?: string
@@ -208,7 +210,7 @@ export interface ConversationTiming {
 }
 
 /** The optional envelope fields a later projection may fill in; absent ones never erase. */
-const OPTIONAL_MESSAGE_FIELDS = ['instruction', 'resumed', 'requestId', 'state', 'createdAt', 'requestHash', 'deadline'] as const
+const OPTIONAL_MESSAGE_FIELDS = ['instruction', 'resumed', 'requestId', 'relationship', 'state', 'createdAt', 'requestHash', 'deadline'] as const
 
 type OptionalMessageFields = Partial<Pick<ConversationUpsert, (typeof OPTIONAL_MESSAGE_FIELDS)[number]>>
 

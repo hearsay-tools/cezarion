@@ -47,6 +47,12 @@ export function openQuestions(state: ConversationState): ConversationMessage[] {
   return state.messages.filter(message => message.question && !state.outcomes.some(outcome => outcome.requestId === message.id));
 }
 
+/** Ledger room the open requests hold for their replies: every accepted request with no outcome,
+ *  a worker's question among them (hearsay-tools/cezarion#1990 review). A reply spends its own. */
+export function reservedReplies(state: ConversationState): number {
+  return state.messages.filter(message => message.kind === 'request' && message.state === 'accepted' && !state.outcomes.some(outcome => outcome.requestId === message.id)).length;
+}
+
 /** A UUID-shaped (version 4 layout) identifier derived from a stable key. */
 export function uuidFrom(key: string): string {
   const hex = createHash('sha256').update(key).digest('hex');

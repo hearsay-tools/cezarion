@@ -215,7 +215,7 @@ with the teardown grace as an upper bound. An unresponsive ACK is aborted and
 remains undelivered; explicit end/interrupt still abort immediately.
 Human `sendMessage` keeps its existing synchronous semantics. The `agent-input` event
 carries `{input: {id, source: 'agent'|'lifecycle', parentRunId, text, createdAt,
-deliveredAt?, conversation?: {senderRunId, recipientRunId, kind, requestId?}}}`; it is not a `user-message`, does not resolve an ask card, and
+deliveredAt?, conversation?: {senderRunId, recipientRunId, kind, requestId?, relationship?}}}`; it is not a `user-message`, does not resolve an ask card, and
 never expands registry slash skills. The queue cap is 32 **undelivered** inputs, including the in-flight reservation.
 The manager batches pending conversations in FIFO order into one submission, up to
 32 messages and 100,000 formatted characters, as soon as the runner admits input. An individually
@@ -257,12 +257,51 @@ updates delivery display without creating a second conversation row. Replayed
 projections never enqueue input or resolve a human ask. Attribution carries actual
 sender and recipient IDs; the legacy `parentRunId` remains the ownership root.
 
+Two root tasks of one project talk the same way (hearsay-tools/cezarion#1990, spec
+`2026-10-27-task-communication-protocol` § 2). The relationship resolver in
+`delegation/service.ts` admits a `family` pair (a root and its direct owned worker, checked as
+before) or a `peer` pair: two root tasks in the caller's project, with different IDs, and no
+history deletion pending on either family. A top-level run with no delegation record counts as
+a root task; the first message it accepts writes its root record. Everything else is
+`denied_scope` with one text. A new `request` or `progress` message lands in its sender's
+family ledger, and a `follow-up` or `reply` in the ledger that holds its request, so a peer
+request and its reply stay in the requester's ledger and a two-way exchange can use two. Peer
+messages and their inputs carry `relationship: 'peer'`; family records leave the field out and
+read as `family`. `AgentInput.parentRunId` holds the ledger owner. A new message ID must be
+unused in its ledger, in the recipient's inputs and in either run's projections:
+`RunStore.commitConversation` checks this in the write that stores the message, so of two peers
+that send one ID to one recipient only the first is accepted, and the second gets
+`invalid_input` and writes nothing. A peer cannot `--resume` a run, never receives a routed
+question, and cannot reply to one. A send to a peer at `review`, `done`, `failed`, `cancelled`
+or stopping returns `continuation-required` with "Only its human can continue it.". An open
+request to a peer settles `completed-without-reply` as soon as the peer rests at `review`, and
+the new outcome `deleted` when the peer's record is deleted. History, request waits and
+cancellation need only the caller's own records, so a deleted peer does not block them, and an
+inbox batch is checked against the caller's own record: a sender deleted before or after the
+reserve leaves the batch whole. History of a peer pair merges both ledgers in `(createdAt, id)`
+order and returns the newest 1,024 messages. Every open request holds ledger room for its reply, and each open peer request also holds one of its sender's 32 inbox slots: a new peer request needs a free slot, and its reply always fits; `nextBefore` names the oldest one returned, and
+`before` reads the page before it. A peer message that opens a wake turn spends one unit of the
+automatic-wake budget; one taken mid-turn, as steering, spends none, and family messages never
+do. Past the budget a peer message stays queued and wakes nothing, and the parked run opens
+Cezar's `budget` human wait. Rows **U19p** (peer attribution beside a pending question) and
+**U19q** (the wake budget) in `workflows/waits-parity-cells.testkit.ts` run on every
+`RUNNER_IDS` native wire; `delegation/peer-conversations.test.ts` pins the service rules.
+The cockpit thread renders a peer message as a green card with a "Peer" chip, never as a user
+message, so it stays apart from the yellow human message and the blue and purple worker cards,
+including beside an open question. The card names the peer by title and links its thread. It
+reads the peer from the server when the run list does not carry it, and a deleted or unreadable
+peer shows "Deleted task" or "Task unavailable" with no link. The `deleted` outcome reads
+"Recipient deleted" on the request card. A peer request is never batched with a worker request.
+An older cockpit shows a peer message as a worker card with its raw outcome. Older cezar
+versions reject peer inputs, peer messages and `deleted` outcomes because their strict schemas
+do not know the added fields and outcome (hearsay-tools/cezarion#1993).
+
 Kinds are `request`, `progress`, `follow-up`, and `reply`. A request's message ID is
 its obligation ID; follow-ups and replies name `requestId`. Exact message retries
 reuse the existing durable input; changed payloads are rejected. Follow-ups and
 progress cannot discharge obligations. Explicit reply and completed-without-reply
-are distinct outcomes, alongside failed, cancelled, destroyed, timed-out, and
-sender-closed. A first reply after deadline expiry amends `timed-out` to
+are distinct outcomes, alongside failed, cancelled, destroyed, timed-out,
+sender-closed, and (for a peer) deleted. A first reply after deadline expiry amends `timed-out` to
 `replied-late`, retaining its reply ID and observation time. Other settlements
 remain unchanged. The amendment emits a separate idempotent outcome projection;
 it never reopens a settled wait or request.
@@ -1014,7 +1053,8 @@ delivery once per second without human input; cancellation, terminal state and
 disposal stop retries. A result that lands mid-turn waits for the boundary. An automatic
 batch that carries a timer result reserves one wake of the automatic-wake budget when it
 is submitted, however many timers it carries; a refused submission or a rejected
-acknowledgement gives it back, and the acknowledgement keeps it. A CI result spends none,
+acknowledgement gives it back, and the acknowledgement keeps it. A peer message that opens an
+admitted wake turn reserves and spends one unit the same way (hearsay-tools/cezarion#1990). A CI result spends none,
 and a human message resets the budget. The count, reservations included, is checked when
 a timer comes due and before a batch with timer results is sent: at the budget, those
 timers are cancelled with a cap note and wake nothing, and CI results beside them are

@@ -17,8 +17,8 @@ import {
   ToolCard,
   ToolStreak,
   UserBubble,
-  WorkerConversationGroup,
 } from './thread-items'
+import { WorkerConversationGroup } from './conversation-card'
 import { ThreadCardCache } from './thread-open-cards'
 import { threadRenderMode } from './thread-scroll'
 import { DaySeparator, TurnTime, localDayKey } from './thread-time'

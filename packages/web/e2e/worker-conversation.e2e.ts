@@ -69,7 +69,7 @@ beforeAll(async () => {
     { ...projection(reqA), deliveredAt: '2026-09-20T12:04:00Z' },
     { type: 'conversation-message', delivery: 'queued', message: { ...reqB, kind: 'progress', text: 'Latest worker update' } },
     { type: 'conversation-message', delivery: 'not-delivered', message: { ...follow, kind: 'progress', requestId: undefined,
-      text: 'Correct the returned result', state: 'continuation-required', instruction: `Not delivered: worker is done. To resume it with a new instruction, run worker send ${alpha} "<instruction>" --kind request --resume --id <new-message-UUID>; use a new message ID.` } },
+      text: 'Correct the returned result', state: 'continuation-required', instruction: `Not delivered: worker is done. To resume it with a new instruction, run worker resume ${alpha} "<instruction>" --id <new-message-UUID>.` } },
   ]
   seedTranscript(join(root, '.ai/cezar/runs', `${diagnostics}.ndjson`), diagnosticEvents.map((event, n) =>
     JSON.stringify({ seq: n + 1, ts: '2026-09-20T12:05:00Z', ...event }).replaceAll(parent, diagnostics)).join('\n') + '\n')
@@ -157,7 +157,7 @@ describe('chronological worker conversation', () => {
       applyContrastQaVariant(browser, variant)
       const explanations = browser.waitForValue<string[]>(`[...document.querySelectorAll('[data-slot="conversation-delivery-explanation"]')].map(el => el.textContent)`, value => value.length === 2)
       expect(explanations.some(text => text.includes('Queued for delivery') && text.includes('during its current turn'))).toBe(true)
-      expect(explanations.some(text => text.includes('Not delivered: worker is done') && text.includes('--resume'))).toBe(true)
+      expect(explanations.some(text => text.includes('Not delivered: worker is done') && text.includes('worker resume'))).toBe(true)
       const rejected = browser.waitForValue<string>(`[...document.querySelectorAll('${card}')].find(el => el.textContent.includes('Correct the returned result'))?.textContent`)
       expect(rejected).toContain('Not delivered')
       // #548 verification reproduction: `npm run test:e2e -- worker-conversation.e2e.ts
