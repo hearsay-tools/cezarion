@@ -866,6 +866,8 @@ export type AutomationToolService = {
   scheduledTasks(request: ScheduledTasksRequest): Promise<ScheduledTasksAnswer>;
 };
 
+/** Only the synchronous delivery of a human answer uses the budget its reset replaced. */
+type HumanAnswerBudget = { spent: number };
 /**
  * The mini workflow engine: executes a `WorkflowDef` against a repo, one step
  * at a time, persisting every event to the RunStore (which the SSE endpoints
@@ -880,9 +882,6 @@ export type AutomationToolService = {
  * subject, so the always-on flushes are not mistaken for the opt-in timer.
  * The user's working tree is never touched.
  */
-/** Only the synchronous delivery of a human answer uses the budget its reset replaced. */
-type HumanAnswerBudget = { spent: number };
-
 export class RunManager {
   private readonly active = new Map<string, ActiveRun>();
   // Queue + `starting` set (spec 006, janitor's pump() pattern): `starting`
