@@ -251,6 +251,14 @@ async function ignoreRefusal(runner: RunnerId, id: string, refusal: string, park
   return workerWaits(id)[0]!;
 }
 
+/** Seed an accepted peer obligation without an unread input: the native turn tests the gate. */
+function seedCompletionRequest(senderRunId: string, recipientRunId: string) {
+  const request = { id: randomUUID(), senderRunId, recipientRunId, kind: 'request' as const, relationship: 'peer' as const,
+    text: 'Please check the result', createdAt: new Date().toISOString(), deadline: new Date(Date.now() + 600_000).toISOString(), requestHash: 'a'.repeat(64), state: 'accepted' as const };
+  store.commitConversation(senderRunId, { messages: [request], outcomes: [] });
+  return request;
+}
+
 const nudgeNotes = (id: string) => store.readEvents(id).filter(event => event.type === 'note' && String(event.message).startsWith(COMPLETION_NUDGE_NOTE));
 const noReplyNotes = (id: string) => store.readEvents(id).filter(event => event.type === 'note' && event.message === COMPLETION_NO_REPLY_NOTE);
 
@@ -321,7 +329,7 @@ export function describeWaitParity(scope: { runner: RunnerId; part: WaitParityPa
       });
 
       it('registers every criterion', () => {
-        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U7q', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U19p', 'U19q', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27']);
+        expect(WAIT_CRITERIA.map(row => row.id)).toEqual(['U1', 'U4', 'U9', 'U2', 'U3', 'U7', 'U7m', 'U7f', 'U8', 'U8l', 'U8h', 'U10', 'U11', 'U12', 'U13', 'U14', 'U16', 'U16b', 'U9c', 'U7h', 'U7k', 'U9h', 'U6', 'U7d', 'U7q', 'U6s', 'U5', 'U5a', 'U5c', 'U5d', 'U18', 'U17', 'U15', 'U2w', 'U2t', 'U2c', 'U3w', 'U3n', 'U3r', 'U3d', 'U7w', 'U9w', 'U14m', 'U9u', 'U9v', 'U19', 'U19p', 'U19q', 'U20', 'U20u', 'U20h', 'U20m', 'U20a', 'U21', 'U21r', 'U21m', 'U21t', 'U21h', 'U21a', 'U22', 'U22s', 'U22c', 'U22f', 'U22k', 'U22r', 'U22x', 'U24', 'U24r', 'U26', 'U25', 'U1p', 'U2p', 'U4p', 'U9p', 'U9pr', 'U27', 'R13', 'R18', 'R17']);
         for (const runner of RUNNER_IDS) for (const row of WAIT_CRITERIA) expect(HARNESS_ADAPTERS[runner].scenarios[row.scenario]).toBeDefined();
       });
 
@@ -2192,6 +2200,94 @@ function workersCells(runners: RunnerId[]): void {
         release();
         await until(() => delivered(p.id, id) && nudgeNotes(p.id).length === 1 && prompted(runner, refusal).length === 1);
       });
+    });
+
+    it(`${runner} R18 Finish followed by a provider error retires its intent before restart`, async () => {
+      const peer = await parentOn(runner);
+      const wire = gatedProviderFailure(root, runner);
+      const run = manager.startRun(QUICK_TASK_WORKFLOW, { runner, task: HARNESS_ADAPTERS[runner].scenarios['provider-error']! });
+      store.commitDelegation([{ id: run.id, delegation: { role: 'root', permissions: ['wait'], receipts: [] } }]);
+      await until(wire.held);
+      const request = seedCompletionRequest(run.id, peer.id);
+      // Hold graceful shutdown until the queued native provider error wins.
+      const close = vi.spyOn(engine().active.get(run.id)!.session, 'end').mockImplementationOnce(() => {});
+      expect(manager.finish(run.id)).toBe(true);
+      close.mockRestore();
+      wire.release();
+      await until(() => store.getRun(run.id)?.status === RUN_STATUS.failed && !manager.isActive(run.id));
+      expect(store.getRun(run.id)?.delegation).not.toHaveProperty('finishRequestedAt');
+      const delegation = store.getRun(run.id)?.delegation;
+      expect(delegation?.role === 'root' && delegation.conversation?.outcomes).toEqual([
+        expect.objectContaining({ requestId: request.id, status: 'sender-closed' }),
+      ]);
+      await restart();
+      expect(store.getRun(run.id)?.status).toBe(RUN_STATUS.failed);
+      expect(store.getRun(run.id)?.delegation).not.toHaveProperty('finishRequestedAt');
+      expect(manager.continueRun(run.id, { text: 'Try again.' })).toEqual({ ok: true });
+      await until(() => store.getRun(run.id)?.status === RUN_STATUS.waiting);
+    });
+
+    it(`${runner} R13 repeated cezar_done tool refusals park on sent requests`, async () => {
+      const p = await parentOn(runner); const peer = await parentOn(runner);
+      const request = seedCompletionRequest(p.id, peer.id);
+      const answers = vi.spyOn(manager, 'acceptDone');
+      expect(manager.sendMessage(p.id, [{ type: 'text', text: `${toolCall('cezar_done', {})} ${toolCall('cezar_done', {})}` }])).toBe(true);
+      await until(() => workerWaits(p.id)[0]?.phase === 'open' && store.getRun(p.id)?.status === 'waiting');
+      expect(workerWaits(p.id)[0]).toMatchObject({ source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, requestIds: [request.id] });
+      expect(answers.mock.results.map(result => result.value)).toEqual([
+        expect.objectContaining({ ok: false, code: 'requests_outstanding', message: expect.stringContaining(request.id) }),
+        expect.objectContaining({ ok: false, code: 'requests_outstanding' }),
+      ]);
+    });
+
+    it(`${runner} R17 a second cezar_done tool call passes after the incoming refusal`, async () => {
+      const p = await parentOn(runner); const peer = await parentOn(runner);
+      const request = seedCompletionRequest(peer.id, p.id);
+      const answers = vi.spyOn(manager, 'acceptDone');
+      expect(manager.sendMessage(p.id, [{ type: 'text', text: `${toolCall('cezar_done', {})} ${toolCall('cezar_done', {})}` }])).toBe(true);
+      await until(() => store.getRun(p.id)?.status === 'done' && !manager.isActive(p.id));
+      expect(answers.mock.results.map(result => result.value)).toEqual([
+        expect.objectContaining({ ok: false, code: 'requests_unanswered', message: expect.stringContaining(request.id) }),
+        expect.objectContaining({ ok: true, finishes: 'at_turn_end' }),
+      ]);
+    });
+
+    it(`${runner} R13 open sent requests refuse done, park without a wait deadline, and a reply wakes the root`, async () => {
+      process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Still done.\nCEZ:DONE']);
+      const p = await parentOn(runner);
+      const peer = await parentOn(runner);
+      const request = seedCompletionRequest(p.id, peer.id);
+      const entry = await ignoreRefusal(runner, p.id, 'Requests are still open:', () => workerWaits(p.id)[0]?.phase === 'open');
+      expect(prompted(runner, request.id)).not.toHaveLength(0);
+      expect(prompted(runner, 'cez message wait --request')).not.toHaveLength(0);
+      expect(prompted(runner, 'cez message cancel-request')).not.toHaveLength(0);
+      expect(entry).toMatchObject({ source: WAIT_SOURCE.cezar, via: WAIT_VIA.completion, requestIds: [request.id], phase: WAIT_PHASE.open });
+      expect(entry).not.toHaveProperty('deadline');
+      expect(entry).not.toHaveProperty('timeoutSeconds');
+      const current = store.getRun(p.id)!.delegation;
+      if (current?.role !== 'root') throw Error('missing ledger');
+      store.commitConversation(p.id, { ...current.conversation!, outcomes: [{ requestId: request.id, status: 'replied', observedAt: new Date().toISOString() }] });
+      manager.reconcileWorkerWaits(p.id);
+      await until(() => settled(p.id, entry.id)?.phase === 'delivered');
+      await until(() => store.getRun(p.id)?.status === 'waiting');
+      expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt(runner, ['Done.\nCEZ:DONE']) }])).toBe(true);
+      await until(() => store.getRun(p.id)?.status === 'done');
+    });
+
+    it(`${runner} R17 incoming requests refuse once then complete and settle the requester obligation`, async () => {
+      process.env.CEZ_MOCK_COMPLETION_REPLY = messagesPrompt(runner, ['Finish without replying.\nCEZ:DONE']);
+      const p = await parentOn(runner);
+      const peer = await parentOn(runner);
+      const request = seedCompletionRequest(peer.id, p.id);
+      expect(manager.sendMessage(p.id, [{ type: 'text', text: messagesPrompt(runner, ['Done.\nCEZ:DONE']) }])).toBe(true);
+      await until(() => prompted(runner, 'Requests are unanswered:').length === 1);
+      expect(prompted(runner, `${request.id} from ${peer.id}`)).toHaveLength(1);
+      await until(() => store.getRun(p.id)?.status === 'done' && !manager.isActive(p.id));
+      await until(() => {
+        const root = store.getRun(peer.id)?.delegation;
+        return root?.role === 'root' && !!root.conversation?.outcomes.some(outcome => outcome.requestId === request.id && outcome.status === 'completed-without-reply');
+      });
+      expect(nudgeNotes(p.id)).toHaveLength(1);
     });
 
     // hearsay-tools/cezarion#1301: the turn that answers the refusal nudge ends on done again.
