@@ -1,7 +1,8 @@
+import { sendRequestContext, sendAdmission, sendMessage, sendInput, type ConversationPair } from './conversation-send.ts';
 import { discoverTasks } from './task-discovery.ts';
 import { discoveredRunners, missingModelChoices, type HostDiscovery } from '../discovery/catalog.ts';
-import { assertConversationCapacity, assertFamilySender, byCreatedAtAndId, commitAccepted, familyPair, inboxEntryIn, isRootTask, notDeliveredInstruction,
-  finishing, orphanedPeerMessage, peerPair, takesPart, projectConversationEvents, reconcileConversationState, replyOutcomes, type InboxEntry } from './conversations.ts';
+import { assertConversationCapacity, assertFamilySender, byCreatedAtAndId, commitAccepted, familyPair, inboxEntryIn, isRootTask,
+  orphanedPeerMessage, peerPair, takesPart, projectConversationEvents, reconcileConversationState, replyOutcomes, type InboxEntry } from './conversations.ts';
 export { rootDelegation } from './conversations.ts';
 import { collectWorkerEvidence, revalidateRetainedWorkerResult, workerRevision } from './results.ts';
 import { join } from 'node:path';
@@ -17,7 +18,6 @@ import {
   CONVERSATION_PAGE_MESSAGES,
   decodeConversationCursor,
   encodeConversationCursor,
-  MAX_CONVERSATION_REQUEST_SECONDS,
   conversationSendRequestSchema,
   conversationInspectRequestSchema,
   conversationCancelRequestSchema,
@@ -143,9 +143,6 @@ function stepIdentityFields({ settings, grants }: ResolvedSpawnStep) {
   return { account: settings.accountBinding, grants, ...(settings.model === undefined ? {} : { model: settings.model }), ...(settings.effort === undefined ? {} : { effort: settings.effort }) };
 }
 export const delegationEnabled = () => process.env.CEZ_DELEGATION === '1';
-
-type ConversationPair = { project: DelegationProject; sender: RunRecord; recipient: RunRecord } &
-  ({ relationship: 'peer' } | { relationship: 'family'; root: RunRecord; worker: RunRecord });
 
 /** A single controller's shared policy adapter; managers retain scheduling and lifecycle ownership. */
 export class DelegationService {
@@ -376,10 +373,10 @@ export class DelegationService {
     const state = this.currentConversation(project, root);
     const existing = state.messages.find(message => message.id === request.id);
     if (existing) return this.retrySend(pair, root, existing, requestHash);
-    const { original, settled } = this.sendRequestContext(state, request, sender, recipient);
+    const { original, settled } = sendRequestContext(state, request, sender, recipient);
     const now = new Date().toISOString();
-    const { destroyed, resumable, resume, instruction } = this.sendAdmission(pair, root, request);
-    const message = this.sendMessage(pair, request, requestHash, now, settled, { destroyed, resumable, resume, instruction });
+    const { destroyed, resumable, resume, instruction } = sendAdmission(pair, root, request);
+    const message = sendMessage(pair, request, requestHash, now, settled, { destroyed, resumable, resume, instruction });
     const enqueue = !destroyed && (!resumable || resume);
     // Open worker questions reserve ledger room for their replies (hearsay-tools/cezarion#505); the reply spends its
     // own. The reply is also always admitted to the worker's inbox, one past its soft 32-input
@@ -391,7 +388,7 @@ export class DelegationService {
     if (answering && !enqueue) throw new DelegationPolicyError('incompatible_state', 'The worker can no longer receive this answer; its question goes back to the human');
     assertConversationCapacity(state, pair, request.kind, enqueue, request.kind === 'reply' && !settled, answering);
     const outcomes = replyOutcomes(state, request, settled, now);
-    const input = this.sendInput(pair, root, message, requestHash, now);
+    const input = sendInput(pair, root, message, requestHash, now);
     const next = { messages: [...state.messages, message], outcomes };
     this.commitSend(pair, root, next, input, resume, enqueue);
     projectConversationEvents(project.store, project.store.getRun(root.id)!);
@@ -414,61 +411,6 @@ export class DelegationService {
     project.manager.reconcileWorkerWaits();
     if (recipient.agentInputs?.some(input => input.id === existing.id && !input.deliveredAt)) project.manager.deliverConversationInput(recipient.id);
     return this.conversationReceipt(project, root.id, existing);
-  }
-  private sendRequestContext(state: ConversationState, request: ConversationSendRequest, sender: RunRecord, recipient: RunRecord) {
-    const original = request.requestId ? state.messages.find(message => message.id === request.requestId && message.kind === 'request' && message.state === 'accepted') : undefined;
-    if (request.requestId && (!original || (request.kind === 'reply'
-      ? original.recipientRunId !== sender.id || original.senderRunId !== recipient.id
-      : original.senderRunId !== sender.id || original.recipientRunId !== recipient.id))) throw new DelegationPolicyError('denied_scope', 'Worker scope denied');
-    const settled = state.outcomes.find(outcome => outcome.requestId === request.requestId);
-    // A worker's question has exactly one answer (hearsay-tools/cezarion#505): a second reply is refused, not recorded late.
-    if (request.kind === 'reply' && settled && original?.question) throw new DelegationPolicyError('incompatible_state', 'This question was already answered');
-    return { original, settled };
-  }
-  private sendAdmission(pair: ConversationPair, root: RunRecord, request: ConversationSendRequest) {
-    const { recipient, relationship } = pair;
-    const peer = relationship === 'peer';
-    const destroyed = recipient.delegation?.role === 'worker' && recipient.delegation.destroy?.phase === 'complete';
-    // A peer whose Finish is pending takes nothing more: Finish would settle it unread (spec § 5).
-    const resumable = !['queued', 'running', 'waiting'].includes(recipient.status) || !!recipient.stopping || (recipient.delegation?.role === 'worker' && !!recipient.delegation.destroy) || (peer && finishing(recipient));
-    const resume = !!request.resume && resumable;
-    // The extended bound belongs to a new continuation, not merely the flag.
-    // Exact retries have already returned above, even if that continuation is now active.
-    if (request.timeoutSeconds > MAX_CONVERSATION_REQUEST_SECONDS && !resume) {
-      throw new DelegationPolicyError('incompatible_state', 'Extended request deadlines require resuming a settled worker; active workers accept at most 1800 seconds');
-    }
-    this.assertSendResume(recipient, resume, destroyed);
-    const instruction = destroyed ? 'Not delivered: this worker was destroyed. Spawn a new worker for further work.'
-      : resumable && !resume ? notDeliveredInstruction(pair, root) : undefined;
-    return { destroyed, resumable, resume, instruction };
-  }
-  private assertSendResume(recipient: RunRecord, resume: boolean, destroyed: boolean): void {
-    if (resume && (destroyed || recipient.delegation?.role !== 'worker' || recipient.delegation.destroy ||
-      recipient.status === 'cancelled' || recipient.stopping)) throw new DelegationPolicyError('incompatible_state',
-        `Worker is ${destroyed ? 'destroyed' : 'stopped or being destroyed'}; --resume cannot restart it. Spawn a new worker with the follow-up instruction`);
-  }
-  private sendMessage(pair: ConversationPair, request: ConversationSendRequest, requestHash: string, now: string,
-    settled: RequestOutcome | undefined, admission: { destroyed: boolean; resumable: boolean; resume: boolean; instruction: string | undefined }): ConversationMessage {
-    const { project, sender, recipient, relationship } = pair;
-    const peer = relationship === 'peer';
-    const { destroyed, resumable, resume, instruction } = admission;
-    const message: ConversationSendResult['message'] = { id: request.id, senderRunId: sender.id, recipientRunId: recipient.id,
-      kind: request.kind, ...(request.requestId ? { requestId: request.requestId } : {}), ...(peer ? { relationship } : {}),
-      text: project.store.redactText(request.text), createdAt: now, requestHash,
-      ...(request.kind === 'request' && !destroyed && (!resumable || resume) ? { deadline: new Date(Date.parse(now) + request.timeoutSeconds * 1000).toISOString() } : {}),
-      ...(resume ? { resumed: true as const } : {}), ...(instruction ? { instruction } : {}),
-      state: request.kind === 'reply' && settled ? 'late' : destroyed ? 'destroyed' : resumable && !resume ? 'continuation-required' : 'accepted' };
-    return message;
-  }
-  private sendInput(pair: ConversationPair, root: RunRecord, message: ConversationMessage, requestHash: string, now: string): AgentInput {
-    const { sender, recipient, relationship } = pair;
-    const peer = relationship === 'peer';
-    // `parentRunId` keeps its name and holds the ledger owner (spec § 2, Message identity).
-    const input = { id: message.id, source: 'agent' as const, parentRunId: root.id, text: message.text, createdAt: now,
-      conversation: { senderRunId: sender.id, recipientRunId: recipient.id, kind: message.kind, ...(message.requestId ? { requestId: message.requestId } : {}), ...(peer ? { relationship } : {}) },
-      // A peer input outlives its sender's ledger: it keeps the message's identity for the recipient's inbox.
-      ...(peer ? { requestHash, ...(message.deadline ? { deadline: message.deadline } : {}) } : {}) };
-    return input;
   }
   private commitSend(pair: ConversationPair, root: RunRecord, next: ConversationState, input: AgentInput, resume: boolean, enqueue: boolean): void {
     const { project, recipient, relationship } = pair;
