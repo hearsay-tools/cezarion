@@ -201,6 +201,16 @@ describe('New project', () => {
     it(`fits a 360x640 screen from the Tools page, ${variant.theme}`, () => {
       browser.goto(`${baseUrl}/tools`)
       applyContrastQaVariant(browser, variant)
+      // Health metadata moves the button after it first appears. Evidence: run 40587764759,
+      // attempt 1, cockpit-failures-shard-2 artifact 12773531152, bundle
+      // .ai/qa/failures/create-project/fits-a-360x640-screen-from-the-Tools-page-light-1/:
+      // no open dialog; snapshot still shows Tools. Native-input reproduction holding health
+      // until after mouse move: 1/1 missed before, 1/1 focused the name after metadata settled
+      // (hearsay-tools/cezarion#2000, issuecomment-6454777312). Reproduce with that probe:
+      // `node --import tsx .ai/qa/ci2000/probe.mts <QA_FIXTURE_BASE_URL> old` (or `fixed`).
+      // Keep the focus assertion below.
+      browser.waitForFunction(`document.querySelector('[data-slot="tool-row"]') !== null &&
+        document.querySelector('[aria-labelledby="add-project-heading"] dl')?.textContent.includes('Checkout folder') === true`)
       browser.click('[data-route="workspace-tools"] [data-action="new-project"]')
       browser.waitForFunction(`document.activeElement?.matches(${JSON.stringify(NAME)}) === true`)
       waitForOwners()
