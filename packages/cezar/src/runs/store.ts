@@ -1873,7 +1873,7 @@ export class RunStore extends EventEmitter {
 
   /** A bounded page of discoverable peer roots, including the current held overlay. */
   listPeerTaskSummaries(options: PeerTaskPageOptions) {
-    return listPeerTaskSummaries({ db: this.db, held: this.held, skipped: new Set([...this.deleted, ...this.unreadable]),
+    return listPeerTaskSummaries({ db: this.db, held: this.held, skipped: this.deleted,
       order: run => this.listOrder(run), cold: id => this.coldSummary(id) }, options);
   }
 

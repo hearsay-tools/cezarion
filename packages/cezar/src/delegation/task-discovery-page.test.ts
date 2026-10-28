@@ -57,6 +57,29 @@ describe('bounded peer discovery pages', () => {
     } finally { db.close(); }
   });
 
+  it('keeps offsets stable when schema-invalid cold roots become unreadable', async () => {
+    const db = RunDatabase.open(join(f.root, '.ai/cezar/runs.db'));
+    try {
+      const records = Array.from({ length: 72 }, (_, index) => makeRunRecord({
+        id: randomUUID(), status: RUN_STATUS.done,
+        createdAt: new Date(Date.UTC(2020, 0, 1) + index * 1000).toISOString(),
+      }));
+      const invalid = new Set([records[65]!.id, records[66]!.id]);
+      db.transaction({ upserts: records.map(run => encodeRunRow(run,
+        invalid.has(run.id) ? JSON.stringify({ ...run, title: 42 }) : JSON.stringify(run))), deletes: [] });
+      const actual: string[] = [];
+      let offset = 0;
+      for (;;) {
+        const page = await tasks(false, offset);
+        actual.push(...page.tasks.map(run => run.id));
+        if (page.nextOffset === undefined) break;
+        offset = page.nextOffset;
+      }
+      expect(actual).toEqual(records.toReversed().filter(run => !invalid.has(run.id)).map(run => run.id));
+      expect(new Set(actual).size).toBe(70);
+    } finally { db.close(); }
+  });
+
   it('keeps held roots in their proper rank without duplicating their stored rows', async () => {
     const db = RunDatabase.open(join(f.root, '.ai/cezar/runs.db'));
     try {

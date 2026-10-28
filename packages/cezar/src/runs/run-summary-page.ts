@@ -3,7 +3,7 @@ import type { RunDatabase } from './run-database.ts';
 import type { RunRecord } from './store.ts';
 
 type Order = { createdAt: string; seq: number };
-type Ranked = readonly [RunSummary, Order];
+type Ranked = readonly [RunSummary | undefined, Order];
 export type PeerTaskPageOptions = { callerId: string; all?: boolean | undefined; offset?: number | undefined };
 type PageContext = {
   db: RunDatabase | null; held: ReadonlyMap<string, RunRecord>; skipped: ReadonlySet<string>;
@@ -24,13 +24,14 @@ export function listPeerTaskSummaries(context: PageContext, options: PeerTaskPag
   const dbOffset = Math.max(0, offset - held.length);
   const excluded = [...context.skipped, ...context.held.keys(), options.callerId];
   const rows = context.db?.listPeerSummaries({ all: options.all ?? false, excluded, offset: dbOffset, limit: 33 + held.length }) ?? [];
-  const cold: Ranked[] = rows.flatMap(row => {
+  // Unreadable rows keep their candidate positions across calls, even after cold() marks them.
+  const cold: Ranked[] = rows.map(row => {
     const summary = parseStoredSummary(row.summary) ?? context.cold(row.id);
-    return summary ? [[summary, row] as const] : [];
+    return [summary, row];
   });
   const ranked = [...cold, ...held].sort(([, a], [, b]) => a.createdAt === b.createdAt ? a.seq - b.seq : a.createdAt < b.createdAt ? 1 : -1);
   const page = ranked.slice(offset - dbOffset, offset - dbOffset + 33).map(([summary]) => summary);
-  return { runs: page.slice(0, 32), ...(page.length > 32 ? { nextOffset: offset + 32 } : {}) };
+  return { runs: page.slice(0, 32).filter((summary): summary is RunSummary => summary !== undefined), ...(page.length > 32 ? { nextOffset: offset + 32 } : {}) };
 }
 
 /**
